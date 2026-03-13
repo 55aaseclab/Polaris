@@ -273,7 +273,7 @@ main() {
   set_default_shell
 
   log "Setup complete."
-  log "Restart your terminal and select a Nerd Font variant such as 'MesloLGS NF' if your terminal does not switch fonts automatically."
+  log "Restart your terminal and select a Nerd Font variant such as 'MesloLGS Nerd Font' if your terminal does not switch fonts automatically."
 }
 
 main "$@"

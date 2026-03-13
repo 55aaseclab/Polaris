@@ -14,15 +14,15 @@ opacity = 0.96
 size = 10.0
 
 [font.normal]
-family = "MesloLGS NF"
+family = "MesloLGS Nerd Font"
 style = "Regular"
 
 [font.bold]
-family = "MesloLGS NF"
+family = "MesloLGS Nerd Font"
 style = "Bold"
 
 [font.italic]
-family = "MesloLGS NF"
+family = "MesloLGS Nerd Font"
 style = "Italic"
 
 [font.offset]

@@ -72,6 +72,7 @@ Alacritty config parsing, and installed `zram` configuration.
 - Re-running `./install.sh` works as an update pass.
 - Git-based tools are pulled forward and repo configs are re-applied.
 - The `zsh` installer skips the Meslo Nerd Font download when it is already installed.
+- Local font discovery on this machine resolves `MesloLGS Nerd Font` cleanly; managed Alacritty and i3 configs use that family name rather than `MesloLGS NF`.
 - The managed Neovim config is symlinked into `~/.config/nvim`, so repo edits show up there immediately.
 - On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left and editor in the middle.
 - The UI uses a VS Code themed colorscheme, top buffer tabs, and plugin-managed breadcrumbs.
