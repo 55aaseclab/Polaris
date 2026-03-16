@@ -133,7 +133,6 @@ return {
         "markdown",
         "markdown_inline",
         "python",
-        "regex",
         "tsx",
         "typescript",
         "vim",
