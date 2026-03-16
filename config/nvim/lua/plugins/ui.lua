@@ -31,7 +31,6 @@ return {
         "dashboard",
         "lazy",
         "neo-tree",
-        "toggleterm",
       },
       modifiers = {
         dirname = ":~:.",
@@ -106,6 +105,30 @@ return {
     },
   },
   {
+    "lukas-reineke/indent-blankline.nvim",
+    main = "ibl",
+    event = { "BufReadPre", "BufNewFile" },
+    opts = {
+      indent = {
+        char = "|",
+      },
+      scope = {
+        enabled = true,
+        show_start = false,
+        show_end = false,
+      },
+      exclude = {
+        filetypes = {
+          "help",
+          "lazy",
+          "mason",
+          "neo-tree",
+          "Trouble",
+        },
+      },
+    },
+  },
+  {
     "folke/edgy.nvim",
     lazy = false,
     init = function()
@@ -126,15 +149,6 @@ return {
       },
       bottom = {
         {
-          ft = "shell_panel",
-          title = "Terminal",
-          size = {
-            height = 0.25,
-          },
-          pinned = true,
-          open = "TerminalToggle",
-        },
-        {
           ft = "Trouble",
           title = "Problems",
           size = {
@@ -144,15 +158,6 @@ return {
         },
       },
       right = {
-        {
-          ft = "codex_panel",
-          title = "Codex",
-          size = {
-            width = 0.32,
-          },
-          pinned = true,
-          open = "CodexToggle",
-        },
         {
           ft = "Outline",
           title = "Symbols",

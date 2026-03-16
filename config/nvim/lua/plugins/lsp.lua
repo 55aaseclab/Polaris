@@ -15,6 +15,8 @@ return {
         "lua_ls",
         "marksman",
         "pyright",
+        "shfmt",
+        "stylua",
       },
     },
   },
@@ -41,62 +43,56 @@ return {
     opts = {},
   },
   {
+    "saghen/blink.cmp",
+    version = "1.*",
+    dependencies = {
+      "rafamadriz/friendly-snippets",
+    },
+    opts = {
+      keymap = { preset = "default" },
+      appearance = {
+        nerd_font_variant = "mono",
+      },
+      completion = {
+        accept = { auto_brackets = { enabled = true } },
+        documentation = { auto_show = true, auto_show_delay_ms = 200 },
+        menu = {
+          draw = {
+            columns = {
+              { "label", "label_description", gap = 1 },
+              { "kind_icon", "kind" },
+            },
+          },
+        },
+      },
+      sources = {
+        default = { "lsp", "path", "snippets", "buffer", "lazydev" },
+        providers = {
+          lazydev = {
+            name = "LazyDev",
+            module = "lazydev.integrations.blink",
+            score_offset = 100,
+          },
+        },
+      },
+      signature = { enabled = true },
+    },
+  },
+  {
     "neovim/nvim-lspconfig",
     dependencies = {
-      "hrsh7th/cmp-nvim-lsp",
-      "hrsh7th/nvim-cmp",
-      "L3MON4D3/LuaSnip",
-      "saadparwaiz1/cmp_luasnip",
-      "rafamadriz/friendly-snippets",
+      "saghen/blink.cmp",
       "SmiteshP/nvim-navic",
     },
     config = function()
-      local cmp = require("cmp")
-      local luasnip = require("luasnip")
       local navic = require("nvim-navic")
-      local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
-      require("luasnip.loaders.from_vscode").lazy_load()
       navic.setup({
         highlight = true,
         separator = " > ",
         depth_limit = 5,
         lsp = {
           auto_attach = true,
-        },
-      })
-
-      cmp.setup({
-        snippet = {
-          expand = function(args)
-            luasnip.lsp_expand(args.body)
-          end,
-        },
-        mapping = cmp.mapping.preset.insert({
-          ["<C-Space>"] = cmp.mapping.complete(),
-          ["<CR>"] = cmp.mapping.confirm({ select = true }),
-          ["<Tab>"] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.select_next_item()
-            elseif luasnip.expand_or_locally_jumpable() then
-              luasnip.expand_or_jump()
-            else
-              fallback()
-            end
-          end, { "i", "s" }),
-          ["<S-Tab>"] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.select_prev_item()
-            elseif luasnip.locally_jumpable(-1) then
-              luasnip.jump(-1)
-            else
-              fallback()
-            end
-          end, { "i", "s" }),
-        }),
-        sources = {
-          { name = "nvim_lsp" },
-          { name = "luasnip" },
         },
       })
 
@@ -108,12 +104,18 @@ return {
           end
 
           map("gd", vim.lsp.buf.definition, "Go to definition")
+          map("gD", vim.lsp.buf.declaration, "Go to declaration")
+          map("gi", vim.lsp.buf.implementation, "Go to implementation")
+          map("gy", vim.lsp.buf.type_definition, "Go to type definition")
           map("gr", vim.lsp.buf.references, "Go to references")
           map("K", vim.lsp.buf.hover, "Hover docs")
           map("<leader>rn", vim.lsp.buf.rename, "Rename symbol")
           map("<leader>ca", vim.lsp.buf.code_action, "Code action")
+          map("<leader>cd", vim.diagnostic.open_float, "Line diagnostics")
         end,
       })
+
+      local capabilities = require("blink.cmp").get_lsp_capabilities()
 
       local servers = {
         bashls = {},

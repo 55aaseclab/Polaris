@@ -5,7 +5,7 @@ Bootstrap or refresh a Debian workstation from one cloned repo.
 ## What it installs
 
 - `zsh` with Meslo Nerd Font, `powerlevel10k`, and shell completion
-- `neovim` with Telescope, Treesitter, Mason/LSP, project root detection, breadcrumbs, and Codex
+- `neovim` with blink.cmp, Telescope, Treesitter, Mason/LSP, gitsigns, conform, flash, and breadcrumbs
 - `tmux` with TPM and a practical default config
 - `alacritty` configured to use the Nerd Font and match the rest of the theme
 - `i3wm` with a usable keyboard-driven config and `i3status`
@@ -73,16 +73,17 @@ Alacritty config parsing, and installed `zram` configuration.
 - Git-based tools are pulled forward and repo configs are re-applied.
 - The `zsh` installer skips the Meslo Nerd Font download when it is already installed.
 - The managed Neovim config is symlinked into `~/.config/nvim`, so repo edits show up there immediately.
-- Neovim Codex integration assumes `codex` is already on your `PATH`.
-- Use `nvim .` for the bundled editor setup. Plain `vim .` will not load the Neovim Codex integration.
-- On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left, editor in the middle, shell below, and Codex on the right.
-- Codex file opens are routed back into the main Neovim session using Neovim remote editing.
+- On startup, Neovim opens a VS Code style layout managed by `neo-tree` and `edgy.nvim`: explorer on the left and editor in the middle.
 - The UI uses a VS Code themed colorscheme, top buffer tabs, and plugin-managed breadcrumbs.
 - Tree-sitter is loaded eagerly at startup, and the config falls back to direct parser setup if `nvim-treesitter.configs` is unavailable.
 - The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
+- SSH sessions use a plain ASCII `zsh` prompt instead of the Nerd Font `powerlevel10k` prompt to avoid broken glyphs on remote hosts.
 - The Alacritty installer computes a smaller default font size from the detected display height when `xrandr` is available, and otherwise falls back to `11.5`. Set `GEEK_ENV_ALACRITTY_FONT_SIZE` to override it explicitly.
-- Keymaps: `<leader>e` toggles the file tree, `<leader>aa` toggles the Codex panel, `<leader>an` opens a new Codex panel, `<leader>at` toggles the shell panel, and `<leader>aT` opens a new shell panel.
+- Keymaps: `<leader>e` toggles the file tree, `<S-h>`/`<S-l>` cycle buffers, `s` triggers flash jump, `<leader>cf` formats the buffer.
+- Git: `]h`/`[h` navigate hunks, `<leader>hs` stages a hunk, `<leader>hp` previews, `<leader>hb` shows blame.
+- Text objects: `af`/`if` select functions, `ac`/`ic` select classes, `aa`/`ia` select arguments; `]f`/`[f` jump between functions.
 - Diagnostics and symbols: `<leader>xx` toggles the diagnostics panel, `<leader>xX` toggles diagnostics for the current buffer, `<leader>cs` toggles the symbols panel, and `<leader>cl` toggles the LSP locations panel.
+- Formatting: conform.nvim formats on save using `shfmt` (shell), `stylua` (Lua), `black` (Python), and `prettier` (JS/TS/JSON/YAML/Markdown). Formatters are installed on demand via Mason.
 - Debian's stock `neovim` package can be too old for this config. `scripts/setup-nvim.sh` requires Neovim `0.11.0` or newer and installs a newer local `nvim` under `~/.local/bin` when needed.
 - The Neovim setup installs the Node.js runtime but does not require `npm`.
 - Debian is the main target, even if some scripts have other branches.

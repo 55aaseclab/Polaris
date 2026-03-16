@@ -118,24 +118,65 @@ return {
     "nvim-treesitter/nvim-treesitter",
     lazy = false,
     build = ":TSUpdate",
+    dependencies = {
+      "nvim-treesitter/nvim-treesitter-textobjects",
+    },
     opts = {
       ensure_installed = {
         "bash",
         "css",
+        "diff",
         "html",
         "javascript",
         "json",
         "lua",
         "markdown",
+        "markdown_inline",
         "python",
+        "regex",
         "tsx",
         "typescript",
         "vim",
+        "vimdoc",
         "yaml",
       },
       auto_install = true,
       highlight = { enable = true },
       indent = { enable = true },
+      textobjects = {
+        select = {
+          enable = true,
+          lookahead = true,
+          keymaps = {
+            ["af"] = { query = "@function.outer", desc = "outer function" },
+            ["if"] = { query = "@function.inner", desc = "inner function" },
+            ["ac"] = { query = "@class.outer", desc = "outer class" },
+            ["ic"] = { query = "@class.inner", desc = "inner class" },
+            ["aa"] = { query = "@parameter.outer", desc = "outer argument" },
+            ["ia"] = { query = "@parameter.inner", desc = "inner argument" },
+          },
+        },
+        move = {
+          enable = true,
+          goto_next_start = {
+            ["]f"] = { query = "@function.outer", desc = "Next function start" },
+            ["]c"] = { query = "@class.outer", desc = "Next class start" },
+          },
+          goto_previous_start = {
+            ["[f"] = { query = "@function.outer", desc = "Previous function start" },
+            ["[c"] = { query = "@class.outer", desc = "Previous class start" },
+          },
+        },
+        swap = {
+          enable = true,
+          swap_next = {
+            ["<leader>a"] = { query = "@parameter.inner", desc = "Swap with next argument" },
+          },
+          swap_previous = {
+            ["<leader>A"] = { query = "@parameter.inner", desc = "Swap with previous argument" },
+          },
+        },
+      },
     },
     config = function(_, opts)
       local ok_configs, configs = pcall(require, "nvim-treesitter.configs")

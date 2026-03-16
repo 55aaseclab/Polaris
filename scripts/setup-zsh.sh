@@ -198,7 +198,12 @@ fi
 alias vim='nvim'
 
 if [[ -o interactive ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
-  [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
+  if [[ -n "\${SSH_CONNECTION:-}" ]]; then
+    PROMPT='%n@%m:%~ %# '
+    RPROMPT=''
+  else
+    [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
+  fi
 fi
 EOF
 }
