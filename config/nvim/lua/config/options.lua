@@ -28,6 +28,5 @@ vim.opt.swapfile = false
 vim.opt.smartindent = true
 vim.opt.fillchars = { eob = " " }
 
-vim.g.netrw_banner = 0
-vim.g.netrw_browse_split = 4
-vim.g.netrw_winsize = 25
+vim.g.loaded_netrwPlugin = 1
+vim.g.loaded_netrw = 1

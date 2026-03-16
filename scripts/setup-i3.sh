@@ -34,7 +34,7 @@ detect_pkg_manager() {
 install_packages() {
   case "$(detect_pkg_manager)" in
     apt)
-      sudo apt-get update
+      sudo apt-get update || log "apt-get update had errors (non-fatal), continuing"
       sudo apt-get install -y i3 i3status i3lock dmenu feh picom flameshot playerctl xss-lock
       ;;
     dnf)

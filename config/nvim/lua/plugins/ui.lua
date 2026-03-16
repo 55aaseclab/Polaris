@@ -128,45 +128,4 @@ return {
       },
     },
   },
-  {
-    "folke/edgy.nvim",
-    lazy = false,
-    init = function()
-      vim.opt.laststatus = 3
-      vim.opt.splitkeep = "screen"
-    end,
-    opts = {
-      left = {
-        {
-          ft = "neo-tree",
-          title = "Explorer",
-          size = {
-            width = 32,
-          },
-          pinned = true,
-          open = "Neotree show filesystem left",
-        },
-      },
-      bottom = {
-        {
-          ft = "Trouble",
-          title = "Problems",
-          size = {
-            height = 0.25,
-          },
-          collapsed = true,
-        },
-      },
-      right = {
-        {
-          ft = "Outline",
-          title = "Symbols",
-          size = {
-            width = 0.25,
-          },
-          collapsed = true,
-        },
-      },
-    },
-  },
 }

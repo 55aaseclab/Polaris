@@ -51,7 +51,7 @@ install_packages() {
 
   case "$manager" in
     apt)
-      sudo apt-get update
+      sudo apt-get update || log "apt-get update had errors (non-fatal), continuing"
       sudo apt-get install -y zsh git curl unzip fontconfig
       ;;
     dnf)

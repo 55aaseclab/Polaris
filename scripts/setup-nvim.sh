@@ -72,8 +72,8 @@ install_packages() {
 
   case "$manager" in
     apt)
-      sudo apt-get update
-      sudo apt-get install -y git curl unzip tar gcc make ripgrep fd-find python3-venv nodejs xclip
+      sudo apt-get update || log "apt-get update had errors (non-fatal), continuing"
+      sudo apt-get install -y git curl unzip tar gcc make ripgrep fd-find python3-venv nodejs npm xclip
       ;;
     dnf)
       sudo dnf install -y neovim git curl unzip gcc ripgrep fd-find python3-virtualenv nodejs xclip
@@ -168,6 +168,8 @@ install_plugins() {
   nvim_bin="$(current_nvim_bin)"
   [[ -n "$nvim_bin" ]] || fail "Neovim is not installed."
 
+  log "Cleaning removed plugins"
+  "$nvim_bin" --headless "+Lazy! clean" +qa
   log "Installing Neovim plugins"
   "$nvim_bin" --headless "+Lazy! sync" +qa
 }
@@ -177,6 +179,12 @@ main() {
 
   install_packages
   ensure_supported_nvim
+
+  if ! command_exists tree-sitter; then
+    log "Installing tree-sitter CLI"
+    sudo npm install -g tree-sitter-cli
+  fi
+
   backup_existing_config
   install_config
   bootstrap_lazy
