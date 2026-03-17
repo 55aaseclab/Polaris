@@ -45,6 +45,9 @@ These also have Alacritty shortcuts (no prefix needed, requires tmux running):
 | `Ctrl+D` | Split horizontally |
 | `Ctrl+Shift+H/J/K/L` | Navigate panes |
 | `Ctrl+Shift+T` | New window |
+| `Ctrl+Shift+Left` | Previous window |
+| `Ctrl+Shift+Right` | Next window |
+| `Ctrl+Shift+S` | List sessions |
 
 ### Copy Mode
 
@@ -55,6 +58,8 @@ Enter copy mode with `prefix + [` or by scrolling up with the mouse.
 | `v` | Begin selection |
 | `Ctrl+v` | Toggle rectangle selection |
 | `y` | Yank selection to clipboard |
+| `p` | Previous window |
+| `n` | Next window |
 
 Mouse selections are automatically copied to the clipboard via tmux-yank.
 

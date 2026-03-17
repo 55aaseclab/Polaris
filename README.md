@@ -6,8 +6,8 @@ Bootstrap or refresh a Debian workstation from one cloned repo.
 
 - `zsh` with Meslo Nerd Font, `powerlevel10k`, and shell completion
 - `neovim` with blink.cmp, Telescope, Treesitter, Mason/LSP, gitsigns, conform, flash, and breadcrumbs
-- `tmux` with TPM and a practical default config
-- `alacritty` configured to use the Nerd Font and match the rest of the theme
+- `tmux` with TPM, a practical default config, top status bar, vi-style copy mode, and copy-mode-safe window navigation
+- `alacritty` configured to use the Nerd Font, match the rest of the theme, and forward tmux split and window shortcuts
 - `i3wm` with a usable keyboard-driven config and `i3status`
 - ZRAM-backed swap using `zstd`
 
@@ -80,6 +80,8 @@ Alacritty config parsing, and installed `zram` configuration.
 - The managed `zsh` config exports `EDITOR=nvim`, `VISUAL=nvim`, and aliases `vim` to `nvim`.
 - SSH sessions use a plain ASCII `zsh` prompt instead of the Nerd Font `powerlevel10k` prompt to avoid broken glyphs on remote hosts.
 - The Alacritty installer computes the font size from the detected display height when `xrandr` is available, falling back to `10.0` for unknown or headless environments.
+- Tmux uses `Ctrl+Space` as the prefix, vi-style copy mode, and binds `p` / `n` to previous / next window even while copy mode is active.
+- Alacritty forwards tmux shortcuts directly: `Ctrl+Shift+D` splits vertically, `Ctrl+D` splits horizontally, `Ctrl+Shift+H/J/K/L` moves between panes, `Ctrl+Shift+T` opens a new tmux window, `Ctrl+Shift+Left` / `Ctrl+Shift+Right` switch windows, and `Ctrl+Shift+S` opens the tmux session list.
 - Keymaps: `<leader>e` toggles the file tree, `<S-h>`/`<S-l>` cycle buffers, `s` triggers flash jump, `<leader>cf` formats the buffer.
 - Git: `]h`/`[h` navigate hunks, `<leader>hs` stages a hunk, `<leader>hp` previews, `<leader>hb` shows blame.
 - Text objects: `af`/`if` select functions, `ac`/`ic` select classes, `aa`/`ia` select arguments; `]f`/`[f` jump between functions.

@@ -86,6 +86,11 @@ bindings = [
   { key = "J",      mods = "Control|Shift", chars = "\u0000j" },
   { key = "K",      mods = "Control|Shift", chars = "\u0000k" },
   { key = "L",      mods = "Control|Shift", chars = "\u0000l" },
+  # Tmux window / tab navigation
+  { key = "Left",   mods = "Control|Shift", chars = "\u0000p" },
+  { key = "Right",  mods = "Control|Shift", chars = "\u0000n" },
   # Tmux new window / tab
   { key = "T",      mods = "Control|Shift", chars = "\u0000c" },
+  # Tmux session management
+  { key = "S",      mods = "Control|Shift", chars = "\u0000s" },
 ]

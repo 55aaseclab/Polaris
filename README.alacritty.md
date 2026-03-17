@@ -36,6 +36,11 @@ These shortcuts send tmux prefix (`Ctrl+Space`) sequences and only work inside a
 | `Ctrl+Shift+K` | Move to pane above |
 | `Ctrl+Shift+L` | Move to right pane |
 | `Ctrl+Shift+T` | New tmux window (tab) |
+| `Ctrl+Shift+Left` | Previous tmux window |
+| `Ctrl+Shift+Right` | Next tmux window |
+| `Ctrl+Shift+S` | Open tmux session list |
+
+Tmux also binds the underlying `p` and `n` window switches in copy mode, so the same Alacritty window shortcuts continue to work there.
 
 ## Font Size by Resolution
 
