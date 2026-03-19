@@ -42,7 +42,7 @@ return {
         },
         filesystem = {
           follow_current_file = {
-            enabled = true,
+            enabled = false,
             leave_dirs_open = false,
           },
           use_libuv_file_watcher = true,
@@ -68,6 +68,8 @@ return {
           mappings = {
             ["l"] = "open",
             ["h"] = "close_node",
+            ["-"] = "navigate_up",
+            ["<bs>"] = "navigate_up",
           },
         },
       }
