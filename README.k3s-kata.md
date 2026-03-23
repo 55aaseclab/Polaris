@@ -94,6 +94,7 @@ Actions:
 
 - `exec`
 - `update`
+- `rebuild`
 - `restart`
 - `status`
 - `delete`
@@ -105,6 +106,8 @@ Actions:
 - waits for `agent` and expected tools
 - attaches in tmux as `agent`
 - starts in the configured work directory
+- does not auto-run the coding agent on attach
+- generates a `start-agent` wrapper inside the container that launches the configured agent with saved args
 
 ## Container Bootstrap
 
@@ -141,6 +144,20 @@ bash scripts/new-agent.sh <project>
 ```
 
 Choose `update`.
+
+This reapplies `agents/<project>.yaml` as saved. It only rolls a new pod if the
+saved manifest changes the Deployment pod template.
+
+### Rebuild a container from current generator logic
+
+```bash
+bash scripts/new-agent.sh <project>
+```
+
+Choose `rebuild`.
+
+This regenerates the container bootstrap section in `agents/<project>.yaml`
+using the current `scripts/new-agent.sh` logic, then reapplies the manifest.
 
 ## `scripts/refresh-k3s-network.sh`
 

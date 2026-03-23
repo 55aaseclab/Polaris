@@ -154,6 +154,125 @@ add_secret() {
               key: ${name}"
 }
 
+agent_package_for_cmd() {
+    case "$1" in
+        claude) printf '%s\n' "@anthropic-ai/claude-code" ;;
+        codex)  printf '%s\n' "@openai/codex" ;;
+        *)      printf '%s\n' "" ;;
+    esac
+}
+
+baseline_packages() {
+    printf '%s\n' "sudo ca-certificates curl wget git jq tmux python3 python3-pip ripgrep fd-find bat"
+}
+
+build_user_setup_line() {
+cat <<'EOF'
+su - agent -c "REPO_ROOT=/opt/geek-env SKIP_FONT_INSTALL=1 SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \
+          su - agent -c "REPO_ROOT=/opt/geek-env /opt/geek-env/scripts/setup-nvim.sh" && \
+          su - agent -c "REPO_ROOT=/opt/geek-env SKIP_PACKAGE_INSTALL=1 /opt/geek-env/scripts/setup-tmux.sh" && \
+EOF
+}
+
+build_container_bootstrap_lines() {
+cat <<EOF
+          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\
+          mkdir -p /home/agent /home/agent/.claude /home/agent/.codex && \\
+          chown agent:agent /home/agent /home/agent/.claude /home/agent/.codex && \\
+          apt-get update && apt-get install -y \\
+            ${ALL_PACKAGES} && \\
+          mkdir -p /etc/sudoers.d && \\
+          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\
+          chmod 440 /etc/sudoers.d/agent && \\
+          ${USER_SETUP_LINE}${RUSTUP_INSTALL_LINE}${AGENT_INSTALL_LINE}${AGENT_WRAPPER_LINE}touch /tmp/.ready && sleep infinity
+EOF
+}
+
+extract_manifest_packages() {
+    local manifest="$1"
+    awk '
+        index($0, "apt-get update && apt-get install -y") {
+            getline
+            line=$0
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+&&[[:space:]]+\\$/, "", line)
+            print line
+            exit
+        }
+    ' "$manifest"
+}
+
+refresh_project_manifest() {
+    local manifest="${OUTPUT_DIR}/${PROJECT_NAME}.yaml"
+    local tmp
+    local block_file
+
+    [[ -f "$manifest" ]] || fail "Manifest not found: ${manifest}"
+
+    ALL_PACKAGES="${PROJECT_ALL_PACKAGES:-}"
+    if [[ -z "$ALL_PACKAGES" ]]; then
+        ALL_PACKAGES="$(extract_manifest_packages "$manifest")"
+    fi
+    if [[ -z "$ALL_PACKAGES" || "$ALL_PACKAGES" != *"sudo"* ]]; then
+        warn "Falling back to derived package set for ${PROJECT_NAME}"
+        ALL_PACKAGES="$(baseline_packages)"
+        if [[ -n "${PROJECT_AGENT_CMD:-}" ]]; then
+            ALL_PACKAGES="${ALL_PACKAGES} nodejs npm"
+        fi
+        if [[ "${PROJECT_AGENT_CMD:-}" == "codex" ]]; then
+            ALL_PACKAGES="${ALL_PACKAGES} bubblewrap"
+        fi
+        ALL_PACKAGES="$(echo "$ALL_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)"
+    fi
+
+    AGENT_PKG="$(agent_package_for_cmd "${PROJECT_AGENT_CMD:-}")"
+    USER_SETUP_LINE="$(build_user_setup_line)"
+    RUSTUP_INSTALL_LINE=""
+    AGENT_INSTALL_LINE=""
+    AGENT_WRAPPER_LINE=""
+
+    if grep -q "sh.rustup.rs" "$manifest"; then
+        RUSTUP_INSTALL_LINE="curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su agent -c 'sh -s -- -y' && \\"$'\n'"          "
+    fi
+
+    if [[ -n "$AGENT_PKG" ]]; then
+        AGENT_INSTALL_LINE="npm install -g ${AGENT_PKG} && \\"$'\n'"          "
+    fi
+
+    if [[ -n "${PROJECT_AGENT_CMD:-}" ]]; then
+        AGENT_WRAPPER_LINE="printf '%s\n' '#!/usr/bin/env sh' 'exec ${PROJECT_AGENT_CMD}${PROJECT_AGENT_ARGS:+ ${PROJECT_AGENT_ARGS}} \"\$@\"' > /usr/local/bin/start-agent && chmod 755 /usr/local/bin/start-agent && \\"$'\n'"          "
+    fi
+
+    tmp="$(mktemp)"
+    block_file="$(mktemp)"
+    build_container_bootstrap_lines > "$block_file"
+    awk -v block_file="$block_file" '
+        BEGIN { in_args = 0 }
+        {
+            if (!in_args && $0 == "        - |") {
+                print $0
+                while ((getline line < block_file) > 0) {
+                    print line
+                }
+                close(block_file)
+                in_args = 1
+                next
+            }
+            if (in_args) {
+                if ($0 == "        readinessProbe:") {
+                    print $0
+                    in_args = 0
+                }
+                next
+            }
+            print $0
+        }
+    ' "$manifest" > "$tmp"
+    rm -f "$block_file"
+    mv "$tmp" "$manifest"
+    ok "Refreshed ${manifest} with current generator bootstrap"
+}
+
 get_project_pod() {
     kubectl -n "$PROJECT_NAME" get pods \
         --selector="app=${PROJECT_NAME}" \
@@ -369,11 +488,15 @@ if [[ -n "${1:-}" ]]; then
     PROJECT_ENV_FILE="${OUTPUT_DIR}/${PROJECT_NAME}.env"
     PROJECT_MOUNT_PATH="/home/agent/work"
     PROJECT_AGENT_CMD=""
+    PROJECT_AGENT_ARGS=""
+    PROJECT_ALL_PACKAGES=""
 
     if [[ -f "$PROJECT_ENV_FILE" ]]; then
         PROJECT_MOUNT_PATH="$(awk -F= '/^MOUNT_PATH=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
         PROJECT_MOUNT_PATH="${PROJECT_MOUNT_PATH:-/home/agent/work}"
         PROJECT_AGENT_CMD="$(awk -F= '/^AGENT_CMD=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
+        PROJECT_AGENT_ARGS="$(awk -F= '/^AGENT_ARGS=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
+        PROJECT_ALL_PACKAGES="$(awk -F= '/^ALL_PACKAGES=/{print substr($0, index($0, "=") + 1)}' "$PROJECT_ENV_FILE" | tail -1)"
     fi
 
     if ! kubectl -n "$PROJECT_NAME" get deployment "$PROJECT_NAME" &>/dev/null 2>&1; then
@@ -394,8 +517,9 @@ echo -e "${RESET}"
 
     choose ACTION "Action" \
         "exec    — attach tmux session" \
-        "update  — apply saved manifest and restart" \
-        "restart — rolling restart" \
+        "update  — apply saved manifest; restarts only if pod spec changed" \
+        "rebuild — regenerate bootstrap and roll a new pod" \
+        "restart — rolling restart with current manifest" \
         "status  — show deployment, pod, and logs" \
         "delete  — delete deployment + namespace"
 
@@ -408,6 +532,14 @@ echo -e "${RESET}"
         update*)
             apply_project_manifest
             ok "Waiting for updated pod to start..."
+            wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
+            POD="$(get_pod)"
+            attach_to_project_pod "$POD"
+            ;;
+        rebuild*)
+            refresh_project_manifest
+            apply_project_manifest
+            ok "Waiting for rebuilt pod to start..."
             wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
             POD="$(get_pod)"
             attach_to_project_pod "$POD"
@@ -785,7 +917,7 @@ if [[ "$TOOLCHAINS" == *"rustup"* ]]; then
 fi
 
 # baseline is always installed; tmux for exec workflow
-BASELINE="sudo ca-certificates curl wget git jq tmux python3 python3-pip ripgrep fd-find bat"
+BASELINE="$(baseline_packages)"
 ALL_PACKAGES="${BASELINE} ${TOOLCHAINS:-} ${EXTRA_PACKAGES:-}"
 ALL_PACKAGES=$(echo "$ALL_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
 
@@ -799,13 +931,12 @@ if [[ -n "$AGENT_PKG" ]]; then
     AGENT_INSTALL_LINE="npm install -g ${AGENT_PKG} && \\"$'\n'"          "
 fi
 
-USER_SETUP_LINE=$(
-cat <<'EOF'
-su - agent -c "REPO_ROOT=/opt/geek-env SKIP_FONT_INSTALL=1 SKIP_DEFAULT_SHELL_CHANGE=1 /opt/geek-env/scripts/setup-zsh.sh" && \
-          su - agent -c "REPO_ROOT=/opt/geek-env /opt/geek-env/scripts/setup-nvim.sh" && \
-          su - agent -c "REPO_ROOT=/opt/geek-env SKIP_PACKAGE_INSTALL=1 /opt/geek-env/scripts/setup-tmux.sh" && \
-EOF
-)
+AGENT_WRAPPER_LINE=""
+if [[ -n "$AGENT_CMD" ]]; then
+    AGENT_WRAPPER_LINE="printf '%s\n' '#!/usr/bin/env sh' 'exec ${AGENT_CMD}${AGENT_ARGS:+ ${AGENT_ARGS}} \"\$@\"' > /usr/local/bin/start-agent && chmod 755 /usr/local/bin/start-agent && \\"$'\n'"          "
+fi
+
+USER_SETUP_LINE="$(build_user_setup_line)"
 
 # ────────────────────────────────────────────────
 # Generate YAML
@@ -883,15 +1014,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\
-          mkdir -p /home/agent /home/agent/.claude /home/agent/.codex && \\
-          chown agent:agent /home/agent /home/agent/.claude /home/agent/.codex && \\
-          apt-get update && apt-get install -y \\
-            ${ALL_PACKAGES} && \\
-          mkdir -p /etc/sudoers.d && \\
-          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\
-          chmod 440 /etc/sudoers.d/agent && \\
-          ${USER_SETUP_LINE}${RUSTUP_INSTALL_LINE}${AGENT_INSTALL_LINE}touch /tmp/.ready && sleep infinity
+$(build_container_bootstrap_lines)
         readinessProbe:
           exec:
             command: ["test", "-f", "/tmp/.ready"]
@@ -977,6 +1100,7 @@ AGENT=${AGENT}
 AGENT_CMD=${AGENT_CMD}
 PERMISSIVE_MODE=${PERMISSIVE_MODE}
 AGENT_ARGS=${AGENT_ARGS}
+ALL_PACKAGES=${ALL_PACKAGES}
 ENV
 
 ok "Generated ${YAML_FILE}"
@@ -991,6 +1115,7 @@ echo -e "  Resources ${BOLD}${CPU} CPU · ${MEMORY} RAM · ${STORAGE} storage${R
 echo -e "  Mount     ${BOLD}${HOST_PATH}${RESET} → ${MOUNT_PATH}"
 [[ -n "$AGENT_CMD" ]] && echo -e "  Agent     ${BOLD}${AGENT_CMD} ${AGENT_ARGS}${RESET}"
 [[ -n "$AGENT_CMD" ]] && echo -e "  Permissive ${BOLD}${PERMISSIVE_MODE:-false}${RESET}"
+[[ -n "$AGENT_CMD" ]] && echo -e "  Wrapper   ${BOLD}start-agent${RESET}"
 echo -e "  ${DIM}───────────────────────────────────────${RESET}"
 echo ""
 confirm_yes "Deploy now?" || exit 0
@@ -1014,11 +1139,7 @@ kubectl apply -f "$YAML_FILE"
 
 PROJECT_MOUNT_PATH="$MOUNT_PATH"
 PROJECT_AGENT_CMD="$AGENT_CMD"
-if [[ -n "$AGENT_CMD" ]]; then
-    PROJECT_TMUX_CMD="tmux new-session -A -s main '${AGENT_CMD} ${AGENT_ARGS}; exec bash'"
-else
-    PROJECT_TMUX_CMD="tmux new-session -A -s main"
-fi
+PROJECT_TMUX_CMD="tmux new-session -A -s main"
 
 ok "Waiting for pod to start..."
 wait_for_pod_running "${POD_START_TIMEOUT_SECONDS:-300}"
