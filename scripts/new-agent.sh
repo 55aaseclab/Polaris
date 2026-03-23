@@ -37,6 +37,21 @@ prompt() {
     printf -v "$var" '%s' "$input"
 }
 
+prompt_path() {
+    # prompt_path <var> <question> <default>
+    # Uses Readline so interactive users get tab completion for filesystem paths.
+    local var="$1" question="$2" default="${3:-}" input
+    if [[ -n "$default" ]]; then
+        echo -ne "${BOLD}${question}${RESET} ${DIM}[${default}]${RESET}: "
+        read -e -i "$default" -r input
+    else
+        echo -ne "${BOLD}${question}${RESET}: "
+        read -e -r input
+    fi
+    input="${input:-$default}"
+    printf -v "$var" '%s' "$input"
+}
+
 choose() {
     # choose <var> <question> [--default N] <option1> <option2> ...
     local var="$1" question="$2"
@@ -446,7 +461,7 @@ while [[ -z "$PROJECT_NAME" || ! "$PROJECT_NAME" =~ ^[a-z0-9-]+$ ]]; do
 done
 
 DEFAULT_HOST_PATH="/home/${SUDO_USER:-$USER}/Projects/${PROJECT_NAME}"
-prompt HOST_PATH "Host path to mount" "$DEFAULT_HOST_PATH"
+prompt_path HOST_PATH "Host path to mount" "$DEFAULT_HOST_PATH"
 if [[ ! -d "$HOST_PATH" ]]; then
     warn "Directory does not exist: $HOST_PATH"
     if confirm "Create it?"; then
@@ -455,7 +470,7 @@ if [[ ! -d "$HOST_PATH" ]]; then
     fi
 fi
 
-prompt MOUNT_PATH "Mount path inside container" "/home/agent/work"
+prompt_path MOUNT_PATH "Mount path inside container" "/home/agent/work"
 
 # ────────────────────────────────────────────────
 # 2. Runtime
@@ -564,6 +579,7 @@ step "AI Agent"
 AGENT_PKG=""
 AGENT_CMD=""
 AGENT_ARGS=""
+PERMISSIVE_MODE=""
 AGENT_KEY_NAME=""
 AGENT_SECRET_NAME=""
 AGENT_SECRET_SOURCE_FILE=""
@@ -580,29 +596,35 @@ case "$AGENT" in
     "Claude Code"*)
         AGENT_PKG="@anthropic-ai/claude-code"
         AGENT_CMD="claude"
-        if confirm_yes "Run with --dangerously-skip-permissions (no prompts)?"; then
-            AGENT_ARGS="--dangerously-skip-permissions"
-        fi
         ;;
     "OpenAI Codex"*)
         AGENT_PKG="@openai/codex"
         AGENT_CMD="codex"
-        AGENT_ARGS="--dangerously-bypass-approvals-and-sandbox"
         AGENT_KEY_NAME="OPENAI_API_KEY"
         ;;
 esac
 
 if [[ -n "$AGENT_CMD" ]]; then
-    hint "Running ${AGENT_CMD} auth on this host..."
-    hint "Complete the login flow in the browser, then return here."
-
-    if command -v "$AGENT_CMD" &>/dev/null; then
-        "$AGENT_CMD" auth login 2>/dev/null || true
+    if confirm_yes "Enable permissive mode for the agent container?"; then
+        PERMISSIVE_MODE="true"
     else
-        warn "${AGENT_CMD} not found on host — install it first (npm install -g ${AGENT_PKG})"
-        warn "Skipping host auth; you can add the key manually below."
+        PERMISSIVE_MODE="false"
     fi
 
+    case "$AGENT_CMD:$PERMISSIVE_MODE" in
+        "claude:true")
+            AGENT_ARGS="--dangerously-skip-permissions"
+            ;;
+        "codex:true")
+            AGENT_ARGS="--dangerously-bypass-approvals-and-sandbox"
+            ;;
+        *)
+            AGENT_ARGS=""
+            ;;
+    esac
+fi
+
+if [[ -n "$AGENT_CMD" ]]; then
     case "$AGENT_CMD" in
         claude)
             # Claude Code uses OAuth — inject the whole credentials file as a mounted secret
@@ -619,6 +641,35 @@ if [[ -n "$AGENT_CMD" ]]; then
                     break
                 fi
             done
+
+            if [[ -z "$AGENT_SECRET_CONTENT" ]]; then
+                hint "No existing Claude credentials file found on this host."
+                hint "Running ${AGENT_CMD} auth login so the container can reuse host auth."
+
+                if command -v "$AGENT_CMD" &>/dev/null; then
+                    "$AGENT_CMD" auth login 2>/dev/null || true
+                else
+                    warn "${AGENT_CMD} not found on host — install it first (npm install -g ${AGENT_PKG})"
+                    warn "Skipping host auth; you can add the key manually below."
+                fi
+
+                for f in \
+                    "$HOME/.claude/.credentials.json" \
+                    "$HOME/.config/claude/credentials.json"
+                do
+                    if [[ -f "$f" ]]; then
+                        AGENT_SECRET_CONTENT="$(cat "$f")"
+                        AGENT_SECRET_SOURCE_FILE="$f"
+                        AGENT_SECRET_NAME="${PROJECT_NAME}-claude-credentials"
+                        AGENT_SECRET_KEY="credentials.json"
+                        AGENT_SECRET_MOUNT_PATH="/home/agent/.claude/.credentials.json"
+                        break
+                    fi
+                done
+            else
+                ok "Reusing existing Claude auth from ${AGENT_SECRET_SOURCE_FILE}"
+            fi
+
             if [[ -n "$AGENT_SECRET_CONTENT" ]]; then
                 ok "Read Claude OAuth credentials from ${AGENT_SECRET_SOURCE_FILE}"
             else
@@ -629,6 +680,20 @@ if [[ -n "$AGENT_CMD" ]]; then
             # Codex may use ChatGPT OAuth (~/.codex/auth.json) or a plain API key
             DERIVED_KEY=""
             CODEX_AUTH_MODE=""
+
+            if [[ ! -f "$HOME/.codex/auth.json" ]]; then
+                hint "No existing Codex auth file found on this host."
+                hint "Running codex auth login so the container can reuse host auth."
+
+                if command -v "$AGENT_CMD" &>/dev/null; then
+                    "$AGENT_CMD" auth login 2>/dev/null || true
+                else
+                    warn "${AGENT_CMD} not found on host — install it first (npm install -g ${AGENT_PKG})"
+                    warn "Skipping host auth; you can add the key manually below."
+                fi
+            else
+                ok "Reusing existing Codex auth from $HOME/.codex/auth.json"
+            fi
 
             if [[ -f "$HOME/.codex/auth.json" ]]; then
                 CODEX_AUTH_MODE="$(jq -r '.auth_mode // empty' "$HOME/.codex/auth.json" 2>/dev/null || true)"
@@ -910,6 +975,7 @@ MEMORY=${MEMORY}
 STORAGE=${STORAGE}
 AGENT=${AGENT}
 AGENT_CMD=${AGENT_CMD}
+PERMISSIVE_MODE=${PERMISSIVE_MODE}
 AGENT_ARGS=${AGENT_ARGS}
 ENV
 
@@ -924,6 +990,7 @@ echo -e "  Image     ${BOLD}${BASE_IMAGE}${RESET}"
 echo -e "  Resources ${BOLD}${CPU} CPU · ${MEMORY} RAM · ${STORAGE} storage${RESET}"
 echo -e "  Mount     ${BOLD}${HOST_PATH}${RESET} → ${MOUNT_PATH}"
 [[ -n "$AGENT_CMD" ]] && echo -e "  Agent     ${BOLD}${AGENT_CMD} ${AGENT_ARGS}${RESET}"
+[[ -n "$AGENT_CMD" ]] && echo -e "  Permissive ${BOLD}${PERMISSIVE_MODE:-false}${RESET}"
 echo -e "  ${DIM}───────────────────────────────────────${RESET}"
 echo ""
 confirm_yes "Deploy now?" || exit 0

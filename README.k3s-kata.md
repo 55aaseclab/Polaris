@@ -56,9 +56,11 @@ The wizard collects:
 ### Agent defaults
 
 - `OpenAI Codex` is the default agent
+- supported agents prompt once for permissive mode and default to `yes`
 - Codex auto-installs `bubblewrap`
-- Codex launches with `--dangerously-bypass-approvals-and-sandbox`
-- Claude can be launched with `--dangerously-skip-permissions`
+- permissive Codex launches with `--dangerously-bypass-approvals-and-sandbox`
+- permissive Claude launches with `--dangerously-skip-permissions`
+- permissive mode can be disabled during generation for stricter containers
 
 ### Auth sources
 
@@ -66,11 +68,13 @@ Claude:
 
 - `~/.claude/.credentials.json`
 - `~/.config/claude/credentials.json`
+- existing Claude credentials are reused automatically during container creation
 
 Codex:
 
 - `~/.codex/auth.json`
 - optional `OPENAI_API_KEY` fallback
+- existing `~/.codex/auth.json` is reused automatically during container creation
 
 ### Generated artifacts
 
@@ -137,3 +141,22 @@ bash scripts/new-agent.sh <project>
 ```
 
 Choose `update`.
+
+## `scripts/refresh-k3s-network.sh`
+
+Refresh k3s after switching between networks such as office, home, or VPN.
+
+### Usage
+
+```bash
+sudo bash scripts/refresh-k3s-network.sh
+```
+
+### What it does
+
+- prints the current host resolver state
+- restarts `k3s`
+- waits for the node to become `Ready`
+- waits for `coredns` and `metrics-server` rollouts
+- verifies `v1beta1.metrics.k8s.io` is available
+- runs `kubectl top nodes` as a final sanity check

@@ -14,7 +14,8 @@ them ship without constant approval babysitting.
 Agent Vault turns this repo into a single-node control plane for isolated coding
 agents. It provisions k3s plus Kata Containers on Debian, then launches each
 agent in its own Kubernetes namespace with a mounted workspace, tmux session,
-and repo-managed shell/editor environment.
+and repo-managed shell/editor environment. Supported agent containers default
+to permissive mode during generation, with a prompt to disable it when needed.
 
 ## Quick Start
 
