@@ -11,7 +11,7 @@ them ship without constant approval babysitting.
 
 ## Description
 
-Agent Vault turns this repo into a single-node control plane for isolated coding
+Agent Vault turns this repo into a k3s control plane for isolated coding
 agents. It provisions k3s plus Kata Containers on Debian, then launches each
 agent in its own Kubernetes namespace with a mounted workspace, tmux session,
 and repo-managed shell/editor environment. Supported agent containers default
@@ -44,6 +44,9 @@ For tool-specific usage details, see:
 - [`README.tmux.md`](README.tmux.md)
 - [`README.alacritty.md`](README.alacritty.md)
 - [`README.vim.md`](README.vim.md)
+
+You can also add additional x64 Kata worker nodes with
+[`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
 
 ## Contribute
 

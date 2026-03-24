@@ -31,6 +31,49 @@ k3s kubectl get nodes
 k3s kubectl get runtimeclass
 ```
 
+## `scripts/setup-k3s-kata-worker.sh`
+
+Join an additional x64 Debian host to an existing k3s cluster as a Kata-capable
+worker.
+
+### Usage
+
+On the current k3s server:
+
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
+On the new x64 worker:
+
+```bash
+export K3S_URL=https://<server-ip>:6443
+export K3S_TOKEN=<node-token>
+sudo -E bash scripts/setup-k3s-kata-worker.sh
+```
+
+Optional:
+
+- set `K3S_NODE_NAME` to override the node name
+- set `K3S_NODE_LABELS` to a comma-separated label list for the worker
+- set `K3S_AGENT_EXTRA_ARGS` for extra `k3s agent` install flags
+
+### What it does
+
+- installs `k3s-agent` and joins the existing cluster
+- installs Kata Containers for `amd64`
+- writes the containerd template for Kata runtimes on the worker
+- restarts `k3s-agent` when required
+
+### Verify
+
+From the server:
+
+```bash
+kubectl get nodes -o wide
+kubectl describe node <worker-name>
+```
+
 ## `scripts/new-agent.sh`
 
 Generate and manage an agent vault.
