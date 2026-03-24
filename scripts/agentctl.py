@@ -52,6 +52,10 @@ class InvalidTransitionError(AgentError):
     pass
 
 
+class BackSignal(Exception):
+    pass
+
+
 @dataclass
 class FileSnapshot:
     path: Path
@@ -124,11 +128,20 @@ def fail(message: str) -> "NoReturn":
     raise AgentError(message)
 
 
+def is_back_token(raw: str) -> bool:
+    return raw.strip().lower() in {"<", "back"}
+
+
 def prompt(question: str, default: str = "") -> str:
     if default:
         raw = input(f"{BOLD}{question}{RESET} {DIM}[{default}]{RESET}: ")
+        if is_back_token(raw):
+            raise BackSignal()
         return raw.strip() or default
-    return input(f"{BOLD}{question}{RESET}: ").strip()
+    raw = input(f"{BOLD}{question}{RESET}: ").strip()
+    if is_back_token(raw):
+        raise BackSignal()
+    return raw
 
 
 def prompt_path(question: str, default: str = "") -> str:
@@ -176,6 +189,8 @@ def prompt_path(question: str, default: str = "") -> str:
             raw = input(f"{BOLD}{question}{RESET} {DIM}[{default}]{RESET}: ")
         else:
             raw = input(f"{BOLD}{question}{RESET}: ")
+        if is_back_token(raw):
+            raise BackSignal()
         return raw.strip() or default
     finally:
         readline.set_startup_hook()
@@ -185,6 +200,7 @@ def prompt_path(question: str, default: str = "") -> str:
 
 def choose(question: str, options: list[str], default_idx: int = 0) -> str:
     print(f"{BOLD}{question}{RESET}")
+    hint("Type '<' or 'back' to return to the previous section.")
     for index, option in enumerate(options, start=1):
         if default_idx and index == default_idx:
             print(f"  {GREEN}*{RESET} {DIM}{index}{RESET}) {option}")
@@ -198,6 +214,8 @@ def choose(question: str, options: list[str], default_idx: int = 0) -> str:
                 return options[default_idx - 1]
         else:
             raw = input(f"Choice [1-{len(options)}]: ").strip()
+        if is_back_token(raw):
+            raise BackSignal()
         if raw.isdigit():
             pick = int(raw)
             if 1 <= pick <= len(options):
@@ -209,10 +227,13 @@ def multichoose(question: str, options: list[str], defaults: list[int] | None = 
     defaults = defaults or []
     print(f"{BOLD}{question}{RESET}")
     hint("Enter numbers to select (e.g: 1 3 4), 0 for none. Press Enter to keep defaults (*).")
+    hint("Type '<' or 'back' to return to the previous section.")
     for index, option in enumerate(options, start=1):
         marker = f"{GREEN}*{RESET} " if index in defaults else "  "
         print(f"  {marker}{DIM}{index}{RESET}) {option}")
     raw = input("Choices: ").strip()
+    if is_back_token(raw):
+        raise BackSignal()
     if not raw:
         return [options[index - 1] for index in defaults]
     if raw == "0":
@@ -227,11 +248,17 @@ def multichoose(question: str, options: list[str], defaults: list[int] | None = 
 
 
 def confirm(question: str) -> bool:
-    return input(f"{BOLD}{question}{RESET} {DIM}[y/N]{RESET}: ").strip().lower() == "y"
+    raw = input(f"{BOLD}{question}{RESET} {DIM}[y/N]{RESET}: ").strip().lower()
+    if is_back_token(raw):
+        raise BackSignal()
+    return raw == "y"
 
 
 def confirm_yes(question: str) -> bool:
-    return input(f"{BOLD}{question}{RESET} {DIM}[Y/n]{RESET}: ").strip().lower() not in {"n", "no"}
+    raw = input(f"{BOLD}{question}{RESET} {DIM}[Y/n]{RESET}: ").strip().lower()
+    if is_back_token(raw):
+        raise BackSignal()
+    return raw not in {"n", "no"}
 
 
 def run(
@@ -1255,194 +1282,325 @@ def gather_agent_auth(agent_cmd: str, project_name: str) -> tuple[str, str, str,
     return "", "", "", ""
 
 
-def build_config_interactively() -> AgentConfig:
-    steps = 8
-    step = 0
+def derive_toolchain_defaults(cfg: AgentConfig | None) -> tuple[list[str], str]:
+    if cfg is None:
+        return [], ""
+    baseline = set(baseline_packages().split())
+    installed = set(cfg.all_packages.split())
+    defaults: list[str] = []
+    if {"nodejs", "npm"}.issubset(installed):
+        defaults.append("nodejs npm")
+        installed -= {"nodejs", "npm"}
+    if "golang" in installed:
+        defaults.append("golang")
+        installed.remove("golang")
+    if cfg.install_rustup:
+        defaults.append("rustup")
+    if "build-essential" in installed:
+        defaults.append("build-essential")
+        installed.remove("build-essential")
+    extras = installed - baseline
+    if cfg.agent_cmd == "codex":
+        extras.discard("bubblewrap")
+    return defaults, " ".join(sorted(extras))
 
-    def next_step(title: str) -> None:
-        nonlocal step
-        step += 1
-        header(f"[{step}/{steps}] {title}")
 
-    os.system("clear")
-    print(f"{BOLD}{CYAN}")
-    print("  ╔═══════════════════════════════════════╗")
-    print("  ║   k3s + Kata Agent Config Generator   ║")
-    print("  ╚═══════════════════════════════════════╝")
-    print(f"{RESET}")
-    print("  Deploys a Kata-isolated coding agent on k3s.\n")
+def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfig:
+    toolchain_defaults, extra_defaults = derive_toolchain_defaults(initial)
+    state: dict[str, object] = {
+        "project_name": initial.project_name if initial else "",
+        "host_path": initial.host_path if initial else "",
+        "mount_path": initial.mount_path if initial else "/home/agent/work",
+        "runtime_class": initial.runtime_class if initial else "kata-qemu",
+        "base_image": initial.base_image if initial else "debian:trixie-slim",
+        "toolchains": toolchain_defaults,
+        "extra_packages": extra_defaults,
+        "cpu": initial.cpu if initial else "2",
+        "memory": initial.memory if initial else "4Gi",
+        "storage": initial.storage if initial else "20Gi",
+        "agent": initial.agent if initial else "OpenAI Codex",
+        "agent_cmd": initial.agent_cmd if initial else "codex",
+        "permissive_mode": initial.permissive_mode if initial else "true",
+        "agent_args": initial.agent_args if initial else resolve_agent_args("codex", "true"),
+        "plain_env_vars": [PlainEnvVar(item.name, item.value) for item in (initial.plain_env_vars if initial else [])],
+        "secret_env_vars": [SecretEnvVar(item.name, item.value) for item in (initial.secret_env_vars if initial else [])],
+        "expose_service": initial.expose_service if initial else False,
+        "container_port": initial.container_port if initial else "",
+        "node_port": initial.node_port if initial else "",
+        "agent_secret_name": initial.agent_secret_name if initial else "",
+        "agent_secret_key": initial.agent_secret_key if initial else "",
+        "agent_secret_mount_path": initial.agent_secret_mount_path if initial else "",
+        "agent_secret_content": initial.agent_secret_content if initial else "",
+    }
 
-    next_step("Project")
-    project_name = prompt("Project name (used as namespace + deployment name)")
-    while not project_name or not re.fullmatch(r"[a-z0-9-]+", project_name):
-        warn("Name must be lowercase letters, numbers, hyphens only")
-        project_name = prompt("Project name")
+    def render_header(step: int, title: str) -> None:
+        os.system("clear")
+        print(f"{BOLD}{CYAN}")
+        print("  ╔═══════════════════════════════════════╗")
+        print("  ║   k3s + Kata Agent Config Generator   ║")
+        print("  ╚═══════════════════════════════════════╝")
+        print(f"{RESET}")
+        print("  Deploys a Kata-isolated coding agent on k3s.\n")
+        header(f"[{step}/8] {title}")
 
-    default_host_path = f"/home/{os.environ.get('SUDO_USER') or os.environ.get('USER')}/Projects/{project_name}"
-    host_path = prompt_path("Host path to mount", default_host_path)
-    if not Path(host_path).exists():
-        warn(f"Directory does not exist: {host_path}")
-        if confirm("Create it?"):
-            Path(host_path).mkdir(parents=True, exist_ok=True)
-            ok(f"Created {host_path}")
-    mount_path = prompt_path("Mount path inside container", "/home/agent/work")
+    def step_project() -> None:
+        project_name = prompt("Project name (used as namespace + deployment name)", str(state["project_name"]))
+        while not project_name or not re.fullmatch(r"[a-z0-9-]+", project_name):
+            warn("Name must be lowercase letters, numbers, hyphens only")
+            project_name = prompt("Project name", project_name)
+        state["project_name"] = project_name
+        default_host_path = str(state["host_path"]) or f"/home/{os.environ.get('SUDO_USER') or os.environ.get('USER')}/Projects/{project_name}"
+        host_path = prompt_path("Host path to mount", default_host_path)
+        if not Path(host_path).exists():
+            warn(f"Directory does not exist: {host_path}")
+            if confirm("Create it?"):
+                Path(host_path).mkdir(parents=True, exist_ok=True)
+                ok(f"Created {host_path}")
+        state["host_path"] = host_path
+        state["mount_path"] = prompt_path("Mount path inside container", str(state["mount_path"]))
 
-    next_step("Runtime")
-    runtime_class = choose(
-        "Kata runtime flavour",
-        [
+    def step_runtime() -> None:
+        runtime_options = [
             "kata-qemu (full VMX isolation)",
             "kata-clh (Cloud Hypervisor, faster start)",
             "kata-qemu-tdx (TDX confidential computing)",
-        ],
-        default_idx=1,
-    )
-    if runtime_class.startswith("kata-qemu-tdx"):
-        runtime_class = "kata-qemu-tdx"
-    elif runtime_class.startswith("kata-clh"):
-        runtime_class = "kata-clh"
-    else:
-        runtime_class = "kata-qemu"
+        ]
+        default_idx = {"kata-qemu": 1, "kata-clh": 2, "kata-qemu-tdx": 3}.get(str(state["runtime_class"]), 1)
+        runtime_class = choose("Kata runtime flavour", runtime_options, default_idx=default_idx)
+        if runtime_class.startswith("kata-qemu-tdx"):
+            state["runtime_class"] = "kata-qemu-tdx"
+        elif runtime_class.startswith("kata-clh"):
+            state["runtime_class"] = "kata-clh"
+        else:
+            state["runtime_class"] = "kata-qemu"
 
-    next_step("Base image")
-    base_image = choose(
-        "Base container image",
-        [
-            "debian:trixie-slim",
-            "ubuntu:24.04",
-            "python:3.12-slim",
-            "node:22-slim",
-            "custom",
-        ],
-        default_idx=1,
-    )
-    if base_image == "custom":
-        base_image = prompt("Enter custom image (e.g. myrepo/myimage:tag)")
+    def step_base_image() -> None:
+        base_options = ["debian:trixie-slim", "ubuntu:24.04", "python:3.12-slim", "node:22-slim", "custom"]
+        current = str(state["base_image"])
+        default_idx = base_options.index(current) + 1 if current in base_options[:-1] else 5
+        picked = choose("Base container image", base_options, default_idx=default_idx)
+        state["base_image"] = prompt("Enter custom image (e.g. myrepo/myimage:tag)", current) if picked == "custom" else picked
 
-    next_step("Toolchain packages")
-    hint("Always installed: python3 python3-pip git curl wget jq ripgrep fd-find bat")
-    toolchains = multichoose(
-        "Additional toolchains",
-        ["nodejs npm", "golang", "rustup", "build-essential"],
-    )
-    extra_packages = prompt("Any additional apt packages (space-separated, or leave blank)")
+    def step_toolchains() -> None:
+        hint("Always installed: python3 python3-pip git curl wget jq ripgrep fd-find bat")
+        options = ["nodejs npm", "golang", "rustup", "build-essential"]
+        defaults = [options.index(item) + 1 for item in list(state["toolchains"]) if item in options]
+        state["toolchains"] = multichoose("Additional toolchains", options, defaults=defaults)
+        state["extra_packages"] = prompt("Any additional apt packages (space-separated, or leave blank)", str(state["extra_packages"]))
 
-    next_step("Resource limits")
-    hint("These are hard limits for the Kata VM. OOM = VM dies, not your host.")
-    hint("Memory and storage values use Kubernetes binary units. Bare numbers default to Gi.")
-    cpu_preset = choose("CPU limit", ["1 (light scripting)", "2", "4 (compilation / ML)", "8 (heavy parallel builds)", "custom"], default_idx=2)
-    cpu = {"1 (light scripting)": "1", "2": "2", "4 (compilation / ML)": "4", "8 (heavy parallel builds)": "8"}.get(cpu_preset, "")
-    if not cpu:
-        cpu = prompt("CPU limit", "2")
-    mem_preset = choose("Memory limit", ["1Gi (minimal)", "2Gi", "4Gi", "8Gi (ML / large builds)", "16Gi", "custom"], default_idx=3)
-    memory = {"1Gi (minimal)": "1Gi", "2Gi": "2Gi", "4Gi": "4Gi", "8Gi (ML / large builds)": "8Gi", "16Gi": "16Gi"}.get(mem_preset, "")
-    if not memory:
-        memory = prompt("Memory limit (e.g. 6Gi)", "4Gi")
-    memory = normalize_binary_quantity(memory, "Memory limit")
-    storage_preset = choose("Ephemeral storage limit", ["10Gi", "20Gi", "50Gi", "100Gi", "custom"], default_idx=2)
-    storage = {"10Gi": "10Gi", "20Gi": "20Gi", "50Gi": "50Gi", "100Gi": "100Gi"}.get(storage_preset, "")
-    if not storage:
-        storage = prompt("Storage limit (e.g. 30Gi)", "20Gi")
-    storage = normalize_binary_quantity(storage, "Ephemeral storage limit")
-
-    next_step("AI Agent")
-    agent_selection = choose("AI coding agent to install in the container", ["Claude Code (Anthropic)", "OpenAI Codex", "None"], default_idx=2)
-    agent_pkg = ""
-    agent_cmd = ""
-    agent = agent_selection
-    if agent_selection.startswith("Claude Code"):
-        agent_pkg = "@anthropic-ai/claude-code"
-        agent_cmd = "claude"
-    elif agent_selection.startswith("OpenAI Codex"):
-        agent_pkg = "@openai/codex"
-        agent_cmd = "codex"
-    permissive_mode = ""
-    agent_args = ""
-    secret_env_vars: list[SecretEnvVar] = []
-    if agent_cmd:
-        permissive_mode = "true" if confirm_yes("Enable permissive mode for the agent container?") else "false"
-        agent_args = resolve_agent_args(agent_cmd, permissive_mode)
-    agent_secret_name = ""
-    agent_secret_key = ""
-    agent_secret_mount_path = ""
-    agent_secret_content = ""
-    if agent_cmd:
-        agent_secret_name, agent_secret_key, agent_secret_mount_path, agent_secret_content = gather_agent_auth(agent_cmd, project_name)
-        if agent_cmd == "codex":
-            auth_path = Path.home() / ".codex" / "auth.json"
-            if auth_path.exists():
+    def step_resources() -> None:
+        hint("These are hard limits for the Kata VM. OOM = VM dies, not your host.")
+        hint("Memory and storage values use Kubernetes binary units. Bare numbers default to Gi.")
+        resource_step = 0
+        while resource_step < 3:
+            if resource_step == 0:
+                cpu_defaults = {"1": 1, "2": 2, "4": 3, "8": 4}
                 try:
-                    auth = json.loads(auth_path.read_text())
-                    derived_key = auth.get("OPENAI_API_KEY") or ""
-                except json.JSONDecodeError:
-                    derived_key = ""
-                if derived_key:
-                    ok("Derived OPENAI_API_KEY from host auth")
-                    secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", derived_key))
-                elif not agent_secret_content:
-                    warn("Could not auto-read credential from host")
-                    manual = prompt("OPENAI_API_KEY (paste manually, or leave blank to skip)")
-                    if manual:
-                        secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", manual))
+                    cpu_preset = choose("CPU limit", ["1 (light scripting)", "2", "4 (compilation / ML)", "8 (heavy parallel builds)", "custom"], default_idx=cpu_defaults.get(str(state["cpu"]), 5))
+                except BackSignal:
+                    raise
+                cpu = {"1 (light scripting)": "1", "2": "2", "4 (compilation / ML)": "4", "8 (heavy parallel builds)": "8"}.get(cpu_preset, "")
+                if not cpu:
+                    try:
+                        cpu = prompt("CPU limit", str(state["cpu"]))
+                    except BackSignal:
+                        continue
+                state["cpu"] = cpu
+                resource_step += 1
+                continue
 
-    next_step("Environment variables")
-    hint("Plain env vars (stored in the Deployment, not encrypted).")
-    plain_env_vars: list[PlainEnvVar] = []
-    while confirm("Add a plain env var?"):
-        plain_env_vars.append(PlainEnvVar(prompt("Variable name (e.g. GOPATH)"), prompt("Value")))
+            if resource_step == 1:
+                mem_defaults = {"1Gi": 1, "2Gi": 2, "4Gi": 3, "8Gi": 4, "16Gi": 5}
+                try:
+                    mem_preset = choose("Memory limit", ["1Gi (minimal)", "2Gi", "4Gi", "8Gi (ML / large builds)", "16Gi", "custom"], default_idx=mem_defaults.get(str(state["memory"]), 6))
+                except BackSignal:
+                    resource_step = 0
+                    continue
+                memory = {"1Gi (minimal)": "1Gi", "2Gi": "2Gi", "4Gi": "4Gi", "8Gi (ML / large builds)": "8Gi", "16Gi": "16Gi"}.get(mem_preset, "")
+                if not memory:
+                    try:
+                        memory = prompt("Memory limit (e.g. 6Gi)", str(state["memory"]))
+                    except BackSignal:
+                        continue
+                state["memory"] = normalize_binary_quantity(memory, "Memory limit")
+                resource_step += 1
+                continue
 
-    hint("Secret env vars (stored as a Kubernetes Secret, injected as env vars).")
-    while confirm("Add a secret env var?"):
-        secret_env_vars.append(SecretEnvVar(prompt("Variable name"), prompt("Value")))
+            storage_defaults = {"10Gi": 1, "20Gi": 2, "50Gi": 3, "100Gi": 4}
+            try:
+                storage_preset = choose("Ephemeral storage limit", ["10Gi", "20Gi", "50Gi", "100Gi", "custom"], default_idx=storage_defaults.get(str(state["storage"]), 5))
+            except BackSignal:
+                resource_step = 1
+                continue
+            storage = {"10Gi": "10Gi", "20Gi": "20Gi", "50Gi": "50Gi", "100Gi": "100Gi"}.get(storage_preset, "")
+            if not storage:
+                try:
+                    storage = prompt("Storage limit (e.g. 30Gi)", str(state["storage"]))
+                except BackSignal:
+                    continue
+            state["storage"] = normalize_binary_quantity(storage, "Ephemeral storage limit")
+            resource_step += 1
 
-    next_step("Network")
-    expose_service = False
-    container_port = ""
-    node_port = ""
-    if confirm("Expose a port via NodePort service?"):
-        container_port = prompt("Container port", "8080")
-        node_port = prompt("NodePort (30000-32767)", "30800")
-        expose_service = True
+    def step_agent() -> None:
+        options = ["Claude Code (Anthropic)", "OpenAI Codex", "None"]
+        current = "None"
+        if str(state["agent_cmd"]) == "claude":
+            current = "Claude Code (Anthropic)"
+        elif str(state["agent_cmd"]) == "codex":
+            current = "OpenAI Codex"
+        picked = choose("AI coding agent to install in the container", options, default_idx=options.index(current) + 1)
+        agent_cmd = "claude" if picked.startswith("Claude Code") else "codex" if picked.startswith("OpenAI Codex") else ""
+        state["agent"] = picked
+        state["agent_cmd"] = agent_cmd
+        state["agent_args"] = ""
+        state["agent_secret_name"] = ""
+        state["agent_secret_key"] = ""
+        state["agent_secret_mount_path"] = ""
+        state["agent_secret_content"] = ""
+        secret_env_vars = [item for item in list(state["secret_env_vars"]) if item.name != "OPENAI_API_KEY"]
+        if agent_cmd:
+            permissive_default = str(state["permissive_mode"]) == "true"
+            state["permissive_mode"] = "true" if (confirm_yes("Enable permissive mode for the agent container?") if permissive_default else confirm("Enable permissive mode for the agent container?")) else "false"
+            state["agent_args"] = resolve_agent_args(agent_cmd, str(state["permissive_mode"]))
+            state["agent_secret_name"], state["agent_secret_key"], state["agent_secret_mount_path"], state["agent_secret_content"] = gather_agent_auth(agent_cmd, str(state["project_name"]))
+            if agent_cmd == "codex":
+                auth_path = Path.home() / ".codex" / "auth.json"
+                if auth_path.exists():
+                    try:
+                        auth = json.loads(auth_path.read_text())
+                        derived_key = auth.get("OPENAI_API_KEY") or ""
+                    except json.JSONDecodeError:
+                        derived_key = ""
+                    if derived_key:
+                        ok("Derived OPENAI_API_KEY from host auth")
+                        secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", derived_key))
+                    elif not str(state["agent_secret_content"]):
+                        warn("Could not auto-read credential from host")
+                        manual = prompt("OPENAI_API_KEY (paste manually, or leave blank to skip)")
+                        if manual:
+                            secret_env_vars.append(SecretEnvVar("OPENAI_API_KEY", manual))
+        else:
+            state["permissive_mode"] = ""
+        state["secret_env_vars"] = secret_env_vars
 
-    toolchain_words = []
-    for item in toolchains:
+    def step_environment() -> None:
+        while True:
+            plain_items = ", ".join(f"{item.name}={item.value}" for item in list(state["plain_env_vars"])) or "none"
+            secret_items = ", ".join(item.name for item in list(state["secret_env_vars"])) or "none"
+            hint(f"Plain env vars: {plain_items}")
+            hint(f"Secret env vars: {secret_items}")
+            action = choose(
+                "Environment variables",
+                [
+                    "done",
+                    "add plain env var",
+                    "remove plain env var",
+                    "add secret env var",
+                    "remove secret env var",
+                    "clear all env vars",
+                ],
+                default_idx=1,
+            )
+            plain_env_vars = list(state["plain_env_vars"])
+            secret_env_vars = list(state["secret_env_vars"])
+            if action == "done":
+                return
+            if action == "add plain env var":
+                plain_env_vars.append(PlainEnvVar(prompt("Variable name (e.g. GOPATH)"), prompt("Value")))
+            elif action == "remove plain env var":
+                if not plain_env_vars:
+                    warn("No plain env vars to remove")
+                    continue
+                picked = choose("Remove which plain env var?", [f"{item.name}={item.value}" for item in plain_env_vars])
+                plain_env_vars.pop([f"{item.name}={item.value}" for item in plain_env_vars].index(picked))
+            elif action == "add secret env var":
+                secret_env_vars.append(SecretEnvVar(prompt("Variable name"), prompt("Value")))
+            elif action == "remove secret env var":
+                if not secret_env_vars:
+                    warn("No secret env vars to remove")
+                    continue
+                picked = choose("Remove which secret env var?", [item.name for item in secret_env_vars])
+                secret_env_vars.pop([item.name for item in secret_env_vars].index(picked))
+            elif action == "clear all env vars":
+                plain_env_vars = []
+                secret_env_vars = [item for item in secret_env_vars if item.name == "OPENAI_API_KEY"]
+            state["plain_env_vars"] = plain_env_vars
+            state["secret_env_vars"] = secret_env_vars
+
+    def step_network() -> None:
+        default_expose = bool(state["expose_service"])
+        expose_service = confirm_yes("Expose a port via NodePort service?") if default_expose else confirm("Expose a port via NodePort service?")
+        state["expose_service"] = expose_service
+        if expose_service:
+            state["container_port"] = prompt("Container port", str(state["container_port"] or "8080"))
+            state["node_port"] = prompt("NodePort (30000-32767)", str(state["node_port"] or "30800"))
+        else:
+            state["container_port"] = ""
+            state["node_port"] = ""
+
+    steps: list[tuple[str, callable]] = [
+        ("Project", step_project),
+        ("Runtime", step_runtime),
+        ("Base image", step_base_image),
+        ("Toolchain packages", step_toolchains),
+        ("Resource limits", step_resources),
+        ("AI Agent", step_agent),
+        ("Environment variables", step_environment),
+        ("Network", step_network),
+    ]
+
+    index = 0
+    while index < len(steps):
+        title, handler = steps[index]
+        render_header(index + 1, title)
+        try:
+            handler()
+            index += 1
+        except BackSignal:
+            if index == 0:
+                warn("Already at the first section")
+                time.sleep(1)
+            else:
+                index -= 1
+
+    toolchain_words: list[str] = []
+    for item in list(state["toolchains"]):
         toolchain_words.extend(item.split())
-    extra_words = extra_packages.split()
-    if agent_pkg and "nodejs" not in toolchain_words:
+    extra_words = str(state["extra_packages"]).split()
+    if state["agent_cmd"] and "nodejs" not in toolchain_words:
         toolchain_words.extend(["nodejs", "npm"])
-    if agent_cmd == "codex" and "bubblewrap" not in extra_words:
+    if state["agent_cmd"] == "codex" and "bubblewrap" not in extra_words:
         extra_words.append("bubblewrap")
     install_rustup = "rustup" in toolchain_words
     if install_rustup:
         toolchain_words = [word for word in toolchain_words if word != "rustup"]
     all_packages = sort_unique_words((baseline_packages() + " " + " ".join(toolchain_words + extra_words)).split())
 
-    cfg = AgentConfig(
-        project_name=project_name,
-        host_path=host_path,
-        mount_path=mount_path,
-        runtime_class=runtime_class,
-        base_image=base_image,
-        cpu=cpu,
-        memory=memory,
-        storage=storage,
-        agent=agent,
-        agent_cmd=agent_cmd,
-        permissive_mode=permissive_mode,
-        agent_args=agent_args,
+    return AgentConfig(
+        project_name=str(state["project_name"]),
+        host_path=str(state["host_path"]),
+        mount_path=str(state["mount_path"]),
+        runtime_class=str(state["runtime_class"]),
+        base_image=str(state["base_image"]),
+        cpu=str(state["cpu"]),
+        memory=str(state["memory"]),
+        storage=str(state["storage"]),
+        agent=str(state["agent"]),
+        agent_cmd=str(state["agent_cmd"]),
+        permissive_mode=str(state["permissive_mode"]),
+        agent_args=str(state["agent_args"]),
         all_packages=all_packages,
         install_rustup=install_rustup,
-        plain_env_vars=plain_env_vars,
-        secret_env_vars=secret_env_vars,
-        expose_service=expose_service,
-        container_port=container_port,
-        node_port=node_port,
-        agent_secret_name=agent_secret_name,
-        agent_secret_key=agent_secret_key,
-        agent_secret_mount_path=agent_secret_mount_path,
-        agent_secret_content=agent_secret_content,
+        plain_env_vars=list(state["plain_env_vars"]),
+        secret_env_vars=list(state["secret_env_vars"]),
+        expose_service=bool(state["expose_service"]),
+        container_port=str(state["container_port"]),
+        node_port=str(state["node_port"]),
+        agent_secret_name=str(state["agent_secret_name"]),
+        agent_secret_key=str(state["agent_secret_key"]),
+        agent_secret_mount_path=str(state["agent_secret_mount_path"]),
+        agent_secret_content=str(state["agent_secret_content"]),
     )
-    return cfg
 
 
 def write_project_files(cfg: AgentConfig) -> None:
