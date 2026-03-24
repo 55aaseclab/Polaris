@@ -97,9 +97,8 @@ The wizard collects:
 - optional NodePort exposure
 
 Memory and storage entries use Kubernetes binary units such as `Mi`, `Gi`, and
-`Ti`. If you enter a bare number in the wizard or have an older saved
-`agents/<project>.env`, `scripts/agentctl.py` normalizes it to `Gi` before
-writing or reusing the manifest.
+`Ti`. If you enter a bare number in the wizard, `scripts/agentctl.py`
+normalizes it to `Gi` before saving the canonical config and rendered manifest.
 
 ### Agent defaults
 
@@ -128,8 +127,8 @@ Codex:
 
 ```text
 agents/
+  <project>.agent.yaml
   <project>.yaml
-  <project>.env
 ```
 
 ### Manage
@@ -171,6 +170,19 @@ The generated `agent` account is switched to `zsh` after provisioning.
 
 ## Troubleshooting
 
+### Live validation
+
+Use the dedicated integration checks when you need to exercise real `kubectl`
+and Kata-backed pod lifecycle behavior:
+
+```bash
+python3 -m unittest tests/test_agentctl_k3s_integration.py
+./tests/smoke-agentctl.sh
+```
+
+They skip cleanly when `kubectl` or the `kata-qemu` RuntimeClass is not
+available.
+
 ### Show status
 
 ```bash
@@ -195,13 +207,14 @@ python3 scripts/agentctl.py <project>
 
 Choose `update`.
 
-This reapplies `agents/<project>.yaml` as saved. It only rolls a new pod if the
-saved manifest changes the Deployment pod template. The manage flow reports
-whether it detected a rollout or is reusing the current pod before attaching,
-and shows the pod it is watching plus provisioning logs once the new container
-starts. Before applying, it also checks the requested CPU, memory, and
-ephemeral storage against remaining requested headroom on ready schedulable
-nodes and fails early if nothing in the cluster can fit the pod.
+This reapplies the rendered `agents/<project>.yaml` from the saved
+`agents/<project>.agent.yaml` config. It only rolls a new pod if the rendered
+manifest changes the Deployment pod template. The manage flow reports whether
+it detected a rollout or is reusing the current pod before attaching, and shows
+the pod it is watching plus provisioning logs once the new container starts.
+Before applying, it also checks the requested CPU, memory, and ephemeral
+storage against remaining requested headroom on ready schedulable nodes and
+fails early if nothing in the cluster can fit the pod.
 
 ### Rebuild a container from current generator logic
 
@@ -211,7 +224,7 @@ python3 scripts/agentctl.py <project>
 
 Choose `rebuild`.
 
-This regenerates the container bootstrap section in `agents/<project>.yaml`
+This regenerates `agents/<project>.yaml` from `agents/<project>.agent.yaml`
 using the current `scripts/agentctl.py` logic, then reapplies the manifest.
 
 ## `scripts/refresh-k3s-network.sh`

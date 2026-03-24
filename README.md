@@ -43,9 +43,11 @@ You can also add additional x64 Kata worker nodes with
 
 ## Notes
 
-- `scripts/agentctl.py` expects Kubernetes-style units for memory and storage
-  limits such as `Gi` or `Mi`. Bare legacy values are normalized to `Gi` when
-  saved manifests are reused.
+- `scripts/agentctl.py` stores each agent as a canonical
+  `agents/<project>.agent.yaml` config and renders `agents/<project>.yaml`
+  from it when applying or rebuilding.
+- Memory and storage limits use Kubernetes-style binary units such as `Gi` or
+  `Mi`. Bare values entered in the wizard are normalized to `Gi`.
 
 ## Contribute
 
@@ -56,6 +58,8 @@ You can also add additional x64 Kata worker nodes with
 python3 -m py_compile scripts/agentctl.py
 bash -n scripts/setup-k3s-kata.sh
 python3 -m unittest tests/test_agentctl_user_story.py
+python3 -m unittest tests/test_agentctl_k3s_integration.py
+./tests/smoke-agentctl.sh
 ./tests/smoke-test.sh
 ```
 

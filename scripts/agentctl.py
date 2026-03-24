@@ -18,6 +18,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal
+import yaml
+
+try:
+    import readline
+except ImportError:  # pragma: no cover
+    readline = None
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -44,6 +50,13 @@ class AgentError(RuntimeError):
 
 class InvalidTransitionError(AgentError):
     pass
+
+
+@dataclass
+class FileSnapshot:
+    path: Path
+    existed: bool
+    content: str = ""
 
 
 def transition_public_state(
@@ -119,7 +132,55 @@ def prompt(question: str, default: str = "") -> str:
 
 
 def prompt_path(question: str, default: str = "") -> str:
-    return prompt(question, default)
+    if readline is None:
+        return prompt(question, default)
+
+    old_completer = readline.get_completer()
+    old_delims = readline.get_completer_delims()
+
+    def complete_path(text: str, state: int) -> str | None:
+        buffer = readline.get_line_buffer()
+        expanded = os.path.expanduser(buffer)
+        if not expanded:
+            expanded = "."
+        if expanded.endswith(os.sep):
+            directory = expanded
+            prefix = ""
+        else:
+            directory = os.path.dirname(expanded) or "."
+            prefix = os.path.basename(expanded)
+        try:
+            entries = sorted(os.listdir(directory))
+        except OSError:
+            return None
+
+        matches: list[str] = []
+        for entry in entries:
+            if not entry.startswith(prefix):
+                continue
+            candidate = os.path.join(directory, entry)
+            display = os.path.join(os.path.dirname(buffer), entry) if buffer and not buffer.endswith(os.sep) else os.path.join(buffer, entry) if buffer else entry
+            if directory == "." and not buffer.startswith(("/", "~")):
+                display = entry
+            if os.path.isdir(candidate):
+                display += os.sep
+            matches.append(display)
+        return matches[state] if state < len(matches) else None
+
+    try:
+        readline.set_completer_delims(" \t\n;")
+        readline.set_completer(complete_path)
+        readline.parse_and_bind("tab: complete")
+        if default:
+            readline.set_startup_hook(lambda: readline.insert_text(default))
+            raw = input(f"{BOLD}{question}{RESET} {DIM}[{default}]{RESET}: ")
+        else:
+            raw = input(f"{BOLD}{question}{RESET}: ")
+        return raw.strip() or default
+    finally:
+        readline.set_startup_hook()
+        readline.set_completer(old_completer)
+        readline.set_completer_delims(old_delims)
 
 
 def choose(question: str, options: list[str], default_idx: int = 0) -> str:
@@ -282,7 +343,7 @@ def resolve_agent_args(agent_cmd: str, permissive_mode: str) -> str:
 def build_agent_install_line(agent_pkg: str) -> str:
     if not agent_pkg:
         return ""
-    return f"mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli {agent_pkg} && \\\n          "
+    return f"          mkdir -p /opt/agent-cli && npm install -g --prefix /opt/agent-cli {agent_pkg} && \\\n"
 
 
 def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
@@ -290,9 +351,9 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
         return ""
     args = f" {agent_args}" if agent_args else ""
     return (
-        "printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' "
+        "          printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' "
         f"'exec /opt/agent-cli/bin/{agent_cmd}{args} \"$@\"' > /usr/local/bin/{agent_cmd} "
-        f"&& chmod 755 /usr/local/bin/{agent_cmd} && \\\n          "
+        f"&& chmod 755 /usr/local/bin/{agent_cmd} && \\\n"
     )
 
 
@@ -337,6 +398,8 @@ class AgentConfig:
     permissive_mode: str
     agent_args: str
     all_packages: str
+    persist_state: bool = True
+    bootstrap_profile: str = "full"
     install_rustup: bool = False
     plain_env_vars: list[PlainEnvVar] = field(default_factory=list)
     secret_env_vars: list[SecretEnvVar] = field(default_factory=list)
@@ -349,12 +412,12 @@ class AgentConfig:
     agent_secret_content: str = ""
 
     @property
-    def yaml_path(self) -> Path:
-        return OUTPUT_DIR / f"{self.project_name}.yaml"
+    def config_path(self) -> Path:
+        return OUTPUT_DIR / f"{self.project_name}.agent.yaml"
 
     @property
-    def env_path(self) -> Path:
-        return OUTPUT_DIR / f"{self.project_name}.env"
+    def yaml_path(self) -> Path:
+        return OUTPUT_DIR / f"{self.project_name}.yaml"
 
     @property
     def agent_state_host_path(self) -> str:
@@ -368,33 +431,113 @@ class AgentConfig:
     def codex_state_host_path(self) -> str:
         return f"{self.agent_state_host_path}/codex"
 
-    def env_text(self) -> str:
-        lines = [
-            f"# {self.project_name}.env — project config",
-            f"PROJECT={self.project_name}",
-            f"HOST_PATH={self.host_path}",
-            f"MOUNT_PATH={self.mount_path}",
-            f"AGENT_STATE_HOST_PATH={self.agent_state_host_path}",
-            f"CLAUDE_STATE_HOST_PATH={self.claude_state_host_path}",
-            f"CODEX_STATE_HOST_PATH={self.codex_state_host_path}",
-            f"RUNTIME_CLASS={self.runtime_class}",
-            f"BASE_IMAGE={self.base_image}",
-            f"CPU={self.cpu}",
-            f"MEMORY={self.memory}",
-            f"STORAGE={self.storage}",
-            f"AGENT={self.agent}",
-            f"AGENT_CMD={self.agent_cmd}",
-            f"PERMISSIVE_MODE={self.permissive_mode}",
-            f"AGENT_ARGS={self.agent_args}",
-            f"ALL_PACKAGES={self.all_packages}",
-            f"INSTALL_RUSTUP={'true' if self.install_rustup else 'false'}",
-        ]
-        return "\n".join(lines) + "\n"
+    def to_config_dict(self) -> dict:
+        return {
+            "project": self.project_name,
+            "workspace": {
+                "host_path": self.host_path,
+                "mount_path": self.mount_path,
+            },
+            "runtime": {
+                "class": self.runtime_class,
+                "base_image": self.base_image,
+            },
+            "resources": {
+                "cpu": self.cpu,
+                "memory": self.memory,
+                "ephemeral_storage": self.storage,
+            },
+            "agent": {
+                "kind": self.agent_cmd or "none",
+                "label": self.agent,
+                "permissive": self.permissive_mode == "true",
+                "args": self.agent_args.split() if self.agent_args else [],
+                "persist_state": self.persist_state,
+            },
+            "tooling": {
+                "bootstrap_profile": self.bootstrap_profile,
+                "apt_packages": self.all_packages.split(),
+                "install_rustup": self.install_rustup,
+            },
+            "auth": {
+                "secret_name": self.agent_secret_name or None,
+                "secret_key": self.agent_secret_key or None,
+                "mount_path": self.agent_secret_mount_path or None,
+                "content": self.agent_secret_content or None,
+            },
+            "env": {
+                "plain": {item.name: item.value for item in self.plain_env_vars},
+                "secret": {item.name: item.value for item in self.secret_env_vars},
+            },
+            "service": {
+                "enabled": self.expose_service,
+                "container_port": self.container_port or None,
+                "node_port": self.node_port or None,
+            },
+        }
+
+    def config_text(self) -> str:
+        return yaml.safe_dump(self.to_config_dict(), sort_keys=False)
+
+    @classmethod
+    def from_config_dict(cls, data: dict) -> "AgentConfig":
+        workspace = data.get("workspace", {}) or {}
+        runtime = data.get("runtime", {}) or {}
+        resources = data.get("resources", {}) or {}
+        agent = data.get("agent", {}) or {}
+        tooling = data.get("tooling", {}) or {}
+        auth = data.get("auth", {}) or {}
+        env = data.get("env", {}) or {}
+        service = data.get("service", {}) or {}
+        plain = env.get("plain", {}) or {}
+        secret = env.get("secret", {}) or {}
+        kind = agent.get("kind") or ""
+        label = agent.get("label") or {
+            "claude": "Claude Code (Anthropic)",
+            "codex": "OpenAI Codex",
+            "none": "None",
+            "": "None",
+        }.get(kind, kind)
+        args = agent.get("args", []) or []
+        return cls(
+            project_name=data["project"],
+            host_path=workspace.get("host_path", ""),
+            mount_path=workspace.get("mount_path", "/home/agent/work"),
+            runtime_class=runtime.get("class", "kata-qemu"),
+            base_image=runtime.get("base_image", "debian:trixie-slim"),
+            cpu=str(resources.get("cpu", "2")),
+            memory=normalize_binary_quantity(str(resources.get("memory", "4Gi")), "Saved memory limit"),
+            storage=normalize_binary_quantity(str(resources.get("ephemeral_storage", "20Gi")), "Saved storage limit"),
+            agent=label,
+            agent_cmd="" if kind == "none" else kind,
+            permissive_mode="true" if agent.get("permissive") and kind and kind != "none" else ("false" if kind and kind != "none" else ""),
+            agent_args=" ".join(args),
+            persist_state=bool(agent.get("persist_state", True)),
+            bootstrap_profile=tooling.get("bootstrap_profile", "full"),
+            all_packages=" ".join(tooling.get("apt_packages", []) or []),
+            install_rustup=bool(tooling.get("install_rustup", False)),
+            plain_env_vars=[PlainEnvVar(name, value) for name, value in plain.items()],
+            secret_env_vars=[SecretEnvVar(name, value) for name, value in secret.items()],
+            expose_service=bool(service.get("enabled", False)),
+            container_port=str(service.get("container_port") or ""),
+            node_port=str(service.get("node_port") or ""),
+            agent_secret_name=auth.get("secret_name") or "",
+            agent_secret_key=auth.get("secret_key") or "",
+            agent_secret_mount_path=auth.get("mount_path") or "",
+            agent_secret_content=auth.get("content") or "",
+        )
 
     def build_container_bootstrap_lines(self) -> str:
+        if self.bootstrap_profile == "minimal":
+            return (
+                "          if ! id agent >/dev/null 2>&1; then useradd -m -s /bin/bash agent; fi && \\\n"
+                "          mkdir -p /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
+                "          chown agent:agent /home/agent /home/agent/.claude /home/agent/.codex && \\\n"
+                "          touch /tmp/.ready && sleep infinity"
+            )
         rustup_line = ""
         if self.install_rustup:
-            rustup_line = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su agent -c 'sh -s -- -y' && \\\n          "
+            rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su agent -c 'sh -s -- -y' && \\\n"
         agent_pkg = agent_package_for_cmd(self.agent_cmd)
         agent_install_line = build_agent_install_line(agent_pkg)
         agent_wrapper_line = build_agent_wrapper_line(self.agent_cmd, self.agent_args)
@@ -408,7 +551,7 @@ class AgentConfig:
             '          echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent && \\\n'
             "          chmod 440 /etc/sudoers.d/agent && \\\n"
             f"          {build_user_setup_line()}{rustup_line}{agent_install_line}{agent_wrapper_line}"
-            "touch /tmp/.ready && sleep infinity"
+            "          touch /tmp/.ready && sleep infinity"
         )
 
     def yaml_text(self) -> str:
@@ -496,14 +639,19 @@ class AgentConfig:
             "        volumeMounts:",
             "        - name: project",
             f"          mountPath: {self.mount_path}",
-            "        - name: claude-home",
-            "          mountPath: /home/agent/.claude",
-            "        - name: codex-home",
-            "          mountPath: /home/agent/.codex",
             "        - name: geek-env",
             "          mountPath: /opt/geek-env",
             "          readOnly: true",
         ]
+        if self.persist_state:
+            deployment_lines.extend(
+                [
+                    "        - name: claude-home",
+                    "          mountPath: /home/agent/.claude",
+                    "        - name: codex-home",
+                    "          mountPath: /home/agent/.codex",
+                ]
+            )
         if self.agent_secret_content:
             deployment_lines.extend(
                 [
@@ -539,20 +687,25 @@ class AgentConfig:
                 "        hostPath:",
                 f"          path: {self.host_path}",
                 "          type: Directory",
-                "      - name: claude-home",
-                "        hostPath:",
-                f"          path: {self.claude_state_host_path}",
-                "          type: DirectoryOrCreate",
-                "      - name: codex-home",
-                "        hostPath:",
-                f"          path: {self.codex_state_host_path}",
-                "          type: DirectoryOrCreate",
                 "      - name: geek-env",
                 "        hostPath:",
                 f"          path: {REPO_ROOT}",
                 "          type: Directory",
             ]
         )
+        if self.persist_state:
+            deployment_lines.extend(
+                [
+                    "      - name: claude-home",
+                    "        hostPath:",
+                    f"          path: {self.claude_state_host_path}",
+                    "          type: DirectoryOrCreate",
+                    "      - name: codex-home",
+                    "        hostPath:",
+                    f"          path: {self.codex_state_host_path}",
+                    "          type: DirectoryOrCreate",
+                ]
+            )
         if self.agent_secret_content:
             deployment_lines.extend(
                 [
@@ -587,116 +740,44 @@ class AgentConfig:
         return "\n---\n".join(docs) + "\n"
 
 
-def parse_env_file(path: Path) -> dict[str, str]:
-    data: dict[str, str] = {}
-    if not path.exists():
-        return data
-    for line in path.read_text().splitlines():
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        data[key] = value
-    return data
+def snapshot_files(paths: Iterable[Path]) -> list[FileSnapshot]:
+    snapshots: list[FileSnapshot] = []
+    for path in paths:
+        if path.exists():
+            snapshots.append(FileSnapshot(path=path, existed=True, content=path.read_text()))
+        else:
+            snapshots.append(FileSnapshot(path=path, existed=False))
+    return snapshots
 
 
-def rewrite_project_resource_files(project_name: str, memory: str = "", storage: str = "") -> None:
-    env_file = OUTPUT_DIR / f"{project_name}.env"
-    manifest = OUTPUT_DIR / f"{project_name}.yaml"
-    if env_file.exists():
-        lines = env_file.read_text().splitlines()
-        rewritten: list[str] = []
-        for line in lines:
-            if memory and line.startswith("MEMORY="):
-                rewritten.append(f"MEMORY={memory}")
-            elif storage and line.startswith("STORAGE="):
-                rewritten.append(f"STORAGE={storage}")
-            else:
-                rewritten.append(line)
-        env_file.write_text("\n".join(rewritten) + "\n")
-    if manifest.exists():
-        text = manifest.read_text()
-        if memory:
-            text = re.sub(r'(^\s+memory:\s+")([^"]+)(")', rf'\1{memory}\3', text, flags=re.MULTILINE)
-        if storage:
-            text = re.sub(r'(^\s+ephemeral-storage:\s+")([^"]+)(")', rf'\1{storage}\3', text, flags=re.MULTILINE)
-        manifest.write_text(text)
+def restore_files(snapshots: Iterable[FileSnapshot]) -> None:
+    for snapshot in snapshots:
+        if snapshot.existed:
+            snapshot.path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot.path.write_text(snapshot.content)
+        elif snapshot.path.exists():
+            snapshot.path.unlink()
 
 
-def extract_manifest_packages(manifest: Path) -> str:
-    lines = manifest.read_text().splitlines()
-    for index, line in enumerate(lines):
-        if "apt-get update && apt-get install -y" in line and index + 1 < len(lines):
-            next_line = lines[index + 1].strip()
-            return re.sub(r"\s+&&\s+\\$", "", next_line)
-    return ""
+def rollback_created_project(cfg: AgentConfig, snapshots: Iterable[FileSnapshot]) -> None:
+    warn(f"Rolling back failed creation for {cfg.project_name}...")
+    if command_exists("kubectl"):
+        subprocess.run(
+            ["kubectl", "delete", "namespace", cfg.project_name, "--ignore-not-found=true", "--wait=false"],
+            cwd=str(REPO_ROOT),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    restore_files(snapshots)
 
 
-def load_project_config(project_name: str) -> dict[str, str]:
-    env_data = parse_env_file(OUTPUT_DIR / f"{project_name}.env")
-    memory = env_data.get("MEMORY")
-    storage = env_data.get("STORAGE")
-    if memory:
-        memory = normalize_binary_quantity(memory, "Saved memory limit")
-    if storage:
-        storage = normalize_binary_quantity(storage, "Saved storage limit")
-    if memory or storage:
-        rewrite_project_resource_files(project_name, memory or "", storage or "")
-    return env_data
-
-
-def render_refreshed_bootstrap(project_name: str, env_data: dict[str, str]) -> str:
-    manifest = OUTPUT_DIR / f"{project_name}.yaml"
-    all_packages = env_data.get("ALL_PACKAGES") or extract_manifest_packages(manifest)
-    if not all_packages or "sudo" not in all_packages:
-        warn(f"Falling back to derived package set for {project_name}")
-        packages = baseline_packages().split()
-        if env_data.get("AGENT_CMD"):
-            packages.extend(["nodejs", "npm"])
-        if env_data.get("AGENT_CMD") == "codex":
-            packages.append("bubblewrap")
-        all_packages = sort_unique_words(packages)
-
-    cfg = AgentConfig(
-        project_name=project_name,
-        host_path=env_data.get("HOST_PATH", ""),
-        mount_path=env_data.get("MOUNT_PATH", "/home/agent/work"),
-        runtime_class=env_data.get("RUNTIME_CLASS", "kata-qemu"),
-        base_image=env_data.get("BASE_IMAGE", "debian:trixie-slim"),
-        cpu=env_data.get("CPU", "2"),
-        memory=env_data.get("MEMORY", "4Gi"),
-        storage=env_data.get("STORAGE", "20Gi"),
-        agent=env_data.get("AGENT", ""),
-        agent_cmd=env_data.get("AGENT_CMD", ""),
-        permissive_mode=env_data.get("PERMISSIVE_MODE", ""),
-        agent_args=resolve_agent_args(env_data.get("AGENT_CMD", ""), env_data.get("PERMISSIVE_MODE", "")),
-        all_packages=all_packages,
-        install_rustup=env_data.get("INSTALL_RUSTUP", "false") == "true" or "sh.rustup.rs" in manifest.read_text(),
-    )
-    return cfg.build_container_bootstrap_lines()
-
-
-def refresh_project_manifest(project_name: str, env_data: dict[str, str]) -> None:
-    manifest = OUTPUT_DIR / f"{project_name}.yaml"
-    if not manifest.exists():
-        fail(f"Manifest not found: {manifest}")
-    bootstrap = render_refreshed_bootstrap(project_name, env_data).splitlines()
-    lines = manifest.read_text().splitlines()
-    rewritten: list[str] = []
-    in_args = False
-    for line in lines:
-        if not in_args and line == "        - |":
-            rewritten.append(line)
-            rewritten.extend(bootstrap)
-            in_args = True
-            continue
-        if in_args:
-            if line == "        readinessProbe:":
-                rewritten.append(line)
-                in_args = False
-            continue
-        rewritten.append(line)
-    manifest.write_text("\n".join(rewritten) + "\n")
-    ok(f"Refreshed {manifest} with current generator bootstrap")
+def load_project_config(project_name: str) -> AgentConfig:
+    config_path = OUTPUT_DIR / f"{project_name}.agent.yaml"
+    if not config_path.exists():
+        fail(f"Config not found: {config_path}")
+    data = yaml.safe_load(config_path.read_text()) or {}
+    return AgentConfig.from_config_dict(data)
 
 
 def get_project_pod(project_name: str, ready_only: bool = False) -> str:
@@ -1036,25 +1117,22 @@ def check_cluster_resource_fit(cpu: str, memory: str, storage: str) -> None:
     )
 
 
-def apply_project_manifest(project_name: str, cpu: str, memory: str, storage: str) -> None:
-    manifest = OUTPUT_DIR / f"{project_name}.yaml"
-    if not manifest.exists():
-        fail(f"Manifest not found: {manifest}")
-    check_cluster_resource_fit(cpu, memory, storage)
-    ok(f"Applying {manifest}...")
-    kubectl(["apply", "-f", str(manifest)], capture=False, namespace=None)
+def render_project_manifest(cfg: AgentConfig) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.yaml_path.write_text(cfg.yaml_text())
+
+
+def apply_project_manifest(cfg: AgentConfig) -> None:
+    render_project_manifest(cfg)
+    check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
+    ok(f"Applying {cfg.yaml_path}...")
+    kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False, namespace=None)
 
 
 def manage_project(project_name: str) -> None:
-    env_data = load_project_config(project_name)
-    mount_path = env_data.get("MOUNT_PATH", "/home/agent/work") or "/home/agent/work"
-    agent_cmd = env_data.get("AGENT_CMD", "")
-    permissive_mode = env_data.get("PERMISSIVE_MODE", "")
-    agent_args = resolve_agent_args(agent_cmd, permissive_mode) if agent_cmd and permissive_mode else env_data.get("AGENT_ARGS", "")
-    all_packages = env_data.get("ALL_PACKAGES", "")
-    cpu = env_data.get("CPU", "2")
-    memory = env_data.get("MEMORY", "4Gi")
-    storage = env_data.get("STORAGE", "20Gi")
+    cfg = load_project_config(project_name)
+    mount_path = cfg.mount_path or "/home/agent/work"
+    agent_cmd = cfg.agent_cmd
 
     exists = kubectl(["get", "deployment", project_name], namespace=project_name, check=False)
     if exists.returncode != 0:
@@ -1072,8 +1150,8 @@ def manage_project(project_name: str) -> None:
         "Action",
         [
             "exec    — attach tmux session",
-            "update  — apply saved manifest; restarts only if pod spec changed",
-            "rebuild — regenerate bootstrap and roll a new pod",
+            "update  — render saved config and apply it",
+            "rebuild — regenerate manifest and roll a new pod",
             "restart — rolling restart with current manifest",
             "status  — show deployment, pod, and logs",
             "delete  — delete deployment + namespace",
@@ -1090,7 +1168,7 @@ def manage_project(project_name: str) -> None:
     if action.startswith("update"):
         generation_before = get_deployment_generation(project_name)
         observed_before = get_deployment_generation(project_name, observed=True)
-        apply_project_manifest(project_name, cpu, memory, storage)
+        apply_project_manifest(cfg)
         generation_after = get_deployment_generation(project_name)
         observed_after = get_deployment_generation(project_name, observed=True)
         if generation_after and generation_after != generation_before:
@@ -1106,8 +1184,7 @@ def manage_project(project_name: str) -> None:
         attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
         return
     if action.startswith("rebuild"):
-        refresh_project_manifest(project_name, env_data)
-        apply_project_manifest(project_name, cpu, memory, storage)
+        apply_project_manifest(cfg)
         ok("Waiting for rebuilt pod to become ready...")
         pod = wait_for_deployment_ready(project_name)
         attach_to_project_pod(project_name, pod, mount_path, agent_cmd)
@@ -1370,8 +1447,9 @@ def build_config_interactively() -> AgentConfig:
 
 def write_project_files(cfg: AgentConfig) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.config_path.write_text(cfg.config_text())
     cfg.yaml_path.write_text(cfg.yaml_text())
-    cfg.env_path.write_text(cfg.env_text())
+    ok(f"Generated {cfg.config_path}")
     ok(f"Generated {cfg.yaml_path}")
 
 
@@ -1403,8 +1481,7 @@ def deploy_new_project(cfg: AgentConfig) -> None:
         if not confirm("Continue?"):
             return
     ok("Applying manifests...")
-    check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
-    kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False)
+    apply_project_manifest(cfg)
     ok("Waiting for pod to start...")
     pod = wait_for_pod_running(cfg.project_name)
     attach_to_project_pod(cfg.project_name, pod, cfg.mount_path, cfg.agent_cmd)
@@ -1420,10 +1497,15 @@ def main(argv: list[str]) -> int:
             manage_project(args.project)
         else:
             cfg = build_config_interactively()
+            snapshots = snapshot_files([cfg.config_path, cfg.yaml_path])
             write_project_files(cfg)
             print_summary(cfg)
             if confirm_yes("Deploy now?"):
-                deploy_new_project(cfg)
+                try:
+                    deploy_new_project(cfg)
+                except Exception:
+                    rollback_created_project(cfg, snapshots)
+                    raise
         return 0
     except AgentError as exc:
         print(f"{YELLOW}✖{RESET}  {exc}", file=sys.stderr)
