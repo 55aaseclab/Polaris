@@ -3,27 +3,30 @@
 This document is the command-level reference for the Agent Vault fleet
 orchestration scripts.
 
-## `scripts/setup-k3s-kata.sh`
+## `scripts/setup-k3s-kata-gvisor.sh`
 
 Prepare a Debian host for Kata-backed agent vaults and multi-node scheduling.
 
 ### Usage
 
 ```bash
-sudo bash scripts/setup-k3s-kata.sh
+sudo bash scripts/setup-k3s-kata-gvisor.sh
 ```
 
 ### What it does
 
 - installs k3s if needed
 - installs Kata Containers
+- installs gVisor
 - writes the containerd template for Kata runtimes
 - restarts k3s when required
 - creates RuntimeClasses:
   - `kata-qemu`
   - `kata-clh`
   - `kata-qemu-tdx`
+  - `gvisor`
 - runs [`scripts/run-kata-smoke-test.sh`](scripts/run-kata-smoke-test.sh)
+  and [`scripts/run-gvisor-smoke-test.sh`](scripts/run-gvisor-smoke-test.sh)
 
 ### Verify
 

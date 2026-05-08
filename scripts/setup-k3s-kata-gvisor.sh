@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# setup-k3s-kata.sh
-# Idempotent setup of k3s + Kata Containers on Debian (VMX required)
+# setup-k3s-kata-gvisor.sh
+# Idempotent setup of k3s with Kata Containers and gVisor on Debian
 
 set -euo pipefail
 
@@ -16,6 +16,8 @@ KATA_CONFIG_DIR="/opt/kata/share/defaults/kata-containers"
 KATA_QEMU_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu.toml"
 KATA_CLH_CONFIG="${KATA_CONFIG_DIR}/configuration-clh.toml"
 KATA_QEMU_TDX_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu-tdx.toml"
+GVISOR_KEYRING="/usr/share/keyrings/gvisor-archive-keyring.gpg"
+GVISOR_APT_SOURCE="/etc/apt/sources.list.d/gvisor.list"
 K3S_CONFIG="/etc/rancher/k3s/config.yaml"
 CONTAINERD_TMPL="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
 RESTART_NEEDED=false
@@ -43,7 +45,7 @@ preflight() {
 install_dependencies() {
   log "Installing dependencies..."
   apt-get update -qq
-  apt-get install -y -qq curl zstd
+  apt-get install -y -qq apt-transport-https ca-certificates curl gnupg wget zstd
 }
 
 install_k3s() {
@@ -83,6 +85,41 @@ install_kata() {
   "$KATA_RUNTIME" check \
     && log "Kata runtime check passed" \
     || log "WARN: kata-runtime check had warnings (see above)"
+}
+
+install_gvisor() {
+  local arch source_line repo_changed=false
+  arch="$(dpkg --print-architecture)"
+  source_line="deb [arch=${arch} signed-by=${GVISOR_KEYRING}] https://storage.googleapis.com/gvisor/releases release main"
+
+  log "Configuring gVisor apt repository..."
+  mkdir -p "$(dirname "$GVISOR_KEYRING")"
+  curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o "$GVISOR_KEYRING.tmp"
+  if cmp -s "$GVISOR_KEYRING.tmp" "$GVISOR_KEYRING" 2>/dev/null; then
+    rm -f "$GVISOR_KEYRING.tmp"
+  else
+    mv "$GVISOR_KEYRING.tmp" "$GVISOR_KEYRING"
+    repo_changed=true
+  fi
+
+  if [[ -f "$GVISOR_APT_SOURCE" ]] && grep -Fxq "$source_line" "$GVISOR_APT_SOURCE"; then
+    :
+  else
+    printf '%s\n' "$source_line" >"$GVISOR_APT_SOURCE"
+    repo_changed=true
+  fi
+
+  if [[ "$repo_changed" == true ]]; then
+    apt-get update -qq
+  fi
+
+  if command_exists runsc && command_exists containerd-shim-runsc-v1; then
+    log "gVisor already installed ($(runsc --version 2>/dev/null | head -1 || echo runsc))"
+  else
+    log "Installing gVisor..."
+    apt-get install -y -qq runsc
+    RESTART_NEEDED=true
+  fi
 }
 
 patch_kata_config() {
@@ -154,6 +191,9 @@ version = 2
   runtime_type = "io.containerd.kata.v2"
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu-tdx.options]
     ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu-tdx.toml"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
 EOF
 
   if cmp -s "$tmp" "$CONTAINERD_TMPL" 2>/dev/null; then
@@ -190,9 +230,9 @@ restart_and_wait() {
 }
 
 apply_runtimeclass() {
-  log "Applying Kata RuntimeClasses..."
+  log "Applying RuntimeClasses..."
   # handler is immutable; delete stale entries before applying
-  k3s kubectl delete runtimeclass kata-qemu kata-clh kata-qemu-tdx --ignore-not-found=true
+  k3s kubectl delete runtimeclass kata-qemu kata-clh kata-qemu-tdx gvisor --ignore-not-found=true
   k3s kubectl apply -f - <<'EOF'
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
@@ -211,8 +251,14 @@ kind: RuntimeClass
 metadata:
   name: kata-qemu-tdx
 handler: kata-qemu-tdx
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
 EOF
-  log "RuntimeClasses applied (kata-qemu, kata-clh, kata-qemu-tdx)"
+  log "RuntimeClasses applied (kata-qemu, kata-clh, kata-qemu-tdx, gvisor)"
 }
 
 main() {
@@ -220,11 +266,13 @@ main() {
   install_dependencies
   install_k3s
   install_kata
+  install_gvisor
   configure_kata
   configure_containerd
   restart_and_wait
   apply_runtimeclass
   "$SCRIPT_DIR/run-kata-smoke-test.sh"
+  GVISOR_SMOKE_RUNTIME_CLASS=gvisor "$SCRIPT_DIR/run-gvisor-smoke-test.sh"
   log "Setup complete. Run: kubectl get nodes && kubectl get runtimeclass"
 }
 

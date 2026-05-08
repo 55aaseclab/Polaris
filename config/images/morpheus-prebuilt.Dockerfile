@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
   curl \
   fd-find \
   git \
+  htop \
   jq \
   libasound2t64 \
   nodejs \

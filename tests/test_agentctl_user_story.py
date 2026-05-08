@@ -49,6 +49,7 @@ class UserStoryGraphTest(unittest.TestCase):
             "git_core_editor": "",
             "git_user_name": "",
             "git_user_email": "",
+            "unbounded_resources": False,
             "plain_env_vars": [],
             "auth_files": [],
             "expose_service": False,
@@ -216,6 +217,22 @@ trust_level = "trusted"
 
         self.assertIn('          limits:\n            memory: "16Gi"\n            cpu: "12"\n            ephemeral-storage: "50Gi"', rendered)
         self.assertIn('          requests:\n            memory: "8Gi"\n            cpu: "4"\n            ephemeral-storage: "20Gi"', rendered)
+
+    def test_unbounded_resources_omit_container_resource_block(self) -> None:
+        cfg = self.make_agent_config(
+            unbounded_resources=True,
+            cpu="12",
+            memory="24Gi",
+            storage="50Gi",
+            cpu_request="4",
+            memory_request="8Gi",
+            storage_request="20Gi",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertNotIn("        resources:\n", rendered)
+        self.assertIn('      storage: "50Gi"', rendered)
 
     def test_paseo_home_is_rendered_as_env_not_volume_mount(self) -> None:
         cfg = self.make_agent_config(

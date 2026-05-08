@@ -509,6 +509,7 @@ class AgentConfig:
     git_core_editor: str = ""
     git_user_name: str = ""
     git_user_email: str = ""
+    unbounded_resources: bool = False
     plain_env_vars: list[PlainEnvVar] = field(default_factory=list)
     auth_files: list[AgentAuthFile] = field(default_factory=list)
     expose_service: bool = False
@@ -538,6 +539,16 @@ class AgentConfig:
         return "/root" if self.container_user == "root" else f"/home/{self.container_user}"
 
     def to_config_dict(self) -> dict:
+        tooling = {
+            "bootstrap_profile": self.bootstrap_profile,
+            "install_rustup": self.install_rustup,
+            "git_core_editor": self.git_core_editor or None,
+            "git_user_name": self.git_user_name or None,
+            "git_user_email": self.git_user_email or None,
+        }
+        apt_packages = self.all_packages.split()
+        if apt_packages:
+            tooling["apt_packages"] = apt_packages
         return {
             "project": self.project_name,
             "runtime": {
@@ -552,6 +563,7 @@ class AgentConfig:
                 "cpu_request": self.cpu_request or None,
                 "memory_request": self.memory_request or None,
                 "ephemeral_storage_request": self.storage_request or None,
+                "unbounded": self.unbounded_resources or None,
             },
             "agent": {
                 "kind": self.agent_cmd or "none",
@@ -559,14 +571,7 @@ class AgentConfig:
                 "args": self.agent_args.split() if self.agent_args else [],
                 "persist_state": self.persist_state,
             },
-            "tooling": {
-                "bootstrap_profile": self.bootstrap_profile,
-                "apt_packages": self.all_packages.split(),
-                "install_rustup": self.install_rustup,
-                "git_core_editor": self.git_core_editor or None,
-                "git_user_name": self.git_user_name or None,
-                "git_user_email": self.git_user_email or None,
-            },
+            "tooling": tooling,
             "auth": {
                 "files": [
                     {
@@ -661,11 +666,14 @@ class AgentConfig:
             agent_args=" ".join(args),
             persist_state=bool(agent.get("persist_state", True)),
             bootstrap_profile=tooling.get("bootstrap_profile", "full"),
-            all_packages=" ".join(tooling.get("apt_packages", []) or []),
+            all_packages=""
+            if tooling.get("bootstrap_profile", "full") == "prebuilt"
+            else " ".join(tooling.get("apt_packages", []) or []),
             install_rustup=bool(tooling.get("install_rustup", False)),
             git_core_editor=str(tooling.get("git_core_editor") or ""),
             git_user_name=str(tooling.get("git_user_name") or ""),
             git_user_email=str(tooling.get("git_user_email") or ""),
+            unbounded_resources=bool(resources.get("unbounded", False)),
             plain_env_vars=[PlainEnvVar(name, value) for name, value in plain.items()],
             auth_files=[
                 AgentAuthFile(
@@ -841,27 +849,32 @@ class AgentConfig:
             "          initialDelaySeconds: 5",
             "          periodSeconds: 5",
             "          failureThreshold: 60",
-            "        resources:",
-            "          limits:",
-            f'            memory: "{self.memory}"',
-            f'            cpu: "{self.cpu}"',
-            f'            ephemeral-storage: "{self.storage}"',
         ]
-        if self.cpu_request or self.memory_request or self.storage_request:
+        if not self.unbounded_resources:
             deployment_lines.extend(
                 [
-                    "          requests:",
-                    *(
-                        [f'            memory: "{self.memory_request}"'] if self.memory_request else []
-                    ),
-                    *([f'            cpu: "{self.cpu_request}"'] if self.cpu_request else []),
-                    *(
-                        [f'            ephemeral-storage: "{self.storage_request}"']
-                        if self.storage_request
-                        else []
-                    ),
+                    "        resources:",
+                    "          limits:",
+                    f'            memory: "{self.memory}"',
+                    f'            cpu: "{self.cpu}"',
+                    f'            ephemeral-storage: "{self.storage}"',
                 ]
             )
+            if self.cpu_request or self.memory_request or self.storage_request:
+                deployment_lines.extend(
+                    [
+                        "          requests:",
+                        *(
+                            [f'            memory: "{self.memory_request}"'] if self.memory_request else []
+                        ),
+                        *([f'            cpu: "{self.cpu_request}"'] if self.cpu_request else []),
+                        *(
+                            [f'            ephemeral-storage: "{self.storage_request}"']
+                            if self.storage_request
+                            else []
+                        ),
+                    ]
+                )
         deployment_lines.extend(
             [
             "        volumeMounts:",
@@ -1459,7 +1472,8 @@ def render_project_manifest(cfg: AgentConfig) -> None:
 
 def apply_project_manifest(cfg: AgentConfig) -> None:
     render_project_manifest(cfg)
-    check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
+    if not cfg.unbounded_resources:
+        check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
     ok(f"Applying {cfg.yaml_path}...")
     kubectl(["apply", "-f", str(cfg.yaml_path)], capture=False, namespace=None)
 
@@ -1577,13 +1591,16 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
             "kata-qemu (full VMX isolation)",
             "kata-clh (Cloud Hypervisor, faster start)",
             "kata-qemu-tdx (TDX confidential computing)",
+            "gvisor (userspace-kernel sandbox)",
         ]
-        default_idx = {"kata-qemu": 1, "kata-clh": 2, "kata-qemu-tdx": 3}.get(str(state["runtime_class"]), 1)
+        default_idx = {"kata-qemu": 1, "kata-clh": 2, "kata-qemu-tdx": 3, "gvisor": 4}.get(str(state["runtime_class"]), 1)
         runtime_class = choose("Kata runtime flavour", runtime_options, default_idx=default_idx)
         if runtime_class.startswith("kata-qemu-tdx"):
             state["runtime_class"] = "kata-qemu-tdx"
         elif runtime_class.startswith("kata-clh"):
             state["runtime_class"] = "kata-clh"
+        elif runtime_class.startswith("gvisor"):
+            state["runtime_class"] = "gvisor"
         else:
             state["runtime_class"] = "kata-qemu"
 

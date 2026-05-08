@@ -15,6 +15,8 @@ KATA_CONFIG_DIR="/opt/kata/share/defaults/kata-containers"
 KATA_QEMU_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu.toml"
 KATA_CLH_CONFIG="${KATA_CONFIG_DIR}/configuration-clh.toml"
 KATA_QEMU_TDX_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu-tdx.toml"
+GVISOR_KEYRING="/usr/share/keyrings/gvisor-archive-keyring.gpg"
+GVISOR_APT_SOURCE="/etc/apt/sources.list.d/gvisor.list"
 K3S_AGENT_CONFIG="/etc/rancher/k3s/config.yaml"
 CONTAINERD_TMPL="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
 RESTART_NEEDED=false
@@ -45,7 +47,7 @@ preflight() {
 install_dependencies() {
   log "Installing dependencies..."
   apt-get update -qq
-  apt-get install -y -qq curl zstd
+  apt-get install -y -qq apt-transport-https ca-certificates curl gnupg wget zstd
 }
 
 install_k3s_agent() {
@@ -119,6 +121,41 @@ install_kata() {
     || log "WARN: kata-runtime check had warnings (see above)"
 }
 
+install_gvisor() {
+  local arch source_line repo_changed=false
+  arch="$(dpkg --print-architecture)"
+  source_line="deb [arch=${arch} signed-by=${GVISOR_KEYRING}] https://storage.googleapis.com/gvisor/releases release main"
+
+  log "Configuring gVisor apt repository..."
+  mkdir -p "$(dirname "$GVISOR_KEYRING")"
+  curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o "$GVISOR_KEYRING.tmp"
+  if cmp -s "$GVISOR_KEYRING.tmp" "$GVISOR_KEYRING" 2>/dev/null; then
+    rm -f "$GVISOR_KEYRING.tmp"
+  else
+    mv "$GVISOR_KEYRING.tmp" "$GVISOR_KEYRING"
+    repo_changed=true
+  fi
+
+  if [[ -f "$GVISOR_APT_SOURCE" ]] && grep -Fxq "$source_line" "$GVISOR_APT_SOURCE"; then
+    :
+  else
+    printf '%s\n' "$source_line" >"$GVISOR_APT_SOURCE"
+    repo_changed=true
+  fi
+
+  if [[ "$repo_changed" == true ]]; then
+    apt-get update -qq
+  fi
+
+  if command_exists runsc && command_exists containerd-shim-runsc-v1; then
+    log "gVisor already installed ($(runsc --version 2>/dev/null | head -1 || echo runsc))"
+  else
+    log "Installing gVisor..."
+    apt-get install -y -qq runsc
+    RESTART_NEEDED=true
+  fi
+}
+
 patch_kata_config() {
   local target_config="$1"
   local tmp
@@ -188,6 +225,9 @@ version = 2
   runtime_type = "io.containerd.kata.v2"
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu-tdx.options]
     ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu-tdx.toml"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
 EOF
 
   if cmp -s "$tmp" "$CONTAINERD_TMPL" 2>/dev/null; then
@@ -227,6 +267,7 @@ main() {
   install_dependencies
   install_k3s_agent
   install_kata
+  install_gvisor
   configure_kata
   configure_containerd
   restart_and_wait
