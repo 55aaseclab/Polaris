@@ -10,6 +10,7 @@ from scripts.agentctl import (
     AgentConfig,
     AgentAuthFile,
     PlainEnvVar,
+    ServicePort,
     apply_saved_project,
     agent_label_for_cmd,
     build_paseo_runtime_cleanup_line,
@@ -51,8 +52,10 @@ class UserStoryGraphTest(unittest.TestCase):
             "plain_env_vars": [],
             "auth_files": [],
             "expose_service": False,
-            "container_port": "",
-            "node_port": "",
+            "service_mode": "nodeport",
+            "service_ports": [],
+            "service_host": "",
+            "service_path": "/",
         }
         defaults.update(overrides)
         return AgentConfig(**defaults)
@@ -126,8 +129,10 @@ trust_level = "trusted"
                 )
             ],
             expose_service=True,
-            container_port="8080",
-            node_port="30800",
+            service_mode="ingress",
+            service_ports=[ServicePort("8080", "30800")],
+            service_host="app.example.test",
+            service_path="/demo",
         )
 
         loaded = AgentConfig.from_config_dict(cfg.to_config_dict())
@@ -150,14 +155,16 @@ trust_level = "trusted"
             "git_core_editor",
             "git_user_name",
             "git_user_email",
-            "container_port",
-            "node_port",
+            "service_mode",
+            "service_host",
+            "service_path",
         ):
             with self.subTest(field=field_name):
                 self.assertEqual(getattr(loaded, field_name), getattr(cfg, field_name))
         self.assertEqual(loaded.plain_env_vars[0].name, "FOO")
         self.assertEqual(loaded.auth_files[0].key, "codex-auth.json")
         self.assertTrue(loaded.expose_service)
+        self.assertEqual([(item.container_port, item.node_port) for item in loaded.service_ports], [("8080", "30800")])
 
     def test_auth_files_are_copied_in_bootstrap_not_k8s_secret(self) -> None:
         cfg = self.make_agent_config(
@@ -221,6 +228,58 @@ trust_level = "trusted"
         self.assertIn("        env:\n", rendered)
         self.assertIn('        - name: PASEO_HOME\n          value: "/home/fight-cuttlefish-x64/.paseo"', rendered)
         self.assertNotIn("PASEO_HOME", volume_mounts_section)
+
+    def test_nodeport_service_is_rendered(self) -> None:
+        cfg = self.make_agent_config(
+            expose_service=True,
+            service_mode="nodeport",
+            service_ports=[ServicePort("8080", "30800"), ServicePort("8081", "30801"), ServicePort("8082", "30802")],
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("kind: Service", rendered)
+        self.assertIn("  type: NodePort", rendered)
+        self.assertIn("    nodePort: 30800", rendered)
+        self.assertIn("    nodePort: 30801", rendered)
+        self.assertIn("    nodePort: 30802", rendered)
+        self.assertNotIn("kind: Ingress", rendered)
+
+    def test_ingress_service_is_rendered_with_traefik(self) -> None:
+        cfg = self.make_agent_config(
+            expose_service=True,
+            service_mode="ingress",
+            service_ports=[ServicePort("8080"), ServicePort("8081"), ServicePort("8082")],
+            service_host="app.example.test",
+            service_path="/demo",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("kind: Service", rendered)
+        self.assertIn("  type: ClusterIP", rendered)
+        self.assertIn("kind: Ingress", rendered)
+        self.assertIn("ingressClassName: traefik", rendered)
+        self.assertIn("traefik.ingress.kubernetes.io/router.entrypoints: web", rendered)
+        self.assertIn("host: app.example.test", rendered)
+        self.assertIn("path: /demo", rendered)
+        self.assertIn("              number: 8080", rendered)
+
+    def test_legacy_single_service_port_config_still_loads(self) -> None:
+        loaded = AgentConfig.from_config_dict(
+            {
+                "project": self.PROJECT,
+                "runtime": {"class": "kata-qemu", "base_image": "debian:trixie-slim"},
+                "resources": {"cpu": "2", "memory": "4Gi", "ephemeral_storage": "20Gi"},
+                "agent": {"kind": "multi", "label": "Codex + Claude Code", "args": [], "persist_state": True},
+                "tooling": {"bootstrap_profile": "prebuilt", "apt_packages": []},
+                "auth": {"files": []},
+                "env": {"plain": {}},
+                "service": {"enabled": True, "mode": "nodeport", "container_port": "6767", "node_port": "31677", "host": None, "path": "/"},
+            }
+        )
+
+        self.assertEqual([(item.container_port, item.node_port) for item in loaded.service_ports], [("6767", "31677")])
 
     def test_claude_config_is_loaded(self) -> None:
         loaded = AgentConfig.from_config_dict(

@@ -11,6 +11,10 @@ KATA_URL="https://github.com/kata-containers/kata-containers/releases/download/$
 KATA_RUNTIME="/opt/kata/bin/kata-runtime"
 KATA_SHIM="/opt/kata/bin/containerd-shim-kata-v2"
 KATA_SHIM_LINK="/usr/local/bin/containerd-shim-kata-v2"
+KATA_CONFIG_DIR="/opt/kata/share/defaults/kata-containers"
+KATA_QEMU_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu.toml"
+KATA_CLH_CONFIG="${KATA_CONFIG_DIR}/configuration-clh.toml"
+KATA_QEMU_TDX_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu-tdx.toml"
 K3S_AGENT_CONFIG="/etc/rancher/k3s/config.yaml"
 CONTAINERD_TMPL="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
 RESTART_NEEDED=false
@@ -115,6 +119,48 @@ install_kata() {
     || log "WARN: kata-runtime check had warnings (see above)"
 }
 
+patch_kata_config() {
+  local target_config="$1"
+  local tmp
+  tmp="$(mktemp)"
+  python3 - "$target_config" <<'PY' >"$tmp"
+from pathlib import Path
+import re
+import sys
+
+target = Path(sys.argv[1])
+text = target.read_text()
+
+patterns = {
+    r"(?m)^enable_debug = (true|false)$": "enable_debug = true",
+    r"(?m)^static_sandbox_resource_mgmt = (true|false)$": "static_sandbox_resource_mgmt = true",
+}
+
+for pattern, replacement in patterns.items():
+    text, count = re.subn(pattern, replacement, text, count=1)
+    if count != 1:
+        raise SystemExit(f"failed to update {pattern!r} in {target}")
+
+sys.stdout.write(text)
+PY
+
+  if cmp -s "$tmp" "$target_config" 2>/dev/null; then
+    log "$(basename "$target_config") already up to date"
+    rm -f "$tmp"
+  else
+    mkdir -p "$(dirname "$target_config")"
+    mv "$tmp" "$target_config"
+    log "Wrote $(basename "$target_config")"
+    RESTART_NEEDED=true
+  fi
+}
+
+configure_kata() {
+  patch_kata_config "$KATA_QEMU_CONFIG"
+  patch_kata_config "$KATA_CLH_CONFIG"
+  patch_kata_config "$KATA_QEMU_TDX_CONFIG"
+}
+
 configure_containerd() {
   local tmp
   tmp="$(mktemp)"
@@ -181,6 +227,7 @@ main() {
   install_dependencies
   install_k3s_agent
   install_kata
+  configure_kata
   configure_containerd
   restart_and_wait
   log "Worker setup complete. Verify from the server with: kubectl get nodes -o wide"

@@ -476,6 +476,18 @@ class AgentAuthFile:
 
 
 @dataclass
+class ServicePort:
+    container_port: str
+    node_port: str = ""
+    name: str = ""
+
+    def port_name(self, index: int) -> str:
+        if self.name:
+            return self.name
+        return "http" if index == 0 else f"http-{index + 1}"
+
+
+@dataclass
 class AgentConfig:
     project_name: str
     runtime_class: str
@@ -500,8 +512,10 @@ class AgentConfig:
     plain_env_vars: list[PlainEnvVar] = field(default_factory=list)
     auth_files: list[AgentAuthFile] = field(default_factory=list)
     expose_service: bool = False
-    container_port: str = ""
-    node_port: str = ""
+    service_mode: str = "nodeport"
+    service_ports: list[ServicePort] = field(default_factory=list)
+    service_host: str = ""
+    service_path: str = "/"
 
     @property
     def config_path(self) -> Path:
@@ -568,8 +582,17 @@ class AgentConfig:
             },
             "service": {
                 "enabled": self.expose_service,
-                "container_port": self.container_port or None,
-                "node_port": self.node_port or None,
+                "mode": self.service_mode if self.expose_service else None,
+                "ports": [
+                    {
+                        "container_port": item.container_port,
+                        "node_port": item.node_port or None,
+                        "name": item.name or None,
+                    }
+                    for item in self.service_ports
+                ] if self.expose_service else [],
+                "host": self.service_host or None,
+                "path": self.service_path or None,
             },
         }
 
@@ -598,6 +621,14 @@ class AgentConfig:
         ) or agent_label_for_cmd(kind)
         args = agent.get("args", []) or []
         auth_files_data = auth.get("files", []) or []
+        service_ports_data = service.get("ports", []) or []
+        if not service_ports_data and (service.get("container_port") or service.get("node_port")):
+            service_ports_data = [
+                {
+                    "container_port": service.get("container_port") or "",
+                    "node_port": service.get("node_port") or "",
+                }
+            ]
         if not auth_files_data:
             legacy_mount_path = auth.get("mount_path") or ""
             legacy_key = auth.get("secret_key") or ""
@@ -646,8 +677,18 @@ class AgentConfig:
                 if item.get("key") and item.get("mount_path") and item.get("content")
             ],
             expose_service=bool(service.get("enabled", False)),
-            container_port=str(service.get("container_port") or ""),
-            node_port=str(service.get("node_port") or ""),
+            service_mode=str(service.get("mode") or ("nodeport" if service.get("enabled", False) else "nodeport")),
+            service_ports=[
+                ServicePort(
+                    container_port=str(item.get("container_port") or ""),
+                    node_port=str(item.get("node_port") or ""),
+                    name=str(item.get("name") or ""),
+                )
+                for item in service_ports_data
+                if item.get("container_port")
+            ],
+            service_host=str(service.get("host") or ""),
+            service_path=str(service.get("path") or "/"),
         )
 
     def build_container_bootstrap_lines(self) -> str:
@@ -863,25 +904,77 @@ class AgentConfig:
         docs.append("\n".join(deployment_lines))
 
         if self.expose_service:
-            docs.append(
-                "\n".join(
+            primary_port = self.service_ports[0]
+            service_lines = [
+                "apiVersion: v1",
+                "kind: Service",
+                "metadata:",
+                f"  name: {self.project_name}",
+                f"  namespace: {self.project_name}",
+                "spec:",
+                f"  type: {'NodePort' if self.service_mode == 'nodeport' else 'ClusterIP'}",
+                "  selector:",
+                f"    app: {self.project_name}",
+                "  ports:",
+            ]
+            for index, port in enumerate(self.service_ports):
+                service_lines.extend(
                     [
-                        "apiVersion: v1",
-                        "kind: Service",
-                        "metadata:",
-                        f"  name: {self.project_name}",
-                        f"  namespace: {self.project_name}",
-                        "spec:",
-                        "  type: NodePort",
-                        "  selector:",
-                        f"    app: {self.project_name}",
-                        "  ports:",
-                        f"  - port: {self.container_port}",
-                        f"    targetPort: {self.container_port}",
-                        f"    nodePort: {self.node_port}",
+                        f"  - name: {port.port_name(index)}",
+                        "    protocol: TCP",
+                        f"    port: {port.container_port}",
+                        f"    targetPort: {port.container_port}",
+                        "    appProtocol: http",
                     ]
                 )
-            )
+                if self.service_mode == "nodeport" and port.node_port:
+                    service_lines.append(f"    nodePort: {port.node_port}")
+            docs.append("\n".join(service_lines))
+
+            if self.service_mode == "ingress":
+                path = self.service_path or "/"
+                ingress_lines = [
+                    "apiVersion: networking.k8s.io/v1",
+                    "kind: Ingress",
+                    "metadata:",
+                    f"  name: {self.project_name}",
+                    f"  namespace: {self.project_name}",
+                    "  annotations:",
+                    '    traefik.ingress.kubernetes.io/router.entrypoints: web',
+                    "spec:",
+                    "  ingressClassName: traefik",
+                    "  rules:",
+                ]
+                if self.service_host:
+                    ingress_lines.extend(
+                        [
+                            f"  - host: {self.service_host}",
+                            "    http:",
+                            "      paths:",
+                            f"      - path: {path}",
+                            "        pathType: Prefix",
+                            "        backend:",
+                            "          service:",
+                            f"            name: {self.project_name}",
+                            "            port:",
+                            f"              number: {primary_port.container_port}",
+                        ]
+                    )
+                else:
+                    ingress_lines.extend(
+                        [
+                            "  - http:",
+                            "      paths:",
+                            f"      - path: {path}",
+                            "        pathType: Prefix",
+                            "        backend:",
+                            "          service:",
+                            f"            name: {self.project_name}",
+                            "            port:",
+                            f"              number: {primary_port.container_port}",
+                        ]
+                    )
+                docs.append("\n".join(ingress_lines))
 
         return "\n---\n".join(docs) + "\n"
 
@@ -1454,8 +1547,10 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         "plain_env_vars": [PlainEnvVar(item.name, item.value) for item in (initial.plain_env_vars if initial else [])],
         "auth_files": [AgentAuthFile(item.key, item.mount_path, item.content) for item in (initial.auth_files if initial else [])],
         "expose_service": initial.expose_service if initial else False,
-        "container_port": initial.container_port if initial else "",
-        "node_port": initial.node_port if initial else "",
+        "service_mode": initial.service_mode if initial else "nodeport",
+        "service_ports": [ServicePort(item.container_port, item.node_port, item.name) for item in (initial.service_ports if initial else [])],
+        "service_host": initial.service_host if initial else "",
+        "service_path": initial.service_path if initial else "/",
     }
 
     def render_header(step: int, title: str) -> None:
@@ -1587,14 +1682,42 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
 
     def step_network() -> None:
         default_expose = bool(state["expose_service"])
-        expose_service = confirm_yes("Expose a port via NodePort service?") if default_expose else confirm("Expose a port via NodePort service?")
+        expose_service = confirm_yes("Expose a web port?") if default_expose else confirm("Expose a web port?")
         state["expose_service"] = expose_service
         if expose_service:
-            state["container_port"] = prompt("Container port", str(state["container_port"] or "8080"))
-            state["node_port"] = prompt("NodePort (30000-32767)", str(state["node_port"] or "30800"))
+            mode_options = ["nodeport", "ingress"]
+            current_mode = str(state["service_mode"] or "nodeport")
+            default_idx = mode_options.index(current_mode) + 1 if current_mode in mode_options else 1
+            state["service_mode"] = choose("Exposure mode", mode_options, default_idx=default_idx)
+            existing_ports = list(state["service_ports"])
+            port_count = 3
+            service_ports: list[ServicePort] = []
+            for index in range(port_count):
+                current = existing_ports[index] if index < len(existing_ports) else ServicePort("", "", "")
+                label = f"Container port {index + 1}"
+                container_port = prompt(label, current.container_port or ("8080" if index == 0 else ""))
+                if not container_port:
+                    continue
+                service_port = ServicePort(container_port=container_port, name=current.name)
+                if state["service_mode"] == "nodeport":
+                    default_node_port = current.node_port or str(30800 + index)
+                    service_port.node_port = prompt(f"NodePort {index + 1} (30000-32767)", default_node_port)
+                service_ports.append(service_port)
+            if not service_ports:
+                warn("At least one service port is required when exposure is enabled")
+                return
+            state["service_ports"] = service_ports
+            if state["service_mode"] == "nodeport":
+                state["service_host"] = ""
+                state["service_path"] = "/"
+            else:
+                state["service_host"] = prompt("Ingress host (blank for any host)", str(state["service_host"]))
+                state["service_path"] = prompt("Ingress path", str(state["service_path"] or "/"))
         else:
-            state["container_port"] = ""
-            state["node_port"] = ""
+            state["service_mode"] = "nodeport"
+            state["service_ports"] = []
+            state["service_host"] = ""
+            state["service_path"] = "/"
 
     steps: list[tuple[str, callable]] = [
         ("Project", step_project),
@@ -1642,8 +1765,10 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         plain_env_vars=list(state["plain_env_vars"]),
         auth_files=list(state["auth_files"]),
         expose_service=bool(state["expose_service"]),
-        container_port=str(state["container_port"]),
-        node_port=str(state["node_port"]),
+        service_mode=str(state["service_mode"]),
+        service_ports=list(state["service_ports"]),
+        service_host=str(state["service_host"]),
+        service_path=str(state["service_path"]),
     )
 
 
