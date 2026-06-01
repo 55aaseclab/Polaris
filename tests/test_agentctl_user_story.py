@@ -512,7 +512,8 @@ trust_level = "trusted"
 
         rendered = cfg.yaml_text()
 
-        self.assertIn('command: ["sh", "-ec", "test -f /tmp/.ready && grep -q \\" /home/fight-cuttlefish-x64 \\" /proc/self/mountinfo"]', rendered)
+        self.assertIn('command: ["sh", "-ec", "test -f /tmp/.ready"]', rendered)
+        self.assertIn("          timeoutSeconds: 5", rendered)
 
     def test_apply_saved_project_waits_for_rollout_when_template_changes(self) -> None:
         cfg = self.make_agent_config()

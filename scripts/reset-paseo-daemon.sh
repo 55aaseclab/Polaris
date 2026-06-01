@@ -48,14 +48,66 @@ fi
 
 log "Resetting Paseo in pod $pod (namespace $namespace)..."
 
+log "Killing existing Paseo supervisors and workers..."
+kubectl exec -n "$namespace" "$pod" -- sh -lc '
+  self=$$
+  parent=$PPID
+  pids="$(
+    pgrep -f "supervisor-entrypoint.js|daemon-worker.js|terminal-worker-process.js" \
+      | grep -vx "$self" \
+      | grep -vx "$parent" \
+      || true
+  )"
+  if [ -n "$pids" ]; then
+    kill -9 $pids || true
+  fi
+'
+
+log "Waiting for old Paseo processes to disappear..."
+for _ in $(seq 1 10); do
+  remaining="$(
+    kubectl exec -n "$namespace" "$pod" -- sh -lc '
+      self=$$
+      parent=$PPID
+      pgrep -f "supervisor-entrypoint.js|daemon-worker.js|terminal-worker-process.js" \
+        | grep -vx "$self" \
+        | grep -vx "$parent" \
+        || true
+    ' 2>/dev/null || true
+  )"
+  if [[ -z "$remaining" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+remaining="$(
+  kubectl exec -n "$namespace" "$pod" -- sh -lc '
+    self=$$
+    parent=$PPID
+    pgrep -f "supervisor-entrypoint.js|daemon-worker.js|terminal-worker-process.js" \
+      | grep -vx "$self" \
+      | grep -vx "$parent" \
+      || true
+  ' 2>/dev/null || true
+)"
+[[ -z "$remaining" ]] || fail "Paseo processes are still running: $remaining"
+
+log "Starting one fresh Paseo daemon..."
 kubectl exec -n "$namespace" "$pod" -- sh -lc "
-  set -eux
-  pkill -9 -f /opt/Paseo/Paseo || true
-  sleep 2
   rm -f ${DEFAULT_PASEO_HOME}/paseo.pid
   PASEO_HOME=${DEFAULT_PASEO_HOME} paseo daemon start
-  sleep 5
+"
+
+log "Waiting for fresh Paseo status..."
+sleep 5
+kubectl exec -n "$namespace" "$pod" -- sh -lc "
   PASEO_HOME=${DEFAULT_PASEO_HOME} paseo daemon status
 "
+
+log "Remaining Paseo process tree:"
+kubectl exec -n "$namespace" "$pod" -- sh -lc '
+  ps -ef | grep -E "supervisor-entrypoint.js|daemon-worker.js|terminal-worker-process.js" | grep -v grep || true
+'
 
 log "Paseo reset completed."
