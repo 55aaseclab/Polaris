@@ -780,7 +780,7 @@ class AgentConfig:
         return [
             "sh",
             "-ec",
-            f'test -f /tmp/.ready && grep -q " {self.container_home} " /proc/self/mountinfo',
+            "test -f /tmp/.ready",
         ]
 
     def yaml_text(self) -> str:
@@ -847,6 +847,7 @@ class AgentConfig:
             "          exec:",
             f"            command: {json.dumps(self.build_readiness_probe_command())}",
             "          initialDelaySeconds: 5",
+            "          timeoutSeconds: 5",
             "          periodSeconds: 5",
             "          failureThreshold: 60",
         ]
