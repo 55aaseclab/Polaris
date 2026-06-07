@@ -29,6 +29,17 @@ For tool-specific usage details, see:
 
 - [`README.k3s-kata.md`](README.k3s-kata.md)
 
+If you want to add full VM workloads alongside the existing container
+workloads, install KubeVirt with:
+
+```bash
+bash scripts/setup-k3s-kubevirt.sh
+```
+
+The `morpheus` workload can also run as a KubeVirt VM while keeping the shared
+project PVC mounted at `/root`, Docker enabled inside the guest, and the
+existing NodePorts (`31677`, `31678`, `31679`) intact.
+
 If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
 [`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
 
