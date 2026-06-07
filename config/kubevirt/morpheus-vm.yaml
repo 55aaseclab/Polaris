@@ -20,7 +20,7 @@ spec:
           cores: 4
         resources:
           requests:
-            memory: 24Gi
+            memory: 20Gi
         devices:
           disks:
           - name: rootdisk
@@ -32,6 +32,10 @@ spec:
           - name: runtimedisk
             disk:
               bus: virtio
+          - name: paseodisk
+            disk:
+              bus: virtio
+            serial: paseo-state
           filesystems:
           - name: projectfs
             virtiofs: {}
@@ -56,3 +60,6 @@ spec:
       - name: runtimedisk
         emptyDisk:
           capacity: 100Gi
+      - name: paseodisk
+        persistentVolumeClaim:
+          claimName: morpheus-paseo
