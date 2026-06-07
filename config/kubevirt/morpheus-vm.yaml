@@ -29,13 +29,6 @@ spec:
           - name: cloudinitdisk
             disk:
               bus: virtio
-          - name: runtimedisk
-            disk:
-              bus: virtio
-          - name: paseodisk
-            disk:
-              bus: virtio
-            serial: paseo-state
           filesystems:
           - name: projectfs
             virtiofs: {}
@@ -57,9 +50,3 @@ spec:
       - name: projectfs
         persistentVolumeClaim:
           claimName: morpheus-project
-      - name: runtimedisk
-        emptyDisk:
-          capacity: 100Gi
-      - name: paseodisk
-        persistentVolumeClaim:
-          claimName: morpheus-paseo
