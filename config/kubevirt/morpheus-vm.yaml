@@ -1,0 +1,52 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: morpheus-vm
+  namespace: morpheus
+  labels:
+    app: morpheus
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        app: morpheus
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: debian
+      terminationGracePeriodSeconds: 30
+      domain:
+        cpu:
+          cores: 4
+        resources:
+          requests:
+            memory: 24Gi
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+          - name: cloudinitdisk
+            disk:
+              bus: virtio
+          filesystems:
+          - name: projectfs
+            virtiofs: {}
+          interfaces:
+          - name: default
+            masquerade: {}
+          rng: {}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - name: rootdisk
+        containerDisk:
+          image: quay.io/containerdisks/debian:latest
+      - name: cloudinitdisk
+        cloudInitNoCloud:
+          secretRef:
+            name: morpheus-vm-cloudinit
+      - name: projectfs
+        persistentVolumeClaim:
+          claimName: morpheus-project

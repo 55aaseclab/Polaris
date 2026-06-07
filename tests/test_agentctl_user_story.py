@@ -42,6 +42,8 @@ class UserStoryGraphTest(unittest.TestCase):
             "agent": "None",
             "agent_cmd": "",
             "agent_args": "",
+            "privileged": False,
+            "docker_enabled": False,
             "persist_state": False,
             "all_packages": "",
             "bootstrap_profile": "full",
@@ -245,6 +247,31 @@ trust_level = "trusted"
         self.assertIn("        env:\n", rendered)
         self.assertIn('        - name: PASEO_HOME\n          value: "/home/fight-cuttlefish-x64/.paseo"', rendered)
         self.assertNotIn("PASEO_HOME", volume_mounts_section)
+
+    def test_docker_enabled_renders_docker_host_and_bootstrap(self) -> None:
+        cfg = self.make_agent_config(
+            docker_enabled=True,
+            runtime_user="root",
+            bootstrap_profile="prebuilt",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn('        - name: DOCKER_HOST\n          value: "unix:///var/run/docker.sock"', rendered)
+        self.assertIn('        - name: DOCKER_BUILDKIT\n          value: "0"', rendered)
+        self.assertIn("dockerd --host=unix:///var/run/docker.sock", rendered)
+
+    def test_privileged_runtime_renders_security_context(self) -> None:
+        cfg = self.make_agent_config(
+            privileged=True,
+            runtime_user="root",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("        securityContext:\n          privileged: true\n          allowPrivilegeEscalation: true", rendered)
+        self.assertIn("          seccompProfile:\n            type: Unconfined", rendered)
+        self.assertIn("            - SYS_ADMIN", rendered)
 
     def test_nodeport_service_is_rendered(self) -> None:
         cfg = self.make_agent_config(

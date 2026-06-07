@@ -35,6 +35,100 @@ k3s kubectl get nodes
 k3s kubectl get runtimeclass
 ```
 
+## `scripts/setup-k3s-kubevirt.sh`
+
+Install or update the KubeVirt control plane on the current k3s cluster.
+
+### Usage
+
+```bash
+bash scripts/setup-k3s-kubevirt.sh
+```
+
+Optional:
+
+- set `KUBEVIRT_RELEASE` to pin a specific KubeVirt release tag
+
+### What it does
+
+- resolves the latest stable KubeVirt release unless pinned
+- applies the KubeVirt operator manifest
+- applies the repo-managed KubeVirt custom resource
+- enables `EnableVirtioFsStorageVolumes`
+- raises the `virtiofs` support-container memory limit so large shared PVCs do
+  not crash the launcher sidecar
+- waits for the KubeVirt control plane to report `Available`
+
+### Verify
+
+```bash
+kubectl get kubevirt -n kubevirt
+kubectl get pods -n kubevirt
+```
+
+## `scripts/setup-k3s-cdi.sh`
+
+Install or update CDI (Containerized Data Importer), which KubeVirt uses for
+VM disk import and DataVolume workflows.
+
+### Usage
+
+```bash
+bash scripts/setup-k3s-cdi.sh
+```
+
+Optional:
+
+- set `CDI_RELEASE` to pin a specific CDI release tag
+
+### What it does
+
+- applies the CDI operator manifest
+- applies the CDI custom resource
+- waits for the CDI control plane to report `Available`
+
+### Verify
+
+```bash
+kubectl get cdi -n cdi
+kubectl get pods -n cdi
+```
+
+## `config/kubevirt/morpheus-vm.yaml`
+
+Initial KubeVirt VM manifest for migrating the `morpheus` workload from a pod
+to a full VM.
+
+What it does:
+
+- boots a Debian container disk under KubeVirt
+- mounts the existing `morpheus-project` PVC into the VM as a `virtiofs`
+  filesystem at `/root` so the shared project home remains in place
+- provisions Docker, Codex, Claude Code, OpenSpec, Paseo, and Rust at first boot
+- starts Paseo in the guest on `0.0.0.0:6767`, which preserves the existing
+  `morpheus` Service and NodePort exposure
+- constrains the VM to the `debian` node for the first migration pass
+
+Apply:
+
+```bash
+kubectl apply -f config/kubevirt/morpheus-vm.yaml
+```
+
+Start:
+
+```bash
+kubectl virt start -n morpheus morpheus-vm
+```
+
+Before applying the Morpheus VM cloud-init Secret, render it from the local
+auth files under `secrets/agentctl/`:
+
+```bash
+python3 scripts/render-morpheus-vm-cloudinit-secret.py
+kubectl apply -f config/kubevirt/.generated/morpheus-vm-cloudinit-secret.yaml
+```
+
 ## `scripts/setup-k3s-kata-worker.sh`
 
 Join an additional x64 Debian host to an existing k3s cluster as a Kata-capable

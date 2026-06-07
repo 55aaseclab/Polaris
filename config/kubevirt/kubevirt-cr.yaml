@@ -1,0 +1,24 @@
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt
+  namespace: kubevirt
+spec:
+  certificateRotateStrategy: {}
+  configuration:
+    developerConfiguration:
+      featureGates:
+      - EnableVirtioFsStorageVolumes
+    imagePullPolicy: IfNotPresent
+    supportContainerResources:
+    - type: virtiofs
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 4Gi
+  customizeComponents: {}
+  imagePullPolicy: IfNotPresent
+  workloadUpdateStrategy: {}

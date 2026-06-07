@@ -473,6 +473,7 @@ class AgentAuthFile:
     key: str
     mount_path: str
     content: str
+    source_path: str = ""
 
 
 @dataclass
@@ -503,6 +504,8 @@ class AgentConfig:
     memory_request: str = ""
     storage_request: str = ""
     runtime_user: str = ""
+    privileged: bool = False
+    docker_enabled: bool = False
     persist_state: bool = True
     bootstrap_profile: str = "full"
     install_rustup: bool = False
@@ -555,6 +558,8 @@ class AgentConfig:
                 "class": self.runtime_class,
                 "base_image": self.base_image,
                 "user": self.container_user,
+                "privileged": self.privileged or None,
+                "docker_enabled": self.docker_enabled or None,
             },
             "resources": {
                 "cpu": self.cpu,
@@ -577,7 +582,8 @@ class AgentConfig:
                     {
                         "key": item.key,
                         "mount_path": item.mount_path,
-                        "content": item.content,
+                        "source_path": item.source_path or None,
+                        "content": item.content if not item.source_path else None,
                     }
                     for item in self.auth_files
                 ],
@@ -651,6 +657,8 @@ class AgentConfig:
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
             runtime_user=str(runtime.get("user") or ""),
+            privileged=bool(runtime.get("privileged", False)),
+            docker_enabled=bool(runtime.get("docker_enabled", False)),
             cpu=str(resources.get("cpu", "2")),
             memory=normalize_binary_quantity(str(resources.get("memory", "4Gi")), "Saved memory limit"),
             storage=normalize_binary_quantity(str(resources.get("ephemeral_storage", "20Gi")), "Saved storage limit"),
@@ -679,10 +687,20 @@ class AgentConfig:
                 AgentAuthFile(
                     key=item.get("key", ""),
                     mount_path=item.get("mount_path", ""),
-                    content=item.get("content", ""),
+                    content=item.get("content", "") or (
+                        Path(item.get("source_path", "")).read_text()
+                        if item.get("source_path") and Path(item.get("source_path", "")).exists()
+                        else ""
+                    ),
+                    source_path=str(item.get("source_path") or ""),
                 )
                 for item in auth_files_data
-                if item.get("key") and item.get("mount_path") and item.get("content")
+                if item.get("key")
+                and item.get("mount_path")
+                and (
+                    item.get("content")
+                    or (item.get("source_path") and Path(item.get("source_path", "")).exists())
+                )
             ],
             expose_service=bool(service.get("enabled", False)),
             service_mode=str(service.get("mode") or ("nodeport" if service.get("enabled", False) else "nodeport")),
@@ -706,14 +724,23 @@ class AgentConfig:
         user_setup_line = ""
         sudoers_line = ""
         rustup_line = "          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \\\n"
+        docker_bootstrap_line = ""
         if user != "root":
             user_setup_line = f"          if ! id {user} >/dev/null 2>&1; then useradd -m -s /bin/bash {user}; fi && \\\n"
             sudoers_line = build_sudoers_line(user)
             rustup_line = f"          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su {user} -c 'sh -s -- -y' && \\\n"
+        if self.docker_enabled and user == "root":
+            docker_bootstrap_line = (
+                "          mkdir -p /var/run /root/.docker && \\\n"
+                "          if ! pgrep -x dockerd >/dev/null 2>&1; then "
+                "nohup dockerd --host=unix:///var/run/docker.sock --data-root=/root/.docker --storage-driver=vfs --iptables=false --bridge=none --ip-forward=false --ip-masq=false >/root/.docker/dockerd.log 2>&1 & "
+                "fi && \\\n"
+                "          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done && \\\n"
+            )
         if self.bootstrap_profile == "minimal":
             return (
                 "          set -eux && \\\n"
-                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}"
+                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{docker_bootstrap_line}"
                 "          touch /tmp/.ready && sleep infinity"
             )
         if self.bootstrap_profile == "prebuilt":
@@ -736,7 +763,7 @@ class AgentConfig:
                 )
             return (
                 "          set -eux && \\\n"
-                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{git_config_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
+                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{git_config_line}{auth_copy_lines}{ssh_keygen_line}{docker_bootstrap_line}{paseo_bootstrap_line}"
                 "          touch /tmp/.ready && sleep infinity"
             )
         agent_install_line = (
@@ -772,7 +799,7 @@ class AgentConfig:
             f"{user_setup_line}{build_agent_dirs_line(user, home)}"
             "          apt-get update && apt-get install -y \\\n"
             f"            openssh-client {apt_packages} && \\\n"
-            f"{sudoers_line}{rustup_line}{git_config_line}{agent_install_line}{paseo_install_line}{pnpm_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{paseo_bootstrap_line}"
+            f"{sudoers_line}{rustup_line}{git_config_line}{agent_install_line}{paseo_install_line}{pnpm_install_line}{paseo_wrapper_line}{agent_wrapper_line}{auth_copy_lines}{ssh_keygen_line}{docker_bootstrap_line}{paseo_bootstrap_line}"
             "          touch /tmp/.ready && sleep infinity"
         )
 
@@ -876,19 +903,36 @@ class AgentConfig:
                         ),
                     ]
                 )
-        deployment_lines.extend(
-            [
+        volume_mount_lines = [
             "        volumeMounts:",
             "        - name: project",
             f"          mountPath: {self.container_home}",
-            ]
-        )
+        ]
         if self.agent_cmd:
-            deployment_lines.extend(
+            volume_mount_lines.extend(
                 [
                     "        - name: project",
                     f"          mountPath: {self.container_home}/.paseo",
                     "          subPath: .paseo",
+                ]
+            )
+        deployment_lines.extend(volume_mount_lines)
+        if self.privileged:
+            deployment_lines.extend(
+                [
+                    "        securityContext:",
+                    "          privileged: true",
+                    "          allowPrivilegeEscalation: true",
+                    "          seccompProfile:",
+                    "            type: Unconfined",
+                    "          capabilities:",
+                    "            add:",
+                    "            - SYS_ADMIN",
+                    "            - NET_ADMIN",
+                    "            - NET_RAW",
+                    "            - MKNOD",
+                    "            - SETFCAP",
+                    "            - AUDIT_WRITE",
                 ]
             )
         env_items: list[str] = []
@@ -904,6 +948,15 @@ class AgentConfig:
                 [
                     "        - name: PASEO_HOME",
                     f'          value: "{self.container_home}/.paseo"',
+                ]
+            )
+        if self.docker_enabled:
+            env_items.extend(
+                [
+                    "        - name: DOCKER_HOST",
+                    '          value: "unix:///var/run/docker.sock"',
+                    "        - name: DOCKER_BUILDKIT",
+                    '          value: "0"',
                 ]
             )
         if env_items:
@@ -1498,6 +1551,7 @@ def gather_agent_auth_files(project_name: str, container_home: str | None = None
                 key="codex-auth.json",
                 mount_path=f"{container_home}/.codex/auth.json",
                 content=codex_auth_path.read_text(),
+                source_path=str(codex_auth_path),
             )
         )
     else:
@@ -1511,6 +1565,7 @@ def gather_agent_auth_files(project_name: str, container_home: str | None = None
                 key="codex-config.toml",
                 mount_path=f"{container_home}/.codex/config.toml",
                 content=sanitize_codex_config_toml(codex_config_path.read_text()),
+                source_path=str(codex_config_path),
             )
         )
     else:
@@ -1528,6 +1583,7 @@ def gather_agent_auth_files(project_name: str, container_home: str | None = None
                 key="claude-settings.json",
                 mount_path=f"{container_home}/.claude/settings.json",
                 content=claude_auth_path.read_text(),
+                source_path=str(claude_auth_path),
             )
         )
     else:
@@ -1554,6 +1610,8 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         "runtime_class": initial.runtime_class if initial else "kata-qemu",
         "base_image": initial.base_image if initial else "debian:trixie-slim",
         "runtime_user": initial.runtime_user if initial else "",
+        "privileged": initial.privileged if initial else False,
+        "docker_enabled": initial.docker_enabled if initial else False,
         "extra_packages": extra_defaults,
         "cpu": initial.cpu if initial else "2",
         "memory": initial.memory if initial else "4Gi",
@@ -1774,6 +1832,8 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         runtime_class=str(state["runtime_class"]),
         base_image=str(state["base_image"]),
         runtime_user=str(state["runtime_user"]),
+        privileged=bool(state["privileged"]),
+        docker_enabled=bool(state["docker_enabled"]),
         cpu=str(state["cpu"]),
         memory=str(state["memory"]),
         storage=str(state["storage"]),
