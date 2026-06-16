@@ -6,6 +6,8 @@ SCRIPT_NAME="$(basename "$0")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="smoke-agentctl-paseo-$(date +%s)"
 WORK_DIR="$(mktemp -d)"
+SPEC_DIR="$WORK_DIR/config/gvisor/specs"
+GENERATED_DIR="$WORK_DIR/config/gvisor/generated"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -13,7 +15,6 @@ log() {
 
 cleanup() {
   kubectl delete namespace "$PROJECT" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
-  rm -f "$REPO_ROOT/agents/$PROJECT.agent.yaml" "$REPO_ROOT/agents/$PROJECT.yaml"
   rm -rf "$WORK_DIR"
 }
 
@@ -34,8 +35,10 @@ if [[ ! -f "$HOME/.codex/auth.json" ]]; then
   exit 0
 fi
 
+mkdir -p "$SPEC_DIR" "$GENERATED_DIR"
+
 log "Generating install-isolation config and rendered manifest for $PROJECT"
-python3 - <<PY
+AGENTCTL_GVISOR_SPECS_DIR="$SPEC_DIR" AGENTCTL_GVISOR_GENERATED_DIR="$GENERATED_DIR" python3 - <<PY
 import json
 from pathlib import Path
 
@@ -93,11 +96,11 @@ _, suffix = rest.split("\\n        readinessProbe:", 1)
 cfg.yaml_path.write_text(prefix + "        - |\\n" + custom_bootstrap + "\\n        readinessProbe:" + suffix)
 PY
 
-test -f "$REPO_ROOT/agents/$PROJECT.agent.yaml"
-test -f "$REPO_ROOT/agents/$PROJECT.yaml"
+test -f "$SPEC_DIR/$PROJECT.agent.yaml"
+test -f "$GENERATED_DIR/$PROJECT.yaml"
 
 log "Applying rendered manifest"
-kubectl apply -f "$REPO_ROOT/agents/$PROJECT.yaml"
+kubectl apply -f "$GENERATED_DIR/$PROJECT.yaml"
 
 log "Waiting for deployment readiness"
 kubectl -n "$PROJECT" rollout status "deployment/$PROJECT" --timeout=900s

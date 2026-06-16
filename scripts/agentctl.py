@@ -28,7 +28,22 @@ import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-OUTPUT_DIR = REPO_ROOT / "agents"
+LEGACY_OUTPUT_DIR = REPO_ROOT / "agents"
+
+
+def env_path(name: str, default: Path) -> Path:
+    raw = os.environ.get(name, "").strip()
+    return Path(raw) if raw else default
+
+
+BACKEND_SPEC_ROOTS = {
+    "pod": env_path("AGENTCTL_GVISOR_SPECS_DIR", REPO_ROOT / "config" / "gvisor" / "specs"),
+    "kubevirt-vm": env_path("AGENTCTL_KUBEVIRT_SPECS_DIR", REPO_ROOT / "config" / "kubevirt" / "specs"),
+}
+BACKEND_GENERATED_ROOTS = {
+    "pod": env_path("AGENTCTL_GVISOR_GENERATED_DIR", REPO_ROOT / "config" / "gvisor" / "generated"),
+    "kubevirt-vm": env_path("AGENTCTL_KUBEVIRT_GENERATED_DIR", REPO_ROOT / "config" / "kubevirt" / "generated"),
+}
 SECRETS_DIR = REPO_ROOT / "secrets" / "agentctl"
 PASEO_RELEASE_VERSION = "0.1.70-beta.1"
 PASEO_DEB_URL = (
@@ -44,6 +59,14 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 LOG_STREAM_PROCESS: subprocess.Popen[str] | None = None
+
+
+def spec_output_dir(backend_kind: str) -> Path:
+    return BACKEND_SPEC_ROOTS.get(backend_kind, BACKEND_SPEC_ROOTS["pod"])
+
+
+def generated_output_dir(backend_kind: str) -> Path:
+    return BACKEND_GENERATED_ROOTS.get(backend_kind, BACKEND_GENERATED_ROOTS["pod"])
 
 class AgentError(RuntimeError):
     pass
@@ -79,6 +102,11 @@ def warn(message: str) -> None:
 def fail(message: str) -> "NoReturn":
     stop_log_stream()
     raise AgentError(message)
+
+
+def indent_block(text: str, spaces: int) -> str:
+    prefix = " " * spaces
+    return "\n".join(f"{prefix}{line}" if line else prefix.rstrip() for line in text.rstrip("\n").splitlines())
 
 
 def is_back_token(raw: str) -> bool:
@@ -363,9 +391,21 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
 
 
 def build_agent_dirs_line(container_user: str, container_home: str) -> str:
+    home_mode = "755" if container_user == "root" else "755"
+    codex_mode = "755" if container_user == "root" else "755"
+    claude_mode = "755" if container_user == "root" else "755"
+    paseo_mode = "700"
+    ownership_normalization = ""
+    if container_user == "root":
+        ownership_normalization = (
+            f"          find {container_home} -xdev -exec chown root:root {{}} + 2>/dev/null || true && \\\n"
+            f"          find {container_home} -xdev -type d -exec chmod g-s {{}} + 2>/dev/null || true && \\\n"
+        )
     return (
         f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
+        f"{ownership_normalization}"
         f"          chown {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
+        f"          chmod {home_mode} {container_home} && chmod {codex_mode} {container_home}/.codex && chmod {claude_mode} {container_home}/.claude && chmod {paseo_mode} {container_home}/.paseo && \\\n"
     )
 
 
@@ -374,7 +414,7 @@ def build_ssh_keygen_line(container_user: str, container_home: str) -> str:
     key_path = f"{ssh_dir}/id_ed25519"
     if container_user == "root":
         return (
-            f"          mkdir -p {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
+            f"          mkdir -p {ssh_dir} && chown root:root {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
             f"          if [ ! -f {key_path} ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f {key_path}; fi && \\\n"
         )
     return (
@@ -521,14 +561,16 @@ class AgentConfig:
     service_ports: list[ServicePort] = field(default_factory=list)
     service_host: str = ""
     service_path: str = "/"
+    backend_kind: str = "pod"
+    backend_spec_files: list[str] = field(default_factory=list)
 
     @property
     def config_path(self) -> Path:
-        return OUTPUT_DIR / f"{self.project_name}.agent.yaml"
+        return spec_output_dir(self.backend_kind) / f"{self.project_name}.agent.yaml"
 
     @property
     def yaml_path(self) -> Path:
-        return OUTPUT_DIR / f"{self.project_name}.yaml"
+        return generated_output_dir(self.backend_kind) / f"{self.project_name}.yaml"
 
     @property
     def project_pvc_name(self) -> str:
@@ -541,6 +583,26 @@ class AgentConfig:
     @property
     def container_home(self) -> str:
         return "/root" if self.container_user == "root" else f"/home/{self.container_user}"
+
+    def validate(self) -> None:
+        if self.backend_kind not in {"pod", "kubevirt-vm"}:
+            fail(f"Unsupported backend kind: {self.backend_kind}")
+        if self.backend_kind == "pod":
+            if self.backend_spec_files:
+                fail("Pod backend must not define backend spec files")
+            if self.runtime_class not in {"kata-qemu", "kata-clh", "kata-qemu-tdx", "gvisor"}:
+                fail(f"Unsupported pod runtime class: {self.runtime_class}")
+            for item in self.auth_files:
+                if "/workspace/" in item.mount_path:
+                    fail("Pod backend auth mount paths must not reference /workspace")
+            for item in self.plain_env_vars:
+                if "/workspace/" in item.value:
+                    fail(f"Pod backend env var {item.name} must not reference /workspace")
+        if self.backend_kind == "kubevirt-vm":
+            if not self.backend_spec_files:
+                fail("KubeVirt VM backend requires backend spec files")
+            if self.project_name != "morpheus":
+                fail("KubeVirt VM backend is currently supported only for project 'morpheus'")
 
     def to_config_dict(self) -> dict:
         tooling = {
@@ -555,6 +617,10 @@ class AgentConfig:
             tooling["apt_packages"] = apt_packages
         return {
             "project": self.project_name,
+            "backend": {
+                "kind": self.backend_kind,
+                "spec_files": self.backend_spec_files or None,
+            },
             "runtime": {
                 "class": self.runtime_class,
                 "base_image": self.base_image,
@@ -613,6 +679,7 @@ class AgentConfig:
 
     @classmethod
     def from_config_dict(cls, data: dict) -> "AgentConfig":
+        backend = data.get("backend", {}) or {}
         runtime = data.get("runtime", {}) or {}
         resources = data.get("resources", {}) or {}
         agent = data.get("agent", {}) or {}
@@ -655,6 +722,8 @@ class AgentConfig:
                 ]
         return cls(
             project_name=data["project"],
+            backend_kind=str(backend.get("kind") or "pod"),
+            backend_spec_files=[str(item) for item in (backend.get("spec_files") or []) if item],
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
             runtime_user=str(runtime.get("user") or ""),
@@ -812,6 +881,8 @@ class AgentConfig:
         ]
 
     def yaml_text(self) -> str:
+        if self.backend_kind == "kubevirt-vm":
+            return self.kubevirt_yaml_text()
         docs: list[str] = [
             "\n".join(
                 [
@@ -1048,6 +1119,24 @@ class AgentConfig:
 
         return "\n---\n".join(docs) + "\n"
 
+    def kubevirt_yaml_text(self) -> str:
+        if self.project_name != "morpheus":
+            fail("KubeVirt VM rendering is currently implemented only for project 'morpheus'")
+        cloudinit_template = (REPO_ROOT / "config" / "kubevirt" / "generated" / "morpheus-vm-cloudinit-secret.yaml").read_text()
+        vm_template = (REPO_ROOT / "config" / "kubevirt" / "generated" / "morpheus.yaml").read_text()
+        codex_auth = next((item for item in self.auth_files if item.key == "codex-auth.json"), None)
+        claude_settings = next((item for item in self.auth_files if item.key == "claude-settings.json"), None)
+        if codex_auth is None or claude_settings is None:
+            fail("KubeVirt VM rendering for morpheus requires codex-auth.json and claude-settings.json")
+        rendered_cloudinit = cloudinit_template.replace(
+            "        __CODEX_AUTH_JSON__",
+            indent_block(codex_auth.content, 8),
+        ).replace(
+            "        __CLAUDE_SETTINGS_JSON__",
+            indent_block(claude_settings.content, 8),
+        )
+        return rendered_cloudinit.rstrip() + "\n---\n" + vm_template.rstrip() + "\n"
+
 
 def snapshot_files(paths: Iterable[Path]) -> list[FileSnapshot]:
     snapshots: list[FileSnapshot] = []
@@ -1082,14 +1171,21 @@ def rollback_created_project(cfg: AgentConfig, snapshots: Iterable[FileSnapshot]
 
 
 def load_project_config(project_name: str) -> AgentConfig:
-    config_path = OUTPUT_DIR / f"{project_name}.agent.yaml"
-    if not config_path.exists():
-        fail(f"Config not found: {config_path}")
+    candidate_paths = [
+        spec_output_dir("pod") / f"{project_name}.agent.yaml",
+        spec_output_dir("kubevirt-vm") / f"{project_name}.agent.yaml",
+        LEGACY_OUTPUT_DIR / f"{project_name}.agent.yaml",
+    ]
+    config_path = next((path for path in candidate_paths if path.exists()), None)
+    if config_path is None:
+        fail(f"Config not found in any known spec directory for project: {project_name}")
     data = yaml.safe_load(config_path.read_text()) or {}
     cfg = AgentConfig.from_config_dict(data)
+    cfg.validate()
     fresh_auth_files = gather_agent_auth_files(project_name, cfg.container_home)
     if fresh_auth_files:
         cfg.auth_files = fresh_auth_files
+    cfg.validate()
     return cfg
 
 
@@ -1521,11 +1617,15 @@ def check_cluster_resource_fit(cpu: str, memory: str, storage: str) -> None:
 
 
 def render_project_manifest(cfg: AgentConfig) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.validate()
     cfg.yaml_path.write_text(cfg.yaml_text())
 
 
 def apply_project_manifest(cfg: AgentConfig) -> None:
+    cfg.validate()
+    if cfg.backend_kind != "pod":
+        fail("agentctl apply currently supports only backend.kind=pod for live apply")
     render_project_manifest(cfg)
     if not cfg.unbounded_resources:
         check_cluster_resource_fit(cfg.cpu, cfg.memory, cfg.storage)
@@ -1608,6 +1708,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
     extra_defaults = derive_extra_package_defaults(initial)
     state: dict[str, object] = {
         "project_name": initial.project_name if initial else "",
+        "backend_kind": initial.backend_kind if initial else "pod",
         "runtime_class": initial.runtime_class if initial else "kata-qemu",
         "base_image": initial.base_image if initial else "debian:trixie-slim",
         "runtime_user": initial.runtime_user if initial else "",
@@ -1636,7 +1737,7 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         print("  ║   k3s + Kata Agent Config Generator   ║")
         print("  ╚═══════════════════════════════════════╝")
         print(f"{RESET}")
-        print("  Deploys a Kata-isolated coding agent on k3s.\n")
+        print("  Deploys a coding agent backend on k3s.\n")
         header(f"[{step}/6] {title}")
 
     def step_project() -> None:
@@ -1647,11 +1748,21 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         state["project_name"] = project_name
 
     def step_runtime() -> None:
+        backend_options = [
+            "pod (Deployment via agentctl)",
+            "kubevirt-vm (spec-only, no live apply yet)",
+        ]
+        backend_default_idx = 1 if str(state["backend_kind"]) == "pod" else 2
+        backend_choice = choose("Backend kind", backend_options, default_idx=backend_default_idx)
+        state["backend_kind"] = "kubevirt-vm" if backend_choice.startswith("kubevirt-vm") else "pod"
+        if state["backend_kind"] == "kubevirt-vm":
+            state["runtime_class"] = "kata-qemu"
+            return
         runtime_options = [
-            "kata-qemu (full VMX isolation)",
-            "kata-clh (Cloud Hypervisor, faster start)",
-            "kata-qemu-tdx (TDX confidential computing)",
-            "gvisor (userspace-kernel sandbox)",
+            "kata-qemu (pod sandbox runtime)",
+            "kata-clh (pod sandbox runtime)",
+            "kata-qemu-tdx (pod sandbox runtime)",
+            "gvisor (userspace-kernel pod sandbox)",
         ]
         default_idx = {"kata-qemu": 1, "kata-clh": 2, "kata-qemu-tdx": 3, "gvisor": 4}.get(str(state["runtime_class"]), 1)
         runtime_class = choose("Kata runtime flavour", runtime_options, default_idx=default_idx)
@@ -1676,7 +1787,10 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
         state["extra_packages"] = prompt("Any additional apt packages (space-separated, or leave blank)", str(state["extra_packages"]))
 
     def step_resources() -> None:
-        hint("These are hard limits for the Kata VM. OOM = VM dies, not your host.")
+        if state["backend_kind"] == "kubevirt-vm":
+            hint("These values are backend inputs for the KubeVirt VM spec.")
+        else:
+            hint("These are pod limits/requests. OOM kills the pod sandbox, not the host.")
         hint("Memory and storage values use Kubernetes binary units. Bare numbers default to Gi.")
         hint(f"Host reference: {host_cpu_count()} CPU(s) visible")
         hint(f"Host reference: {host_total_memory()} RAM visible")
@@ -1830,6 +1944,10 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
 
     return AgentConfig(
         project_name=str(state["project_name"]),
+        backend_kind=str(state["backend_kind"]),
+        backend_spec_files=["config/kubevirt/specs/morpheus.agent.yaml"]
+        if str(state["backend_kind"]) == "kubevirt-vm"
+        else [],
         runtime_class=str(state["runtime_class"]),
         base_image=str(state["base_image"]),
         runtime_user=str(state["runtime_user"]),
@@ -1854,7 +1972,8 @@ def build_config_interactively(initial: AgentConfig | None = None) -> AgentConfi
 
 
 def write_project_files(cfg: AgentConfig) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.config_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.yaml_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.config_path.write_text(cfg.config_text())
     cfg.yaml_path.write_text(cfg.yaml_text())
     ok(f"Generated {cfg.config_path}")
@@ -1866,6 +1985,7 @@ def print_summary(cfg: AgentConfig) -> None:
     print(f"{BOLD}  Summary{RESET}")
     print(f"  {DIM}───────────────────────────────────────{RESET}")
     print(f"  Project   {BOLD}{cfg.project_name}{RESET}")
+    print(f"  Backend   {BOLD}{cfg.backend_kind}{RESET}")
     print(f"  Runtime   {BOLD}{cfg.runtime_class}{RESET}")
     print(f"  Image     {BOLD}{cfg.base_image}{RESET}")
     print(f"  Resources {BOLD}{cfg.cpu} CPU · {cfg.memory} RAM · {cfg.storage} storage{RESET}")
@@ -1898,7 +2018,7 @@ def apply_saved_project(project_name: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Generate k3s Kata agent project config and manifests.")
+    parser = argparse.ArgumentParser(description="Unified entrypoint for pod and KubeVirt-backed agent specs.")
     parser.add_argument("project", nargs="?", help="Apply a saved project config")
     args = parser.parse_args(argv)
 

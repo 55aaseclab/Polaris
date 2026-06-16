@@ -30,10 +30,14 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory(prefix="agentctl-k3s-")
         self.addCleanup(self.tempdir.cleanup)
 
-        self.original_output_dir = agentctl.OUTPUT_DIR
-        self.output_dir = Path(self.tempdir.name) / "agents"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        agentctl.OUTPUT_DIR = self.output_dir
+        self.original_spec_roots = dict(agentctl.BACKEND_SPEC_ROOTS)
+        self.original_generated_roots = dict(agentctl.BACKEND_GENERATED_ROOTS)
+        self.spec_dir = Path(self.tempdir.name) / "config" / "gvisor" / "specs"
+        self.generated_dir = Path(self.tempdir.name) / "config" / "gvisor" / "generated"
+        self.spec_dir.mkdir(parents=True, exist_ok=True)
+        self.generated_dir.mkdir(parents=True, exist_ok=True)
+        agentctl.BACKEND_SPEC_ROOTS["pod"] = self.spec_dir
+        agentctl.BACKEND_GENERATED_ROOTS["pod"] = self.generated_dir
 
         self.project_name = f"itest-{time.time_ns()}"
 
@@ -41,7 +45,10 @@ class AgentCtlK3sIntegrationTest(unittest.TestCase):
         try:
             agentctl.kubectl(["delete", "namespace", self.project_name, "--ignore-not-found=true", "--wait=false"], check=False)
         finally:
-            agentctl.OUTPUT_DIR = self.original_output_dir
+            agentctl.BACKEND_SPEC_ROOTS.clear()
+            agentctl.BACKEND_SPEC_ROOTS.update(self.original_spec_roots)
+            agentctl.BACKEND_GENERATED_ROOTS.clear()
+            agentctl.BACKEND_GENERATED_ROOTS.update(self.original_generated_roots)
 
     def write_and_load_config(self, cfg: AgentConfig) -> AgentConfig:
         agentctl.write_project_files(cfg)
