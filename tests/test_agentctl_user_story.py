@@ -453,7 +453,7 @@ trust_level = "trusted"
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
         rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
         self.assertIn(f"rm -f /home/{self.PROJECT}/.paseo/paseo.pid", rendered)
-        self.assertIn("paseo daemon start", rendered)
+        self.assertIn("paseo daemon start --listen 0.0.0.0:6767", rendered)
         self.assertIn("paseo daemon pair --json", rendered)
 
     def test_full_bootstrap_pins_paseo_version(self) -> None:
