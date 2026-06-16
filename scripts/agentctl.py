@@ -399,18 +399,19 @@ def build_paseo_runtime_cleanup_line(container_home: str) -> str:
 def build_paseo_bootstrap_line(agent_cmd: str, container_user: str, container_home: str) -> str:
     if not agent_cmd:
         return ""
+    listen_target = "0.0.0.0:6767"
     if container_user == "root":
         return (
             f"{build_paseo_runtime_cleanup_line(container_home)}"
             "          echo 'starting paseo daemon' && \\\n"
-            f"          PASEO_HOME={container_home}/.paseo paseo daemon start && \\\n"
+            f"          PASEO_HOME={container_home}/.paseo paseo daemon start --listen {listen_target} && \\\n"
             "          echo 'pairing paseo daemon' && \\\n"
             f"          paired=0; for i in $(seq 1 30); do PASEO_HOME={container_home}/.paseo paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test \"$paired\" = 1 && \\\n"
         )
     return (
         f"{build_paseo_runtime_cleanup_line(container_home)}"
         "          echo 'starting paseo daemon' && \\\n"
-        f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo paseo daemon start" && \\\n'
+        f'          su - {container_user} -c "PASEO_HOME={container_home}/.paseo paseo daemon start --listen {listen_target}" && \\\n'
         "          echo 'pairing paseo daemon' && \\\n"
         f'          su - {container_user} -c "for i in \\$(seq 1 30); do PASEO_HOME={container_home}/.paseo paseo daemon pair --json > {container_home}/.paseo/pairing.json.tmp 2>/dev/null && mv {container_home}/.paseo/pairing.json.tmp {container_home}/.paseo/pairing.json && exit 0; sleep 2; done; exit 1" && \\\n'
     )
