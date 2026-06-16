@@ -9,9 +9,11 @@ from unittest.mock import patch
 from scripts.agentctl import (
     AgentConfig,
     AgentAuthFile,
+    AgentError,
     PlainEnvVar,
     ServicePort,
     apply_saved_project,
+    apply_project_manifest,
     agent_label_for_cmd,
     build_paseo_runtime_cleanup_line,
     build_ssh_keygen_line,
@@ -26,11 +28,42 @@ from scripts.agentctl import (
 
 
 class UserStoryGraphTest(unittest.TestCase):
-    PROJECT = "fight-cuttlefish-x64"
+    PROJECT = "sample-agent"
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory(prefix="agentctl-user-story-")
+        self.addCleanup(self.tempdir.cleanup)
+        self.original_spec_roots = dict(__import__("scripts.agentctl", fromlist=[""]).BACKEND_SPEC_ROOTS)
+        self.original_generated_roots = dict(__import__("scripts.agentctl", fromlist=[""]).BACKEND_GENERATED_ROOTS)
+        self.spec_dir = Path(self.tempdir.name) / "config" / "gvisor" / "specs"
+        self.generated_dir = Path(self.tempdir.name) / "config" / "gvisor" / "generated"
+        self.kubevirt_spec_dir = Path(self.tempdir.name) / "config" / "kubevirt" / "specs"
+        self.kubevirt_generated_dir = Path(self.tempdir.name) / "config" / "kubevirt" / "generated"
+        self.spec_dir.mkdir(parents=True, exist_ok=True)
+        self.generated_dir.mkdir(parents=True, exist_ok=True)
+        self.kubevirt_spec_dir.mkdir(parents=True, exist_ok=True)
+        self.kubevirt_generated_dir.mkdir(parents=True, exist_ok=True)
+
+        import scripts.agentctl as agentctl
+
+        agentctl.BACKEND_SPEC_ROOTS["pod"] = self.spec_dir
+        agentctl.BACKEND_GENERATED_ROOTS["pod"] = self.generated_dir
+        agentctl.BACKEND_SPEC_ROOTS["kubevirt-vm"] = self.kubevirt_spec_dir
+        agentctl.BACKEND_GENERATED_ROOTS["kubevirt-vm"] = self.kubevirt_generated_dir
+
+    def tearDown(self) -> None:
+        import scripts.agentctl as agentctl
+
+        agentctl.BACKEND_SPEC_ROOTS.clear()
+        agentctl.BACKEND_SPEC_ROOTS.update(self.original_spec_roots)
+        agentctl.BACKEND_GENERATED_ROOTS.clear()
+        agentctl.BACKEND_GENERATED_ROOTS.update(self.original_generated_roots)
 
     def make_config(self, **overrides: Any) -> AgentConfig:
         defaults: dict[str, Any] = {
             "project_name": self.PROJECT,
+            "backend_kind": "pod",
+            "backend_spec_files": [],
             "runtime_class": "kata-qemu",
             "base_image": "debian:trixie-slim",
             "cpu": "2",
@@ -142,6 +175,7 @@ trust_level = "trusted"
 
         for field_name in (
             "project_name",
+            "backend_kind",
             "runtime_class",
             "base_image",
             "cpu",
@@ -168,6 +202,72 @@ trust_level = "trusted"
         self.assertEqual(loaded.auth_files[0].key, "codex-auth.json")
         self.assertTrue(loaded.expose_service)
         self.assertEqual([(item.container_port, item.node_port) for item in loaded.service_ports], [("8080", "30800")])
+
+    def test_pod_backend_rejects_workspace_paths(self) -> None:
+        cfg = self.make_agent_config(
+            auth_files=[
+                AgentAuthFile(
+                    key="bad.json",
+                    mount_path="/workspace/.codex/auth.json",
+                    content="{}",
+                )
+            ]
+        )
+
+        with self.assertRaises(AgentError):
+            cfg.validate()
+
+    def test_kubevirt_backend_requires_spec_files(self) -> None:
+        cfg = self.make_config(
+            backend_kind="kubevirt-vm",
+            backend_spec_files=[],
+        )
+
+        with self.assertRaises(AgentError):
+            cfg.validate()
+
+    def test_apply_rejects_kubevirt_backend(self) -> None:
+        cfg = self.make_config(
+            backend_kind="kubevirt-vm",
+            backend_spec_files=["config/kubevirt/morpheus-vm.yaml"],
+        )
+
+        with self.assertRaises(AgentError):
+            apply_project_manifest(cfg)
+
+    def test_kubevirt_backend_renders_vm_manifest_bundle(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        (self.kubevirt_generated_dir / "morpheus-vm-cloudinit-secret.yaml").write_text(
+            (repo_root / "config" / "kubevirt" / "generated" / "morpheus-vm-cloudinit-secret.yaml").read_text()
+        )
+        (self.kubevirt_generated_dir / "morpheus.yaml").write_text(
+            (repo_root / "config" / "kubevirt" / "generated" / "morpheus.yaml").read_text()
+        )
+        cfg = self.make_config(
+            project_name="morpheus",
+            backend_kind="kubevirt-vm",
+            backend_spec_files=["config/kubevirt/specs/morpheus.agent.yaml"],
+            auth_files=[
+                AgentAuthFile(
+                    key="codex-auth.json",
+                    mount_path="/root/.codex/auth.json",
+                    content='{"auth_mode":"chatgpt"}',
+                ),
+                AgentAuthFile(
+                    key="claude-settings.json",
+                    mount_path="/root/.claude/settings.json",
+                    content='{"token":"abc"}',
+                ),
+            ],
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("kind: Secret", rendered)
+        self.assertIn("name: morpheus-vm-cloudinit", rendered)
+        self.assertIn("kind: VirtualMachine", rendered)
+        self.assertIn("name: morpheus-vm", rendered)
+        self.assertIn('{"auth_mode":"chatgpt"}', rendered)
 
     def test_auth_files_are_copied_in_bootstrap_not_k8s_secret(self) -> None:
         cfg = self.make_agent_config(
@@ -245,7 +345,7 @@ trust_level = "trusted"
         volume_mounts_section = rendered.split("        volumeMounts:\n", 1)[1].split("        env:\n", 1)[0]
 
         self.assertIn("        env:\n", rendered)
-        self.assertIn('        - name: PASEO_HOME\n          value: "/home/fight-cuttlefish-x64/.paseo"', rendered)
+        self.assertIn(f'        - name: PASEO_HOME\n          value: "/home/{self.PROJECT}/.paseo"', rendered)
         self.assertNotIn("PASEO_HOME", volume_mounts_section)
 
     def test_docker_enabled_renders_docker_host_and_bootstrap(self) -> None:
@@ -411,10 +511,15 @@ trust_level = "trusted"
                     ),
                 ]
             )
-            (output_dir / f"{self.PROJECT}.agent.yaml").write_text(stale_cfg.config_text())
+            specs_dir = output_dir / "config" / "gvisor" / "specs"
+            generated_dir = output_dir / "config" / "gvisor" / "generated"
+            specs_dir.mkdir(parents=True, exist_ok=True)
+            generated_dir.mkdir(parents=True, exist_ok=True)
+            (specs_dir / f"{self.PROJECT}.agent.yaml").write_text(stale_cfg.config_text())
 
             with (
-                patch("scripts.agentctl.OUTPUT_DIR", output_dir),
+                patch("scripts.agentctl.BACKEND_SPEC_ROOTS", {"pod": specs_dir, "kubevirt-vm": output_dir / "config" / "kubevirt" / "specs"}),
+                patch("scripts.agentctl.BACKEND_GENERATED_ROOTS", {"pod": generated_dir, "kubevirt-vm": output_dir / "config" / "kubevirt" / "generated"}),
                 patch("scripts.agentctl.SECRETS_DIR", secrets_dir),
             ):
                 loaded = load_project_config(self.PROJECT)
@@ -483,8 +588,22 @@ trust_level = "trusted"
     def test_root_ssh_keygen_line_is_idempotent(self) -> None:
         rendered = build_ssh_keygen_line("root", "/root")
 
+        self.assertIn("chown root:root /root/.ssh", rendered)
         self.assertIn("if [ ! -f /root/.ssh/id_ed25519 ]; then", rendered)
         self.assertIn("ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /root/.ssh/id_ed25519", rendered)
+
+    def test_root_agent_dirs_line_normalizes_modes(self) -> None:
+        from scripts.agentctl import build_agent_dirs_line
+
+        rendered = build_agent_dirs_line("root", "/root")
+
+        self.assertIn("find /root -xdev -exec chown root:root {} + 2>/dev/null || true", rendered)
+        self.assertIn("find /root -xdev -type d -exec chmod g-s {} + 2>/dev/null || true", rendered)
+        self.assertIn("chown root:root /root /root/.codex /root/.claude /root/.paseo", rendered)
+        self.assertIn("chmod 755 /root", rendered)
+        self.assertIn("chmod 755 /root/.codex", rendered)
+        self.assertIn("chmod 755 /root/.claude", rendered)
+        self.assertIn("chmod 700 /root/.paseo", rendered)
 
     def test_container_identity_uses_project_name(self) -> None:
         cfg = self.make_agent_config()
@@ -547,6 +666,7 @@ trust_level = "trusted"
 
         with (
             patch("scripts.agentctl.load_project_config", return_value=cfg),
+            patch("scripts.agentctl.write_project_files"),
             patch("scripts.agentctl.apply_project_manifest"),
             patch("scripts.agentctl.get_deployment_generation", side_effect=["1", "1", "2", "2"]),
             patch("scripts.agentctl.wait_for_deployment_ready", return_value="pod/morpheus-new") as wait_ready,

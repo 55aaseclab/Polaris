@@ -6,8 +6,10 @@ SCRIPT_NAME="$(basename "$0")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="back-agentctl-$(date +%s)"
 WORK_DIR="$(mktemp -d)"
-CONFIG_PATH="$REPO_ROOT/agents/$PROJECT.agent.yaml"
-MANIFEST_PATH="$REPO_ROOT/agents/$PROJECT.yaml"
+SPEC_DIR="$WORK_DIR/config/gvisor/specs"
+GENERATED_DIR="$WORK_DIR/config/gvisor/generated"
+CONFIG_PATH="$SPEC_DIR/$PROJECT.agent.yaml"
+MANIFEST_PATH="$GENERATED_DIR/$PROJECT.yaml"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -26,10 +28,11 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$WORK_DIR"
+mkdir -p "$SPEC_DIR" "$GENERATED_DIR"
 
 log "Running agentctl wizard with backtracking from memory to CPU"
 
-cat <<EOF | TERM=dumb python3 "$REPO_ROOT/scripts/agentctl.py" >/tmp/test-agentctl-back.log 2>&1
+cat <<EOF | AGENTCTL_GVISOR_SPECS_DIR="$SPEC_DIR" AGENTCTL_GVISOR_GENERATED_DIR="$GENERATED_DIR" TERM=dumb python3 "$REPO_ROOT/scripts/agentctl.py" >/tmp/test-agentctl-back.log 2>&1
 $PROJECT
 $WORK_DIR
 

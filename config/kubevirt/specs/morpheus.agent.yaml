@@ -1,0 +1,61 @@
+project: morpheus
+backend:
+  kind: kubevirt-vm
+  spec_files:
+  - config/kubevirt/specs/morpheus.agent.yaml
+runtime:
+  class: gvisor
+  base_image: ttl.sh/morpheus-prebuilt-1781600969:24h
+  user: root
+  privileged: null
+  docker_enabled: null
+resources:
+  cpu: '12'
+  memory: 24Gi
+  ephemeral_storage: 300Gi
+  cpu_request: '4'
+  memory_request: 8Gi
+  ephemeral_storage_request: 20Gi
+  unbounded: true
+agent:
+  kind: multi
+  label: Codex + Claude Code
+  args: []
+  persist_state: true
+tooling:
+  bootstrap_profile: prebuilt
+  install_rustup: true
+  git_core_editor: vi
+  git_user_name: Qiang Liu
+  git_user_email: cyruscyliu@gmail.com
+auth:
+  files:
+  - key: codex-auth.json
+    mount_path: /root/.codex/auth.json
+    source_path: /home/debian/Projects/geek-env/secrets/agentctl/codex/auth.json
+    content: null
+  - key: codex-config.toml
+    mount_path: /root/.codex/config.toml
+    source_path: /home/debian/Projects/geek-env/secrets/agentctl/codex/config.toml
+    content: null
+  - key: claude-settings.json
+    mount_path: /root/.claude/settings.json
+    source_path: /home/debian/Projects/geek-env/secrets/agentctl/claude/settings.json
+    content: null
+env:
+  plain: {}
+service:
+  enabled: true
+  mode: nodeport
+  ports:
+  - container_port: '6767'
+    node_port: '31677'
+    name: paseo
+  - container_port: '8080'
+    node_port: '31678'
+    name: web-1
+  - container_port: '8081'
+    node_port: '31679'
+    name: web-2
+  host: null
+  path: /
