@@ -568,6 +568,7 @@ class AgentConfig:
     cpu_request: str = ""
     memory_request: str = ""
     storage_request: str = ""
+    storage_claim_name: str = ""
     runtime_user: str = ""
     privileged: bool = False
     docker_enabled: bool = False
@@ -598,7 +599,7 @@ class AgentConfig:
 
     @property
     def project_pvc_name(self) -> str:
-        return f"{self.project_name}-project"
+        return self.storage_claim_name or f"{self.project_name}-project"
 
     @property
     def container_user(self) -> str:
@@ -649,6 +650,7 @@ class AgentConfig:
                 "class": self.runtime_class,
                 "base_image": self.base_image,
                 "user": self.container_user,
+                "storage_claim_name": self.storage_claim_name or None,
                 "privileged": self.privileged or None,
                 "docker_enabled": self.docker_enabled or None,
             },
@@ -750,6 +752,7 @@ class AgentConfig:
             backend_spec_files=[str(item) for item in (backend.get("spec_files") or []) if item],
             runtime_class=runtime.get("class", "kata-qemu"),
             base_image=runtime.get("base_image", "debian:trixie-slim"),
+            storage_claim_name=str(runtime.get("storage_claim_name") or ""),
             runtime_user=str(runtime.get("user") or ""),
             privileged=bool(runtime.get("privileged", False)),
             docker_enabled=bool(runtime.get("docker_enabled", False)),
@@ -936,23 +939,24 @@ class AgentConfig:
             )
         ]
 
-        docs.append(
-            "\n".join(
-                [
-                    "apiVersion: v1",
-                    "kind: PersistentVolumeClaim",
-                    "metadata:",
-                    f"  name: {self.project_pvc_name}",
-                    f"  namespace: {self.project_name}",
-                    "spec:",
-                    "  accessModes:",
-                    "  - ReadWriteOnce",
-                    "  resources:",
-                    "    requests:",
-                    f'      storage: "{self.storage}"',
-                ]
+        if self.persist_state:
+            docs.append(
+                "\n".join(
+                    [
+                        "apiVersion: v1",
+                        "kind: PersistentVolumeClaim",
+                        "metadata:",
+                        f"  name: {self.project_pvc_name}",
+                        f"  namespace: {self.project_name}",
+                        "spec:",
+                        "  accessModes:",
+                        "  - ReadWriteOnce",
+                        "  resources:",
+                        "    requests:",
+                        f'      storage: "{self.storage}"',
+                    ]
+                )
             )
-        )
 
         deployment_lines = [
             "apiVersion: apps/v1",
@@ -1059,14 +1063,23 @@ class AgentConfig:
         if env_items:
             deployment_lines.append("        env:")
             deployment_lines.extend(env_items)
-        deployment_lines.extend(
-            [
-                "      volumes:",
-                "      - name: project",
-                "        persistentVolumeClaim:",
-                f"          claimName: {self.project_pvc_name}",
-            ]
-        )
+        if self.persist_state:
+            deployment_lines.extend(
+                [
+                    "      volumes:",
+                    "      - name: project",
+                    "        persistentVolumeClaim:",
+                    f"          claimName: {self.project_pvc_name}",
+                ]
+            )
+        else:
+            deployment_lines.extend(
+                [
+                    "      volumes:",
+                    "      - name: project",
+                    "        emptyDir: {}",
+                ]
+            )
         docs.append("\n".join(deployment_lines))
 
         if self.expose_service:

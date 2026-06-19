@@ -72,6 +72,7 @@ class UserStoryGraphTest(unittest.TestCase):
             "cpu_request": "",
             "memory_request": "",
             "storage_request": "",
+            "storage_claim_name": "",
             "agent": "None",
             "agent_cmd": "",
             "agent_args": "",
@@ -184,6 +185,7 @@ trust_level = "trusted"
             "cpu_request",
             "memory_request",
             "storage_request",
+            "storage_claim_name",
             "agent_cmd",
             "agent_args",
             "persist_state",
@@ -306,6 +308,27 @@ trust_level = "trusted"
         self.assertNotIn("subPath: .paseo", rendered)
         self.assertNotIn("hostPath:", rendered)
 
+    def test_non_persistent_pod_uses_emptydir_not_pvc(self) -> None:
+        cfg = self.make_agent_config(persist_state=False)
+
+        rendered = cfg.yaml_text()
+
+        self.assertNotIn("kind: PersistentVolumeClaim", rendered)
+        self.assertIn("      volumes:\n      - name: project\n        emptyDir: {}", rendered)
+        self.assertNotIn("persistentVolumeClaim:", rendered)
+
+    def test_storage_claim_name_override_is_used_for_pvc(self) -> None:
+        cfg = self.make_agent_config(
+            persist_state=True,
+            storage_claim_name="sample-agent-project-fresh",
+        )
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("name: sample-agent-project-fresh", rendered)
+        self.assertIn("claimName: sample-agent-project-fresh", rendered)
+        self.assertNotIn(f"\n          claimName: {self.PROJECT}-project\n", rendered)
+
     def test_burstable_resources_render_requests_separately_from_limits(self) -> None:
         cfg = self.make_agent_config(
             cpu="12",
@@ -330,6 +353,7 @@ trust_level = "trusted"
             cpu_request="4",
             memory_request="8Gi",
             storage_request="20Gi",
+            persist_state=True,
         )
 
         rendered = cfg.yaml_text()
