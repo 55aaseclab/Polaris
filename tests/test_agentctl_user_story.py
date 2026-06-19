@@ -678,13 +678,20 @@ trust_level = "trusted"
         self.assertIn("apt-get install -y \\\n            openssh-client nodejs npm python3", rendered)
         self.assertIn("npm install -g --prefix /opt/agent-cli pnpm", rendered)
 
-    def test_readiness_probe_checks_ready_file_and_pvc_mount(self) -> None:
-        cfg = self.make_agent_config()
+    def test_gvisor_readiness_probe_uses_tcp_socket(self) -> None:
+        cfg = self.make_agent_config(runtime_class="gvisor")
+
+        rendered = cfg.yaml_text()
+
+        self.assertIn("        readinessProbe:\n          tcpSocket:\n            port: 6767", rendered)
+        self.assertIn("          timeoutSeconds: 5", rendered)
+
+    def test_non_gvisor_readiness_probe_checks_ready_file(self) -> None:
+        cfg = self.make_agent_config(runtime_class="kata-qemu")
 
         rendered = cfg.yaml_text()
 
         self.assertIn('command: ["sh", "-ec", "test -f /tmp/.ready"]', rendered)
-        self.assertIn("          timeoutSeconds: 5", rendered)
 
     def test_apply_saved_project_waits_for_rollout_when_template_changes(self) -> None:
         cfg = self.make_agent_config()
