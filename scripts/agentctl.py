@@ -898,11 +898,25 @@ class AgentConfig:
             "          touch /tmp/.ready && sleep infinity"
         )
 
-    def build_readiness_probe_command(self) -> list[str]:
+    def build_readiness_probe_lines(self) -> list[str]:
+        if self.backend_kind == "pod" and self.runtime_class == "gvisor" and self.agent_cmd:
+            return [
+                "        readinessProbe:",
+                "          tcpSocket:",
+                "            port: 6767",
+                "          initialDelaySeconds: 5",
+                "          timeoutSeconds: 5",
+                "          periodSeconds: 5",
+                "          failureThreshold: 60",
+            ]
         return [
-            "sh",
-            "-ec",
-            "test -f /tmp/.ready",
+            "        readinessProbe:",
+            "          exec:",
+            f"            command: {json.dumps(['sh', '-ec', 'test -f /tmp/.ready'])}",
+            "          initialDelaySeconds: 5",
+            "          timeoutSeconds: 5",
+            "          periodSeconds: 5",
+            "          failureThreshold: 60",
         ]
 
     def yaml_text(self) -> str:
@@ -967,14 +981,8 @@ class AgentConfig:
             "        args:",
             "        - |",
             self.build_container_bootstrap_lines(),
-            "        readinessProbe:",
-            "          exec:",
-            f"            command: {json.dumps(self.build_readiness_probe_command())}",
-            "          initialDelaySeconds: 5",
-            "          timeoutSeconds: 5",
-            "          periodSeconds: 5",
-            "          failureThreshold: 60",
         ]
+        deployment_lines.extend(self.build_readiness_probe_lines())
         if not self.unbounded_resources:
             deployment_lines.extend(
                 [
