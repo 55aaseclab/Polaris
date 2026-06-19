@@ -294,15 +294,16 @@ trust_level = "trusted"
         self.assertIn(f"/home/{self.PROJECT}/.codex/auth.json", rendered)
         self.assertIn(f"/home/{self.PROJECT}/.claude/settings.json", rendered)
 
-    def test_persisted_codex_state_uses_project_pvc_not_host_home(self) -> None:
+    def test_persisted_codex_state_uses_single_project_pvc_mount(self) -> None:
         cfg = self.make_agent_config(persist_state=True)
 
         rendered = cfg.yaml_text()
 
         self.assertIn("  strategy:\n    type: Recreate", rendered)
-        self.assertIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
+        self.assertIn(f"mountPath: /home/{self.PROJECT}", rendered)
         self.assertIn(f"claimName: {cfg.project_pvc_name}", rendered)
-        self.assertIn("subPath: .paseo", rendered)
+        self.assertNotIn(f"mountPath: /home/{self.PROJECT}/.paseo", rendered)
+        self.assertNotIn("subPath: .paseo", rendered)
         self.assertNotIn("hostPath:", rendered)
 
     def test_burstable_resources_render_requests_separately_from_limits(self) -> None:
@@ -555,6 +556,26 @@ trust_level = "trusted"
         self.assertIn("git config --global pull.rebase true", rendered)
         self.assertIn("paseo daemon start", rendered)
 
+    def test_root_prebuilt_bootstrap_repairs_profile_and_pnpm_symlink(self) -> None:
+        cfg = self.make_agent_config(
+            bootstrap_profile="prebuilt",
+            runtime_user="root",
+        )
+
+        rendered = cfg.build_container_bootstrap_lines()
+
+        self.assertIn("profile_fix_needed=0", rendered)
+        self.assertIn("[ -f /root/.profile ] || profile_fix_needed=1", rendered)
+        self.assertIn('if [ "$profile_fix_needed" = 1 ]; then', rendered)
+        self.assertIn("touch /root/.profile", rendered)
+        self.assertIn("for rc in /root/.profile /root/.bashrc /root/.zshrc; do", rendered)
+        self.assertIn("grep -Eq", rendered)
+        self.assertIn("awk 'BEGIN{seen=0}", rendered)
+        self.assertIn("$0 ~ /\\$HOME\\/root\\/\\.cargo\\/env/", rendered)
+        self.assertIn('print ". \\"$HOME/.cargo/env\\""', rendered)
+        self.assertIn("readlink /usr/local/bin/pnpm", rendered)
+        self.assertIn("ln -sf /opt/agent-cli/bin/pnpm /usr/local/bin/pnpm", rendered)
+
     def test_paseo_bootstrap_is_enabled_for_agents(self) -> None:
         rendered = build_paseo_bootstrap_line("multi", self.PROJECT, f"/home/{self.PROJECT}")
         self.assertIn(f"rm -f /home/{self.PROJECT}/.paseo/paseo.pid", rendered)
@@ -591,14 +612,18 @@ trust_level = "trusted"
         self.assertIn("chown root:root /root/.ssh", rendered)
         self.assertIn("if [ ! -f /root/.ssh/id_ed25519 ]; then", rendered)
         self.assertIn("ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /root/.ssh/id_ed25519", rendered)
+        self.assertIn("stat -c %U:%G /root/.ssh/id_ed25519", rendered)
+        self.assertIn("chmod 400 /root/.ssh/id_ed25519", rendered)
+        self.assertIn("stat -c %U:%G /root/.ssh/id_ed25519.pub", rendered)
+        self.assertIn("chmod 644 /root/.ssh/id_ed25519.pub", rendered)
+        self.assertIn("for ssh_meta in /root/.ssh/authorized_keys /root/.ssh/known_hosts /root/.ssh/known_hosts.old", rendered)
+        self.assertIn("chmod 600 \"$ssh_meta\"", rendered)
 
     def test_root_agent_dirs_line_normalizes_modes(self) -> None:
         from scripts.agentctl import build_agent_dirs_line
 
         rendered = build_agent_dirs_line("root", "/root")
 
-        self.assertIn("find /root -xdev -exec chown root:root {} + 2>/dev/null || true", rendered)
-        self.assertIn("find /root -xdev -type d -exec chmod g-s {} + 2>/dev/null || true", rendered)
         self.assertIn("chown root:root /root /root/.codex /root/.claude /root/.paseo", rendered)
         self.assertIn("chmod 755 /root", rendered)
         self.assertIn("chmod 755 /root/.codex", rendered)

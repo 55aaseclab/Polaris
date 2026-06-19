@@ -390,20 +390,41 @@ def build_agent_wrapper_line(agent_cmd: str, agent_args: str) -> str:
     )
 
 
+def build_root_profile_fix_line(container_user: str, container_home: str) -> str:
+    if container_user != "root":
+        return ""
+    return (
+        "          profile_fix_needed=0 && \\\n"
+        f"          [ -f {container_home}/.profile ] || profile_fix_needed=1 && \\\n"
+        f"          for rc in {container_home}/.profile {container_home}/.bashrc {container_home}/.zshrc; do "
+        "[ -f \"$rc\" ] || continue; "
+        "grep -Eq \"/root/root/\\\\.cargo/env|\\\\$HOME/root/\\\\.cargo/env\" \"$rc\" && profile_fix_needed=1 && break; "
+        "done && \\\n"
+        "          if [ \"$profile_fix_needed\" = 1 ]; then "
+        f"touch {container_home}/.profile && "
+        f"for rc in {container_home}/.profile {container_home}/.bashrc {container_home}/.zshrc; do "
+        "[ -f \"$rc\" ] || continue; "
+        "awk 'BEGIN{seen=0} "
+        "{ "
+        "if ($0 ~ /\\/root\\/root\\/\\.cargo\\/env/ || $0 ~ /\\$HOME\\/root\\/\\.cargo\\/env/) { if (!seen) print \". \\\"$HOME/.cargo/env\\\"\"; seen=1; next } "
+        "if ($0 == \". \\\"$HOME/.cargo/env\\\"\" || $0 == \"source \\\"$HOME/.cargo/env\\\"\") { if (!seen) print \". \\\"$HOME/.cargo/env\\\"\"; seen=1; next } "
+        "print "
+        "} "
+        "END{ if (ARGV[1] ~ /\\.profile$/ && !seen) print \". \\\"$HOME/.cargo/env\\\"\" }' "
+        "\"$rc\" > \"$rc.tmp\" && mv \"$rc.tmp\" \"$rc\"; "
+        "done; "
+        "fi && \\\n"
+        "          if [ ! -L /usr/local/bin/pnpm ] || [ \"$(readlink /usr/local/bin/pnpm 2>/dev/null)\" != \"/opt/agent-cli/bin/pnpm\" ]; then ln -sf /opt/agent-cli/bin/pnpm /usr/local/bin/pnpm; fi && \\\n"
+    )
+
+
 def build_agent_dirs_line(container_user: str, container_home: str) -> str:
     home_mode = "755" if container_user == "root" else "755"
     codex_mode = "755" if container_user == "root" else "755"
     claude_mode = "755" if container_user == "root" else "755"
     paseo_mode = "700"
-    ownership_normalization = ""
-    if container_user == "root":
-        ownership_normalization = (
-            f"          find {container_home} -xdev -exec chown root:root {{}} + 2>/dev/null || true && \\\n"
-            f"          find {container_home} -xdev -type d -exec chmod g-s {{}} + 2>/dev/null || true && \\\n"
-        )
     return (
         f"          mkdir -p {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
-        f"{ownership_normalization}"
         f"          chown {container_user}:{container_user} {container_home} {container_home}/.codex {container_home}/.claude {container_home}/.paseo && \\\n"
         f"          chmod {home_mode} {container_home} && chmod {codex_mode} {container_home}/.codex && chmod {claude_mode} {container_home}/.claude && chmod {paseo_mode} {container_home}/.paseo && \\\n"
     )
@@ -416,6 +437,9 @@ def build_ssh_keygen_line(container_user: str, container_home: str) -> str:
         return (
             f"          mkdir -p {ssh_dir} && chown root:root {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
             f"          if [ ! -f {key_path} ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f {key_path}; fi && \\\n"
+            f"          if [ -e {key_path} ] && {{ [ \"$(stat -c %U:%G {key_path} 2>/dev/null || true)\" != \"root:root\" ] || [ \"$(stat -c %a {key_path} 2>/dev/null || true)\" != \"400\" ]; }}; then chown root:root {key_path} 2>/dev/null || true; chmod 400 {key_path} 2>/dev/null || true; fi && \\\n"
+            f"          if [ -e {key_path}.pub ] && {{ [ \"$(stat -c %U:%G {key_path}.pub 2>/dev/null || true)\" != \"root:root\" ] || [ \"$(stat -c %a {key_path}.pub 2>/dev/null || true)\" != \"644\" ]; }}; then chown root:root {key_path}.pub 2>/dev/null || true; chmod 644 {key_path}.pub 2>/dev/null || true; fi && \\\n"
+            f"          for ssh_meta in {ssh_dir}/authorized_keys {ssh_dir}/known_hosts {ssh_dir}/known_hosts.old; do if [ -e \"$ssh_meta\" ] && {{ [ \"$(stat -c %U:%G \"$ssh_meta\" 2>/dev/null || true)\" != \"root:root\" ] || [ \"$(stat -c %a \"$ssh_meta\" 2>/dev/null || true)\" != \"600\" ]; }}; then chown root:root \"$ssh_meta\" 2>/dev/null || true; chmod 600 \"$ssh_meta\" 2>/dev/null || true; fi; done && \\\n"
         )
     return (
         f"          mkdir -p {ssh_dir} && chown {container_user}:{container_user} {ssh_dir} && chmod 700 {ssh_dir} && \\\n"
@@ -817,6 +841,7 @@ class AgentConfig:
             auth_copy_lines = build_auth_copy_lines(user, self.auth_files)
             ssh_keygen_line = build_ssh_keygen_line(user, home)
             paseo_bootstrap_line = build_paseo_bootstrap_line("multi", user, home)
+            root_profile_fix_line = build_root_profile_fix_line(user, home)
             git_config_line = ""
             if self.git_core_editor:
                 git_config_line = (
@@ -833,7 +858,7 @@ class AgentConfig:
                 )
             return (
                 "          set -eux && \\\n"
-                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{git_config_line}{auth_copy_lines}{ssh_keygen_line}{docker_bootstrap_line}{paseo_bootstrap_line}"
+                f"{user_setup_line}{build_agent_dirs_line(user, home)}{sudoers_line}{root_profile_fix_line}{git_config_line}{auth_copy_lines}{ssh_keygen_line}{docker_bootstrap_line}{paseo_bootstrap_line}"
                 "          touch /tmp/.ready && sleep infinity"
             )
         agent_install_line = (
@@ -980,14 +1005,6 @@ class AgentConfig:
             "        - name: project",
             f"          mountPath: {self.container_home}",
         ]
-        if self.agent_cmd:
-            volume_mount_lines.extend(
-                [
-                    "        - name: project",
-                    f"          mountPath: {self.container_home}/.paseo",
-                    "          subPath: .paseo",
-                ]
-            )
         deployment_lines.extend(volume_mount_lines)
         if self.privileged:
             deployment_lines.extend(

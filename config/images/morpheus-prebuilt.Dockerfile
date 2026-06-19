@@ -38,6 +38,7 @@ RUN mkdir -p /opt/agent-cli \
     pnpm
 
 RUN ln -sf /opt/agent-cli/bin/paseo /usr/local/bin/paseo \
+  && ln -sf /opt/agent-cli/bin/pnpm /usr/local/bin/pnpm \
   && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /opt/agent-cli/bin/codex "$@"' > /usr/local/bin/codex \
   && chmod 755 /usr/local/bin/codex \
   && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /opt/agent-cli/bin/claude "$@"' > /usr/local/bin/claude \
