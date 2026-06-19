@@ -596,7 +596,7 @@ trust_level = "trusted"
         self.assertIn("grep -Eq", rendered)
         self.assertIn("awk 'BEGIN{seen=0}", rendered)
         self.assertIn("$0 ~ /\\$HOME\\/root\\/\\.cargo\\/env/", rendered)
-        self.assertIn('print ". \\"$HOME/.cargo/env\\""', rendered)
+        self.assertIn('[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\"', rendered)
         self.assertIn("readlink /usr/local/bin/pnpm", rendered)
         self.assertIn("ln -sf /opt/agent-cli/bin/pnpm /usr/local/bin/pnpm", rendered)
 
