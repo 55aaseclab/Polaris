@@ -6,6 +6,7 @@ runtime:
   class: gvisor
   base_image: ttl.sh/morpheus-prebuilt-1781875178:24h
   user: root
+  storage_claim_name: morpheus-project-fresh
   privileged: null
   docker_enabled: null
 resources:
@@ -20,7 +21,7 @@ agent:
   kind: multi
   label: Codex + Claude Code
   args: []
-  persist_state: true
+  persist_state: false
 tooling:
   bootstrap_profile: prebuilt
   install_rustup: true
