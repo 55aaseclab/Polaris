@@ -4,7 +4,7 @@ backend:
   spec_files: null
 runtime:
   class: gvisor
-  base_image: ttl.sh/morpheus-prebuilt-1781600969:24h
+  base_image: ttl.sh/morpheus-prebuilt-1781875178:24h
   user: root
   privileged: null
   docker_enabled: null
