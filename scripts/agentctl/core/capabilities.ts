@@ -7,6 +7,22 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     throw new Error("Workspace project name is required");
   }
 
+  if (!workspace.attachments.workspaceData.mountRoot) {
+    throw new Error("workspace-data must declare a mount root");
+  }
+  if (!workspace.attachments.workspaceRuntimeState.mountRoot) {
+    throw new Error("workspace-runtime-state must declare a mount root");
+  }
+  if (!workspace.attachments.userIdentityState.mountRoot) {
+    throw new Error("user-identity-state must declare a mount root");
+  }
+  if (!workspace.attachments.userSshState.mountRoot) {
+    throw new Error("user-ssh-state must declare a mount root");
+  }
+  if (!workspace.attachments.ephemeralRuntime.mountRoot) {
+    throw new Error("ephemeral-runtime must declare a mount root");
+  }
+
   if (workspace.attachments.workspaceData.scope !== "workspace" || workspace.attachments.workspaceData.sharing !== "exclusive") {
     throw new Error("workspace-data must remain workspace-scoped and non-shared");
   }
@@ -27,6 +43,9 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   }
   if (workspace.attachments.userSshState.durablePaths.some((entry) => entry === "/ssh") === false) {
     throw new Error("user-ssh-state must expose the shared SSH attachment root");
+  }
+  if (workspace.attachments.ephemeralRuntime.staleArtifacts.length === 0) {
+    throw new Error("ephemeral-runtime must define stale artifact cleanup targets");
   }
 
   if (workspace.backend.kind === "pod") {

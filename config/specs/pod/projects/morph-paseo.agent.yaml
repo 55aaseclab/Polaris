@@ -40,3 +40,53 @@ service:
     name: paseo
   host: null
   path: /
+attachments:
+  workspace-data:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/project
+    durable_paths:
+    - /workspace/project
+    source:
+      kind: persistent-volume
+      volume_ref: morph-paseo-project
+      description: workspace-scoped persistent storage for morph-paseo
+  workspace-runtime-state:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/state
+    durable_paths:
+    - /workspace/state/paseo
+    source:
+      kind: persistent-volume
+      volume_ref: morph-paseo-project
+      sub_path: state
+      description: workspace runtime state for morph-paseo
+  user-identity-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /identity
+    durable_paths:
+    - /identity/codex
+    - /identity/claude
+    source:
+      kind: secret-material
+      description: user identity material
+  user-ssh-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /ssh
+    durable_paths:
+    - /ssh
+    source:
+      kind: generated-material
+      description: user SSH material
+  ephemeral-runtime:
+    mount_root: /run/workspace
+    paths:
+    - /run/workspace/tmp
+    - /run/workspace/pids
+    - /run/workspace/sockets
+    stale_artifacts:
+    - /root/.paseo/paseo.pid
+    - /run/workspace/pids/paseo.pid

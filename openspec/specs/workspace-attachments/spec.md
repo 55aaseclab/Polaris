@@ -4,7 +4,7 @@
 TBD - created by archiving change workspace-attachments-persistence-model. Update Purpose after archive.
 ## Requirements
 ### Requirement: Persistence SHALL be modeled as attachment classes
-The system SHALL model durable workspace persistence through explicit attachment classes rather than by persisting a runtime home directory or a flat list of durable paths.
+The system SHALL model durable workspace persistence through explicit attachment classes and SHALL expose those attachment classes directly in the saved workspace config model rather than only as an internal representation derived from legacy fields.
 
 #### Scenario: Workspace intent is expressed as durable attachments
 - **WHEN** the control plane models workspace persistence

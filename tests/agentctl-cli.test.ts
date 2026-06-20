@@ -20,6 +20,7 @@ test("loadWorkspace normalizes morpheus pod config through the TypeScript contro
   assert.equal(workspace.attachments.userSshState.scope, "user");
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
+  assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
 });
 
 test("backend registry resolves pod driver", () => {
@@ -86,4 +87,12 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.scope, "workspace");
   assert.equal(workspace.attachments.userIdentityState.scope, "user");
+});
+
+test("direct attachment config is present in migrated saved specs", () => {
+  const workspace = loadWorkspace("morpheus");
+  assert.equal(workspace.attachments.workspaceData.source.kind, "persistent-volume");
+  assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
+  assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
+  assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
 });

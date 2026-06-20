@@ -64,8 +64,9 @@ config/
 ## Current Reality
 
 - New TypeScript code prefers `config/specs/**` and `config/generated/**`.
-- The control plane now translates legacy path-centric persistence fields into
-  explicit attachment classes before backend realization.
+- Repo-managed specs now declare attachment classes directly.
+- The control plane translates legacy path-centric persistence fields only as a
+  compatibility path when direct attachment declarations are absent.
 - Legacy saved configs still exist under:
   - `config/gvisor/specs/`
   - `config/kubevirt/specs/`

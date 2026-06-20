@@ -48,3 +48,16 @@ through a persisted runtime home:
 - `ephemeral-runtime`
 
 See [runtime-layout.md](./runtime-layout.md) for the backend-independent model.
+
+## Direct Config Model
+
+The primary saved-spec model is now attachment-based:
+
+- `workspace-data`
+- `workspace-runtime-state`
+- `user-identity-state`
+- `user-ssh-state`
+- `ephemeral-runtime`
+
+Legacy path-centric persistence fields remain compatibility-only and are
+translated only when direct attachment declarations are absent.
