@@ -35,3 +35,16 @@ pnpm test:agentctl
 pnpm exec tsx scripts/agentctl.ts status morpheus
 pnpm exec tsx scripts/agentctl.ts render morpheus
 ```
+
+## Persistence Semantics
+
+`agentctl` now reasons about persistence through attachment classes rather than
+through a persisted runtime home:
+
+- `workspace-data`
+- `workspace-runtime-state`
+- `user-identity-state`
+- `user-ssh-state`
+- `ephemeral-runtime`
+
+See [runtime-layout.md](./runtime-layout.md) for the backend-independent model.

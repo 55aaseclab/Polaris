@@ -1,7 +1,13 @@
 # Neovim Usage Guide
 
-The geek-env Neovim config is symlinked into `~/.config/nvim`. Edits to
-`config/nvim/` take effect immediately. Leader key is `Space`.
+The Polaris Neovim config is symlinked into `~/.config/nvim`. Edits to
+`config/workspace-tooling/nvim/` take effect immediately. Leader key is `Space`.
+
+## Install
+
+```bash
+bash scripts/tooling/workspace/install-nvim.sh
+```
 
 ## Layout
 
@@ -268,7 +274,7 @@ based on `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`, or
 ## Config Structure
 
 ```
-config/nvim/
+config/workspace-tooling/nvim/
   init.lua                     -- leader key, loads config modules
   lua/config/
     options.lua                -- vim options

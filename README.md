@@ -1,6 +1,6 @@
-# Agent Vault
+# Polaris
 
-Agent Vault is an AI-native environment for isolated coding agents. It runs
+Polaris is an AI-native environment for isolated coding agents. It runs
 agent workloads in sandboxed Kubernetes pods using Kata Containers and
 gVisor, with
 [Headlamp](https://headlamp.dev/) managing k3s pods and
@@ -20,22 +20,22 @@ each guest or sandbox.
 
 ```bash
 grep -c vmx /proc/cpuinfo
-sudo bash scripts/setup-k3s-kata-gvisor.sh
+sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
 python3 -m pip install -r requirements.txt
 pnpm exec tsx scripts/agentctl.ts
 ```
 
 For tool-specific usage details, start with:
 
-- [`docs/README.md`](docs/README.md)
-- [`docs/agentctl.md`](docs/agentctl.md)
-- [`README.k3s-kata.md`](README.k3s-kata.md)
+- [docs/README.md](docs/README.md)
+- [docs/agentctl/README.md](docs/agentctl/README.md)
+- [docs/operations/README.md](docs/operations/README.md)
 
 If you want to bypass `k3s` entirely and run Morpheus as a plain Docker
 container on a single host, use:
 
 ```bash
-bash scripts/run-morpheus-docker.sh
+bash scripts/operations/run-morpheus-docker.sh
 ```
 
 This starts `ttl.sh/morpheus-prebuilt-1781875178:24h` with:
@@ -49,7 +49,7 @@ If you want to add full VM workloads alongside the existing container
 workloads, install KubeVirt with:
 
 ```bash
-bash scripts/setup-k3s-kubevirt.sh
+bash scripts/operations/setup-k3s-kubevirt.sh
 ```
 
 The `morpheus` workload can also run as a KubeVirt VM while keeping the shared
@@ -57,7 +57,7 @@ project PVC mounted at `/root`, Docker enabled inside the guest, and the
 existing NodePorts (`31677`, `31678`, `31679`) intact.
 
 If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
-[`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
+[`scripts/operations/setup-k3s-kata-worker.sh`](scripts/operations/setup-k3s-kata-worker.sh).
 
 ## Pitfalls
 
@@ -76,15 +76,14 @@ If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
 
 ```bash
 pnpm exec tsc -p tsconfig.json --noEmit
-bash -n scripts/setup-k3s-kata-gvisor.sh
+bash -n scripts/operations/setup-k3s-kata-gvisor.sh
 pnpm test:agentctl
 ./tests/smoke-agentctl-paseo.sh
 ```
 
 If you change command flow or generated manifests, update the relevant docs
-under `docs/` first, then any remaining repo-root READMEs that still carry
-legacy material.
+under `docs/` first.
 
 ## License
 
-[`MIT LICENSE`](LICENSE).
+[MIT LICENSE](LICENSE).

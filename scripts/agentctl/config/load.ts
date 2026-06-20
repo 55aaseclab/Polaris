@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import type { WorkspaceSpec, PlainEnvVar, AuthFile, ServicePort } from "../core/workspace.js";
+import type { WorkspaceSpec, PlainEnvVar, AuthFile, ServicePort, WorkspaceAttachments, DurableAttachment } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -19,6 +19,106 @@ function specCandidates(project: string): string[] {
 
 function canonicalHome(user: string, projectName: string): string {
   return user === "root" ? "/root" : `/home/${user || projectName}`;
+}
+
+function authFileKind(file: AuthFile, home: string): "identity" | "ssh" {
+  const normalizedHome = home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`^${normalizedHome}/\\.ssh/`).test(file.mountPath) || file.key.includes("ssh")) {
+    return "ssh";
+  }
+  return "identity";
+}
+
+function buildAttachment(
+  kind: DurableAttachment["kind"],
+  scope: DurableAttachment["scope"],
+  sharing: DurableAttachment["sharing"],
+  mountRoot: string,
+  durablePaths: string[],
+  source: DurableAttachment["source"],
+): DurableAttachment {
+  return {
+    kind,
+    scope,
+    sharing,
+    mountRoot,
+    durablePaths,
+    source,
+  };
+}
+
+function translateLegacyAttachments(args: {
+  projectName: string;
+  home: string;
+  persistState: boolean;
+  claimName: string;
+  authFiles: AuthFile[];
+  backendKind: WorkspaceSpec["backend"]["kind"];
+}): WorkspaceAttachments {
+  const workspaceVolumeSource = args.persistState
+    ? {
+        kind: "persistent-volume" as const,
+        volumeRef: args.claimName,
+        description: `workspace-scoped persistent storage for ${args.projectName}`,
+      }
+    : {
+        kind: "generated-material" as const,
+        description: `ephemeral workspace storage for ${args.projectName}`,
+      };
+  const identityFiles = args.authFiles.filter((file) => authFileKind(file, args.home) === "identity");
+  const sshFiles = args.authFiles.filter((file) => authFileKind(file, args.home) === "ssh");
+
+  return {
+    workspaceData: buildAttachment(
+      "workspace-data",
+      "workspace",
+      "exclusive",
+      "/workspace/project",
+      ["/workspace/project"],
+      workspaceVolumeSource,
+    ),
+    workspaceRuntimeState: buildAttachment(
+      "workspace-runtime-state",
+      "workspace",
+      "exclusive",
+      "/workspace/state",
+      ["/workspace/state/paseo"],
+      {
+        ...workspaceVolumeSource,
+        subPath: "state",
+        description: `workspace runtime state for ${args.projectName}`,
+      },
+    ),
+    userIdentityState: buildAttachment(
+      "user-identity-state",
+      "user",
+      "cross-workspace",
+      "/identity",
+      ["/identity/codex", "/identity/claude"],
+      {
+        kind: "secret-material",
+        description: identityFiles.length
+          ? `user identity material sourced from ${identityFiles.map((file) => file.key).join(", ")}`
+          : "user identity material",
+      },
+    ),
+    userSshState: buildAttachment(
+      "user-ssh-state",
+      "user",
+      "cross-workspace",
+      "/ssh",
+      ["/ssh"],
+      {
+        kind: sshFiles.length ? "secret-material" : "generated-material",
+        description: sshFiles.length ? `user SSH material sourced from ${sshFiles.map((file) => file.key).join(", ")}` : "user SSH material",
+      },
+    ),
+    ephemeralRuntime: {
+      mountRoot: "/run/workspace",
+      paths: ["/run/workspace/tmp", "/run/workspace/pids", "/run/workspace/sockets"],
+      staleArtifacts: ["/run/workspace/pids/paseo.pid"],
+    },
+  };
 }
 
 function normalizeAuthFiles(rawFiles: unknown): AuthFile[] {
@@ -94,6 +194,16 @@ export function loadWorkspace(project: string): WorkspaceSpec {
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
   const authFiles = normalizeAuthFiles(auth.files);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
+  const persistState = Boolean(agent.persist_state ?? true);
+  const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
+  const attachments = translateLegacyAttachments({
+    projectName,
+    home,
+    persistState,
+    claimName,
+    authFiles,
+    backendKind,
+  });
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },
@@ -104,10 +214,16 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       dockerRuntimeMode: runtime.docker_enabled ? "legacy" : "disabled"
     },
     storage: {
-      persistState: Boolean(agent.persist_state ?? true),
-      claimName: String(runtime.storage_claim_name ?? `${projectName}-project`),
-      durablePaths: [home, `${home}/.codex`, `${home}/.claude`, `${home}/.paseo`, `${home}/.ssh`]
+      persistState,
+      claimName,
+      durablePaths: [
+        ...attachments.workspaceData.durablePaths,
+        ...attachments.workspaceRuntimeState.durablePaths,
+        ...attachments.userIdentityState.durablePaths,
+        ...attachments.userSshState.durablePaths,
+      ]
     },
+    attachments,
     resources: {
       cpu: String(resources.cpu ?? "2"),
       memory: String(resources.memory ?? "4Gi"),
@@ -145,13 +261,13 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       actions: ["create", "start", "stop", "restart", "rebuild", "status", "reconcile", "render", "apply"]
     },
     runtimeContract: {
-      durableState: [home, `${home}/.codex`, `${home}/.claude`, `${home}/.paseo`, `${home}/.ssh`],
-      staleRuntimeArtifacts: [`${home}/.paseo/paseo.pid`],
-      structuralInvariants: [
-        `workspace home SHALL resolve to ${home}`,
-        `${home}/.paseo SHALL exist with mode 700`,
-        `${home}/.ssh private keys SHALL remain mode 400`
-      ]
+      minimalInvariants: [
+        `runtime home SHALL resolve to ${home}`,
+        `${home}/.paseo SHALL assemble from workspace-runtime-state`,
+        `${home}/.codex and ${home}/.claude SHALL assemble from user-identity-state`,
+        `${home}/.ssh SHALL assemble from user-ssh-state with strict key permissions`,
+      ],
+      staleRuntimeArtifacts: [`${home}/.paseo/paseo.pid`, ...attachments.ephemeralRuntime.staleArtifacts],
     },
     health: {
       readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agent.kind ? "daemon-port" : "ready-file",

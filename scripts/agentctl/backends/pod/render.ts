@@ -9,9 +9,49 @@ function timestamp(): string {
   return new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
 }
 
-function indent(lines: string[], spaces: number): string[] {
-  const prefix = " ".repeat(spaces);
-  return lines.map((line) => `${prefix}${line}`);
+function relativeRuntimePath(filePath: string, home: string): string {
+  if (filePath.startsWith(`${home}/.codex/`)) {
+    return `codex/${filePath.slice(`${home}/.codex/`.length)}`;
+  }
+  if (filePath.startsWith(`${home}/.claude/`)) {
+    return `claude/${filePath.slice(`${home}/.claude/`.length)}`;
+  }
+  if (filePath.startsWith(`${home}/.ssh/`)) {
+    return filePath.slice(`${home}/.ssh/`.length);
+  }
+  return filePath.replace(/^\/+/, "");
+}
+
+function authFileStorageTarget(file: AuthFile, workspace: WorkspaceSpec): string {
+  const home = workspace.runtime.home;
+  if (file.mountPath.startsWith(`${home}/.codex/`) || file.mountPath.startsWith(`${home}/.claude/`)) {
+    return `${workspace.attachments.userIdentityState.mountRoot}/${relativeRuntimePath(file.mountPath, home)}`;
+  }
+  if (file.mountPath.startsWith(`${home}/.ssh/`)) {
+    return `${workspace.attachments.userSshState.mountRoot}/${relativeRuntimePath(file.mountPath, home)}`;
+  }
+  return file.mountPath;
+}
+
+function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
+  const home = workspace.runtime.home;
+  const user = workspace.runtime.user;
+  const projectRoot = workspace.attachments.workspaceData.mountRoot;
+  const paseoRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo`;
+  const identityRoot = workspace.attachments.userIdentityState.mountRoot;
+  const sshRoot = workspace.attachments.userSshState.mountRoot;
+  const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
+  return [
+    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets && \\`,
+    `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
+    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh && \\`,
+    `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
+    `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
+    `          ln -sfn ${paseoRoot} ${home}/.paseo && \\`,
+    `          ln -sfn ${sshRoot} ${home}/.ssh && \\`,
+    `          ln -sfn ${projectRoot} ${home}/workspace && \\`,
+    ...(workspace.identity.projectName === "morpheus" ? [`          ln -sfn ${projectRoot} ${home}/Morpheus && \\`] : []),
+  ];
 }
 
 function buildRootProfileFixLine(home: string): string[] {
@@ -26,25 +66,26 @@ function buildRootProfileFixLine(home: string): string[] {
 
 function buildAgentDirsLine(user: string, home: string): string[] {
   return [
-    `          mkdir -p ${home} ${home}/.codex ${home}/.claude ${home}/.paseo && \\`,
-    `          chown ${user}:${user} ${home} ${home}/.codex ${home}/.claude ${home}/.paseo && \\`,
-    `          chmod 755 ${home} && chmod 755 ${home}/.codex && chmod 755 ${home}/.claude && chmod 700 ${home}/.paseo && \\`,
+    `          mkdir -p ${home} && \\`,
+    `          chown ${user}:${user} ${home} && \\`,
+    `          chmod 755 ${home} && \\`,
   ];
 }
 
-function buildAuthCopyLines(user: string, authFiles: AuthFile[]): string[] {
+function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: WorkspaceSpec): string[] {
   return authFiles.flatMap((item) => {
     const content = item.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
-    const parent = item.mountPath.replace(/\/[^/]+$/, "");
+    const target = authFileStorageTarget(item, workspace);
+    const parent = target.replace(/\/[^/]+$/, "");
     return [
-      `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(item.mountPath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && chown ${user}:${user} ${parent} ${item.mountPath} && chmod 600 ${item.mountPath} && \\`,
+      `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && chown ${user}:${user} ${parent} ${target} && chmod 600 ${target} && \\`,
     ];
   });
 }
 
-function buildSshKeygenLine(user: string, home: string): string[] {
-  const sshDir = `${home}/.ssh`;
+function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
+  const sshDir = workspace.attachments.userSshState.mountRoot;
   const keyPath = `${sshDir}/id_ed25519`;
   if (user === "root") {
     return [
@@ -97,10 +138,11 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
     return [
       "          set -eux && \\",
       ...buildAgentDirsLine(user, home),
+      ...buildAttachmentAssemblyLines(workspace),
       ...(user === "root" ? buildRootProfileFixLine(home) : []),
       ...buildGitConfigLines(workspace),
-      ...buildAuthCopyLines(user, workspace.runtime.authFiles),
-      ...buildSshKeygenLine(user, home),
+      ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
+      ...buildSshKeygenLine(user, workspace),
       ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
       "          touch /tmp/.ready && sleep infinity",
     ];
@@ -108,9 +150,10 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
   return [
     "          set -eux && \\",
     ...buildAgentDirsLine(user, home),
+    ...buildAttachmentAssemblyLines(workspace),
     `          apt-get update && apt-get install -y openssh-client ${workspace.runtime.aptPackages.join(" ")} && \\`,
-    ...buildAuthCopyLines(user, workspace.runtime.authFiles),
-    ...buildSshKeygenLine(user, home),
+    ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
+    ...buildSshKeygenLine(user, workspace),
     ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
     "          touch /tmp/.ready && sleep infinity",
   ];
@@ -149,6 +192,14 @@ function buildEnvLines(workspace: WorkspaceSpec): string[] {
     envLines.push("        - name: PASEO_HOME");
     envLines.push(`          value: ${q(`${workspace.runtime.home}/.paseo`)}`);
   }
+  envLines.push("        - name: AGENTCTL_WORKSPACE_DATA_ROOT");
+  envLines.push(`          value: ${q(workspace.attachments.workspaceData.mountRoot)}`);
+  envLines.push("        - name: AGENTCTL_WORKSPACE_RUNTIME_ROOT");
+  envLines.push(`          value: ${q(workspace.attachments.workspaceRuntimeState.mountRoot)}`);
+  envLines.push("        - name: AGENTCTL_USER_IDENTITY_ROOT");
+  envLines.push(`          value: ${q(workspace.attachments.userIdentityState.mountRoot)}`);
+  envLines.push("        - name: AGENTCTL_USER_SSH_ROOT");
+  envLines.push(`          value: ${q(workspace.attachments.userSshState.mountRoot)}`);
   return envLines;
 }
 
@@ -170,13 +221,13 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     ].join("\n"),
   );
 
-  if (workspace.storage.persistState) {
+  if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
     docs.push(
       [
         "apiVersion: v1",
         "kind: PersistentVolumeClaim",
         "metadata:",
-        `  name: ${workspace.storage.claimName}`,
+        `  name: ${workspace.attachments.workspaceData.source.volumeRef ?? workspace.storage.claimName}`,
         `  namespace: ${workspace.identity.projectName}`,
         "spec:",
         "  accessModes:",
@@ -231,21 +282,42 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     }
   }
   deploymentLines.push("        volumeMounts:");
-  deploymentLines.push("        - name: project");
-  deploymentLines.push(`          mountPath: ${workspace.runtime.home}`);
+  deploymentLines.push("        - name: workspace-data");
+  deploymentLines.push(`          mountPath: ${workspace.attachments.workspaceData.mountRoot}`);
+  deploymentLines.push("        - name: workspace-runtime-state");
+  deploymentLines.push(`          mountPath: ${workspace.attachments.workspaceRuntimeState.mountRoot}`);
+  deploymentLines.push("        - name: user-identity-state");
+  deploymentLines.push(`          mountPath: ${workspace.attachments.userIdentityState.mountRoot}`);
+  deploymentLines.push("        - name: user-ssh-state");
+  deploymentLines.push(`          mountPath: ${workspace.attachments.userSshState.mountRoot}`);
+  deploymentLines.push("        - name: ephemeral-runtime");
+  deploymentLines.push(`          mountPath: ${workspace.attachments.ephemeralRuntime.mountRoot}`);
   const envLines = buildEnvLines(workspace);
   if (envLines.length) {
     deploymentLines.push("        env:");
     deploymentLines.push(...envLines);
   }
   deploymentLines.push("      volumes:");
-  deploymentLines.push("      - name: project");
-  if (workspace.storage.persistState) {
+  deploymentLines.push("      - name: workspace-data");
+  if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
-    deploymentLines.push(`          claimName: ${workspace.storage.claimName}`);
+    deploymentLines.push(`          claimName: ${workspace.attachments.workspaceData.source.volumeRef ?? workspace.storage.claimName}`);
   } else {
     deploymentLines.push("        emptyDir: {}");
   }
+  deploymentLines.push("      - name: workspace-runtime-state");
+  if (workspace.attachments.workspaceRuntimeState.source.kind === "persistent-volume") {
+    deploymentLines.push("        persistentVolumeClaim:");
+    deploymentLines.push(`          claimName: ${workspace.attachments.workspaceRuntimeState.source.volumeRef ?? workspace.storage.claimName}`);
+  } else {
+    deploymentLines.push("        emptyDir: {}");
+  }
+  deploymentLines.push("      - name: user-identity-state");
+  deploymentLines.push("        emptyDir: {}");
+  deploymentLines.push("      - name: user-ssh-state");
+  deploymentLines.push("        emptyDir: {}");
+  deploymentLines.push("      - name: ephemeral-runtime");
+  deploymentLines.push("        emptyDir: {}");
   docs.push(deploymentLines.join("\n"));
 
   if (workspace.connectivity.exposeService && workspace.connectivity.servicePorts.length) {
