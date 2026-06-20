@@ -1,4 +1,4 @@
-Repo-local credential staging for `scripts/agentctl.ts`.
+Repo-local credential staging for `scripts/polaris.ts`.
 
 Expected files:
 

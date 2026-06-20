@@ -2,7 +2,7 @@
 
 ## Active Scripts
 
-- `scripts/agentctl.ts`: unified TypeScript entrypoint
+- `scripts/polaris.ts`: unified TypeScript entrypoint
 - `scripts/operations/setup-k3s-kata-gvisor.sh`
 - `scripts/operations/setup-k3s-kubevirt.sh`
 - `scripts/operations/setup-k3s-kata-worker.sh`
@@ -24,7 +24,7 @@
 The following personal environment setup scripts were removed because they are
 not part of the current workspace orchestration path:
 
-- `scripts/agentctl.py`
+- legacy Python control-plane entrypoint
 - `scripts/setup-alacritty.sh`
 - `scripts/setup-nvim.sh`
 - `scripts/setup-tmux.sh`

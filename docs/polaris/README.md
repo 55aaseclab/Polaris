@@ -1,28 +1,28 @@
-# agentctl
+# Polaris
 
-`agentctl` is now rooted at:
+`polaris` is now rooted at:
 
 ```bash
-pnpm exec tsx scripts/agentctl.ts
+pnpm exec tsx scripts/polaris.ts
 ```
 
 ## Commands
 
 ```bash
-pnpm exec tsx scripts/agentctl.ts <project>
-pnpm exec tsx scripts/agentctl.ts render <project>
-pnpm exec tsx scripts/agentctl.ts status <project>
-pnpm exec tsx scripts/agentctl.ts reconcile <project>
-pnpm exec tsx scripts/agentctl.ts create <project>
-pnpm exec tsx scripts/agentctl.ts start <project>
-pnpm exec tsx scripts/agentctl.ts stop <project>
-pnpm exec tsx scripts/agentctl.ts restart <project>
-pnpm exec tsx scripts/agentctl.ts rebuild <project>
+pnpm exec tsx scripts/polaris.ts <project>
+pnpm exec tsx scripts/polaris.ts render <project>
+pnpm exec tsx scripts/polaris.ts status <project>
+pnpm exec tsx scripts/polaris.ts reconcile <project>
+pnpm exec tsx scripts/polaris.ts create <project>
+pnpm exec tsx scripts/polaris.ts start <project>
+pnpm exec tsx scripts/polaris.ts stop <project>
+pnpm exec tsx scripts/polaris.ts restart <project>
+pnpm exec tsx scripts/polaris.ts rebuild <project>
 ```
 
 ## Current Boundary
 
-- `scripts/agentctl.ts` is the operator entrypoint and source of truth.
+- `scripts/polaris.ts` is the operator entrypoint and source of truth.
 - Backend logic now runs directly through the TypeScript control plane.
 - `docker` is still intentionally preserved as a legacy backend boundary rather
   than fully reworked.
@@ -31,14 +31,14 @@ pnpm exec tsx scripts/agentctl.ts rebuild <project>
 
 ```bash
 pnpm exec tsc -p tsconfig.json --noEmit
-pnpm test:agentctl
-pnpm exec tsx scripts/agentctl.ts status morpheus
-pnpm exec tsx scripts/agentctl.ts render morpheus
+pnpm test:polaris
+pnpm exec tsx scripts/polaris.ts status morpheus
+pnpm exec tsx scripts/polaris.ts render morpheus
 ```
 
 ## Persistence Semantics
 
-`agentctl` now reasons about persistence through attachment classes rather than
+`polaris` now reasons about persistence through attachment classes rather than
 through a persisted runtime home:
 
 - `workspace-data`

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
 
-import { runCli } from "./agentctl/cli/main.js";
+import { runCli } from "./polaris/cli/main.js";
 
 await runCli(process.argv.slice(2));
