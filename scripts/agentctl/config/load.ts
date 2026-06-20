@@ -1,7 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import type { WorkspaceSpec, PlainEnvVar, AuthFile, ServicePort, WorkspaceAttachments, DurableAttachment } from "../core/workspace.js";
+import type {
+  WorkspaceSpec,
+  PlainEnvVar,
+  AuthFile,
+  ServicePort,
+  WorkspaceAttachments,
+  DurableAttachment,
+  DirectAttachmentConfig,
+  DirectDurableAttachmentConfig,
+  DirectEphemeralRuntimeConfig,
+} from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -44,6 +54,101 @@ function buildAttachment(
     mountRoot,
     durablePaths,
     source,
+  };
+}
+
+function normalizeDirectDurableAttachmentConfig(raw: unknown): DirectDurableAttachmentConfig | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const entry = raw as Record<string, unknown>;
+  return {
+    scope: entry.scope === "user" ? "user" : "workspace",
+    sharing: entry.sharing === "cross-workspace" ? "cross-workspace" : "exclusive",
+    mountRoot: String(entry.mount_root ?? ""),
+    durablePaths: Array.isArray(entry.durable_paths) ? entry.durable_paths.map((item) => String(item)) : [],
+    source: {
+      kind: String((entry.source as Record<string, unknown> | undefined)?.kind ?? "generated-material") as DirectDurableAttachmentConfig["source"]["kind"],
+      volumeRef: (entry.source as Record<string, unknown> | undefined)?.volume_ref ? String((entry.source as Record<string, unknown>).volume_ref) : undefined,
+      subPath: (entry.source as Record<string, unknown> | undefined)?.sub_path ? String((entry.source as Record<string, unknown>).sub_path) : undefined,
+      description: (entry.source as Record<string, unknown> | undefined)?.description ? String((entry.source as Record<string, unknown>).description) : undefined,
+    },
+  };
+}
+
+function normalizeDirectEphemeralRuntimeConfig(raw: unknown): DirectEphemeralRuntimeConfig | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const entry = raw as Record<string, unknown>;
+  return {
+    mountRoot: String(entry.mount_root ?? ""),
+    paths: Array.isArray(entry.paths) ? entry.paths.map((item) => String(item)) : [],
+    staleArtifacts: Array.isArray(entry.stale_artifacts) ? entry.stale_artifacts.map((item) => String(item)) : [],
+  };
+}
+
+function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const attachments = raw as Record<string, unknown>;
+  const workspaceData = normalizeDirectDurableAttachmentConfig(attachments["workspace-data"]);
+  const workspaceRuntimeState = normalizeDirectDurableAttachmentConfig(attachments["workspace-runtime-state"]);
+  const userIdentityState = normalizeDirectDurableAttachmentConfig(attachments["user-identity-state"]);
+  const userSshState = normalizeDirectDurableAttachmentConfig(attachments["user-ssh-state"]);
+  const ephemeralRuntime = normalizeDirectEphemeralRuntimeConfig(attachments["ephemeral-runtime"]);
+  if (!workspaceData || !workspaceRuntimeState || !userIdentityState || !userSshState || !ephemeralRuntime) {
+    return null;
+  }
+  return {
+    "workspace-data": workspaceData,
+    "workspace-runtime-state": workspaceRuntimeState,
+    "user-identity-state": userIdentityState,
+    "user-ssh-state": userSshState,
+    "ephemeral-runtime": ephemeralRuntime,
+  };
+}
+
+function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfig): WorkspaceAttachments {
+  return {
+    workspaceData: buildAttachment(
+      "workspace-data",
+      config["workspace-data"].scope,
+      config["workspace-data"].sharing,
+      config["workspace-data"].mountRoot,
+      config["workspace-data"].durablePaths,
+      config["workspace-data"].source,
+    ),
+    workspaceRuntimeState: buildAttachment(
+      "workspace-runtime-state",
+      config["workspace-runtime-state"].scope,
+      config["workspace-runtime-state"].sharing,
+      config["workspace-runtime-state"].mountRoot,
+      config["workspace-runtime-state"].durablePaths,
+      config["workspace-runtime-state"].source,
+    ),
+    userIdentityState: buildAttachment(
+      "user-identity-state",
+      config["user-identity-state"].scope,
+      config["user-identity-state"].sharing,
+      config["user-identity-state"].mountRoot,
+      config["user-identity-state"].durablePaths,
+      config["user-identity-state"].source,
+    ),
+    userSshState: buildAttachment(
+      "user-ssh-state",
+      config["user-ssh-state"].scope,
+      config["user-ssh-state"].sharing,
+      config["user-ssh-state"].mountRoot,
+      config["user-ssh-state"].durablePaths,
+      config["user-ssh-state"].source,
+    ),
+    ephemeralRuntime: {
+      mountRoot: config["ephemeral-runtime"].mountRoot,
+      paths: config["ephemeral-runtime"].paths,
+      staleArtifacts: config["ephemeral-runtime"].staleArtifacts,
+    },
   };
 }
 
@@ -196,14 +301,17 @@ export function loadWorkspace(project: string): WorkspaceSpec {
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
   const persistState = Boolean(agent.persist_state ?? true);
   const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
-  const attachments = translateLegacyAttachments({
-    projectName,
-    home,
-    persistState,
-    claimName,
-    authFiles,
-    backendKind,
-  });
+  const directAttachmentConfig = normalizeDirectAttachmentConfig(data.attachments);
+  const attachments = directAttachmentConfig
+    ? buildWorkspaceAttachmentsFromDirectConfig(directAttachmentConfig)
+    : translateLegacyAttachments({
+        projectName,
+        home,
+        persistState,
+        claimName,
+        authFiles,
+        backendKind,
+      });
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },

@@ -49,3 +49,53 @@ service:
   ports: []
   host: null
   path: /
+attachments:
+  workspace-data:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/project
+    durable_paths:
+    - /workspace/project
+    source:
+      kind: generated-material
+      volume_ref: null
+      description: ephemeral workspace storage for morph-base
+  workspace-runtime-state:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/state
+    durable_paths:
+    - /workspace/state/paseo
+    source:
+      kind: generated-material
+      volume_ref: null
+      sub_path: state
+      description: workspace runtime state for morph-base
+  user-identity-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /identity
+    durable_paths:
+    - /identity/codex
+    - /identity/claude
+    source:
+      kind: secret-material
+      description: user identity material sourced from spec auth files
+  user-ssh-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /ssh
+    durable_paths:
+    - /ssh
+    source:
+      kind: generated-material
+      description: user SSH material
+  ephemeral-runtime:
+    mount_root: /run/workspace
+    paths:
+    - /run/workspace/tmp
+    - /run/workspace/pids
+    - /run/workspace/sockets
+    stale_artifacts:
+    - /root/.paseo/paseo.pid
+    - /run/workspace/pids/paseo.pid

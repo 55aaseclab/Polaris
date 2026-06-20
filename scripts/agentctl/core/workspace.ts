@@ -5,6 +5,7 @@ export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state"
 export type AttachmentScope = "workspace" | "user";
 export type AttachmentSharing = "exclusive" | "cross-workspace";
 export type AttachmentSourceKind = "persistent-volume" | "secret-material" | "generated-material" | "legacy-backend";
+export type DirectAttachmentConfigKey = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
 
 export interface PlainEnvVar {
   name: string;
@@ -53,6 +54,33 @@ export interface DurableAttachment {
     subPath?: string;
     description?: string;
   };
+}
+
+export interface DirectDurableAttachmentConfig {
+  scope: AttachmentScope;
+  sharing: AttachmentSharing;
+  mountRoot: string;
+  durablePaths: string[];
+  source: {
+    kind: AttachmentSourceKind;
+    volumeRef?: string;
+    subPath?: string;
+    description?: string;
+  };
+}
+
+export interface DirectEphemeralRuntimeConfig {
+  mountRoot: string;
+  paths: string[];
+  staleArtifacts: string[];
+}
+
+export interface DirectAttachmentConfig {
+  "workspace-data": DirectDurableAttachmentConfig;
+  "workspace-runtime-state": DirectDurableAttachmentConfig;
+  "user-identity-state": DirectDurableAttachmentConfig;
+  "user-ssh-state": DirectDurableAttachmentConfig;
+  "ephemeral-runtime": DirectEphemeralRuntimeConfig;
 }
 
 export interface EphemeralRuntimeState {
