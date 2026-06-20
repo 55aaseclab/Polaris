@@ -288,7 +288,7 @@ kubectl -n kube-system delete serviceaccount headlamp-admin
 kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/headlamp/main/kubernetes-headlamp.yaml
 ```
 
-## `scripts/agentctl.py`
+## `scripts/agentctl.ts`
 
 Generate AI-native vault project config and manifests, and re-apply saved
 projects.
@@ -296,7 +296,7 @@ projects.
 ### Create
 
 ```bash
-python3 scripts/agentctl.py
+pnpm exec tsx scripts/agentctl.ts
 ```
 
 The wizard collects:
@@ -312,7 +312,7 @@ The wizard collects:
 - optional NodePort exposure
 
 Memory and storage entries use Kubernetes binary units such as `Mi`, `Gi`, and
-`Ti`. If you enter a bare number in the wizard, `scripts/agentctl.py`
+`Ti`. If you enter a bare number in the wizard, `scripts/agentctl.ts`
 normalizes it to `Gi` before saving the canonical config and rendered manifest.
 
 ### Agent defaults
@@ -348,7 +348,7 @@ agents/
 ### Apply A Saved Project
 
 ```bash
-python3 scripts/agentctl.py <project>
+pnpm exec tsx scripts/agentctl.ts <project>
 ```
 
 This reloads `agents/<project>.agent.yaml`, re-renders `agents/<project>.yaml`,

@@ -1,0 +1,3 @@
+backend:
+  kind: pod
+  profile: kata-qemu

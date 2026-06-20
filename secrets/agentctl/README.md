@@ -1,4 +1,4 @@
-Repo-local credential staging for `scripts/agentctl.py`.
+Repo-local credential staging for `scripts/agentctl.ts`.
 
 Expected files:
 
