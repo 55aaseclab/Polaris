@@ -9,8 +9,8 @@ import argparse
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_PATH = REPO_ROOT / "config" / "kubevirt" / "morpheus-vm-cloudinit-secret.yaml"
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "config" / "kubevirt" / ".generated" / "morpheus-vm-cloudinit-secret.yaml"
+TEMPLATE_PATH = REPO_ROOT / "config" / "generated" / "kubevirt" / "morpheus-vm-cloudinit-secret.yaml"
+DEFAULT_OUTPUT_PATH = REPO_ROOT / "config" / "generated" / "kubevirt" / "morpheus-vm-cloudinit-secret.yaml"
 CODEX_AUTH_PATH = REPO_ROOT / "secrets" / "agentctl" / "codex" / "auth.json"
 CLAUDE_SETTINGS_PATH = REPO_ROOT / "secrets" / "agentctl" / "claude" / "settings.json"
 

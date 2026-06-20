@@ -7,14 +7,31 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     throw new Error("Workspace project name is required");
   }
 
+  if (workspace.attachments.workspaceData.scope !== "workspace" || workspace.attachments.workspaceData.sharing !== "exclusive") {
+    throw new Error("workspace-data must remain workspace-scoped and non-shared");
+  }
+  if (workspace.attachments.workspaceRuntimeState.scope !== "workspace" || workspace.attachments.workspaceRuntimeState.sharing !== "exclusive") {
+    throw new Error("workspace-runtime-state must remain workspace-scoped and non-shared");
+  }
+  if (workspace.attachments.userIdentityState.scope !== "user" || workspace.attachments.userIdentityState.sharing !== "cross-workspace") {
+    throw new Error("user-identity-state must remain user-scoped and cross-workspace");
+  }
+  if (workspace.attachments.userSshState.scope !== "user" || workspace.attachments.userSshState.sharing !== "cross-workspace") {
+    throw new Error("user-ssh-state must remain user-scoped and cross-workspace");
+  }
+  if (workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes("paseo")) === false) {
+    throw new Error("workspace-runtime-state must contain the durable paseo state path");
+  }
+  if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/")) === false) {
+    throw new Error("user-identity-state must expose identity attachment roots");
+  }
+  if (workspace.attachments.userSshState.durablePaths.some((entry) => entry === "/ssh") === false) {
+    throw new Error("user-ssh-state must expose the shared SSH attachment root");
+  }
+
   if (workspace.backend.kind === "pod") {
     if (!POD_PROFILES.has(workspace.backend.profile)) {
       throw new Error(`Workspace backend 'pod' requires a supported profile; got ${workspace.backend.profile}`);
-    }
-    for (const authFile of workspace.runtime.authFiles) {
-      if (authFile.mountPath.includes("/workspace/")) {
-        throw new Error(`Workspace backend 'pod' cannot mount auth file ${authFile.key} under /workspace`);
-      }
     }
     for (const envVar of workspace.runtime.plainEnvVars) {
       if (envVar.value.includes("/workspace/")) {

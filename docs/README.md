@@ -1,19 +1,10 @@
 # Documentation
 
-This directory is the canonical documentation entrypoint for `geek-env`.
+This directory is the canonical documentation entrypoint for `Polaris`.
 
 ## Current Docs
 
-- [agentctl.md](./agentctl.md): TypeScript `agentctl` control plane, lifecycle commands, migration notes
-- [runtime-layout.md](./runtime-layout.md): current config/spec/generated layout and backend model
-- [scripts.md](./scripts.md): active script inventory, removed legacy scripts, and compatibility notes
-
-## Legacy Root Documents
-
-These documents still exist at the repo root and should be folded into `docs/`
-incrementally rather than duplicated blindly:
-
-- [`../README.k3s-kata.md`](../README.k3s-kata.md)
-- [`../README.alacritty.md`](../README.alacritty.md)
-- [`../README.tmux.md`](../README.tmux.md)
-- [`../README.vim.md`](../README.vim.md)
+- [agentctl/README.md](./agentctl/README.md): Polaris control plane and runtime model
+- [operations/README.md](./operations/README.md): host and cluster operations, runtime setup, and operational scripts
+- [tooling/workspace/README.md](./tooling/workspace/README.md): optional tools installed inside a workspace
+- [tooling/host/README.md](./tooling/host/README.md): host-side companion tooling

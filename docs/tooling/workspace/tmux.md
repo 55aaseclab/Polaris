@@ -5,7 +5,7 @@ Terminal multiplexer configured with Catppuccin Mocha theme and vi copy mode.
 ## Install
 
 ```bash
-./install.sh tmux
+bash scripts/tooling/workspace/install-tmux.sh
 ```
 
 The config is copied to `~/.tmux.conf`. Plugins are managed by TPM and installed automatically.

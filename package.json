@@ -1,5 +1,5 @@
 {
-  "name": "geek-env-agentctl",
+  "name": "polaris-agentctl",
   "private": true,
   "type": "module",
   "scripts": {

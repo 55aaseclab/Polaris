@@ -5,7 +5,7 @@ GPU-accelerated terminal emulator configured with Catppuccin Mocha theme, DejaVu
 ## Install
 
 ```bash
-./install.sh alacritty
+bash scripts/tooling/host/install-alacritty.sh
 ```
 
 The setup script auto-detects your display resolution and sets an appropriate font size. The config is copied (not symlinked) to `~/.config/alacritty/alacritty.toml`.

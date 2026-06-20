@@ -46,7 +46,8 @@ export class DockerDriver implements BackendDriver {
       },
       details: {
         driver: "docker",
-        mode: "legacy"
+        mode: "legacy",
+        attachmentModel: "workspace-data, workspace-runtime-state, user-identity-state, user-ssh-state"
       }
     };
   }
