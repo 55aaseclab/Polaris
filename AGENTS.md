@@ -3,17 +3,17 @@
 Use this flow:
 
 ```text
-scripts/agentctl.ts -> config/specs/<backend-or-layer>/... -> config/generated/<backend>/<project>.yaml -> apply/spec handoff
+scripts/polaris.ts -> config/specs/<backend-or-layer>/... -> config/generated/<backend>/<project>.yaml -> apply/spec handoff
 ```
 
-- `scripts/agentctl.ts` is the unified entrypoint and source of truth.
+- `scripts/polaris.ts` is the unified entrypoint and source of truth.
 - `config/specs/**` holds saved workspace intent and backend/profile-specific config.
 - `config/generated/<backend>/<project>.yaml` is generated output.
 
 Rules:
 
-- Change `scripts/agentctl.ts` and `scripts/agentctl/**` first.
-- Reapply with `pnpm exec tsx scripts/agentctl.ts <project>`.
+- Change `scripts/polaris.ts` and `scripts/polaris/**` first.
+- Reapply with `pnpm exec tsx scripts/polaris.ts <project>`.
 - Do not hand-edit live Kubernetes resources as the final fix.
 - Do not treat generated manifests as hand-maintained files.
 - When persisted state causes restart issues, clean only stale runtime artifacts, not durable state.
@@ -47,5 +47,5 @@ Validate with:
 ```bash
 pnpm install
 pnpm exec tsc -p tsconfig.json --noEmit
-pnpm exec tsx scripts/agentctl.ts <project>
+pnpm exec tsx scripts/polaris.ts <project>
 ```

@@ -77,4 +77,4 @@ services:
       - "31679:8081"
     volumes:
       - /var/lib/kubelet/plugins/kubernetes.io/csi/driver.longhorn.io/083db50c9d2e0df8f14538d0b1861805375f1344a8ce178164e56a34af938d14/globalmount:/root
-      - ${MORPHEUS_SECRETS_DIR:-./secrets/agentctl}:/bootstrap-secrets:ro
+      - ${MORPHEUS_SECRETS_DIR:-./secrets/polaris}:/bootstrap-secrets:ro

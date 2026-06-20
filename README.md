@@ -22,13 +22,13 @@ each guest or sandbox.
 grep -c vmx /proc/cpuinfo
 sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
 python3 -m pip install -r requirements.txt
-pnpm exec tsx scripts/agentctl.ts
+pnpm exec tsx scripts/polaris.ts
 ```
 
 For tool-specific usage details, start with:
 
 - [docs/README.md](docs/README.md)
-- [docs/agentctl/README.md](docs/agentctl/README.md)
+- [docs/polaris/README.md](docs/polaris/README.md)
 - [docs/operations/README.md](docs/operations/README.md)
 
 If you want to bypass `k3s` entirely and run Morpheus as a plain Docker
@@ -42,7 +42,7 @@ This starts `ttl.sh/morpheus-prebuilt-1781875178:24h` with:
 
 - host root state bound at the Longhorn global mount for `morpheus-project` by default
 - optional override: `MORPHEUS_ROOT_DIR=/path/to/root-state`
-- repo-local secrets bound at `${MORPHEUS_SECRETS_DIR:-./secrets/agentctl}`
+- repo-local secrets bound at `${MORPHEUS_SECRETS_DIR:-./secrets/polaris}`
 - ports `31677`, `31678`, `31679` mapped to `6767`, `8080`, `8081`
 
 If you want to add full VM workloads alongside the existing container
@@ -77,8 +77,8 @@ If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
 ```bash
 pnpm exec tsc -p tsconfig.json --noEmit
 bash -n scripts/operations/setup-k3s-kata-gvisor.sh
-pnpm test:agentctl
-./tests/smoke-agentctl-paseo.sh
+pnpm test:polaris
+./tests/smoke-polaris-paseo.sh
 ```
 
 If you change command flow or generated manifests, update the relevant docs

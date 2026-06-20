@@ -11,8 +11,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = REPO_ROOT / "config" / "generated" / "kubevirt" / "morpheus-vm-cloudinit-secret.yaml"
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "config" / "generated" / "kubevirt" / "morpheus-vm-cloudinit-secret.yaml"
-CODEX_AUTH_PATH = REPO_ROOT / "secrets" / "agentctl" / "codex" / "auth.json"
-CLAUDE_SETTINGS_PATH = REPO_ROOT / "secrets" / "agentctl" / "claude" / "settings.json"
+CODEX_AUTH_PATH = REPO_ROOT / "secrets" / "polaris" / "codex" / "auth.json"
+CLAUDE_SETTINGS_PATH = REPO_ROOT / "secrets" / "polaris" / "claude" / "settings.json"
 
 
 def read_required(path: Path) -> str:

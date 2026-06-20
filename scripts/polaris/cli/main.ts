@@ -11,7 +11,7 @@ import { reconcileCommand } from "./commands/reconcile.js";
 const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm exec tsx scripts/agentctl.ts <project> | <create|start|stop|restart|rebuild|apply|render|status|reconcile> <project>");
+  throw new Error("Usage: pnpm exec tsx scripts/polaris.ts <project> | <create|start|stop|restart|rebuild|apply|render|status|reconcile> <project>");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
