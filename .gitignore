@@ -13,9 +13,11 @@ nohup.out
 # Python caches
 __pycache__/
 *.pyc
+node_modules/
 
 # K3S kata configs
 agents
+config/state/
 
 # Repo-local agent credentials
 secrets/agentctl/**

@@ -22,11 +22,13 @@ each guest or sandbox.
 grep -c vmx /proc/cpuinfo
 sudo bash scripts/setup-k3s-kata-gvisor.sh
 python3 -m pip install -r requirements.txt
-python3 scripts/agentctl.py
+pnpm exec tsx scripts/agentctl.ts
 ```
 
-For tool-specific usage details, see:
+For tool-specific usage details, start with:
 
+- [`docs/README.md`](docs/README.md)
+- [`docs/agentctl.md`](docs/agentctl.md)
 - [`README.k3s-kata.md`](README.k3s-kata.md)
 
 If you want to bypass `k3s` entirely and run Morpheus as a plain Docker
@@ -73,15 +75,15 @@ If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
 - validate with:
 
 ```bash
-python3 -m py_compile scripts/agentctl.py
+pnpm exec tsc -p tsconfig.json --noEmit
 bash -n scripts/setup-k3s-kata-gvisor.sh
-python3 -m unittest tests/test_agentctl_user_story.py
-python3 -m unittest tests/test_agentctl_k3s_integration.py
+pnpm test:agentctl
 ./tests/smoke-agentctl-paseo.sh
 ```
 
-If you change command flow or generated manifests, update the relevant usage
-docs under the README files in the repo root.
+If you change command flow or generated manifests, update the relevant docs
+under `docs/` first, then any remaining repo-root READMEs that still carry
+legacy material.
 
 ## License
 
