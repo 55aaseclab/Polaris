@@ -1,5 +1,6 @@
+import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
-import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
 import { runCommand } from "../../utils/shell.js";
 import { renderAndWritePodWorkspace } from "./render.js";
 
@@ -37,32 +38,107 @@ export class PodDriver implements BackendDriver {
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
-  async status(workspace: WorkspaceSpec): Promise<WorkspaceStatus> {
+  async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
+    const deployment = spawnSync(
+      "kubectl",
+      ["-n", workspace.identity.projectName, "get", "deployment", workspace.identity.projectName, "-o", "json"],
+      { encoding: "utf8" },
+    );
+    if (deployment.status !== 0 || !deployment.stdout) {
+      return {
+        backend: {
+          kind: workspace.backend.kind,
+          exists: false,
+          running: false,
+          detail: "deployment not found",
+        },
+        attachments: {},
+        runtimeAssembly: {},
+        daemon: {},
+        services: {
+          declared: workspace.connectivity.servicePorts.length,
+          observed: 0,
+          detail: "no services observed",
+        },
+      };
+    }
+
+    const podNameResult = spawnSync(
+      "kubectl",
+      ["-n", workspace.identity.projectName, "get", "pod", "-l", `app=${workspace.identity.projectName}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      { encoding: "utf8" },
+    );
+    const podName = (podNameResult.stdout || "").trim();
+    const running = Boolean(podName);
+
+    const execCheck = (command: string): boolean => {
+      if (!podName) return false;
+      const result = spawnSync(
+        "kubectl",
+        ["-n", workspace.identity.projectName, "exec", podName, "--", "sh", "-lc", command],
+        { encoding: "utf8" },
+      );
+      return result.status === 0;
+    };
+
+    const observedServices = workspace.connectivity.servicePorts.length
+      ? spawnSync(
+          "kubectl",
+          ["-n", workspace.identity.projectName, "get", "svc", workspace.identity.projectName, "-o", "jsonpath={.metadata.name}"],
+          { encoding: "utf8" },
+        )
+      : { status: 0, stdout: "", stderr: "" };
+    const serviceCount = (observedServices.stdout || "").trim() ? 1 : 0;
+
     return {
-      project: workspace.identity.projectName,
-      backend: { kind: workspace.backend.kind, profile: workspace.backend.profile },
-      lifecycleAction: "status",
-      state: "saved",
-      health: {
-        backendLiveness: "unknown",
-        workspaceReadiness: "unknown",
-        daemonReadiness: workspace.health.requiresDaemon ? "expected" : "not-applicable"
+      backend: {
+        kind: workspace.backend.kind,
+        exists: true,
+        running,
+        detail: podName ? `pod/${podName}` : "deployment exists but pod is not running",
       },
-      details: {
-        driver: "pod",
-        readinessMode: workspace.health.readinessMode
-      }
+      attachments: {
+        workspaceData: { observed: execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: workspace.attachments.workspaceData.mountRoot },
+        workspaceRuntimeState: { observed: execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: workspace.attachments.workspaceRuntimeState.mountRoot },
+        userIdentityState: { observed: execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: workspace.attachments.userIdentityState.mountRoot },
+        userSshState: { observed: execCheck(`test -d ${workspace.attachments.userSshState.mountRoot}`), detail: workspace.attachments.userSshState.mountRoot },
+      },
+      runtimeAssembly: {
+        home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
+        projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/Morpheus`), detail: `${workspace.runtime.home}/workspace` },
+        paseo: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: `${workspace.runtime.home}/.paseo` },
+        codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
+        claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
+        ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
+      },
+      daemon: {
+        paseo: workspace.health.requiresDaemon
+          ? { observed: execCheck("test -f /tmp/.ready"), detail: "/tmp/.ready" }
+          : { observed: true, detail: "daemon not required" },
+      },
+      services: {
+        declared: workspace.connectivity.servicePorts.length ? 1 : 0,
+        observed: serviceCount,
+        detail: `observed ${serviceCount} service objects`,
+      },
     };
   }
 
-  async reconcile(workspace: WorkspaceSpec): Promise<WorkspaceStatus> {
-    return {
-      ...(await this.status(workspace)),
-      lifecycleAction: "reconcile",
-      details: {
-        driver: "pod",
-        reconcileScope: "stale-artifacts + structural-invariants"
+  async executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void> {
+    for (const action of plan.actions) {
+      if (action.kind === "render") {
+        renderAndWritePodWorkspace(workspace);
+        continue;
       }
-    };
+      if (action.kind === "apply") {
+        const outputPath = renderAndWritePodWorkspace(workspace);
+        runCommand("kubectl", ["apply", "-f", outputPath]);
+        continue;
+      }
+      if (action.kind === "restart-runtime") {
+        runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
+        continue;
+      }
+    }
   }
 }

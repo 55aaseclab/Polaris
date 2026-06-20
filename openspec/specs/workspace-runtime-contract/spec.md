@@ -4,7 +4,7 @@
 TBD - created by archiving change coder-inspired-workspace-orchestration. Update Purpose after archive.
 ## Requirements
 ### Requirement: Workspace runtime SHALL classify managed filesystem and process state
-The system SHALL classify managed workspace runtime state into two categories: minimal runtime invariants and stale runtime artifacts. Durable persistence semantics MUST be defined through attachment classes rather than through the runtime contract.
+The system SHALL classify managed workspace runtime state into two categories: minimal runtime invariants and stale runtime artifacts. Durable persistence semantics MUST be defined through attachment classes rather than through the runtime contract, and these runtime concerns SHALL feed into drift detection and reconcile planning rather than only static validation.
 
 #### Scenario: Durable attachments are not defined by runtime-path persistence
 - **WHEN** the control plane defines durable state semantics
