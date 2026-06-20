@@ -6,6 +6,7 @@ import { loadWorkspace } from "../scripts/polaris/config/load.js";
 import { getBackendDriver } from "../scripts/polaris/backends/index.js";
 import { writeWorkspaceStatus } from "../scripts/polaris/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/polaris/backends/pod/render.js";
+import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/polaris/core/runtime-controller.js";
 
 test("loadWorkspace normalizes morpheus pod config through the TypeScript control plane", () => {
   const workspace = loadWorkspace("morpheus");
@@ -95,4 +96,28 @@ test("direct attachment config is present in migrated saved specs", () => {
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
   assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
+});
+
+test("pod backend returns structured observations", async () => {
+  const workspace = loadWorkspace("morpheus");
+  const driver = getBackendDriver("pod");
+  const observation = await driver.inspect(workspace);
+  assert.equal(observation.backend.kind, "pod");
+  assert.ok("workspaceData" in observation.attachments);
+  assert.ok("projectRoot" in observation.runtimeAssembly);
+  assert.ok("paseo" in observation.daemon);
+});
+
+test("runtime controller computes status and reconcile plan from observations", async () => {
+  const workspace = loadWorkspace("morpheus");
+  const driver = getBackendDriver("pod");
+  const observation = await driver.inspect(workspace);
+  const drift = computeWorkspaceDrift(workspace, observation);
+  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+  const plan = buildReconcilePlan(workspace, drift);
+
+  assert.equal(Array.isArray(drift.items), true);
+  assert.equal(status.backend.kind, "pod");
+  assert.equal(status.lifecycleAction, "status");
+  assert.equal(Array.isArray(plan.actions), true);
 });

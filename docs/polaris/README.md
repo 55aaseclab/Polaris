@@ -61,3 +61,16 @@ The primary saved-spec model is now attachment-based:
 
 Legacy path-centric persistence fields remain compatibility-only and are
 translated only when direct attachment declarations are absent.
+
+## Runtime Controller
+
+Polaris now treats runtime control as a control-plane pipeline:
+
+- backend observation
+- drift computation
+- status synthesis
+- reconcile planning
+- backend action execution
+
+`status` and `reconcile` are therefore not thin backend calls anymore; they are
+control-plane judgments built from backend observations.

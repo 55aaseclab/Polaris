@@ -1,5 +1,5 @@
 import type { BackendDriver } from "../types.js";
-import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
 
 export class DockerDriver implements BackendDriver {
   readonly kind = "docker" as const;
@@ -32,27 +32,31 @@ export class DockerDriver implements BackendDriver {
     throw new Error("Workspace backend 'docker' is preserved as legacy material and is not applied by the TypeScript control plane yet");
   }
 
-  async status(workspace: WorkspaceSpec): Promise<WorkspaceStatus> {
+  async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
     return {
-      project: workspace.identity.projectName,
-      backend: { kind: workspace.backend.kind, profile: workspace.backend.profile },
-      lifecycleAction: "status",
-      state: "unsupported",
-      health: {
-        backendLiveness: "legacy",
-        workspaceReadiness: "unsupported",
-        daemonReadiness: "unknown",
-        reason: "docker backend remains packaged as legacy material during migration"
+      backend: {
+        kind: workspace.backend.kind,
+        exists: false,
+        running: false,
+        detail: "docker backend remains legacy-only during migration",
       },
-      details: {
-        driver: "docker",
-        mode: "legacy",
-        attachmentModel: "workspace-data, workspace-runtime-state, user-identity-state, user-ssh-state"
-      }
+      attachments: {
+        workspaceData: { observed: false, detail: "legacy docker backend does not expose attachment observations yet" },
+        workspaceRuntimeState: { observed: false, detail: "legacy docker backend does not expose attachment observations yet" },
+        userIdentityState: { observed: false, detail: "legacy docker backend does not expose attachment observations yet" },
+        userSshState: { observed: false, detail: "legacy docker backend does not expose attachment observations yet" },
+      },
+      runtimeAssembly: {},
+      daemon: {},
+      services: {
+        declared: workspace.connectivity.servicePorts.length ? 1 : 0,
+        observed: 0,
+        detail: "legacy docker backend not inspected",
+      },
     };
   }
 
-  async reconcile(workspace: WorkspaceSpec): Promise<WorkspaceStatus> {
-    return this.status(workspace);
+  async executeReconcilePlan(_workspace: WorkspaceSpec, _plan: ReconcilePlan): Promise<void> {
+    throw new Error("Workspace backend 'docker' cannot execute reconcile plans yet");
   }
 }

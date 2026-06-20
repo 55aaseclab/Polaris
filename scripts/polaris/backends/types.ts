@@ -1,4 +1,4 @@
-import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../core/workspace.js";
 
 export interface BackendDriver {
   readonly kind: WorkspaceSpec["backend"]["kind"];
@@ -9,6 +9,6 @@ export interface BackendDriver {
   rebuild(workspace: WorkspaceSpec): Promise<void>;
   render(workspace: WorkspaceSpec): Promise<void>;
   apply(workspace: WorkspaceSpec): Promise<void>;
-  status(workspace: WorkspaceSpec): Promise<WorkspaceStatus>;
-  reconcile(workspace: WorkspaceSpec): Promise<WorkspaceStatus>;
+  inspect(workspace: WorkspaceSpec): Promise<BackendObservation>;
+  executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void>;
 }

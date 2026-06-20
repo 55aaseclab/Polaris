@@ -165,6 +165,7 @@ export interface WorkspaceStatus {
   backend: {
     kind: string;
     profile: string;
+    instanceState?: "missing" | "created" | "running" | "stopped" | "degraded" | "unsupported";
   };
   lifecycleAction: LifecycleAction;
   state: "saved" | "not-applied" | "degraded" | "ready" | "unsupported";
@@ -175,4 +176,83 @@ export interface WorkspaceStatus {
     reason?: string;
   };
   details: Record<string, string | undefined>;
+  drift?: WorkspaceDrift;
+  attachments?: Record<string, CheckStatus>;
+  runtimeAssembly?: Record<string, CheckStatus>;
+  daemon?: Record<string, CheckStatus>;
+}
+
+export interface ObservationItem {
+  observed: boolean;
+  detail?: string;
+}
+
+export interface CheckStatus {
+  state: "ok" | "missing" | "drifted" | "unknown";
+  detail?: string;
+}
+
+export interface BackendObservation {
+  backend: {
+    kind: BackendKind;
+    exists: boolean;
+    running: boolean;
+    detail?: string;
+  };
+  attachments: {
+    workspaceData?: ObservationItem;
+    workspaceRuntimeState?: ObservationItem;
+    userIdentityState?: ObservationItem;
+    userSshState?: ObservationItem;
+  };
+  runtimeAssembly: {
+    home?: ObservationItem;
+    projectRoot?: ObservationItem;
+    paseo?: ObservationItem;
+    codex?: ObservationItem;
+    claude?: ObservationItem;
+    ssh?: ObservationItem;
+  };
+  daemon: {
+    paseo?: ObservationItem;
+  };
+  services: {
+    declared?: number;
+    observed?: number;
+    detail?: string;
+  };
+}
+
+export interface DriftItem {
+  kind: "backend" | "attachment" | "runtime-assembly" | "daemon" | "service";
+  target: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+}
+
+export interface WorkspaceDrift {
+  items: DriftItem[];
+  hasErrors: boolean;
+  hasWarnings: boolean;
+}
+
+export interface ReconcileAction {
+  kind:
+    | "render"
+    | "apply"
+    | "restart-runtime"
+    | "repair-runtime-assembly"
+    | "clean-ephemeral-runtime"
+    | "report-unrecoverable-drift";
+  target?: string;
+  reason?: string;
+}
+
+export interface ReconcilePlan {
+  project: string;
+  backend: string;
+  safe: boolean;
+  requiresRestart: boolean;
+  destructive: boolean;
+  actions: ReconcileAction[];
 }

@@ -76,3 +76,19 @@ config/
 - Backend implementations may still realize the same attachment classes with
   different physical mount primitives, but they are expected to preserve the
   same scope and lifecycle semantics.
+
+## Runtime Controller Pipeline
+
+Polaris is moving toward a runtime-controller model:
+
+```text
+WorkspaceSpec
+  -> BackendObservation
+  -> WorkspaceDrift
+  -> WorkspaceStatus
+  -> ReconcilePlan
+  -> Backend action execution
+```
+
+This makes live workspace truth a control-plane concern rather than a thin
+backend-local status response.
