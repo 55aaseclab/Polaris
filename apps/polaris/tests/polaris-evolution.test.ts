@@ -164,3 +164,100 @@ test("curator records promotion, suppression, and decay decisions with explainab
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("evolution store filters, archives, and summarizes artifacts across scopes", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-evolution-filters-"));
+  const dbPath = path.join(tempDir, "store.db");
+  const store = await EvolutionStore.open(dbPath);
+  try {
+    const now = new Date().toISOString();
+    store.upsertArtifact({
+      id: "workspace-1",
+      workspaceId: "morpheus",
+      userProfileId: "user-1",
+      kind: "workspace-playbook",
+      scope: "workspace",
+      title: "Verifier workflow",
+      content: "Run verifier before retrying.",
+      confidence: 0.9,
+      status: "active",
+      sourceSessionId: "session-1",
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        retrieval: { reasons: ["workspace-scoped"] },
+        explainability: { existsBecause: "Captured from a successful retry flow." },
+        curator: { action: "promoted", reason: "high confidence" },
+      },
+    });
+    store.upsertArtifact({
+      id: "user-1-artifact",
+      workspaceId: "morpheus",
+      userProfileId: "user-1",
+      kind: "lesson",
+      scope: "user",
+      title: "User preference",
+      content: "Prefer concise reviews.",
+      confidence: 0.8,
+      status: "active",
+      sourceSessionId: "session-2",
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        explainability: { suppressedBecause: "not actually suppressed" },
+      },
+    });
+    store.upsertArtifact({
+      id: "other-user-artifact",
+      workspaceId: "morpheus",
+      userProfileId: "user-2",
+      kind: "lesson",
+      scope: "user",
+      title: "Other user secret",
+      content: "Should stay hidden",
+      confidence: 0.7,
+      status: "active",
+      sourceSessionId: "session-3",
+      createdAt: now,
+      updatedAt: now,
+      metadata: {},
+    });
+
+    const filtered = store.queryArtifacts({
+      workspaceId: "morpheus",
+      userProfileId: "user-1",
+      kinds: ["workspace-playbook"],
+      text: "verifier",
+      limit: 5,
+    });
+    assert.deepEqual(filtered.map((artifact) => artifact.id), ["workspace-1"]);
+
+    const noUserSummary = store.summarize("morpheus");
+    assert.equal(noUserSummary.activeUserArtifacts, 0);
+
+    const summary = store.summarize("morpheus", "user-1");
+    assert.equal(summary.artifactCount, 3);
+    assert.equal(summary.activeWorkspaceArtifacts, 1);
+    assert.equal(summary.activeUserArtifacts, 1);
+    assert.ok(summary.latestTitles.includes("Verifier workflow"));
+    const latest = summary.latestArtifacts.find((artifact) => artifact.title === "Verifier workflow");
+    assert.deepEqual(latest?.whyRetrieved, ["workspace-scoped"]);
+    assert.equal(latest?.whyExists, "Captured from a successful retry flow.");
+    assert.equal(latest?.curatorAction, "promoted");
+    assert.equal(latest?.curatorReason, "high confidence");
+
+    store.archiveArtifacts([]);
+    store.archiveArtifacts(["workspace-1"]);
+    const afterArchive = store.queryArtifacts({
+      workspaceId: "morpheus",
+      userProfileId: "user-1",
+      limit: 10,
+    });
+    assert.equal(afterArchive.some((artifact) => artifact.id === "workspace-1"), false);
+    assert.equal(afterArchive.some((artifact) => artifact.id === "user-1-artifact"), true);
+    assert.equal(afterArchive.some((artifact) => artifact.id === "other-user-artifact"), false);
+  } finally {
+    store.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

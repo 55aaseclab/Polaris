@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { runCli } from "../scripts/cli/main.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 
 function getStdoutCaptureQueue(): Promise<void> {

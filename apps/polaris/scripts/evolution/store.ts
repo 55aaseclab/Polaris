@@ -91,6 +91,7 @@ export class EvolutionStore {
 
   flush(): void {
     const data = this.db.export();
+    ensureParentDir(this.dbPath);
     fs.writeFileSync(this.dbPath, Buffer.from(data));
   }
 
