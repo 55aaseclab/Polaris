@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SOURCE_CONFIG_DIR="$REPO_ROOT/config/host-tooling/alacritty"
+SOURCE_CONFIG_DIR="$REPO_ROOT/config/tooling/host/alacritty"
 TARGET_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/alacritty"
 CONFIG_FILE="alacritty.toml"
 

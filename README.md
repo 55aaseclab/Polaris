@@ -47,17 +47,6 @@ Use $use-polaris to set up Polaris locally with Docker for project <project>.
 
 ## Install
 
-### Local Docker
-
-Use the Docker path when you want the shortest route from clone to running
-workspace.
-
-```bash
-pnpm install
-pnpm exec tsx scripts/polaris.ts create <project>
-pnpm exec tsx scripts/polaris.ts start <project>@docker
-```
-
 ### Kubernetes Pods
 
 Use the pod backend when you want stronger sandboxing and the existing k3s

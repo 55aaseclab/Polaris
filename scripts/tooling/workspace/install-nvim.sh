@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 DEFAULT_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_ROOT="${REPO_ROOT:-$DEFAULT_REPO_ROOT}"
-SOURCE_CONFIG_DIR="$REPO_ROOT/config/workspace-tooling/nvim"
+SOURCE_CONFIG_DIR="$REPO_ROOT/config/tooling/workspace/nvim"
 TARGET_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
 LAZY_DIR="$DATA_DIR/lazy/lazy.nvim"
