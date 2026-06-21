@@ -33,7 +33,6 @@ export interface WorkspaceProfile {
   name: string;
   assetBaseName: string;
   workspaceAlias?: string;
-  sshKeyComment: string;
   defaults: {
     runtime?: {
       baseImage?: string;
@@ -45,6 +44,18 @@ export interface WorkspaceProfile {
       path?: string;
     };
   };
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  secretsRoot: string;
+  ssh: {
+    mode: "managed-key" | "provided-key";
+    comment: string;
+  };
+  authFiles: AuthFile[];
 }
 
 export interface WorkspaceBackend {
@@ -178,6 +189,7 @@ export interface WorkspaceLifecycle {
 export interface WorkspaceSpec {
   identity: WorkspaceIdentity;
   profile: WorkspaceProfile;
+  userProfile: UserProfile;
   backend: WorkspaceBackend;
   storage: WorkspaceStorage;
   attachments: WorkspaceAttachments;

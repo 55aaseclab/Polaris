@@ -1,4 +1,5 @@
 project: morph-paseo
+user_profile: "100000000000000001"
 backend:
   kind: pod
   spec_files: null
@@ -27,8 +28,6 @@ tooling:
   git_core_editor: vi
   git_user_name: Qiang Liu
   git_user_email: cyruscyliu@gmail.com
-auth:
-  files: []
 env:
   plain: {}
 service:

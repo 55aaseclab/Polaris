@@ -64,6 +64,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
     const rendered = fs.readFileSync(configPath, "utf8");
     assert.match(rendered, /backend:\n  kind: docker/);
     assert.match(rendered, /profile: morpheus/);
+    assert.match(rendered, /user_profile: '?100000000000000001'?/);
     assert.match(output, /"created": "saved-spec"/);
     assert.match(output, new RegExp(`"project": "${project}"`));
   } finally {

@@ -168,6 +168,7 @@ export function synthesizeWorkspaceStatus(
       agentDetail: workspace.agent.enabled
         ? `${workspace.agent.manager} + ${workspace.agent.harnesses.join(" + ")}`
         : "agent integration disabled",
+      userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
     },
     attachments: {
       workspaceData: attachmentCheck(observation.attachments.workspaceData),

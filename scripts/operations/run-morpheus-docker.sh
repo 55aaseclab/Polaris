@@ -7,7 +7,7 @@ COMPOSE_FILE="${REPO_ROOT}/docker/morpheus-compose.yaml"
 
 DEFAULT_MORPHEUS_ROOT_DIR="/var/lib/kubelet/plugins/kubernetes.io/csi/driver.longhorn.io/083db50c9d2e0df8f14538d0b1861805375f1344a8ce178164e56a34af938d14/globalmount"
 export MORPHEUS_ROOT_DIR="${MORPHEUS_ROOT_DIR:-$DEFAULT_MORPHEUS_ROOT_DIR}"
-export MORPHEUS_SECRETS_DIR="${MORPHEUS_SECRETS_DIR:-${REPO_ROOT}/secrets/polaris}"
+export MORPHEUS_SECRETS_DIR="${MORPHEUS_SECRETS_DIR:-${REPO_ROOT}/config/users/100000000000000001}"
 
 if [[ ! -d "${MORPHEUS_SECRETS_DIR}" ]]; then
   echo "MORPHEUS_SECRETS_DIR does not exist: ${MORPHEUS_SECRETS_DIR}" >&2

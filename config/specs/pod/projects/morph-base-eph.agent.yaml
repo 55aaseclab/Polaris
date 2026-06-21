@@ -1,4 +1,5 @@
 project: morph-base-eph
+user_profile: "100000000000000001"
 backend:
   kind: pod
   spec_files: null
@@ -27,20 +28,6 @@ tooling:
   git_core_editor: null
   git_user_name: null
   git_user_email: null
-auth:
-  files:
-  - key: codex-auth.json
-    mount_path: /root/.codex/auth.json
-    source_path: /home/debian/Projects/geek-env/secrets/polaris/codex/auth.json
-    content: null
-  - key: codex-config.toml
-    mount_path: /root/.codex/config.toml
-    source_path: /home/debian/Projects/geek-env/secrets/polaris/codex/config.toml
-    content: null
-  - key: claude-settings.json
-    mount_path: /root/.claude/settings.json
-    source_path: /home/debian/Projects/geek-env/secrets/polaris/claude/settings.json
-    content: null
 env:
   plain: {}
 service:

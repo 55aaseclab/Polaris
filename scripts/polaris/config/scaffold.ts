@@ -23,6 +23,7 @@ export function scaffoldDockerWorkspace(project: string): string {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const doc = {
     project,
+    user_profile: "100000000000000001",
     backend: {
       kind: "docker",
       spec_files: null,
@@ -54,30 +55,6 @@ export function scaffoldDockerWorkspace(project: string): string {
       bootstrap_profile: "prebuilt",
       install_rustup: true,
       git_core_editor: "vi",
-      git_user_name: null,
-      git_user_email: null,
-    },
-    auth: {
-      files: [
-        {
-          key: "codex-auth.json",
-          mount_path: "/root/.codex/auth.json",
-          source_path: path.join(REPO_ROOT, "secrets", "polaris", "codex", "auth.json"),
-          content: null,
-        },
-        {
-          key: "codex-config.toml",
-          mount_path: "/root/.codex/config.toml",
-          source_path: path.join(REPO_ROOT, "secrets", "polaris", "codex", "config.toml"),
-          content: null,
-        },
-        {
-          key: "claude-settings.json",
-          mount_path: "/root/.claude/settings.json",
-          source_path: path.join(REPO_ROOT, "secrets", "polaris", "claude", "settings.json"),
-          content: null,
-        },
-      ],
     },
     env: {
       plain: {},

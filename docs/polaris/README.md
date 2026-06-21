@@ -22,6 +22,12 @@ scripts/polaris.ts
 Polaris owns the saved spec and generated output. Treat generated manifests as
 rendered artifacts, not hand-maintained files.
 
+Polaris now treats workspace profile and user profile as separate concerns:
+
+- workspace profile: reusable workspace/runtime defaults
+- user profile: Git identity, SSH identity policy, and user-scoped external
+  agent identity defaults
+
 ## Recommended Flow
 
 Create a new workspace spec:
@@ -33,6 +39,10 @@ pnpm exec tsx scripts/polaris.ts create <project>
 If the project does not already exist, `create` scaffolds:
 
 - `config/specs/docker/projects/<project>.agent.yaml`
+
+Repo-managed workspace specs should also reference a user profile such as:
+
+- `user_profile: 100000000000000001`
 
 Then stage bootstrap secrets and render/start the workspace:
 
@@ -98,7 +108,7 @@ pnpm exec tsx scripts/polaris.ts logs <project>@kubevirt-vm
 The default Docker scaffold expects bootstrap material under:
 
 ```text
-secrets/polaris/
+config/users/100000000000000001/
   codex/auth.json
   codex/config.toml
   claude/settings.json
@@ -106,7 +116,7 @@ secrets/polaris/
 
 At runtime, the Docker backend mounts:
 
-- `./secrets/polaris` by default
+- `./config/users/100000000000000001` by default
 - or `$POLARIS_SECRETS_DIR` if that environment variable is set
 
 Those files are copied into the user-scoped identity attachments during
@@ -121,6 +131,9 @@ Polaris also creates or assembles:
 - workspace runtime state at `/workspace/state/paseo`
 - SSH material at `/ssh`
 - ephemeral runtime state under `/run/workspace`
+
+User-scoped identity now belongs to the selected user profile, not only to the
+runtime UNIX user or the workspace profile.
 
 When restart issues come from runtime leftovers, clean stale runtime artifacts
 only. Do not treat durable state as disposable.

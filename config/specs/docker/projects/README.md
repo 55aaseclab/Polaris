@@ -26,7 +26,7 @@ Notes:
 - `start` runs the rendered Docker Compose workspace.
 - `status` inspects the live runtime and writes `config/state/<project>.status.json`.
 - `logs` tails the workspace runtime logs.
-- Bootstrap secrets are expected under `secrets/polaris/` unless
+- Bootstrap secrets are expected under `config/users/100000000000000001/` unless
   `$POLARIS_SECRETS_DIR` overrides the mount source.
 
 During the migration, old Docker runtime material may still exist, but the

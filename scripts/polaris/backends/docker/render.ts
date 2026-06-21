@@ -9,12 +9,19 @@ function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceS
   if (!sourcePath) {
     return null;
   }
-  const marker = "/secrets/polaris/";
-  const index = sourcePath.indexOf(marker);
-  if (index === -1) {
+  const relativeSource = sourcePath.startsWith(workspace.userProfile.secretsRoot)
+    ? sourcePath.slice(workspace.userProfile.secretsRoot.length).replace(/^\/+/, "")
+    : null;
+  if (relativeSource) {
+    return `${workspace.agent.bootstrapSecretsRoot}/${relativeSource}`;
+  }
+  const usersMarker = "/config/users/";
+  const markerIndex = sourcePath.indexOf(usersMarker);
+  if (markerIndex === -1) {
     return null;
   }
-  return `${workspace.agent.bootstrapSecretsRoot}/${sourcePath.slice(index + marker.length)}`;
+  const tail = sourcePath.slice(markerIndex + usersMarker.length).split("/").slice(1).join("/");
+  return tail ? `${workspace.agent.bootstrapSecretsRoot}/${tail}` : null;
 }
 
 export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
@@ -23,7 +30,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const containerName = `${project}-docker`;
   const workspaceDataVolume = `${project}-workspace-data`;
   const workspaceRuntimeVolume = `${project}-workspace-runtime-state`;
-  const userScope = workspace.runtime.user.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
   const identityVolume = `polaris-${userScope}-identity`;
   const sshVolume = `polaris-${userScope}-ssh`;
   const home = workspace.runtime.home;
@@ -59,9 +66,17 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
     ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
     ...authBootstrapLines,
-    `if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.profile.sshKeyComment} -N '' -f /ssh/id_ed25519; fi`,
-    "chmod 400 /ssh/id_ed25519 || true",
-    "chmod 644 /ssh/id_ed25519.pub || true",
+    ...(workspace.userProfile.ssh.mode === "managed-key"
+      ? [
+          `if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f /ssh/id_ed25519; fi`,
+          "chmod 400 /ssh/id_ed25519 || true",
+          "chmod 644 /ssh/id_ed25519.pub || true",
+        ]
+      : [
+          "test -f /ssh/id_ed25519",
+          "chmod 400 /ssh/id_ed25519 || true",
+          "if [ -f /ssh/id_ed25519.pub ]; then chmod 644 /ssh/id_ed25519.pub || true; fi",
+        ]),
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...(workspace.agent.enabled
       ? [
@@ -94,7 +109,7 @@ ${portLines || '      - "6767:6767"'}
       - ${workspaceRuntimeVolume}:/workspace/state
       - ${identityVolume}:/identity
       - ${sshVolume}:/ssh
-      - \${POLARIS_SECRETS_DIR:-./secrets/polaris}:${bootstrapSecretsRoot}:ro
+      - \${POLARIS_SECRETS_DIR:-./${workspace.userProfile.secretsRoot}}:${bootstrapSecretsRoot}:ro
     tmpfs:
       - /run/workspace
 

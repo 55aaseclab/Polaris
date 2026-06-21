@@ -24,6 +24,8 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   const vmTemplate = fs.readFileSync(vmPath, "utf8");
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
   const claudeSettings = workspace.runtime.authFiles.find((item) => item.key === "claude-settings.json")?.content;
+  const sshPrivateKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !item.mountPath.endsWith(".pub"))?.content;
+  const sshPublicKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && item.mountPath.endsWith(".pub"))?.content;
   if (workspace.agent.enabled && (!codexAuth || !claudeSettings)) {
     throw new Error("KubeVirt render requires codex-auth.json and claude-settings.json");
   }
@@ -44,7 +46,20 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     .replace("rm -f /workspace/.paseo/paseo.pid", "rm -f /workspace/state/paseo/paseo.pid")
     .replace("cat >/workspace/.codex/auth.json", "cat >/identity/codex/auth.json")
     .replace("cat >/workspace/.codex/config.toml", "cat >/identity/codex/config.toml")
-    .replace("cat >/workspace/.claude/settings.json", "cat >/identity/claude/settings.json");
+    .replace("cat >/workspace/.claude/settings.json", "cat >/identity/claude/settings.json")
+    .replace(/ssh-keygen -q -t ed25519 -C [^\n]+/g, `ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f /ssh/id_ed25519`);
+  if (sshPrivateKey) {
+    renderedCloudinit = renderedCloudinit.replace(
+      `      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
+      `      - |\n        cat >/ssh/id_ed25519 <<'EOF'\n${indentBlock(sshPrivateKey, 8)}\n        EOF\n      - chmod 400 /ssh/id_ed25519${sshPublicKey ? `\n      - |\n        cat >/ssh/id_ed25519.pub <<'EOF'\n${indentBlock(sshPublicKey, 8)}\n        EOF\n      - chmod 644 /ssh/id_ed25519.pub` : ""}`,
+    );
+  }
+  if (workspace.userProfile.ssh.mode === "provided-key") {
+    renderedCloudinit = renderedCloudinit.replace(
+      /if \[ ! -f \/root\/\.ssh\/id_ed25519 \]; then ssh-keygen[^\n]+\n/g,
+      "test -f /ssh/id_ed25519\n",
+    );
+  }
   return `${renderedCloudinit.trimEnd()}\n---\n${vmTemplate.trimEnd()}\n`;
 }
 

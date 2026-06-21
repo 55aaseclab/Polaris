@@ -21,7 +21,7 @@ services:
         if [ -f /bootstrap-secrets/codex/auth.json ]; then install -m 600 /bootstrap-secrets/codex/auth.json /identity/codex/auth.json; fi
         if [ -f /bootstrap-secrets/codex/config.toml ]; then install -m 600 /bootstrap-secrets/codex/config.toml /identity/codex/config.toml; fi
         if [ -f /bootstrap-secrets/claude/settings.json ]; then install -m 600 /bootstrap-secrets/claude/settings.json /identity/claude/settings.json; fi
-        if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /ssh/id_ed25519; fi
+        if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C cyruscyliu@gmail.com -N '' -f /ssh/id_ed25519; fi
         chmod 400 /ssh/id_ed25519 || true
         chmod 644 /ssh/id_ed25519.pub || true
         rm -f /root/.paseo/paseo.pid /run/workspace/pids/paseo.pid
@@ -36,14 +36,14 @@ services:
     volumes:
       - morpheus-workspace-data:/workspace/project
       - morpheus-workspace-runtime-state:/workspace/state
-      - polaris-root-identity:/identity
-      - polaris-root-ssh:/ssh
-      - ${POLARIS_SECRETS_DIR:-./secrets/polaris}:/bootstrap-secrets:ro
+      - polaris-100000000000000001-identity:/identity
+      - polaris-100000000000000001-ssh:/ssh
+      - ${POLARIS_SECRETS_DIR:-./config/users/100000000000000001}:/bootstrap-secrets:ro
     tmpfs:
       - /run/workspace
 
 volumes:
   morpheus-workspace-data: {}
   morpheus-workspace-runtime-state: {}
-  polaris-root-identity: {}
-  polaris-root-ssh: {}
+  polaris-100000000000000001-identity: {}
+  polaris-100000000000000001-ssh: {}

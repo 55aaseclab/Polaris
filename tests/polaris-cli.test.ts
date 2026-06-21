@@ -9,6 +9,7 @@ import { getBackendDriver } from "../scripts/polaris/backends/index.js";
 import { workspaceConfigPath } from "../scripts/polaris/config/scaffold.js";
 import { writeWorkspaceStatus } from "../scripts/polaris/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/polaris/backends/pod/render.js";
+import { renderAndWriteDockerWorkspace } from "../scripts/polaris/backends/docker/render.js";
 import { runCli } from "../scripts/polaris/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/polaris/core/runtime-controller.js";
 
@@ -120,6 +121,9 @@ test("loadWorkspace normalizes morpheus pod config through the TypeScript contro
   const workspace = loadWorkspace("morpheus");
   assert.equal(workspace.identity.projectName, "morpheus");
   assert.equal(workspace.profile.name, "morpheus");
+  assert.equal(workspace.userProfile.id, "100000000000000001");
+  assert.equal(workspace.userProfile.name, "Qiang Liu");
+  assert.equal(workspace.userProfile.email, "cyruscyliu@gmail.com");
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -212,7 +216,102 @@ test("direct attachment config is present in migrated saved specs", () => {
 test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
   const workspace = loadWorkspace("morpheus");
   assert.equal(workspace.profile.workspaceAlias, "Morpheus");
-  assert.equal(workspace.profile.sshKeyComment, "morpheus@agent-vault");
+  assert.equal(workspace.userProfile.ssh.comment, "cyruscyliu@gmail.com");
+});
+
+test("workspace compatibility path derives a legacy user profile from inline git identity", async () => {
+  const project = uniqueProjectName("compat-user");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    delete doc.user_profile;
+    doc.auth = {
+      files: [
+        {
+          key: "codex-auth.json",
+          mount_path: "/root/.codex/auth.json",
+          content: "{}",
+        },
+        {
+          key: "codex-config.toml",
+          mount_path: "/root/.codex/config.toml",
+          content: "model = 'gpt-5'\n",
+        },
+        {
+          key: "claude-settings.json",
+          mount_path: "/root/.claude/settings.json",
+          content: "{}",
+        },
+      ],
+    };
+    doc.tooling = {
+      ...(doc.tooling ?? {}),
+      git_user_name: "Legacy User",
+      git_user_email: "legacy@example.com",
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspace(`${project}@docker`);
+    assert.equal(workspace.userProfile.id, "legacy-legacy-example.com");
+    assert.equal(workspace.userProfile.name, "Legacy User");
+    assert.equal(workspace.userProfile.email, "legacy@example.com");
+  });
+});
+
+test("provided-key user profile requires staged SSH private-key material", async () => {
+  const project = uniqueProjectName("provided-key");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", "provided-key-test.yaml");
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: "provided-key-test",
+        name: "Provided Key User",
+        email: "provided@example.com",
+        ssh: {
+          mode: "provided-key",
+          comment: "provided@polaris",
+        },
+      }),
+      "utf8",
+    );
+    try {
+      const outputPath = workspaceConfigPath(project, "docker");
+      const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+      doc.user_profile = "provided-key-test";
+      doc.auth = {
+        files: [
+          {
+            key: "codex-auth.json",
+            mount_path: "/root/.codex/auth.json",
+            content: "{}",
+          },
+          {
+            key: "codex-config.toml",
+            mount_path: "/root/.codex/config.toml",
+            content: "model = 'gpt-5'\n",
+          },
+          {
+            key: "claude-settings.json",
+            mount_path: "/root/.claude/settings.json",
+            content: "{}",
+          },
+        ],
+      };
+      fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+      assert.throws(() => loadWorkspace(`${project}@docker`), /provided-key/);
+    } finally {
+      fs.rmSync(profilePath, { force: true });
+    }
+  });
+});
+
+test("docker render keys user-scoped identity volumes by user profile id", () => {
+  const workspace = loadWorkspace("morpheus@docker");
+  const outputPath = renderAndWriteDockerWorkspace(workspace);
+  const rendered = fs.readFileSync(outputPath, "utf8");
+  assert.match(rendered, /polaris-100000000000000001-identity/);
+  assert.match(rendered, /polaris-100000000000000001-ssh/);
 });
 
 test("pod backend returns structured observations", async () => {
