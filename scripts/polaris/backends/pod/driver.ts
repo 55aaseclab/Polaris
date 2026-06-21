@@ -38,6 +38,20 @@ export class PodDriver implements BackendDriver {
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
+  async logs(workspace: WorkspaceSpec): Promise<void> {
+    const podNameResult = spawnSync(
+      "kubectl",
+      ["-n", workspace.identity.projectName, "get", "pod", "-l", `app=${workspace.identity.projectName}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      { encoding: "utf8" },
+    );
+    const podName = (podNameResult.stdout || "").trim();
+    if (podName) {
+      runCommand("kubectl", ["-n", workspace.identity.projectName, "logs", podName, "--tail=200"]);
+      return;
+    }
+    runCommand("kubectl", ["-n", workspace.identity.projectName, "logs", "deployment/" + workspace.identity.projectName, "--tail=200"]);
+  }
+
   async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
     const deployment = spawnSync(
       "kubectl",
@@ -90,6 +104,14 @@ export class PodDriver implements BackendDriver {
       : { status: 0, stdout: "", stderr: "" };
     const serviceCount = (observedServices.stdout || "").trim() ? 1 : 0;
 
+    const daemonObserved =
+      workspace.agent.enabled &&
+      podName
+        ? execCheck(`test -f ${workspace.agent.readyFile} && test -f ${workspace.agent.pairingFile}`)
+        : workspace.agent.enabled
+          ? false
+          : true;
+
     return {
       backend: {
         kind: workspace.backend.kind,
@@ -97,23 +119,25 @@ export class PodDriver implements BackendDriver {
         running,
         detail: podName ? `pod/${podName}` : "deployment exists but pod is not running",
       },
-      attachments: {
+      attachments: running ? {
         workspaceData: { observed: execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: workspace.attachments.workspaceData.mountRoot },
         workspaceRuntimeState: { observed: execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: workspace.attachments.workspaceRuntimeState.mountRoot },
         userIdentityState: { observed: execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: workspace.attachments.userIdentityState.mountRoot },
         userSshState: { observed: execCheck(`test -d ${workspace.attachments.userSshState.mountRoot}`), detail: workspace.attachments.userSshState.mountRoot },
-      },
-      runtimeAssembly: {
+      } : {},
+      runtimeAssembly: running ? {
         home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
-        projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/Morpheus`), detail: `${workspace.runtime.home}/workspace` },
+        projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
         paseo: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: `${workspace.runtime.home}/.paseo` },
         codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
         claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
         ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
-      },
+      } : {},
       daemon: {
-        paseo: workspace.health.requiresDaemon
-          ? { observed: execCheck("test -f /tmp/.ready"), detail: "/tmp/.ready" }
+        paseo: workspace.health.requiresDaemon && running
+          ? { observed: daemonObserved, detail: workspace.agent.pairingFile ?? workspace.agent.readyFile }
+          : workspace.health.requiresDaemon
+            ? { observed: false, detail: workspace.agent.readyFile }
           : { observed: true, detail: "daemon not required" },
       },
       services: {
@@ -138,6 +162,13 @@ export class PodDriver implements BackendDriver {
       if (action.kind === "restart-runtime") {
         runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
         continue;
+      }
+      if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
+        runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
+        continue;
+      }
+      if (action.kind === "report-unrecoverable-drift") {
+        throw new Error(action.reason || "pod backend cannot repair workspace drift");
       }
     }
   }

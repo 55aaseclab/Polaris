@@ -48,6 +48,28 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     throw new Error("ephemeral-runtime must define stale artifact cleanup targets");
   }
 
+  for (const authFile of workspace.runtime.authFiles) {
+    if (!authFile.content && !authFile.sourcePath) {
+      throw new Error(`Auth file '${authFile.key}' must define inline content or a source path`);
+    }
+    if (authFile.sourcePath && !authFile.content) {
+      throw new Error(`Auth file '${authFile.key}' source path is missing or unreadable: ${authFile.sourcePath}`);
+    }
+  }
+
+  if (workspace.agent.enabled) {
+    const requiredFiles = ["codex-auth.json", "codex-config.toml", "claude-settings.json"];
+    for (const key of requiredFiles) {
+      const authFile = workspace.runtime.authFiles.find((entry) => entry.key === key);
+      if (!authFile) {
+        throw new Error(`Agent-enabled workspaces require auth file '${key}'`);
+      }
+      if (!authFile.content && !authFile.sourcePath) {
+        throw new Error(`Auth file '${key}' must define inline content or a source path`);
+      }
+    }
+  }
+
   if (workspace.backend.kind === "pod") {
     if (!POD_PROFILES.has(workspace.backend.profile)) {
       throw new Error(`Workspace backend 'pod' requires a supported profile; got ${workspace.backend.profile}`);

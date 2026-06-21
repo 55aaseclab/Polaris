@@ -17,13 +17,14 @@ services:
         ln -sfn /workspace/state/paseo /root/.paseo
         ln -sfn /ssh /root/.ssh
         ln -sfn /workspace/project /root/workspace
+        ln -sfn /workspace/project /root/Morpheus
         if [ -f /bootstrap-secrets/codex/auth.json ]; then install -m 600 /bootstrap-secrets/codex/auth.json /identity/codex/auth.json; fi
         if [ -f /bootstrap-secrets/codex/config.toml ]; then install -m 600 /bootstrap-secrets/codex/config.toml /identity/codex/config.toml; fi
         if [ -f /bootstrap-secrets/claude/settings.json ]; then install -m 600 /bootstrap-secrets/claude/settings.json /identity/claude/settings.json; fi
         if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /ssh/id_ed25519; fi
         chmod 400 /ssh/id_ed25519 || true
         chmod 644 /ssh/id_ed25519.pub || true
-        rm -f /root/.paseo/paseo.pid
+        rm -f /root/.paseo/paseo.pid /run/workspace/pids/paseo.pid
         PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767
         paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json > /root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$$paired" = 1
         touch /tmp/.ready
@@ -35,14 +36,14 @@ services:
     volumes:
       - morpheus-workspace-data:/workspace/project
       - morpheus-workspace-runtime-state:/workspace/state
-      - polaris-user-identity:/identity
-      - polaris-user-ssh:/ssh
-      - ${MORPHEUS_SECRETS_DIR:-./secrets/polaris}:/bootstrap-secrets:ro
+      - polaris-root-identity:/identity
+      - polaris-root-ssh:/ssh
+      - ${POLARIS_SECRETS_DIR:-./secrets/polaris}:/bootstrap-secrets:ro
     tmpfs:
       - /run/workspace
 
 volumes:
   morpheus-workspace-data: {}
   morpheus-workspace-runtime-state: {}
-  polaris-user-identity: {}
-  polaris-user-ssh: {}
+  polaris-root-identity: {}
+  polaris-root-ssh: {}

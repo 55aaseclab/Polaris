@@ -1,6 +1,6 @@
 export type BackendKind = "pod" | "kubevirt-vm" | "docker";
 export type PodProfile = "gvisor" | "kata-qemu" | "kata-clh" | "kata-qemu-tdx";
-export type LifecycleAction = "create" | "start" | "stop" | "restart" | "rebuild" | "status" | "reconcile" | "render" | "apply";
+export type LifecycleAction = "create" | "start" | "stop" | "restart" | "rebuild" | "status" | "reconcile" | "render" | "apply" | "logs";
 export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
 export type AttachmentScope = "workspace" | "user";
 export type AttachmentSharing = "exclusive" | "cross-workspace";
@@ -143,6 +143,16 @@ export interface WorkspaceRuntime {
   authFiles: AuthFile[];
 }
 
+export interface WorkspaceAgentContract {
+  enabled: boolean;
+  manager: "none" | "paseo";
+  harnesses: Array<"codex" | "claude">;
+  bootstrapSecretsRoot: string;
+  readyFile: string;
+  pairingFile?: string;
+  staleRuntimeArtifacts: string[];
+}
+
 export interface WorkspaceConnectivity {
   exposeService: boolean;
   serviceMode: "nodeport" | "ingress";
@@ -173,6 +183,7 @@ export interface WorkspaceSpec {
   attachments: WorkspaceAttachments;
   resources: WorkspaceResources;
   runtime: WorkspaceRuntime;
+  agent: WorkspaceAgentContract;
   connectivity: WorkspaceConnectivity;
   lifecycle: WorkspaceLifecycle;
   runtimeContract: WorkspaceRuntimeContract;

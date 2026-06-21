@@ -2136,6 +2136,4556 @@ stringData:
       - mkdir -p /workspace
       - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
     runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
+      - mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp
+      - /bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'
+      - /bin/sh -lc 'if [ -e /workspace/Morpheus ] || [ ! -e /root/Morpheus ]; then rm -rf /root/Morpheus; ln -s /workspace/Morpheus /root/Morpheus; fi'
+      - chmod 700 /ssh
+      - chmod 1777 /run/workspace/tmp
+      - /bin/sh -lc 'apt-get clean && rm -rf /var/lib/apt/lists/*'
+      - rm -f /workspace/state/paseo/paseo.pid
+      - |
+        cat >/identity/codex/auth.json <<'EOF'
+        {
+          "OPENAI_API_KEY": "sk-33b98ca625474572bfd50a544a1ec772"
+        }
+        EOF
+      - |
+        cat >/identity/codex/config.toml <<'EOF'
+        model_provider = "rightcode"
+        model = "gpt-5.4"
+        model_reasoning_effort = "medium"
+        disable_response_storage = true
+
+        model_context_window = 1000000
+        model_auto_compact_token_limit = 900000
+        approvals_reviewer = "user"
+
+        [model_providers.rightcode]
+        name = "rightcode"
+        base_url = "https://right.codes/codex/v1"
+        wire_api = "responses"
+        requires_openai_auth = true
+        EOF
+      - |
+        cat >/identity/claude/settings.json <<'EOF'
+        {
+          "env": {
+            "ANTHROPIC_AUTH_TOKEN": "sk-ZNa9UnSDRngX5iuq2nAL5gklcXEPX084gEx7QOWhoZdvbhM0",
+            "ANTHROPIC_BASE_URL": "https://api.codexzh.com",
+            "ANTHROPIC_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "cc-gpt-5.4",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "cc-gpt-5.4",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            "ENABLE_TOOL_SEARCH": "true"
+          },
+          "attribution": {
+            "commit": "",
+            "pr": ""
+          },
+          "includeCoAuthoredBy": false,
+          "model": "sonnet",
+          "skipDangerousModePermissionPrompt": true,
+          "effortLevel": "medium"
+        }
+        EOF
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | CARGO_HOME=/root/.cargo RUSTUP_HOME=/root/.rustup sh -s -- -y
+      - /bin/sh -lc 'mkdir -p /root/.local/agent-cli /tmp/npm-cache && ulimit -n 65535 && npm_config_cache=/tmp/npm-cache npm install -g --prefix /root/.local/agent-cli @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm'
+      - ln -sf /root/.local/agent-cli/bin/paseo /usr/local/bin/paseo
+      - |
+        cat >/etc/profile.d/codex-home.sh <<'EOF'
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        EOF
+      - chmod 644 /etc/profile.d/codex-home.sh
+      - |
+        cat >/usr/local/bin/codex <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export CODEX_HOME=/root/.codex
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        export CARGO_HOME=/root/.cargo
+        export RUSTUP_HOME=/root/.rustup
+        mkdir -p "${CODEX_HOME}"
+        exec /root/.local/agent-cli/bin/codex "$@"
+        EOF
+      - chmod 755 /usr/local/bin/codex
+      - |
+        cat >/usr/local/bin/claude <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        export NPM_CONFIG_PREFIX=/root/.local/agent-cli
+        export npm_config_cache=/root/.npm
+        exec /root/.local/agent-cli/bin/claude "$@"
+        EOF
+      - chmod 755 /usr/local/bin/claude
+      - mkdir -p /etc/docker
+      - |
+        cat >/etc/docker/daemon.json <<'EOF'
+        {
+          "data-root": "/var/lib/docker-data",
+          "mtu": 1450
+        }
+        EOF
+      - mkdir -p /var/lib/docker-data
+      - /bin/sh -lc 'if [ ! -f /workspace/.docker-data.img ]; then truncate -s 80G /workspace/.docker-data.img; fi'
+      - /bin/sh -lc 'blkid /workspace/.docker-data.img >/dev/null 2>&1 || /usr/sbin/mkfs.ext4 -F -L docker-data /workspace/.docker-data.img'
+      - /bin/sh -lc 'mountpoint -q /var/lib/docker-data || mount -o loop /workspace/.docker-data.img /var/lib/docker-data'
+      - /bin/sh -lc 'sed -i "s#/.cargo/env#/root/.cargo/env#g" /root/.profile 2>/dev/null || true'
+      - |
+        cat >/etc/systemd/system/paseo-daemon.service <<'EOF'
+        [Unit]
+        Description=Paseo daemon
+        After=network-online.target docker.service
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        Environment=PASEO_HOME=/root/.paseo
+        LimitNOFILE=65535
+        ExecStartPre=/bin/rm -f /root/.paseo/paseo.pid
+        ExecStart=/root/.local/agent-cli/bin/paseo daemon start --foreground --listen 0.0.0.0:6767
+        ExecStop=/bin/sh -lc '/root/.local/agent-cli/bin/paseo daemon stop || true'
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      - systemctl daemon-reload
+      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N "" -f /root/.ssh/id_ed25519; fi'
+      - HOME=/root git config --global core.editor vi
+      - HOME=/root git config --global core.sshCommand "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+      - HOME=/root git config --global pull.rebase true
+      - HOME=/root git config --global --add safe.directory '*'
+      - git config --system --add safe.directory '*'
+      - HOME=/root git config --global user.name "Qiang Liu"
+      - HOME=/root git config --global user.email "cyruscyliu@gmail.com"
+      - systemctl enable --now docker
+      - systemctl restart docker
+      - systemctl enable --now qemu-guest-agent
+      - systemctl enable --now ssh
+      - systemctl enable --now paseo-daemon
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json >/root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morpheus-vm-cloudinit
+  namespace: morpheus
+type: Opaque
+stringData:
+  userdata: |-
+    #cloud-config
+    package_update: true
+    packages:
+      - openssh-client
+      - openssh-server
+      - bash
+      - bat
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - curl
+      - docker.io
+      - fd-find
+      - git
+      - htop
+      - jq
+      - libasound2t64
+      - nodejs
+      - npm
+      - python3
+      - python3-pip
+      - qemu-guest-agent
+      - ripgrep
+      - sudo
+      - wget
+      - xdg-utils
+    bootcmd:
+      - mkdir -p /workspace
+      - mountpoint -q /workspace || mount -t virtiofs projectfs /workspace
+    runcmd:
       - mkdir -p /workspace/.cache /workspace/.codex /workspace/.claude /workspace/.paseo /workspace/.ssh /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /workspace/.tmp
       - /bin/sh -lc 'for p in .cache .codex .claude .paseo .ssh .cargo .rustup .npm .tmp; do rm -rf "/root/$p"; ln -s "/workspace/$p" "/root/$p"; done'
       - /bin/sh -lc 'mkdir -p /root/.local; rm -rf /root/.local/agent-cli; ln -s /workspace/.local/agent-cli /root/.local/agent-cli'

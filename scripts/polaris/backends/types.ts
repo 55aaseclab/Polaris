@@ -9,6 +9,7 @@ export interface BackendDriver {
   rebuild(workspace: WorkspaceSpec): Promise<void>;
   render(workspace: WorkspaceSpec): Promise<void>;
   apply(workspace: WorkspaceSpec): Promise<void>;
+  logs(workspace: WorkspaceSpec): Promise<void>;
   inspect(workspace: WorkspaceSpec): Promise<BackendObservation>;
   executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void>;
 }

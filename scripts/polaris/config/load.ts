@@ -12,6 +12,7 @@ import type {
   DirectDurableAttachmentConfig,
   DirectEphemeralRuntimeConfig,
   WorkspaceProfile,
+  WorkspaceAgentContract,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 
@@ -36,11 +37,35 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
   },
 };
 
-function specCandidates(project: string): string[] {
-  return [
+export function parseWorkspaceReference(projectRef: string): { project: string; backendHint?: WorkspaceSpec["backend"]["kind"] } {
+  const match = /^(.+?)@((?:pod)|(?:docker)|(?:kubevirt-vm))$/.exec(projectRef.trim());
+  if (!match) {
+    return { project: projectRef.trim() };
+  }
+  return {
+    project: match[1],
+    backendHint: match[2] as WorkspaceSpec["backend"]["kind"],
+  };
+}
+
+function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"]["kind"]): string[] {
+  const preferredBackend =
+    backendHint === "kubevirt-vm"
+      ? "kubevirt"
+      : backendHint;
+  const configuredSpecs = [
     path.join(REPO_ROOT, "config", "specs", "pod", "projects", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "config", "specs", "kubevirt", "projects", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "config", "specs", "docker", "projects", `${project}.agent.yaml`),
+  ];
+  const orderedSpecs = preferredBackend
+    ? [
+        path.join(REPO_ROOT, "config", "specs", preferredBackend, "projects", `${project}.agent.yaml`),
+        ...configuredSpecs.filter((candidate) => !candidate.includes(`/${preferredBackend}/`)),
+      ]
+    : configuredSpecs;
+  return [
+    ...orderedSpecs,
     path.join(REPO_ROOT, "config", "gvisor", "specs", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "config", "kubevirt", "specs", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`)
@@ -278,6 +303,27 @@ function normalizeAuthFiles(rawFiles: unknown): AuthFile[] {
     .filter((entry) => entry.key && entry.mountPath);
 }
 
+function normalizeAgentKind(rawKind: unknown): string {
+  const kind = String(rawKind ?? "").trim().toLowerCase();
+  if (!kind || kind === "none" || kind === "disabled") {
+    return "";
+  }
+  return kind;
+}
+
+function buildAgentContract(home: string, agentKind: string): WorkspaceAgentContract {
+  const enabled = Boolean(agentKind);
+  return {
+    enabled,
+    manager: enabled ? "paseo" : "none",
+    harnesses: enabled ? ["codex", "claude"] : [],
+    bootstrapSecretsRoot: "/bootstrap-secrets",
+    readyFile: "/tmp/.ready",
+    pairingFile: enabled ? `${home}/.paseo/pairing.json` : undefined,
+    staleRuntimeArtifacts: enabled ? [`${home}/.paseo/paseo.pid`, "/run/workspace/pids/paseo.pid"] : [],
+  };
+}
+
 function normalizePlainEnv(rawPlain: unknown): PlainEnvVar[] {
   if (!rawPlain || typeof rawPlain !== "object") {
     return [];
@@ -311,8 +357,9 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
   return [];
 }
 
-export function loadWorkspace(project: string): WorkspaceSpec {
-  const configPath = specCandidates(project).find((candidate) => fs.existsSync(candidate));
+export function loadWorkspace(projectRef: string): WorkspaceSpec {
+  const { project, backendHint } = parseWorkspaceReference(projectRef);
+  const configPath = specCandidates(project, backendHint).find((candidate) => fs.existsSync(candidate));
   if (!configPath) {
     throw new Error(`Config not found for project '${project}'`);
   }
@@ -334,6 +381,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
   const home = canonicalHome(mergedRuntimeUser, projectName);
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
   const authFiles = normalizeAuthFiles(auth.files);
+  const agentKind = normalizeAgentKind(agent.kind);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
   const persistState = Boolean(agent.persist_state ?? true);
   const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
@@ -348,6 +396,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
         authFiles,
         backendKind,
       });
+  const agentContract = buildAgentContract(home, agentKind);
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },
@@ -384,7 +433,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       home,
       privileged: Boolean(runtime.privileged ?? false),
       agentLabel: String(agent.label ?? "None"),
-      agentCmd: String(agent.kind ?? ""),
+      agentCmd: agentKind,
       agentArgs: Array.isArray(agent.args) ? agent.args.map((item) => String(item)) : [],
       bootstrapProfile: String(tooling.bootstrap_profile ?? profile.defaults.runtime?.bootstrapProfile ?? "full"),
       aptPackages: Array.isArray(tooling.apt_packages) ? tooling.apt_packages.map((item) => String(item)) : [],
@@ -395,6 +444,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       plainEnvVars,
       authFiles
     },
+    agent: agentContract,
     connectivity: {
       exposeService: Boolean(service.enabled ?? false),
       serviceMode: String(service.mode ?? "nodeport") === "ingress" ? "ingress" : "nodeport",
@@ -415,8 +465,8 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       staleRuntimeArtifacts: [`${home}/.paseo/paseo.pid`, ...attachments.ephemeralRuntime.staleArtifacts],
     },
     health: {
-      readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agent.kind ? "daemon-port" : "ready-file",
-      requiresDaemon: Boolean(agent.kind)
+      readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agentContract.enabled ? "daemon-port" : "ready-file",
+      requiresDaemon: agentContract.enabled
     }
   };
 
