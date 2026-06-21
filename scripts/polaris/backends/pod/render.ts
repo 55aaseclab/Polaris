@@ -87,10 +87,26 @@ function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: Work
 function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
   const sshDir = workspace.attachments.userSshState.mountRoot;
   const keyPath = `${sshDir}/id_ed25519`;
+  if (workspace.userProfile.ssh.mode === "provided-key") {
+    if (user === "root") {
+      return [
+        `          mkdir -p ${sshDir} && chown root:root ${sshDir} && chmod 700 ${sshDir} && \\`,
+        `          test -f ${keyPath} && \\`,
+        `          chown root:root ${keyPath} 2>/dev/null || true && chmod 400 ${keyPath} 2>/dev/null || true && \\`,
+        `          if [ -e ${keyPath}.pub ]; then chown root:root ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
+      ];
+    }
+    return [
+      `          mkdir -p ${sshDir} && chown ${user}:${user} ${sshDir} && chmod 700 ${sshDir} && \\`,
+      `          test -f ${keyPath} && \\`,
+      `          chown ${user}:${user} ${keyPath} 2>/dev/null || true && chmod 600 ${keyPath} 2>/dev/null || true && \\`,
+      `          if [ -e ${keyPath}.pub ]; then chown ${user}:${user} ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
+    ];
+  }
   if (user === "root") {
     return [
       `          mkdir -p ${sshDir} && chown root:root ${sshDir} && chmod 700 ${sshDir} && \\`,
-      `          if [ ! -f ${keyPath} ]; then ssh-keygen -q -t ed25519 -C ${workspace.profile.sshKeyComment} -N '' -f ${keyPath}; fi && \\`,
+      `          if [ ! -f ${keyPath} ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f ${keyPath}; fi && \\`,
       `          if [ -e ${keyPath} ] && { [ "$(stat -c %U:%G ${keyPath} 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a ${keyPath} 2>/dev/null || true)" != "400" ]; }; then chown root:root ${keyPath} 2>/dev/null || true; chmod 400 ${keyPath} 2>/dev/null || true; fi && \\`,
       `          if [ -e ${keyPath}.pub ] && { [ "$(stat -c %U:%G ${keyPath}.pub 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a ${keyPath}.pub 2>/dev/null || true)" != "644" ]; }; then chown root:root ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
       `          for ssh_meta in ${sshDir}/authorized_keys ${sshDir}/known_hosts ${sshDir}/known_hosts.old; do if [ -e "$ssh_meta" ] && { [ "$(stat -c %U:%G "$ssh_meta" 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a "$ssh_meta" 2>/dev/null || true)" != "600" ]; }; then chown root:root "$ssh_meta" 2>/dev/null || true; chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done && \\`,
@@ -98,7 +114,7 @@ function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
   }
   return [
     `          mkdir -p ${sshDir} && chown ${user}:${user} ${sshDir} && chmod 700 ${sshDir} && \\`,
-    `          if [ ! -f ${keyPath} ]; then su - ${user} -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -C ${workspace.profile.sshKeyComment} -N '' -f ~/.ssh/id_ed25519"; fi && \\`,
+    `          if [ ! -f ${keyPath} ]; then su - ${user} -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f ~/.ssh/id_ed25519"; fi && \\`,
     `          chown ${user}:${user} ${keyPath} ${keyPath}.pub && chmod 600 ${keyPath} && chmod 644 ${keyPath}.pub && \\`,
   ];
 }

@@ -6,6 +6,15 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.identity.projectName) {
     throw new Error("Workspace project name is required");
   }
+  if (!workspace.userProfile.id) {
+    throw new Error("Workspace user profile id is required");
+  }
+  if (!workspace.userProfile.name) {
+    throw new Error("Workspace user profile name is required");
+  }
+  if (!workspace.userProfile.email) {
+    throw new Error("Workspace user profile email is required");
+  }
 
   if (!workspace.attachments.workspaceData.mountRoot) {
     throw new Error("workspace-data must declare a mount root");
@@ -67,6 +76,15 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
       if (!authFile.content && !authFile.sourcePath) {
         throw new Error(`Auth file '${key}' must define inline content or a source path`);
       }
+    }
+  }
+
+  if (workspace.userProfile.ssh.mode === "provided-key") {
+    const sshPrivateKey = workspace.runtime.authFiles.find((entry) => {
+      return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
+    });
+    if (!sshPrivateKey) {
+      throw new Error("User profile SSH mode 'provided-key' requires staged private-key material");
     }
   }
 

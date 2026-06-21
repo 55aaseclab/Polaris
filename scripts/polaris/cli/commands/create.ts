@@ -22,7 +22,7 @@ export async function createCommand(projectRef: string): Promise<void> {
       created: "saved-spec",
       configPath: outputPath,
       nextSteps: [
-        `Stage credentials under secrets/polaris/`,
+        `Stage credentials under config/users/100000000000000001/`,
         `pnpm exec tsx scripts/polaris.ts render ${project}@${scaffoldBackend}`,
         `pnpm exec tsx scripts/polaris.ts start ${project}@${scaffoldBackend}`,
       ],

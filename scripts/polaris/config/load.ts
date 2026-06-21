@@ -13,6 +13,7 @@ import type {
   DirectEphemeralRuntimeConfig,
   WorkspaceProfile,
   WorkspaceAgentContract,
+  UserProfile,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 
@@ -23,7 +24,6 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
     name: "morpheus",
     assetBaseName: "morpheus",
     workspaceAlias: "Morpheus",
-    sshKeyComment: "morpheus@agent-vault",
     defaults: {
       runtime: {
         baseImage: "ttl.sh/morpheus-prebuilt-1781875178:24h",
@@ -36,6 +36,9 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
     },
   },
 };
+
+const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
+const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 
 export function parseWorkspaceReference(projectRef: string): { project: string; backendHint?: WorkspaceSpec["backend"]["kind"] } {
   const match = /^(.+?)@((?:pod)|(?:docker)|(?:kubevirt-vm))$/.exec(projectRef.trim());
@@ -84,6 +87,82 @@ function resolveWorkspaceProfile(rawProfile: unknown, projectName: string): Work
     throw new Error(`Unknown workspace profile '${profileName}'`);
   }
   return profile;
+}
+
+function userProfilePath(userProfileId: string): string {
+  return path.join(USER_PROFILES_DIR, `${userProfileId}.yaml`);
+}
+
+function sanitizeUserProfileId(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
+}
+
+function buildCompatibilityUserProfile(args: {
+  runtimeUser: string;
+  gitUserName?: string;
+  gitUserEmail?: string;
+}): UserProfile {
+  const identitySeed = args.gitUserEmail || args.gitUserName || args.runtimeUser || "default";
+  const id = `legacy-${sanitizeUserProfileId(identitySeed)}`;
+  const name = args.gitUserName || "Polaris User";
+  const email = args.gitUserEmail || `${sanitizeUserProfileId(args.runtimeUser || "user")}@polaris.local`;
+  return {
+    id,
+    name,
+    email,
+    secretsRoot: path.join("config", "users", id),
+    ssh: {
+      mode: "managed-key",
+      comment: `${id}@polaris`,
+    },
+    authFiles: [],
+  };
+}
+
+function mergeAuthFiles(primary: AuthFile[], secondary: AuthFile[]): AuthFile[] {
+  const merged = new Map<string, AuthFile>();
+  for (const file of secondary) {
+    merged.set(file.key, file);
+  }
+  for (const file of primary) {
+    merged.set(file.key, file);
+  }
+  return Array.from(merged.values());
+}
+
+function resolveAuthSourcePath(sourcePath: string, baseDir: string): string {
+  return path.isAbsolute(sourcePath) ? sourcePath : path.resolve(baseDir, sourcePath);
+}
+
+function resolveUserProfile(rawUserProfile: unknown, args: {
+  runtimeUser: string;
+  gitUserName?: string;
+  gitUserEmail?: string;
+}): UserProfile {
+  const rawProfileId =
+    typeof rawUserProfile === "string" || typeof rawUserProfile === "number"
+      ? String(rawUserProfile).trim()
+      : "";
+  if (rawProfileId) {
+    const profileId = rawProfileId;
+    const profilePath = userProfilePath(profileId);
+    if (!fs.existsSync(profilePath)) {
+      throw new Error(`Unknown user profile '${profileId}'`);
+    }
+    const data = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+    return {
+      id: String(data.id ?? profileId),
+      name: String(data.name ?? ""),
+      email: String(data.email ?? ""),
+      secretsRoot: path.join("config", "users", profileId),
+      ssh: {
+        mode: data.ssh?.mode === "provided-key" ? "provided-key" : "managed-key",
+        comment: String(data.ssh?.comment ?? `${profileId}@polaris`),
+      },
+      authFiles: normalizeAuthFiles(data.auth?.files, path.join(USER_SECRETS_ROOT, profileId)),
+    };
+  }
+  return buildCompatibilityUserProfile(args);
 }
 
 function canonicalHome(user: string, projectName: string): string {
@@ -285,7 +364,7 @@ function translateLegacyAttachments(args: {
   };
 }
 
-function normalizeAuthFiles(rawFiles: unknown): AuthFile[] {
+function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] {
   const files = Array.isArray(rawFiles) ? rawFiles : [];
   return files
     .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
@@ -295,10 +374,10 @@ function normalizeAuthFiles(rawFiles: unknown): AuthFile[] {
       content:
         entry.content
           ? String(entry.content)
-          : entry.source_path && fs.existsSync(String(entry.source_path))
-            ? fs.readFileSync(String(entry.source_path), "utf8")
+          : entry.source_path && fs.existsSync(resolveAuthSourcePath(String(entry.source_path), baseDir))
+            ? fs.readFileSync(resolveAuthSourcePath(String(entry.source_path), baseDir), "utf8")
             : undefined,
-      sourcePath: entry.source_path ? String(entry.source_path) : undefined
+      sourcePath: entry.source_path ? resolveAuthSourcePath(String(entry.source_path), baseDir) : undefined
     }))
     .filter((entry) => entry.key && entry.mountPath);
 }
@@ -377,10 +456,17 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
   const projectName = String(data.project ?? project);
   const profile = resolveWorkspaceProfile(data.profile, projectName);
   const runtimeUser = String(runtime.user ?? "");
+  const toolingGitUserName = tooling.git_user_name ? String(tooling.git_user_name) : undefined;
+  const toolingGitUserEmail = tooling.git_user_email ? String(tooling.git_user_email) : undefined;
   const mergedRuntimeUser = runtimeUser || profile.defaults.runtime?.user || projectName;
   const home = canonicalHome(mergedRuntimeUser, projectName);
+  const userProfile = resolveUserProfile(data.user_profile, {
+    runtimeUser: mergedRuntimeUser,
+    gitUserName: toolingGitUserName,
+    gitUserEmail: toolingGitUserEmail,
+  });
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
-  const authFiles = normalizeAuthFiles(auth.files);
+  const workspaceAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
   const agentKind = normalizeAgentKind(agent.kind);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
   const persistState = Boolean(agent.persist_state ?? true);
@@ -391,16 +477,18 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     : translateLegacyAttachments({
         projectName,
         home,
-        persistState,
-        claimName,
-        authFiles,
-        backendKind,
-      });
+      persistState,
+      claimName,
+      authFiles: mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles),
+      backendKind,
+    });
+  const authFiles = mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles);
   const agentContract = buildAgentContract(home, agentKind);
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },
     profile,
+    userProfile,
     backend: {
       kind: backendKind,
       profile: backendKind === "pod" ? String(runtime.class ?? "kata-qemu") : backendKind === "docker" ? "legacy" : "vm",
@@ -439,8 +527,8 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
       aptPackages: Array.isArray(tooling.apt_packages) ? tooling.apt_packages.map((item) => String(item)) : [],
       installRustup: Boolean(tooling.install_rustup ?? false),
       gitCoreEditor: tooling.git_core_editor ? String(tooling.git_core_editor) : undefined,
-      gitUserName: tooling.git_user_name ? String(tooling.git_user_name) : undefined,
-      gitUserEmail: tooling.git_user_email ? String(tooling.git_user_email) : undefined,
+      gitUserName: userProfile.name,
+      gitUserEmail: userProfile.email,
       plainEnvVars,
       authFiles
     },

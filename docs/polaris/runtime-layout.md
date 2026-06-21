@@ -66,6 +66,12 @@ Profiles are part of the workspace intent layer. A workspace may select a
 built-in profile such as `morpheus`, and backend renderers consume profile
 defaults rather than branching directly on the workspace name.
 
+Polaris now distinguishes between:
+
+- workspace profile: backend/runtime-oriented defaults
+- user profile: Git identity, SSH policy, and ownership of user-scoped
+  identity state
+
 ## Current Reality
 
 - New onboarding should start from `config/specs/docker/projects/*.agent.yaml`
@@ -96,6 +102,8 @@ For Docker specifically:
 - when the same project name exists across multiple backends, operators can use
   `<project>@docker`, `<project>@pod`, or `<project>@kubevirt-vm` to select the
   intended saved spec
+- user-scoped identity storage is expected to derive from explicit user profile
+  identity rather than only from runtime UNIX user
 
 ## Runtime Controller Pipeline
 
