@@ -17,8 +17,8 @@ The installer:
   - `zsh-autosuggestions`
   - `zsh-syntax-highlighting`
 - installs repo-managed shell config from:
-  - `config/workspace-tooling/zsh/.zshrc`
-  - `config/workspace-tooling/zsh/.zshenv`
+  - `config/tooling/workspace/zsh/.zshrc`
+  - `config/tooling/workspace/zsh/.zshenv`
 
 ## Scope
 

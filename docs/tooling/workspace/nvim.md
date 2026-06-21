@@ -1,7 +1,7 @@
 # Neovim Usage Guide
 
 The Polaris Neovim config is symlinked into `~/.config/nvim`. Edits to
-`config/workspace-tooling/nvim/` take effect immediately. Leader key is `Space`.
+`config/tooling/workspace/nvim/` take effect immediately. Leader key is `Space`.
 
 ## Install
 
@@ -274,7 +274,7 @@ based on `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`, or
 ## Config Structure
 
 ```
-config/workspace-tooling/nvim/
+config/tooling/workspace/nvim/
   init.lua                     -- leader key, loads config modules
   lua/config/
     options.lua                -- vim options

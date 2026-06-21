@@ -69,8 +69,6 @@ function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"][
     : configuredSpecs;
   return [
     ...orderedSpecs,
-    path.join(REPO_ROOT, "config", "gvisor", "specs", `${project}.agent.yaml`),
-    path.join(REPO_ROOT, "config", "kubevirt", "specs", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`)
   ];
 }

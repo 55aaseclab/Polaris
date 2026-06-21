@@ -24,4 +24,9 @@ secrets/agentctl/**
 !secrets/agentctl/
 !secrets/agentctl/.gitignore
 !secrets/agentctl/README.md
-config/kubevirt/.generated/
+config/users/*
+!config/users/profiles/
+!config/users/profiles/**
+!config/users/*/
+config/users/*/**
+!config/users/*/.gitignore

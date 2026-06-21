@@ -80,12 +80,6 @@ Polaris now distinguishes between:
 - Repo-managed specs now declare attachment classes directly.
 - The control plane translates legacy path-centric persistence fields only as a
   compatibility path when direct attachment declarations are absent.
-- Legacy saved configs still exist under:
-  - `config/gvisor/specs/`
-  - `config/kubevirt/specs/`
-- Legacy generated manifests still exist under:
-  - `config/gvisor/generated/`
-  - `config/kubevirt/generated/`
 - Backend implementations may still realize the same attachment classes with
   different physical mount primitives, but they are expected to preserve the
   same scope and lifecycle semantics.
