@@ -1,22 +1,11 @@
 {
-  "name": "polaris",
+  "name": "geek-env",
   "private": true,
   "type": "module",
   "scripts": {
-    "polaris": "tsx scripts/polaris.ts",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
-    "test:polaris": "tsx --test tests/*.test.ts"
-  },
-  "dependencies": {
-    "js-yaml": "^4.1.0",
-    "sql.js": "^1.14.1"
-  },
-  "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^24.0.3",
-    "@types/sql.js": "^1.4.11",
-    "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "polaris": "pnpm --filter polaris run polaris",
+    "build": "pnpm --filter polaris run build",
+    "check": "pnpm --filter polaris run check",
+    "test:polaris": "pnpm --filter polaris run test"
   }
 }

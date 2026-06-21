@@ -1,4 +1,0 @@
-interface:
-  display_name: "Use Polaris"
-  short_description: "Set up and operate Polaris workspaces"
-  default_prompt: "Use $use-polaris to create, start, inspect, or debug a Polaris workspace."
