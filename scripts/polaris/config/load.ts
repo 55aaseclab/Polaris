@@ -11,10 +11,30 @@ import type {
   DirectAttachmentConfig,
   DirectDurableAttachmentConfig,
   DirectEphemeralRuntimeConfig,
+  WorkspaceProfile,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+
+const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
+  morpheus: {
+    name: "morpheus",
+    assetBaseName: "morpheus",
+    workspaceAlias: "Morpheus",
+    sshKeyComment: "morpheus@agent-vault",
+    defaults: {
+      runtime: {
+        baseImage: "ttl.sh/morpheus-prebuilt-1781875178:24h",
+        bootstrapProfile: "prebuilt",
+        user: "root",
+      },
+      service: {
+        path: "/",
+      },
+    },
+  },
+};
 
 function specCandidates(project: string): string[] {
   return [
@@ -25,6 +45,20 @@ function specCandidates(project: string): string[] {
     path.join(REPO_ROOT, "config", "kubevirt", "specs", `${project}.agent.yaml`),
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`)
   ];
+}
+
+function resolveWorkspaceProfile(rawProfile: unknown, projectName: string): WorkspaceProfile {
+  const profileName =
+    typeof rawProfile === "string" && rawProfile.trim()
+      ? rawProfile.trim()
+      : projectName === "morpheus"
+        ? "morpheus"
+        : "morpheus";
+  const profile = BUILTIN_PROFILES[profileName];
+  if (!profile) {
+    throw new Error(`Unknown workspace profile '${profileName}'`);
+  }
+  return profile;
 }
 
 function canonicalHome(user: string, projectName: string): string {
@@ -294,8 +328,10 @@ export function loadWorkspace(project: string): WorkspaceSpec {
   const service = (data.service ?? {}) as Record<string, unknown>;
 
   const projectName = String(data.project ?? project);
+  const profile = resolveWorkspaceProfile(data.profile, projectName);
   const runtimeUser = String(runtime.user ?? "");
-  const home = canonicalHome(runtimeUser || projectName, projectName);
+  const mergedRuntimeUser = runtimeUser || profile.defaults.runtime?.user || projectName;
+  const home = canonicalHome(mergedRuntimeUser, projectName);
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
   const authFiles = normalizeAuthFiles(auth.files);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
@@ -315,6 +351,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },
+    profile,
     backend: {
       kind: backendKind,
       profile: backendKind === "pod" ? String(runtime.class ?? "kata-qemu") : backendKind === "docker" ? "legacy" : "vm",
@@ -342,14 +379,14 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       unbounded: Boolean(resources.unbounded ?? false)
     },
     runtime: {
-      baseImage: String(runtime.base_image ?? "debian:trixie-slim"),
-      user: runtimeUser || projectName,
+      baseImage: String(runtime.base_image ?? profile.defaults.runtime?.baseImage ?? "debian:trixie-slim"),
+      user: mergedRuntimeUser,
       home,
       privileged: Boolean(runtime.privileged ?? false),
       agentLabel: String(agent.label ?? "None"),
       agentCmd: String(agent.kind ?? ""),
       agentArgs: Array.isArray(agent.args) ? agent.args.map((item) => String(item)) : [],
-      bootstrapProfile: String(tooling.bootstrap_profile ?? "full"),
+      bootstrapProfile: String(tooling.bootstrap_profile ?? profile.defaults.runtime?.bootstrapProfile ?? "full"),
       aptPackages: Array.isArray(tooling.apt_packages) ? tooling.apt_packages.map((item) => String(item)) : [],
       installRustup: Boolean(tooling.install_rustup ?? false),
       gitCoreEditor: tooling.git_core_editor ? String(tooling.git_core_editor) : undefined,
@@ -363,7 +400,7 @@ export function loadWorkspace(project: string): WorkspaceSpec {
       serviceMode: String(service.mode ?? "nodeport") === "ingress" ? "ingress" : "nodeport",
       servicePorts: normalizeServicePorts(service),
       serviceHost: service.host ? String(service.host) : undefined,
-      servicePath: String(service.path ?? "/")
+      servicePath: String(service.path ?? profile.defaults.service?.path ?? "/")
     },
     lifecycle: {
       actions: ["create", "start", "stop", "restart", "rebuild", "status", "reconcile", "render", "apply"]

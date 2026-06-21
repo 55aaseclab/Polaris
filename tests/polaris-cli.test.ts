@@ -26,6 +26,7 @@ async function withFakePath(commandName: string, scriptBody: string, fn: () => P
 test("loadWorkspace normalizes morpheus pod config through the TypeScript control plane", () => {
   const workspace = loadWorkspace("morpheus");
   assert.equal(workspace.identity.projectName, "morpheus");
+  assert.equal(workspace.profile.name, "morpheus");
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -107,10 +108,17 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
 
 test("direct attachment config is present in migrated saved specs", () => {
   const workspace = loadWorkspace("morpheus");
+  assert.equal(workspace.profile.name, "morpheus");
   assert.equal(workspace.attachments.workspaceData.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
   assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
+});
+
+test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
+  const workspace = loadWorkspace("morpheus");
+  assert.equal(workspace.profile.workspaceAlias, "Morpheus");
+  assert.equal(workspace.profile.sshKeyComment, "morpheus@agent-vault");
 });
 
 test("pod backend returns structured observations", async () => {
