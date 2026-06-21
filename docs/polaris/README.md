@@ -168,3 +168,8 @@ pnpm exec tsc -p tsconfig.json --noEmit
 pnpm exec tsx scripts/polaris.ts render <project>
 pnpm exec tsx scripts/polaris.ts status <project>
 ```
+
+## More Docs
+
+- [runtime-layout.md](./runtime-layout.md)
+- [evolution-kernel.md](./evolution-kernel.md)
