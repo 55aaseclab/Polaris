@@ -1,9 +1,9 @@
 id: "100000000000000001"
-name: Qiang Liu
-email: cyruscyliu@gmail.com
+name: Demo User
+email: demo@example.com
 ssh:
   mode: managed-key
-  comment: cyruscyliu@gmail.com
+  comment: demo@example.com
 auth:
   files:
     - key: codex-auth.json
