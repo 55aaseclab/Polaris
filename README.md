@@ -74,7 +74,7 @@ Start here:
 - [docs/README.md](docs/README.md)
 - [docs/polaris/README.md](docs/polaris/README.md)
 - [docs/polaris/runtime-layout.md](docs/polaris/runtime-layout.md)
-- [docs/polaris/comparison-with-coder.md](docs/polaris/comparison-with-coder.md)
+- [docs/polaris/maturity-map.md](docs/polaris/maturity-map.md)
 - [docs/operations/README.md](docs/operations/README.md)
 
 ## Contributing
