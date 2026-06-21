@@ -1,0 +1,12 @@
+{
+  "name": "geek-env",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "polaris": "pnpm --filter polaris run polaris",
+    "build": "pnpm --filter polaris run build",
+    "check": "pnpm --filter polaris run check",
+    "test:polaris": "pnpm --filter polaris run test",
+    "test:polaris:coverage": "pnpm --filter polaris run test:coverage"
+  }
+}

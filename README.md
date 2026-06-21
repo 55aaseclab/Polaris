@@ -1,74 +1,99 @@
-# Agent Vault
+# Polaris
 
-Agent Vault is an AI-native environment for isolated coding agents. It runs
-agent workloads in sandboxed Kubernetes pods using Kata Containers and
-gVisor, with
-[Headlamp](https://headlamp.dev/) managing k3s pods and
-[Paseo](https://github.com/getpaseo/paseo) managing the agent runtime inside
-each guest or sandbox.
+Self-hosted workspace control plane for isolated development environments and
+external AI coding agents.
 
-![Platform](https://img.shields.io/badge/platform-k3s-blue)
-![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
-![Runtime](https://img.shields.io/badge/runtime-gVisor-00add8)
-![Agent](https://img.shields.io/badge/agent-Codex-0a7ea4)
-![Agent](https://img.shields.io/badge/agent-Claude%20Code-d97706)
-![UI](https://img.shields.io/badge/ui-Headlamp-2563eb)
+[Quickstart](#quickstart) | [Documentation](./docs/README.md)
+
+![Platform](https://img.shields.io/badge/platform-self--hosted-blue)
+![Backends](https://img.shields.io/badge/backends-pod%20%7C%20docker%20%7C%20kubevirt-2563eb)
 ![Manager](https://img.shields.io/badge/manager-Paseo-15803d)
 ![License](https://img.shields.io/badge/license-MIT-black)
 
-## Quick Start
+Polaris is a workspace control plane.
+
+It manages development environments across `pod`, `docker`, and
+`kubevirt-vm` backends.
+
+It keeps the agent layer external and replaceable.
+
+Today that means:
+
+- workspace specs are the source of truth
+- generated backend artifacts remain outputs
+- Docker is the clean default onboarding path
+- agent orchestration is built around `Paseo`
+- coding harnesses such as `Codex` and `Claude` stay external to Polaris
+
+## Quickstart
+
+Install the repo skill if you want the shorter prompt:
 
 ```bash
-grep -c vmx /proc/cpuinfo
-sudo bash scripts/setup-k3s-kata-gvisor.sh
-python3 -m pip install -r requirements.txt
-python3 scripts/agentctl.py
+pnpm exec tsx scripts/install-skills.ts --target codex use-polaris
 ```
 
-For tool-specific usage details, see:
-
-- [`README.k3s-kata.md`](README.k3s-kata.md)
-
-If you want to add full VM workloads alongside the existing container
-workloads, install KubeVirt with:
+Install into Claude instead with:
 
 ```bash
-bash scripts/setup-k3s-kubevirt.sh
+pnpm exec tsx scripts/install-skills.ts --target claude use-polaris
 ```
 
-The `morpheus` workload can also run as a KubeVirt VM while keeping the shared
-project PVC mounted at `/root`, Docker enabled inside the guest, and the
-existing NodePorts (`31677`, `31678`, `31679`) intact.
+Then use this prompt for the fastest local Docker path:
 
-If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
-[`scripts/setup-k3s-kata-worker.sh`](scripts/setup-k3s-kata-worker.sh).
+```text
+Use $use-polaris to set up Polaris locally with Docker for project <project>.
+```
 
-## Pitfalls
+## Install
 
-- do not build with `make -j$(nproc)` inside Kata guests for heavy workloads
-  such as Buildroot; `$(nproc)` reflects visible CPUs, but max parallelism can
-  overdrive the guest VM and trigger Kata agent timeouts or sandbox restarts.
-  Prefer a conservative value such as `-j2` or `-j4` unless you have verified
-  the workload is stable with more parallelism
-- for `prebuilt` agent images, install persistent tools in the image itself
-  rather than expecting `apt_packages` to be installed at pod startup
+### Kubernetes Pods
 
-## Contribute
-
-- update docs when behavior changes
-- validate with:
+Use the pod backend when you want stronger sandboxing and the existing k3s
+runtime path.
 
 ```bash
-python3 -m py_compile scripts/agentctl.py
-bash -n scripts/setup-k3s-kata-gvisor.sh
-python3 -m unittest tests/test_agentctl_user_story.py
-python3 -m unittest tests/test_agentctl_k3s_integration.py
-./tests/smoke-agentctl-paseo.sh
+sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
+pnpm run polaris -- start morpheus@pod
 ```
 
-If you change command flow or generated manifests, update the relevant usage
-docs under the README files in the repo root.
+### KubeVirt
+
+Use the KubeVirt backend when you want full VM workloads managed by the same
+control plane.
+
+```bash
+bash scripts/operations/setup-k3s-kubevirt.sh
+pnpm run polaris -- start morpheus@kubevirt-vm
+```
+
+## Documentation
+
+Start here:
+
+- [docs/README.md](./docs/README.md)
+- [apps/polaris/docs/README.md](./apps/polaris/docs/README.md)
+- [apps/polaris/docs/runtime-layout.md](./apps/polaris/docs/runtime-layout.md)
+- [apps/polaris/docs/maturity-map.md](./apps/polaris/docs/maturity-map.md)
+- [docs/operations/README.md](./docs/operations/README.md)
+
+## Contributing
+
+Keep generated artifacts in sync with the TypeScript control plane.
+
+Do not treat generated backend manifests as hand-maintained files.
+
+Validate changes with:
+
+```bash
+pnpm run check
+pnpm run test
+bash tests/smoke-polaris-paseo.sh
+```
+
+If you change command flow, backend behavior, or onboarding, update the
+relevant docs under `docs/`.
 
 ## License
 
-[`MIT LICENSE`](LICENSE).
+[MIT](./LICENSE)

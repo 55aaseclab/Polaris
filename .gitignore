@@ -13,13 +13,23 @@ nohup.out
 # Python caches
 __pycache__/
 *.pyc
+node_modules/
+dist/
+apps/polaris/.coverage/
 
 # K3S kata configs
 agents
+config/state/
+config/generated/**
 
 # Repo-local agent credentials
 secrets/agentctl/**
 !secrets/agentctl/
 !secrets/agentctl/.gitignore
 !secrets/agentctl/README.md
-config/kubevirt/.generated/
+config/users/*
+!config/users/profiles/
+!config/users/profiles/**
+!config/users/*/
+config/users/*/**
+!config/users/*/.gitignore
