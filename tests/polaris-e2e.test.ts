@@ -6,6 +6,16 @@ import os from "node:os";
 import { runCli } from "../scripts/polaris/cli/main.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
+
+function getStdoutCaptureQueue(): Promise<void> {
+  const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
+  return existing instanceof Promise ? (existing as Promise<void>) : Promise.resolve();
+}
+
+function setStdoutCaptureQueue(queue: Promise<void>): void {
+  (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY] = queue;
+}
 
 async function withFakePath(commands: Record<string, string>, fn: () => Promise<void> | void): Promise<void> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-e2e-"));
@@ -23,6 +33,13 @@ async function withFakePath(commands: Record<string, string>, fn: () => Promise<
 }
 
 async function captureStdout(fn: () => Promise<void>): Promise<string> {
+  const previous = getStdoutCaptureQueue();
+  let release!: () => void;
+  const next = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  setStdoutCaptureQueue(next);
+  await previous;
   const chunks: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array) => {
@@ -31,16 +48,27 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
   }) as typeof process.stdout.write;
   try {
     await fn();
+    return chunks.join("");
   } finally {
     process.stdout.write = originalWrite;
+    release();
   }
-  return chunks.join("");
 }
 
 function removeIfExists(target: string): void {
   if (fs.existsSync(target)) {
     fs.rmSync(target, { recursive: true, force: true });
   }
+}
+
+function parseJsonOutput<T>(stdout: string): T {
+  const trimmed = stdout.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
+  }
+  return JSON.parse(trimmed.slice(start, end + 1)) as T;
 }
 
 function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: string): string {

@@ -234,4 +234,65 @@ export class EvolutionStore {
     stmt.free();
     this.flush();
   }
+
+  summarize(workspaceId: string, userProfileId?: string): {
+    artifactCount: number;
+    activeWorkspaceArtifacts: number;
+    activeUserArtifacts: number;
+    latestTitles: string[];
+  } {
+    const allStmt = this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM artifacts
+      WHERE workspace_id = ?
+    `);
+    allStmt.bind([workspaceId]);
+    allStmt.step();
+    const artifactCount = Number(allStmt.get()[0] ?? 0);
+    allStmt.free();
+
+    const workspaceStmt = this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM artifacts
+      WHERE workspace_id = ? AND scope = 'workspace' AND status = 'active'
+    `);
+    workspaceStmt.bind([workspaceId]);
+    workspaceStmt.step();
+    const activeWorkspaceArtifacts = Number(workspaceStmt.get()[0] ?? 0);
+    workspaceStmt.free();
+
+    let activeUserArtifacts = 0;
+    if (userProfileId) {
+      const userStmt = this.db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM artifacts
+        WHERE user_profile_id = ? AND scope = 'user' AND status = 'active'
+      `);
+      userStmt.bind([userProfileId]);
+      userStmt.step();
+      activeUserArtifacts = Number(userStmt.get()[0] ?? 0);
+      userStmt.free();
+    }
+
+    const latestStmt = this.db.prepare(`
+      SELECT title
+      FROM artifacts
+      WHERE workspace_id = ? AND status = 'active'
+      ORDER BY updated_at DESC
+      LIMIT 5
+    `);
+    latestStmt.bind([workspaceId]);
+    const latestTitles: string[] = [];
+    while (latestStmt.step()) {
+      latestTitles.push(String(latestStmt.get()[0] ?? ""));
+    }
+    latestStmt.free();
+
+    return {
+      artifactCount,
+      activeWorkspaceArtifacts,
+      activeUserArtifacts,
+      latestTitles,
+    };
+  }
 }

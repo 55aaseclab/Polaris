@@ -243,6 +243,13 @@ export interface WorkspaceStatus {
     reason?: string;
   };
   details: Record<string, string | undefined>;
+  evolution?: {
+    artifactCount: number;
+    activeWorkspaceArtifacts: number;
+    activeUserArtifacts: number;
+    latestTitles: string[];
+    lastSessionId?: string;
+  };
   drift?: WorkspaceDrift;
   attachments?: Record<string, CheckStatus>;
   runtimeAssembly?: Record<string, CheckStatus>;
