@@ -72,7 +72,8 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
 
     const runtimeTargets = [
       { key: "projectRoot", message: "workspace project root assembly missing" },
-      { key: "paseo", message: "workspace paseo assembly missing" },
+      { key: "managerState", message: "workspace manager assembly missing" },
+      { key: "evolutionState", message: "workspace evolution assembly missing" },
       { key: "codex", message: "user identity codex assembly missing" },
       { key: "claude", message: "user identity claude assembly missing" },
       { key: "ssh", message: "user SSH assembly missing" },
@@ -90,13 +91,13 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (workspace.health.requiresDaemon) {
-      const paseo = observation.daemon.paseo;
-      if (paseo && !paseo.observed) {
+      const manager = observation.daemon.manager;
+      if (manager && !manager.observed) {
         items.push({
           kind: "daemon",
-          target: "paseo",
+          target: "manager",
           severity: "warning",
-          message: paseo?.detail || "paseo daemon is not ready",
+          message: manager?.detail || "manager daemon is not ready",
         });
       }
     }
@@ -156,8 +157,8 @@ export function synthesizeWorkspaceStatus(
       backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "stopped") : "missing",
       workspaceReadiness: state === "ready" ? "ready" : "not-ready",
       daemonReadiness: workspace.health.requiresDaemon
-        ? observation.daemon.paseo
-          ? (observation.daemon.paseo.observed ? "ready" : "degraded")
+        ? observation.daemon.manager
+          ? (observation.daemon.manager.observed ? "ready" : "degraded")
           : "unknown"
         : "not-applicable",
       reason: drift.items[0]?.message,
@@ -166,7 +167,7 @@ export function synthesizeWorkspaceStatus(
       backendDetail: observation.backend.detail,
       serviceDetail: observation.services.detail,
       agentDetail: workspace.agent.enabled
-        ? `${workspace.agent.manager} + ${workspace.agent.harnesses.join(" + ")}`
+        ? `${workspace.agent.managerId} + ${workspace.agent.harnesses.join(" + ")}`
         : "agent integration disabled",
       userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
     },
@@ -179,13 +180,14 @@ export function synthesizeWorkspaceStatus(
     runtimeAssembly: {
       home: runtimeCheck(observation.runtimeAssembly.home),
       projectRoot: runtimeCheck(observation.runtimeAssembly.projectRoot),
-      paseo: runtimeCheck(observation.runtimeAssembly.paseo),
+      managerState: runtimeCheck(observation.runtimeAssembly.managerState),
+      evolutionState: runtimeCheck(observation.runtimeAssembly.evolutionState),
       codex: runtimeCheck(observation.runtimeAssembly.codex),
       claude: runtimeCheck(observation.runtimeAssembly.claude),
       ssh: runtimeCheck(observation.runtimeAssembly.ssh),
     },
     daemon: {
-      paseo: daemonCheck(observation.daemon.paseo),
+      manager: daemonCheck(observation.daemon.manager),
     },
     drift,
   };

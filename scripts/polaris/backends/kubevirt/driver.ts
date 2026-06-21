@@ -126,7 +126,8 @@ export class KubevirtDriver implements BackendDriver {
         ? {
             home: { observed: true, detail: workspace.runtime.home },
             projectRoot: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
-            paseo: { observed: workspace.agent.enabled, detail: workspace.agent.enabled ? workspace.attachments.workspaceRuntimeState.mountRoot : "daemon disabled" },
+            managerState: { observed: workspace.agent.enabled, detail: workspace.agent.enabled ? workspace.agent.runtime.stateRoot : "daemon disabled" },
+            evolutionState: { observed: workspace.agent.enabled, detail: workspace.agent.enabled ? workspace.agent.runtime.evolutionRoot : "daemon disabled" },
             codex: { observed: cloudInitPresent, detail: workspace.attachments.userIdentityState.mountRoot },
             claude: { observed: cloudInitPresent, detail: workspace.attachments.userIdentityState.mountRoot },
             ssh: { observed: true, detail: workspace.attachments.userSshState.mountRoot },
@@ -134,9 +135,9 @@ export class KubevirtDriver implements BackendDriver {
         : {},
       daemon: workspace.agent.enabled
         ? {
-            paseo: exists && running
+            manager: exists && running
               ? { observed: cloudInitPresent, detail: cloudInitPresent ? "bootstrapped by cloud-init" : "cloud-init secret missing" }
-              : { observed: false, detail: workspace.agent.readyFile },
+              : { observed: false, detail: workspace.agent.runtime.readyFile },
           }
         : {},
       services: {

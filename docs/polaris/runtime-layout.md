@@ -19,7 +19,8 @@ Durable state is modeled as attachment classes, not as a persisted runtime home:
 - `workspace-runtime-state`
   - workspace-scoped
   - not shared across workspaces
-  - includes durable `paseo` state
+  - includes durable manager state
+  - includes workspace evolution state
 - `user-identity-state`
   - user-scoped
   - cross-workspace
@@ -39,6 +40,11 @@ Non-durable runtime state is modeled separately:
 
 Runtime home paths are assembled views of these attachments rather than the
 persistence boundary itself.
+
+For the current Paseo-backed runtime, the default realization is:
+
+- manager state: `/workspace/state/paseo`
+- evolution state: `/workspace/state/paseo/evolution`
 
 ## Config Layout
 

@@ -53,6 +53,7 @@ attachments:
     mount_root: /workspace/state
     durable_paths:
     - /workspace/state/paseo
+    - /workspace/state/paseo/evolution
     source:
       kind: generated-material
       volume_ref: null

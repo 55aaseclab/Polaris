@@ -38,11 +38,12 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
   const user = workspace.runtime.user;
   const projectRoot = workspace.attachments.workspaceData.mountRoot;
   const paseoRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo`;
+  const evolutionRoot = `${paseoRoot}/evolution`;
   const identityRoot = workspace.attachments.userIdentityState.mountRoot;
   const sshRoot = workspace.attachments.userSshState.mountRoot;
   const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
   return [
-    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets && \\`,
+    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets && \\`,
     `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
     `          rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,

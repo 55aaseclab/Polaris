@@ -113,6 +113,10 @@ function buildCompatibilityUserProfile(args: {
       mode: "managed-key",
       comment: `${id}@polaris`,
     },
+    agentIdentity: {
+      codex: "default",
+      claude: "default",
+    },
     authFiles: [],
   };
 }
@@ -156,6 +160,10 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       ssh: {
         mode: data.ssh?.mode === "provided-key" ? "provided-key" : "managed-key",
         comment: String(data.ssh?.comment ?? `${profileId}@polaris`),
+      },
+      agentIdentity: {
+        codex: String(data.agent_identity?.codex ?? "default"),
+        claude: String(data.agent_identity?.claude ?? "default"),
       },
       authFiles: normalizeAuthFiles(data.auth?.files, path.join(USER_SECRETS_ROOT, profileId)),
     };
@@ -247,6 +255,10 @@ function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig |
 }
 
 function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfig): WorkspaceAttachments {
+  const runtimeDurablePaths = Array.from(new Set([
+    ...config["workspace-runtime-state"].durablePaths,
+    `${config["workspace-runtime-state"].mountRoot.replace(/\/+$/, "")}/paseo/evolution`,
+  ]));
   return {
     workspaceData: buildAttachment(
       "workspace-data",
@@ -261,7 +273,7 @@ function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfi
       config["workspace-runtime-state"].scope,
       config["workspace-runtime-state"].sharing,
       config["workspace-runtime-state"].mountRoot,
-      config["workspace-runtime-state"].durablePaths,
+      runtimeDurablePaths,
       config["workspace-runtime-state"].source,
     ),
     userIdentityState: buildAttachment(
@@ -323,7 +335,7 @@ function translateLegacyAttachments(args: {
       "workspace",
       "exclusive",
       "/workspace/state",
-      ["/workspace/state/paseo"],
+      ["/workspace/state/paseo", "/workspace/state/paseo/evolution"],
       {
         ...workspaceVolumeSource,
         subPath: "state",
@@ -390,14 +402,31 @@ function normalizeAgentKind(rawKind: unknown): string {
 
 function buildAgentContract(home: string, agentKind: string): WorkspaceAgentContract {
   const enabled = Boolean(agentKind);
+  const stateRoot = `${home}/.paseo`;
+  const evolutionRoot = `${stateRoot}/evolution`;
   return {
     enabled,
-    manager: enabled ? "paseo" : "none",
+    managerId: enabled ? "paseo" : "none",
+    contractVersion: "v1",
+    capabilities: {
+      supportsEventStream: enabled,
+      supportsTranscriptReplay: enabled,
+      supportsStructuredArtifacts: enabled,
+      supportsReview: enabled,
+      supportsRetrieval: enabled,
+      supportsCuration: enabled,
+      requiresDaemon: enabled,
+      supportsPairing: enabled,
+    },
     harnesses: enabled ? ["codex", "claude"] : [],
     bootstrapSecretsRoot: "/bootstrap-secrets",
-    readyFile: "/tmp/.ready",
-    pairingFile: enabled ? `${home}/.paseo/pairing.json` : undefined,
-    staleRuntimeArtifacts: enabled ? [`${home}/.paseo/paseo.pid`, "/run/workspace/pids/paseo.pid"] : [],
+    runtime: {
+      stateRoot,
+      evolutionRoot,
+      readyFile: "/tmp/.ready",
+      pairingFile: enabled ? `${stateRoot}/pairing.json` : undefined,
+      staleRuntimeArtifacts: enabled ? [`${stateRoot}/paseo.pid`, "/run/workspace/pids/paseo.pid"] : [],
+    },
   };
 }
 
@@ -544,15 +573,16 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     runtimeContract: {
       minimalInvariants: [
         `runtime home SHALL resolve to ${home}`,
-        `${home}/.paseo SHALL assemble from workspace-runtime-state`,
+        `${agentContract.runtime.stateRoot} SHALL assemble from workspace-runtime-state`,
+        `${agentContract.runtime.evolutionRoot} SHALL assemble from workspace-runtime-state`,
         `${home}/.codex and ${home}/.claude SHALL assemble from user-identity-state`,
         `${home}/.ssh SHALL assemble from user-ssh-state with strict key permissions`,
       ],
-      staleRuntimeArtifacts: [`${home}/.paseo/paseo.pid`, ...attachments.ephemeralRuntime.staleArtifacts],
+      staleRuntimeArtifacts: [...agentContract.runtime.staleRuntimeArtifacts, ...attachments.ephemeralRuntime.staleArtifacts],
     },
     health: {
-      readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agentContract.enabled ? "daemon-port" : "ready-file",
-      requiresDaemon: agentContract.enabled
+      readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agentContract.capabilities.requiresDaemon ? "daemon-port" : "ready-file",
+      requiresDaemon: agentContract.capabilities.requiresDaemon
     }
   };
 

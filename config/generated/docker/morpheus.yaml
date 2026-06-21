@@ -10,7 +10,7 @@ services:
         set -eux
         mkdir -p /root
         chmod 755 /root
-        mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /run/workspace/tmp /run/workspace/pids /run/workspace/sockets
+        mkdir -p /workspace/project /workspace/state/paseo /workspace/state/paseo/evolution /identity/codex /identity/claude /ssh /run/workspace/tmp /run/workspace/pids /run/workspace/sockets
         rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace
         ln -sfn /identity/codex /root/.codex
         ln -sfn /identity/claude /root/.claude

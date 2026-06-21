@@ -55,6 +55,10 @@ export interface UserProfile {
     mode: "managed-key" | "provided-key";
     comment: string;
   };
+  agentIdentity: {
+    codex: string;
+    claude: string;
+  };
   authFiles: AuthFile[];
 }
 
@@ -156,12 +160,27 @@ export interface WorkspaceRuntime {
 
 export interface WorkspaceAgentContract {
   enabled: boolean;
-  manager: "none" | "paseo";
+  managerId: "none" | "paseo" | "generic-daemon";
+  contractVersion: "v1";
+  capabilities: {
+    supportsEventStream: boolean;
+    supportsTranscriptReplay: boolean;
+    supportsStructuredArtifacts: boolean;
+    supportsReview: boolean;
+    supportsRetrieval: boolean;
+    supportsCuration: boolean;
+    requiresDaemon: boolean;
+    supportsPairing: boolean;
+  };
   harnesses: Array<"codex" | "claude">;
   bootstrapSecretsRoot: string;
-  readyFile: string;
-  pairingFile?: string;
-  staleRuntimeArtifacts: string[];
+  runtime: {
+    stateRoot: string;
+    evolutionRoot: string;
+    readyFile?: string;
+    pairingFile?: string;
+    staleRuntimeArtifacts: string[];
+  };
 }
 
 export interface WorkspaceConnectivity {
@@ -250,13 +269,14 @@ export interface BackendObservation {
   runtimeAssembly: {
     home?: ObservationItem;
     projectRoot?: ObservationItem;
-    paseo?: ObservationItem;
+    managerState?: ObservationItem;
+    evolutionState?: ObservationItem;
     codex?: ObservationItem;
     claude?: ObservationItem;
     ssh?: ObservationItem;
   };
   daemon: {
-    paseo?: ObservationItem;
+    manager?: ObservationItem;
   };
   services: {
     declared?: number;
