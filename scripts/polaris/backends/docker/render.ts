@@ -5,34 +5,71 @@ function q(value: string): string {
   return JSON.stringify(value);
 }
 
+function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceSpec): string | null {
+  if (!sourcePath) {
+    return null;
+  }
+  const marker = "/secrets/polaris/";
+  const index = sourcePath.indexOf(marker);
+  if (index === -1) {
+    return null;
+  }
+  return `${workspace.agent.bootstrapSecretsRoot}/${sourcePath.slice(index + marker.length)}`;
+}
+
 export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
   const serviceName = project;
   const containerName = `${project}-docker`;
   const workspaceDataVolume = `${project}-workspace-data`;
   const workspaceRuntimeVolume = `${project}-workspace-runtime-state`;
-  const identityVolume = "polaris-user-identity";
-  const sshVolume = "polaris-user-ssh";
+  const userScope = workspace.runtime.user.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const identityVolume = `polaris-${userScope}-identity`;
+  const sshVolume = `polaris-${userScope}-ssh`;
+  const home = workspace.runtime.home;
+  const bootstrapSecretsRoot = workspace.agent.bootstrapSecretsRoot;
+  const authBootstrapLines = workspace.runtime.authFiles
+    .map((file) => {
+      const source = secretMountSource(file.sourcePath, workspace);
+      if (!source) {
+        return null;
+      }
+      if (file.mountPath.includes("/.codex/")) {
+        return `if [ -f ${source} ]; then install -m 600 ${source} /identity/codex/${file.mountPath.split("/").pop()}; fi`;
+      }
+      if (file.mountPath.includes("/.claude/")) {
+        return `if [ -f ${source} ]; then install -m 600 ${source} /identity/claude/${file.mountPath.split("/").pop()}; fi`;
+      }
+      if (file.mountPath.includes("/.ssh/")) {
+        return `if [ -f ${source} ]; then install -m 600 ${source} /ssh/${file.mountPath.split("/").pop()}; fi`;
+      }
+      return null;
+    })
+    .filter((line): line is string => Boolean(line));
   const bootstrap = [
     "set -eux",
-    "mkdir -p /root",
-    "chmod 755 /root",
-    "mkdir -p /workspace/project /workspace/state/paseo /identity/codex /identity/claude /ssh /run/workspace/tmp /run/workspace/pids /run/workspace/sockets",
-    "rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace",
-    "ln -sfn /identity/codex /root/.codex",
-    "ln -sfn /identity/claude /root/.claude",
-    "ln -sfn /workspace/state/paseo /root/.paseo",
-    "ln -sfn /ssh /root/.ssh",
-    "ln -sfn /workspace/project /root/workspace",
-    "if [ -f /bootstrap-secrets/codex/auth.json ]; then install -m 600 /bootstrap-secrets/codex/auth.json /identity/codex/auth.json; fi",
-    "if [ -f /bootstrap-secrets/codex/config.toml ]; then install -m 600 /bootstrap-secrets/codex/config.toml /identity/codex/config.toml; fi",
-    "if [ -f /bootstrap-secrets/claude/settings.json ]; then install -m 600 /bootstrap-secrets/claude/settings.json /identity/claude/settings.json; fi",
+    `mkdir -p ${home}`,
+    `chmod 755 ${home}`,
+    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets`,
+    `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
+    `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
+    `ln -sfn ${workspace.attachments.userSshState.mountRoot} ${home}/.ssh`,
+    `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
+    ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
+    ...authBootstrapLines,
     `if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.profile.sshKeyComment} -N '' -f /ssh/id_ed25519; fi`,
     "chmod 400 /ssh/id_ed25519 || true",
     "chmod 644 /ssh/id_ed25519.pub || true",
-    "rm -f /root/.paseo/paseo.pid",
-    "PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767",
-    "paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json > /root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test \"$$paired\" = 1",
+    ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
+    ...(workspace.agent.enabled
+      ? [
+          `rm -f ${home}/.paseo/paseo.pid ${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`,
+          `PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+          `paired=0; for i in $(seq 1 30); do PASEO_HOME=${home}/.paseo paseo daemon pair --json > ${home}/.paseo/pairing.json.tmp 2>/dev/null && mv ${home}/.paseo/pairing.json.tmp ${home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$$paired" = 1`,
+        ]
+      : []),
     "touch /tmp/.ready",
     "sleep infinity",
   ].join("\n");
@@ -57,7 +94,7 @@ ${portLines || '      - "6767:6767"'}
       - ${workspaceRuntimeVolume}:/workspace/state
       - ${identityVolume}:/identity
       - ${sshVolume}:/ssh
-      - \${MORPHEUS_SECRETS_DIR:-./secrets/polaris}:/bootstrap-secrets:ro
+      - \${POLARIS_SECRETS_DIR:-./secrets/polaris}:${bootstrapSecretsRoot}:ro
     tmpfs:
       - /run/workspace
 

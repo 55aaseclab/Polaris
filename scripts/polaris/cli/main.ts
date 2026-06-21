@@ -7,11 +7,12 @@ import { restartCommand } from "./commands/restart.js";
 import { rebuildCommand } from "./commands/rebuild.js";
 import { statusCommand } from "./commands/status.js";
 import { reconcileCommand } from "./commands/reconcile.js";
+import { logsCommand } from "./commands/logs.js";
 
-const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile"]);
+const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm exec tsx scripts/polaris.ts <project> | <create|start|stop|restart|rebuild|apply|render|status|reconcile> <project>");
+  throw new Error("Usage: pnpm exec tsx scripts/polaris.ts <status|create|start|stop|restart|rebuild|apply|render|reconcile|logs> <project>");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -20,7 +21,7 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   const [first, second] = argv;
-  const command = COMMANDS.has(first) ? first : "apply";
+  const command = COMMANDS.has(first) ? first : "status";
   const project = COMMANDS.has(first) ? second : first;
   if (!project) {
     usage();
@@ -60,6 +61,10 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (command === "reconcile") {
     await reconcileCommand(project);
+    return;
+  }
+  if (command === "logs") {
+    await logsCommand(project);
     return;
   }
 

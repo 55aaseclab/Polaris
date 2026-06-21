@@ -24,12 +24,12 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   const vmTemplate = fs.readFileSync(vmPath, "utf8");
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
   const claudeSettings = workspace.runtime.authFiles.find((item) => item.key === "claude-settings.json")?.content;
-  if (!codexAuth || !claudeSettings) {
+  if (workspace.agent.enabled && (!codexAuth || !claudeSettings)) {
     throw new Error("KubeVirt render requires codex-auth.json and claude-settings.json");
   }
   let renderedCloudinit = cloudinitTemplate
-    .replace("        __CODEX_AUTH_JSON__", indentBlock(codexAuth, 8))
-    .replace("        __CLAUDE_SETTINGS_JSON__", indentBlock(claudeSettings, 8));
+    .replace("        __CODEX_AUTH_JSON__", indentBlock(codexAuth ?? "{}", 8))
+    .replace("        __CLAUDE_SETTINGS_JSON__", indentBlock(claudeSettings ?? "{}", 8));
   renderedCloudinit = renderedCloudinit
     .replace(
       "mkdir -p /workspace/.cache /workspace/.codex /workspace/.claude /workspace/.paseo /workspace/.ssh /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /workspace/.tmp",

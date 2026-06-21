@@ -31,6 +31,7 @@ function daemonCheck(observed: BackendObservation["daemon"][keyof BackendObserva
 
 export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: BackendObservation): WorkspaceDrift {
   const items: DriftItem[] = [];
+  const backendRunning = observation.backend.exists && observation.backend.running;
 
   if (!observation.backend.exists) {
     items.push({
@@ -48,68 +49,70 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     });
   }
 
-  const attachmentTargets = {
-    workspaceData: workspace.attachments.workspaceData,
-    workspaceRuntimeState: workspace.attachments.workspaceRuntimeState,
-    userIdentityState: workspace.attachments.userIdentityState,
-    userSshState: workspace.attachments.userSshState,
-  } as const;
+  if (backendRunning) {
+    const attachmentTargets = {
+      workspaceData: workspace.attachments.workspaceData,
+      workspaceRuntimeState: workspace.attachments.workspaceRuntimeState,
+      userIdentityState: workspace.attachments.userIdentityState,
+      userSshState: workspace.attachments.userSshState,
+    } as const;
 
-  for (const [key, attachment] of Object.entries(attachmentTargets)) {
-    const observationKey = key as keyof BackendObservation["attachments"];
-    const observed = observation.attachments[observationKey];
-    if (!observed || !observed.observed) {
-      items.push({
-        kind: "attachment",
-        target: attachment.kind,
-        severity: "error",
-        message: observed?.detail || `${attachment.kind} is missing or not attached`,
-      });
+    for (const [key, attachment] of Object.entries(attachmentTargets)) {
+      const observationKey = key as keyof BackendObservation["attachments"];
+      const observed = observation.attachments[observationKey];
+      if (!observed || !observed.observed) {
+        items.push({
+          kind: "attachment",
+          target: attachment.kind,
+          severity: "error",
+          message: observed?.detail || `${attachment.kind} is missing or not attached`,
+        });
+      }
     }
-  }
 
-  const runtimeTargets = [
-    { key: "projectRoot", message: "workspace project root assembly missing" },
-    { key: "paseo", message: "workspace paseo assembly missing" },
-    { key: "codex", message: "user identity codex assembly missing" },
-    { key: "claude", message: "user identity claude assembly missing" },
-    { key: "ssh", message: "user SSH assembly missing" },
-  ] as const;
-  for (const target of runtimeTargets) {
-    const observed = observation.runtimeAssembly[target.key];
-    if (observed && !observed.observed) {
+    const runtimeTargets = [
+      { key: "projectRoot", message: "workspace project root assembly missing" },
+      { key: "paseo", message: "workspace paseo assembly missing" },
+      { key: "codex", message: "user identity codex assembly missing" },
+      { key: "claude", message: "user identity claude assembly missing" },
+      { key: "ssh", message: "user SSH assembly missing" },
+    ] as const;
+    for (const target of runtimeTargets) {
+      const observed = observation.runtimeAssembly[target.key];
+      if (observed && !observed.observed) {
+        items.push({
+          kind: "runtime-assembly",
+          target: target.key,
+          severity: "warning",
+          message: observed?.detail || target.message,
+        });
+      }
+    }
+
+    if (workspace.health.requiresDaemon) {
+      const paseo = observation.daemon.paseo;
+      if (paseo && !paseo.observed) {
+        items.push({
+          kind: "daemon",
+          target: "paseo",
+          severity: "warning",
+          message: paseo?.detail || "paseo daemon is not ready",
+        });
+      }
+    }
+
+    if (
+      typeof observation.services.declared === "number" &&
+      typeof observation.services.observed === "number" &&
+      observation.services.declared !== observation.services.observed
+    ) {
       items.push({
-        kind: "runtime-assembly",
-        target: target.key,
+        kind: "service",
+        target: "service-count",
         severity: "warning",
-        message: observed?.detail || target.message,
+        message: observation.services.detail || `declared ${observation.services.declared} services but observed ${observation.services.observed}`,
       });
     }
-  }
-
-  if (workspace.health.requiresDaemon) {
-    const paseo = observation.daemon.paseo;
-    if (paseo && !paseo.observed) {
-      items.push({
-        kind: "daemon",
-        target: "paseo",
-        severity: "warning",
-        message: paseo?.detail || "paseo daemon is not ready",
-      });
-    }
-  }
-
-  if (
-    typeof observation.services.declared === "number" &&
-    typeof observation.services.observed === "number" &&
-    observation.services.declared !== observation.services.observed
-  ) {
-    items.push({
-      kind: "service",
-      target: "service-count",
-      severity: "warning",
-      message: observation.services.detail || `declared ${observation.services.declared} services but observed ${observation.services.observed}`,
-    });
   }
 
   return {
@@ -129,14 +132,16 @@ export function synthesizeWorkspaceStatus(
     ? "missing"
     : observation.backend.running
       ? "running"
-      : "degraded";
+      : "stopped";
   const state: WorkspaceStatus["state"] = !observation.backend.exists
     ? "not-applied"
-    : drift.hasErrors
-      ? "degraded"
-      : drift.hasWarnings
+    : !observation.backend.running && !drift.hasErrors
+      ? "saved"
+      : drift.hasErrors
         ? "degraded"
-        : "ready";
+        : drift.hasWarnings
+          ? "degraded"
+          : "ready";
 
   return {
     project: workspace.identity.projectName,
@@ -148,7 +153,7 @@ export function synthesizeWorkspaceStatus(
     lifecycleAction,
     state,
     health: {
-      backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "degraded") : "missing",
+      backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "stopped") : "missing",
       workspaceReadiness: state === "ready" ? "ready" : "not-ready",
       daemonReadiness: workspace.health.requiresDaemon
         ? observation.daemon.paseo
@@ -160,6 +165,9 @@ export function synthesizeWorkspaceStatus(
     details: {
       backendDetail: observation.backend.detail,
       serviceDetail: observation.services.detail,
+      agentDetail: workspace.agent.enabled
+        ? `${workspace.agent.manager} + ${workspace.agent.harnesses.join(" + ")}`
+        : "agent integration disabled",
     },
     attachments: {
       workspaceData: attachmentCheck(observation.attachments.workspaceData),

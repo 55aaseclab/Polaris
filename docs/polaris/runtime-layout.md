@@ -6,7 +6,8 @@
   - profiles: `gvisor`, `kata-qemu`, `kata-clh`, `kata-qemu-tdx`
 - `kubevirt-vm`
 - `docker`
-  - first-class backend target, still maturing toward parity
+  - clean default onboarding path
+  - first-class backend target for spec -> render -> runtime flow
 
 ## Attachment Model
 
@@ -67,6 +68,8 @@ defaults rather than branching directly on the workspace name.
 
 ## Current Reality
 
+- New onboarding should start from `config/specs/docker/projects/*.agent.yaml`
+  and `config/generated/docker/*.yaml`.
 - New TypeScript code prefers `config/specs/**` and `config/generated/**`.
 - Repo-managed specs now declare attachment classes directly.
 - The control plane translates legacy path-centric persistence fields only as a
@@ -81,9 +84,18 @@ defaults rather than branching directly on the workspace name.
   different physical mount primitives, but they are expected to preserve the
   same scope and lifecycle semantics.
 - Pod currently has the deepest runtime-controller support.
-- KubeVirt and Docker are expected to converge on the same controller model
-  rather than remain second-class paths.
+- KubeVirt and Docker are expected to converge on the same controller model.
 - Morpheus remains a built-in profile/example, not a backend-special-case name.
+
+For Docker specifically:
+
+- saved intent lives under `config/specs/docker/projects/`
+- rendered output lives under `config/generated/docker/`
+- the rendered artifact is a Docker Compose file consumed by `docker compose`
+- `status` also writes a synthesized control-plane view to `config/state/`
+- when the same project name exists across multiple backends, operators can use
+  `<project>@docker`, `<project>@pod`, or `<project>@kubevirt-vm` to select the
+  intended saved spec
 
 ## Runtime Controller Pipeline
 

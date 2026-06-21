@@ -29,6 +29,12 @@ Instead, Polaris uses:
 - `Paseo` as the manager/orchestrator layer
 - replaceable coding harnesses such as `Codex` and `Claude`
 
+The practical contract is:
+
+- Polaris assembles the workspace and bootstraps external agent credentials
+- `Paseo` provides the workspace-local daemon/orchestration layer
+- `Codex` and `Claude` remain external harnesses, not Polaris-native features
+
 So Polaris is intentionally:
 
 - harness-agnostic
