@@ -2,7 +2,12 @@ import { getBackendDriver } from "../../backends/index.js";
 import { loadWorkspace } from "../../config/load.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
-import { prepareEvolutionBootstrapContext } from "../../evolution/runtime.js";
+import {
+  appendEvolutionEvent,
+  createEvolutionSessionId,
+  finalizeEvolutionSession,
+  prepareEvolutionBootstrapContext,
+} from "../../evolution/runtime.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
 
 export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleAction"], projectRef: string): {
@@ -86,4 +91,38 @@ export async function waitForWorkspaceReady(
     );
   }
   throw new Error(`Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms`);
+}
+
+export async function runWorkspaceCommandWithEvolution<T>(params: {
+  workspace: WorkspaceSpec;
+  command: WorkspaceStatus["lifecycleAction"];
+  execute: () => Promise<T>;
+  onSuccessPayload?: (result: T) => Record<string, unknown>;
+}): Promise<{ result: T; evolutionSessionId?: string }> {
+  const { workspace, command, execute, onSuccessPayload } = params;
+  if (!workspace.agent.enabled) {
+    return { result: await execute() };
+  }
+  const sessionId = createEvolutionSessionId(command);
+  await appendEvolutionEvent(workspace, sessionId, "task-started", {
+    command,
+    backend: workspace.backend.kind,
+    project: workspace.identity.projectName,
+  });
+  try {
+    const result = await execute();
+    await appendEvolutionEvent(workspace, sessionId, "task-completed", {
+      command,
+      ...(onSuccessPayload ? onSuccessPayload(result) : {}),
+    });
+    await finalizeEvolutionSession(workspace, sessionId);
+    return { result, evolutionSessionId: sessionId };
+  } catch (error) {
+    await appendEvolutionEvent(workspace, sessionId, "task-failed", {
+      command,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await finalizeEvolutionSession(workspace, sessionId);
+    throw error;
+  }
 }

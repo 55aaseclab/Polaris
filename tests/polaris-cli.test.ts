@@ -15,6 +15,16 @@ import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } 
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const STATUS_DIR = path.join(REPO_ROOT, "config", "state");
+const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
+
+function getStdoutCaptureQueue(): Promise<void> {
+  const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
+  return existing instanceof Promise ? (existing as Promise<void>) : Promise.resolve();
+}
+
+function setStdoutCaptureQueue(queue: Promise<void>): void {
+  (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY] = queue;
+}
 
 async function withFakeCommands(
   commands: Record<string, string>,
@@ -52,6 +62,13 @@ ${scriptBody}
 }
 
 async function captureStdout(fn: () => Promise<void> | void): Promise<string> {
+  const previous = getStdoutCaptureQueue();
+  let release!: () => void;
+  const next = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  setStdoutCaptureQueue(next);
+  await previous;
   const chunks: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
@@ -63,15 +80,21 @@ async function captureStdout(fn: () => Promise<void> | void): Promise<string> {
 
   try {
     await fn();
+    return chunks.join("");
   } finally {
     process.stdout.write = originalWrite;
+    release();
   }
-
-  return chunks.join("");
 }
 
 function parseJsonOutput<T>(stdout: string): T {
-  return JSON.parse(stdout.trim()) as T;
+  const trimmed = stdout.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
+  }
+  return JSON.parse(trimmed.slice(start, end + 1)) as T;
 }
 
 function uniqueProjectName(prefix: string): string {
@@ -432,6 +455,7 @@ test("CLI create scaffolds a docker workspace spec for a new project", async () 
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {
   cleanupStatusFile("morpheus");
+  const expectedStatusFile = path.join(STATUS_DIR, "morpheus.status.json");
 
   await withFakeCommands(
     {
@@ -455,18 +479,19 @@ exit 0
 `,
     },
     async () => {
-      const stdout = await captureStdout(async () => {
+      await captureStdout(async () => {
         await runCli(["morpheus"]);
       });
 
-      const parsed = parseJsonOutput<{
+      assert.equal(fs.existsSync(expectedStatusFile), true);
+      const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
         project: string;
         lifecycleAction: string;
         state: string;
         backend: { kind: string; instanceState: string };
         health: { backendLiveness: string; workspaceReadiness: string; daemonReadiness: string };
-        statusFile: string;
-      }>(stdout);
+        evolution?: { artifactCount: number };
+      };
 
       assert.equal(parsed.project, "morpheus");
       assert.equal(parsed.lifecycleAction, "status");
@@ -476,7 +501,7 @@ exit 0
       assert.equal(parsed.health.backendLiveness, "running");
       assert.equal(parsed.health.workspaceReadiness, "ready");
       assert.equal(parsed.health.daemonReadiness, "ready");
-      assert.equal(fs.existsSync(parsed.statusFile), true);
+      assert.ok(parsed.evolution);
     },
   );
 

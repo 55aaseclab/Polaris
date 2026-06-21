@@ -1,6 +1,12 @@
-import { loadWorkspaceForCommand } from "./shared.js";
+import { loadExecutableWorkspaceForCommand, runWorkspaceCommandWithEvolution } from "./shared.js";
 
 export async function restartCommand(project: string): Promise<void> {
-  const { workspace, driver } = loadWorkspaceForCommand("restart", project);
-  await driver.restart(workspace);
+  const { workspace, driver } = await loadExecutableWorkspaceForCommand("restart", project);
+  await runWorkspaceCommandWithEvolution({
+    workspace,
+    command: "restart",
+    execute: async () => {
+      await driver.restart(workspace);
+    },
+  });
 }
