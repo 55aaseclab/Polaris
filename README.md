@@ -27,28 +27,23 @@ Today that means:
 
 ## Quickstart
 
-The fastest path is local Docker.
+Install the repo skill if you want the shorter prompt:
 
 ```bash
-pnpm install
-pnpm exec tsx scripts/polaris.ts create <project>
-pnpm exec tsx scripts/polaris.ts render <project>@docker
-pnpm exec tsx scripts/polaris.ts start <project>@docker
-pnpm exec tsx scripts/polaris.ts status <project>@docker
-pnpm exec tsx scripts/polaris.ts logs <project>@docker
+pnpm exec tsx scripts/install-skills.ts --target codex use-polaris
 ```
 
-Stage bootstrap secrets before starting the workspace:
+Install into Claude instead with:
+
+```bash
+pnpm exec tsx scripts/install-skills.ts --target claude use-polaris
+```
+
+Then use this prompt for the fastest local Docker path:
 
 ```text
-secrets/polaris/
-  codex/auth.json
-  codex/config.toml
-  claude/settings.json
+Use $use-polaris to set up Polaris locally with Docker for project <project>.
 ```
-
-Override the default secret mount source with `POLARIS_SECRETS_DIR` when
-needed.
 
 ## Install
 
