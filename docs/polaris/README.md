@@ -39,10 +39,12 @@ pnpm exec tsx scripts/polaris.ts create <project>
 If the project does not already exist, `create` scaffolds:
 
 - `config/specs/docker/projects/<project>.agent.yaml`
+- `config/users/profiles/local-<identity>.yaml` when a matching local user
+  profile does not already exist
 
-Repo-managed workspace specs should also reference a user profile such as:
+The scaffolded spec references that local user profile:
 
-- `user_profile: 100000000000000001`
+- `user_profile: local-<identity>`
 
 Then stage bootstrap secrets and render/start the workspace:
 
@@ -105,10 +107,11 @@ pnpm exec tsx scripts/polaris.ts logs <project>@kubevirt-vm
 
 ## Secrets And Bootstrap
 
-The default Docker scaffold expects bootstrap material under:
+The default Docker scaffold expects bootstrap material under the user profile
+directory reported by `create`, for example:
 
 ```text
-config/users/100000000000000001/
+config/users/local-<identity>/
   codex/auth.json
   codex/config.toml
   claude/settings.json
@@ -116,7 +119,7 @@ config/users/100000000000000001/
 
 At runtime, the Docker backend mounts:
 
-- `./config/users/100000000000000001` by default
+- `./config/users/<user-profile-id>` by default
 - or `$POLARIS_SECRETS_DIR` if that environment variable is set
 
 Those files are copied into the user-scoped identity attachments during
