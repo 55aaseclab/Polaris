@@ -128,7 +128,8 @@ bootstrap:
 Polaris also creates or assembles:
 
 - workspace data at `/workspace/project`
-- workspace runtime state at `/workspace/state/paseo`
+- workspace manager state at `/workspace/state/paseo`
+- workspace evolution state at `/workspace/state/paseo/evolution`
 - SSH material at `/ssh`
 - ephemeral runtime state under `/run/workspace`
 
@@ -144,10 +145,11 @@ Polaris does not provide a built-in coding harness.
 
 The contract is:
 
-- `Paseo` is the workspace manager/orchestrator layer
+- Polaris targets a manager contract, not a hard-coded daemon product name
+- `Paseo` is the first workspace manager/orchestrator adapter
 - `Codex` and `Claude` are external harnesses bootstrapped into the workspace
 - Polaris is responsible for workspace assembly, secrets bootstrap, daemon
-  startup, and status/drift reporting
+  startup, evolution-state persistence, and status/drift reporting
 - Harness behavior is external to Polaris
 
 So the default Docker path is:
@@ -155,6 +157,7 @@ So the default Docker path is:
 - Polaris creates the spec
 - Polaris renders and starts the workspace
 - Paseo comes up inside the workspace
+- Polaris may persist learning artifacts under `/workspace/state/paseo/evolution`
 - Codex and Claude use the mounted identity/bootstrap material
 
 ## Validation

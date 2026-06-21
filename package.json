@@ -9,11 +9,13 @@
     "test:polaris": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.3",
+    "@types/sql.js": "^1.4.11",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

@@ -2,6 +2,12 @@ import type { WorkspaceSpec } from "./workspace.js";
 
 const POD_PROFILES = new Set(["gvisor", "kata-qemu", "kata-clh", "kata-qemu-tdx"]);
 
+function terminalPathToken(filePath: string | undefined): string {
+  if (!filePath) return "";
+  const parts = filePath.split("/").filter(Boolean);
+  return (parts[parts.length - 1] || "").replace(/^\.+/, "");
+}
+
 export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.identity.projectName) {
     throw new Error("Workspace project name is required");
@@ -44,8 +50,19 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.attachments.userSshState.scope !== "user" || workspace.attachments.userSshState.sharing !== "cross-workspace") {
     throw new Error("user-ssh-state must remain user-scoped and cross-workspace");
   }
-  if (workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes("paseo")) === false) {
-    throw new Error("workspace-runtime-state must contain the durable paseo state path");
+  const managerStateToken = terminalPathToken(workspace.agent.runtime.stateRoot);
+  const evolutionStateToken = terminalPathToken(workspace.agent.runtime.evolutionRoot);
+  if (
+    workspace.agent.enabled &&
+    workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes(managerStateToken)) === false
+  ) {
+    throw new Error("workspace-runtime-state must contain the durable manager state path");
+  }
+  if (
+    workspace.agent.enabled &&
+    workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes(evolutionStateToken)) === false
+  ) {
+    throw new Error("workspace-runtime-state must contain the durable evolution state path");
   }
   if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/")) === false) {
     throw new Error("user-identity-state must expose identity attachment roots");
@@ -67,6 +84,15 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   }
 
   if (workspace.agent.enabled) {
+    if (workspace.agent.managerId === "none") {
+      throw new Error("Agent-enabled workspaces require a manager id");
+    }
+    if (!workspace.agent.capabilities.supportsEventStream) {
+      throw new Error("Agent-enabled workspaces require manager event stream support");
+    }
+    if (!workspace.agent.capabilities.supportsTranscriptReplay) {
+      throw new Error("Agent-enabled workspaces require transcript replay support");
+    }
     const requiredFiles = ["codex-auth.json", "codex-config.toml", "claude-settings.json"];
     for (const key of requiredFiles) {
       const authFile = workspace.runtime.authFiles.find((entry) => entry.key === key);
@@ -97,6 +123,10 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
         throw new Error(`Workspace backend 'pod' cannot set env var ${envVar.name} to a /workspace path`);
       }
     }
+  }
+
+  if (workspace.health.requiresDaemon !== workspace.agent.capabilities.requiresDaemon) {
+    throw new Error("Workspace health daemon requirement must match manager capabilities");
   }
 
   if (workspace.backend.kind === "kubevirt-vm") {

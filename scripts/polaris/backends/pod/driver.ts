@@ -107,7 +107,7 @@ export class PodDriver implements BackendDriver {
     const daemonObserved =
       workspace.agent.enabled &&
       podName
-        ? execCheck(`test -f ${workspace.agent.readyFile} && test -f ${workspace.agent.pairingFile}`)
+        ? execCheck(`test -f ${workspace.agent.runtime.readyFile} && test -f ${workspace.agent.runtime.pairingFile}`)
         : workspace.agent.enabled
           ? false
           : true;
@@ -128,17 +128,18 @@ export class PodDriver implements BackendDriver {
       runtimeAssembly: running ? {
         home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
         projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
-        paseo: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: `${workspace.runtime.home}/.paseo` },
+        managerState: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },
+        evolutionState: { observed: execCheck(`test -d ${workspace.agent.runtime.evolutionRoot}`), detail: workspace.agent.runtime.evolutionRoot },
         codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
         claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
         ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
       } : {},
       daemon: {
-        paseo: workspace.health.requiresDaemon && running
-          ? { observed: daemonObserved, detail: workspace.agent.pairingFile ?? workspace.agent.readyFile }
+        manager: workspace.health.requiresDaemon && running
+          ? { observed: daemonObserved, detail: workspace.agent.runtime.pairingFile ?? workspace.agent.runtime.readyFile }
           : workspace.health.requiresDaemon
-            ? { observed: false, detail: workspace.agent.readyFile }
-          : { observed: true, detail: "daemon not required" },
+            ? { observed: false, detail: workspace.agent.runtime.readyFile }
+            : { observed: true, detail: "daemon not required" },
       },
       services: {
         declared: workspace.connectivity.servicePorts.length ? 1 : 0,

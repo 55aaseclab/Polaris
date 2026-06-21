@@ -87,7 +87,7 @@ export function scaffoldDockerWorkspace(project: string): string {
         scope: "workspace",
         sharing: "exclusive",
         mount_root: "/workspace/state",
-        durable_paths: ["/workspace/state/paseo"],
+        durable_paths: ["/workspace/state/paseo", "/workspace/state/paseo/evolution"],
         source: {
           kind: "generated-material",
           description: `docker workspace runtime state for ${project}`,

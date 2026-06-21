@@ -183,7 +183,10 @@ test("pod render writes a TypeScript-generated manifest", () => {
 
 test("attachment model distinguishes durable workspace state from ephemeral runtime state", () => {
   const workspace = loadWorkspace("morpheus");
-  assert.deepEqual(workspace.attachments.workspaceRuntimeState.durablePaths, ["/workspace/state/paseo"]);
+  assert.deepEqual(workspace.attachments.workspaceRuntimeState.durablePaths, [
+    "/workspace/state/paseo",
+    "/workspace/state/paseo/evolution",
+  ]);
   assert.ok(workspace.attachments.ephemeralRuntime.staleArtifacts.includes("/run/workspace/pids/paseo.pid"));
   assert.ok(workspace.runtimeContract.minimalInvariants.some((entry) => entry.includes("user-identity-state")));
 });
@@ -343,7 +346,7 @@ exit 0
       assert.equal(observation.backend.kind, "pod");
       assert.ok("workspaceData" in observation.attachments);
       assert.ok("projectRoot" in observation.runtimeAssembly);
-      assert.ok("paseo" in observation.daemon);
+      assert.ok("manager" in observation.daemon);
     },
   );
 });
