@@ -6,5 +6,7 @@ Use repo-relative paths or plain code references.
 Do not add absolute filesystem paths.
 Do not hardcode environment-specific paths or similar host-layout assumptions into
 repo code.
+Do not write business data, real customer data, or real repository identifiers
+into tests; use generic placeholders and synthetic fixtures instead.
 Add comments when they improve clarity.
 If you are uncertain, ask instead of fabricating results under pressure.

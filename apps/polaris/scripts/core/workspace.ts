@@ -51,6 +51,9 @@ export interface UserProfile {
   name: string;
   email: string;
   secretsRoot: string;
+  github: {
+    account?: string;
+  };
   ssh: {
     mode: "managed-key" | "provided-key";
     comment: string;
@@ -259,6 +262,14 @@ export interface WorkspaceStatus {
       suppressedBecause?: string;
     }>;
     lastSessionId?: string;
+  };
+  ssh?: {
+    mode: "managed-key" | "provided-key";
+    githubAccount?: string;
+    selfCheck: {
+      state: "ready" | "warning" | "error" | "not-configured";
+      message: string;
+    };
   };
   drift?: WorkspaceDrift;
   attachments?: Record<string, CheckStatus>;

@@ -81,6 +81,9 @@ export function ensureScaffoldUserProfile(): {
         id: profile.id,
         name: profile.name,
         email: profile.email,
+        github: {
+          account: null,
+        },
         ssh: {
           mode: "managed-key",
           comment: profile.email,
