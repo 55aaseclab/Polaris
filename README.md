@@ -3,10 +3,7 @@
 Self-hosted workspace control plane for isolated development environments and
 external AI coding agents.
 
-[Quickstart](#quickstart) | [Documentation](docs/README.md) |
-[Polaris Docs](docs/polaris/README.md) |
-[Operations](docs/operations/README.md) |
-[Coder Comparison](docs/polaris/comparison-with-coder.md)
+[Quickstart](#quickstart) | [Documentation](docs/README.md)
 
 ![Platform](https://img.shields.io/badge/platform-self--hosted-blue)
 ![Backends](https://img.shields.io/badge/backends-pod%20%7C%20docker%20%7C%20kubevirt-2563eb)
