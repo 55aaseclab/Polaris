@@ -240,6 +240,16 @@ export class EvolutionStore {
     activeWorkspaceArtifacts: number;
     activeUserArtifacts: number;
     latestTitles: string[];
+    latestArtifacts: Array<{
+      title: string;
+      kind: string;
+      status: string;
+      whyExists?: string;
+      whyRetrieved?: string[];
+      curatorAction?: string;
+      curatorReason?: string;
+      suppressedBecause?: string;
+    }>;
   } {
     const allStmt = this.db.prepare(`
       SELECT COUNT(*) AS count
@@ -275,16 +285,42 @@ export class EvolutionStore {
     }
 
     const latestStmt = this.db.prepare(`
-      SELECT title
+      SELECT title, kind, status, metadata_json
       FROM artifacts
-      WHERE workspace_id = ? AND status = 'active'
+      WHERE workspace_id = ?
       ORDER BY updated_at DESC
       LIMIT 5
     `);
     latestStmt.bind([workspaceId]);
     const latestTitles: string[] = [];
+    const latestArtifacts: Array<{
+      title: string;
+      kind: string;
+      status: string;
+      whyExists?: string;
+      whyRetrieved?: string[];
+      curatorAction?: string;
+      curatorReason?: string;
+      suppressedBecause?: string;
+    }> = [];
     while (latestStmt.step()) {
-      latestTitles.push(String(latestStmt.get()[0] ?? ""));
+      const row = rowToRecord<Record<string, unknown>>(latestStmt.getColumnNames(), latestStmt.get());
+      const title = String(row.title ?? "");
+      latestTitles.push(title);
+      const metadata = JSON.parse(String(row.metadata_json ?? "{}")) as Record<string, unknown>;
+      const explainability = (metadata.explainability ?? {}) as Record<string, unknown>;
+      const retrieval = (metadata.retrieval ?? {}) as Record<string, unknown>;
+      const curator = (metadata.curator ?? {}) as Record<string, unknown>;
+      latestArtifacts.push({
+        title,
+        kind: String(row.kind ?? ""),
+        status: String(row.status ?? ""),
+        whyExists: typeof explainability.existsBecause === "string" ? explainability.existsBecause : undefined,
+        whyRetrieved: Array.isArray(retrieval.reasons) ? retrieval.reasons.map((reason) => String(reason)) : undefined,
+        curatorAction: typeof curator.action === "string" ? curator.action : undefined,
+        curatorReason: typeof curator.reason === "string" ? curator.reason : undefined,
+        suppressedBecause: typeof explainability.suppressedBecause === "string" ? explainability.suppressedBecause : undefined,
+      });
     }
     latestStmt.free();
 
@@ -293,6 +329,7 @@ export class EvolutionStore {
       activeWorkspaceArtifacts,
       activeUserArtifacts,
       latestTitles,
+      latestArtifacts,
     };
   }
 }

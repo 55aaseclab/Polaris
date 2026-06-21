@@ -220,12 +220,25 @@ review loop".
 
 ### Polaris Today
 
-Polaris now has an evolution direction with:
+Polaris now has a real evolution kernel rather than only an aspiration.
+
+Its current loop is:
+
+1. capture execution signals
+2. review them into typed lessons
+3. curate those lessons over time
+4. retrieve active lessons into future runs
+
+That loop is manager-agnostic at the control-plane boundary.
+
+Today Polaris already has:
 
 - manager-generic contract scaffolding
 - an evolution store
 - typed artifacts
 - reviewer / retriever / curator modules
+- automatic lifecycle event capture
+- bootstrap context generation and runtime injection
 - workspace-scoped and user-linked evolution semantics
 
 This is meaningful progress.
@@ -248,14 +261,14 @@ current product story.
 
 ### Gap
 
-Polaris has the kernel direction.
+Polaris has the kernel and the loop shape.
 
 Hermes has the stronger harness-level closed learning loop.
 
 Polaris is still earlier on:
 
-- live capture wiring
-- retrieval injection in real runs
+- transcript fidelity and richer runtime capture
+- retrieval influence in real runs
 - curator authority
 - promotion/decay policy
 - explanation and trust surfaces
@@ -267,13 +280,13 @@ Polaris may end up stronger on architectural placement:
 - evolution lives at the control-plane boundary
 - not buried inside one harness
 - not tied to one manager forever
+- separated from identity state and private harness config
 
 That is potentially better than a harness-only design, but it still needs to
 prove itself in real use.
 
 ### TODO Toward Hermes Maturity
 
-- Fully wire execution capture into real manager runs by default.
 - Make retrieval actually influence future runs in a visible, debuggable way.
 - Add curator promotion, merge, suppression, and decay policies with operator
   visibility.
@@ -284,6 +297,8 @@ prove itself in real use.
 - Add background and scheduled review flows so evolution is not only invoked by
   tests or explicit hooks.
 - Add safety around hallucinated lessons and stale knowledge.
+- Add deeper manager-native transcript ingestion without making the manager the
+  source of truth.
 
 ## Direction-by-Direction Scorecard
 
@@ -292,7 +307,7 @@ prove itself in real use.
 | Workspace | credible control plane | `Coder` | explicit state semantics | product maturity, governance, templates |
 | Isolation | strong architecture | mixed | clearer isolation abstraction | operational maturity and parity |
 | Agent Swarm | external integration layer | `Coder` | replaceability | native orchestration product |
-| Evolution | early but real kernel | `Hermes` | control-plane placement | closed-loop maturity |
+| Evolution | real kernel, early closed loop | `Hermes` | control-plane placement | deeper closed-loop maturity |
 
 ## Most Important Reality Check
 

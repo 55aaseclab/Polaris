@@ -190,6 +190,69 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   cleanupStatusFile(project);
 });
 
+test("status command exposes evolution explainability details", async () => {
+  const workspace = loadWorkspace("morpheus@docker");
+  const evolutionDir = path.join(REPO_ROOT, "config", "state", "evolution", workspace.identity.projectName);
+  const dbPath = path.join(evolutionDir, "store.db");
+  try {
+    fs.mkdirSync(evolutionDir, { recursive: true });
+    const { EvolutionStore } = await import("../scripts/polaris/evolution/store.js");
+    const store = await EvolutionStore.open(dbPath);
+    store.upsertArtifact({
+      id: "explained-artifact",
+      workspaceId: workspace.identity.projectName,
+      userProfileId: workspace.userProfile.id,
+      kind: "workspace-playbook",
+      scope: "workspace",
+      title: "Explained lesson",
+      content: "Use the verifier before retrying.",
+      confidence: 0.9,
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        retrieval: { reasons: ["workspace-scoped", "matched tags: verifier"] },
+        explainability: { existsBecause: "Recovered from a successful validation workflow." },
+        curator: { action: "promoted", reason: "high-confidence active artifact" },
+      },
+    });
+    store.close();
+
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q morpheus"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        const output = await captureStdout(async () => {
+          await runCli(["status", "morpheus@docker"]);
+        });
+        const parsed = parseJsonOutput<{ evolution?: { latestArtifacts?: Array<{ title: string; whyRetrieved?: string[]; curatorAction?: string; whyExists?: string }> } }>(output);
+        assert.ok(parsed.evolution?.latestArtifacts);
+        assert.ok(parsed.evolution?.latestArtifacts?.some((item) => item.title === "Explained lesson"));
+        const artifact = parsed.evolution?.latestArtifacts?.find((item) => item.title === "Explained lesson");
+        assert.deepEqual(artifact?.whyRetrieved, ["workspace-scoped", "matched tags: verifier"]);
+        assert.equal(artifact?.curatorAction, "promoted");
+        assert.equal(artifact?.whyExists, "Recovered from a successful validation workflow.");
+      },
+    );
+  } finally {
+    fs.rmSync(evolutionDir, { recursive: true, force: true });
+  }
+});
+
 test("pod render writes a TypeScript-generated manifest", () => {
   const workspace = loadWorkspace("morpheus");
   const outputPath = renderAndWritePodWorkspace(workspace);

@@ -143,6 +143,16 @@ export async function getEvolutionSummary(
   activeWorkspaceArtifacts: number;
   activeUserArtifacts: number;
   latestTitles: string[];
+  latestArtifacts: Array<{
+    title: string;
+    kind: string;
+    status: string;
+    whyExists?: string;
+    whyRetrieved?: string[];
+    curatorAction?: string;
+    curatorReason?: string;
+    suppressedBecause?: string;
+  }>;
 }> {
   const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(workspace));
   try {
