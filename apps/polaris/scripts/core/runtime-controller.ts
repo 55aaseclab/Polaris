@@ -14,7 +14,10 @@ function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
   });
 }
 
-function buildSshSelfCheck(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus["ssh"]> {
+function buildSshSelfCheck(
+  workspace: WorkspaceSpec,
+  observation: BackendObservation,
+): NonNullable<WorkspaceStatus["ssh"]> {
   const githubAccount = workspace.userProfile.github.account;
   if (!githubAccount) {
     return {
@@ -22,6 +25,17 @@ function buildSshSelfCheck(workspace: WorkspaceSpec): NonNullable<WorkspaceStatu
       selfCheck: {
         state: "not-configured",
         message: "No github.account is configured in the user profile.",
+      },
+    };
+  }
+  const githubAuthObserved = observation.runtimeAssembly.githubAuth?.observed === true;
+  if (githubAuthObserved) {
+    return {
+      mode: workspace.userProfile.ssh.mode,
+      githubAccount,
+      selfCheck: {
+        state: "ready",
+        message: `GitHub SSH authentication is working for account ${githubAccount}.`,
       },
     };
   }
@@ -218,7 +232,7 @@ export function synthesizeWorkspaceStatus(
         : "agent integration disabled",
       userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
     },
-    ssh: buildSshSelfCheck(workspace),
+    ssh: buildSshSelfCheck(workspace, observation),
     attachments: {
       workspaceData: attachmentCheck(observation.attachments.workspaceData),
       workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),

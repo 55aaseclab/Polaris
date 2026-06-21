@@ -237,6 +237,9 @@ if [[ "$*" == *"inspect abc123"* ]]; then
   printf '[{"State":{"Running":true}}]'
   exit 0
 fi
+if [[ "$*" == *"successfully authenticated"* ]]; then
+  exit 1
+fi
 if [[ "$1" == "exec" ]]; then
   exit 0
 fi
@@ -318,6 +321,9 @@ if [[ "$*" == *"inspect abc123"* ]]; then
   printf '[{"State":{"Running":true}}]'
   exit 0
 fi
+if [[ "$*" == *"successfully authenticated"* ]]; then
+  exit 0
+fi
 if [[ "$1" == "exec" ]]; then
   exit 0
 fi
@@ -331,8 +337,8 @@ exit 0
           const parsed = parseJsonOutput<{ ssh?: { mode: string; githubAccount?: string; selfCheck?: { state: string; message: string } } }>(output);
           assert.equal(parsed.ssh?.mode, "managed-key");
           assert.equal(parsed.ssh?.githubAccount, "example-account");
-          assert.equal(parsed.ssh?.selfCheck?.state, "warning");
-          assert.match(parsed.ssh?.selfCheck?.message || "", /not proven/i);
+          assert.equal(parsed.ssh?.selfCheck?.state, "ready");
+          assert.match(parsed.ssh?.selfCheck?.message || "", /authentication is working/i);
         },
       );
     } finally {

@@ -65,6 +65,10 @@ export class DockerDriver implements BackendDriver {
         : workspace.agent.enabled
           ? false
           : true;
+    const githubAuthObserved =
+      exists && running && workspace.userProfile.github.account
+        ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
+        : false;
 
     return {
       backend: {
@@ -87,6 +91,9 @@ export class DockerDriver implements BackendDriver {
         codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
         claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
         ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
+        githubAuth: workspace.userProfile.github.account
+          ? { observed: githubAuthObserved, detail: workspace.userProfile.github.account }
+          : undefined,
       } : {},
       daemon: {
         manager: workspace.health.requiresDaemon && exists && running

@@ -308,6 +308,7 @@ export interface BackendObservation {
     codex?: ObservationItem;
     claude?: ObservationItem;
     ssh?: ObservationItem;
+    githubAuth?: ObservationItem;
   };
   daemon: {
     manager?: ObservationItem;
