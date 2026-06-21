@@ -24,8 +24,8 @@ pnpm exec tsx scripts/polaris.ts rebuild <project>
 
 - `scripts/polaris.ts` is the operator entrypoint and source of truth.
 - Backend logic now runs directly through the TypeScript control plane.
-- `docker` is still intentionally preserved as a legacy backend boundary rather
-  than fully reworked.
+- `pod` is currently the most mature backend.
+- `kubevirt-vm` and `docker` are being promoted toward first-class runtime-controller backends.
 
 ## Validation
 
