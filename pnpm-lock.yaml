@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  apps/polaris:
     dependencies:
       js-yaml:
         specifier: ^4.1.0

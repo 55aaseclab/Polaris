@@ -3,7 +3,7 @@ Docker workspace specs live here in the target Polaris layout.
 Use this directory as the clean default onboarding path:
 
 ```text
-scripts/polaris.ts
+apps/polaris/scripts/polaris.ts
 -> config/specs/docker/projects/<project>.agent.yaml
 -> config/generated/docker/<project>.yaml
 -> docker compose runtime
@@ -12,11 +12,11 @@ scripts/polaris.ts
 Recommended lifecycle:
 
 ```bash
-pnpm exec tsx scripts/polaris.ts create <project>
-pnpm exec tsx scripts/polaris.ts render <project>
-pnpm exec tsx scripts/polaris.ts start <project>
-pnpm exec tsx scripts/polaris.ts status <project>
-pnpm exec tsx scripts/polaris.ts logs <project>
+pnpm --dir apps/polaris run polaris -- create <project>
+pnpm --dir apps/polaris run polaris -- render <project>
+pnpm --dir apps/polaris run polaris -- start <project>
+pnpm --dir apps/polaris run polaris -- status <project>
+pnpm --dir apps/polaris run polaris -- logs <project>
 ```
 
 Notes:

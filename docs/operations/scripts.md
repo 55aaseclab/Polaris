@@ -2,7 +2,7 @@
 
 ## Active Scripts
 
-- `scripts/polaris.ts`: unified TypeScript entrypoint
+- `apps/polaris/scripts/polaris.ts`: unified TypeScript entrypoint for the Polaris app
 - `scripts/operations/setup-k3s-kata-gvisor.sh`
 - `scripts/operations/setup-k3s-kubevirt.sh`
 - `scripts/operations/setup-k3s-kata-worker.sh`
