@@ -1,0 +1,100 @@
+project: morpheus
+user_profile: "100000000000000001"
+backend:
+  kind: kubevirt-vm
+  spec_files:
+  - config/kubevirt/specs/morpheus.agent.yaml
+runtime:
+  class: gvisor
+  base_image: ttl.sh/morpheus-prebuilt-1781600969:24h
+  user: root
+  privileged: null
+  docker_enabled: null
+resources:
+  cpu: '12'
+  memory: 24Gi
+  ephemeral_storage: 300Gi
+  cpu_request: '4'
+  memory_request: 8Gi
+  ephemeral_storage_request: 20Gi
+  unbounded: true
+agent:
+  kind: multi
+  label: Codex + Claude Code
+  args: []
+  persist_state: true
+tooling:
+  bootstrap_profile: prebuilt
+  install_rustup: true
+  git_core_editor: vi
+  git_user_name: Qiang Liu
+  git_user_email: cyruscyliu@gmail.com
+env:
+  plain: {}
+service:
+  enabled: true
+  mode: nodeport
+  ports:
+  - container_port: '6767'
+    node_port: '31677'
+    name: paseo
+  - container_port: '8080'
+    node_port: '31678'
+    name: web-1
+  - container_port: '8081'
+    node_port: '31679'
+    name: web-2
+  host: null
+  path: /
+attachments:
+  workspace-data:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/project
+    durable_paths:
+    - /workspace/project
+    source:
+      kind: persistent-volume
+      volume_ref: morpheus-project
+      description: workspace-scoped persistent storage for morpheus
+  workspace-runtime-state:
+    scope: workspace
+    sharing: exclusive
+    mount_root: /workspace/state
+    durable_paths:
+    - /workspace/state/paseo
+    - /workspace/state/paseo/evolution
+    source:
+      kind: persistent-volume
+      volume_ref: morpheus-project
+      sub_path: state
+      description: workspace runtime state for morpheus
+  user-identity-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /identity
+    durable_paths:
+    - /identity/codex
+    - /identity/claude
+    source:
+      kind: secret-material
+      description: user identity material sourced from spec auth files
+  user-ssh-state:
+    scope: user
+    sharing: cross-workspace
+    mount_root: /ssh
+    durable_paths:
+    - /ssh
+    source:
+      kind: generated-material
+      description: user SSH material
+  ephemeral-runtime:
+    mount_root: /run/workspace
+    paths:
+    - /run/workspace/tmp
+    - /run/workspace/pids
+    - /run/workspace/sockets
+    stale_artifacts:
+    - /root/.paseo/paseo.pid
+    - /run/workspace/pids/paseo.pid
+profile: morpheus
