@@ -1,7 +1,6 @@
-import { loadWorkspace } from "../../config/load.js";
-import { getBackendDriver } from "../../backends/index.js";
+import { loadWorkspaceForCommand } from "./shared.js";
 
 export async function rebuildCommand(project: string): Promise<void> {
-  const workspace = loadWorkspace(project);
-  await getBackendDriver(workspace.backend.kind).rebuild(workspace);
+  const { workspace, driver } = loadWorkspaceForCommand("rebuild", project);
+  await driver.rebuild(workspace);
 }

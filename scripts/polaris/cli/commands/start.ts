@@ -1,7 +1,7 @@
-import { loadWorkspace } from "../../config/load.js";
-import { getBackendDriver } from "../../backends/index.js";
+import { loadWorkspaceForCommand, waitForWorkspaceReady } from "./shared.js";
 
 export async function startCommand(project: string): Promise<void> {
-  const workspace = loadWorkspace(project);
-  await getBackendDriver(workspace.backend.kind).start(workspace);
+  const { workspace, driver } = loadWorkspaceForCommand("start", project);
+  await driver.start(workspace);
+  await waitForWorkspaceReady(workspace);
 }

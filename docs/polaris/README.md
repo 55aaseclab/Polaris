@@ -48,6 +48,12 @@ pnpm exec tsx scripts/polaris.ts status <project>
 pnpm exec tsx scripts/polaris.ts logs <project>
 ```
 
+For more operator trace output during lifecycle commands:
+
+```bash
+POLARIS_LOG_LEVEL=debug pnpm exec tsx scripts/polaris.ts start <project>
+```
+
 If the same project name exists in multiple backend directories, target the
 intended one explicitly:
 

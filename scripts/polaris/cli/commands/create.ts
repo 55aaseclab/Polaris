@@ -1,6 +1,7 @@
 import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
 import { getBackendDriver } from "../../backends/index.js";
 import { scaffoldDockerWorkspace, workspaceConfigExists } from "../../config/scaffold.js";
+import { logInfo } from "../../utils/log.js";
 
 export async function createCommand(projectRef: string): Promise<void> {
   const { project, backendHint } = parseWorkspaceReference(projectRef);
@@ -10,6 +11,11 @@ export async function createCommand(projectRef: string): Promise<void> {
       throw new Error(`Scaffolding for backend '${scaffoldBackend}' is not implemented yet; use '${project}@docker' or omit the backend selector`);
     }
     const outputPath = scaffoldDockerWorkspace(project);
+    logInfo("cli", "workspace-scaffolded", {
+      project,
+      backend: scaffoldBackend,
+      configPath: outputPath,
+    });
     process.stdout.write(`${JSON.stringify({
       project,
       backend: scaffoldBackend,
@@ -24,5 +30,9 @@ export async function createCommand(projectRef: string): Promise<void> {
     return;
   }
   const workspace = loadWorkspace(projectRef);
+  logInfo("cli", "workspace-create-dispatch", {
+    project: workspace.identity.projectName,
+    backend: workspace.backend.kind,
+  });
   await getBackendDriver(workspace.backend.kind).create(workspace);
 }
