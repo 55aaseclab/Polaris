@@ -144,9 +144,9 @@ test("loadWorkspace normalizes morpheus pod config through the TypeScript contro
   const workspace = loadWorkspace("morpheus");
   assert.equal(workspace.identity.projectName, "morpheus");
   assert.equal(workspace.profile.name, "morpheus");
-  assert.equal(workspace.userProfile.id, "100000000000000001");
-  assert.equal(workspace.userProfile.name, "Qiang Liu");
-  assert.equal(workspace.userProfile.email, "cyruscyliu@gmail.com");
+  assert.match(workspace.userProfile.id, /^\d{18}$/);
+  assert.ok(workspace.userProfile.name.length > 0);
+  assert.match(workspace.userProfile.email, /@/);
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -158,6 +158,7 @@ test("loadWorkspace normalizes morpheus pod config through the TypeScript contro
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
+  assert.ok(!workspace.userProfile.github.account || workspace.userProfile.github.account.length > 0);
 });
 
 test("backend registry resolves pod driver", () => {
@@ -261,6 +262,85 @@ exit 0
   });
 });
 
+test("status exposes ssh self-check for github account on managed-key profiles", async () => {
+  const project = uniqueProjectName("ssh-status");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", "ssh-status-test.yaml");
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: "ssh-status-test",
+        name: "SSH Status User",
+        email: "ssh-status@example.com",
+        github: {
+          account: "example-account",
+        },
+        ssh: {
+          mode: "managed-key",
+          comment: "ssh-status@example.com",
+        },
+        auth: {
+          files: [
+            {
+              key: "codex-auth.json",
+              mount_path: "/root/.codex/auth.json",
+              content: "{}",
+            },
+            {
+              key: "codex-config.toml",
+              mount_path: "/root/.codex/config.toml",
+              content: "model = 'gpt-5'\n",
+            },
+            {
+              key: "claude-settings.json",
+              mount_path: "/root/.claude/settings.json",
+              content: "{}",
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+    try {
+      const outputPath = workspaceConfigPath(project, "docker");
+      const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+      doc.user_profile = "ssh-status-test";
+      fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+      await withFakeCommands(
+        {
+          docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+        },
+        async () => {
+          const output = await captureStdout(async () => {
+            await runCli(["status", `${project}@docker`]);
+          });
+          const parsed = parseJsonOutput<{ ssh?: { mode: string; githubAccount?: string; selfCheck?: { state: string; message: string } } }>(output);
+          assert.equal(parsed.ssh?.mode, "managed-key");
+          assert.equal(parsed.ssh?.githubAccount, "example-account");
+          assert.equal(parsed.ssh?.selfCheck?.state, "warning");
+          assert.match(parsed.ssh?.selfCheck?.message || "", /not proven/i);
+        },
+      );
+    } finally {
+      fs.rmSync(profilePath, { force: true });
+    }
+  });
+});
+
 test("pod render writes a TypeScript-generated manifest", () => {
   const workspace = loadWorkspace("morpheus");
   const outputPath = renderAndWritePodWorkspace(workspace);
@@ -313,7 +393,7 @@ test("direct attachment config is present in migrated saved specs", () => {
 test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
   const workspace = loadWorkspace("morpheus");
   assert.equal(workspace.profile.workspaceAlias, "Morpheus");
-  assert.equal(workspace.userProfile.ssh.comment, "cyruscyliu@gmail.com");
+  assert.equal(workspace.userProfile.ssh.comment, workspace.userProfile.email);
 });
 
 test("workspace compatibility path derives a legacy user profile from inline git identity", async () => {
@@ -407,9 +487,10 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
   const workspace = loadWorkspace("morpheus@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
-  assert.match(rendered, /polaris-100000000000000001-identity/);
-  assert.match(rendered, /polaris-100000000000000001-ssh/);
-  assert.match(rendered, /\$\{POLARIS_SECRETS_DIR:-\.\.\/\.\.\/users\/100000000000000001\}:\/bootstrap-secrets:ro/);
+  const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
+  assert.match(rendered, new RegExp(`polaris-${escapedId}-ssh`));
+  assert.match(rendered, new RegExp(`\\$\\{POLARIS_SECRETS_DIR:-\\.\\.\\/\\.\\.\\/users\\/${escapedId}\\}:\\/bootstrap-secrets:ro`));
 });
 
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {

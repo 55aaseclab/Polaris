@@ -8,6 +8,53 @@ import type {
   WorkspaceStatus,
 } from "./workspace.js";
 
+function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
+  return workspace.runtime.authFiles.some((entry) => {
+    return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
+  });
+}
+
+function buildSshSelfCheck(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus["ssh"]> {
+  const githubAccount = workspace.userProfile.github.account;
+  if (!githubAccount) {
+    return {
+      mode: workspace.userProfile.ssh.mode,
+      selfCheck: {
+        state: "not-configured",
+        message: "No github.account is configured in the user profile.",
+      },
+    };
+  }
+  if (workspace.userProfile.ssh.mode === "managed-key") {
+    return {
+      mode: "managed-key",
+      githubAccount,
+      selfCheck: {
+        state: "warning",
+        message: `Managed SSH keys are generated automatically, but access to GitHub account ${githubAccount} is not proven until the generated public key is registered with that account.`,
+      },
+    };
+  }
+  if (hasProvidedSshPrivateKey(workspace)) {
+    return {
+      mode: "provided-key",
+      githubAccount,
+      selfCheck: {
+        state: "ready",
+        message: `Provided SSH key material is staged for GitHub account ${githubAccount}.`,
+      },
+    };
+  }
+  return {
+    mode: "provided-key",
+    githubAccount,
+    selfCheck: {
+      state: "error",
+      message: `github.account is set to ${githubAccount}, but no provided SSH private key material is staged.`,
+    },
+  };
+}
+
 function attachmentCheck(observed: BackendObservation["attachments"][keyof BackendObservation["attachments"]]): CheckStatus {
   if (!observed) {
     return { state: "unknown" };
@@ -171,6 +218,7 @@ export function synthesizeWorkspaceStatus(
         : "agent integration disabled",
       userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
     },
+    ssh: buildSshSelfCheck(workspace),
     attachments: {
       workspaceData: attachmentCheck(observation.attachments.workspaceData),
       workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),

@@ -109,6 +109,7 @@ function buildCompatibilityUserProfile(args: {
     name,
     email,
     secretsRoot: path.join("config", "users", id),
+    github: {},
     ssh: {
       mode: "managed-key",
       comment: `${id}@polaris`,
@@ -157,6 +158,13 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       name: String(data.name ?? ""),
       email: String(data.email ?? ""),
       secretsRoot: path.join("config", "users", profileId),
+      github: {
+        account: data.github?.account
+          ? String(data.github.account)
+          : data.github?.repo
+            ? String(data.github.repo)
+            : undefined,
+      },
       ssh: {
         mode: data.ssh?.mode === "provided-key" ? "provided-key" : "managed-key",
         comment: String(data.ssh?.comment ?? `${profileId}@polaris`),
