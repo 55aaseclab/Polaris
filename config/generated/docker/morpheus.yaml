@@ -33,6 +33,9 @@ services:
       - "31677:6767"
       - "31678:8080"
       - "31679:8081"
+    environment:
+      POLARIS_EVOLUTION_ROOT: /root/.paseo/evolution
+      POLARIS_EVOLUTION_CONTEXT_FILE: 
     volumes:
       - morpheus-workspace-data:/workspace/project
       - morpheus-workspace-runtime-state:/workspace/state

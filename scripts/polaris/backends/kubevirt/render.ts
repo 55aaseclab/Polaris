@@ -48,6 +48,12 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     .replace("cat >/workspace/.codex/config.toml", "cat >/identity/codex/config.toml")
     .replace("cat >/workspace/.claude/settings.json", "cat >/identity/claude/settings.json")
     .replace(/ssh-keygen -q -t ed25519 -C [^\n]+/g, `ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f /ssh/id_ed25519`);
+  if (workspace.evolution?.bootstrapContextFile && workspace.evolution.bootstrapContextContent) {
+    renderedCloudinit = renderedCloudinit.replace(
+      "      - chmod 1777 /run/workspace/tmp",
+      `      - chmod 1777 /run/workspace/tmp\n      - |\n        cat >${workspace.evolution.bootstrapContextFile} <<'EOF'\n${indentBlock(workspace.evolution.bootstrapContextContent, 8)}\n        EOF`,
+    );
+  }
   if (sshPrivateKey) {
     renderedCloudinit = renderedCloudinit.replace(
       `      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,

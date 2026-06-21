@@ -24,6 +24,18 @@ function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceS
   return tail ? `${workspace.agent.bootstrapSecretsRoot}/${tail}` : null;
 }
 
+function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
+  const filePath = workspace.evolution?.bootstrapContextFile;
+  const content = workspace.evolution?.bootstrapContextContent;
+  if (!filePath || !content) {
+    return [];
+  }
+  const encoded = Buffer.from(content, "utf8").toString("base64");
+  return [
+    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
+  ];
+}
+
 export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
   const serviceName = project;
@@ -78,6 +90,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
           "if [ -f /ssh/id_ed25519.pub ]; then chmod 644 /ssh/id_ed25519.pub || true; fi",
         ]),
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
+    ...buildEvolutionBootstrapLines(workspace),
     ...(workspace.agent.enabled
       ? [
           `rm -f ${home}/.paseo/paseo.pid ${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`,
@@ -104,6 +117,9 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
 ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     ports:
 ${portLines || '      - "6767:6767"'}
+    environment:
+      POLARIS_EVOLUTION_ROOT: ${workspace.agent.runtime.evolutionRoot}
+      POLARIS_EVOLUTION_CONTEXT_FILE: ${workspace.evolution?.bootstrapContextFile ?? ""}
     volumes:
       - ${workspaceDataVolume}:/workspace/project
       - ${workspaceRuntimeVolume}:/workspace/state
