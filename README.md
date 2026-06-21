@@ -1,89 +1,118 @@
 # Polaris
 
-Polaris is an AI-native environment for isolated coding agents. It runs
-agent workloads in sandboxed Kubernetes pods using Kata Containers and
-gVisor, with
-[Headlamp](https://headlamp.dev/) managing k3s pods and
-[Paseo](https://github.com/getpaseo/paseo) managing the agent runtime inside
-each guest or sandbox.
+Self-hosted workspace control plane for isolated development environments and
+external AI coding agents.
 
-![Platform](https://img.shields.io/badge/platform-k3s-blue)
-![Isolation](https://img.shields.io/badge/isolation-Kata%20Containers-6f42c1)
-![Runtime](https://img.shields.io/badge/runtime-gVisor-00add8)
-![Agent](https://img.shields.io/badge/agent-Codex-0a7ea4)
-![Agent](https://img.shields.io/badge/agent-Claude%20Code-d97706)
-![UI](https://img.shields.io/badge/ui-Headlamp-2563eb)
+[Quickstart](#quickstart) | [Documentation](docs/README.md) |
+[Polaris Docs](docs/polaris/README.md) |
+[Operations](docs/operations/README.md) |
+[Coder Comparison](docs/polaris/comparison-with-coder.md)
+
+![Platform](https://img.shields.io/badge/platform-self--hosted-blue)
+![Backends](https://img.shields.io/badge/backends-pod%20%7C%20docker%20%7C%20kubevirt-2563eb)
 ![Manager](https://img.shields.io/badge/manager-Paseo-15803d)
 ![License](https://img.shields.io/badge/license-MIT-black)
 
-## Quick Start
+Polaris is a workspace control plane.
+
+It manages development environments across `pod`, `docker`, and
+`kubevirt-vm` backends.
+
+It keeps the agent layer external and replaceable.
+
+Today that means:
+
+- workspace specs are the source of truth
+- generated backend artifacts remain outputs
+- Docker is the clean default onboarding path
+- agent orchestration is built around `Paseo`
+- coding harnesses such as `Codex` and `Claude` stay external to Polaris
+
+## Quickstart
+
+The fastest path is local Docker.
 
 ```bash
-grep -c vmx /proc/cpuinfo
+pnpm install
+pnpm exec tsx scripts/polaris.ts create <project>
+pnpm exec tsx scripts/polaris.ts render <project>@docker
+pnpm exec tsx scripts/polaris.ts start <project>@docker
+pnpm exec tsx scripts/polaris.ts status <project>@docker
+pnpm exec tsx scripts/polaris.ts logs <project>@docker
+```
+
+Stage bootstrap secrets before starting the workspace:
+
+```text
+secrets/polaris/
+  codex/auth.json
+  codex/config.toml
+  claude/settings.json
+```
+
+Override the default secret mount source with `POLARIS_SECRETS_DIR` when
+needed.
+
+## Install
+
+### Local Docker
+
+Use the Docker path when you want the shortest route from clone to running
+workspace.
+
+```bash
+pnpm install
+pnpm exec tsx scripts/polaris.ts create <project>
+pnpm exec tsx scripts/polaris.ts start <project>@docker
+```
+
+### Kubernetes Pods
+
+Use the pod backend when you want stronger sandboxing and the existing k3s
+runtime path.
+
+```bash
 sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
-python3 -m pip install -r requirements.txt
-pnpm exec tsx scripts/polaris.ts
+pnpm exec tsx scripts/polaris.ts start morpheus@pod
 ```
 
-For tool-specific usage details, start with:
+### KubeVirt
 
-- [docs/README.md](docs/README.md)
-- [docs/polaris/README.md](docs/polaris/README.md)
-- [docs/operations/README.md](docs/operations/README.md)
-
-If you want to bypass `k3s` entirely and run Morpheus as a plain Docker
-container on a single host, use:
-
-```bash
-bash scripts/operations/run-morpheus-docker.sh
-```
-
-This starts `ttl.sh/morpheus-prebuilt-1781875178:24h` with:
-
-- host root state bound at the Longhorn global mount for `morpheus-project` by default
-- optional override: `MORPHEUS_ROOT_DIR=/path/to/root-state`
-- repo-local secrets bound at `${MORPHEUS_SECRETS_DIR:-./secrets/polaris}`
-- ports `31677`, `31678`, `31679` mapped to `6767`, `8080`, `8081`
-
-If you want to add full VM workloads alongside the existing container
-workloads, install KubeVirt with:
+Use the KubeVirt backend when you want full VM workloads managed by the same
+control plane.
 
 ```bash
 bash scripts/operations/setup-k3s-kubevirt.sh
+pnpm exec tsx scripts/polaris.ts start morpheus@kubevirt-vm
 ```
 
-The `morpheus` workload can also run as a KubeVirt VM while keeping the shared
-project PVC mounted at `/root`, Docker enabled inside the guest, and the
-existing NodePorts (`31677`, `31678`, `31679`) intact.
+## Documentation
 
-If you want to extend the underlying k3s/Kata/gVisor setup to more hosts, see
-[`scripts/operations/setup-k3s-kata-worker.sh`](scripts/operations/setup-k3s-kata-worker.sh).
+Start here:
 
-## Pitfalls
+- [docs/README.md](docs/README.md)
+- [docs/polaris/README.md](docs/polaris/README.md)
+- [docs/polaris/runtime-layout.md](docs/polaris/runtime-layout.md)
+- [docs/polaris/comparison-with-coder.md](docs/polaris/comparison-with-coder.md)
+- [docs/operations/README.md](docs/operations/README.md)
 
-- do not build with `make -j$(nproc)` inside Kata guests for heavy workloads
-  such as Buildroot; `$(nproc)` reflects visible CPUs, but max parallelism can
-  overdrive the guest VM and trigger Kata agent timeouts or sandbox restarts.
-  Prefer a conservative value such as `-j2` or `-j4` unless you have verified
-  the workload is stable with more parallelism
-- for `prebuilt` agent images, install persistent tools in the image itself
-  rather than expecting `apt_packages` to be installed at pod startup
+## Contributing
 
-## Contribute
+Keep generated artifacts in sync with the TypeScript control plane.
 
-- update docs when behavior changes
-- validate with:
+Do not treat generated backend manifests as hand-maintained files.
+
+Validate changes with:
 
 ```bash
-pnpm exec tsc -p tsconfig.json --noEmit
-bash -n scripts/operations/setup-k3s-kata-gvisor.sh
-pnpm test:polaris
-./tests/smoke-polaris-paseo.sh
+pnpm run check
+pnpm run test:polaris
+bash tests/smoke-polaris-paseo.sh
 ```
 
-If you change command flow or generated manifests, update the relevant docs
-under `docs/` first.
+If you change command flow, backend behavior, or onboarding, update the
+relevant docs under `docs/`.
 
 ## License
 
-[MIT LICENSE](LICENSE).
+[MIT](LICENSE)

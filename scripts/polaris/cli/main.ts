@@ -8,6 +8,7 @@ import { rebuildCommand } from "./commands/rebuild.js";
 import { statusCommand } from "./commands/status.js";
 import { reconcileCommand } from "./commands/reconcile.js";
 import { logsCommand } from "./commands/logs.js";
+import { logInfo } from "../utils/log.js";
 
 const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs"]);
 
@@ -26,6 +27,7 @@ export async function runCli(argv: string[]): Promise<void> {
   if (!project) {
     usage();
   }
+  logInfo("cli", "dispatch", { argv, command, project });
 
   if (command === "create") {
     await createCommand(project);

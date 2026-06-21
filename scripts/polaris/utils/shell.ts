@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { logDebug, logInfo } from "./log.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 
 export function runCommand(command: string, args: string[]): void {
+  logInfo("shell", "exec", { command, args });
   const result = spawnSync(command, args, {
     cwd: REPO_ROOT,
     stdio: "inherit",
@@ -16,4 +18,5 @@ export function runCommand(command: string, args: string[]): void {
   if (result.status !== 0) {
     throw new Error(`Command failed (${result.status ?? 1}): ${command} ${args.join(" ")}`);
   }
+  logDebug("shell", "exec-ok", { command, args, status: result.status ?? 0 });
 }
