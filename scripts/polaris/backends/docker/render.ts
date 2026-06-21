@@ -1,9 +1,13 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
 }
+
+const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
 
 function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceSpec): string | null {
   if (!sourcePath) {
@@ -36,6 +40,45 @@ function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
+function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
+  if (!workspace.agent.enabled) {
+    return [];
+  }
+  const observerPath = path.join(REPO_ROOT, "scripts", "polaris", "evolution", "runtime-observer.mjs");
+  const script = fs.readFileSync(observerPath, "utf8");
+  const encoded = Buffer.from(script, "utf8").toString("base64");
+  const runtimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-observer.mjs`;
+  const toolRoot = `${workspace.runtime.home}/.local/polaris`;
+  return [
+    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(runtimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
+    `chmod 755 ${runtimePath}`,
+    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} POLARIS_TOOL_ROOT=${q(toolRoot)} POLARIS_PASEO_DAEMON_URL=${q("ws://127.0.0.1:6767/ws")} PASEO_HOME=${workspace.runtime.home}/.paseo node ${runtimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-observer.log 2>&1 &`,
+  ];
+}
+
+function bootstrapSecretsVolumeSource(workspace: WorkspaceSpec): string {
+  const sourceRoot = workspace.userProfile.secretsRoot.replace(/^\.?\//, "");
+  const relative = path.posix.relative("config/generated/docker", sourceRoot);
+  if (!relative || relative === ".") {
+    return ".";
+  }
+  return relative.startsWith(".") ? relative : `./${relative}`;
+}
+
+function buildAgentCliInstallLines(home: string): string[] {
+  const toolRoot = `${home}/.local/polaris`;
+  return [
+    `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.npm`,
+    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm`,
+    `ln -sf ${toolRoot}/bin/paseo /usr/local/bin/paseo`,
+    `ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm`,
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=${home}/.npm' 'mkdir -p ${home}/.codex' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
+    "chmod 755 /usr/local/bin/codex",
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=${home}/.npm' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
+    "chmod 755 /usr/local/bin/claude",
+  ];
+}
+
 export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
   const serviceName = project;
@@ -47,6 +90,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const sshVolume = `polaris-${userScope}-ssh`;
   const home = workspace.runtime.home;
   const bootstrapSecretsRoot = workspace.agent.bootstrapSecretsRoot;
+  const bootstrapSecretsSource = bootstrapSecretsVolumeSource(workspace);
   const authBootstrapLines = workspace.runtime.authFiles
     .map((file) => {
       const source = secretMountSource(file.sourcePath, workspace);
@@ -69,6 +113,15 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     "set -eux",
     `mkdir -p ${home}`,
     `chmod 755 ${home}`,
+    ...(workspace.runtime.bootstrapProfile === "prebuilt"
+      ? []
+      : [
+          `apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ${workspace.runtime.aptPackages.join(" ")} && rm -rf /var/lib/apt/lists/*`,
+          ...(workspace.runtime.installRustup
+            ? ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"]
+            : []),
+          ...buildAgentCliInstallLines(home),
+        ]),
     `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets`,
     `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
@@ -96,6 +149,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
           `rm -f ${home}/.paseo/paseo.pid ${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`,
           `PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
           `paired=0; for i in $(seq 1 30); do PASEO_HOME=${home}/.paseo paseo daemon pair --json > ${home}/.paseo/pairing.json.tmp 2>/dev/null && mv ${home}/.paseo/pairing.json.tmp ${home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$$paired" = 1`,
+          ...buildRuntimeObserverLines(workspace),
         ]
       : []),
     "touch /tmp/.ready",
@@ -125,7 +179,7 @@ ${portLines || '      - "6767:6767"'}
       - ${workspaceRuntimeVolume}:/workspace/state
       - ${identityVolume}:/identity
       - ${sshVolume}:/ssh
-      - \${POLARIS_SECRETS_DIR:-./${workspace.userProfile.secretsRoot}}:${bootstrapSecretsRoot}:ro
+      - \${POLARIS_SECRETS_DIR:-${bootstrapSecretsSource}}:${bootstrapSecretsRoot}:ro
     tmpfs:
       - /run/workspace
 

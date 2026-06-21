@@ -74,6 +74,9 @@ test("renderers expose evolution bootstrap context to runtime consumers", async 
     assert.match(dockerRendered, /POLARIS_EVOLUTION_ROOT/);
     assert.match(dockerRendered, /POLARIS_EVOLUTION_CONTEXT_FILE/);
     assert.match(dockerRendered, /bootstrap-context\.md/);
+    assert.match(dockerRendered, /runtime-observer\.mjs/);
+    assert.match(dockerRendered, /runtime-observer\.log/);
+    assert.match(dockerRendered, /POLARIS_PASEO_DAEMON_URL/);
     assert.match(podRendered, /POLARIS_EVOLUTION_ROOT/);
     assert.match(podRendered, /POLARIS_EVOLUTION_CONTEXT_FILE/);
     assert.match(podRendered, /bootstrap-context\.md/);
