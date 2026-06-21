@@ -77,7 +77,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
   ] as const;
   for (const target of runtimeTargets) {
     const observed = observation.runtimeAssembly[target.key];
-    if (!observed || !observed.observed) {
+    if (observed && !observed.observed) {
       items.push({
         kind: "runtime-assembly",
         target: target.key,
@@ -89,7 +89,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
 
   if (workspace.health.requiresDaemon) {
     const paseo = observation.daemon.paseo;
-    if (!paseo || !paseo.observed) {
+    if (paseo && !paseo.observed) {
       items.push({
         kind: "daemon",
         target: "paseo",
@@ -129,9 +129,7 @@ export function synthesizeWorkspaceStatus(
     ? "missing"
     : observation.backend.running
       ? "running"
-      : workspace.backend.kind === "docker"
-        ? "unsupported"
-        : "degraded";
+      : "degraded";
   const state: WorkspaceStatus["state"] = !observation.backend.exists
     ? "not-applied"
     : drift.hasErrors
@@ -153,7 +151,9 @@ export function synthesizeWorkspaceStatus(
       backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "degraded") : "missing",
       workspaceReadiness: state === "ready" ? "ready" : "not-ready",
       daemonReadiness: workspace.health.requiresDaemon
-        ? (observation.daemon.paseo?.observed ? "ready" : "degraded")
+        ? observation.daemon.paseo
+          ? (observation.daemon.paseo.observed ? "ready" : "degraded")
+          : "unknown"
         : "not-applicable",
       reason: drift.items[0]?.message,
     },

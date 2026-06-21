@@ -6,7 +6,7 @@
   - profiles: `gvisor`, `kata-qemu`, `kata-clh`, `kata-qemu-tdx`
 - `kubevirt-vm`
 - `docker`
-  - currently preserved as a legacy backend boundary during migration
+  - first-class backend target, still maturing toward parity
 
 ## Attachment Model
 
@@ -76,6 +76,9 @@ config/
 - Backend implementations may still realize the same attachment classes with
   different physical mount primitives, but they are expected to preserve the
   same scope and lifecycle semantics.
+- Pod currently has the deepest runtime-controller support.
+- KubeVirt and Docker are expected to converge on the same controller model
+  rather than remain second-class paths.
 
 ## Runtime Controller Pipeline
 

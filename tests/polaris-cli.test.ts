@@ -2,11 +2,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { loadWorkspace } from "../scripts/polaris/config/load.js";
 import { getBackendDriver } from "../scripts/polaris/backends/index.js";
 import { writeWorkspaceStatus } from "../scripts/polaris/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/polaris/backends/pod/render.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/polaris/core/runtime-controller.js";
+
+async function withFakePath(commandName: string, scriptBody: string, fn: () => Promise<void> | void): Promise<void> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-test-"));
+  const commandPath = path.join(tempDir, commandName);
+  fs.writeFileSync(commandPath, scriptBody, { mode: 0o755 });
+  const originalPath = process.env.PATH || "";
+  process.env.PATH = `${tempDir}:${originalPath}`;
+  try {
+    await fn();
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
 
 test("loadWorkspace normalizes morpheus pod config through the TypeScript control plane", () => {
   const workspace = loadWorkspace("morpheus");
@@ -101,23 +116,209 @@ test("direct attachment config is present in migrated saved specs", () => {
 test("pod backend returns structured observations", async () => {
   const workspace = loadWorkspace("morpheus");
   const driver = getBackendDriver("pod");
-  const observation = await driver.inspect(workspace);
-  assert.equal(observation.backend.kind, "pod");
-  assert.ok("workspaceData" in observation.attachments);
-  assert.ok("projectRoot" in observation.runtimeAssembly);
-  assert.ok("paseo" in observation.daemon);
+  await withFakePath(
+    "kubectl",
+    `#!/usr/bin/env bash
+if [[ "$*" == *"get deployment morpheus"* ]]; then
+  printf '{"metadata":{"name":"morpheus"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get svc morpheus"* ]]; then
+  printf 'morpheus'
+  exit 0
+fi
+exit 0
+`,
+    async () => {
+      const observation = await driver.inspect(workspace);
+      assert.equal(observation.backend.kind, "pod");
+      assert.ok("workspaceData" in observation.attachments);
+      assert.ok("projectRoot" in observation.runtimeAssembly);
+      assert.ok("paseo" in observation.daemon);
+    },
+  );
 });
 
 test("runtime controller computes status and reconcile plan from observations", async () => {
   const workspace = loadWorkspace("morpheus");
   const driver = getBackendDriver("pod");
-  const observation = await driver.inspect(workspace);
-  const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
-  const plan = buildReconcilePlan(workspace, drift);
+  await withFakePath(
+    "kubectl",
+    `#!/usr/bin/env bash
+if [[ "$*" == *"get deployment morpheus"* ]]; then
+  printf '{"metadata":{"name":"morpheus"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get svc morpheus"* ]]; then
+  printf 'morpheus'
+  exit 0
+fi
+exit 0
+`,
+    async () => {
+      const observation = await driver.inspect(workspace);
+      const drift = computeWorkspaceDrift(workspace, observation);
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      const plan = buildReconcilePlan(workspace, drift);
 
-  assert.equal(Array.isArray(drift.items), true);
-  assert.equal(status.backend.kind, "pod");
-  assert.equal(status.lifecycleAction, "status");
-  assert.equal(Array.isArray(plan.actions), true);
+      assert.equal(Array.isArray(drift.items), true);
+      assert.equal(status.backend.kind, "pod");
+      assert.equal(status.lifecycleAction, "status");
+      assert.equal(Array.isArray(plan.actions), true);
+    },
+  );
+});
+
+test("kubevirt backend returns structured observations and executes safe plan actions", async () => {
+  const workspace = {
+    ...loadWorkspace("morpheus"),
+    backend: {
+      ...loadWorkspace("morpheus").backend,
+      kind: "kubevirt-vm" as const,
+      profile: "vm",
+    },
+  };
+  const driver = getBackendDriver("kubevirt-vm");
+
+  await withFakePath(
+    "kubectl",
+    `#!/usr/bin/env bash
+if [[ "$*" == *"get vm morpheus-vm"* ]]; then
+  printf 'morpheus-vm'
+  exit 0
+fi
+if [[ "$*" == *"get vmi morpheus-vm"* ]]; then
+  printf 'Running'
+  exit 0
+fi
+if [[ "$*" == *"get svc morpheus"* ]]; then
+  printf 'morpheus'
+  exit 0
+fi
+exit 0
+`,
+    async () => {
+      const observation = await driver.inspect(workspace);
+      assert.equal(observation.backend.exists, true);
+      assert.equal(observation.backend.running, true);
+      const drift = computeWorkspaceDrift(workspace, observation);
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      assert.equal(status.backend.kind, "kubevirt-vm");
+      assert.equal(status.state, "ready");
+
+      const plan = { project: "morpheus", backend: "kubevirt-vm", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
+      await driver.executeReconcilePlan(workspace, plan as any);
+    },
+  );
+});
+
+test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
+  const workspace = {
+    ...loadWorkspace("morpheus"),
+    backend: {
+      ...loadWorkspace("morpheus").backend,
+      kind: "kubevirt-vm" as const,
+      profile: "vm",
+    },
+  };
+  const driver = getBackendDriver("kubevirt-vm");
+
+  await withFakePath(
+    "kubectl",
+    `#!/usr/bin/env bash
+exit 0
+`,
+    async () => {
+      await driver.apply(workspace);
+      await driver.start(workspace);
+      await driver.stop(workspace);
+      await driver.restart(workspace);
+    },
+  );
+});
+
+test("docker backend returns structured observations and executes compose actions", async () => {
+  const base = loadWorkspace("morpheus");
+  const workspace = {
+    ...base,
+    backend: {
+      ...base.backend,
+      kind: "docker" as const,
+      profile: "docker",
+      dockerRuntimeMode: "legacy" as const,
+    },
+  };
+  const driver = getBackendDriver("docker");
+
+  await withFakePath(
+    "docker",
+    `#!/usr/bin/env bash
+if [[ "$*" == *"compose"* && "$*" == *"ps -q morpheus"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+    async () => {
+      const observation = await driver.inspect(workspace);
+      assert.equal(observation.backend.exists, true);
+      assert.equal(observation.backend.running, true);
+      const drift = computeWorkspaceDrift(workspace, observation);
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      assert.equal(status.backend.kind, "docker");
+
+      const plan = { project: "morpheus", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
+      await driver.executeReconcilePlan(workspace, plan as any);
+    },
+  );
+});
+
+test("docker lifecycle actions execute through docker compose", async () => {
+  const base = loadWorkspace("morpheus");
+  const workspace = {
+    ...base,
+    backend: {
+      ...base.backend,
+      kind: "docker" as const,
+      profile: "docker",
+      dockerRuntimeMode: "legacy" as const,
+    },
+  };
+  const driver = getBackendDriver("docker");
+
+  await withFakePath(
+    "docker",
+    `#!/usr/bin/env bash
+exit 0
+`,
+    async () => {
+      await driver.render(workspace);
+      await driver.apply(workspace);
+      await driver.start(workspace);
+      await driver.stop(workspace);
+      await driver.restart(workspace);
+      await driver.rebuild(workspace);
+    },
+  );
 });
