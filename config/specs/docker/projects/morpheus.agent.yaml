@@ -5,7 +5,7 @@ backend:
   spec_files: null
 runtime:
   class: docker
-  base_image: ttl.sh/morpheus-prebuilt-1781875178:24h
+  base_image: morpheus-prebuilt:local
   user: root
   storage_claim_name: null
   privileged: null
