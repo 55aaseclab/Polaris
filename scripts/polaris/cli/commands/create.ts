@@ -1,6 +1,10 @@
 import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
 import { getBackendDriver } from "../../backends/index.js";
-import { scaffoldDockerWorkspace, workspaceConfigExists } from "../../config/scaffold.js";
+import {
+  ensureScaffoldUserProfile,
+  scaffoldDockerWorkspace,
+  workspaceConfigExists,
+} from "../../config/scaffold.js";
 import { logInfo } from "../../utils/log.js";
 
 export async function createCommand(projectRef: string): Promise<void> {
@@ -10,19 +14,28 @@ export async function createCommand(projectRef: string): Promise<void> {
     if (scaffoldBackend !== "docker") {
       throw new Error(`Scaffolding for backend '${scaffoldBackend}' is not implemented yet; use '${project}@docker' or omit the backend selector`);
     }
-    const outputPath = scaffoldDockerWorkspace(project);
+    const userProfile = ensureScaffoldUserProfile();
+    const outputPath = scaffoldDockerWorkspace(project, userProfile.id);
     logInfo("cli", "workspace-scaffolded", {
       project,
       backend: scaffoldBackend,
       configPath: outputPath,
+      userProfileId: userProfile.id,
+      userProfileCreated: userProfile.created,
     });
     process.stdout.write(`${JSON.stringify({
       project,
       backend: scaffoldBackend,
       created: "saved-spec",
       configPath: outputPath,
+      userProfile: {
+        id: userProfile.id,
+        created: userProfile.created,
+        profilePath: userProfile.profilePath,
+        secretsRoot: userProfile.secretsRoot,
+      },
       nextSteps: [
-        `Stage credentials under config/users/100000000000000001/`,
+        `Stage credentials under ${userProfile.secretsRoot}/`,
         `pnpm exec tsx scripts/polaris.ts render ${project}@${scaffoldBackend}`,
         `pnpm exec tsx scripts/polaris.ts start ${project}@${scaffoldBackend}`,
       ],

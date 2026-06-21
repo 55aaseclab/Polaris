@@ -22,18 +22,21 @@ pnpm exec tsx scripts/polaris.ts
 For a new Docker workspace:
 
 1. Run `create <project>`.
-2. Stage bootstrap secrets under `secrets/polaris/`:
-   `codex/auth.json`, `codex/config.toml`,
-   `claude/settings.json`.
-3. Set `POLARIS_SECRETS_DIR` only when the secrets live elsewhere.
-4. Run `render <project>@docker`.
-5. Run `start <project>@docker`.
-6. Run `status <project>@docker`.
-7. Run `logs <project>@docker`.
+2. If the referenced user profile does not exist yet, let Polaris create it first.
+3. Read the `userProfile.secretsRoot` field from the `create` output.
+4. Stage bootstrap secrets there:
+   `codex/auth.json`, `codex/config.toml`, `claude/settings.json`.
+5. Set `POLARIS_SECRETS_DIR` only when the secrets live elsewhere.
+6. Run `render <project>@docker`.
+7. Run `start <project>@docker`.
+8. Run `status <project>@docker`.
+9. Run `logs <project>@docker`.
 
 ## Command Model
 
 - `create` scaffolds a saved spec for a new Docker workspace.
+- `create` also provisions a local user profile when the scaffolded spec would
+  otherwise point at a missing profile.
 - `render` writes generated backend output and does not start the runtime.
 - `start` renders first, then launches the backend runtime.
 - `status` checks backend liveness, readiness, and drift.

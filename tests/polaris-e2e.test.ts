@@ -32,6 +32,32 @@ async function withFakePath(commands: Record<string, string>, fn: () => Promise<
   }
 }
 
+async function withEnv(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<void> | void,
+): Promise<void> {
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(vars)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) {
+      delete process.env[key];
+      continue;
+    }
+    process.env[key] = value;
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) {
+        delete process.env[key];
+        continue;
+      }
+      process.env[key] = value;
+    }
+  }
+}
+
 async function captureStdout(fn: () => Promise<void>): Promise<string> {
   const previous = getStdoutCaptureQueue();
   let release!: () => void;
@@ -81,22 +107,52 @@ function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: st
 
 test("create scaffolds a docker-first saved spec when the project is new", async () => {
   const project = `e2e-create-${Date.now()}`;
+  const profileEmail = `${project}@polaris.local`;
   const configPath = path.join(REPO_ROOT, "config", "specs", "docker", "projects", `${project}.agent.yaml`);
+  const userProfileId = `local-${project}-polaris.local`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
 
   try {
-    const output = await captureStdout(async () => {
-      await runCli(["create", project]);
-    });
+    await withEnv(
+      {
+        GIT_AUTHOR_NAME: "E2E Create",
+        GIT_AUTHOR_EMAIL: profileEmail,
+      },
+      async () => {
+        const output = await captureStdout(async () => {
+          await runCli(["create", project]);
+        });
+        const parsed = parseJsonOutput<{
+          created: string;
+          project: string;
+          userProfile: {
+            id: string;
+            created: boolean;
+            profilePath: string;
+            secretsRoot: string;
+          };
+        }>(output);
 
-    assert.equal(fs.existsSync(configPath), true);
-    const rendered = fs.readFileSync(configPath, "utf8");
-    assert.match(rendered, /backend:\n  kind: docker/);
-    assert.match(rendered, /profile: morpheus/);
-    assert.match(rendered, /user_profile: '?100000000000000001'?/);
-    assert.match(output, /"created": "saved-spec"/);
-    assert.match(output, new RegExp(`"project": "${project}"`));
+        assert.equal(fs.existsSync(configPath), true);
+        const rendered = fs.readFileSync(configPath, "utf8");
+        assert.match(rendered, /backend:\n  kind: docker/);
+        assert.match(rendered, /profile: morpheus/);
+        assert.match(rendered, new RegExp(`user_profile: '?${userProfileId}'?`));
+        assert.equal(parsed.created, "saved-spec");
+        assert.equal(parsed.project, project);
+        assert.equal(parsed.userProfile.id, userProfileId);
+        assert.equal(parsed.userProfile.created, true);
+        assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
+        assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
+        assert.equal(fs.existsSync(profilePath), true);
+        assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
+      },
+    );
   } finally {
     removeIfExists(configPath);
+    removeIfExists(profilePath);
+    removeIfExists(secretsRoot);
   }
 });
 
