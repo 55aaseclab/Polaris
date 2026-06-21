@@ -13,7 +13,7 @@ import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STATUS_DIR = path.join(REPO_ROOT, "config", "state");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 
@@ -165,6 +165,11 @@ test("backend registry resolves pod driver", () => {
   assert.equal(driver.kind, "pod");
 });
 
+test("runCli rejects empty argv and missing project", async () => {
+  await assert.rejects(() => runCli([]), /Usage:/);
+  await assert.rejects(() => runCli(["status"]), /Usage:/);
+});
+
 test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
@@ -191,37 +196,39 @@ test("writeWorkspaceStatus persists a structured state file", () => {
 });
 
 test("status command exposes evolution explainability details", async () => {
-  const workspace = loadWorkspace("morpheus@docker");
-  const evolutionDir = path.join(REPO_ROOT, "config", "state", "evolution", workspace.identity.projectName);
-  const dbPath = path.join(evolutionDir, "store.db");
-  try {
-    fs.mkdirSync(evolutionDir, { recursive: true });
-    const { EvolutionStore } = await import("../scripts/evolution/store.js");
-    const store = await EvolutionStore.open(dbPath);
-    store.upsertArtifact({
-      id: "explained-artifact",
-      workspaceId: workspace.identity.projectName,
-      userProfileId: workspace.userProfile.id,
-      kind: "workspace-playbook",
-      scope: "workspace",
-      title: "Explained lesson",
-      content: "Use the verifier before retrying.",
-      confidence: 0.9,
-      status: "active",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      metadata: {
-        retrieval: { reasons: ["workspace-scoped", "matched tags: verifier"] },
-        explainability: { existsBecause: "Recovered from a successful validation workflow." },
-        curator: { action: "promoted", reason: "high-confidence active artifact" },
-      },
-    });
-    store.close();
+  const project = uniqueProjectName("explained-status");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const workspace = loadWorkspace(`${project}@docker`);
+    const evolutionDir = path.join(REPO_ROOT, "config", "state", "evolution", workspace.identity.projectName);
+    const dbPath = path.join(evolutionDir, "store.db");
+    try {
+      fs.mkdirSync(evolutionDir, { recursive: true });
+      const { EvolutionStore } = await import("../scripts/evolution/store.js");
+      const store = await EvolutionStore.open(dbPath);
+      store.upsertArtifact({
+        id: "explained-artifact",
+        workspaceId: workspace.identity.projectName,
+        userProfileId: workspace.userProfile.id,
+        kind: "workspace-playbook",
+        scope: "workspace",
+        title: "Explained lesson",
+        content: "Use the verifier before retrying.",
+        confidence: 0.9,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        metadata: {
+          retrieval: { reasons: ["workspace-scoped", "matched tags: verifier"] },
+          explainability: { existsBecause: "Recovered from a successful validation workflow." },
+          curator: { action: "promoted", reason: "high-confidence active artifact" },
+        },
+      });
+      store.close();
 
-    await withFakeCommands(
-      {
-        docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q morpheus"* ]]; then
+      await withFakeCommands(
+        {
+          docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -234,23 +241,24 @@ if [[ "$1" == "exec" ]]; then
 fi
 exit 0
 `,
-      },
-      async () => {
-        const output = await captureStdout(async () => {
-          await runCli(["status", "morpheus@docker"]);
-        });
-        const parsed = parseJsonOutput<{ evolution?: { latestArtifacts?: Array<{ title: string; whyRetrieved?: string[]; curatorAction?: string; whyExists?: string }> } }>(output);
-        assert.ok(parsed.evolution?.latestArtifacts);
-        assert.ok(parsed.evolution?.latestArtifacts?.some((item) => item.title === "Explained lesson"));
-        const artifact = parsed.evolution?.latestArtifacts?.find((item) => item.title === "Explained lesson");
-        assert.deepEqual(artifact?.whyRetrieved, ["workspace-scoped", "matched tags: verifier"]);
-        assert.equal(artifact?.curatorAction, "promoted");
-        assert.equal(artifact?.whyExists, "Recovered from a successful validation workflow.");
-      },
-    );
-  } finally {
-    fs.rmSync(evolutionDir, { recursive: true, force: true });
-  }
+        },
+        async () => {
+          const output = await captureStdout(async () => {
+            await runCli(["status", `${project}@docker`]);
+          });
+          const parsed = parseJsonOutput<{ evolution?: { latestArtifacts?: Array<{ title: string; whyRetrieved?: string[]; curatorAction?: string; whyExists?: string }> } }>(output);
+          assert.ok(parsed.evolution?.latestArtifacts);
+          assert.ok(parsed.evolution?.latestArtifacts?.some((item) => item.title === "Explained lesson"));
+          const artifact = parsed.evolution?.latestArtifacts?.find((item) => item.title === "Explained lesson");
+          assert.deepEqual(artifact?.whyRetrieved, ["workspace-scoped", "matched tags: verifier"]);
+          assert.equal(artifact?.curatorAction, "promoted");
+          assert.equal(artifact?.whyExists, "Recovered from a successful validation workflow.");
+        },
+      );
+    } finally {
+      fs.rmSync(evolutionDir, { recursive: true, force: true });
+    }
+  });
 });
 
 test("pod render writes a TypeScript-generated manifest", () => {
@@ -612,6 +620,51 @@ exit 0
       assert.ok(commands.some((entry) => entry.includes("logs deployment/morpheus --tail=200")));
     },
   );
+});
+
+test("CLI docker lifecycle commands dispatch through compose and status artifacts", async () => {
+  const project = uniqueProjectName("docker-lifecycle");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        await runCli(["render", project]);
+        await runCli(["apply", project]);
+        await runCli(["start", project]);
+        await runCli(["restart", project]);
+        await runCli(["stop", project]);
+        await runCli(["rebuild", project]);
+        const reconcileOutput = await captureStdout(async () => {
+          await runCli(["reconcile", project]);
+        });
+
+        const commands = readCommandLog();
+        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("up -d")));
+        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("stop")));
+        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("restart")));
+        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("up -d --force-recreate")));
+
+        const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
+        assert.ok(Array.isArray(parsed.reconcilePlan.actions));
+        assert.equal(parsed.reconcilePlan.safe, true);
+      },
+    );
+  });
 });
 
 test("kubevirt backend returns structured observations and current status semantics stay ready only when cloud-init is present", async () => {

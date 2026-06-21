@@ -20,19 +20,52 @@ const logPrefix = "[polaris-evolution-observer]";
 const pollIntervalMs = 60000;
 const lessonLimitDefault = Number(process.env.POLARIS_LESSON_RECALL_LIMIT || 3);
 
-let bootstrapSeed = fs.existsSync(contextFile) ? fs.readFileSync(contextFile, "utf8") : "";
+function normalizeBootstrapSeed(raw) {
+  const source = String(raw || "").trim();
+  if (!source) {
+    return "";
+  }
+  const runtimeMarker = "\n# Polaris Runtime Lessons";
+  const runtimeIndex = source.indexOf(runtimeMarker);
+  if (runtimeIndex === -1) {
+    return `${source}\n`;
+  }
+  return `${source.slice(0, runtimeIndex).trimEnd()}\n`;
+}
+
+let bootstrapSeed = normalizeBootstrapSeed(fs.existsSync(contextFile) ? fs.readFileSync(contextFile, "utf8") : "");
 let lastRenderedContext = bootstrapSeed;
 let lastAppendedPrompt = "";
 let paseoClient = null;
 let createPaseoClient = null;
+let cachedArtifactsStatKey = "";
+let cachedArtifacts = [];
+
+function includesAny(source, markers) {
+  return markers.some((marker) => source.includes(marker));
+}
 
 export function parseTriggerFlags(text) {
   const source = String(text || "");
   return {
-    learn: source.includes("POLARIS-LEARN-IT"),
-    recall: source.includes("POLARIS-RECALL"),
-    dontLearn: source.includes("POLARIS-DONT-LEARN"),
-    ephemeral: source.includes("POLARIS-EPHEMERAL"),
+    learn: includesAny(source, [
+      "POLARIS-LEARN-IT",
+      "POLARIS_LEARN_IT",
+      "POLARIS-LEARNT-IT",
+      "POLARIS_LEARNT_IT",
+    ]),
+    recall: includesAny(source, [
+      "POLARIS-RECALL",
+      "POLARIS_RECALL",
+    ]),
+    dontLearn: includesAny(source, [
+      "POLARIS-DONT-LEARN",
+      "POLARIS_DONT_LEARN",
+    ]),
+    ephemeral: includesAny(source, [
+      "POLARIS-EPHEMERAL",
+      "POLARIS_EPHEMERAL",
+    ]),
   };
 }
 
@@ -44,6 +77,9 @@ export function shouldPersistLesson(triggerFlags, previousStatus, nextStatus) {
     return true;
   }
   if (nextStatus === "error") {
+    return true;
+  }
+  if (previousStatus == null && nextStatus === "idle") {
     return true;
   }
   return previousStatus === "running" && Boolean(nextStatus) && nextStatus !== "running" && nextStatus !== "error";
@@ -113,9 +149,29 @@ function normalizeLessonArtifact(raw) {
   };
 }
 
+function artifactFingerprint(artifact) {
+  const summary = String(artifact.metadata?.summary || artifact.content || "").trim();
+  const whenToUse = String(artifact.metadata?.whenToUse || "").trim();
+  const tags = Array.isArray(artifact.metadata?.tags) ? artifact.metadata.tags.join(",") : "";
+  return JSON.stringify([
+    String(artifact.kind || "lesson"),
+    String(artifact.title || "").trim(),
+    summary,
+    whenToUse,
+    tags,
+  ]);
+}
+
 function listRuntimeArtifacts() {
   if (!fs.existsSync(artifactsFile)) {
+    cachedArtifactsStatKey = "";
+    cachedArtifacts = [];
     return [];
+  }
+  const stats = fs.statSync(artifactsFile);
+  const statKey = `${stats.size}:${stats.mtimeMs}`;
+  if (statKey === cachedArtifactsStatKey) {
+    return cachedArtifacts;
   }
   const lines = fs.readFileSync(artifactsFile, "utf8").split(/\r?\n/).filter(Boolean);
   const artifacts = [];
@@ -129,18 +185,29 @@ function listRuntimeArtifacts() {
       continue;
     }
   }
+  cachedArtifactsStatKey = statKey;
+  cachedArtifacts = artifacts;
   return artifacts;
 }
 
 export function selectRuntimeLessons(artifacts, options = {}) {
   const recallRequested = Boolean(options.recallRequested);
   const limit = recallRequested ? Math.max(lessonLimitDefault * 2, lessonLimitDefault) : lessonLimitDefault;
-  return [...artifacts]
-    .sort((left, right) => {
-      const confidenceDelta = Number(right.confidence || 0) - Number(left.confidence || 0);
-      if (confidenceDelta !== 0) return confidenceDelta;
-      return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
-    })
+  const seen = new Set();
+  const deduped = [];
+  for (const artifact of [...artifacts].sort((left, right) => {
+    const confidenceDelta = Number(right.confidence || 0) - Number(left.confidence || 0);
+    if (confidenceDelta !== 0) return confidenceDelta;
+    return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+  })) {
+    const fingerprint = artifactFingerprint(artifact);
+    if (seen.has(fingerprint)) {
+      continue;
+    }
+    seen.add(fingerprint);
+    deduped.push(artifact);
+  }
+  return deduped
     .slice(0, limit);
 }
 
@@ -421,11 +488,18 @@ export async function deriveAgentObservationUpdate(previousStatus, record) {
   };
   const events = [{ kind: "task-output", payload }];
   const nextStatus = record.lastStatus ?? null;
+  const completedBeforeFirstPoll =
+    previousStatus == null &&
+    nextStatus === "idle" &&
+    (record.attentionReason === "finished" || record.requiresAttention === true);
   if (nextStatus === "running" && previousStatus !== "running") {
     events.push({ kind: "task-started", payload });
   } else if (nextStatus === "error" && previousStatus !== "error") {
     events.push({ kind: "task-failed", payload });
-  } else if (previousStatus === "running" && nextStatus && nextStatus !== "running" && nextStatus !== "error") {
+  } else if (
+    completedBeforeFirstPoll ||
+    (previousStatus === "running" && nextStatus && nextStatus !== "running" && nextStatus !== "error")
+  ) {
     events.push({ kind: "task-completed", payload });
   }
   const lesson = shouldPersistLesson(triggerFlags, previousStatus, nextStatus)
@@ -555,6 +629,15 @@ async function poll() {
 
 export async function main() {
   ensureDir(evolutionRoot);
+  log("starting observer", {
+    paseoHome,
+    evolutionRoot,
+    daemonUrl,
+    workspaceId,
+    userProfileId,
+    managerId,
+    pollIntervalMs,
+  });
   await writeContextAndPatch(listRuntimeArtifacts());
   await poll();
   setInterval(() => {
@@ -564,7 +647,9 @@ export async function main() {
   }, pollIntervalMs);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const isMainModule = typeof process.argv[1] === "string" && process.argv[1].endsWith("runtime-observer.mjs");
+
+if (isMainModule) {
   void main().catch((error) => {
     log("observer crashed", error instanceof Error ? error.stack || error.message : String(error));
     process.exitCode = 1;

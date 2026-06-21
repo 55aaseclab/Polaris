@@ -15,6 +15,7 @@ __pycache__/
 *.pyc
 node_modules/
 dist/
+apps/polaris/.coverage/
 
 # K3S kata configs
 agents
