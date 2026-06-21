@@ -219,6 +219,12 @@ export interface WorkspaceSpec {
   lifecycle: WorkspaceLifecycle;
   runtimeContract: WorkspaceRuntimeContract;
   health: WorkspaceHealthPolicy;
+  evolution?: {
+    bootstrapContextFile: string;
+    bootstrapContextContent: string;
+    controlPlaneSnapshotPath?: string;
+    artifactCount: number;
+  };
 }
 
 export interface WorkspaceStatus {

@@ -1,6 +1,6 @@
-import { loadWorkspaceForCommand } from "./shared.js";
+import { loadExecutableWorkspaceForCommand } from "./shared.js";
 
 export async function renderCommand(project: string): Promise<void> {
-  const { workspace, driver } = loadWorkspaceForCommand("render", project);
+  const { workspace, driver } = await loadExecutableWorkspaceForCommand("render", project);
   await driver.render(workspace);
 }

@@ -2,6 +2,7 @@ import { getBackendDriver } from "../../backends/index.js";
 import { loadWorkspace } from "../../config/load.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
+import { prepareEvolutionBootstrapContext } from "../../evolution/runtime.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
 
 export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleAction"], projectRef: string): {
@@ -18,6 +19,18 @@ export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleActio
     profile: workspace.backend.profile,
   });
   return { workspace, driver };
+}
+
+export async function loadExecutableWorkspaceForCommand(
+  command: WorkspaceStatus["lifecycleAction"],
+  projectRef: string,
+): Promise<{
+  workspace: WorkspaceSpec;
+  driver: ReturnType<typeof getBackendDriver>;
+}> {
+  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef);
+  const preparedWorkspace = await prepareEvolutionBootstrapContext(workspace);
+  return { workspace: preparedWorkspace, driver };
 }
 
 function sleep(ms: number): Promise<void> {

@@ -85,6 +85,18 @@ function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: Work
   });
 }
 
+function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
+  const filePath = workspace.evolution?.bootstrapContextFile;
+  const content = workspace.evolution?.bootstrapContextContent;
+  if (!filePath || !content) {
+    return [];
+  }
+  const encoded = Buffer.from(content, "utf8").toString("base64");
+  return [
+    `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && \\`,
+  ];
+}
+
 function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
   const sshDir = workspace.attachments.userSshState.mountRoot;
   const keyPath = `${sshDir}/id_ed25519`;
@@ -159,6 +171,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
       ...(user === "root" ? buildRootProfileFixLine(home) : []),
       ...buildGitConfigLines(workspace),
       ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
+      ...buildEvolutionBootstrapLines(workspace),
       ...buildSshKeygenLine(user, workspace),
       ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
       "          touch /tmp/.ready && sleep infinity",
@@ -170,6 +183,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
     ...buildAttachmentAssemblyLines(workspace),
     `          apt-get update && apt-get install -y openssh-client ${workspace.runtime.aptPackages.join(" ")} && \\`,
     ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
+    ...buildEvolutionBootstrapLines(workspace),
     ...buildSshKeygenLine(user, workspace),
     ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
     "          touch /tmp/.ready && sleep infinity",
@@ -217,6 +231,12 @@ function buildEnvLines(workspace: WorkspaceSpec): string[] {
   envLines.push(`          value: ${q(workspace.attachments.userIdentityState.mountRoot)}`);
   envLines.push("        - name: POLARIS_USER_SSH_ROOT");
   envLines.push(`          value: ${q(workspace.attachments.userSshState.mountRoot)}`);
+  envLines.push("        - name: POLARIS_EVOLUTION_ROOT");
+  envLines.push(`          value: ${q(workspace.agent.runtime.evolutionRoot)}`);
+  if (workspace.evolution?.bootstrapContextFile) {
+    envLines.push("        - name: POLARIS_EVOLUTION_CONTEXT_FILE");
+    envLines.push(`          value: ${q(workspace.evolution.bootstrapContextFile)}`);
+  }
   return envLines;
 }
 
