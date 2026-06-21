@@ -29,7 +29,8 @@ secrets/agentctl/**
 !secrets/agentctl/README.md
 config/users/*
 !config/users/profiles/
-!config/users/profiles/**
+config/users/profiles/**
 !config/users/*/
 config/users/*/**
-!config/users/*/.gitignore
+!config/users/profiles/100000000000000001.yaml
+!config/users/100000000000000001/.gitignore
