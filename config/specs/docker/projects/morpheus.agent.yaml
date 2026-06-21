@@ -106,3 +106,4 @@ attachments:
     stale_artifacts:
     - /root/.paseo/paseo.pid
     - /run/workspace/pids/paseo.pid
+profile: morpheus

@@ -61,6 +61,10 @@ config/
   state/
 ```
 
+Profiles are part of the workspace intent layer. A workspace may select a
+built-in profile such as `morpheus`, and backend renderers consume profile
+defaults rather than branching directly on the workspace name.
+
 ## Current Reality
 
 - New TypeScript code prefers `config/specs/**` and `config/generated/**`.
@@ -79,6 +83,7 @@ config/
 - Pod currently has the deepest runtime-controller support.
 - KubeVirt and Docker are expected to converge on the same controller model
   rather than remain second-class paths.
+- Morpheus remains a built-in profile/example, not a backend-special-case name.
 
 ## Runtime Controller Pipeline
 

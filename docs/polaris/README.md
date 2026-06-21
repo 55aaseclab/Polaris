@@ -62,6 +62,19 @@ The primary saved-spec model is now attachment-based:
 Legacy path-centric persistence fields remain compatibility-only and are
 translated only when direct attachment declarations are absent.
 
+## Workspace Profiles
+
+Polaris supports explicit workspace profiles.
+
+Today:
+
+- `morpheus` is the built-in reference profile/example
+
+The important distinction is:
+
+- Morpheus remains available as a profile
+- backend implementations should no longer depend on the workspace name
+
 ## Runtime Controller
 
 Polaris now treats runtime control as a control-plane pipeline:

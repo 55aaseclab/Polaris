@@ -27,7 +27,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     "if [ -f /bootstrap-secrets/codex/auth.json ]; then install -m 600 /bootstrap-secrets/codex/auth.json /identity/codex/auth.json; fi",
     "if [ -f /bootstrap-secrets/codex/config.toml ]; then install -m 600 /bootstrap-secrets/codex/config.toml /identity/codex/config.toml; fi",
     "if [ -f /bootstrap-secrets/claude/settings.json ]; then install -m 600 /bootstrap-secrets/claude/settings.json /identity/claude/settings.json; fi",
-    "if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C morpheus@agent-vault -N '' -f /ssh/id_ed25519; fi",
+    `if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.profile.sshKeyComment} -N '' -f /ssh/id_ed25519; fi`,
     "chmod 400 /ssh/id_ed25519 || true",
     "chmod 644 /ssh/id_ed25519.pub || true",
     "rm -f /root/.paseo/paseo.pid",
@@ -51,7 +51,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       - |
 ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     ports:
-${portLines || "      - \"31677:6767\""}
+${portLines || '      - "6767:6767"'}
     volumes:
       - ${workspaceDataVolume}:/workspace/project
       - ${workspaceRuntimeVolume}:/workspace/state

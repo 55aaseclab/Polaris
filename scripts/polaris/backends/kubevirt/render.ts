@@ -15,11 +15,11 @@ function indentBlock(text: string, spaces: number): string {
 }
 
 export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
-  if (workspace.identity.projectName !== "morpheus") {
-    throw new Error("Workspace backend 'kubevirt-vm' is currently supported only for project 'morpheus'");
+  if (workspace.profile.assetBaseName !== "morpheus") {
+    throw new Error(`Workspace backend 'kubevirt-vm' does not have built-in templates for profile '${workspace.profile.name}' yet`);
   }
-  const cloudinitPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", "morpheus-vm-cloudinit-secret.yaml");
-  const vmPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", "morpheus.yaml");
+  const cloudinitPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", `${workspace.profile.assetBaseName}-vm-cloudinit-secret.yaml`);
+  const vmPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", `${workspace.profile.assetBaseName}.yaml`);
   const cloudinitTemplate = fs.readFileSync(cloudinitPath, "utf8");
   const vmTemplate = fs.readFileSync(vmPath, "utf8");
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;

@@ -29,6 +29,24 @@ export interface WorkspaceIdentity {
   projectName: string;
 }
 
+export interface WorkspaceProfile {
+  name: string;
+  assetBaseName: string;
+  workspaceAlias?: string;
+  sshKeyComment: string;
+  defaults: {
+    runtime?: {
+      baseImage?: string;
+      bootstrapProfile?: string;
+      user?: string;
+    };
+    service?: {
+      host?: string;
+      path?: string;
+    };
+  };
+}
+
 export interface WorkspaceBackend {
   kind: BackendKind;
   profile: string;
@@ -149,6 +167,7 @@ export interface WorkspaceLifecycle {
 
 export interface WorkspaceSpec {
   identity: WorkspaceIdentity;
+  profile: WorkspaceProfile;
   backend: WorkspaceBackend;
   storage: WorkspaceStorage;
   attachments: WorkspaceAttachments;
