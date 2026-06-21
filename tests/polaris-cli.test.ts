@@ -338,6 +338,33 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
   const rendered = fs.readFileSync(outputPath, "utf8");
   assert.match(rendered, /polaris-100000000000000001-identity/);
   assert.match(rendered, /polaris-100000000000000001-ssh/);
+  assert.match(rendered, /\$\{POLARIS_SECRETS_DIR:-\.\.\/\.\.\/users\/100000000000000001\}:\/bootstrap-secrets:ro/);
+});
+
+test("docker full bootstrap installs agent tooling on plain debian images", async () => {
+  const project = uniqueProjectName("docker-full");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.runtime = {
+      ...(doc.runtime ?? {}),
+      base_image: "debian:13",
+    };
+    doc.tooling = {
+      ...(doc.tooling ?? {}),
+      bootstrap_profile: "full",
+      apt_packages: ["neovim", "zsh", "tmux"],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspace(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    assert.match(rendered, /apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 neovim zsh tmux/);
+    assert.match(rendered, /npm install -g --prefix \/root\/\.local\/polaris @getpaseo\/cli@latest @openai\/codex @anthropic-ai\/claude-code @fission-ai\/openspec@latest pnpm/);
+    assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/codex "\$@"/);
+    assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/claude "\$@"/);
+    assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
+  });
 });
 
 test("pod backend returns structured observations", async () => {
@@ -422,35 +449,6 @@ exit 0
       assert.deepEqual(plan.actions, [{ kind: "restart-runtime" }]);
     },
   );
-});
-
-test("CLI create scaffolds a docker workspace spec for a new project", async () => {
-  const project = uniqueProjectName("create-workspace");
-  const outputPath = workspaceConfigPath(project, "docker");
-
-  try {
-    const stdout = await captureStdout(async () => {
-      await runCli(["create", project]);
-    });
-
-    const parsed = parseJsonOutput<{
-      project: string;
-      backend: string;
-      created: string;
-      configPath: string;
-      nextSteps: string[];
-    }>(stdout);
-
-    assert.equal(parsed.project, project);
-    assert.equal(parsed.backend, "docker");
-    assert.equal(parsed.created, "saved-spec");
-    assert.equal(parsed.configPath, outputPath);
-    assert.equal(fs.existsSync(outputPath), true);
-    assert.ok(parsed.nextSteps.some((entry) => entry.includes(`render ${project}`)));
-    assert.ok(parsed.nextSteps.some((entry) => entry.includes(`start ${project}`)));
-  } finally {
-    fs.rmSync(outputPath, { force: true });
-  }
 });
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {

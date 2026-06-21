@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH=/opt/agent-cli/bin:/root/.cargo/bin:${PATH}
+ENV PATH=/root/.local/polaris/bin:/root/.cargo/bin:${PATH}
 
 RUN apt-get update && apt-get install -y \
   openssh-client \
@@ -29,17 +29,17 @@ RUN apt-get update && apt-get install -y \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-RUN mkdir -p /opt/agent-cli \
-  && npm install -g --prefix /opt/agent-cli \
+RUN mkdir -p /root/.local/polaris \
+  && npm install -g --prefix /root/.local/polaris \
     @getpaseo/cli@latest \
     @openai/codex \
     @anthropic-ai/claude-code \
     @fission-ai/openspec@latest \
     pnpm
 
-RUN ln -sf /opt/agent-cli/bin/paseo /usr/local/bin/paseo \
-  && ln -sf /opt/agent-cli/bin/pnpm /usr/local/bin/pnpm \
-  && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /opt/agent-cli/bin/codex "$@"' > /usr/local/bin/codex \
+RUN ln -sf /root/.local/polaris/bin/paseo /usr/local/bin/paseo \
+  && ln -sf /root/.local/polaris/bin/pnpm /usr/local/bin/pnpm \
+  && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /root/.local/polaris/bin/codex "$@"' > /usr/local/bin/codex \
   && chmod 755 /usr/local/bin/codex \
-  && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /opt/agent-cli/bin/claude "$@"' > /usr/local/bin/claude \
+  && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec /root/.local/polaris/bin/claude "$@"' > /usr/local/bin/claude \
   && chmod 755 /usr/local/bin/claude

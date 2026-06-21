@@ -34,8 +34,8 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     .replace("        __CLAUDE_SETTINGS_JSON__", indentBlock(claudeSettings ?? "{}", 8));
   renderedCloudinit = renderedCloudinit
     .replace(
-      "mkdir -p /workspace/.cache /workspace/.codex /workspace/.claude /workspace/.paseo /workspace/.ssh /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /workspace/.tmp",
-      "mkdir -p /workspace/project /workspace/state/paseo /workspace/state/paseo/evolution /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/agent-cli /run/workspace/tmp",
+      "mkdir -p /workspace/.cache /workspace/.codex /workspace/.claude /workspace/.paseo /workspace/.ssh /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/polaris /workspace/.tmp",
+      "mkdir -p /workspace/project /workspace/state/paseo /workspace/state/paseo/evolution /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/polaris /run/workspace/tmp",
     )
     .replace(
       `/bin/sh -lc 'for p in .cache .codex .claude .paseo .ssh .cargo .rustup .npm .tmp; do rm -rf "/root/$p"; ln -s "/workspace/$p" "/root/$p"; done'`,
