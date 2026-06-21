@@ -248,6 +248,16 @@ export interface WorkspaceStatus {
     activeWorkspaceArtifacts: number;
     activeUserArtifacts: number;
     latestTitles: string[];
+    latestArtifacts?: Array<{
+      title: string;
+      kind: string;
+      status: string;
+      whyExists?: string;
+      whyRetrieved?: string[];
+      curatorAction?: string;
+      curatorReason?: string;
+      suppressedBecause?: string;
+    }>;
     lastSessionId?: string;
   };
   drift?: WorkspaceDrift;

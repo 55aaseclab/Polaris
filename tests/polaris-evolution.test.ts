@@ -48,11 +48,13 @@ test("evolution store records events and retrieves curated artifacts", async () 
     const retrieved = await retrieveEvolutionContext(store, {
       workspaceId: "morpheus",
       userProfileId: "100000000000000001",
-      prompt: "",
+      prompt: "prefer verifier",
       limit: 5,
     });
     assert.ok(retrieved.length >= 1);
     assert.match(renderRetrievedArtifacts(retrieved), /Relevant prior lessons:/);
+    assert.ok(Array.isArray((retrieved[0]?.metadata as Record<string, unknown>)?.retrieval?.reasons));
+    assert.match(renderRetrievedArtifacts(retrieved), /why retrieved:/);
 
     const curatorResult = applyCuratorResult(store, retrieved);
     assert.ok(Array.isArray(curatorResult.archivedIds));
@@ -85,4 +87,80 @@ test("paseo manager adapter normalizes transcript events and runtime paths", () 
   assert.equal(events.length, 1);
   assert.equal(events[0]?.managerId, "paseo");
   assert.equal(events[0]?.workspaceId, "morpheus");
+});
+
+test("curator records promotion, suppression, and decay decisions with explainability", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-curation-"));
+  const dbPath = path.join(tempDir, "store.db");
+  const store = await EvolutionStore.open(dbPath);
+  try {
+    const now = new Date();
+    const stale = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString();
+    const artifacts = [
+      {
+        id: "promoted-1",
+        workspaceId: "morpheus",
+        userProfileId: "100000000000000001",
+        kind: "workspace-playbook" as const,
+        scope: "workspace" as const,
+        title: "High confidence lesson",
+        content: "Use the verifier first.",
+        confidence: 0.95,
+        status: "active" as const,
+        sourceSessionId: "session-p",
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        metadata: {},
+      },
+      {
+        id: "suppressed-1",
+        workspaceId: "morpheus",
+        userProfileId: "100000000000000001",
+        kind: "workspace-playbook" as const,
+        scope: "workspace" as const,
+        title: "Low confidence lesson",
+        content: "Weak signal.",
+        confidence: 0.1,
+        status: "active" as const,
+        sourceSessionId: "session-s",
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        metadata: {},
+      },
+      {
+        id: "decayed-1",
+        workspaceId: "morpheus",
+        userProfileId: "100000000000000001",
+        kind: "workspace-playbook" as const,
+        scope: "workspace" as const,
+        title: "Stale medium lesson",
+        content: "Old and weak.",
+        confidence: 0.3,
+        status: "active" as const,
+        sourceSessionId: "session-d",
+        createdAt: stale,
+        updatedAt: stale,
+        metadata: {},
+      },
+    ];
+    for (const artifact of artifacts) {
+      store.upsertArtifact(artifact);
+    }
+
+    const result = applyCuratorResult(store, artifacts);
+    assert.ok(result.promotedIds?.includes("promoted-1"));
+    assert.ok(result.suppressedIds.includes("suppressed-1"));
+    assert.ok(result.decayedIds?.includes("decayed-1"));
+
+    const queried = store.queryArtifacts({
+      workspaceId: "morpheus",
+      userProfileId: "100000000000000001",
+      limit: 10,
+    });
+    const promoted = queried.find((artifact) => artifact.id === "promoted-1");
+    assert.equal(promoted?.metadata.curator?.action, "promoted");
+  } finally {
+    store.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

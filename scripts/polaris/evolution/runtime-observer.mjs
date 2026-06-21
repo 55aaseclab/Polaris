@@ -18,12 +18,40 @@ const artifactsFile = path.join(evolutionRoot, "artifacts.jsonl");
 const stateFile = path.join(evolutionRoot, "runtime-observer-state.json");
 const logPrefix = "[polaris-evolution-observer]";
 const pollIntervalMs = 60000;
+const lessonLimitDefault = Number(process.env.POLARIS_LESSON_RECALL_LIMIT || 3);
 
 let bootstrapSeed = fs.existsSync(contextFile) ? fs.readFileSync(contextFile, "utf8") : "";
 let lastRenderedContext = bootstrapSeed;
 let lastAppendedPrompt = "";
 let paseoClient = null;
 let createPaseoClient = null;
+
+export function parseTriggerFlags(text) {
+  const source = String(text || "");
+  return {
+    learn: source.includes("POLARIS-LEARN-IT"),
+    recall: source.includes("POLARIS-RECALL"),
+    dontLearn: source.includes("POLARIS-DONT-LEARN"),
+    ephemeral: source.includes("POLARIS-EPHEMERAL"),
+  };
+}
+
+export function shouldPersistLesson(triggerFlags, previousStatus, nextStatus) {
+  if (triggerFlags.dontLearn || triggerFlags.ephemeral) {
+    return false;
+  }
+  if (triggerFlags.learn) {
+    return true;
+  }
+  if (nextStatus === "error") {
+    return true;
+  }
+  return previousStatus === "running" && Boolean(nextStatus) && nextStatus !== "running" && nextStatus !== "error";
+}
+
+export function shouldUseModelSummarizer(triggerFlags, status) {
+  return triggerFlags.learn || status === "error" || status === "idle";
+}
 
 function log(message, extra) {
   if (extra === undefined) {
@@ -63,6 +91,28 @@ function loadObserverState() {
   };
 }
 
+function normalizeLessonArtifact(raw) {
+  if (!raw || raw.status !== "active") {
+    return null;
+  }
+  const metadata = typeof raw.metadata === "object" && raw.metadata ? raw.metadata : {};
+  const tags = Array.isArray(metadata.tags) ? metadata.tags.map((tag) => String(tag)) : [];
+  return {
+    ...raw,
+    title: String(raw.title || "Untitled lesson"),
+    content: String(raw.content || ""),
+    metadata: {
+      ...metadata,
+      summary: String(metadata.summary || raw.content || ""),
+      whenToUse: String(metadata.whenToUse || ""),
+      tags,
+      trigger: metadata.trigger ? String(metadata.trigger) : undefined,
+    },
+    updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()),
+    confidence: Number(raw.confidence ?? 0),
+  };
+}
+
 function listRuntimeArtifacts() {
   if (!fs.existsSync(artifactsFile)) {
     return [];
@@ -71,16 +121,31 @@ function listRuntimeArtifacts() {
   const artifacts = [];
   for (const line of lines) {
     try {
-      artifacts.push(JSON.parse(line));
+      const normalized = normalizeLessonArtifact(JSON.parse(line));
+      if (normalized) {
+        artifacts.push(normalized);
+      }
     } catch {
       continue;
     }
   }
-  return artifacts.filter((artifact) => artifact && artifact.status === "active");
+  return artifacts;
 }
 
-function renderContext(artifacts) {
-  const relevant = artifacts.slice(-8);
+export function selectRuntimeLessons(artifacts, options = {}) {
+  const recallRequested = Boolean(options.recallRequested);
+  const limit = recallRequested ? Math.max(lessonLimitDefault * 2, lessonLimitDefault) : lessonLimitDefault;
+  return [...artifacts]
+    .sort((left, right) => {
+      const confidenceDelta = Number(right.confidence || 0) - Number(left.confidence || 0);
+      if (confidenceDelta !== 0) return confidenceDelta;
+      return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+    })
+    .slice(0, limit);
+}
+
+export function renderContext(artifacts, options = {}) {
+  const relevant = selectRuntimeLessons(artifacts, options);
   const sections = [];
   if (bootstrapSeed.trim()) {
     sections.push(bootstrapSeed.trimEnd());
@@ -95,13 +160,17 @@ function renderContext(artifacts) {
       `- runtime-artifacts: ${relevant.length}`,
       "",
       "Relevant runtime lessons:",
-      ...relevant.map((artifact) => {
-        const kind = String(artifact.kind || "artifact");
-        const title = String(artifact.title || "Untitled artifact").trim() || "Untitled artifact";
-        const content = String(artifact.content || "").trim() || "No content recorded.";
-        return `- [${kind}] ${title}: ${content}`;
-      }),
     ];
+    for (const artifact of relevant) {
+      const kind = String(artifact.kind || "lesson");
+      const title = String(artifact.title || "Untitled lesson").trim() || "Untitled lesson";
+      const summary = String(artifact.metadata?.summary || artifact.content || "").trim() || "No summary recorded.";
+      const whenToUse = String(artifact.metadata?.whenToUse || "").trim();
+      const tags = Array.isArray(artifact.metadata?.tags) && artifact.metadata.tags.length > 0
+        ? ` Tags: ${artifact.metadata.tags.join(", ")}.`
+        : "";
+      lines.push(`- [${kind}] ${title}: ${summary}${whenToUse ? ` Use when: ${whenToUse}.` : ""}${tags}`);
+    }
     sections.push(lines.join("\n"));
   }
   if (sections.length === 0) {
@@ -178,8 +247,8 @@ async function patchDaemonAppendSystemPrompt(content) {
   }
 }
 
-function writeContextAndPatch(artifacts) {
-  const rendered = renderContext(artifacts);
+function writeContextAndPatch(artifacts, options = {}) {
+  const rendered = renderContext(artifacts, options);
   if (rendered !== lastRenderedContext) {
     ensureDir(path.dirname(contextFile));
     fs.writeFileSync(contextFile, rendered, "utf8");
@@ -204,31 +273,198 @@ function recordEvent(sessionId, kind, payload) {
   appendJsonl(eventsFile, makeEvent(sessionId, kind, payload));
 }
 
-function makeArtifact(sessionId, kind, title, content, metadata = {}) {
+function buildDefaultTags(record, triggerFlags) {
+  const tags = new Set();
+  if (record.provider) tags.add(String(record.provider));
+  if (record.cwd) {
+    for (const token of String(record.cwd).split(/[\/._-]+/).filter(Boolean)) {
+      if (token.length > 1) tags.add(token);
+    }
+  }
+  if (record.lastError) {
+    for (const token of String(record.lastError).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+      if (token.length > 2) tags.add(token);
+    }
+  }
+  if (triggerFlags.learn) tags.add("learn");
+  if (triggerFlags.recall) tags.add("recall");
+  return [...tags].slice(0, 8);
+}
+
+export function buildFallbackLesson(record, sessionId, triggerFlags) {
+  const status = String(record.lastStatus || "");
+  const provider = String(record.provider || "agent");
+  const title = String(record.title || "").trim() || "Recovered lesson";
+  const detail = String(record.lastError || "").trim();
+  if (status === "error") {
+    return {
+      kind: "lesson",
+      title: `Recovered failure lesson (${provider})`,
+      summary: detail || "The run failed and produced a durable troubleshooting lesson.",
+      whenToUse: `Use when ${provider} shows the same failure pattern in this workspace`,
+      tags: buildDefaultTags(record, triggerFlags),
+      confidence: triggerFlags.learn ? 0.8 : 0.6,
+      trigger: triggerFlags.learn ? "POLARIS-LEARN-IT" : "automatic-failure",
+      sourceSessionId: sessionId,
+    };
+  }
+  return {
+    kind: "lesson",
+    title: `Recovered workflow lesson (${provider})`,
+    summary: title,
+    whenToUse: `Use when repeating a similar ${provider} task in this workspace`,
+    tags: buildDefaultTags(record, triggerFlags),
+    confidence: triggerFlags.learn ? 0.85 : 0.6,
+    trigger: triggerFlags.learn ? "POLARIS-LEARN-IT" : "automatic-success",
+    sourceSessionId: sessionId,
+  };
+}
+
+async function summarizeWithCheapModel(record, sessionId, triggerFlags) {
+  const model = process.env.POLARIS_LESSON_SUMMARIZER_MODEL?.trim();
+  const apiKey = process.env.POLARIS_LESSON_SUMMARIZER_API_KEY?.trim();
+  const baseUrl = (process.env.POLARIS_LESSON_SUMMARIZER_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  if (!model || !apiKey) {
+    return null;
+  }
+  const prompt = {
+    provider: record.provider ?? "unknown",
+    cwd: record.cwd ?? null,
+    title: record.title ?? null,
+    status: record.lastStatus ?? null,
+    lastError: record.lastError ?? null,
+    triggerFlags,
+    workspaceId,
+    userProfileId,
+  };
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "Summarize one engineering experience into a durable lesson. Return strict JSON with keys: title, summary, whenToUse, tags, confidence. Keep it concise. If there is no durable lesson, return {\"summary\": \"\", \"tags\": []}.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify(prompt),
+        },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`summarizer request failed: ${response.status} ${response.statusText}`);
+  }
+  const body = await response.json();
+  const content = body?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    return null;
+  }
+  const parsed = JSON.parse(content);
+  const summary = String(parsed.summary || "").trim();
+  if (!summary) {
+    return null;
+  }
+  return {
+    kind: "lesson",
+    title: String(parsed.title || `Recovered lesson (${record.provider || "agent"})`).trim(),
+    summary,
+    whenToUse: String(parsed.whenToUse || "").trim(),
+    tags: Array.isArray(parsed.tags) ? parsed.tags.map((tag) => String(tag)).slice(0, 8) : [],
+    confidence: Number(parsed.confidence ?? (triggerFlags.learn ? 0.8 : 0.6)),
+    trigger: triggerFlags.learn ? "POLARIS-LEARN-IT" : statusToAutomaticTrigger(record.lastStatus),
+    sourceSessionId: sessionId,
+  };
+}
+
+function statusToAutomaticTrigger(status) {
+  return status === "error" ? "automatic-failure" : "automatic-success";
+}
+
+export async function buildLesson(record, sessionId, triggerFlags) {
+  const status = String(record.lastStatus || "");
+  const meaningful = shouldUseModelSummarizer(triggerFlags, status);
+  if (!meaningful) {
+    return null;
+  }
+  try {
+    const modelLesson = await summarizeWithCheapModel(record, sessionId, triggerFlags);
+    if (modelLesson) {
+      return modelLesson;
+    }
+  } catch (error) {
+    log("cheap summarizer failed; falling back to deterministic summary", error instanceof Error ? error.message : String(error));
+  }
+  return buildFallbackLesson(record, sessionId, triggerFlags);
+}
+
+export async function deriveAgentObservationUpdate(previousStatus, record) {
+  const triggerFlags = parseTriggerFlags(record.title || "");
+  const sessionId = String(record.runtimeInfo?.sessionId || record.persistence?.sessionId || record.id);
+  const payload = {
+    agentId: String(record.id),
+    provider: record.provider ?? "unknown",
+    cwd: record.cwd ?? null,
+    title: record.title ?? null,
+    status: record.lastStatus ?? null,
+    lastError: record.lastError ?? null,
+    updatedAt: record.updatedAt ?? null,
+    triggers: triggerFlags,
+  };
+  const events = [{ kind: "task-output", payload }];
+  const nextStatus = record.lastStatus ?? null;
+  if (nextStatus === "running" && previousStatus !== "running") {
+    events.push({ kind: "task-started", payload });
+  } else if (nextStatus === "error" && previousStatus !== "error") {
+    events.push({ kind: "task-failed", payload });
+  } else if (previousStatus === "running" && nextStatus && nextStatus !== "running" && nextStatus !== "error") {
+    events.push({ kind: "task-completed", payload });
+  }
+  const lesson = shouldPersistLesson(triggerFlags, previousStatus, nextStatus)
+    ? await buildLesson(record, sessionId, triggerFlags)
+    : null;
+  return { sessionId, triggerFlags, payload, events, lesson };
+}
+
+function makeArtifact(sessionId, lesson, metadata = {}) {
   const timestamp = new Date().toISOString();
   return {
     id: randomUUID(),
     workspaceId,
     userProfileId,
-    kind,
-    scope: kind === "user-preference" ? "user" : "workspace",
-    title,
-    content,
-    confidence: kind === "discarded-observation" ? 0.1 : 0.6,
-    status: kind === "discarded-observation" ? "suppressed" : "active",
+    kind: lesson.kind,
+    scope: "workspace",
+    title: lesson.title,
+    content: lesson.summary,
+    confidence: lesson.confidence,
+    status: "active",
     sourceSessionId: sessionId,
     createdAt: timestamp,
     updatedAt: timestamp,
-    metadata,
+    metadata: {
+      summary: lesson.summary,
+      whenToUse: lesson.whenToUse,
+      tags: lesson.tags,
+      trigger: lesson.trigger,
+      ...metadata,
+    },
   };
 }
 
-function recordArtifact(state, sessionId, kind, title, content, metadata) {
-  const signature = `${sessionId}:${kind}:${title}`;
+function recordArtifact(state, sessionId, lesson, metadata) {
+  const signature = `${sessionId}:${lesson.kind}:${lesson.title}`;
   if (state.artifacts[signature]) {
     return false;
   }
-  const artifact = makeArtifact(sessionId, kind, title, content, metadata);
+  const artifact = makeArtifact(sessionId, lesson, metadata);
   appendJsonl(artifactsFile, artifact);
   state.artifacts[signature] = artifact.id;
   return true;
@@ -268,7 +504,7 @@ function listAgentRecords() {
   return records;
 }
 
-function maybeRecordAgentChange(state, record) {
+async function maybeRecordAgentChange(state, record) {
   if (!record || typeof record !== "object" || !record.id) {
     return false;
   }
@@ -278,55 +514,23 @@ function maybeRecordAgentChange(state, record) {
   if (previous?.fingerprint === fingerprint) {
     return false;
   }
-  const sessionId = String(
-    record.runtimeInfo?.sessionId ||
-      record.persistence?.sessionId ||
-      record.id,
-  );
-  const payload = {
-    agentId: key,
-    provider: record.provider ?? "unknown",
-    cwd: record.cwd ?? null,
-    title: record.title ?? null,
-    status: record.lastStatus ?? null,
-    lastError: record.lastError ?? null,
-    updatedAt: record.updatedAt ?? null,
-  };
-  recordEvent(sessionId, "task-output", payload);
   const previousStatus = previous?.lastStatus ?? null;
   const nextStatus = record.lastStatus ?? null;
-  if (nextStatus === "running" && previousStatus !== "running") {
-    recordEvent(sessionId, "task-started", payload);
-  } else if (nextStatus === "error" && previousStatus !== "error") {
-    recordEvent(sessionId, "task-failed", payload);
-    const detail = String(record.lastError || "The manager reported an execution failure.");
-    recordArtifact(
-      state,
-      sessionId,
-      "workspace-playbook",
-      `Recovered failure lesson (${record.provider || "agent"})`,
-      detail,
-      { agentId: key, provider: record.provider ?? "unknown", status: nextStatus },
-    );
-  } else if (
-    previousStatus === "running" &&
-    nextStatus &&
-    nextStatus !== "running" &&
-    nextStatus !== "error"
-  ) {
-    recordEvent(sessionId, "task-completed", payload);
-    recordArtifact(
-      state,
-      sessionId,
-      "workspace-playbook",
-      `Recovered workflow lesson (${record.provider || "agent"})`,
-      String(record.title || "A real manager run completed successfully."),
-      { agentId: key, provider: record.provider ?? "unknown", status: nextStatus },
-    );
+  const derived = await deriveAgentObservationUpdate(previousStatus, record);
+  for (const event of derived.events) {
+    recordEvent(derived.sessionId, event.kind, event.payload);
+  }
+  if (derived.lesson) {
+    recordArtifact(state, derived.sessionId, derived.lesson, {
+      agentId: key,
+      provider: record.provider ?? "unknown",
+      status: nextStatus,
+    });
   }
   state.agents[key] = {
     fingerprint,
     lastStatus: nextStatus,
+    triggerFlags: derived.triggerFlags,
   };
   return true;
 }
@@ -334,8 +538,11 @@ function maybeRecordAgentChange(state, record) {
 async function poll() {
   const state = loadObserverState();
   let changed = false;
+  let recallRequested = false;
   for (const record of listAgentRecords()) {
-    if (maybeRecordAgentChange(state, record)) {
+    const triggerFlags = parseTriggerFlags(record.title || "");
+    recallRequested ||= triggerFlags.recall;
+    if (await maybeRecordAgentChange(state, record)) {
       changed = true;
     }
   }
@@ -343,10 +550,10 @@ async function poll() {
     writeJson(stateFile, state);
   }
   const artifacts = listRuntimeArtifacts();
-  await writeContextAndPatch(artifacts);
+  await writeContextAndPatch(artifacts, { recallRequested });
 }
 
-async function main() {
+export async function main() {
   ensureDir(evolutionRoot);
   await writeContextAndPatch(listRuntimeArtifacts());
   await poll();
@@ -357,7 +564,9 @@ async function main() {
   }, pollIntervalMs);
 }
 
-void main().catch((error) => {
-  log("observer crashed", error instanceof Error ? error.stack || error.message : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((error) => {
+    log("observer crashed", error instanceof Error ? error.stack || error.message : String(error));
+    process.exitCode = 1;
+  });
+}

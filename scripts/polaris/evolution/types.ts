@@ -66,4 +66,12 @@ export interface EvolutionCuratorResult {
   mergedIds: string[];
   archivedIds: string[];
   suppressedIds: string[];
+  promotedIds?: string[];
+  decayedIds?: string[];
+  details?: Array<{
+    artifactId: string;
+    action: "promoted" | "merged" | "archived" | "suppressed" | "decayed" | "kept";
+    reason: string;
+    targetArtifactId?: string;
+  }>;
 }

@@ -157,6 +157,119 @@ On session finalization, Polaris runs:
 The current reviewer is intentionally simple and rule-based. It proves the loop
 shape and storage contract before deeper manager-native transcript integration.
 
+## Lesson-Only Learning
+
+Polaris now treats runtime learning as lesson capture, not skill creation.
+
+The current direction is:
+
+- summarize durable experiences
+- store short lessons
+- inject recalled lessons later
+- avoid autonomous skill generation
+
+This is intentionally narrower than Hermes-style skill evolution. Polaris keeps
+the write surface smaller:
+
+- lesson title
+- lesson summary
+- when-to-use guidance
+- retrieval tags
+- source metadata
+
+The runtime observer supports explicit trigger markers such as:
+
+- `POLARIS-LEARN-IT`
+- `POLARIS-RECALL`
+- `POLARIS-DONT-LEARN`
+- `POLARIS-EPHEMERAL`
+
+The conservative first policy is:
+
+- trust user-issued learn markers
+- automatically summarize meaningful failures and completions
+- do not summarize every run
+
+## Runtime Observer
+
+For daemon-backed Paseo workspaces, Polaris now runs a runtime observer inside
+the workspace state boundary.
+
+It currently:
+
+- watches daemon-owned agent records under `.paseo/agents`
+- writes runtime execution events under `.paseo/evolution/execution-events.jsonl`
+- writes runtime lesson artifacts under `.paseo/evolution/artifacts.jsonl`
+- refreshes `.paseo/evolution/bootstrap-context.md`
+- patches Paseo daemon `appendSystemPrompt` live through supported daemon config
+  APIs
+
+That shared daemon prompt patch is the important integration point because it
+applies to:
+
+- CLI-created runs
+- web-portal-created runs
+
+through the same manager surface.
+
+## Selective Summarization
+
+Polaris now has a path for cheap-model lesson distillation, but it is meant to
+be selective rather than always-on.
+
+The intended policy is:
+
+- use a cheap coding-capable summarizer only for explicit learn-triggered runs
+  and meaningful success/failure events
+- fall back to deterministic lesson summaries when no summarizer is configured
+
+This keeps token usage lower than a system that reflexively summarizes every
+turn or creates autonomous skills.
+
+## Retrieval Explainability
+
+Retrieved lessons are now meant to be visible and debuggable rather than
+opaque prompt stuffing.
+
+The retrieval path can now record:
+
+- retrieval score
+- retrieval reasons
+- retrieval timestamp
+- prompt text used for matching
+
+Typical retrieval reasons include:
+
+- workspace-scoped
+- same user profile
+- direct prompt text match
+- matched tags
+- recently updated
+
+The rendered lesson context can expose these reasons directly so operators can
+see why a lesson was selected for a run.
+
+## Curator Policies
+
+Polaris now has explicit curator policy categories rather than only simple
+archive behavior:
+
+- **promotion**
+  - high-confidence active artifacts are marked as promoted
+- **merge**
+  - duplicate signatures keep the stronger artifact and archive the weaker one
+- **suppression**
+  - low-confidence artifacts are suppressed
+- **decay**
+  - stale low-confidence artifacts are decayed out of active retrieval
+
+The curator writes operator-visible metadata onto artifacts so they can answer:
+
+- why this lesson exists
+- why it was retrieved
+- why it was suppressed
+- why it was promoted, merged, or decayed
+
 ## Status Surface
 
 `polaris status <project>` now exposes a summarized evolution view in the
@@ -204,6 +317,7 @@ Not yet manager-native:
 - deep ingestion of external manager transcript detail
 - tool-call-level semantic replay from manager-private stores
 - model-based reviewer with stronger validation
+- richer trigger-aware lesson extraction from full run transcripts
 
 That distinction matters: the loop is real and functional today, but transcript
 fidelity is still control-plane-first rather than manager-internal.
