@@ -16,6 +16,7 @@ import type {
   UserProfile,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
+import { readWorkspaceDriverSelection } from "../output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 
@@ -39,15 +40,46 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
+const POD_PROFILE_SPECS_DIR = path.join(REPO_ROOT, "config", "specs", "pod", "profiles");
 
-export function parseWorkspaceReference(projectRef: string): { project: string; backendHint?: WorkspaceSpec["backend"]["kind"] } {
-  const match = /^(.+?)@((?:pod)|(?:docker)|(?:kubevirt-vm))$/.exec(projectRef.trim());
+export function parseWorkspaceReference(projectRef: string): {
+  project: string;
+  backendHint?: WorkspaceSpec["backend"]["kind"];
+  profileHint?: string;
+} {
+  const match = /^(.+?)@((?:pod)|(?:docker)|(?:kubevirt-vm))(?:[:]([a-zA-Z0-9_.-]+))?$/.exec(projectRef.trim());
   if (!match) {
     return { project: projectRef.trim() };
   }
   return {
     project: match[1],
     backendHint: match[2] as WorkspaceSpec["backend"]["kind"],
+    profileHint: match[3] ? String(match[3]) : undefined,
+  };
+}
+
+function resolveBackendHint(project: string, explicitHint?: WorkspaceSpec["backend"]["kind"]): WorkspaceSpec["backend"]["kind"] | undefined {
+  if (explicitHint) {
+    return explicitHint;
+  }
+  return readWorkspaceDriverSelection(project)?.backend;
+}
+
+function resolveProfileHint(project: string, explicitHint?: string): string | undefined {
+  if (explicitHint) {
+    return explicitHint;
+  }
+  return readWorkspaceDriverSelection(project)?.profile;
+}
+
+function loadPodProfileDefaults(profileName: string): { backendProfile?: string } {
+  const profilePath = path.join(POD_PROFILE_SPECS_DIR, `${profileName}.yaml`);
+  if (!fs.existsSync(profilePath)) {
+    return {};
+  }
+  const data = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+  return {
+    backendProfile: data.backend?.profile ? String(data.backend.profile) : undefined,
   };
 }
 
@@ -472,8 +504,10 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
 }
 
 export function loadWorkspace(projectRef: string): WorkspaceSpec {
-  const { project, backendHint } = parseWorkspaceReference(projectRef);
-  const configPath = specCandidates(project, backendHint).find((candidate) => fs.existsSync(candidate));
+  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  const resolvedBackendHint = resolveBackendHint(project, backendHint);
+  const resolvedProfileHint = resolveProfileHint(project, profileHint);
+  const configPath = specCandidates(project, resolvedBackendHint).find((candidate) => fs.existsSync(candidate));
   if (!configPath) {
     throw new Error(`Config not found for project '${project}'`);
   }
@@ -501,6 +535,9 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     gitUserEmail: toolingGitUserEmail,
   });
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
+  const podProfileDefaults = backendKind === "pod" && resolvedProfileHint
+    ? loadPodProfileDefaults(resolvedProfileHint)
+    : {};
   const workspaceAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
   const agentKind = normalizeAgentKind(agent.kind);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
@@ -526,7 +563,9 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     userProfile,
     backend: {
       kind: backendKind,
-      profile: backendKind === "pod" ? String(runtime.class ?? "kata-qemu") : backendKind === "docker" ? "legacy" : "vm",
+      profile: backendKind === "pod"
+        ? String(podProfileDefaults.backendProfile ?? resolvedProfileHint ?? runtime.class ?? "kata-qemu")
+        : backendKind === "docker" ? "legacy" : "vm",
       specFiles: Array.isArray(backend.spec_files) ? backend.spec_files.map((item) => String(item)) : [],
       dockerRuntimeMode: runtime.docker_enabled ? "legacy" : "disabled"
     },

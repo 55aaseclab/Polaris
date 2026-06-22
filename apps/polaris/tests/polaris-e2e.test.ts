@@ -97,6 +97,10 @@ function parseJsonOutput<T>(stdout: string): T {
   return JSON.parse(trimmed.slice(start, end + 1)) as T;
 }
 
+function selectionPath(project: string): string {
+  return path.join(REPO_ROOT, "config", "state", `${project}.selection.json`);
+}
+
 function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: string): string {
   const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "demo.agent.yaml");
   const outputPath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", `${project}.agent.yaml`);
@@ -214,6 +218,143 @@ exit 0
       assert.match(output, /"project": "demo"/);
     },
   );
+});
+
+test("switch stops the previous backend, starts the new backend, and updates defaults", async () => {
+  const project = "demo";
+  const driverSelectionPath = selectionPath(project);
+  removeIfExists(driverSelectionPath);
+
+  try {
+    await withFakePath(
+      {
+        docker: `#!/usr/bin/env bash
+if [[ "$*" == *" stop"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *" up -d"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+  printf 'docker-id'
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+        kubectl: `#!/usr/bin/env bash
+if [[ "$*" == *"apply -f "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"rollout restart"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        const switched = await captureStdout(async () => {
+          await runCli(["switch", "demo@docker"]);
+        });
+        assert.match(switched, /"selectedBackend": "docker"/);
+        assert.match(switched, /"stoppedBackends": \[\s*"pod"\s*\]/);
+        assert.equal(fs.existsSync(driverSelectionPath), true);
+
+        const dockerOutput = await captureStdout(async () => {
+          await runCli(["status", project]);
+        });
+        assert.match(dockerOutput, /"kind": "docker"/);
+
+        const switchedAgain = await captureStdout(async () => {
+          await runCli(["switch", "demo@pod"]);
+        });
+        assert.match(switchedAgain, /"selectedBackend": "pod"/);
+        assert.match(switchedAgain, /"selectedProfile": "gvisor"/);
+        assert.match(switchedAgain, /"stoppedBackends": \[\s*"docker"\s*\]/);
+
+        const podOutput = await captureStdout(async () => {
+          await runCli(["status", project]);
+        });
+        assert.match(podOutput, /"kind": "pod"/);
+      },
+    );
+  } finally {
+    removeIfExists(driverSelectionPath);
+  }
+});
+
+test("switch accepts pod driver variants such as kata", async () => {
+  const project = "demo";
+  const driverSelectionPath = selectionPath(project);
+  removeIfExists(driverSelectionPath);
+
+  try {
+    await withFakePath(
+      {
+        kubectl: `#!/usr/bin/env bash
+if [[ "$*" == *"apply -f "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
+  exit 0
+fi
+exit 0
+`,
+        docker: `#!/usr/bin/env bash
+exit 0
+`,
+      },
+      async () => {
+        const switched = await captureStdout(async () => {
+          await runCli(["switch", "demo@pod:kata"]);
+        });
+        assert.match(switched, /"selectedBackend": "pod"/);
+        assert.match(switched, /"selectedProfile": "kata"/);
+
+        const saved = JSON.parse(fs.readFileSync(driverSelectionPath, "utf8")) as {
+          backend: string;
+          profile?: string;
+        };
+        assert.equal(saved.backend, "pod");
+        assert.equal(saved.profile, "kata");
+      },
+    );
+  } finally {
+    removeIfExists(driverSelectionPath);
+  }
 });
 
 test("logs command dispatches to each backend implementation", async () => {

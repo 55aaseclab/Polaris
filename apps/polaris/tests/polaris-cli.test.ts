@@ -7,7 +7,7 @@ import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
-import { writeWorkspaceStatus } from "../scripts/output/state-store.js";
+import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { runCli } from "../scripts/cli/main.js";
@@ -105,6 +105,10 @@ function cleanupStatusFile(project: string): void {
   fs.rmSync(path.join(STATUS_DIR, `${project}.status.json`), { force: true });
 }
 
+function cleanupSelectionFile(project: string): void {
+  fs.rmSync(path.join(STATUS_DIR, `${project}.selection.json`), { force: true });
+}
+
 async function withTempWorkspaceSpec(
   project: string,
   backendKind: "docker" | "pod" | "kubevirt-vm",
@@ -194,6 +198,39 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   assert.equal(parsed.backend.kind, "pod");
 
   cleanupStatusFile(project);
+});
+
+test("driver selection persists a default backend control", () => {
+  const project = uniqueProjectName("driver-selection");
+  const selectionPath = writeWorkspaceDriverSelection(project, { backend: "pod", profile: "gvisor" });
+  assert.equal(fs.existsSync(selectionPath), true);
+  const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
+  assert.equal(parsed.backend, "pod");
+  assert.equal(parsed.profile, "gvisor");
+  cleanupSelectionFile(project);
+});
+
+test("stored pod driver selection influences default workspace loading", () => {
+  const project = "demo";
+  writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" });
+  try {
+    const workspace = loadWorkspace(project);
+    assert.equal(workspace.backend.kind, "pod");
+    assert.equal(workspace.backend.profile, "kata-qemu");
+  } finally {
+    cleanupSelectionFile(project);
+  }
+});
+
+test("stored docker driver selection influences default workspace loading", () => {
+  const project = "demo";
+  writeWorkspaceDriverSelection(project, { backend: "docker" });
+  try {
+    const workspace = loadWorkspace(project);
+    assert.equal(workspace.backend.kind, "docker");
+  } finally {
+    cleanupSelectionFile(project);
+  }
 });
 
 test("status command exposes evolution explainability details", async () => {
