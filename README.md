@@ -72,9 +72,9 @@ pnpm run polaris -- start demo@kubevirt-vm
 Start here:
 
 - [docs/README.md](./docs/README.md)
-- [apps/polaris/docs/README.md](./apps/polaris/docs/README.md)
-- [apps/polaris/docs/runtime-layout.md](./apps/polaris/docs/runtime-layout.md)
-- [apps/polaris/docs/maturity-map.md](./apps/polaris/docs/maturity-map.md)
+- [docs/polaris/README.md](./docs/polaris/README.md)
+- [docs/polaris/runtime-layout.md](./docs/polaris/runtime-layout.md)
+- [docs/polaris/maturity-map.md](./docs/polaris/maturity-map.md)
 - [docs/operations/README.md](./docs/operations/README.md)
 
 ## Contributing
