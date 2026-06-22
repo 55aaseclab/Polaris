@@ -22,6 +22,18 @@ CONTAINERD_TMPL_V2="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
 CONTAINERD_TMPL_V3="/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl"
 NODE_NAME="${K3S_NODE_NAME:-$(hostname -s)}"
 RESTART_NEEDED=false
+SERVER_ONLY_CONFIG_KEYS=(
+  "write-kubeconfig"
+  "write-kubeconfig-mode"
+  "cluster-init"
+  "disable-apiserver"
+  "disable-controller-manager"
+  "disable-scheduler"
+  "etcd-arg"
+  "kube-apiserver-arg"
+  "kube-controller-manager-arg"
+  "kube-scheduler-arg"
+)
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"

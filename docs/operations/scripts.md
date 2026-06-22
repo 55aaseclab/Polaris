@@ -6,6 +6,7 @@
 - `scripts/operations/setup-k3s-sandbox-runtimes.sh`
 - `scripts/operations/setup-k3s-kubevirt.sh`
 - `scripts/operations/setup-k3s-sandbox-worker.sh`
+- `scripts/operations/print-k3s-worker-join-info.sh`
 - `scripts/operations/setup-k3s-cdi.sh`
 - `scripts/operations/run-gvisor-smoke-test.sh`
 - `scripts/operations/run-kata-smoke-test.sh`
