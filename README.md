@@ -53,7 +53,7 @@ Use the pod backend when you want stronger sandboxing and the existing k3s
 runtime path.
 
 ```bash
-sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
+sudo bash scripts/operations/setup-k3s-sandbox-runtimes.sh
 pnpm run polaris -- start demo@pod
 ```
 
