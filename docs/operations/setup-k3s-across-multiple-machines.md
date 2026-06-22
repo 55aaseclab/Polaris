@@ -1,4 +1,4 @@
-# Platform Operations
+# Set Up k3s Across Multiple Machines
 
 This document restores the k3s cluster setup notes that used to live in the
 legacy top-level k3s guide.
