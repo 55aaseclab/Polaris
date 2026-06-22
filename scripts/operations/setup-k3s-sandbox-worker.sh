@@ -44,8 +44,41 @@ fail() {
   exit 1
 }
 
+fail_missing_join_input() {
+  cat >&2 <<'EOF'
+[setup-k3s-sandbox-worker.sh] ERROR: Missing k3s worker join settings.
+
+Set these environment variables before running this script:
+
+  export K3S_URL=https://<control-plane-host-or-ip>:6443
+  export K3S_TOKEN='<server-node-token>'
+
+On the control-plane node, you can print the values with:
+
+  ./scripts/operations/print-k3s-worker-join-info.sh
+
+Then run this worker setup again, for example:
+
+  sudo K3S_URL=https://128.178.122.44:6443 \
+       K3S_TOKEN='K10...' \
+       ./scripts/operations/setup-k3s-sandbox-worker.sh
+EOF
+  exit 1
+}
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+config_contains_server_only_keys() {
+  [[ -f "$K3S_AGENT_CONFIG" ]] || return 1
+  local key
+  for key in "${SERVER_ONLY_CONFIG_KEYS[@]}"; do
+    if grep -Eq "^[[:space:]]*${key}:" "$K3S_AGENT_CONFIG"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 preflight() {
@@ -53,8 +86,8 @@ preflight() {
   [[ "$(uname -m)" == "x86_64" ]] || fail "This worker path currently supports x86_64 only"
   grep -qE "vmx|svm" /proc/cpuinfo \
     || fail "VMX/SVM not found in /proc/cpuinfo. Enable hardware virtualisation in BIOS."
-  [[ -n "${K3S_URL:-}" ]] || fail "Set K3S_URL to your existing k3s server URL (for example https://server:6443)"
-  [[ -n "${K3S_TOKEN:-}" ]] || fail "Set K3S_TOKEN to the server node token"
+  [[ -n "${K3S_URL:-}" ]] || fail_missing_join_input
+  [[ -n "${K3S_TOKEN:-}" ]] || fail_missing_join_input
   log "Preflight passed (root, x86_64, VMX available, join settings present)"
 }
 
@@ -99,6 +132,13 @@ EOF
         printf '  - %s\n' "$label"
       done <<< "$(printf '%s\n' "$K3S_NODE_LABELS" | tr ',' '\n')"
     } >>"$tmp"
+  fi
+
+  if config_contains_server_only_keys; then
+    local backup_path
+    backup_path="${K3S_AGENT_CONFIG}.before-worker.$(date +%Y%m%d%H%M%S)"
+    cp "$K3S_AGENT_CONFIG" "$backup_path"
+    log "Backed up incompatible server-side k3s config to ${backup_path}"
   fi
 
   if cmp -s "$tmp" "$K3S_AGENT_CONFIG" 2>/dev/null; then
