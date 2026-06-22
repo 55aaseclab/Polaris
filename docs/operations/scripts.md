@@ -5,7 +5,7 @@
 - `apps/polaris/scripts/polaris.ts`: unified TypeScript entrypoint for the Polaris app
 - `scripts/operations/setup-k3s-sandbox-runtimes.sh`
 - `scripts/operations/setup-k3s-kubevirt.sh`
-- `scripts/operations/setup-k3s-kata-worker.sh`
+- `scripts/operations/setup-k3s-sandbox-worker.sh`
 - `scripts/operations/setup-k3s-cdi.sh`
 - `scripts/operations/run-gvisor-smoke-test.sh`
 - `scripts/operations/run-kata-smoke-test.sh`
