@@ -47,7 +47,7 @@ If the same project exists in multiple backends, always target
 
 ## References
 
-Read `apps/polaris/docs/README.md` when you need:
+Read `docs/polaris/README.md` when you need:
 
 - the full command model
 - runtime assembly details
