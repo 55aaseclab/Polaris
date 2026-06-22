@@ -70,6 +70,15 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+default_runtime_labels() {
+  cat <<'EOF'
+polaris.runtime.kata-qemu=true
+polaris.runtime.kata-clh=true
+polaris.runtime.kata-qemu-tdx=true
+polaris.runtime.gvisor=true
+EOF
+}
+
 config_contains_server_only_keys() {
   [[ -f "$K3S_AGENT_CONFIG" ]] || return 1
   local key
@@ -98,7 +107,7 @@ install_dependencies() {
 }
 
 install_k3s_agent() {
-  local tmp
+  local tmp combined_labels
 
   if command_exists k3s-agent; then
     log "k3s-agent already installed"
@@ -124,13 +133,18 @@ node-name: ${K3S_NODE_NAME}
 EOF
   fi
 
+  combined_labels="$(default_runtime_labels)"
   if [[ -n "${K3S_NODE_LABELS:-}" ]]; then
+    combined_labels="${combined_labels}"$'\n'"$(printf '%s\n' "$K3S_NODE_LABELS" | tr ',' '\n')"
+  fi
+
+  if [[ -n "$combined_labels" ]]; then
     {
       printf 'node-label:\n'
       while IFS= read -r label; do
         [[ -n "$label" ]] || continue
         printf '  - %s\n' "$label"
-      done <<< "$(printf '%s\n' "$K3S_NODE_LABELS" | tr ',' '\n')"
+      done <<< "$combined_labels"
     } >>"$tmp"
   fi
 
@@ -335,16 +349,6 @@ verify_live_runtime_registration() {
   log "Live runtime registration looks correct"
 }
 
-label_runtime_capabilities() {
-  log "Labelling node ${NODE_NAME} with sandbox runtime capabilities..."
-  k3s kubectl label node "${NODE_NAME}" \
-    polaris.runtime.kata-qemu=true \
-    polaris.runtime.kata-clh=true \
-    polaris.runtime.kata-qemu-tdx=true \
-    polaris.runtime.gvisor=true \
-    --overwrite
-}
-
 restart_and_wait() {
   ensure_runtime_restart_needed
   if [[ "$RESTART_NEEDED" != true ]]; then
@@ -377,8 +381,7 @@ main() {
   configure_containerd
   restart_and_wait
   verify_live_runtime_registration
-  label_runtime_capabilities
-  log "Worker setup complete. Verify from the server with: kubectl get nodes --show-labels"
+  log "Worker setup complete. Verify from the control-plane with: kubectl get nodes --show-labels"
 }
 
 main "$@"
