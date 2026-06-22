@@ -41,37 +41,11 @@ Then use this prompt for the fastest local Docker path:
 Use $use-polaris to set up Polaris locally with Docker for project <project>.
 ```
 
-## Install
-
-### Kubernetes Pods
-
-Use the pod backend when you want stronger sandboxing and the existing k3s
-runtime path.
-
-```bash
-sudo bash scripts/operations/setup-k3s-sandbox-runtimes.sh
-pnpm run polaris -- start demo@pod
-```
-
-### KubeVirt
-
-Use the KubeVirt backend when you want full VM workloads managed by the same
-control plane.
-
-```bash
-bash scripts/operations/setup-k3s-kubevirt.sh
-pnpm run polaris -- start demo@kubevirt-vm
-```
-
 ## Documentation
 
-Start here:
-
-- [docs/README.md](./docs/README.md)
 - [docs/polaris/README.md](./docs/polaris/README.md)
-- [docs/polaris/runtime-layout.md](./docs/polaris/runtime-layout.md)
 - [docs/polaris/maturity-map.md](./docs/polaris/maturity-map.md)
-- [docs/operations/README.md](./docs/operations/README.md)
+- [Support multiple machines with k3s](./docs/operations/setup-k3s-across-multiple-machines.md)
 
 ## Contributing
 
