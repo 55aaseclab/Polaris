@@ -54,7 +54,7 @@ runtime path.
 
 ```bash
 sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
-pnpm run polaris -- start morpheus@pod
+pnpm run polaris -- start demo@pod
 ```
 
 ### KubeVirt
@@ -64,7 +64,7 @@ control plane.
 
 ```bash
 bash scripts/operations/setup-k3s-kubevirt.sh
-pnpm run polaris -- start morpheus@kubevirt-vm
+pnpm run polaris -- start demo@kubevirt-vm
 ```
 
 ## Documentation

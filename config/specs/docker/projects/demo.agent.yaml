@@ -46,8 +46,9 @@ attachments:
     durable_paths:
       - /workspace/project
     source:
-      kind: generated-material
-      description: docker workspace data for demo
+      kind: persistent-volume
+      volume_ref: demo-project
+      description: reusable docker workspace data for demo
   workspace-runtime-state:
     scope: workspace
     sharing: exclusive
@@ -56,8 +57,9 @@ attachments:
       - /workspace/state/paseo
       - /workspace/state/paseo/evolution
     source:
-      kind: generated-material
-      description: docker workspace runtime state for demo
+      kind: persistent-volume
+      volume_ref: demo-project-state
+      description: reusable docker workspace runtime state for demo
   user-identity-state:
     scope: user
     sharing: cross-workspace
