@@ -1,0 +1,4 @@
+model = "gpt-5"
+
+[profiles.demo]
+approval_policy = "never"

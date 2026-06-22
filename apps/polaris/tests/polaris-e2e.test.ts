@@ -98,9 +98,9 @@ function parseJsonOutput<T>(stdout: string): T {
 }
 
 function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: string): string {
-  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "morpheus.agent.yaml");
+  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "demo.agent.yaml");
   const outputPath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", `${project}.agent.yaml`);
-  const source = fs.readFileSync(sourcePath, "utf8").replace(/^project: morpheus$/m, `project: ${project}`);
+  const source = fs.readFileSync(sourcePath, "utf8").replace(/^project: demo$/m, `project: ${project}`);
   fs.writeFileSync(outputPath, source, "utf8");
   return outputPath;
 }
@@ -160,19 +160,19 @@ test("default CLI dispatch uses status instead of apply", async () => {
   await withFakePath(
     {
       kubectl: `#!/usr/bin/env bash
-if [[ "$*" == *"get deployment morpheus"* ]]; then
-  printf '{"metadata":{"name":"morpheus"}}'
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc morpheus"* ]]; then
-  printf 'morpheus'
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
   exit 0
 fi
 exit 0
@@ -180,7 +180,7 @@ exit 0
     },
     async () => {
       const output = await captureStdout(async () => {
-        await runCli(["morpheus"]);
+        await runCli(["demo"]);
       });
       assert.match(output, /"lifecycleAction": "status"/);
       assert.match(output, /"statusFile":/);
@@ -188,11 +188,11 @@ exit 0
   );
 });
 
-test("backend selectors disambiguate shared project names like morpheus@docker", async () => {
+test("backend selectors disambiguate shared project names like demo@docker", async () => {
   await withFakePath(
     {
       docker: `#!/usr/bin/env bash
-if [[ "$*" == *"compose"* && "$*" == *"ps -q morpheus"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -208,10 +208,10 @@ exit 0
     },
     async () => {
       const output = await captureStdout(async () => {
-        await runCli(["status", "morpheus@docker"]);
+        await runCli(["status", "demo@docker"]);
       });
       assert.match(output, /"kind": "docker"/);
-      assert.match(output, /"project": "morpheus"/);
+      assert.match(output, /"project": "demo"/);
     },
   );
 });

@@ -4,6 +4,8 @@ import type { WorkspaceSpec } from "../../core/workspace.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
+const GENERATED_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "generated", "kubevirt");
+const FALLBACK_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "kubevirt", "templates");
 
 function indentBlock(text: string, spaces: number): string {
   const prefix = " ".repeat(spaces);
@@ -14,23 +16,62 @@ function indentBlock(text: string, spaces: number): string {
     .join("\n");
 }
 
+function readTemplate(preferredPath: string, fallbackPath: string): string {
+  if (fs.existsSync(preferredPath)) {
+    return fs.readFileSync(preferredPath, "utf8");
+  }
+  return fs.readFileSync(fallbackPath, "utf8");
+}
+
+function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
+  const workspaceVolume =
+    workspace.attachments.workspaceData.source.volumeRef ??
+    `${workspace.identity.projectName}-project`;
+  const servicePort =
+    workspace.connectivity.servicePorts[0]?.containerPort ?? "6767";
+  const nodePort =
+    workspace.connectivity.servicePorts[0]?.nodePort ?? servicePort;
+  return text
+    .replaceAll("__PROJECT__", workspace.identity.projectName)
+    .replaceAll("__WORKSPACE_VOLUME__", workspaceVolume)
+    .replaceAll("__SERVICE_PORT__", servicePort)
+    .replaceAll("__NODE_PORT__", nodePort);
+}
+
 export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   if (workspace.profile.assetBaseName !== "morpheus") {
     throw new Error(`Workspace backend 'kubevirt-vm' does not have built-in templates for profile '${workspace.profile.name}' yet`);
   }
-  const cloudinitPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", `${workspace.profile.assetBaseName}-vm-cloudinit-secret.yaml`);
-  const vmPath = path.join(REPO_ROOT, "config", "generated", "kubevirt", `${workspace.profile.assetBaseName}.yaml`);
-  const cloudinitTemplate = fs.readFileSync(cloudinitPath, "utf8");
-  const vmTemplate = fs.readFileSync(vmPath, "utf8");
+  const cloudinitPath = path.join(
+    GENERATED_KUBEVIRT_DIR,
+    `${workspace.profile.assetBaseName}-vm-cloudinit-secret.yaml`,
+  );
+  const vmPath = path.join(
+    GENERATED_KUBEVIRT_DIR,
+    `${workspace.profile.assetBaseName}.yaml`,
+  );
+  const cloudinitTemplate = replacePlaceholders(
+    readTemplate(
+      cloudinitPath,
+      path.join(FALLBACK_KUBEVIRT_DIR, "vm-cloudinit-secret.yaml"),
+    ),
+    workspace,
+  );
+  const vmTemplate = replacePlaceholders(
+    readTemplate(vmPath, path.join(FALLBACK_KUBEVIRT_DIR, "vm.yaml")),
+    workspace,
+  );
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
+  const codexConfig = workspace.runtime.authFiles.find((item) => item.key === "codex-config.toml")?.content;
   const claudeSettings = workspace.runtime.authFiles.find((item) => item.key === "claude-settings.json")?.content;
   const sshPrivateKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !item.mountPath.endsWith(".pub"))?.content;
   const sshPublicKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && item.mountPath.endsWith(".pub"))?.content;
-  if (workspace.agent.enabled && (!codexAuth || !claudeSettings)) {
-    throw new Error("KubeVirt render requires codex-auth.json and claude-settings.json");
+  if (workspace.agent.enabled && (!codexAuth || !codexConfig || !claudeSettings)) {
+    throw new Error("KubeVirt render requires codex-auth.json, codex-config.toml, and claude-settings.json");
   }
   let renderedCloudinit = cloudinitTemplate
     .replace("        __CODEX_AUTH_JSON__", indentBlock(codexAuth ?? "{}", 8))
+    .replace("        __CODEX_CONFIG_TOML__", indentBlock(codexConfig ?? "", 8))
     .replace("        __CLAUDE_SETTINGS_JSON__", indentBlock(claudeSettings ?? "{}", 8));
   renderedCloudinit = renderedCloudinit
     .replace(

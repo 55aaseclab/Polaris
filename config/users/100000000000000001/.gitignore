@@ -1,1 +1,6 @@
 *
+!claude/
+!claude/settings.json
+!codex/
+!codex/auth.json
+!codex/config.toml

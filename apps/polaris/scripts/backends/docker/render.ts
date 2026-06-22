@@ -7,6 +7,29 @@ function q(value: string): string {
   return JSON.stringify(value);
 }
 
+function sanitizeVolumeToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function volumeKey(name: string): string {
+  return sanitizeVolumeToken(name).replace(/^[.-]+/, "") || "volume";
+}
+
+function resolveDockerVolume(args: {
+  fallbackName: string;
+  source: WorkspaceSpec["attachments"]["workspaceData"]["source"];
+}): { key: string; name: string } {
+  const baseName = args.source.volumeRef?.trim() || args.fallbackName;
+  const suffix = args.source.subPath?.trim()
+    ? `-${args.source.subPath.trim().replace(/[^a-zA-Z0-9_.-]+/g, "-")}`
+    : "";
+  const name = `${baseName}${suffix}`;
+  return {
+    key: volumeKey(name),
+    name,
+  };
+}
+
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
 
 function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceSpec): string | null {
@@ -83,11 +106,23 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
   const serviceName = project;
   const containerName = `${project}-docker`;
-  const workspaceDataVolume = `${project}-workspace-data`;
-  const workspaceRuntimeVolume = `${project}-workspace-runtime-state`;
+  const workspaceDataVolume = resolveDockerVolume({
+    fallbackName: `${project}-workspace-data`,
+    source: workspace.attachments.workspaceData.source,
+  });
+  const workspaceRuntimeVolume = resolveDockerVolume({
+    fallbackName: `${project}-workspace-runtime-state`,
+    source: workspace.attachments.workspaceRuntimeState.source,
+  });
   const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
-  const identityVolume = `polaris-${userScope}-identity`;
-  const sshVolume = `polaris-${userScope}-ssh`;
+  const identityVolume = resolveDockerVolume({
+    fallbackName: `polaris-${userScope}-identity`,
+    source: workspace.attachments.userIdentityState.source,
+  });
+  const sshVolume = resolveDockerVolume({
+    fallbackName: `polaris-${userScope}-ssh`,
+    source: workspace.attachments.userSshState.source,
+  });
   const home = workspace.runtime.home;
   const bootstrapSecretsRoot = workspace.agent.bootstrapSecretsRoot;
   const bootstrapSecretsSource = bootstrapSecretsVolumeSource(workspace);
@@ -175,19 +210,31 @@ ${portLines || '      - "6767:6767"'}
       POLARIS_EVOLUTION_ROOT: ${workspace.agent.runtime.evolutionRoot}
       POLARIS_EVOLUTION_CONTEXT_FILE: ${workspace.evolution?.bootstrapContextFile ?? ""}
     volumes:
-      - ${workspaceDataVolume}:/workspace/project
-      - ${workspaceRuntimeVolume}:/workspace/state
-      - ${identityVolume}:/identity
-      - ${sshVolume}:/ssh
+      - type: volume
+        source: ${workspaceDataVolume.key}
+        target: /workspace/project
+      - type: volume
+        source: ${workspaceRuntimeVolume.key}
+        target: /workspace/state
+      - type: volume
+        source: ${identityVolume.key}
+        target: /identity
+      - type: volume
+        source: ${sshVolume.key}
+        target: /ssh
       - \${POLARIS_SECRETS_DIR:-${bootstrapSecretsSource}}:${bootstrapSecretsRoot}:ro
     tmpfs:
       - /run/workspace
 
 volumes:
-  ${workspaceDataVolume}: {}
-  ${workspaceRuntimeVolume}: {}
-  ${identityVolume}: {}
-  ${sshVolume}: {}
+  ${workspaceDataVolume.key}:
+    name: ${workspaceDataVolume.name}
+  ${workspaceRuntimeVolume.key}:
+    name: ${workspaceRuntimeVolume.name}
+  ${identityVolume.key}:
+    name: ${identityVolume.name}
+  ${sshVolume.key}:
+    name: ${sshVolume.name}
 `;
 }
 
