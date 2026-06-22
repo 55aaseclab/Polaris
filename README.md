@@ -17,13 +17,9 @@ It manages development environments across `pod`, `docker`, and
 
 It keeps the agent layer external and replaceable.
 
-Today that means:
-
-- workspace specs are the source of truth
-- generated backend artifacts remain outputs
-- Docker is the clean default onboarding path
-- agent orchestration is built around `Paseo`
-- coding harnesses such as `Codex` and `Claude` stay external to Polaris
+Today that means you can run one machine or a fleet of them, create an
+isolated workspace from a spec, and use the full capacity of your own hardware
+while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
