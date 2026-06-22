@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-k3s-kata-gvisor.sh
+# setup-k3s-sandbox-runtimes.sh
 # Idempotent setup of k3s with Kata Containers and gVisor on Debian
 
 set -euo pipefail
