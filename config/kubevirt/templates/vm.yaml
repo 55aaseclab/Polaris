@@ -3,6 +3,7 @@ kind: Namespace
 metadata:
   name: __PROJECT__
 ---
+__PERSISTENT_VOLUME_CLAIMS__---
 apiVersion: v1
 kind: Service
 metadata:
@@ -31,19 +32,54 @@ spec:
         vm.kubevirt.io/name: __PROJECT__-vm
     spec:
       domain:
+        resources:
+          requests:
+            memory: __MEMORY_REQUEST__
+        memory:
+          guest: __MEMORY_GUEST__
         devices:
+          interfaces:
+            - name: default
+              masquerade: {}
+              ports:
+                - port: __SERVICE_PORT__
+                  protocol: TCP
+          filesystems:
+            - name: workspace-data
+              virtiofs: {}
+            - name: workspace-runtime-state
+              virtiofs: {}
+            - name: user-identity-state
+              virtiofs: {}
+            - name: user-ssh-state
+              virtiofs: {}
           disks:
-            - name: workspace
+            - name: rootdisk
               disk:
                 bus: virtio
             - name: cloudinitdisk
               disk:
                 bus: virtio
       volumes:
-        - name: workspace
+        - name: rootdisk
+          containerDisk:
+            image: __ROOTDISK_IMAGE__
+        - name: workspace-data
           persistentVolumeClaim:
-            claimName: __WORKSPACE_VOLUME__
+            claimName: __WORKSPACE_DATA_VOLUME__
+        - name: workspace-runtime-state
+          persistentVolumeClaim:
+            claimName: __WORKSPACE_RUNTIME_STATE_VOLUME__
+        - name: user-identity-state
+          persistentVolumeClaim:
+            claimName: __USER_IDENTITY_STATE_VOLUME__
+        - name: user-ssh-state
+          persistentVolumeClaim:
+            claimName: __USER_SSH_STATE_VOLUME__
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:
               name: __PROJECT__-vm-cloudinit
+      networks:
+        - name: default
+          pod: {}

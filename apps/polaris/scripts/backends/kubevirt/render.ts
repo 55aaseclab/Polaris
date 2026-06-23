@@ -23,19 +23,125 @@ function readTemplate(preferredPath: string, fallbackPath: string): string {
   return fs.readFileSync(fallbackPath, "utf8");
 }
 
+function requireAttachmentVolumeRef(
+  workspace: WorkspaceSpec,
+  attachment:
+    | "workspaceData"
+    | "workspaceRuntimeState"
+    | "userIdentityState"
+    | "userSshState",
+): string {
+  const source = workspace.attachments[attachment].source;
+  if (source.kind !== "persistent-volume" || !source.volumeRef?.trim()) {
+    throw new Error(
+      `KubeVirt render requires '${workspace.attachments[attachment].kind}' to use a dedicated persistent-volume source`,
+    );
+  }
+  return source.volumeRef.trim();
+}
+
+function attachmentVolumeSize(
+  workspace: WorkspaceSpec,
+  attachment:
+    | "workspaceData"
+    | "workspaceRuntimeState"
+    | "userIdentityState"
+    | "userSshState",
+): string {
+  const source = workspace.attachments[attachment].source;
+  if (source.volumeSize?.trim()) {
+    return source.volumeSize.trim();
+  }
+  switch (attachment) {
+    case "workspaceData":
+      return workspace.resources.ephemeralStorage;
+    case "workspaceRuntimeState":
+      return "20Gi";
+    case "userIdentityState":
+      return "5Gi";
+    case "userSshState":
+      return "1Gi";
+  }
+}
+
+function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
+  const claims = [
+    {
+      name: requireAttachmentVolumeRef(workspace, "workspaceData"),
+      size: attachmentVolumeSize(workspace, "workspaceData"),
+    },
+    {
+      name: requireAttachmentVolumeRef(workspace, "workspaceRuntimeState"),
+      size: attachmentVolumeSize(workspace, "workspaceRuntimeState"),
+    },
+    {
+      name: requireAttachmentVolumeRef(workspace, "userIdentityState"),
+      size: attachmentVolumeSize(workspace, "userIdentityState"),
+    },
+    {
+      name: requireAttachmentVolumeRef(workspace, "userSshState"),
+      size: attachmentVolumeSize(workspace, "userSshState"),
+    },
+  ];
+  return Array.from(
+    new Map(claims.map((claim) => [claim.name, claim])).values(),
+  )
+    .map((claim) =>
+      [
+        "apiVersion: v1",
+        "kind: PersistentVolumeClaim",
+        "metadata:",
+        `  name: ${claim.name}`,
+        `  namespace: ${workspace.identity.projectName}`,
+        "spec:",
+        "  accessModes:",
+        "  - ReadWriteOnce",
+        "  resources:",
+        "    requests:",
+        `      storage: ${claim.size}`,
+      ].join("\n"),
+    )
+    .join("\n---\n");
+}
+
 function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
-  const workspaceVolume =
-    workspace.attachments.workspaceData.source.volumeRef ??
-    `${workspace.identity.projectName}-project`;
   const servicePort =
     workspace.connectivity.servicePorts[0]?.containerPort ?? "6767";
   const nodePort =
     workspace.connectivity.servicePorts[0]?.nodePort ?? servicePort;
+  const rootdiskImage =
+    workspace.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
+  const memoryGuest =
+    workspace.resources.memory || "4Gi";
+  const memoryRequest =
+    workspace.resources.memoryRequest || memoryGuest;
   return text
+    .replaceAll(
+      "__PERSISTENT_VOLUME_CLAIMS__",
+      `${buildPersistentVolumeClaimDocs(workspace)}\n`,
+    )
     .replaceAll("__PROJECT__", workspace.identity.projectName)
-    .replaceAll("__WORKSPACE_VOLUME__", workspaceVolume)
+    .replaceAll(
+      "__WORKSPACE_DATA_VOLUME__",
+      requireAttachmentVolumeRef(workspace, "workspaceData"),
+    )
+    .replaceAll(
+      "__WORKSPACE_RUNTIME_STATE_VOLUME__",
+      requireAttachmentVolumeRef(workspace, "workspaceRuntimeState"),
+    )
+    .replaceAll(
+      "__USER_IDENTITY_STATE_VOLUME__",
+      requireAttachmentVolumeRef(workspace, "userIdentityState"),
+    )
+    .replaceAll(
+      "__USER_SSH_STATE_VOLUME__",
+      requireAttachmentVolumeRef(workspace, "userSshState"),
+    )
     .replaceAll("__SERVICE_PORT__", servicePort)
-    .replaceAll("__NODE_PORT__", nodePort);
+    .replaceAll("__NODE_PORT__", nodePort)
+    .replaceAll("__ROOTDISK_IMAGE__", rootdiskImage)
+    .replaceAll("__MEMORY_GUEST__", memoryGuest)
+    .replaceAll("__MEMORY_REQUEST__", memoryRequest);
 }
 
 export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
@@ -70,25 +176,13 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     throw new Error("KubeVirt render requires codex-auth.json, codex-config.toml, and claude-settings.json");
   }
   let renderedCloudinit = cloudinitTemplate
-    .replace("        __CODEX_AUTH_JSON__", indentBlock(codexAuth ?? "{}", 8))
-    .replace("        __CODEX_CONFIG_TOML__", indentBlock(codexConfig ?? "", 8))
-    .replace("        __CLAUDE_SETTINGS_JSON__", indentBlock(claudeSettings ?? "{}", 8));
-  renderedCloudinit = renderedCloudinit
-    .replace(
-      "mkdir -p /workspace/.cache /workspace/.codex /workspace/.claude /workspace/.paseo /workspace/.ssh /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/polaris /workspace/.tmp",
-      "mkdir -p /workspace/project /workspace/state/paseo /workspace/state/paseo/evolution /identity/codex /identity/claude /ssh /workspace/.cache /workspace/.cargo /workspace/.rustup /workspace/.npm /workspace/.local/polaris /run/workspace/tmp",
-    )
-    .replace(
-      `/bin/sh -lc 'for p in .cache .codex .claude .paseo .ssh .cargo .rustup .npm .tmp; do rm -rf "/root/$p"; ln -s "/workspace/$p" "/root/$p"; done'`,
-      `/bin/sh -lc 'rm -rf /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'`,
-    )
-    .replace("chmod 700 /workspace/.ssh", "chmod 700 /ssh")
-    .replace("chmod 1777 /workspace/.tmp", "chmod 1777 /run/workspace/tmp")
-    .replace("rm -f /workspace/.paseo/paseo.pid", "rm -f /workspace/state/paseo/paseo.pid")
-    .replace("cat >/workspace/.codex/auth.json", "cat >/identity/codex/auth.json")
-    .replace("cat >/workspace/.codex/config.toml", "cat >/identity/codex/config.toml")
-    .replace("cat >/workspace/.claude/settings.json", "cat >/identity/claude/settings.json")
-    .replace(/ssh-keygen -q -t ed25519 -C [^\n]+/g, `ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f /ssh/id_ed25519`);
+    .replace("__CODEX_AUTH_JSON_B64__", Buffer.from(codexAuth ?? "{}", "utf8").toString("base64"))
+    .replace("__CODEX_CONFIG_TOML_B64__", Buffer.from(codexConfig ?? "", "utf8").toString("base64"))
+    .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from(claudeSettings ?? "{}", "utf8").toString("base64"));
+  renderedCloudinit = renderedCloudinit.replace(
+    `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C fixture@polaris -N "" -f /ssh/id_ed25519; fi'`,
+    `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
+  );
   if (workspace.evolution?.bootstrapContextFile && workspace.evolution.bootstrapContextContent) {
     renderedCloudinit = renderedCloudinit.replace(
       "      - chmod 1777 /run/workspace/tmp",
@@ -97,14 +191,8 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   }
   if (sshPrivateKey) {
     renderedCloudinit = renderedCloudinit.replace(
-      `      - /bin/sh -lc 'if [ ! -f /root/.ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
+      `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
       `      - |\n        cat >/ssh/id_ed25519 <<'EOF'\n${indentBlock(sshPrivateKey, 8)}\n        EOF\n      - chmod 400 /ssh/id_ed25519${sshPublicKey ? `\n      - |\n        cat >/ssh/id_ed25519.pub <<'EOF'\n${indentBlock(sshPublicKey, 8)}\n        EOF\n      - chmod 644 /ssh/id_ed25519.pub` : ""}`,
-    );
-  }
-  if (workspace.userProfile.ssh.mode === "provided-key") {
-    renderedCloudinit = renderedCloudinit.replace(
-      /if \[ ! -f \/root\/\.ssh\/id_ed25519 \]; then ssh-keygen[^\n]+\n/g,
-      "test -f /ssh/id_ed25519\n",
     );
   }
   return `${renderedCloudinit.trimEnd()}\n---\n${vmTemplate.trimEnd()}\n`;

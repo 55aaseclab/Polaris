@@ -32,25 +32,6 @@ function resolveDockerVolume(args: {
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
 
-function secretMountSource(sourcePath: string | undefined, workspace: WorkspaceSpec): string | null {
-  if (!sourcePath) {
-    return null;
-  }
-  const relativeSource = sourcePath.startsWith(workspace.userProfile.secretsRoot)
-    ? sourcePath.slice(workspace.userProfile.secretsRoot.length).replace(/^\/+/, "")
-    : null;
-  if (relativeSource) {
-    return `${workspace.agent.bootstrapSecretsRoot}/${relativeSource}`;
-  }
-  const usersMarker = "/config/users/";
-  const markerIndex = sourcePath.indexOf(usersMarker);
-  if (markerIndex === -1) {
-    return null;
-  }
-  const tail = sourcePath.slice(markerIndex + usersMarker.length).split("/").slice(1).join("/");
-  return tail ? `${workspace.agent.bootstrapSecretsRoot}/${tail}` : null;
-}
-
 function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
   const filePath = workspace.evolution?.bootstrapContextFile;
   const content = workspace.evolution?.bootstrapContextContent;
@@ -77,15 +58,6 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
     `chmod 755 ${runtimePath}`,
     `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} POLARIS_TOOL_ROOT=${q(toolRoot)} POLARIS_PASEO_DAEMON_URL=${q("ws://127.0.0.1:6767/ws")} PASEO_HOME=${workspace.runtime.home}/.paseo node ${runtimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-observer.log 2>&1 &`,
   ];
-}
-
-function bootstrapSecretsVolumeSource(workspace: WorkspaceSpec): string {
-  const sourceRoot = workspace.userProfile.secretsRoot.replace(/^\.?\//, "");
-  const relative = path.posix.relative("config/generated/docker", sourceRoot);
-  if (!relative || relative === ".") {
-    return ".";
-  }
-  return relative.startsWith(".") ? relative : `./${relative}`;
 }
 
 function buildAgentCliInstallLines(home: string): string[] {
@@ -124,26 +96,38 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     source: workspace.attachments.userSshState.source,
   });
   const home = workspace.runtime.home;
-  const bootstrapSecretsRoot = workspace.agent.bootstrapSecretsRoot;
-  const bootstrapSecretsSource = bootstrapSecretsVolumeSource(workspace);
-  const authBootstrapLines = workspace.runtime.authFiles
-    .map((file) => {
-      const source = secretMountSource(file.sourcePath, workspace);
-      if (!source) {
-        return null;
-      }
-      if (file.mountPath.includes("/.codex/")) {
-        return `if [ -f ${source} ]; then install -m 600 ${source} /identity/codex/${file.mountPath.split("/").pop()}; fi`;
-      }
-      if (file.mountPath.includes("/.claude/")) {
-        return `if [ -f ${source} ]; then install -m 600 ${source} /identity/claude/${file.mountPath.split("/").pop()}; fi`;
-      }
-      if (file.mountPath.includes("/.ssh/")) {
-        return `if [ -f ${source} ]; then install -m 600 ${source} /ssh/${file.mountPath.split("/").pop()}; fi`;
-      }
-      return null;
-    })
-    .filter((line): line is string => Boolean(line));
+  const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
+    const content = file.content ?? "";
+    const encoded = Buffer.from(content, "utf8").toString("base64");
+    if (file.mountPath.includes("/.codex/")) {
+      const name = file.mountPath.split("/").pop();
+      return name
+        ? [
+            `if [ ! -f /identity/codex/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/codex/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            `chmod 600 /identity/codex/${name}`,
+          ]
+        : [];
+    }
+    if (file.mountPath.includes("/.claude/")) {
+      const name = file.mountPath.split("/").pop();
+      return name
+        ? [
+            `if [ ! -f /identity/claude/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/claude/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            `chmod 600 /identity/claude/${name}`,
+          ]
+        : [];
+    }
+    if (file.mountPath.includes("/.ssh/")) {
+      const name = file.mountPath.split("/").pop();
+      return name
+        ? [
+            `if [ ! -f /ssh/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/ssh/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            `chmod 600 /ssh/${name} || true`,
+          ]
+        : [];
+    }
+    return [];
+  });
   const bootstrap = [
     "set -eux",
     `mkdir -p ${home}`,
@@ -158,7 +142,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
           ...buildAgentCliInstallLines(home),
         ]),
     `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets`,
-    `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
+    `rm -f ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
     `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
@@ -222,7 +206,6 @@ ${portLines || '      - "6767:6767"'}
       - type: volume
         source: ${sshVolume.key}
         target: /ssh
-      - \${POLARIS_SECRETS_DIR:-${bootstrapSecretsSource}}:${bootstrapSecretsRoot}:ro
     tmpfs:
       - /run/workspace
 

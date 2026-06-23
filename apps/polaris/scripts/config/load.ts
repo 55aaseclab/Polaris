@@ -254,6 +254,7 @@ function normalizeDirectDurableAttachmentConfig(raw: unknown): DirectDurableAtta
     source: {
       kind: String((entry.source as Record<string, unknown> | undefined)?.kind ?? "generated-material") as DirectDurableAttachmentConfig["source"]["kind"],
       volumeRef: (entry.source as Record<string, unknown> | undefined)?.volume_ref ? String((entry.source as Record<string, unknown>).volume_ref) : undefined,
+      volumeSize: (entry.source as Record<string, unknown> | undefined)?.volume_size ? String((entry.source as Record<string, unknown>).volume_size) : undefined,
       subPath: (entry.source as Record<string, unknown> | undefined)?.sub_path ? String((entry.source as Record<string, unknown>).sub_path) : undefined,
       description: (entry.source as Record<string, unknown> | undefined)?.description ? String((entry.source as Record<string, unknown>).description) : undefined,
     },
@@ -459,7 +460,6 @@ function buildAgentContract(home: string, agentKind: string): WorkspaceAgentCont
       supportsPairing: enabled,
     },
     harnesses: enabled ? ["codex", "claude"] : [],
-    bootstrapSecretsRoot: "/bootstrap-secrets",
     runtime: {
       stateRoot,
       evolutionRoot,
@@ -591,6 +591,7 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     },
     runtime: {
       baseImage: String(runtime.base_image ?? profile.defaults.runtime?.baseImage ?? "debian:trixie-slim"),
+      rootdiskImage: runtime.rootdisk_image ? String(runtime.rootdisk_image) : undefined,
       user: mergedRuntimeUser,
       home,
       privileged: Boolean(runtime.privileged ?? false),

@@ -89,12 +89,18 @@ async function captureStdout(fn: () => Promise<void> | void): Promise<string> {
 
 function parseJsonOutput<T>(stdout: string): T {
   const trimmed = stdout.trim();
-  const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) {
+  if (end === -1) {
     throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
   }
-  return JSON.parse(trimmed.slice(start, end + 1)) as T;
+  for (let start = trimmed.lastIndexOf("{", end); start !== -1; start = trimmed.lastIndexOf("{", start - 1)) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1)) as T;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
 }
 
 function uniqueProjectName(prefix: string): string {
@@ -533,7 +539,7 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
   const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
   assert.match(rendered, new RegExp(`polaris-${escapedId}-ssh`));
-  assert.match(rendered, new RegExp(`\\$\\{POLARIS_SECRETS_DIR:-\\.\\.\\/\\.\\.\\/users\\/${escapedId}\\}:\\/bootstrap-secrets:ro`));
+  assert.doesNotMatch(rendered, /bootstrap-secrets/);
 });
 
 test("demo specs reuse the demo profile across docker, pod, and kubevirt backends", () => {
@@ -853,6 +859,15 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
   printf '${project}-vm-cloudinit'
   exit 0
 fi
+if [[ "$*" == *"port-forward svc/${project} "* ]]; then
+  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
+  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
+  server_pid=$!
+  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
+  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
+  wait $server_pid
+  exit 0
+fi
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
@@ -949,11 +964,20 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
   printf '${project}-vm-cloudinit'
   exit 0
 fi
-if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${project}-vm"* ]]; then
+if [[ "$*" == *"port-forward svc/${project} "* ]]; then
+  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
+  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
+  server_pid=$!
+  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
+  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
+  wait $server_pid
+  exit 0
+fi
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${project}-vm"* ]]; then
   printf 'virt-launcher-0'
   exit 0
 fi
-if [[ "$*" == *"logs virt-launcher-0 --tail=200"* ]]; then
+if [[ "$1" == "-n" && "$3" == "logs" && "$4" == "virt-launcher-0" && "$5" == "--tail=200" ]]; then
   printf 'kubevirt logs'
   exit 0
 fi

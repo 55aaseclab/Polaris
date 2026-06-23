@@ -73,7 +73,6 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.attachments.ephemeralRuntime.staleArtifacts.length === 0) {
     throw new Error("ephemeral-runtime must define stale artifact cleanup targets");
   }
-
   for (const authFile of workspace.runtime.authFiles) {
     if (!authFile.content && !authFile.sourcePath) {
       throw new Error(`Auth file '${authFile.key}' must define inline content or a source path`);

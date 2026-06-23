@@ -45,7 +45,7 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
   return [
     `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets && \\`,
     `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
-    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh && \\`,
+    `          rm -f ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
     `          ln -sfn ${paseoRoot} ${home}/.paseo && \\`,
@@ -81,7 +81,7 @@ function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: Work
     const target = authFileStorageTarget(item, workspace);
     const parent = target.replace(/\/[^/]+$/, "");
     return [
-      `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && chown ${user}:${user} ${parent} ${target} && chmod 600 ${target} && \\`,
+      `          if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi && chown ${user}:${user} ${parent} ${target} && chmod 600 ${target} && \\`,
     ];
   });
 }
