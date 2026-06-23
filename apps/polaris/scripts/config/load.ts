@@ -32,7 +32,7 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
     workspaceAlias: "Morpheus",
     defaults: {
       runtime: {
-        baseImage: "ttl.sh/morpheus-prebuilt-1781875178:24h",
+        baseImage: "ttl.sh/polaris-demo-debian13-1782126452:24h",
         bootstrapProfile: "prebuilt",
         user: "root",
       },
