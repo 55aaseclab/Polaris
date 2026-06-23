@@ -21,6 +21,26 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.userProfile.email) {
     throw new Error("Workspace user profile email is required");
   }
+  for (const binding of workspace.credentialBindings) {
+    const resolvedBinding = workspace.resolvedCredentialBindings.find((entry) => {
+      return entry.purpose === binding.purpose && entry.credentialId === binding.credentialId;
+    });
+    if (!resolvedBinding && binding.required) {
+      throw new Error(`Required credential binding '${binding.purpose}' could not be resolved`);
+    }
+  }
+  for (const binding of workspace.resolvedCredentialBindings) {
+    if (binding.credential.userId !== workspace.userProfile.id) {
+      throw new Error(
+        `Credential '${binding.credential.id}' must belong to workspace user '${workspace.userProfile.id}'`,
+      );
+    }
+    if (binding.authFiles.length === 0 && binding.required) {
+      throw new Error(
+        `Credential '${binding.credential.id}' must resolve at least one auth file`,
+      );
+    }
+  }
 
   if (!workspace.attachments.workspaceData.mountRoot) {
     throw new Error("workspace-data must declare a mount root");

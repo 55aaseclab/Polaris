@@ -169,6 +169,10 @@ test("loadWorkspace normalizes demo pod config through the TypeScript control pl
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
   assert.ok(!workspace.userProfile.github.account || workspace.userProfile.github.account.length > 0);
+  assert.equal(workspace.credentialBindings.length, 1);
+  assert.equal(workspace.credentialBindings[0]?.purpose, "agent-auth");
+  assert.equal(workspace.resolvedCredentialBindings[0]?.source, "registry");
+  assert.equal(workspace.resolvedCredentialBindings[0]?.attachmentKind, "user-identity-state");
 });
 
 test("backend registry resolves pod driver", () => {
@@ -351,6 +355,7 @@ test("status exposes ssh self-check for github account on managed-key profiles",
       const outputPath = workspaceConfigPath(project, "docker");
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "ssh-status-test";
+      delete doc.credentials;
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
       await withFakeCommands(
@@ -451,6 +456,7 @@ test("workspace compatibility path derives a legacy user profile from inline git
     const outputPath = workspaceConfigPath(project, "docker");
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     delete doc.user_profile;
+    delete doc.credentials;
     doc.auth = {
       files: [
         {
@@ -481,6 +487,225 @@ test("workspace compatibility path derives a legacy user profile from inline git
     assert.equal(workspace.userProfile.id, "legacy-legacy-example.com");
     assert.equal(workspace.userProfile.name, "Legacy User");
     assert.equal(workspace.userProfile.email, "legacy@example.com");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.source, "compatibility");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.purpose, "agent-auth");
+  });
+});
+
+test("registry-backed credentials override legacy auth for the same purpose", async () => {
+  const project = uniqueProjectName("credential-binding");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", profileId);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
+    fs.mkdirSync(path.join(secretsRoot, "claude"), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(path.join(secretsRoot, "codex", "auth.json"), "{\"source\":\"registry\"}\n", "utf8");
+    fs.writeFileSync(path.join(secretsRoot, "codex", "config.toml"), "model = 'gpt-5'\n", "utf8");
+    fs.writeFileSync(path.join(secretsRoot, "claude", "settings.json"), "{\"provider\":\"registry\"}\n", "utf8");
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Credential User",
+        email: "credential@example.com",
+        auth: {
+          files: [
+            {
+              key: "codex-auth.json",
+              mount_path: "/root/.codex/auth.json",
+              content: "{\"source\":\"legacy\"}\n",
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profileId,
+        kind: "codex-auth",
+        label: "Registry Codex auth",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+            },
+            {
+              key: "codex-config.toml",
+              source_path: "codex/config.toml",
+            },
+            {
+              key: "claude-settings.json",
+              source_path: "claude/settings.json",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspace(`${project}@docker`);
+    const codexAuth = workspace.runtime.authFiles.find((file) => file.key === "codex-auth.json");
+    assert.equal(codexAuth?.content, "{\"source\":\"registry\"}\n");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.credential.id, "codex-default");
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  });
+});
+
+test("credential registry rejects cross-user ownership mismatches", async () => {
+  const project = uniqueProjectName("credential-owner");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Owner User",
+        email: "owner@example.com",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: "someone-else",
+        kind: "codex-auth",
+        label: "Wrong owner",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    assert.throws(
+      () => loadWorkspace(`${project}@docker`),
+      /must be owned by user/,
+    );
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  });
+});
+
+test("credential registry rejects inline secret material", async () => {
+  const project = uniqueProjectName("credential-inline-secret");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Secret User",
+        email: "secret@example.com",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profileId,
+        kind: "codex-auth",
+        label: "Inline secret",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+              content: "{\"token\":\"inline\"}",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    assert.throws(
+      () => loadWorkspace(`${project}@docker`),
+      /must externalize secret material/,
+    );
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
   });
 });
 
@@ -505,6 +730,7 @@ test("provided-key user profile requires staged SSH private-key material", async
       const outputPath = workspaceConfigPath(project, "docker");
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "provided-key-test";
+      delete doc.credentials;
       doc.auth = {
         files: [
           {
@@ -562,8 +788,8 @@ test("demo specs reuse the demo profile across docker, pod, and kubevirt backend
     "demo-project",
   );
   assert.equal(
-    kubevirtWorkspace.attachments.workspaceRuntimeState.source.subPath,
-    "state",
+    kubevirtWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
+    "demo-workspace-runtime-state",
   );
 });
 
@@ -639,6 +865,7 @@ exit 0
 });
 
 test("runtime controller computes degraded status and reconcile plan from observations when daemon is missing", async () => {
+  cleanupSelectionFile("demo");
   const workspace = {
     ...loadWorkspace("demo"),
     agent: {
@@ -686,9 +913,11 @@ exit 0
       assert.deepEqual(plan.actions, [{ kind: "restart-runtime" }]);
     },
   );
+  cleanupSelectionFile("demo");
 });
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {
+  cleanupSelectionFile("demo");
   cleanupStatusFile("demo");
   const expectedStatusFile = path.join(STATUS_DIR, "demo.status.json");
 
@@ -741,9 +970,11 @@ exit 0
   );
 
   cleanupStatusFile("demo");
+  cleanupSelectionFile("demo");
 });
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
+  cleanupSelectionFile("demo");
   await withFakeCommands(
     {
       kubectl: `
@@ -786,6 +1017,7 @@ exit 0
       assert.ok(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")));
     },
   );
+  cleanupSelectionFile("demo");
 });
 
 test("CLI docker lifecycle commands dispatch through compose and status artifacts", async () => {
@@ -1009,14 +1241,7 @@ exit 0
 });
 
 test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
-  const workspace = {
-    ...loadWorkspace("demo"),
-    backend: {
-      ...loadWorkspace("demo").backend,
-      kind: "kubevirt-vm" as const,
-      profile: "vm",
-    },
-  };
+  const workspace = loadWorkspace("demo@kubevirt-vm");
   const driver = getBackendDriver("kubevirt-vm");
 
   await withFakeCommands(

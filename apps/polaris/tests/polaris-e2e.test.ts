@@ -153,6 +153,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
   const userProfileId = `local-${project}-polaris.local`;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", "credentials", userProfileId);
 
   try {
     await withEnv(
@@ -173,6 +174,10 @@ test("create scaffolds a docker-first saved spec when the project is new", async
             profilePath: string;
             secretsRoot: string;
           };
+          credentials: {
+            registryRoot: string;
+            defaults: string[];
+          };
         }>(output);
 
         assert.equal(fs.existsSync(configPath), true);
@@ -180,20 +185,27 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.match(rendered, /backend:\n  kind: docker/);
         assert.match(rendered, /profile: morpheus/);
         assert.match(rendered, new RegExp(`user_profile: '?${userProfileId}'?`));
+        assert.match(rendered, /credentials:\n  bindings:/);
+        assert.match(rendered, /credentialId: codex-default/);
         assert.equal(parsed.created, "saved-spec");
         assert.equal(parsed.project, project);
         assert.equal(parsed.userProfile.id, userProfileId);
         assert.equal(parsed.userProfile.created, true);
         assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
         assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
+        assert.equal(parsed.credentials.registryRoot, `config/users/credentials/${userProfileId}`);
+        assert.deepEqual(parsed.credentials.defaults, ["codex-default", "github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
         assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
+        assert.equal(fs.existsSync(path.join(credentialRoot, "codex-default.yaml")), true);
+        assert.equal(fs.existsSync(path.join(credentialRoot, "github-ssh.yaml")), true);
       },
     );
   } finally {
     removeIfExists(configPath);
     removeIfExists(profilePath);
     removeIfExists(secretsRoot);
+    removeIfExists(credentialRoot);
   }
 });
 
@@ -260,24 +272,38 @@ exit 0
 test("switch stops the previous backend, starts the new backend, and updates defaults", async () => {
   const project = "demo";
   const driverSelectionPath = selectionPath(project);
+  const dockerStateFile = `/tmp/polaris-switch-basic-docker-state-${process.pid}-${Date.now()}`;
+  const podStateFile = `/tmp/polaris-switch-basic-pod-state-${process.pid}-${Date.now()}`;
   removeIfExists(driverSelectionPath);
 
   try {
     await withFakePath(
       {
         docker: `#!/usr/bin/env bash
+state_file=${JSON.stringify(dockerStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
 if [[ "$*" == *" stop"* ]]; then
+  printf 'stopped\n' > "$state_file"
   exit 0
 fi
 if [[ "$*" == *" up -d"* ]]; then
+  printf 'running\n' > "$state_file"
   exit 0
 fi
 if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
-  printf 'docker-id'
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'docker-id'
+  fi
   exit 0
 fi
 if [[ "$*" == *"inspect docker-id"* ]]; then
-  printf '[{"State":{"Running":true}}]'
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '[{"State":{"Running":true}}]'
+  else
+    printf '[{"State":{"Running":false}}]'
+  fi
   exit 0
 fi
 if [[ "$1" == "exec" ]]; then
@@ -286,18 +312,30 @@ fi
 exit 0
 `,
         kubectl: `#!/usr/bin/env bash
+state_file=${JSON.stringify(podStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
 if [[ "$*" == *"apply -f "* ]]; then
+  printf 'running\n' > "$state_file"
   exit 0
 fi
 if [[ "$*" == *"rollout restart"* ]]; then
+  printf 'running\n' > "$state_file"
   exit 0
 fi
 if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
-  exit 0
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '{"metadata":{"name":"demo"}}'
+    exit 0
+  fi
+  exit 1
 fi
 if [[ "$*" == *"get pod -l app=demo"* ]]; then
-  printf 'pod-1'
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'pod-1'
+    exit 0
+  fi
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
@@ -305,6 +343,10 @@ if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
 fi
 if [[ "$*" == *"get svc demo"* ]]; then
   printf 'demo'
+  exit 0
+fi
+if [[ "$*" == *"scale deployment demo --replicas=0"* ]]; then
+  printf 'stopped\n' > "$state_file"
   exit 0
 fi
 exit 0
@@ -338,6 +380,8 @@ exit 0
     );
   } finally {
     removeIfExists(driverSelectionPath);
+    removeIfExists(dockerStateFile);
+    removeIfExists(podStateFile);
   }
 });
 
@@ -545,6 +589,7 @@ if [[ "$*" == *"get svc demo"* ]]; then
 fi
 if [[ "$*" == *"scale deployment demo --replicas=0"* ]]; then
   POD_RUNNING=0
+  POD_EXISTS=0
   save_state
   sleep 0.1
   exit 0

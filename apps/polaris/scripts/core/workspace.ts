@@ -65,6 +65,56 @@ export interface UserProfile {
   authFiles: AuthFile[];
 }
 
+export type CredentialKind =
+  | "ssh-key"
+  | "api-key"
+  | "codex-auth"
+  | "git-https-token"
+  | "kubeconfig"
+  | "cloud-token";
+
+export interface CredentialMaterialFile {
+  key: string;
+  sourcePath: string;
+  mountPath: string;
+  content?: string;
+}
+
+export interface CredentialMaterialRef {
+  type: "file";
+  key: string;
+  files: CredentialMaterialFile[];
+}
+
+export interface CredentialMetadata {
+  [key: string]: boolean | number | string | string[] | null | undefined;
+}
+
+export interface Credential {
+  id: string;
+  userId: string;
+  kind: CredentialKind;
+  label: string;
+  purposes: string[];
+  materialRef: CredentialMaterialRef;
+  metadata: CredentialMetadata;
+  status: string;
+}
+
+export interface WorkspaceCredentialBinding {
+  purpose: string;
+  credentialId: string;
+  required: boolean;
+}
+
+export interface ResolvedWorkspaceCredentialBinding
+  extends WorkspaceCredentialBinding {
+  source: "registry" | "compatibility";
+  credential: Credential;
+  attachmentKind: "user-identity-state" | "user-ssh-state";
+  authFiles: AuthFile[];
+}
+
 export interface WorkspaceBackend {
   kind: BackendKind;
   profile: string;
@@ -214,6 +264,9 @@ export interface WorkspaceSpec {
   identity: WorkspaceIdentity;
   profile: WorkspaceProfile;
   userProfile: UserProfile;
+  credentials: Credential[];
+  credentialBindings: WorkspaceCredentialBinding[];
+  resolvedCredentialBindings: ResolvedWorkspaceCredentialBinding[];
   backend: WorkspaceBackend;
   storage: WorkspaceStorage;
   attachments: WorkspaceAttachments;

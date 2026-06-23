@@ -14,6 +14,10 @@ import type {
   WorkspaceProfile,
   WorkspaceAgentContract,
   UserProfile,
+  Credential,
+  CredentialKind,
+  WorkspaceCredentialBinding,
+  ResolvedWorkspaceCredentialBinding,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
@@ -39,8 +43,17 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
 };
 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
+const USER_CREDENTIALS_DIR = path.join(REPO_ROOT, "config", "users", "credentials");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 const POD_PROFILE_SPECS_DIR = path.join(REPO_ROOT, "config", "specs", "pod", "profiles");
+const SUPPORTED_CREDENTIAL_KINDS = new Set<CredentialKind>([
+  "ssh-key",
+  "api-key",
+  "codex-auth",
+  "git-https-token",
+  "kubeconfig",
+  "cloud-token",
+]);
 
 export function parseWorkspaceReference(projectRef: string): {
   project: string;
@@ -123,6 +136,10 @@ function userProfilePath(userProfileId: string): string {
   return path.join(USER_PROFILES_DIR, `${userProfileId}.yaml`);
 }
 
+function userCredentialRegistryDir(userProfileId: string): string {
+  return path.join(USER_CREDENTIALS_DIR, userProfileId);
+}
+
 function sanitizeUserProfileId(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
@@ -163,6 +180,304 @@ function mergeAuthFiles(primary: AuthFile[], secondary: AuthFile[]): AuthFile[] 
     merged.set(file.key, file);
   }
   return Array.from(merged.values());
+}
+
+function normalizeCredentialMetadata(
+  rawMetadata: unknown,
+): Credential["metadata"] {
+  if (!rawMetadata || typeof rawMetadata !== "object") {
+    return {};
+  }
+  const metadata: Credential["metadata"] = {};
+  for (const [key, value] of Object.entries(rawMetadata as Record<string, unknown>)) {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      metadata[key] = value;
+      continue;
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === "string")
+    ) {
+      metadata[key] = value.map((item) => String(item));
+    }
+  }
+  return metadata;
+}
+
+function credentialKindAttachmentKind(
+  kind: CredentialKind,
+): ResolvedWorkspaceCredentialBinding["attachmentKind"] {
+  return kind === "ssh-key" ? "user-ssh-state" : "user-identity-state";
+}
+
+function mountPathForCredentialFile(
+  kind: CredentialKind,
+  runtimeHome: string,
+  key: string,
+): string {
+  if (kind === "ssh-key") {
+    return `${runtimeHome}/.ssh/${path.posix.basename(key)}`;
+  }
+  if (key === "codex-auth.json") {
+    return `${runtimeHome}/.codex/auth.json`;
+  }
+  if (key === "codex-config.toml") {
+    return `${runtimeHome}/.codex/config.toml`;
+  }
+  if (key === "claude-settings.json") {
+    return `${runtimeHome}/.claude/settings.json`;
+  }
+  return `${runtimeHome}/.config/credentials/${path.posix.basename(key)}`;
+}
+
+function normalizeCredentialMaterialFiles(args: {
+  rawFiles: unknown;
+  runtimeHome: string;
+  baseDir: string;
+  kind: CredentialKind;
+  credentialId: string;
+}): Credential["materialRef"]["files"] {
+  const files = Array.isArray(args.rawFiles) ? args.rawFiles : [];
+  return files
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
+    .map((entry) => {
+      const key = String(entry.key ?? "");
+      const rawSourcePath = String(entry.source_path ?? "");
+      if (!key || !rawSourcePath) {
+        throw new Error(
+          `Credential '${args.credentialId}' must declare file key and source_path`,
+        );
+      }
+      if (entry.content !== undefined && entry.content !== null) {
+        throw new Error(
+          `Credential '${args.credentialId}' must externalize secret material through materialRef.files.source_path`,
+        );
+      }
+      return {
+        key,
+        sourcePath: resolveAuthSourcePath(rawSourcePath, args.baseDir),
+        mountPath: entry.mount_path
+          ? String(entry.mount_path)
+          : mountPathForCredentialFile(args.kind, args.runtimeHome, key),
+        content: undefined,
+      };
+    });
+}
+
+function normalizeCredentialMaterialRef(args: {
+  rawMaterialRef: unknown;
+  runtimeHome: string;
+  baseDir: string;
+  kind: CredentialKind;
+  credentialId: string;
+}): Credential["materialRef"] {
+  if (!args.rawMaterialRef || typeof args.rawMaterialRef !== "object") {
+    throw new Error(`Credential '${args.credentialId}' must declare materialRef`);
+  }
+  const rawMaterialRef = args.rawMaterialRef as Record<string, unknown>;
+  const type = String(rawMaterialRef.type ?? "");
+  if (type !== "file") {
+    throw new Error(
+      `Credential '${args.credentialId}' materialRef.type must be 'file'`,
+    );
+  }
+  const key = String(rawMaterialRef.key ?? "").trim();
+  if (!key) {
+    throw new Error(`Credential '${args.credentialId}' must declare materialRef.key`);
+  }
+  const files = normalizeCredentialMaterialFiles({
+    rawFiles: rawMaterialRef.files,
+    runtimeHome: args.runtimeHome,
+    baseDir: args.baseDir,
+    kind: args.kind,
+    credentialId: args.credentialId,
+  });
+  if (files.length === 0) {
+    throw new Error(
+      `Credential '${args.credentialId}' must declare at least one materialRef.files entry`,
+    );
+  }
+  return {
+    type: "file",
+    key,
+    files,
+  };
+}
+
+function loadUserCredentials(
+  userProfileId: string,
+  runtimeHome: string,
+): Credential[] {
+  const registryDir = userCredentialRegistryDir(userProfileId);
+  if (!fs.existsSync(registryDir)) {
+    return [];
+  }
+  return fs
+    .readdirSync(registryDir)
+    .filter((entry) => entry.endsWith(".yaml") || entry.endsWith(".yml"))
+    .sort()
+    .map((entry) => {
+      const credentialPath = path.join(registryDir, entry);
+      const data = (yaml.load(fs.readFileSync(credentialPath, "utf8")) ?? {}) as Record<string, unknown>;
+      const id = String(data.id ?? "").trim();
+      const userId = String(data.userId ?? data.user_id ?? "").trim();
+      const kind = String(data.kind ?? "").trim() as CredentialKind;
+      const label = String(data.label ?? "").trim();
+      const purposes = Array.isArray(data.purposes)
+        ? data.purposes.map((item) => String(item)).filter(Boolean)
+        : [];
+      const status = String(data.status ?? "").trim();
+      if (!id || !userId || !kind || !label || !status || purposes.length === 0) {
+        throw new Error(
+          `Credential registry entry '${path.relative(REPO_ROOT, credentialPath)}' is missing required fields`,
+        );
+      }
+      if (userId !== userProfileId) {
+        throw new Error(
+          `Credential '${id}' must be owned by user '${userProfileId}', got '${userId}'`,
+        );
+      }
+      if (!SUPPORTED_CREDENTIAL_KINDS.has(kind)) {
+        throw new Error(`Credential '${id}' uses unsupported kind '${kind}'`);
+      }
+      const materialRef = normalizeCredentialMaterialRef({
+        rawMaterialRef: data.materialRef ?? data.material_ref,
+        runtimeHome,
+        baseDir: path.join(USER_SECRETS_ROOT, userProfileId),
+        kind,
+        credentialId: id,
+      });
+      return {
+        id,
+        userId,
+        kind,
+        label,
+        purposes,
+        materialRef,
+        metadata: normalizeCredentialMetadata(data.metadata),
+        status,
+      };
+    });
+}
+
+function credentialFilesToAuthFiles(
+  credential: Credential,
+): AuthFile[] {
+  return credential.materialRef.files.map((file) => ({
+    key: file.key,
+    mountPath: file.mountPath,
+    sourcePath: file.sourcePath,
+    content: file.content ?? (fs.existsSync(file.sourcePath)
+      ? fs.readFileSync(file.sourcePath, "utf8")
+      : undefined),
+  }));
+}
+
+function normalizeCredentialBindings(
+  rawBindings: unknown,
+): WorkspaceCredentialBinding[] {
+  if (!Array.isArray(rawBindings)) {
+    return [];
+  }
+  return rawBindings
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
+    .map((entry) => ({
+      purpose: String(entry.purpose ?? "").trim(),
+      credentialId: String(entry.credentialId ?? entry.credential_id ?? "").trim(),
+      required: entry.required === undefined ? true : Boolean(entry.required),
+    }))
+    .filter((entry) => entry.purpose && entry.credentialId);
+}
+
+function buildCompatibilityCredentials(
+  userProfile: UserProfile,
+): Credential[] {
+  if (userProfile.authFiles.length === 0) {
+    return [];
+  }
+  const byKind = new Map<CredentialKind, AuthFile[]>();
+  for (const authFile of userProfile.authFiles) {
+    const kind = authFile.mountPath.includes("/.ssh/")
+      ? "ssh-key"
+      : "codex-auth";
+    const files = byKind.get(kind) ?? [];
+    files.push(authFile);
+    byKind.set(kind, files);
+  }
+  const credentials: Credential[] = [];
+  for (const [kind, files] of byKind.entries()) {
+    credentials.push({
+      id: `legacy-${userProfile.id}-${kind}`,
+      userId: userProfile.id,
+      kind,
+      label: `Legacy ${kind} for ${userProfile.id}`,
+      purposes: kind === "ssh-key" ? ["git-auth", "ssh-auth"] : ["agent-auth"],
+      materialRef: {
+        type: "file",
+        key: `legacy/${kind}`,
+        files: files.map((file) => ({
+          key: file.key,
+          sourcePath: file.sourcePath ?? "",
+          mountPath: file.mountPath,
+          content: file.content,
+        })),
+      },
+      metadata: {
+        compatibility: true,
+      },
+      status: "ready",
+    });
+  }
+  return credentials;
+}
+
+function resolveCredentialBindings(args: {
+  directBindings: WorkspaceCredentialBinding[];
+  registryCredentials: Credential[];
+  compatibilityCredentials: Credential[];
+}): ResolvedWorkspaceCredentialBinding[] {
+  const directBindings = args.directBindings;
+  if (directBindings.length > 0) {
+    const registryById = new Map(args.registryCredentials.map((credential) => [credential.id, credential]));
+    return directBindings.map((binding) => {
+      const credential = registryById.get(binding.credentialId);
+      if (!credential) {
+        throw new Error(
+          `Workspace binding '${binding.purpose}' references unknown credential '${binding.credentialId}'`,
+        );
+      }
+      if (!credential.purposes.includes(binding.purpose)) {
+        throw new Error(
+          `Credential '${credential.id}' does not support binding purpose '${binding.purpose}'`,
+        );
+      }
+      return {
+        ...binding,
+        source: "registry",
+        credential,
+        attachmentKind: credentialKindAttachmentKind(credential.kind),
+        authFiles: credentialFilesToAuthFiles(credential),
+      };
+    });
+  }
+
+  return args.compatibilityCredentials.map((credential) => {
+    const purpose = credential.kind === "ssh-key" ? "git-auth" : "agent-auth";
+    return {
+      purpose,
+      credentialId: credential.id,
+      required: true,
+      source: "compatibility",
+      credential,
+      attachmentKind: credentialKindAttachmentKind(credential.kind),
+      authFiles: credentialFilesToAuthFiles(credential),
+    };
+  });
 }
 
 function resolveAuthSourcePath(sourcePath: string, baseDir: string): string {
@@ -539,11 +854,33 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     ? loadPodProfileDefaults(resolvedProfileHint)
     : {};
   const workspaceAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
+  const registryCredentials = loadUserCredentials(userProfile.id, home);
+  const directCredentialBindings = normalizeCredentialBindings(
+    (data.credentials as Record<string, unknown> | undefined)?.bindings,
+  );
+  const compatibilityUserProfile = {
+    ...userProfile,
+    authFiles: mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles),
+  };
+  const compatibilityCredentials = buildCompatibilityCredentials(
+    compatibilityUserProfile,
+  );
+  const resolvedCredentialBindings = resolveCredentialBindings({
+    directBindings: directCredentialBindings,
+    registryCredentials,
+    compatibilityCredentials,
+  });
+  const boundAuthFiles = mergeAuthFiles(
+    resolvedCredentialBindings.flatMap((binding) => binding.authFiles),
+    [],
+  );
   const agentKind = normalizeAgentKind(agent.kind);
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
   const persistState = Boolean(agent.persist_state ?? true);
   const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
   const directAttachmentConfig = normalizeDirectAttachmentConfig(data.attachments);
+  const compatibilityAuthFiles = mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles);
+  const runtimeAuthFiles = mergeAuthFiles(boundAuthFiles, compatibilityAuthFiles);
   const attachments = directAttachmentConfig
     ? buildWorkspaceAttachmentsFromDirectConfig(directAttachmentConfig)
     : translateLegacyAttachments({
@@ -551,16 +888,18 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
         home,
       persistState,
       claimName,
-      authFiles: mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles),
+      authFiles: runtimeAuthFiles,
       backendKind,
     });
-  const authFiles = mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles);
   const agentContract = buildAgentContract(home, agentKind);
 
   const workspace: WorkspaceSpec = {
     identity: { projectName },
     profile,
     userProfile,
+    credentials: registryCredentials,
+    credentialBindings: directCredentialBindings,
+    resolvedCredentialBindings,
     backend: {
       kind: backendKind,
       profile: backendKind === "pod"
@@ -605,7 +944,7 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
       gitUserName: userProfile.name,
       gitUserEmail: userProfile.email,
       plainEnvVars,
-      authFiles
+      authFiles: runtimeAuthFiles
     },
     agent: agentContract,
     connectivity: {

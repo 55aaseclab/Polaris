@@ -34,6 +34,10 @@ export async function createCommand(projectRef: string): Promise<void> {
         profilePath: userProfile.profilePath,
         secretsRoot: userProfile.secretsRoot,
       },
+      credentials: {
+        registryRoot: `config/users/credentials/${userProfile.id}`,
+        defaults: ["codex-default", "github-ssh"],
+      },
       nextSteps: [
         `Stage credentials under ${userProfile.secretsRoot}/`,
         `pnpm --dir apps/polaris run polaris -- render ${project}@${scaffoldBackend}`,

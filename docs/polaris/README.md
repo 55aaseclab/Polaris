@@ -28,6 +28,12 @@ Polaris now treats workspace profile and user profile as separate concerns:
 - user profile: Git identity, SSH identity policy, and user-scoped external
   agent identity defaults
 
+Polaris also treats `Credential` as a first-class user-owned entity:
+
+- one user can own multiple credentials
+- one workspace can bind multiple credentials by purpose
+- driver selection stays separate from credential selection
+
 ## Recommended Flow
 
 Create a new workspace spec:
@@ -41,10 +47,13 @@ If the project does not already exist, `create` scaffolds:
 - `config/specs/docker/projects/<project>.agent.yaml`
 - `config/users/profiles/local-<identity>.yaml` when a matching local user
   profile does not already exist
+- `config/users/credentials/local-<identity>/*.yaml` for default Codex and SSH
+  credentials
 
-The scaffolded spec references that local user profile:
+The scaffolded spec references that local user profile and default bindings:
 
 - `user_profile: local-<identity>`
+- `credentials.bindings[].credentialId: codex-default`
 
 Then stage bootstrap secrets and render/start the workspace:
 
@@ -105,19 +114,44 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 - Tails the backend logs for the workspace runtime.
 - For Docker, this is `docker compose ... logs --tail 200 <project>`.
 
-## Secrets And Bootstrap
+## Credentials And Bootstrap
 
-The default Docker scaffold expects bootstrap material under the user profile
-directory reported by `create`, for example:
+Credential metadata lives in a pure file-backed registry:
+
+```text
+config/users/profiles/<user>.yaml
+config/users/credentials/<user>/*.yaml
+```
+
+The default Docker scaffold expects secret material under the user-owned
+credential root reported by `create`, for example:
 
 ```text
 config/users/local-<identity>/
   codex/auth.json
   codex/config.toml
   claude/settings.json
+  ssh/id_ed25519
+  ssh/id_ed25519.pub
 ```
 
-At runtime, the Docker backend mounts:
+Workspace specs bind those credentials by purpose:
+
+```yaml
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: codex-default
+      required: true
+    - purpose: git-auth
+      credentialId: github-ssh
+      required: false
+```
+
+At runtime, Polaris resolves auth material from explicit credential bindings
+first. Legacy `user_profile.auth.files` remains compatibility-only.
+
+The Docker backend mounts:
 
 - `./config/users/<user-profile-id>` by default
 - or `$POLARIS_SECRETS_DIR` if that environment variable is set
