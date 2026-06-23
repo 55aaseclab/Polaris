@@ -21,7 +21,8 @@ Options:
   --build-workspace-image       Rebuild the workspace OCI image from the Dockerfile
                                 before snapshotting the VM.
   --dockerfile <path>           Dockerfile used for workspace-image rebuild.
-                                Default: apps/polaris/assets/docker/polaris-demo-debian13.Dockerfile
+                                Default: user-profile Dockerfile when present,
+                                otherwise config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile
   --context <path>              Docker build context for workspace-image rebuild.
                                 Default: repo root
   --workspace-image-output <ref>
@@ -60,9 +61,32 @@ VM_NAME="demo-vm"
 WORKSPACE_IMAGE_REF="ttl.sh/polaris-demo-debian13-1782126452:24h"
 BUILD_WORKSPACE_IMAGE=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DOCKERFILE_PATH="${REPO_ROOT}/apps/polaris/assets/docker/polaris-demo-debian13.Dockerfile"
+KUBEVIRT_SPEC_PATH="${REPO_ROOT}/config/specs/kubevirt/projects/demo.agent.yaml"
+DEFAULT_DOCKERFILE_PATH="${REPO_ROOT}/config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile"
+DOCKERFILE_PATH=""
 BUILD_CONTEXT="${REPO_ROOT}"
 WORKSPACE_IMAGE_OUTPUT=""
+
+resolve_workspace_user_profile_id() {
+  sed -n "s/^user_profile: ['\"]\\{0,1\\}\\([^'\"]*\\)['\"]\\{0,1\\}$/\\1/p" \
+    "${KUBEVIRT_SPEC_PATH}" | head -n 1
+}
+
+resolve_default_dockerfile_path() {
+  local user_profile_id
+  local user_dockerfile
+
+  user_profile_id="$(resolve_workspace_user_profile_id)"
+  if [[ -n "${user_profile_id}" ]]; then
+    user_dockerfile="${REPO_ROOT}/config/users/${user_profile_id}/docker/workspace-prebuilt.Dockerfile"
+    if [[ -f "${user_dockerfile}" ]]; then
+      printf '%s\n' "${user_dockerfile}"
+      return
+    fi
+  fi
+
+  printf '%s\n' "${DEFAULT_DOCKERFILE_PATH}"
+}
 
 if [[ $# -lt 1 ]]; then
   usage
@@ -116,6 +140,10 @@ done
 
 if [[ -z "${WORKSPACE_IMAGE_OUTPUT}" ]]; then
   WORKSPACE_IMAGE_OUTPUT="${WORKSPACE_IMAGE_REF}"
+fi
+
+if [[ -z "${DOCKERFILE_PATH}" ]]; then
+  DOCKERFILE_PATH="$(resolve_default_dockerfile_path)"
 fi
 
 need_cmd() {
