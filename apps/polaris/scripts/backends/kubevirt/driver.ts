@@ -163,6 +163,15 @@ function runVmLifecycleAction(project: string, action: "start" | "stop" | "resta
   patchVmRunStrategy(project, "Always");
 }
 
+function extractPairingUrl(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw) as { url?: unknown };
+    return typeof parsed.url === "string" && parsed.url.trim() ? parsed.url.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function probeKubevirtPairingState(project: string, claimName: string): ObservationItem {
   const podName = `${project}-pairing-inspect`;
   const manifest = [
@@ -217,8 +226,25 @@ function probeKubevirtPairingState(project: string, claimName: string): Observat
         ],
         { encoding: "utf8" },
       );
+      const pairingFile = spawnSync(
+        "kubectl",
+        [
+          "-n",
+          project,
+          "exec",
+          podName,
+          "--",
+          "sh",
+          "-lc",
+          "cat /workspace/state/paseo/pairing.json",
+        ],
+        { encoding: "utf8" },
+      );
+      const pairingUrl = pairingFile.status === 0
+        ? extractPairingUrl(String(pairingFile.stdout || ""))
+        : undefined;
       return inspect.status === 0
-        ? { observed: true, detail: "/root/.paseo/pairing.json" }
+        ? { observed: true, detail: "/root/.paseo/pairing.json", url: pairingUrl }
         : { observed: false, detail: "/root/.paseo/pairing.json" };
     } catch {
       return { observed: false, detail: "pairing inspection failed" };

@@ -336,11 +336,13 @@ export interface WorkspaceStatus {
 export interface ObservationItem {
   observed: boolean;
   detail?: string;
+  url?: string;
 }
 
 export interface CheckStatus {
   state: "ok" | "missing" | "drifted" | "unknown";
   detail?: string;
+  url?: string;
 }
 
 export interface BackendObservation {
