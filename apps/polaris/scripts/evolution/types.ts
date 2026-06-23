@@ -13,32 +13,54 @@ export interface EvolutionExecutionEvent {
   managerId: string;
   sessionId: string;
   turnId?: string;
-  kind: EvolutionEventKind;
   timestamp: string;
+  kind: EvolutionEventKind;
   payload: Record<string, unknown>;
 }
 
-export type EvolutionArtifactKind =
-  | "user-preference"
-  | "workspace-playbook"
-  | "verified-lesson"
-  | "discarded-observation";
+export type EvolutionMemoryTarget = "workspace-memory" | "user-memory";
+export type EvolutionMemoryOperation = "add" | "replace" | "remove";
+export type EvolutionMemoryStatus = "active" | "archived" | "suppressed";
+export type EvolutionMemoryChangeStatus = "pending" | "approved" | "rejected" | "applied";
 
-export type EvolutionArtifactScope = "workspace" | "user";
-
-export interface EvolutionArtifact {
+export interface EvolutionMemoryEntry {
   id: string;
   workspaceId: string;
   userProfileId?: string;
-  kind: EvolutionArtifactKind;
-  scope: EvolutionArtifactScope;
+  target: EvolutionMemoryTarget;
+  section: string;
+  key: string;
   title: string;
-  content: string;
+  body: string;
   confidence: number;
-  status: "active" | "archived" | "suppressed";
+  status: EvolutionMemoryStatus;
   sourceSessionId?: string;
   createdAt: string;
   updatedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface EvolutionMemoryCandidate {
+  title: string;
+  body: string;
+}
+
+export interface EvolutionMemoryChange {
+  id: string;
+  workspaceId: string;
+  userProfileId?: string;
+  target: EvolutionMemoryTarget;
+  operation: EvolutionMemoryOperation;
+  section: string;
+  key: string;
+  candidate?: EvolutionMemoryCandidate;
+  reason: string;
+  confidence: number;
+  sourceSessionId?: string;
+  sourceRunIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+  status: EvolutionMemoryChangeStatus;
   metadata: Record<string, unknown>;
 }
 
@@ -51,27 +73,32 @@ export interface EvolutionReviewCandidate {
 }
 
 export interface EvolutionReviewResult {
-  artifacts: EvolutionArtifact[];
+  changes: EvolutionMemoryChange[];
 }
 
-export interface EvolutionRetrievalQuery {
+export interface EvolutionMemoryQuery {
   workspaceId: string;
   userProfileId?: string;
-  kinds?: EvolutionArtifactKind[];
+  target?: EvolutionMemoryTarget;
+  section?: string;
   text?: string;
   limit?: number;
 }
 
-export interface EvolutionCuratorResult {
-  mergedIds: string[];
+export interface EvolutionMemoryProviderEntry {
+  source: string;
+  title: string;
+  body: string;
+  score?: number;
+}
+
+export interface EvolutionMemoryCuratorResult {
   archivedIds: string[];
   suppressedIds: string[];
-  promotedIds?: string[];
-  decayedIds?: string[];
-  details?: Array<{
-    artifactId: string;
-    action: "promoted" | "merged" | "archived" | "suppressed" | "decayed" | "kept";
+  promotedIds: string[];
+  details: Array<{
+    entryId: string;
+    action: "promoted" | "archived" | "suppressed" | "kept";
     reason: string;
-    targetArtifactId?: string;
   }>;
 }

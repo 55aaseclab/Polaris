@@ -1,23 +1,42 @@
-## 1. Trigger And Lesson Model
+## 1. Core Memory Model
 
-- [x] 1.1 Add explicit trigger parsing for `POLARIS-LEARN-IT`, `POLARIS-RECALL`, `POLARIS-DONT-LEARN`, and `POLARIS-EPHEMERAL` in the evolution observer/runtime path
-- [x] 1.2 Introduce a structured lesson artifact schema with title, summary, when-to-use guidance, tags, scope, source metadata, and confidence
-- [x] 1.3 Update runtime artifact rendering so retrieved context is lesson-oriented rather than generic playbook-only summaries
+- [x] 1.1 Replace lesson-oriented semantics with workspace memory and user
+  memory semantics
+- [x] 1.2 Define bounded local `MEMORY.md` and `USER.md` file layouts
+- [x] 1.3 Define structured supporting state for memory operations, pending
+  approvals, and curation metadata
 
-## 2. Selective Summarization
+## 2. Memory Operations
 
-- [x] 2.1 Add a cheap summarizer integration that is invoked only for explicit learn-triggered runs and meaningful success/failure events
-- [x] 2.2 Add a deterministic fallback summarization path when the cheap summarizer is unavailable or disabled
-- [x] 2.3 Add conservative policy rules so user-issued triggers are trusted first and routine runs do not automatically incur summarization cost
+- [x] 2.1 Add explicit memory operations with `add`, `replace`, and `remove`
+  semantics
+- [x] 2.2 Add source attribution and reasons for every persisted memory change
+- [x] 2.3 Add write policy modes for automatic writes and staged approval
 
-## 3. Shared Daemon Recall Path
+## 3. Background Review
 
-- [x] 3.1 Keep daemon-owned `appendSystemPrompt` as the shared recall surface and update the observer to patch it using supported Paseo daemon config APIs
-- [x] 3.2 Ensure the shared appended prompt remains short, bounded, and derived from the top relevant lessons only
-- [x] 3.3 Verify that both CLI-created and web-portal-created Paseo runs receive the same refreshed lesson context through the daemon path
+- [x] 3.1 Update runtime review to derive memory operations instead of lessons
+  or skills
+- [x] 3.2 Add conservative policy rules for when review proposes memory writes
+- [x] 3.3 Add pending-review and approval flows for memory updates
 
-## 4. Verification And Documentation
+## 4. Session Use
 
-- [x] 4.1 Add tests for trigger detection, selective summarization policy, lesson artifact persistence, and shared appended prompt refresh
-- [x] 4.2 Add tests or fixtures that prove daemon-observed runs produce lessons without requiring entrypoint-specific wrappers
-- [x] 4.3 Update evolution documentation to describe the lesson-only model, trigger vocabulary, and cheap-model summarization strategy
+- [x] 4.1 Assemble frozen memory snapshots at session start
+- [x] 4.2 Separate workspace memory from user memory in snapshot assembly
+- [x] 4.3 Ensure harness adapters consume snapshots without manager-specific
+  prompt mutation hacks
+
+## 5. Optional Provider Integration
+
+- [x] 5.1 Define an optional memory-provider contract for retrieval and sync
+- [x] 5.2 Support provider-assisted pre-run retrieval
+- [x] 5.3 Support post-run or session-end provider sync of approved memories
+
+## 6. Verification And Documentation
+
+- [x] 6.1 Add tests for memory operations, approval policy, and snapshot
+  assembly
+- [x] 6.2 Add tests for background review producing memory updates
+- [x] 6.3 Update evolution documentation to describe the memory model, file
+  scopes, review policy, and provider contract

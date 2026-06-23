@@ -9,6 +9,7 @@ import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts
 import { assertNoProjectNameCollision } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
+import { EvolutionStore } from "../scripts/evolution/store.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceEvolutionStateDir,
@@ -380,28 +381,39 @@ test("status command exposes evolution explainability details", async () => {
     );
     const dbPath = path.join(evolutionDir, "store.db");
     try {
-      fs.mkdirSync(evolutionDir, { recursive: true });
-      const { EvolutionStore } = await import("../scripts/evolution/store.js");
       const store = await EvolutionStore.open(dbPath);
-      store.upsertArtifact({
-        id: "explained-artifact",
-        workspaceId: workspace.identity.projectName,
-        userProfileId: workspace.userProfile.id,
-        kind: "workspace-playbook",
-        scope: "workspace",
-        title: "Explained lesson",
-        content: "Use the verifier before retrying.",
-        confidence: 0.9,
-        status: "active",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        metadata: {
-          retrieval: { reasons: ["workspace-scoped", "matched tags: verifier"] },
-          explainability: { existsBecause: "Recovered from a successful validation workflow." },
-          curator: { action: "promoted", reason: "high-confidence active artifact" },
-        },
-      });
-      store.close();
+      const now = new Date().toISOString();
+      try {
+        store.upsertMemoryEntry({
+          id: "workspace-memory:Validation:run-verifier-first:test",
+          workspaceId: workspace.identity.projectName,
+          userProfileId: workspace.userProfile.id,
+          target: "workspace-memory",
+          section: "Validation",
+          key: "run-verifier-first",
+          title: "Explained lesson",
+          body: "Use the verifier before retrying.",
+          confidence: 0.95,
+          status: "active",
+          sourceSessionId: "session-1",
+          createdAt: now,
+          updatedAt: now,
+          metadata: {
+            retrieval: {
+              reasons: ["workspace-memory", "matched tags: verifier"],
+            },
+            curator: {
+              action: "promoted",
+              reason: "high-confidence memory entry",
+            },
+            explainability: {
+              existsBecause: "Recovered from a successful validation workflow.",
+            },
+          },
+        });
+      } finally {
+        store.close();
+      }
 
       await withFakeCommands(
         {
@@ -431,7 +443,7 @@ exit 0
           assert.ok(parsed.evolution?.latestArtifacts);
           assert.ok(parsed.evolution?.latestArtifacts?.some((item) => item.title === "Explained lesson"));
           const artifact = parsed.evolution?.latestArtifacts?.find((item) => item.title === "Explained lesson");
-          assert.deepEqual(artifact?.whyRetrieved, ["workspace-scoped", "matched tags: verifier"]);
+          assert.deepEqual(artifact?.whyRetrieved, ["workspace-memory", "matched tags: verifier"]);
           assert.equal(artifact?.curatorAction, "promoted");
           assert.equal(artifact?.whyExists, "Recovered from a successful validation workflow.");
         },

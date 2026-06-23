@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import type {
-  EvolutionArtifact,
   EvolutionExecutionEvent,
-  EvolutionRetrievalQuery,
+  EvolutionMemoryChange,
+  EvolutionMemoryEntry,
+  EvolutionMemoryQuery,
 } from "./types.js";
 
 let sqlJsPromise: Promise<SqlJsStatic> | null = null;
@@ -12,10 +13,6 @@ let sqlJsPromise: Promise<SqlJsStatic> | null = null;
 async function loadSqlJs(): Promise<SqlJsStatic> {
   sqlJsPromise ??= initSqlJs();
   return sqlJsPromise;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 function ensureParentDir(filePath: string): void {
@@ -32,10 +29,18 @@ function rowToRecord<T>(columns: string[], values: unknown[]): T {
 
 type SqlScalar = string | number | null;
 
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(String(value ?? "{}"));
+    return typeof parsed === "object" && parsed ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 export class EvolutionStore {
   private constructor(
     private readonly dbPath: string,
-    private readonly sqlite: SqlJsStatic,
     private readonly db: Database,
   ) {}
 
@@ -45,7 +50,7 @@ export class EvolutionStore {
     const db = fs.existsSync(dbPath)
       ? new sqlite.Database(fs.readFileSync(dbPath))
       : new sqlite.Database();
-    const store = new EvolutionStore(dbPath, sqlite, db);
+    const store = new EvolutionStore(dbPath, db);
     store.migrate();
     return store;
   }
@@ -63,14 +68,15 @@ export class EvolutionStore {
         payload_json TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS artifacts (
+      CREATE TABLE IF NOT EXISTS memory_entries (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
         user_profile_id TEXT,
-        kind TEXT NOT NULL,
-        scope TEXT NOT NULL,
+        target TEXT NOT NULL,
+        section_name TEXT NOT NULL,
+        entry_key TEXT NOT NULL,
         title TEXT NOT NULL,
-        content TEXT NOT NULL,
+        body TEXT NOT NULL,
         confidence REAL NOT NULL,
         status TEXT NOT NULL,
         source_session_id TEXT,
@@ -79,20 +85,40 @@ export class EvolutionStore {
         metadata_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS pending_memory_changes (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        user_profile_id TEXT,
+        target TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        section_name TEXT NOT NULL,
+        entry_key TEXT NOT NULL,
+        candidate_json TEXT,
+        reason TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        source_session_id TEXT,
+        source_run_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        metadata_json TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_execution_events_workspace_session
         ON execution_events(workspace_id, session_id, timestamp);
-      CREATE INDEX IF NOT EXISTS idx_artifacts_workspace_scope_kind
-        ON artifacts(workspace_id, scope, kind, status);
-      CREATE INDEX IF NOT EXISTS idx_artifacts_user_scope_kind
-        ON artifacts(user_profile_id, scope, kind, status);
+      CREATE INDEX IF NOT EXISTS idx_memory_entries_workspace_target
+        ON memory_entries(workspace_id, target, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_memory_entries_user_target
+        ON memory_entries(user_profile_id, target, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_pending_memory_changes_workspace_status
+        ON pending_memory_changes(workspace_id, status, updated_at);
     `);
     this.flush();
   }
 
   flush(): void {
-    const data = this.db.export();
     ensureParentDir(this.dbPath);
-    fs.writeFileSync(this.dbPath, Buffer.from(data));
+    fs.writeFileSync(this.dbPath, Buffer.from(this.db.export()));
   }
 
   close(): void {
@@ -139,99 +165,218 @@ export class EvolutionStore {
         turnId: row.turn_id ? String(row.turn_id) : undefined,
         kind: String(row.kind) as EvolutionExecutionEvent["kind"],
         timestamp: String(row.timestamp),
-        payload: JSON.parse(String(row.payload_json)),
+        payload: parseJsonObject(row.payload_json),
       });
     }
     stmt.free();
     return rows;
   }
 
-  upsertArtifact(artifact: EvolutionArtifact): void {
-    const timestamp = artifact.updatedAt || nowIso();
+  listEventsForWorkspace(workspaceId: string): EvolutionExecutionEvent[] {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (
-        id, workspace_id, user_profile_id, kind, scope, title, content, confidence,
-        status, source_session_id, created_at, updated_at, metadata_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      SELECT id, workspace_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
+      FROM execution_events
+      WHERE workspace_id = ?
+      ORDER BY timestamp ASC
+    `);
+    stmt.bind([workspaceId]);
+    const rows: EvolutionExecutionEvent[] = [];
+    while (stmt.step()) {
+      const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
+      rows.push({
+        id: String(row.id),
+        workspaceId: String(row.workspace_id),
+        managerId: String(row.manager_id),
+        sessionId: String(row.session_id),
+        turnId: row.turn_id ? String(row.turn_id) : undefined,
+        kind: String(row.kind) as EvolutionExecutionEvent["kind"],
+        timestamp: String(row.timestamp),
+        payload: parseJsonObject(row.payload_json),
+      });
+    }
+    stmt.free();
+    return rows;
+  }
+
+  upsertMemoryEntry(entry: EvolutionMemoryEntry): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO memory_entries (
+        id, workspace_id, user_profile_id, target, section_name, entry_key, title, body,
+        confidence, status, source_session_id, created_at, updated_at, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run([
-      artifact.id,
-      artifact.workspaceId,
-      artifact.userProfileId ?? null,
-      artifact.kind,
-      artifact.scope,
-      artifact.title,
-      artifact.content,
-      artifact.confidence,
-      artifact.status,
-      artifact.sourceSessionId ?? null,
-      artifact.createdAt,
-      timestamp,
-      JSON.stringify(artifact.metadata),
+      entry.id,
+      entry.workspaceId,
+      entry.userProfileId ?? null,
+      entry.target,
+      entry.section,
+      entry.key,
+      entry.title,
+      entry.body,
+      entry.confidence,
+      entry.status,
+      entry.sourceSessionId ?? null,
+      entry.createdAt,
+      entry.updatedAt,
+      JSON.stringify(entry.metadata),
     ]);
     stmt.free();
     this.flush();
   }
 
-  queryArtifacts(query: EvolutionRetrievalQuery): EvolutionArtifact[] {
-    const limit = query.limit ?? 10;
-    const kinds = query.kinds ?? [];
+  queryMemoryEntries(query: EvolutionMemoryQuery): EvolutionMemoryEntry[] {
     const clauses = ["status = 'active'", "workspace_id = ?"];
     const params: SqlScalar[] = [query.workspaceId];
     if (query.userProfileId) {
-      clauses.push("(scope = 'workspace' OR user_profile_id = ?)");
+      clauses.push("(target = 'workspace-memory' OR user_profile_id = ?)");
       params.push(query.userProfileId);
     }
-    if (kinds.length > 0) {
-      clauses.push(`kind IN (${kinds.map(() => "?").join(", ")})`);
-      params.push(...kinds);
+    if (query.target) {
+      clauses.push("target = ?");
+      params.push(query.target);
+    }
+    if (query.section) {
+      clauses.push("section_name = ?");
+      params.push(query.section);
     }
     if (query.text?.trim()) {
-      clauses.push("(title LIKE ? OR content LIKE ?)");
+      clauses.push("(title LIKE ? OR body LIKE ? OR entry_key LIKE ?)");
       const pattern = `%${query.text.trim()}%`;
-      params.push(pattern, pattern);
+      params.push(pattern, pattern, pattern);
     }
-    params.push(limit);
+    params.push(query.limit ?? 20);
     const stmt = this.db.prepare(`
-      SELECT id, workspace_id, user_profile_id, kind, scope, title, content, confidence,
-             status, source_session_id, created_at, updated_at, metadata_json
-      FROM artifacts
+      SELECT id, workspace_id, user_profile_id, target, section_name, entry_key, title, body,
+             confidence, status, source_session_id, created_at, updated_at, metadata_json
+      FROM memory_entries
       WHERE ${clauses.join(" AND ")}
       ORDER BY confidence DESC, updated_at DESC
       LIMIT ?
     `);
     stmt.bind(params);
-    const rows: EvolutionArtifact[] = [];
+    const rows: EvolutionMemoryEntry[] = [];
     while (stmt.step()) {
       const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
       rows.push({
         id: String(row.id),
         workspaceId: String(row.workspace_id),
         userProfileId: row.user_profile_id ? String(row.user_profile_id) : undefined,
-        kind: String(row.kind) as EvolutionArtifact["kind"],
-        scope: String(row.scope) as EvolutionArtifact["scope"],
+        target: String(row.target) as EvolutionMemoryEntry["target"],
+        section: String(row.section_name),
+        key: String(row.entry_key),
         title: String(row.title),
-        content: String(row.content),
+        body: String(row.body),
         confidence: Number(row.confidence),
-        status: String(row.status) as EvolutionArtifact["status"],
+        status: String(row.status) as EvolutionMemoryEntry["status"],
         sourceSessionId: row.source_session_id ? String(row.source_session_id) : undefined,
         createdAt: String(row.created_at),
         updatedAt: String(row.updated_at),
-        metadata: JSON.parse(String(row.metadata_json)),
+        metadata: parseJsonObject(row.metadata_json),
       });
     }
     stmt.free();
     return rows;
   }
 
-  archiveArtifacts(ids: string[]): void {
-    if (ids.length === 0) return;
+  findActiveMemoryEntry(workspaceId: string, target: EvolutionMemoryEntry["target"], key: string): EvolutionMemoryEntry | null {
+    const rows = this.queryMemoryEntries({ workspaceId, target, limit: 100 }).filter((entry) => entry.key === key);
+    return rows[0] ?? null;
+  }
+
+  archiveMemoryEntries(ids: string[]): void {
+    if (ids.length === 0) {
+      return;
+    }
     const stmt = this.db.prepare(`
-      UPDATE artifacts
-      SET status = 'archived', updated_at = ?
+      UPDATE memory_entries
+      SET status = 'archived'
       WHERE id IN (${ids.map(() => "?").join(", ")})
     `);
-    stmt.run([nowIso(), ...ids]);
+    stmt.run(ids);
+    stmt.free();
+    this.flush();
+  }
+
+  savePendingMemoryChange(change: EvolutionMemoryChange): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO pending_memory_changes (
+        id, workspace_id, user_profile_id, target, operation, section_name, entry_key,
+        candidate_json, reason, confidence, source_session_id, source_run_ids_json,
+        created_at, updated_at, status, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run([
+      change.id,
+      change.workspaceId,
+      change.userProfileId ?? null,
+      change.target,
+      change.operation,
+      change.section,
+      change.key,
+      change.candidate ? JSON.stringify(change.candidate) : null,
+      change.reason,
+      change.confidence,
+      change.sourceSessionId ?? null,
+      JSON.stringify(change.sourceRunIds ?? []),
+      change.createdAt,
+      change.updatedAt,
+      change.status,
+      JSON.stringify(change.metadata),
+    ]);
+    stmt.free();
+    this.flush();
+  }
+
+  listPendingMemoryChanges(workspaceId: string, status?: EvolutionMemoryChange["status"]): EvolutionMemoryChange[] {
+    const clauses = ["workspace_id = ?"];
+    const params: SqlScalar[] = [workspaceId];
+    if (status) {
+      clauses.push("status = ?");
+      params.push(status);
+    }
+    const stmt = this.db.prepare(`
+      SELECT id, workspace_id, user_profile_id, target, operation, section_name, entry_key,
+             candidate_json, reason, confidence, source_session_id, source_run_ids_json,
+             created_at, updated_at, status, metadata_json
+      FROM pending_memory_changes
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY updated_at DESC
+    `);
+    stmt.bind(params);
+    const rows: EvolutionMemoryChange[] = [];
+    while (stmt.step()) {
+      const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
+      rows.push({
+        id: String(row.id),
+        workspaceId: String(row.workspace_id),
+        userProfileId: row.user_profile_id ? String(row.user_profile_id) : undefined,
+        target: String(row.target) as EvolutionMemoryChange["target"],
+        operation: String(row.operation) as EvolutionMemoryChange["operation"],
+        section: String(row.section_name),
+        key: String(row.entry_key),
+        candidate: row.candidate_json ? JSON.parse(String(row.candidate_json)) as EvolutionMemoryChange["candidate"] : undefined,
+        reason: String(row.reason),
+        confidence: Number(row.confidence),
+        sourceSessionId: row.source_session_id ? String(row.source_session_id) : undefined,
+        sourceRunIds: JSON.parse(String(row.source_run_ids_json ?? "[]")) as string[],
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+        status: String(row.status) as EvolutionMemoryChange["status"],
+        metadata: parseJsonObject(row.metadata_json),
+      });
+    }
+    stmt.free();
+    return rows;
+  }
+
+  updatePendingMemoryChangeStatus(id: string, status: EvolutionMemoryChange["status"]): void {
+    const stmt = this.db.prepare(`
+      UPDATE pending_memory_changes
+      SET status = ?
+      WHERE id = ?
+    `);
+    stmt.run([status, id]);
     stmt.free();
     this.flush();
   }
@@ -251,86 +396,45 @@ export class EvolutionStore {
       curatorReason?: string;
       suppressedBecause?: string;
     }>;
+    pendingMemoryChanges: number;
   } {
-    const allStmt = this.db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM artifacts
-      WHERE workspace_id = ?
-    `);
-    allStmt.bind([workspaceId]);
-    allStmt.step();
-    const artifactCount = Number(allStmt.get()[0] ?? 0);
-    allStmt.free();
-
-    const workspaceStmt = this.db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM artifacts
-      WHERE workspace_id = ? AND scope = 'workspace' AND status = 'active'
-    `);
-    workspaceStmt.bind([workspaceId]);
-    workspaceStmt.step();
-    const activeWorkspaceArtifacts = Number(workspaceStmt.get()[0] ?? 0);
-    workspaceStmt.free();
-
-    let activeUserArtifacts = 0;
-    if (userProfileId) {
-      const userStmt = this.db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM artifacts
-        WHERE user_profile_id = ? AND scope = 'user' AND status = 'active'
-      `);
-      userStmt.bind([userProfileId]);
-      userStmt.step();
-      activeUserArtifacts = Number(userStmt.get()[0] ?? 0);
-      userStmt.free();
-    }
-
-    const latestStmt = this.db.prepare(`
-      SELECT title, kind, status, metadata_json
-      FROM artifacts
-      WHERE workspace_id = ?
-      ORDER BY updated_at DESC
-      LIMIT 5
-    `);
-    latestStmt.bind([workspaceId]);
-    const latestTitles: string[] = [];
-    const latestArtifacts: Array<{
-      title: string;
-      kind: string;
-      status: string;
-      whyExists?: string;
-      whyRetrieved?: string[];
-      curatorAction?: string;
-      curatorReason?: string;
-      suppressedBecause?: string;
-    }> = [];
-    while (latestStmt.step()) {
-      const row = rowToRecord<Record<string, unknown>>(latestStmt.getColumnNames(), latestStmt.get());
-      const title = String(row.title ?? "");
-      latestTitles.push(title);
-      const metadata = JSON.parse(String(row.metadata_json ?? "{}")) as Record<string, unknown>;
-      const explainability = (metadata.explainability ?? {}) as Record<string, unknown>;
-      const retrieval = (metadata.retrieval ?? {}) as Record<string, unknown>;
-      const curator = (metadata.curator ?? {}) as Record<string, unknown>;
-      latestArtifacts.push({
-        title,
-        kind: String(row.kind ?? ""),
-        status: String(row.status ?? ""),
-        whyExists: typeof explainability.existsBecause === "string" ? explainability.existsBecause : undefined,
-        whyRetrieved: Array.isArray(retrieval.reasons) ? retrieval.reasons.map((reason) => String(reason)) : undefined,
-        curatorAction: typeof curator.action === "string" ? curator.action : undefined,
-        curatorReason: typeof curator.reason === "string" ? curator.reason : undefined,
-        suppressedBecause: typeof explainability.suppressedBecause === "string" ? explainability.suppressedBecause : undefined,
-      });
-    }
-    latestStmt.free();
-
+    const workspaceEntries = this.queryMemoryEntries({ workspaceId, target: "workspace-memory", limit: 1000 });
+    const userEntries = userProfileId
+      ? this.queryMemoryEntries({ workspaceId, userProfileId, target: "user-memory", limit: 1000 })
+      : [];
+    const all = [...workspaceEntries, ...userEntries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return {
-      artifactCount,
-      activeWorkspaceArtifacts,
-      activeUserArtifacts,
-      latestTitles,
-      latestArtifacts,
+      artifactCount: all.length,
+      activeWorkspaceArtifacts: workspaceEntries.length,
+      activeUserArtifacts: userEntries.length,
+      latestTitles: all.slice(0, 5).map((entry) => entry.title),
+      latestArtifacts: all.slice(0, 5).map((entry) => {
+        const metadata = entry.metadata as Record<string, unknown>;
+        const explainability = (metadata.explainability ?? {}) as Record<string, unknown>;
+        const retrieval = (metadata.retrieval ?? {}) as Record<string, unknown>;
+        const curator = (metadata.curator ?? {}) as Record<string, unknown>;
+        return {
+          title: entry.title,
+          kind: entry.target,
+          status: entry.status,
+          whyExists: typeof explainability.existsBecause === "string"
+            ? explainability.existsBecause
+            : undefined,
+          whyRetrieved: Array.isArray(retrieval.reasons)
+            ? retrieval.reasons as string[]
+            : undefined,
+          curatorAction: typeof curator.action === "string"
+            ? curator.action
+            : undefined,
+          curatorReason: typeof curator.reason === "string"
+            ? curator.reason
+            : undefined,
+          suppressedBecause: typeof explainability.suppressedBecause === "string"
+            ? explainability.suppressedBecause
+            : undefined,
+        };
+      }),
+      pendingMemoryChanges: this.listPendingMemoryChanges(workspaceId, "pending").length,
     };
   }
 }

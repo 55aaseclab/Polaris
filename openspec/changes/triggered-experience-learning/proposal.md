@@ -1,34 +1,83 @@
 ## Why
 
-Polaris now has a working evolution kernel, but the current learning loop is still too implicit and too shallow: it summarizes coarse success/failure state rather than explicitly capturing durable operator experiences. We need a narrower, cheaper learning model that stores lessons instead of generating skills, and that can be triggered intentionally during real runs.
+Polaris now has a working evolution kernel, but the current
+triggered-experience-learning direction is the wrong abstraction.
+
+It is too centered on:
+
+- explicit learn triggers
+- lesson summaries
+- generated skill-like outputs
+
+The user direction is different.
+
+Polaris should adopt a durable memory system closer to Hermes, but implemented
+at the Polaris and Paseo boundary rather than inside one harness.
+
+That means Polaris should support:
+
+- bounded persistent memory files
+- separate workspace memory and user memory
+- explicit memory write operations
+- background review that proposes or writes memories
+- optional approval before writes land
+- frozen prompt snapshots for session stability
+- optional external memory providers
+
+The goal is not to learn `AGENTS.md`, and not to create skills.
+
+The goal is to remember:
+
+- project facts
+- environment facts
+- operator preferences
+- durable learned facts
+
+across sessions, in a generic way that different harnesses can consume.
 
 ## What Changes
 
-- Introduce explicit lesson-learning triggers such as `POLARIS-LEARN-IT`, `POLARIS-RECALL`, `POLARIS-DONT-LEARN`, and `POLARIS-EPHEMERAL`.
-- Add a lesson-centric artifact model that stores short summaries, usage guidance, and retrieval tags instead of autonomous skill definitions.
-- Add a lightweight summarization path that can use a cheap coding-capable model only when a run is explicitly marked for learning or when a meaningful success/failure should be distilled.
-- Make daemon-level context injection the shared retrieval path so both Paseo CLI runs and web-portal runs receive the same recalled lessons.
-- Add policy for when lessons are created automatically versus only by explicit trigger, with conservative defaults that prioritize user-issued learning signals.
+- Replace the lesson and generated-skill model with a memory model centered on
+  bounded `MEMORY.md` and `USER.md`.
+- Introduce explicit memory operations equivalent to `add`, `replace`, and
+  `remove` at the Polaris layer.
+- Add a background review path that can propose or persist memory updates after
+  meaningful runs.
+- Add write-approval policy so memory writes can be automatic or staged for
+  operator approval.
+- Define frozen memory snapshot semantics so sessions load memory at session
+  start rather than mutating prompt context continuously mid-run.
+- Add optional memory-provider integration for retrieval, sync, and session-end
+  extraction.
 
 ## Capabilities
 
 ### New Capabilities
-- `experience-learning`: Explicit trigger-based lesson capture, summarization, storage, and retrieval for workspace and user-scoped experiences.
+
+- `workspace-memory`: Durable workspace and user memory with bounded local
+  files, write policy, review, retrieval, and provider integration.
 
 ### Modified Capabilities
-- `workspace-orchestration`: Agent runs gain shared daemon-level lesson recall behavior across both CLI and web-portal entrypoints.
-- `workspace-runtime-contract`: Runtime evolution state now includes daemon-observed lesson summaries and shared appended prompt refresh semantics.
+
+- `workspace-orchestration`: Agent sessions gain memory snapshot assembly and
+  memory-aware run lifecycle hooks.
+- `workspace-runtime-contract`: Runtime evolution state includes memory
+  artifacts, pending memory writes, and optional provider sync state.
 
 ## Impact
 
 - Affected code:
-  - `scripts/polaris/evolution/**`
-  - `scripts/polaris/backends/docker/render.ts`
-  - future Paseo daemon integration helpers and summarizer wiring
+  - `apps/polaris/scripts/evolution/**`
+  - `apps/polaris/scripts/backends/*/render.ts`
+  - future Paseo runtime-observer and review helpers
 - Affected systems:
-  - Paseo daemon config (`appendSystemPrompt`)
+  - workspace-local `MEMORY.md`
+  - user-scoped `USER.md`
+  - control-plane memory state under `config/users/<user-profile>/polaris/**`
   - runtime evolution state under `.paseo/evolution/`
-  - user/operator prompt conventions for explicit learning triggers
+  - optional external memory providers
 - Affected behavior:
-  - future runs may receive recalled lessons automatically or via explicit recall markers
-  - summarization token usage is introduced only for selected learning events, not every run
+  - future sessions load durable memory snapshots at session start
+  - runs may propose or persist memory updates after meaningful outcomes
+  - operator approval may gate memory writes
+  - external providers may enrich retrieval and post-run memory sync
