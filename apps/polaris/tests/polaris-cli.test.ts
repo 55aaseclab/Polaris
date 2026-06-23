@@ -880,6 +880,125 @@ test("provided-key user profile requires staged SSH private-key material", async
   });
 });
 
+test("provided-key user profile requires matching public-key comment", async () => {
+  const project = uniqueProjectName("provided-key-comment");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const profileId = "provided-key-comment-test";
+    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+    const userRoot = path.join(REPO_ROOT, "config", "users", profileId);
+    const credentialRoot = path.join(userRoot, "credentials");
+    const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
+    const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
+    const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
+    const privateKey = path.join(userRoot, "credentials", "ssh", "id_ed25519");
+    const publicKey = path.join(userRoot, "credentials", "ssh", "id_ed25519.pub");
+
+    fs.mkdirSync(path.dirname(privateKey), { recursive: true });
+    fs.mkdirSync(credentialRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Provided Key User",
+        email: "provided@example.com",
+        ssh: {
+          mode: "provided-key",
+          comment: "expected@example.com",
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(credentialRoot, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profileId,
+        kind: "codex-auth",
+        label: "Default Codex auth",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "credentials/codex/auth.json",
+            },
+            {
+              key: "codex-config.toml",
+              source_path: "credentials/codex/config.toml",
+            },
+            {
+              key: "claude-settings.json",
+              source_path: "credentials/claude/settings.json",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(credentialRoot, "github-ssh.yaml"),
+      yaml.dump({
+        id: "github-ssh",
+        userId: profileId,
+        kind: "ssh-key",
+        label: "GitHub SSH key",
+        purposes: ["git-auth", "ssh-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-ssh-state/default",
+          files: [
+            {
+              key: "id_ed25519",
+              source_path: "credentials/ssh/id_ed25519",
+            },
+            {
+              key: "id_ed25519.pub",
+              source_path: "credentials/ssh/id_ed25519.pub",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(codexAuth, "{}\n", "utf8");
+    fs.writeFileSync(codexConfig, "model = 'gpt-5'\n", "utf8");
+    fs.writeFileSync(claudeSettings, "{}\n", "utf8");
+    fs.writeFileSync(privateKey, "dummy-private-key\n", "utf8");
+    fs.writeFileSync(publicKey, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey wrong@example.com\n", "utf8");
+
+    try {
+      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+      doc.user_profile = profileId;
+      doc.credentials = {
+        bindings: [
+          {
+            purpose: "agent-auth",
+            credential_id: "codex-default",
+            required: true,
+          },
+          {
+            purpose: "git-auth",
+            credential_id: "github-ssh",
+            required: true,
+          },
+        ],
+      };
+      fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+      assert.throws(() => loadWorkspace(`${project}@docker`), /public-key comment 'expected@example.com'/);
+    } finally {
+      fs.rmSync(profilePath, { force: true });
+      fs.rmSync(userRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 test("docker render keys user-scoped identity volumes by user profile id", () => {
   const workspace = loadWorkspace("demo@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);

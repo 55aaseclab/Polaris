@@ -121,7 +121,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       const name = file.mountPath.split("/").pop();
       return name
         ? [
-            `if [ ! -f /ssh/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/ssh/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            `${workspace.userProfile.ssh.mode === "provided-key" ? "" : `if [ ! -f /ssh/${name} ]; then `}python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/ssh/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)};${workspace.userProfile.ssh.mode === "provided-key" ? "" : " fi"}`,
             `chmod 600 /ssh/${name} || true`,
           ]
         : [];
