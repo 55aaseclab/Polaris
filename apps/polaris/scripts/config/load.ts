@@ -591,6 +591,11 @@ function normalizeDirectDurableAttachmentConfig(raw: unknown): DirectDurableAtta
       volumeRef: (entry.source as Record<string, unknown> | undefined)?.volume_ref ? String((entry.source as Record<string, unknown>).volume_ref) : undefined,
       volumeSize: (entry.source as Record<string, unknown> | undefined)?.volume_size ? String((entry.source as Record<string, unknown>).volume_size) : undefined,
       subPath: (entry.source as Record<string, unknown> | undefined)?.sub_path ? String((entry.source as Record<string, unknown>).sub_path) : undefined,
+      server: (entry.source as Record<string, unknown> | undefined)?.server ? String((entry.source as Record<string, unknown>).server) : undefined,
+      exportPath: (entry.source as Record<string, unknown> | undefined)?.export_path ? String((entry.source as Record<string, unknown>).export_path) : undefined,
+      mountOptions: Array.isArray((entry.source as Record<string, unknown> | undefined)?.mount_options)
+        ? ((entry.source as Record<string, unknown>).mount_options as unknown[]).map((item) => String(item))
+        : undefined,
       description: (entry.source as Record<string, unknown> | undefined)?.description ? String((entry.source as Record<string, unknown>).description) : undefined,
     },
   };

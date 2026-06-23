@@ -54,9 +54,16 @@ attachments:
     durable_paths:
       - /workspace/project
     source:
-      kind: persistent-volume
-      volume_ref: morpheus-project
-      description: reusable docker workspace data for morpheus
+      kind: netfs
+      server: 127.0.0.1
+      export_path: /
+      mount_options:
+        - nfsvers=4
+        - hard
+        - rw
+      volume_ref: morpheus-workspace-data
+      volume_size: 120Gi
+      description: docker consumes the authoritative morpheus workspace-data PVC through the exporter
   workspace-runtime-state:
     scope: workspace
     sharing: exclusive

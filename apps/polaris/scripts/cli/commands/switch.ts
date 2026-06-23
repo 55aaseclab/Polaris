@@ -404,6 +404,12 @@ export async function switchCommand(projectRef: string): Promise<void> {
     throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
   }
   ensureProvisionedWorkspace(projectRef);
+  const targetRef = backendHint === "pod" && profileHint
+    ? `${project}@${backendHint}:${profileHint}`
+    : `${project}@${backendHint}`;
+  ensureWorkspaceConfig(targetRef);
+  const previewWorkspace = loadWorkspace(targetRef);
+  await getBackendDriver(previewWorkspace.backend.kind).render(previewWorkspace);
 
   const previousSelection = readWorkspaceDriverSelection(project);
   const previousBackend = previousSelection?.backend;
@@ -421,9 +427,6 @@ export async function switchCommand(projectRef: string): Promise<void> {
     backend: backendHint,
     profile: backendHint === "pod" ? profileHint : undefined,
   });
-  const targetRef = backendHint === "pod" && profileHint
-    ? `${project}@${backendHint}:${profileHint}`
-    : `${project}@${backendHint}`;
   const { workspace, driver } = await loadExecutableWorkspaceForCommand("start", targetRef);
   const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm" ? 600000 : 45000;
   try {

@@ -4,7 +4,12 @@ export type LifecycleAction = "create" | "start" | "stop" | "restart" | "rebuild
 export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
 export type AttachmentScope = "workspace" | "user";
 export type AttachmentSharing = "exclusive" | "cross-workspace";
-export type AttachmentSourceKind = "persistent-volume" | "secret-material" | "generated-material" | "legacy-backend";
+export type AttachmentSourceKind =
+  | "persistent-volume"
+  | "secret-material"
+  | "generated-material"
+  | "legacy-backend"
+  | "netfs";
 export type DirectAttachmentConfigKey = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
 
 export interface PlainEnvVar {
@@ -140,6 +145,9 @@ export interface DurableAttachment {
     volumeRef?: string;
     volumeSize?: string;
     subPath?: string;
+    server?: string;
+    exportPath?: string;
+    mountOptions?: string[];
     description?: string;
   };
 }
@@ -154,6 +162,9 @@ export interface DirectDurableAttachmentConfig {
     volumeRef?: string;
     volumeSize?: string;
     subPath?: string;
+    server?: string;
+    exportPath?: string;
+    mountOptions?: string[];
     description?: string;
   };
 }

@@ -51,10 +51,17 @@ attachments:
     durable_paths:
       - /workspace/project
     source:
-      kind: persistent-volume
+      kind: netfs
+      server: netfs.local
+      export_path: /exports/polaris/workspaces
+      sub_path: demo
+      mount_options:
+        - nfsvers=4.1
+        - hard
+        - rw
       volume_ref: demo-workspace-data
       volume_size: 120Gi
-      description: reusable workspace data for demo
+      description: shared workspace data for demo
   workspace-runtime-state:
     scope: workspace
     sharing: exclusive

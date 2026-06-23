@@ -76,6 +76,23 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.attachments.userSshState.scope !== "user" || workspace.attachments.userSshState.sharing !== "cross-workspace") {
     throw new Error("user-ssh-state must remain user-scoped and cross-workspace");
   }
+  if (workspace.attachments.workspaceRuntimeState.source.kind === "netfs") {
+    throw new Error("workspace-runtime-state must not use a netfs source");
+  }
+  if (workspace.attachments.userIdentityState.source.kind === "netfs") {
+    throw new Error("user-identity-state must not use a netfs source");
+  }
+  if (workspace.attachments.userSshState.source.kind === "netfs") {
+    throw new Error("user-ssh-state must not use a netfs source");
+  }
+  if (workspace.attachments.workspaceData.source.kind === "netfs") {
+    if (!workspace.attachments.workspaceData.source.server?.trim()) {
+      throw new Error("workspace-data netfs source requires a server");
+    }
+    if (!workspace.attachments.workspaceData.source.exportPath?.trim()) {
+      throw new Error("workspace-data netfs source requires an export path");
+    }
+  }
   const managerStateToken = terminalPathToken(workspace.agent.runtime.stateRoot);
   const evolutionStateToken = terminalPathToken(workspace.agent.runtime.evolutionRoot);
   if (
