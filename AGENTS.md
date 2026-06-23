@@ -11,4 +11,6 @@
   instead.
 - Add comments when they improve clarity.
 - Do not cheat around constraints, tests, or review expectations.
+- Do not say "if you want" when the next step is clear; default to taking
+  action directly.
 - If you are uncertain, ask instead of fabricating results under pressure.
