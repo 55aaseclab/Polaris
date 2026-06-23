@@ -232,10 +232,19 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C fixture@polaris -N "" -f /ssh/id_ed25519; fi'`,
     `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
   );
-  if (workspace.evolution?.bootstrapContextFile && workspace.evolution.bootstrapContextContent) {
+  const evolutionOutputs = [
+    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
+    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
+    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+  ] as Array<[string | undefined, string | undefined]>;
+  const writes = evolutionOutputs
+    .filter(([filePath, content]) => Boolean(filePath && content))
+    .map(([filePath, content]) => `      - |\n        cat >${filePath} <<'EOF'\n${indentBlock(content || "", 8)}\n        EOF`)
+    .join("\n");
+  if (writes) {
     renderedCloudinit = renderedCloudinit.replace(
       "      - chmod 1777 /run/workspace/tmp",
-      `      - chmod 1777 /run/workspace/tmp\n      - |\n        cat >${workspace.evolution.bootstrapContextFile} <<'EOF'\n${indentBlock(workspace.evolution.bootstrapContextContent, 8)}\n        EOF`,
+      `      - chmod 1777 /run/workspace/tmp\n${writes}`,
     );
   }
   if (sshPrivateKey) {

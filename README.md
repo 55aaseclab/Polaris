@@ -44,7 +44,10 @@ Use $use-polaris to set up Polaris locally with Docker for project <project>.
 ## Documentation
 
 - [docs/polaris/README.md](./docs/polaris/README.md)
-- [docs/polaris/maturity-map.md](./docs/polaris/maturity-map.md)
+- [docs/polaris/workspace-maturity.md](./docs/polaris/workspace-maturity.md)
+- [docs/polaris/isolation-maturity.md](./docs/polaris/isolation-maturity.md)
+- [docs/polaris/agent-swarm-maturity.md](./docs/polaris/agent-swarm-maturity.md)
+- [docs/polaris/evolution-maturity.md](./docs/polaris/evolution-maturity.md)
 - [Support multiple machines with k3s](./docs/operations/setup-k3s-across-multiple-machines.md)
 
 ## Contributing

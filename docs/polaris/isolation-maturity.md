@@ -1,4 +1,46 @@
-# Runtime Layout
+# Isolation Maturity
+
+## Short Version
+
+For `Isolation`, Polaris has the more explicit substrate model.
+`Coder` has the more mature production operating model.
+
+## Polaris Today
+
+- Isolation is a core design concern.
+- Polaris can target:
+  - `pod`
+  - `kubevirt-vm`
+  - `docker`
+- Pod and VM paths are treated as first-class runtime backends.
+- The control plane reasons about runtime assembly and state inside those
+  environments.
+
+## Coder Today
+
+Coder is mature on workspace provisioning and secure self-hosted environments,
+but its product center of gravity is not "multi-backend isolation as a first
+class abstraction" in the same explicit way Polaris models it.
+
+Coder is stronger on:
+
+- production deployment maturity
+- admin controls
+- enterprise governance
+- broad infrastructure integration
+
+## Gap
+
+Polaris has the more explicit isolation substrate model.
+
+Coder has the more mature production operational model.
+
+## Polaris Strength
+
+- Stronger conceptual split between workspace intent and backend realization
+- Clearer runtime-state and attachment semantics across isolation surfaces
+- Better foundation for saying "this workspace can move across pod/vm/docker
+  while keeping the same logical contract"
 
 ## Backend Model
 
@@ -11,7 +53,8 @@
 
 ## Attachment Model
 
-Durable state is modeled as attachment classes, not as a persisted runtime home:
+Durable state is modeled as attachment classes, not as a persisted runtime
+home:
 
 - `workspace-data`
   - workspace-scoped
@@ -52,17 +95,20 @@ Long-term target layout:
 
 ```text
 config/
-  pod/
-    profiles/
-  users/
-    profiles/
-    <user>/
-      credentials/
+  specs/
+    base/
+    pod/
+      profiles/
       projects/
-        <project>/
-          *.agent.yaml
-          generated/
-          state/
+    kubevirt/
+      projects/
+    docker/
+      projects/
+  generated/
+    pod/
+    kubevirt/
+    docker/
+  state/
 ```
 
 Profiles are part of the workspace intent layer. A workspace may select a
@@ -101,11 +147,9 @@ credentials:
 
 ## Current Reality
 
-- New onboarding should start from
-  `config/users/<user>/projects/<project>/docker.agent.yaml`
-  and `config/users/<user>/projects/<project>/generated/docker.yaml`.
-- New TypeScript code prefers user-scoped saved specs and generated artifacts
-  under `config/users/**`.
+- New onboarding should start from `config/specs/docker/projects/*.agent.yaml`
+  and `config/generated/docker/*.yaml`.
+- New TypeScript code prefers `config/specs/**` and `config/generated/**`.
 - Repo-managed specs now declare attachment classes directly.
 - Repo-managed specs may also declare credential bindings directly.
 - The control plane translates legacy path-centric persistence fields only as a
@@ -121,12 +165,10 @@ credentials:
 
 For Docker specifically:
 
-- saved intent lives under `config/users/<user>/projects/<project>/`
-- rendered output lives under
-  `config/users/<user>/projects/<project>/generated/`
+- saved intent lives under `config/specs/docker/projects/`
+- rendered output lives under `config/generated/docker/`
 - the rendered artifact is a Docker Compose file consumed by `docker compose`
-- `status` also writes a synthesized control-plane view to
-  `config/users/<user>/projects/<project>/state/`
+- `status` also writes a synthesized control-plane view to `config/state/`
 - when the same project name exists across multiple backends, operators can use
   `<project>@docker`, `<project>@pod`, or `<project>@kubevirt-vm` to select the
   intended saved spec
@@ -148,3 +190,13 @@ WorkspaceSpec
 
 This makes live workspace truth a control-plane concern rather than a thin
 backend-local status response.
+
+## TODO Toward Coder Maturity
+
+- Make backend parity boring:
+  same lifecycle quality, same diagnostics, same docs, same recovery behavior.
+- Add stronger backend capability matrices and preflight validation.
+- Add operational SLO-level observability for backend provisioning and runtime
+  failures.
+- Add safer rollback and repair flows for backend-specific failures.
+- Add platform install stories that are simpler than reading repo internals.

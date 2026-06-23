@@ -1,38 +1,141 @@
 ## ADDED Requirements
 
-### Requirement: Polaris SHALL support explicit lesson-learning trigger markers
-The system SHALL recognize explicit lesson-learning trigger markers in real agent-run context. The initial trigger vocabulary SHALL include `POLARIS-LEARN-IT`, `POLARIS-RECALL`, `POLARIS-DONT-LEARN`, and `POLARIS-EPHEMERAL`.
+### Requirement: Polaris SHALL provide durable workspace and user memory
 
-#### Scenario: Explicit learn trigger marks a run for persistence
-- **WHEN** a user issues a run that contains `POLARIS-LEARN-IT`
-- **THEN** Polaris SHALL treat the run as a candidate for durable lesson summarization and storage
+The system SHALL provide two primary durable memory surfaces:
 
-#### Scenario: Explicit recall trigger requests prior lessons
-- **WHEN** a user issues a run that contains `POLARIS-RECALL`
-- **THEN** Polaris SHALL retrieve and inject relevant prior lessons for that run
+- workspace memory
+- user memory
 
-#### Scenario: Explicit do-not-learn trigger suppresses persistence
-- **WHEN** a run contains `POLARIS-DONT-LEARN`
-- **THEN** Polaris SHALL NOT persist a new durable lesson from that run unless the operator overrides the suppression explicitly
+The workspace memory SHALL store project and environment facts.
+The user memory SHALL store durable operator preferences and user-specific
+facts.
+The workspace memory SHALL have a workspace-local runtime path and a
+control-plane mirror.
+The user memory SHALL have a user-profile control-plane path and a runtime
+path assembled from user identity state.
 
-### Requirement: Polaris SHALL persist lessons as structured summaries rather than skills
-The system SHALL store durable learning artifacts as structured lessons with title, summary, usage guidance, retrieval tags, source metadata, confidence, and scope. The system SHALL NOT treat those artifacts as autonomous skills in this capability.
+#### Scenario: Workspace fact is persisted durably
 
-#### Scenario: Structured lesson is stored for a meaningful run
-- **WHEN** Polaris persists a lesson from an explicitly marked or meaningful run
-- **THEN** the stored artifact SHALL include a concise summary, when-to-use guidance, tags, source session metadata, and confidence
+- **WHEN** Polaris learns or is told a durable project or environment fact
+- **THEN** it SHALL persist that fact in workspace-scoped memory rather than in
+  user-scoped memory
 
-#### Scenario: Skill creation remains out of scope
-- **WHEN** Polaris persists an experience-derived artifact in this capability
-- **THEN** it SHALL store a lesson record and SHALL NOT create or promote an autonomous skill definition
+#### Scenario: User preference is persisted durably
 
-### Requirement: Polaris SHALL use selective summarization for lesson distillation
-The system SHALL use model-based lesson distillation only for selected runs, including explicit learn-triggered runs and meaningful success or failure events. Routine runs without an explicit trigger or notable outcome SHALL NOT require model summarization.
+- **WHEN** Polaris learns or is told a durable operator preference
+- **THEN** it SHALL persist that preference in user-scoped memory rather than
+  in workspace-scoped memory
 
-#### Scenario: Triggered run uses cheap summarizer
-- **WHEN** a run includes `POLARIS-LEARN-IT`
-- **THEN** Polaris SHALL be allowed to invoke a cheap coding-capable summarizer model to distill a lesson from the captured experience
+#### Scenario: Memory paths are deterministic
 
-#### Scenario: Routine run avoids unnecessary summarization cost
-- **WHEN** a run has no explicit learning trigger and no meaningful success or failure to distill
-- **THEN** Polaris SHALL NOT invoke lesson summarization for that run
+- **WHEN** Polaris prepares durable memory for a workspace session
+- **THEN** workspace memory SHALL map to `<workspaceData>/.polaris/MEMORY.md`
+- **AND** user memory SHALL map to `<userIdentityState>/polaris/USER.md`
+- **AND** the control-plane workspace memory mirror SHALL map to
+  `config/users/<user-profile>/polaris/workspaces/<project>/MEMORY.md`
+- **AND** the control-plane user memory path SHALL map to
+  `config/users/<user-profile>/polaris/USER.md`
+
+### Requirement: Polaris SHALL expose explicit memory operations
+
+The system SHALL support explicit memory operations with at least these
+semantics:
+
+- `add`
+- `replace`
+- `remove`
+
+Each memory operation SHALL carry source attribution and a reason.
+
+#### Scenario: Memory entry is added
+
+- **WHEN** Polaris persists a new durable fact
+- **THEN** it SHALL record an `add` operation with source attribution and
+  reason
+
+#### Scenario: Memory entry is corrected
+
+- **WHEN** Polaris updates an existing durable fact
+- **THEN** it SHALL record a `replace` operation rather than treating the new
+  fact as an unrelated append
+
+#### Scenario: Stale memory entry is removed
+
+- **WHEN** Polaris determines that a durable fact should no longer remain in
+  memory
+- **THEN** it SHALL support a `remove` operation with source attribution and
+  reason
+
+### Requirement: Polaris SHALL support memory review and approval policy
+
+The system SHALL support deriving memory updates from meaningful runs through
+background review.
+The system SHALL also support policy that either:
+
+- writes memory automatically
+- stages memory updates for approval before persistence
+
+#### Scenario: Review proposes pending memory update
+
+- **WHEN** a meaningful run yields a candidate durable fact and approval is
+  required
+- **THEN** Polaris SHALL record a pending memory update rather than writing it
+  immediately
+
+#### Scenario: Approved memory update is persisted
+
+- **WHEN** an operator approves a pending memory update
+- **THEN** Polaris SHALL apply the update to the correct durable memory
+  surface
+
+#### Scenario: Pending memory update uses structured record shape
+
+- **WHEN** Polaris stages a memory update for approval
+- **THEN** it SHALL persist a structured record containing target, operation,
+  stable key, reason, source attribution, proposal timestamp, and status
+
+### Requirement: Polaris SHALL assemble frozen session memory snapshots
+
+The system SHALL assemble memory into a session snapshot at session start.
+Memory writes that occur during the session MAY update durable state
+immediately, but they SHALL NOT require continuous prompt mutation in the
+current session.
+
+#### Scenario: Session sees start-of-session memory snapshot
+
+- **WHEN** a new agent session starts
+- **THEN** Polaris SHALL assemble workspace and user memory into a session
+  snapshot for that session
+
+#### Scenario: In-session memory write is deferred for next snapshot
+
+- **WHEN** Polaris persists memory during an active session
+- **THEN** the durable memory SHALL update, and the new memory SHALL become
+  available to later snapshots without requiring continuous prompt mutation in
+  the current session
+
+#### Scenario: Session snapshot has stable source format
+
+- **WHEN** Polaris assembles a session memory snapshot
+- **THEN** it SHALL render a manager-neutral markdown document containing
+  header metadata, workspace memory, user memory, and provider memory sections
+
+### Requirement: Polaris SHALL support optional external memory providers
+
+The system SHALL allow optional external memory providers that can enrich local
+memory retrieval and sync.
+Local durable memory surfaces SHALL remain authoritative unless policy says
+otherwise.
+
+#### Scenario: Provider enriches pre-run retrieval
+
+- **WHEN** a memory provider is enabled for a session
+- **THEN** Polaris MAY retrieve relevant external memories before assembling the
+  session snapshot
+
+#### Scenario: Approved local memory is synced externally
+
+- **WHEN** Polaris persists an approved durable memory update and provider sync
+  is enabled
+- **THEN** it MAY mirror that memory update to the external provider

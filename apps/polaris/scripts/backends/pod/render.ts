@@ -92,15 +92,20 @@ function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: Work
 }
 
 function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
-  const filePath = workspace.evolution?.bootstrapContextFile;
-  const content = workspace.evolution?.bootstrapContextContent;
-  if (!filePath || !content) {
-    return [];
-  }
-  const encoded = Buffer.from(content, "utf8").toString("base64");
-  return [
-    `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && \\`,
-  ];
+  const outputs = [
+    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
+    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
+    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+  ] as Array<[string | undefined, string | undefined]>;
+  return outputs.flatMap(([filePath, content]) => {
+    if (!filePath || !content) {
+      return [];
+    }
+    const encoded = Buffer.from(content, "utf8").toString("base64");
+    return [
+      `          python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)} && \\`,
+    ];
+  });
 }
 
 function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
@@ -240,10 +245,12 @@ function buildEnvLines(workspace: WorkspaceSpec): string[] {
   envLines.push(`          value: ${q(workspace.attachments.userSshState.mountRoot)}`);
   envLines.push("        - name: POLARIS_EVOLUTION_ROOT");
   envLines.push(`          value: ${q(workspace.agent.runtime.evolutionRoot)}`);
-  if (workspace.evolution?.bootstrapContextFile) {
-    envLines.push("        - name: POLARIS_EVOLUTION_CONTEXT_FILE");
-    envLines.push(`          value: ${q(workspace.evolution.bootstrapContextFile)}`);
-  }
+  envLines.push("        - name: POLARIS_WORKSPACE_MEMORY_FILE");
+  envLines.push(`          value: ${q(workspace.evolution?.workspaceMemoryFile ?? "")}`);
+  envLines.push("        - name: POLARIS_USER_MEMORY_FILE");
+  envLines.push(`          value: ${q(workspace.evolution?.userMemoryFile ?? "")}`);
+  envLines.push("        - name: POLARIS_MEMORY_SNAPSHOT_FILE");
+  envLines.push(`          value: ${q(workspace.evolution?.sessionSnapshotFile ?? "")}`);
   return envLines;
 }
 

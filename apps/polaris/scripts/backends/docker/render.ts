@@ -85,15 +85,20 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
 
 function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
-  const filePath = workspace.evolution?.bootstrapContextFile;
-  const content = workspace.evolution?.bootstrapContextContent;
-  if (!filePath || !content) {
-    return [];
-  }
-  const encoded = Buffer.from(content, "utf8").toString("base64");
-  return [
-    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
-  ];
+  const outputs = [
+    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
+    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
+    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+  ] as Array<[string | undefined, string | undefined]>;
+  return outputs.flatMap(([filePath, content]) => {
+    if (!filePath || !content) {
+      return [];
+    }
+    const encoded = Buffer.from(content, "utf8").toString("base64");
+    return [
+      `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
+    ];
+  });
 }
 
 function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
@@ -104,11 +109,10 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
   const script = fs.readFileSync(observerPath, "utf8");
   const encoded = Buffer.from(script, "utf8").toString("base64");
   const runtimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-observer.mjs`;
-  const toolRoot = `${workspace.runtime.home}/.local/polaris`;
   return [
     `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(runtimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
     `chmod 755 ${runtimePath}`,
-    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} POLARIS_TOOL_ROOT=${q(toolRoot)} POLARIS_PASEO_DAEMON_URL=${q("ws://127.0.0.1:6767/ws")} PASEO_HOME=${workspace.runtime.home}/.paseo node ${runtimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-observer.log 2>&1 &`,
+    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${runtimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-observer.log 2>&1 &`,
   ];
 }
 
@@ -242,7 +246,9 @@ ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
 ${portLines || '      - "6767:6767"'}
     environment:
       POLARIS_EVOLUTION_ROOT: ${workspace.agent.runtime.evolutionRoot}
-      POLARIS_EVOLUTION_CONTEXT_FILE: ${workspace.evolution?.bootstrapContextFile ?? ""}
+      POLARIS_WORKSPACE_MEMORY_FILE: ${workspace.evolution?.workspaceMemoryFile ?? ""}
+      POLARIS_USER_MEMORY_FILE: ${workspace.evolution?.userMemoryFile ?? ""}
+      POLARIS_MEMORY_SNAPSHOT_FILE: ${workspace.evolution?.sessionSnapshotFile ?? ""}
     volumes:
 ${workspaceDataVolume.mountBlock.join("\n")}
       - type: volume
