@@ -87,7 +87,9 @@ function daemonCheck(observed: BackendObservation["daemon"][keyof BackendObserva
   if (!observed) {
     return { state: "unknown" };
   }
-  return observed.observed ? { state: "ok", detail: observed.detail } : { state: "missing", detail: observed.detail };
+  return observed.observed
+    ? { state: "ok", detail: observed.detail, ...(observed.url ? { url: observed.url } : {}) }
+    : { state: "missing", detail: observed.detail, ...(observed.url ? { url: observed.url } : {}) };
 }
 
 export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: BackendObservation): WorkspaceDrift {

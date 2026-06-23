@@ -238,14 +238,14 @@ test("driver selection persists a default backend control", () => {
   cleanupSelectionFile(project);
 });
 
-test("workspaceLocalImageTag derives a neutral deterministic local tag", () => {
+test("workspaceImageRef derives a neutral deterministic ttl.sh reference", () => {
   assert.equal(
-    workspaceLocalImageTag("100000000000000002", "morpheus"),
-    "user-002-morpheus:local",
+    workspaceImageRef("100000000000000002", "morpheus"),
+    "ttl.sh/user-002-morpheus:24h",
   );
   assert.equal(
-    workspaceLocalImageTag("local-cyrus@example.com", "Feature Preview"),
-    "user-local-cyrus-example-com-feature-preview:local",
+    workspaceImageRef("local-cyrus@example.com", "Feature Preview"),
+    "ttl.sh/user-local-cyrus-example-com-feature-preview:24h",
   );
 });
 
@@ -946,6 +946,102 @@ exit 0
     },
   );
   cleanupSelectionFile("demo");
+});
+
+test("status includes the daemon pairing URL when the runtime exposes one", async () => {
+  cleanupSelectionFile("demo");
+  cleanupStatusFile("demo");
+
+  await withFakeCommands(
+    {
+      kubectl: `
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=test"}'
+  exit 0
+fi
+if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
+  exit 0
+fi
+exit 0
+`,
+    },
+    async () => {
+      const output = await captureStdout(async () => {
+        await runCli(["status", "demo@pod"]);
+      });
+      const parsed = parseJsonOutput<{ daemon?: { pairing?: { state?: string; url?: string } } }>(output);
+      assert.equal(parsed.daemon?.pairing?.state, "ok");
+      assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=test");
+    },
+  );
+});
+
+test("kubevirt status includes the daemon pairing URL when runtime state exposes one", async () => {
+  const project = uniqueProjectName("vm-pair-url");
+  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
+    await withFakeCommands(
+      {
+        kubectl: `
+if [[ "$*" == *"get vm ${project}-vm"* ]]; then
+  printf '${project}-vm'
+  exit 0
+fi
+if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+  printf 'Running'
+  exit 0
+fi
+if [[ "$*" == *"get svc ${project}"* ]]; then
+  printf '${project}'
+  exit 0
+fi
+if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
+  printf '${project}-vm-cloudinit'
+  exit 0
+fi
+if [[ "$*" == *"apply -f -"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pairing-inspect"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"cat /workspace/state/paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=vmtest"}'
+  exit 0
+fi
+if [[ "$*" == *"exec ${project}-pairing-inspect"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"delete pod ${project}-pairing-inspect"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"logs"* ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        const output = await captureStdout(async () => {
+          await runCli(["status", `${project}@kubevirt-vm`]);
+        });
+        const parsed = parseJsonOutput<{ daemon?: { pairing?: { url?: string; state?: string } } }>(output);
+        assert.equal(parsed.daemon?.pairing?.state, "ok");
+        assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=vmtest");
+      },
+    );
+  });
 });
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {

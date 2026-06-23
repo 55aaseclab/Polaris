@@ -4,6 +4,15 @@ import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../cor
 import { runCommand } from "../../utils/shell.js";
 import { renderAndWritePodWorkspace } from "./render.js";
 
+function extractPairingUrl(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw) as { url?: unknown };
+    return typeof parsed.url === "string" && parsed.url.trim() ? parsed.url.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class PodDriver implements BackendDriver {
   readonly kind = "pod" as const;
 
@@ -94,6 +103,15 @@ export class PodDriver implements BackendDriver {
       );
       return result.status === 0;
     };
+    const execOutput = (command: string): string => {
+      if (!podName) return "";
+      const result = spawnSync(
+        "kubectl",
+        ["-n", workspace.identity.projectName, "exec", podName, "--", "sh", "-lc", command],
+        { encoding: "utf8" },
+      );
+      return result.status === 0 ? String(result.stdout || "") : "";
+    };
 
     const observedServices = workspace.connectivity.servicePorts.length
       ? spawnSync(
@@ -122,6 +140,10 @@ export class PodDriver implements BackendDriver {
       running && workspace.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
+    const pairingUrl =
+      workspace.agent.enabled && podName && pairingObserved
+        ? extractPairingUrl(execOutput(`cat ${workspace.agent.runtime.pairingFile}`))
+        : undefined;
 
     return {
       backend: {
@@ -155,7 +177,7 @@ export class PodDriver implements BackendDriver {
             ? { observed: false, detail: workspace.agent.runtime.readyFile }
             : { observed: true, detail: "daemon not required" },
         pairing: workspace.health.requiresDaemon && running
-          ? { observed: pairingObserved, detail: workspace.agent.runtime.pairingFile }
+          ? { observed: pairingObserved, detail: workspace.agent.runtime.pairingFile, url: pairingUrl }
           : workspace.health.requiresDaemon
             ? { observed: false, detail: workspace.agent.runtime.pairingFile }
             : { observed: true, detail: "daemon not required" },
