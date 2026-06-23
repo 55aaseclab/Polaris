@@ -6,7 +6,7 @@ import os from "node:os";
 import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
-import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import { workspaceConfigPath, workspaceLocalImageTag } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceEvolutionStateDir,
@@ -236,6 +236,17 @@ test("driver selection persists a default backend control", () => {
   assert.equal(parsed.backend, "pod");
   assert.equal(parsed.profile, "gvisor");
   cleanupSelectionFile(project);
+});
+
+test("workspaceLocalImageTag derives a neutral deterministic local tag", () => {
+  assert.equal(
+    workspaceLocalImageTag("100000000000000002", "morpheus"),
+    "user-002-morpheus:local",
+  );
+  assert.equal(
+    workspaceLocalImageTag("local-cyrus@example.com", "Feature Preview"),
+    "user-local-cyrus-example-com-feature-preview:local",
+  );
 });
 
 test("stored pod driver selection influences default workspace loading", () => {
