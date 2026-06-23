@@ -43,9 +43,8 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
 };
 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
-const USER_CREDENTIALS_DIR = path.join(REPO_ROOT, "config", "users", "credentials");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
-const POD_PROFILE_SPECS_DIR = path.join(REPO_ROOT, "config", "specs", "pod", "profiles");
+const POD_PROFILE_SPECS_DIR = path.join(REPO_ROOT, "config", "pod", "profiles");
 const SUPPORTED_CREDENTIAL_KINDS = new Set<CredentialKind>([
   "ssh-key",
   "api-key",
@@ -97,25 +96,41 @@ function loadPodProfileDefaults(profileName: string): { backendProfile?: string 
 }
 
 function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"]["kind"]): string[] {
+  const userScopedSpecs = (
+    backendKind: WorkspaceSpec["backend"]["kind"] | "kubevirt",
+  ): string[] => {
+    const backendFile =
+      backendKind === "kubevirt-vm" || backendKind === "kubevirt"
+        ? "kubevirt.agent.yaml"
+        : `${backendKind}.agent.yaml`;
+    const usersRoot = path.join(REPO_ROOT, "config", "users");
+    if (!fs.existsSync(usersRoot)) {
+      return [];
+    }
+    return fs
+      .readdirSync(usersRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(usersRoot, entry.name, "projects", project, backendFile));
+  };
   const preferredBackend =
     backendHint === "kubevirt-vm"
       ? "kubevirt"
       : backendHint;
   const configuredSpecs = [
-    path.join(REPO_ROOT, "config", "specs", "pod", "projects", `${project}.agent.yaml`),
-    path.join(REPO_ROOT, "config", "specs", "kubevirt", "projects", `${project}.agent.yaml`),
-    path.join(REPO_ROOT, "config", "specs", "docker", "projects", `${project}.agent.yaml`),
+    ...userScopedSpecs("pod"),
+    ...userScopedSpecs("kubevirt"),
+    ...userScopedSpecs("docker"),
   ];
   const orderedSpecs = preferredBackend
     ? [
-        path.join(REPO_ROOT, "config", "specs", preferredBackend, "projects", `${project}.agent.yaml`),
+        ...userScopedSpecs(preferredBackend),
         ...configuredSpecs.filter((candidate) => !candidate.includes(`/${preferredBackend}/`)),
       ]
     : configuredSpecs;
-  return [
+  return Array.from(new Set([
     ...orderedSpecs,
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`)
-  ];
+  ]));
 }
 
 function resolveWorkspaceProfile(rawProfile: unknown, projectName: string): WorkspaceProfile {
@@ -137,7 +152,7 @@ function userProfilePath(userProfileId: string): string {
 }
 
 function userCredentialRegistryDir(userProfileId: string): string {
-  return path.join(USER_CREDENTIALS_DIR, userProfileId);
+  return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
 }
 
 function sanitizeUserProfileId(raw: string): string {
@@ -158,6 +173,7 @@ function buildCompatibilityUserProfile(args: {
     name,
     email,
     secretsRoot: path.join("config", "users", id),
+    workspaces: [],
     github: {},
     ssh: {
       mode: "managed-key",
@@ -314,15 +330,19 @@ function loadUserCredentials(
   runtimeHome: string,
 ): Credential[] {
   const registryDir = userCredentialRegistryDir(userProfileId);
-  if (!fs.existsSync(registryDir)) {
+  const legacyRegistryDir = path.join(REPO_ROOT, "config", "users", "credentials", userProfileId);
+  const activeRegistryDir = fs.existsSync(registryDir)
+    ? registryDir
+    : legacyRegistryDir;
+  if (!fs.existsSync(activeRegistryDir)) {
     return [];
   }
   return fs
-    .readdirSync(registryDir)
+    .readdirSync(activeRegistryDir)
     .filter((entry) => entry.endsWith(".yaml") || entry.endsWith(".yml"))
     .sort()
     .map((entry) => {
-      const credentialPath = path.join(registryDir, entry);
+      const credentialPath = path.join(activeRegistryDir, entry);
       const data = (yaml.load(fs.readFileSync(credentialPath, "utf8")) ?? {}) as Record<string, unknown>;
       const id = String(data.id ?? "").trim();
       const userId = String(data.userId ?? data.user_id ?? "").trim();
@@ -505,6 +525,9 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       name: String(data.name ?? ""),
       email: String(data.email ?? ""),
       secretsRoot: path.join("config", "users", profileId),
+      workspaces: Array.isArray(data.workspaces)
+        ? data.workspaces.map((item: unknown) => String(item)).filter(Boolean)
+        : [],
       github: {
         account: data.github?.account
           ? String(data.github.account)

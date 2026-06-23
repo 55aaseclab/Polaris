@@ -61,7 +61,7 @@ VM_NAME="demo-vm"
 WORKSPACE_IMAGE_REF="ttl.sh/polaris-demo-debian13-1782126452:24h"
 BUILD_WORKSPACE_IMAGE=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-KUBEVIRT_SPEC_PATH="${REPO_ROOT}/config/specs/kubevirt/projects/demo.agent.yaml"
+KUBEVIRT_SPEC_PATH="${REPO_ROOT}/config/users/100000000000000001/projects/demo/kubevirt.agent.yaml"
 DEFAULT_DOCKERFILE_PATH="${REPO_ROOT}/config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile"
 DOCKERFILE_PATH=""
 BUILD_CONTEXT="${REPO_ROOT}"
@@ -168,7 +168,7 @@ if [[ "${BUILD_WORKSPACE_IMAGE}" == "1" ]]; then
   WORKSPACE_IMAGE_REF="${WORKSPACE_IMAGE_OUTPUT}"
 fi
 
-SPEC_BASE_IMAGE="$(sed -n "s/^  base_image: //p" "${REPO_ROOT}/config/specs/kubevirt/projects/demo.agent.yaml" | head -n 1 | tr -d '\r')"
+SPEC_BASE_IMAGE="$(sed -n "s/^  base_image: //p" "${KUBEVIRT_SPEC_PATH}" | head -n 1 | tr -d '\r')"
 if [[ -n "${SPEC_BASE_IMAGE}" && "${SPEC_BASE_IMAGE}" != "${WORKSPACE_IMAGE_REF}" ]]; then
   log "warning: kubevirt saved spec base_image is '${SPEC_BASE_IMAGE}', but requested workspace-image is '${WORKSPACE_IMAGE_REF}'"
   log "warning: snapshot provenance may not match the current saved spec unless you update the spec first"

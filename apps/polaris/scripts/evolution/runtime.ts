@@ -2,16 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceSpec } from "../core/workspace.js";
+import { workspaceEvolutionStateDir } from "../output/state-store.js";
 import { EvolutionStore } from "./store.js";
 import { retrieveEvolutionContext, renderRetrievedArtifacts } from "./retriever.js";
 import { reviewExecutionCandidate } from "./reviewer.js";
 import { applyCuratorResult } from "./curator.js";
 import type { EvolutionExecutionEvent } from "./types.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
-
 function evolutionStateDir(workspace: WorkspaceSpec): string {
-  return path.join(REPO_ROOT, "config", "state", "evolution", workspace.identity.projectName);
+  return workspaceEvolutionStateDir(
+    workspace.identity.projectName,
+    workspace.userProfile.id,
+  );
 }
 
 function ensureDir(dir: string): void {

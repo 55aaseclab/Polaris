@@ -24,7 +24,7 @@ export async function statusCommand(project: string): Promise<void> {
       lastSessionId: evolutionSessionId,
     };
   }
-  const outputPath = writeWorkspaceStatus(status);
+  const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
   logInfo("cli", "status-synthesized", {
     project: status.project,
     backend: status.backend.kind,

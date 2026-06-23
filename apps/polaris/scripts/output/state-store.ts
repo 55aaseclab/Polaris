@@ -3,42 +3,115 @@ import path from "node:path";
 import type { WorkspaceStatus } from "../core/workspace.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
-const STATE_DIR = path.join(REPO_ROOT, "config", "state");
+const LEGACY_STATE_DIR = path.join(REPO_ROOT, "config", "state");
 
 export interface WorkspaceDriverSelection {
   backend: "docker" | "pod" | "kubevirt-vm";
   profile?: string;
 }
 
-function selectionPath(project: string): string {
-  return path.join(STATE_DIR, `${project}.selection.json`);
+function projectRoot(project: string, userProfileId?: string): string | null {
+  if (userProfileId?.trim()) {
+    return path.join(
+      REPO_ROOT,
+      "config",
+      "users",
+      userProfileId.trim(),
+      "projects",
+      project,
+    );
+  }
+
+  const usersRoot = path.join(REPO_ROOT, "config", "users");
+  if (!fs.existsSync(usersRoot)) {
+    return null;
+  }
+
+  const matches = fs
+    .readdirSync(usersRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(usersRoot, entry.name, "projects", project))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+
+  return matches[0] ?? null;
 }
 
-export function writeWorkspaceStatus(status: WorkspaceStatus): string {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  const outputPath = path.join(STATE_DIR, `${status.project}.status.json`);
+export function workspaceStateDir(project: string, userProfileId?: string): string {
+  const root = projectRoot(project, userProfileId);
+  return root ? path.join(root, "state") : LEGACY_STATE_DIR;
+}
+
+export function workspaceStatusPath(project: string, userProfileId?: string): string {
+  const stateDir = workspaceStateDir(project, userProfileId);
+  if (stateDir === LEGACY_STATE_DIR) {
+    return path.join(stateDir, `${project}.status.json`);
+  }
+  return path.join(stateDir, "status.json");
+}
+
+export function workspaceSelectionPath(project: string, userProfileId?: string): string {
+  const stateDir = workspaceStateDir(project, userProfileId);
+  if (stateDir === LEGACY_STATE_DIR) {
+    return path.join(stateDir, `${project}.selection.json`);
+  }
+  return path.join(stateDir, "selection.json");
+}
+
+function legacyWorkspaceStatusPath(project: string): string {
+  return path.join(LEGACY_STATE_DIR, `${project}.status.json`);
+}
+
+function legacyWorkspaceSelectionPath(project: string): string {
+  return path.join(LEGACY_STATE_DIR, `${project}.selection.json`);
+}
+
+export function workspaceEvolutionStateDir(project: string, userProfileId?: string): string {
+  return path.join(workspaceStateDir(project, userProfileId), "evolution");
+}
+
+export function writeWorkspaceStatus(status: WorkspaceStatus, userProfileId?: string): string {
+  const outputPath = workspaceStatusPath(status.project, userProfileId);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
+  if (outputPath !== legacyWorkspaceStatusPath(status.project)) {
+    fs.rmSync(legacyWorkspaceStatusPath(status.project), { force: true });
+  }
   return outputPath;
 }
 
-export function readWorkspaceDriverSelection(project: string): WorkspaceDriverSelection | null {
-  const filePath = selectionPath(project);
-  if (!fs.existsSync(filePath)) {
-    return null;
+export function readWorkspaceDriverSelection(project: string, userProfileId?: string): WorkspaceDriverSelection | null {
+  const candidates = [
+    workspaceSelectionPath(project, userProfileId),
+    legacyWorkspaceSelectionPath(project),
+  ].filter((candidate, index, entries) => entries.indexOf(candidate) === index);
+
+  for (const filePath of candidates) {
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceDriverSelection;
+    if (parsed.backend !== "docker" && parsed.backend !== "pod" && parsed.backend !== "kubevirt-vm") {
+      return null;
+    }
+    if (parsed.profile !== undefined && typeof parsed.profile !== "string") {
+      return null;
+    }
+    return parsed;
   }
-  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceDriverSelection;
-  if (parsed.backend !== "docker" && parsed.backend !== "pod" && parsed.backend !== "kubevirt-vm") {
-    return null;
-  }
-  if (parsed.profile !== undefined && typeof parsed.profile !== "string") {
-    return null;
-  }
-  return parsed;
+  return null;
 }
 
-export function writeWorkspaceDriverSelection(project: string, selection: WorkspaceDriverSelection): string {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  const outputPath = selectionPath(project);
+export function writeWorkspaceDriverSelection(
+  project: string,
+  selection: WorkspaceDriverSelection,
+  userProfileId?: string,
+): string {
+  const outputPath = workspaceSelectionPath(project, userProfileId);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(selection, null, 2)}\n`, "utf8");
+  if (outputPath !== legacyWorkspaceSelectionPath(project)) {
+    fs.rmSync(legacyWorkspaceSelectionPath(project), { force: true });
+  }
   return outputPath;
 }

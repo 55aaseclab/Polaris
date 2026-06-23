@@ -2,8 +2,7 @@ project: demo
 user_profile: '100000000000000001'
 backend:
   kind: kubevirt-vm
-  spec_files:
-    - config/kubevirt/specs/demo.agent.yaml
+  spec_files: null
 credentials:
   bindings:
     - purpose: agent-auth
