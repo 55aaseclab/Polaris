@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
+import { assertNoProjectNameCollision } from "./project-ownership.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
@@ -51,6 +52,7 @@ export function workspaceConfigPath(
 }
 
 export function workspaceConfigExists(project: string): boolean {
+  assertNoProjectNameCollision(project);
   const userScopedRoot = path.join(REPO_ROOT, "config", "users");
   const userScopedMatches = fs.existsSync(userScopedRoot)
     ? fs.readdirSync(userScopedRoot, { withFileTypes: true })
