@@ -290,9 +290,16 @@ export interface WorkspaceSpec {
   runtimeContract: WorkspaceRuntimeContract;
   health: WorkspaceHealthPolicy;
   evolution?: {
-    bootstrapContextFile: string;
-    bootstrapContextContent: string;
-    controlPlaneSnapshotPath?: string;
+    workspaceMemoryFile: string;
+    workspaceMemoryContent: string;
+    userMemoryFile: string;
+    userMemoryContent: string;
+    sessionSnapshotFile: string;
+    sessionSnapshotContent: string;
+    controlPlaneWorkspaceMemoryPath?: string;
+    controlPlaneUserMemoryPath?: string;
+    controlPlaneSessionSnapshotPath?: string;
+    controlPlanePendingMemoryPath?: string;
     artifactCount: number;
   };
 }
@@ -328,6 +335,7 @@ export interface WorkspaceStatus {
       curatorReason?: string;
       suppressedBecause?: string;
     }>;
+    pendingMemoryChanges?: number;
     lastSessionId?: string;
   };
   ssh?: {

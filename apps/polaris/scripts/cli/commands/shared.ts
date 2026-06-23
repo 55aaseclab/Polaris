@@ -7,7 +7,7 @@ import {
   appendEvolutionEvent,
   createEvolutionSessionId,
   finalizeEvolutionSession,
-  prepareEvolutionBootstrapContext,
+  prepareEvolutionMemorySnapshot,
 } from "../../evolution/runtime.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
 
@@ -37,7 +37,7 @@ export async function loadExecutableWorkspaceForCommand(
 }> {
   ensureProvisionedWorkspace(projectRef);
   const { workspace, driver } = loadWorkspaceForCommand(command, projectRef);
-  const preparedWorkspace = await prepareEvolutionBootstrapContext(workspace);
+  const preparedWorkspace = await prepareEvolutionMemorySnapshot(workspace);
   return { workspace: preparedWorkspace, driver };
 }
 

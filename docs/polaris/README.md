@@ -212,5 +212,7 @@ pnpm --dir apps/polaris run polaris -- status <project>
 
 ## More Docs
 
-- [runtime-layout.md](./runtime-layout.md)
-- [evolution-kernel.md](./evolution-kernel.md)
+- [workspace-maturity.md](./workspace-maturity.md)
+- [isolation-maturity.md](./isolation-maturity.md)
+- [agent-swarm-maturity.md](./agent-swarm-maturity.md)
+- [evolution-maturity.md](./evolution-maturity.md)
