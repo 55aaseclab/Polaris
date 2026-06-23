@@ -35,7 +35,6 @@ config/users/profiles/**
 !config/users/*/projects/
 !config/users/*/projects/*/
 config/users/*/**
-!config/users/*/projects/*/*.agent.yaml
 !config/users/profiles/100000000000000001.yaml
 !config/users/100000000000000001/.gitignore
 !config/users/100000000000000001/credentials/
