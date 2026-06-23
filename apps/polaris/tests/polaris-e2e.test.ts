@@ -221,6 +221,49 @@ test("create scaffolds a docker-first saved spec when the project is new", async
   }
 });
 
+test("create scaffolds a requested pod spec from the docker source of truth", async () => {
+  const project = `e2e-create-pod-${Date.now()}`;
+  const profileEmail = `${project}@polaris.local`;
+  const userProfileId = `local-${project}-polaris.local`;
+  const dockerConfigPath = workspaceConfigPath(project, "docker", userProfileId);
+  const podConfigPath = workspaceConfigPath(project, "pod", userProfileId);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+
+  try {
+    await withEnv(
+      {
+        GIT_AUTHOR_NAME: "E2E Create Pod",
+        GIT_AUTHOR_EMAIL: profileEmail,
+      },
+      async () => {
+        const output = await captureStdout(async () => {
+          await runCli(["create", `${project}@pod:gvisor`]);
+        });
+        const parsed = parseJsonOutput<{
+          backend: string;
+          configPath: string;
+        }>(output);
+
+        assert.equal(parsed.backend, "pod");
+        assert.equal(parsed.configPath, podConfigPath);
+        assert.equal(fs.existsSync(dockerConfigPath), true);
+        assert.equal(fs.existsSync(podConfigPath), true);
+        const rendered = fs.readFileSync(podConfigPath, "utf8");
+        assert.match(rendered, /backend:\n  kind: pod/);
+        assert.match(rendered, /class: gvisor/);
+      },
+    );
+  } finally {
+    removeIfExists(dockerConfigPath);
+    removeIfExists(podConfigPath);
+    removeIfExists(profilePath);
+    removeIfExists(secretsRoot);
+    removeIfExists(credentialRoot);
+  }
+});
+
 test("default CLI dispatch uses status instead of apply", async () => {
   await withFakePath(
     {

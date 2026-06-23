@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getBackendDriver } from "../../backends/index.js";
 import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
+import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { readWorkspaceDriverSelection, writeWorkspaceDriverSelection } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
@@ -16,7 +17,9 @@ const SUPPORTED_BACKENDS: Array<WorkspaceSpec["backend"]["kind"]> = [
 
 function loadWorkspaceForBackend(project: string, backend: WorkspaceSpec["backend"]["kind"]): WorkspaceSpec | null {
   try {
-    return loadWorkspace(`${project}@${backend}`);
+    ensureWorkspaceConfig(`${project}@${backend}`);
+    const workspace = loadWorkspace(`${project}@${backend}`);
+    return workspace.backend.kind === backend ? workspace : null;
   } catch (error) {
     if (error instanceof Error && /Config not found/.test(error.message)) {
       return null;
@@ -405,6 +408,7 @@ export async function switchCommand(projectRef: string): Promise<void> {
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
     throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
   }
+  ensureProvisionedWorkspace(projectRef);
 
   const previousSelection = readWorkspaceDriverSelection(project);
   const previousBackend = previousSelection?.backend;

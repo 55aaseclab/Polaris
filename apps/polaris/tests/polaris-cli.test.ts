@@ -5,6 +5,8 @@ import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
+import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
+import { assertNoProjectNameCollision } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
@@ -247,6 +249,94 @@ test("workspaceImageRef derives a neutral deterministic ttl.sh reference", () =>
     workspaceImageRef("local-cyrus@example.com", "Feature Preview"),
     "ttl.sh/user-local-cyrus-example-com-feature-preview:24h",
   );
+});
+
+test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of truth", () => {
+  const project = uniqueProjectName("synth-pod");
+  const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+  fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+
+  const sourceDoc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+  sourceDoc.project = project;
+  fs.writeFileSync(dockerPath, yaml.dump(sourceDoc, { lineWidth: 120, noRefs: true }), "utf8");
+
+  try {
+    const synthesized = ensureWorkspaceConfig(`${project}@pod:gvisor`);
+    assert.equal(fs.existsSync(podPath), true);
+    assert.equal(synthesized?.configPath, podPath);
+    const podDoc = (yaml.load(fs.readFileSync(podPath, "utf8")) ?? {}) as Record<string, any>;
+    assert.equal(podDoc.backend.kind, "pod");
+    assert.equal(podDoc.runtime.class, "gvisor");
+    assert.equal(podDoc.runtime.base_image, sourceDoc.runtime.base_image);
+    assert.equal(podDoc.attachments["workspace-data"].source.volume_ref, `${project}-workspace-data`);
+    assert.equal(
+      podDoc.attachments["workspace-runtime-state"].source.volume_ref,
+      `${project}-workspace-runtime-state`,
+    );
+  } finally {
+    fs.rmSync(dockerPath, { force: true });
+    fs.rmSync(podPath, { force: true });
+  }
+});
+
+test("ensureCanonicalWorkspaceImage builds and pushes the canonical ttl image when it is missing", async () => {
+  const project = uniqueProjectName("image-provision");
+  const imageRef = workspaceImageRef(DEMO_USER_PROFILE_ID, project);
+  const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+
+  const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+  doc.project = project;
+  doc.user_profile = DEMO_USER_PROFILE_ID;
+  doc.runtime.base_image = imageRef;
+  fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+  try {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$1 $2 $3" == "image inspect ${imageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
+  exit 1
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        assert.deepEqual(readCommandLog(), [
+          `image inspect ${imageRef}`,
+          `pull ${imageRef}`,
+          `build -f ${path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")} -t ${imageRef} .`,
+          `push ${imageRef}`,
+        ]);
+      },
+    );
+  } finally {
+    fs.rmSync(dockerPath, { force: true });
+  }
+});
+
+test("project ownership check rejects collisions across users", () => {
+  const project = uniqueProjectName("collision");
+  const firstPath = workspaceConfigPath(project, "docker", "111111111111111111");
+  const secondPath = workspaceConfigPath(project, "docker", "222222222222222222");
+  fs.mkdirSync(path.dirname(firstPath), { recursive: true });
+  fs.mkdirSync(path.dirname(secondPath), { recursive: true });
+  fs.writeFileSync(firstPath, "project: collision\n", "utf8");
+  fs.writeFileSync(secondPath, "project: collision\n", "utf8");
+
+  try {
+    assert.throws(() => assertNoProjectNameCollision(project), /Project name collision/);
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", "111111111111111111"), { recursive: true, force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", "222222222222222222"), { recursive: true, force: true });
+  }
 });
 
 test("stored pod driver selection influences default workspace loading", () => {

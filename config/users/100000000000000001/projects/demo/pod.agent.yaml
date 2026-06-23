@@ -52,7 +52,8 @@ attachments:
       - /workspace/project
     source:
       kind: persistent-volume
-      volume_ref: demo-project
+      volume_ref: demo-workspace-data
+      volume_size: 120Gi
       description: reusable workspace data for demo
   workspace-runtime-state:
     scope: workspace
@@ -63,8 +64,8 @@ attachments:
       - /workspace/state/paseo/evolution
     source:
       kind: persistent-volume
-      volume_ref: demo-project
-      sub_path: state
+      volume_ref: demo-workspace-runtime-state
+      volume_size: 20Gi
       description: reusable workspace runtime state for demo
   user-identity-state:
     scope: user

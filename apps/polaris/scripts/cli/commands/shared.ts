@@ -1,5 +1,6 @@
 import { getBackendDriver } from "../../backends/index.js";
 import { loadWorkspace } from "../../config/load.js";
+import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
 import {
@@ -15,6 +16,7 @@ export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleActio
   driver: ReturnType<typeof getBackendDriver>;
 } {
   logInfo("cli", "load-workspace", { command, projectRef });
+  ensureWorkspaceConfig(projectRef);
   const workspace = loadWorkspace(projectRef);
   const driver = getBackendDriver(workspace.backend.kind);
   logDebug("cli", "workspace-loaded", {
@@ -33,6 +35,7 @@ export async function loadExecutableWorkspaceForCommand(
   workspace: WorkspaceSpec;
   driver: ReturnType<typeof getBackendDriver>;
 }> {
+  ensureProvisionedWorkspace(projectRef);
   const { workspace, driver } = loadWorkspaceForCommand(command, projectRef);
   const preparedWorkspace = await prepareEvolutionBootstrapContext(workspace);
   return { workspace: preparedWorkspace, driver };
