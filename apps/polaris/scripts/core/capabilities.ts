@@ -8,6 +8,12 @@ function terminalPathToken(filePath: string | undefined): string {
   return (parts[parts.length - 1] || "").replace(/^\.+/, "");
 }
 
+function parsePublicKeyComment(raw: string | undefined): string {
+  const text = String(raw || "").trim();
+  const parts = text.split(/\s+/);
+  return parts.length >= 3 ? parts.slice(2).join(" ") : "";
+}
+
 export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.identity.projectName) {
     throw new Error("Workspace project name is required");
@@ -128,8 +134,20 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     const sshPrivateKey = workspace.runtime.authFiles.find((entry) => {
       return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
     });
+    const sshPublicKey = workspace.runtime.authFiles.find((entry) => {
+      return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && entry.mountPath.endsWith(".pub");
+    });
     if (!sshPrivateKey) {
       throw new Error("User profile SSH mode 'provided-key' requires staged private-key material");
+    }
+    if (!sshPublicKey?.content) {
+      throw new Error("User profile SSH mode 'provided-key' requires staged public-key material");
+    }
+    const publicKeyComment = parsePublicKeyComment(sshPublicKey.content);
+    if (publicKeyComment !== workspace.userProfile.ssh.comment) {
+      throw new Error(
+        `User profile SSH mode 'provided-key' requires public-key comment '${workspace.userProfile.ssh.comment}', got '${publicKeyComment || "missing"}'`,
+      );
     }
   }
 
