@@ -19,6 +19,11 @@ fail() {
   exit 1
 }
 
+dump_pod_diagnostics() {
+  log "Pod diagnostics for ${POD_NAME}:"
+  k3s kubectl describe pod "$POD_NAME" || true
+}
+
 main() {
   [[ $EUID -eq 0 ]] || fail "Run this script with sudo or as root"
 
@@ -33,7 +38,10 @@ main() {
 
   log "Waiting for smoke test pod..."
   k3s kubectl wait --for=condition=Ready "pod/${POD_NAME}" --timeout=60s 2>/dev/null || true
-  k3s kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/${POD_NAME}" --timeout=60s
+  if ! k3s kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/${POD_NAME}" --timeout=60s; then
+    dump_pod_diagnostics
+    fail "Smoke test pod did not reach Succeeded"
+  fi
 
   local result
   result="$(k3s kubectl logs "$POD_NAME")"

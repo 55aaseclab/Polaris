@@ -8,12 +8,13 @@ import { rebuildCommand } from "./commands/rebuild.js";
 import { statusCommand } from "./commands/status.js";
 import { reconcileCommand } from "./commands/reconcile.js";
 import { logsCommand } from "./commands/logs.js";
+import { switchCommand } from "./commands/switch.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs"]);
+const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <status|create|start|stop|restart|rebuild|apply|render|reconcile|logs> <project>");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <status|create|start|stop|restart|rebuild|apply|render|reconcile|logs|switch> <project>");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -67,6 +68,10 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (command === "logs") {
     await logsCommand(project);
+    return;
+  }
+  if (command === "switch") {
+    await switchCommand(project);
     return;
   }
 

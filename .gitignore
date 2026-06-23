@@ -6,6 +6,7 @@ config/nvim/lazy-lock.json
 
 # OS/editor metadata
 .DS_Store
+.tmp
 .idea/
 .vscode/
 nohup.out

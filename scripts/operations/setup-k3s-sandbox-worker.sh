@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# setup-k3s-kata-worker.sh
-# Join an x86_64 Debian host to an existing k3s cluster and enable Kata runtimes
+# setup-k3s-sandbox-worker.sh
+# Join an x86_64 host to an existing k3s cluster and enable sandbox runtimes
 
 set -euo pipefail
 
@@ -18,8 +18,22 @@ KATA_QEMU_TDX_CONFIG="${KATA_CONFIG_DIR}/configuration-qemu-tdx.toml"
 GVISOR_KEYRING="/usr/share/keyrings/gvisor-archive-keyring.gpg"
 GVISOR_APT_SOURCE="/etc/apt/sources.list.d/gvisor.list"
 K3S_AGENT_CONFIG="/etc/rancher/k3s/config.yaml"
-CONTAINERD_TMPL="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
+CONTAINERD_TMPL_V2="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
+CONTAINERD_TMPL_V3="/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl"
+NODE_NAME="${K3S_NODE_NAME:-$(hostname -s)}"
 RESTART_NEEDED=false
+SERVER_ONLY_CONFIG_KEYS=(
+  "write-kubeconfig"
+  "write-kubeconfig-mode"
+  "cluster-init"
+  "disable-apiserver"
+  "disable-controller-manager"
+  "disable-scheduler"
+  "etcd-arg"
+  "kube-apiserver-arg"
+  "kube-controller-manager-arg"
+  "kube-scheduler-arg"
+)
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -30,8 +44,50 @@ fail() {
   exit 1
 }
 
+fail_missing_join_input() {
+  cat >&2 <<'EOF'
+[setup-k3s-sandbox-worker.sh] ERROR: Missing k3s worker join settings.
+
+Set these environment variables before running this script:
+
+  export K3S_URL=https://<control-plane-host-or-ip>:6443
+  export K3S_TOKEN='<server-node-token>'
+
+On the control-plane node, you can print the values with:
+
+  ./scripts/operations/print-k3s-worker-join-info.sh
+
+Then run this worker setup again, for example:
+
+  sudo K3S_URL=https://128.178.122.44:6443 \
+       K3S_TOKEN='K10...' \
+       ./scripts/operations/setup-k3s-sandbox-worker.sh
+EOF
+  exit 1
+}
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+default_runtime_labels() {
+  cat <<'EOF'
+polaris.runtime.kata-qemu=true
+polaris.runtime.kata-clh=true
+polaris.runtime.kata-qemu-tdx=true
+polaris.runtime.gvisor=true
+EOF
+}
+
+config_contains_server_only_keys() {
+  [[ -f "$K3S_AGENT_CONFIG" ]] || return 1
+  local key
+  for key in "${SERVER_ONLY_CONFIG_KEYS[@]}"; do
+    if grep -Eq "^[[:space:]]*${key}:" "$K3S_AGENT_CONFIG"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 preflight() {
@@ -39,8 +95,8 @@ preflight() {
   [[ "$(uname -m)" == "x86_64" ]] || fail "This worker path currently supports x86_64 only"
   grep -qE "vmx|svm" /proc/cpuinfo \
     || fail "VMX/SVM not found in /proc/cpuinfo. Enable hardware virtualisation in BIOS."
-  [[ -n "${K3S_URL:-}" ]] || fail "Set K3S_URL to your existing k3s server URL (for example https://server:6443)"
-  [[ -n "${K3S_TOKEN:-}" ]] || fail "Set K3S_TOKEN to the server node token"
+  [[ -n "${K3S_URL:-}" ]] || fail_missing_join_input
+  [[ -n "${K3S_TOKEN:-}" ]] || fail_missing_join_input
   log "Preflight passed (root, x86_64, VMX available, join settings present)"
 }
 
@@ -51,7 +107,7 @@ install_dependencies() {
 }
 
 install_k3s_agent() {
-  local tmp
+  local tmp combined_labels
 
   if command_exists k3s-agent; then
     log "k3s-agent already installed"
@@ -77,14 +133,26 @@ node-name: ${K3S_NODE_NAME}
 EOF
   fi
 
+  combined_labels="$(default_runtime_labels)"
   if [[ -n "${K3S_NODE_LABELS:-}" ]]; then
+    combined_labels="${combined_labels}"$'\n'"$(printf '%s\n' "$K3S_NODE_LABELS" | tr ',' '\n')"
+  fi
+
+  if [[ -n "$combined_labels" ]]; then
     {
       printf 'node-label:\n'
       while IFS= read -r label; do
         [[ -n "$label" ]] || continue
         printf '  - %s\n' "$label"
-      done <<< "$(printf '%s\n' "$K3S_NODE_LABELS" | tr ',' '\n')"
+      done <<< "$combined_labels"
     } >>"$tmp"
+  fi
+
+  if config_contains_server_only_keys; then
+    local backup_path
+    backup_path="${K3S_AGENT_CONFIG}.before-worker.$(date +%Y%m%d%H%M%S)"
+    cp "$K3S_AGENT_CONFIG" "$backup_path"
+    log "Backed up incompatible server-side k3s config to ${backup_path}"
   fi
 
   if cmp -s "$tmp" "$K3S_AGENT_CONFIG" 2>/dev/null; then
@@ -202,46 +270,87 @@ configure_containerd() {
   local tmp
   tmp="$(mktemp)"
   cat >"$tmp" <<'EOF'
-version = 2
+{{ template "base" . }}
 
-[plugins."io.containerd.grpc.v1.cri".cni]
-  bin_dir = "/var/lib/rancher/k3s/data/current/bin"
-  conf_dir = "/var/lib/rancher/k3s/agent/etc/cni/net.d"
-
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-  runtime_type = "io.containerd.runc.v2"
-
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-qemu']
   runtime_type = "io.containerd.kata.v2"
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu.options]
-    ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml"
 
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-qemu'.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-clh']
   runtime_type = "io.containerd.kata.v2"
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh.options]
-    ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-clh.toml"
 
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu-tdx]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-clh'.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-clh.toml"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-qemu-tdx']
   runtime_type = "io.containerd.kata.v2"
-  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu-tdx.options]
-    ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu-tdx.toml"
 
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-qemu-tdx'.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu-tdx.toml"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'runsc']
   runtime_type = "io.containerd.runsc.v1"
 EOF
 
-  if cmp -s "$tmp" "$CONTAINERD_TMPL" 2>/dev/null; then
-    log "containerd template already up to date"
+  if cmp -s "$tmp" "$CONTAINERD_TMPL_V3" 2>/dev/null; then
+    log "containerd v3 template already up to date"
     rm -f "$tmp"
   else
-    mkdir -p "$(dirname "$CONTAINERD_TMPL")"
-    mv "$tmp" "$CONTAINERD_TMPL"
-    log "containerd template written"
+    mkdir -p "$(dirname "$CONTAINERD_TMPL_V3")"
+    mv "$tmp" "$CONTAINERD_TMPL_V3"
+    log "containerd v3 template written"
+    RESTART_NEEDED=true
+  fi
+
+  if [[ -f "$CONTAINERD_TMPL_V2" ]]; then
+    rm -f "$CONTAINERD_TMPL_V2"
+    log "Removed legacy containerd v2 template to avoid precedence confusion"
     RESTART_NEEDED=true
   fi
 }
 
+live_containerd_config_has() {
+  local pattern="$1"
+  grep -Fq "$pattern" /var/lib/rancher/k3s/agent/etc/containerd/config.toml 2>/dev/null
+}
+
+ensure_runtime_restart_needed() {
+  local live_missing=false
+  if ! live_containerd_config_has "[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'runsc']" && \
+     ! live_containerd_config_has '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]'; then
+    log "Live k3s-agent containerd config does not yet include runsc; restart required"
+    live_missing=true
+  fi
+  if ! live_containerd_config_has 'runtime_type = "io.containerd.runsc.v1"'; then
+    log "Live k3s-agent containerd config does not yet include io.containerd.runsc.v1; restart required"
+    live_missing=true
+  fi
+  if [[ "$live_missing" == true ]]; then
+    RESTART_NEEDED=true
+  fi
+}
+
+verify_live_runtime_registration() {
+  log "Verifying live k3s-agent containerd runtime registration..."
+  if ! live_containerd_config_has "[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'kata-qemu']" && \
+     ! live_containerd_config_has '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu]'; then
+    fail "Live k3s-agent containerd config is missing kata-qemu runtime registration"
+  fi
+  if ! live_containerd_config_has "[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'runsc']" && \
+     ! live_containerd_config_has '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]'; then
+    fail "Live k3s-agent containerd config is missing runsc runtime registration"
+  fi
+  live_containerd_config_has 'runtime_type = "io.containerd.runsc.v1"' \
+    || fail "Live k3s-agent containerd config is missing io.containerd.runsc.v1"
+  command_exists runsc || fail "runsc is not installed on PATH"
+  command_exists containerd-shim-runsc-v1 || fail "containerd-shim-runsc-v1 is not installed on PATH"
+  log "Live runtime registration looks correct"
+}
+
 restart_and_wait() {
+  ensure_runtime_restart_needed
   if [[ "$RESTART_NEEDED" != true ]]; then
     log "No runtime changes detected; ensuring k3s-agent is running"
     systemctl enable --now k3s-agent
@@ -271,7 +380,8 @@ main() {
   configure_kata
   configure_containerd
   restart_and_wait
-  log "Worker setup complete. Verify from the server with: kubectl get nodes -o wide"
+  verify_live_runtime_registration
+  log "Worker setup complete. Verify from the control-plane with: kubectl get nodes --show-labels"
 }
 
 main "$@"

@@ -17,13 +17,9 @@ It manages development environments across `pod`, `docker`, and
 
 It keeps the agent layer external and replaceable.
 
-Today that means:
-
-- workspace specs are the source of truth
-- generated backend artifacts remain outputs
-- Docker is the clean default onboarding path
-- agent orchestration is built around `Paseo`
-- coding harnesses such as `Codex` and `Claude` stay external to Polaris
+Today that means you can run one machine or a fleet of them, create an
+isolated workspace from a spec, and use the full capacity of your own hardware
+while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
@@ -45,37 +41,11 @@ Then use this prompt for the fastest local Docker path:
 Use $use-polaris to set up Polaris locally with Docker for project <project>.
 ```
 
-## Install
-
-### Kubernetes Pods
-
-Use the pod backend when you want stronger sandboxing and the existing k3s
-runtime path.
-
-```bash
-sudo bash scripts/operations/setup-k3s-kata-gvisor.sh
-pnpm run polaris -- start morpheus@pod
-```
-
-### KubeVirt
-
-Use the KubeVirt backend when you want full VM workloads managed by the same
-control plane.
-
-```bash
-bash scripts/operations/setup-k3s-kubevirt.sh
-pnpm run polaris -- start morpheus@kubevirt-vm
-```
-
 ## Documentation
 
-Start here:
-
-- [docs/README.md](./docs/README.md)
-- [apps/polaris/docs/README.md](./apps/polaris/docs/README.md)
-- [apps/polaris/docs/runtime-layout.md](./apps/polaris/docs/runtime-layout.md)
-- [apps/polaris/docs/maturity-map.md](./apps/polaris/docs/maturity-map.md)
-- [docs/operations/README.md](./docs/operations/README.md)
+- [docs/polaris/README.md](./docs/polaris/README.md)
+- [docs/polaris/maturity-map.md](./docs/polaris/maturity-map.md)
+- [Support multiple machines with k3s](./docs/operations/setup-k3s-across-multiple-machines.md)
 
 ## Contributing
 
@@ -88,7 +58,6 @@ Validate changes with:
 ```bash
 pnpm run check
 pnpm run test
-bash tests/smoke-polaris-paseo.sh
 ```
 
 If you change command flow, backend behavior, or onboarding, update the

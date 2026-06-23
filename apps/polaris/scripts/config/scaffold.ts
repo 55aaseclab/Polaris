@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
+const USER_CREDENTIALS_DIR = path.join(REPO_ROOT, "config", "users", "credentials");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 
 export function workspaceConfigPath(project: string, backendKind: "docker" | "pod" | "kubevirt-vm" = "docker"): string {
@@ -54,10 +55,15 @@ function userProfilePath(userProfileId: string): string {
   return path.join(USER_PROFILES_DIR, `${userProfileId}.yaml`);
 }
 
+function userCredentialRegistryDir(userProfileId: string): string {
+  return path.join(USER_CREDENTIALS_DIR, userProfileId);
+}
+
 function writeUserSecretsLayout(userProfileId: string): void {
   const secretsRoot = path.join(USER_SECRETS_ROOT, userProfileId);
   fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
   fs.mkdirSync(path.join(secretsRoot, "claude"), { recursive: true });
+  fs.mkdirSync(path.join(secretsRoot, "ssh"), { recursive: true });
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
 }
 
@@ -75,6 +81,7 @@ export function ensureScaffoldUserProfile(): {
 
   if (created) {
     fs.mkdirSync(USER_PROFILES_DIR, { recursive: true });
+    fs.mkdirSync(userCredentialRegistryDir(profile.id), { recursive: true });
     fs.writeFileSync(
       profilePath,
       yaml.dump({
@@ -88,28 +95,68 @@ export function ensureScaffoldUserProfile(): {
           mode: "managed-key",
           comment: profile.email,
         },
-        auth: {
+      }, { lineWidth: 120, noRefs: true }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(userCredentialRegistryDir(profile.id), "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profile.id,
+        kind: "codex-auth",
+        label: "Default Codex + Claude auth",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
           files: [
             {
               key: "codex-auth.json",
-              mount_path: "/root/.codex/auth.json",
               source_path: "codex/auth.json",
-              content: null,
             },
             {
               key: "codex-config.toml",
-              mount_path: "/root/.codex/config.toml",
               source_path: "codex/config.toml",
-              content: null,
             },
             {
               key: "claude-settings.json",
-              mount_path: "/root/.claude/settings.json",
               source_path: "claude/settings.json",
-              content: null,
             },
           ],
         },
+        metadata: {
+          provider: "local",
+        },
+        status: "ready",
+      }, { lineWidth: 120, noRefs: true }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(userCredentialRegistryDir(profile.id), "github-ssh.yaml"),
+      yaml.dump({
+        id: "github-ssh",
+        userId: profile.id,
+        kind: "ssh-key",
+        label: "Default SSH key",
+        purposes: ["git-auth", "ssh-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-ssh-state/default",
+          files: [
+            {
+              key: "id_ed25519",
+              source_path: "ssh/id_ed25519",
+            },
+            {
+              key: "id_ed25519.pub",
+              source_path: "ssh/id_ed25519.pub",
+            },
+          ],
+        },
+        metadata: {
+          provider: "local",
+        },
+        status: "ready",
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -134,6 +181,20 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
     backend: {
       kind: "docker",
       spec_files: null,
+    },
+    credentials: {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credentialId: "codex-default",
+          required: true,
+        },
+        {
+          purpose: "git-auth",
+          credentialId: "github-ssh",
+          required: false,
+        },
+      ],
     },
     runtime: {
       class: "docker",

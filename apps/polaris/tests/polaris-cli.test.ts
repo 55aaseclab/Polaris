@@ -7,7 +7,7 @@ import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
-import { writeWorkspaceStatus } from "../scripts/output/state-store.js";
+import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { runCli } from "../scripts/cli/main.js";
@@ -89,12 +89,18 @@ async function captureStdout(fn: () => Promise<void> | void): Promise<string> {
 
 function parseJsonOutput<T>(stdout: string): T {
   const trimmed = stdout.trim();
-  const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) {
+  if (end === -1) {
     throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
   }
-  return JSON.parse(trimmed.slice(start, end + 1)) as T;
+  for (let start = trimmed.lastIndexOf("{", end); start !== -1; start = trimmed.lastIndexOf("{", start - 1)) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1)) as T;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`No JSON object found in stdout: ${JSON.stringify(trimmed)}`);
 }
 
 function uniqueProjectName(prefix: string): string {
@@ -103,6 +109,10 @@ function uniqueProjectName(prefix: string): string {
 
 function cleanupStatusFile(project: string): void {
   fs.rmSync(path.join(STATUS_DIR, `${project}.status.json`), { force: true });
+}
+
+function cleanupSelectionFile(project: string): void {
+  fs.rmSync(path.join(STATUS_DIR, `${project}.selection.json`), { force: true });
 }
 
 async function withTempWorkspaceSpec(
@@ -115,7 +125,7 @@ async function withTempWorkspaceSpec(
   const generatedPath = path.join(REPO_ROOT, "config", "generated", backendDir, `${project}.yaml`);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "morpheus.agent.yaml");
+  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "demo.agent.yaml");
   const doc = (yaml.load(fs.readFileSync(sourcePath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
   doc.backend = {
@@ -140,9 +150,9 @@ async function withTempWorkspaceSpec(
   }
 }
 
-test("loadWorkspace normalizes morpheus pod config through the TypeScript control plane", () => {
-  const workspace = loadWorkspace("morpheus");
-  assert.equal(workspace.identity.projectName, "morpheus");
+test("loadWorkspace normalizes demo pod config through the TypeScript control plane", () => {
+  const workspace = loadWorkspace("demo");
+  assert.equal(workspace.identity.projectName, "demo");
   assert.equal(workspace.profile.name, "morpheus");
   assert.match(workspace.userProfile.id, /^\d{18}$/);
   assert.ok(workspace.userProfile.name.length > 0);
@@ -159,6 +169,10 @@ test("loadWorkspace normalizes morpheus pod config through the TypeScript contro
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
   assert.ok(!workspace.userProfile.github.account || workspace.userProfile.github.account.length > 0);
+  assert.equal(workspace.credentialBindings.length, 1);
+  assert.equal(workspace.credentialBindings[0]?.purpose, "agent-auth");
+  assert.equal(workspace.resolvedCredentialBindings[0]?.source, "registry");
+  assert.equal(workspace.resolvedCredentialBindings[0]?.attachmentKind, "user-identity-state");
 });
 
 test("backend registry resolves pod driver", () => {
@@ -194,6 +208,39 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   assert.equal(parsed.backend.kind, "pod");
 
   cleanupStatusFile(project);
+});
+
+test("driver selection persists a default backend control", () => {
+  const project = uniqueProjectName("driver-selection");
+  const selectionPath = writeWorkspaceDriverSelection(project, { backend: "pod", profile: "gvisor" });
+  assert.equal(fs.existsSync(selectionPath), true);
+  const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
+  assert.equal(parsed.backend, "pod");
+  assert.equal(parsed.profile, "gvisor");
+  cleanupSelectionFile(project);
+});
+
+test("stored pod driver selection influences default workspace loading", () => {
+  const project = "demo";
+  writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" });
+  try {
+    const workspace = loadWorkspace(project);
+    assert.equal(workspace.backend.kind, "pod");
+    assert.equal(workspace.backend.profile, "kata-qemu");
+  } finally {
+    cleanupSelectionFile(project);
+  }
+});
+
+test("stored docker driver selection influences default workspace loading", () => {
+  const project = "demo";
+  writeWorkspaceDriverSelection(project, { backend: "docker" });
+  try {
+    const workspace = loadWorkspace(project);
+    assert.equal(workspace.backend.kind, "docker");
+  } finally {
+    cleanupSelectionFile(project);
+  }
 });
 
 test("status command exposes evolution explainability details", async () => {
@@ -308,6 +355,7 @@ test("status exposes ssh self-check for github account on managed-key profiles",
       const outputPath = workspaceConfigPath(project, "docker");
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "ssh-status-test";
+      delete doc.credentials;
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
       await withFakeCommands(
@@ -348,7 +396,7 @@ exit 0
 });
 
 test("pod render writes a TypeScript-generated manifest", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   const outputPath = renderAndWritePodWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
   assert.match(rendered, /Generated by polaris\.ts/);
@@ -362,7 +410,7 @@ test("pod render writes a TypeScript-generated manifest", () => {
 });
 
 test("attachment model distinguishes durable workspace state from ephemeral runtime state", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   assert.deepEqual(workspace.attachments.workspaceRuntimeState.durablePaths, [
     "/workspace/state/paseo",
     "/workspace/state/paseo/evolution",
@@ -372,13 +420,13 @@ test("attachment model distinguishes durable workspace state from ephemeral runt
 });
 
 test("user identity attachments do not include workspace-scoped paseo state", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   assert.equal(workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("paseo")), false);
   assert.equal(workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes("paseo")), true);
 });
 
 test("attachment lifecycle semantics encode cross-workspace user state and exclusive workspace state", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   assert.equal(workspace.attachments.workspaceData.sharing, "exclusive");
   assert.equal(workspace.attachments.workspaceRuntimeState.sharing, "exclusive");
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
@@ -388,7 +436,7 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
 });
 
 test("direct attachment config is present in migrated saved specs", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   assert.equal(workspace.profile.name, "morpheus");
   assert.equal(workspace.attachments.workspaceData.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
@@ -397,7 +445,7 @@ test("direct attachment config is present in migrated saved specs", () => {
 });
 
 test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   assert.equal(workspace.profile.workspaceAlias, "Morpheus");
   assert.equal(workspace.userProfile.ssh.comment, workspace.userProfile.email);
 });
@@ -408,6 +456,7 @@ test("workspace compatibility path derives a legacy user profile from inline git
     const outputPath = workspaceConfigPath(project, "docker");
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     delete doc.user_profile;
+    delete doc.credentials;
     doc.auth = {
       files: [
         {
@@ -438,6 +487,225 @@ test("workspace compatibility path derives a legacy user profile from inline git
     assert.equal(workspace.userProfile.id, "legacy-legacy-example.com");
     assert.equal(workspace.userProfile.name, "Legacy User");
     assert.equal(workspace.userProfile.email, "legacy@example.com");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.source, "compatibility");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.purpose, "agent-auth");
+  });
+});
+
+test("registry-backed credentials override legacy auth for the same purpose", async () => {
+  const project = uniqueProjectName("credential-binding");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", profileId);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
+    fs.mkdirSync(path.join(secretsRoot, "claude"), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(path.join(secretsRoot, "codex", "auth.json"), "{\"source\":\"registry\"}\n", "utf8");
+    fs.writeFileSync(path.join(secretsRoot, "codex", "config.toml"), "model = 'gpt-5'\n", "utf8");
+    fs.writeFileSync(path.join(secretsRoot, "claude", "settings.json"), "{\"provider\":\"registry\"}\n", "utf8");
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Credential User",
+        email: "credential@example.com",
+        auth: {
+          files: [
+            {
+              key: "codex-auth.json",
+              mount_path: "/root/.codex/auth.json",
+              content: "{\"source\":\"legacy\"}\n",
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profileId,
+        kind: "codex-auth",
+        label: "Registry Codex auth",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+            },
+            {
+              key: "codex-config.toml",
+              source_path: "codex/config.toml",
+            },
+            {
+              key: "claude-settings.json",
+              source_path: "claude/settings.json",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspace(`${project}@docker`);
+    const codexAuth = workspace.runtime.authFiles.find((file) => file.key === "codex-auth.json");
+    assert.equal(codexAuth?.content, "{\"source\":\"registry\"}\n");
+    assert.equal(workspace.resolvedCredentialBindings[0]?.credential.id, "codex-default");
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  });
+});
+
+test("credential registry rejects cross-user ownership mismatches", async () => {
+  const project = uniqueProjectName("credential-owner");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Owner User",
+        email: "owner@example.com",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: "someone-else",
+        kind: "codex-auth",
+        label: "Wrong owner",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    assert.throws(
+      () => loadWorkspace(`${project}@docker`),
+      /must be owned by user/,
+    );
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
+  });
+});
+
+test("credential registry rejects inline secret material", async () => {
+  const project = uniqueProjectName("credential-inline-secret");
+  const profileId = `${project}-user`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(registryDir, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: profileId,
+        name: "Secret User",
+        email: "secret@example.com",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(registryDir, "codex-default.yaml"),
+      yaml.dump({
+        id: "codex-default",
+        userId: profileId,
+        kind: "codex-auth",
+        label: "Inline secret",
+        purposes: ["agent-auth"],
+        materialRef: {
+          type: "file",
+          key: "user-identity-state/default",
+          files: [
+            {
+              key: "codex-auth.json",
+              source_path: "codex/auth.json",
+              content: "{\"token\":\"inline\"}",
+            },
+          ],
+        },
+        status: "ready",
+      }),
+      "utf8",
+    );
+
+    const outputPath = workspaceConfigPath(project, "docker");
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    doc.credentials = {
+      bindings: [
+        {
+          purpose: "agent-auth",
+          credential_id: "codex-default",
+          required: true,
+        },
+      ],
+    };
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    assert.throws(
+      () => loadWorkspace(`${project}@docker`),
+      /must externalize secret material/,
+    );
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(registryDir, { recursive: true, force: true });
   });
 });
 
@@ -462,6 +730,7 @@ test("provided-key user profile requires staged SSH private-key material", async
       const outputPath = workspaceConfigPath(project, "docker");
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "provided-key-test";
+      delete doc.credentials;
       doc.auth = {
         files: [
           {
@@ -490,13 +759,49 @@ test("provided-key user profile requires staged SSH private-key material", async
 });
 
 test("docker render keys user-scoped identity volumes by user profile id", () => {
-  const workspace = loadWorkspace("morpheus@docker");
+  const workspace = loadWorkspace("demo@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
   const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
   assert.match(rendered, new RegExp(`polaris-${escapedId}-ssh`));
-  assert.match(rendered, new RegExp(`\\$\\{POLARIS_SECRETS_DIR:-\\.\\.\\/\\.\\.\\/users\\/${escapedId}\\}:\\/bootstrap-secrets:ro`));
+  assert.doesNotMatch(rendered, /bootstrap-secrets/);
+});
+
+test("demo specs reuse the demo profile across docker, pod, and kubevirt backends", () => {
+  const dockerWorkspace = loadWorkspace("demo@docker");
+  const podWorkspace = loadWorkspace("demo@pod");
+  const kubevirtWorkspace = loadWorkspace("demo@kubevirt-vm");
+
+  for (const workspace of [dockerWorkspace, podWorkspace, kubevirtWorkspace]) {
+    assert.equal(workspace.identity.projectName, "demo");
+    assert.equal(workspace.userProfile.id, "100000000000000001");
+    assert.equal(workspace.userProfile.name, "Demo User");
+    assert.equal(workspace.userProfile.email, "demo@example.com");
+    assert.equal(workspace.runtime.gitUserName, "Demo User");
+    assert.equal(workspace.runtime.gitUserEmail, "demo@example.com");
+  }
+
+  assert.equal(dockerWorkspace.attachments.workspaceData.source.volumeRef, "demo-project");
+  assert.equal(
+    podWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
+    "demo-project",
+  );
+  assert.equal(
+    kubevirtWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
+    "demo-workspace-runtime-state",
+  );
+});
+
+test("docker render uses stable named volumes for reusable demo attachments", () => {
+  const workspace = loadWorkspace("demo@docker");
+  const outputPath = renderAndWriteDockerWorkspace(workspace);
+  const rendered = fs.readFileSync(outputPath, "utf8");
+
+  assert.match(rendered, /source: demo-project\b/);
+  assert.match(rendered, /source: demo-project-state\b/);
+  assert.match(rendered, /demo-project:\n    name: demo-project/);
+  assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
 });
 
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {
@@ -526,24 +831,24 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 });
 
 test("pod backend returns structured observations", async () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   const driver = getBackendDriver("pod");
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment morpheus"* ]]; then
-  printf '{"metadata":{"name":"morpheus"}}'
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc morpheus"* ]]; then
-  printf 'morpheus'
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
   exit 0
 fi
 exit 0
@@ -560,10 +865,11 @@ exit 0
 });
 
 test("runtime controller computes degraded status and reconcile plan from observations when daemon is missing", async () => {
+  cleanupSelectionFile("demo");
   const workspace = {
-    ...loadWorkspace("morpheus"),
+    ...loadWorkspace("demo"),
     agent: {
-      ...loadWorkspace("morpheus").agent,
+      ...loadWorkspace("demo").agent,
       pairingFile: "/root/.paseo/pairing.json",
     },
   };
@@ -572,11 +878,11 @@ test("runtime controller computes degraded status and reconcile plan from observ
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment morpheus"* ]]; then
-  printf '{"metadata":{"name":"morpheus"}}'
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -586,8 +892,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc morpheus"* ]]; then
-  printf 'morpheus'
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
   exit 0
 fi
 exit 0
@@ -607,28 +913,30 @@ exit 0
       assert.deepEqual(plan.actions, [{ kind: "restart-runtime" }]);
     },
   );
+  cleanupSelectionFile("demo");
 });
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {
-  cleanupStatusFile("morpheus");
-  const expectedStatusFile = path.join(STATUS_DIR, "morpheus.status.json");
+  cleanupSelectionFile("demo");
+  cleanupStatusFile("demo");
+  const expectedStatusFile = path.join(STATUS_DIR, "demo.status.json");
 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment morpheus"* ]]; then
-  printf '{"metadata":{"name":"morpheus"}}'
+if [[ "$*" == *"get deployment demo"* ]]; then
+  printf '{"metadata":{"name":"demo"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc morpheus"* ]]; then
-  printf 'morpheus'
+if [[ "$*" == *"get svc demo"* ]]; then
+  printf 'demo'
   exit 0
 fi
 exit 0
@@ -636,7 +944,7 @@ exit 0
     },
     async () => {
       await captureStdout(async () => {
-        await runCli(["morpheus"]);
+        await runCli(["demo"]);
       });
 
       assert.equal(fs.existsSync(expectedStatusFile), true);
@@ -649,7 +957,7 @@ exit 0
         evolution?: { artifactCount: number };
       };
 
-      assert.equal(parsed.project, "morpheus");
+      assert.equal(parsed.project, "demo");
       assert.equal(parsed.lifecycleAction, "status");
       assert.equal(parsed.state, "ready");
       assert.equal(parsed.backend.kind, "pod");
@@ -661,14 +969,16 @@ exit 0
     },
   );
 
-  cleanupStatusFile("morpheus");
+  cleanupStatusFile("demo");
+  cleanupSelectionFile("demo");
 });
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
+  cleanupSelectionFile("demo");
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -680,21 +990,21 @@ exit 0
 `,
     },
     async ({ readCommandLog }) => {
-      await runCli(["logs", "morpheus"]);
+      await runCli(["logs", "demo"]);
       const commands = readCommandLog();
-      assert.ok(commands.some((entry) => entry.includes("get pod -l app=morpheus")));
+      assert.ok(commands.some((entry) => entry.includes("get pod -l app=demo")));
       assert.ok(commands.some((entry) => entry.includes("logs pod-1 --tail=200")));
-      assert.equal(commands.some((entry) => entry.includes("logs deployment/morpheus --tail=200")), false);
+      assert.equal(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")), false);
     },
   );
 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get pod -l app=morpheus"* ]]; then
+if [[ "$*" == *"get pod -l app=demo"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"logs deployment/morpheus --tail=200"* ]]; then
+if [[ "$*" == *"logs deployment/demo --tail=200"* ]]; then
   printf 'deployment logs'
   exit 0
 fi
@@ -702,11 +1012,12 @@ exit 0
 `,
     },
     async ({ readCommandLog }) => {
-      await runCli(["logs", "morpheus"]);
+      await runCli(["logs", "demo"]);
       const commands = readCommandLog();
-      assert.ok(commands.some((entry) => entry.includes("logs deployment/morpheus --tail=200")));
+      assert.ok(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")));
     },
   );
+  cleanupSelectionFile("demo");
 });
 
 test("CLI docker lifecycle commands dispatch through compose and status artifacts", async () => {
@@ -776,8 +1087,17 @@ if [[ "$*" == *"get svc ${project}"* ]]; then
   printf '${project}'
   exit 0
 fi
-if [[ "$*" == *"get secret morpheus-vm-cloudinit"* ]]; then
-  printf 'morpheus-vm-cloudinit'
+if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
+  printf '${project}-vm-cloudinit'
+  exit 0
+fi
+if [[ "$*" == *"port-forward svc/${project} "* ]]; then
+  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
+  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
+  server_pid=$!
+  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
+  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
+  wait $server_pid
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
@@ -872,15 +1192,24 @@ if [[ "$*" == *"get svc ${project}"* ]]; then
   printf '${project}'
   exit 0
 fi
-if [[ "$*" == *"get secret morpheus-vm-cloudinit"* ]]; then
-  printf 'morpheus-vm-cloudinit'
+if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
+  printf '${project}-vm-cloudinit'
   exit 0
 fi
-if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${project}-vm"* ]]; then
+if [[ "$*" == *"port-forward svc/${project} "* ]]; then
+  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
+  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
+  server_pid=$!
+  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
+  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
+  wait $server_pid
+  exit 0
+fi
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${project}-vm"* ]]; then
   printf 'virt-launcher-0'
   exit 0
 fi
-if [[ "$*" == *"logs virt-launcher-0 --tail=200"* ]]; then
+if [[ "$1" == "-n" && "$3" == "logs" && "$4" == "virt-launcher-0" && "$5" == "--tail=200" ]]; then
   printf 'kubevirt logs'
   exit 0
 fi
@@ -912,14 +1241,7 @@ exit 0
 });
 
 test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
-  const workspace = {
-    ...loadWorkspace("morpheus"),
-    backend: {
-      ...loadWorkspace("morpheus").backend,
-      kind: "kubevirt-vm" as const,
-      profile: "vm",
-    },
-  };
+  const workspace = loadWorkspace("demo@kubevirt-vm");
   const driver = getBackendDriver("kubevirt-vm");
 
   await withFakeCommands(
@@ -938,7 +1260,7 @@ exit 0
 });
 
 test("docker backend returns structured observations and executes compose actions", async () => {
-  const base = loadWorkspace("morpheus");
+  const base = loadWorkspace("demo");
   const workspace = {
     ...base,
     backend: {
@@ -953,7 +1275,7 @@ test("docker backend returns structured observations and executes compose action
   await withFakeCommands(
     {
       docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q morpheus"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -975,14 +1297,14 @@ exit 0
       const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
       assert.equal(status.backend.kind, "docker");
 
-      const plan = { project: "morpheus", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
+      const plan = { project: "demo", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
       await driver.executeReconcilePlan(workspace, plan as any);
     },
   );
 });
 
 test("docker lifecycle actions execute through docker compose", async () => {
-  const base = loadWorkspace("morpheus");
+  const base = loadWorkspace("demo");
   const workspace = {
     ...base,
     backend: {

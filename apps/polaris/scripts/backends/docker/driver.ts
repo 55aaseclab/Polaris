@@ -65,6 +65,12 @@ export class DockerDriver implements BackendDriver {
         : workspace.agent.enabled
           ? false
           : true;
+    const pairingObserved =
+      workspace.agent.enabled && exists && running
+        ? execCheck(`test -s ${workspace.agent.runtime.pairingFile} && test -s ${workspace.agent.runtime.stateRoot}/server-id && test -s ${workspace.agent.runtime.stateRoot}/daemon-keypair.json && ! tail -n 40 ${workspace.agent.runtime.stateRoot}/daemon.log 2>/dev/null | grep -q 'missing hello'`)
+        : workspace.agent.enabled
+          ? false
+          : true;
     const githubAuthObserved =
       exists && running && workspace.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
@@ -100,6 +106,11 @@ export class DockerDriver implements BackendDriver {
           ? { observed: daemonObserved, detail: workspace.agent.runtime.pairingFile ?? workspace.agent.runtime.readyFile }
           : workspace.health.requiresDaemon
             ? { observed: false, detail: workspace.agent.runtime.readyFile }
+            : { observed: true, detail: "daemon not required" },
+        pairing: workspace.health.requiresDaemon && exists && running
+          ? { observed: pairingObserved, detail: workspace.agent.runtime.pairingFile }
+          : workspace.health.requiresDaemon
+            ? { observed: false, detail: workspace.agent.runtime.pairingFile }
             : { observed: true, detail: "daemon not required" },
       },
       services: {
