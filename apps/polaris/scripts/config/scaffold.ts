@@ -24,10 +24,10 @@ function neutralUserImageTagSegment(userProfileId: string): string {
   return `user-${sanitizeImageTagComponent(trimmed, "default").slice(0, 24)}`;
 }
 
-export function workspaceLocalImageTag(userProfileId: string, project: string): string {
+export function workspaceImageRef(userProfileId: string, project: string): string {
   const userSegment = neutralUserImageTagSegment(userProfileId);
   const projectSegment = sanitizeImageTagComponent(project, "workspace").slice(0, 32);
-  return `${userSegment}-${projectSegment}:local`;
+  return `ttl.sh/${userSegment}-${projectSegment}:24h`;
 }
 
 export function workspaceConfigPath(
@@ -261,7 +261,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
     },
     runtime: {
       class: "docker",
-      base_image: workspaceLocalImageTag(userProfileId, project),
+      base_image: workspaceImageRef(userProfileId, project),
       user: "root",
       storage_claim_name: null,
       privileged: null,

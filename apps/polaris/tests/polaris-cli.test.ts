@@ -6,7 +6,7 @@ import os from "node:os";
 import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
-import { workspaceConfigPath, workspaceLocalImageTag } from "../scripts/config/scaffold.js";
+import { workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceEvolutionStateDir,

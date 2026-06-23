@@ -13,7 +13,7 @@ credentials:
       required: true
 runtime:
   class: docker
-  base_image: user-002-morpheus:local
+  base_image: ttl.sh/user-002-morpheus:24h
   user: root
   storage_claim_name: null
   privileged: null

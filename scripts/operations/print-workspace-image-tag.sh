@@ -8,7 +8,7 @@ Usage:
 
 Example:
   ./scripts/operations/print-workspace-image-tag.sh 100000000000000002 morpheus
-  # user-002-morpheus:local
+  # ttl.sh/user-002-morpheus:24h
 EOF
 }
 
@@ -45,6 +45,6 @@ if [[ $# -ne 2 ]]; then
   exit 1
 fi
 
-printf '%s-%s:local\n' \
+printf 'ttl.sh/%s-%s:24h\n' \
   "$(user_segment "$1")" \
   "$(sanitize_component "$2" "workspace" | cut -c1-32)"
