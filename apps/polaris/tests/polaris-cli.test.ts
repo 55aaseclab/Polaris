@@ -7,15 +7,22 @@ import yaml from "js-yaml";
 import { loadWorkspace } from "../scripts/config/load.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
-import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
+import { generatedOutputPath } from "../scripts/output/write-generated.js";
+import {
+  workspaceEvolutionStateDir,
+  workspaceSelectionPath,
+  workspaceStatusPath,
+  writeWorkspaceDriverSelection,
+  writeWorkspaceStatus,
+} from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
-const STATUS_DIR = path.join(REPO_ROOT, "config", "state");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
+const DEMO_USER_PROFILE_ID = "100000000000000001";
 
 function getStdoutCaptureQueue(): Promise<void> {
   const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
@@ -108,11 +115,18 @@ function uniqueProjectName(prefix: string): string {
 }
 
 function cleanupStatusFile(project: string): void {
-  fs.rmSync(path.join(STATUS_DIR, `${project}.status.json`), { force: true });
+  fs.rmSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.status.json`), { force: true });
 }
 
 function cleanupSelectionFile(project: string): void {
-  fs.rmSync(path.join(STATUS_DIR, `${project}.selection.json`), { force: true });
+  fs.rmSync(workspaceSelectionPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`), { force: true });
+}
+
+function loadDefaultDemoWorkspace() {
+  cleanupSelectionFile("demo");
+  return loadWorkspace("demo");
 }
 
 async function withTempWorkspaceSpec(
@@ -120,12 +134,10 @@ async function withTempWorkspaceSpec(
   backendKind: "docker" | "pod" | "kubevirt-vm",
   fn: () => Promise<void> | void,
 ): Promise<void> {
-  const outputPath = workspaceConfigPath(project, backendKind);
-  const backendDir = backendKind === "kubevirt-vm" ? "kubevirt" : backendKind;
-  const generatedPath = path.join(REPO_ROOT, "config", "generated", backendDir, `${project}.yaml`);
+  const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "demo.agent.yaml");
+  const sourcePath = workspaceConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
   const doc = (yaml.load(fs.readFileSync(sourcePath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
   doc.backend = {
@@ -141,6 +153,7 @@ async function withTempWorkspaceSpec(
   }
 
   fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+  const generatedPath = generatedOutputPath(loadWorkspace(`${project}@${backendKind}`));
   try {
     await fn();
   } finally {
@@ -151,12 +164,13 @@ async function withTempWorkspaceSpec(
 }
 
 test("loadWorkspace normalizes demo pod config through the TypeScript control plane", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.identity.projectName, "demo");
   assert.equal(workspace.profile.name, "morpheus");
   assert.match(workspace.userProfile.id, /^\d{18}$/);
   assert.ok(workspace.userProfile.name.length > 0);
   assert.match(workspace.userProfile.email, /@/);
+  assert.ok(workspace.userProfile.workspaces.includes("demo"));
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -200,7 +214,7 @@ test("writeWorkspaceStatus persists a structured state file", () => {
     details: {
       driver: "pod",
     },
-  });
+  }, DEMO_USER_PROFILE_ID);
 
   assert.ok(fs.existsSync(statusPath));
   const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as { project: string; backend: { kind: string } };
@@ -212,7 +226,11 @@ test("writeWorkspaceStatus persists a structured state file", () => {
 
 test("driver selection persists a default backend control", () => {
   const project = uniqueProjectName("driver-selection");
-  const selectionPath = writeWorkspaceDriverSelection(project, { backend: "pod", profile: "gvisor" });
+  const selectionPath = writeWorkspaceDriverSelection(
+    project,
+    { backend: "pod", profile: "gvisor" },
+    DEMO_USER_PROFILE_ID,
+  );
   assert.equal(fs.existsSync(selectionPath), true);
   const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
   assert.equal(parsed.backend, "pod");
@@ -222,7 +240,7 @@ test("driver selection persists a default backend control", () => {
 
 test("stored pod driver selection influences default workspace loading", () => {
   const project = "demo";
-  writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" });
+  writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" }, DEMO_USER_PROFILE_ID);
   try {
     const workspace = loadWorkspace(project);
     assert.equal(workspace.backend.kind, "pod");
@@ -234,7 +252,7 @@ test("stored pod driver selection influences default workspace loading", () => {
 
 test("stored docker driver selection influences default workspace loading", () => {
   const project = "demo";
-  writeWorkspaceDriverSelection(project, { backend: "docker" });
+  writeWorkspaceDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
   try {
     const workspace = loadWorkspace(project);
     assert.equal(workspace.backend.kind, "docker");
@@ -247,7 +265,10 @@ test("status command exposes evolution explainability details", async () => {
   const project = uniqueProjectName("explained-status");
   await withTempWorkspaceSpec(project, "docker", async () => {
     const workspace = loadWorkspace(`${project}@docker`);
-    const evolutionDir = path.join(REPO_ROOT, "config", "state", "evolution", workspace.identity.projectName);
+    const evolutionDir = workspaceEvolutionStateDir(
+      workspace.identity.projectName,
+      workspace.userProfile.id,
+    );
     const dbPath = path.join(evolutionDir, "store.db");
     try {
       fs.mkdirSync(evolutionDir, { recursive: true });
@@ -352,7 +373,7 @@ test("status exposes ssh self-check for github account on managed-key profiles",
       "utf8",
     );
     try {
-      const outputPath = workspaceConfigPath(project, "docker");
+      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "ssh-status-test";
       delete doc.credentials;
@@ -396,7 +417,7 @@ exit 0
 });
 
 test("pod render writes a TypeScript-generated manifest", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   const outputPath = renderAndWritePodWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
   assert.match(rendered, /Generated by polaris\.ts/);
@@ -410,7 +431,7 @@ test("pod render writes a TypeScript-generated manifest", () => {
 });
 
 test("attachment model distinguishes durable workspace state from ephemeral runtime state", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.deepEqual(workspace.attachments.workspaceRuntimeState.durablePaths, [
     "/workspace/state/paseo",
     "/workspace/state/paseo/evolution",
@@ -420,13 +441,13 @@ test("attachment model distinguishes durable workspace state from ephemeral runt
 });
 
 test("user identity attachments do not include workspace-scoped paseo state", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("paseo")), false);
   assert.equal(workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes("paseo")), true);
 });
 
 test("attachment lifecycle semantics encode cross-workspace user state and exclusive workspace state", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.attachments.workspaceData.sharing, "exclusive");
   assert.equal(workspace.attachments.workspaceRuntimeState.sharing, "exclusive");
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
@@ -436,7 +457,7 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
 });
 
 test("direct attachment config is present in migrated saved specs", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.profile.name, "morpheus");
   assert.equal(workspace.attachments.workspaceData.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
@@ -445,7 +466,7 @@ test("direct attachment config is present in migrated saved specs", () => {
 });
 
 test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.profile.workspaceAlias, "Morpheus");
   assert.equal(workspace.userProfile.ssh.comment, workspace.userProfile.email);
 });
@@ -453,7 +474,7 @@ test("profile defaults drive renderer behavior instead of workspace-name checks"
 test("workspace compatibility path derives a legacy user profile from inline git identity", async () => {
   const project = uniqueProjectName("compat-user");
   await withTempWorkspaceSpec(project, "docker", async () => {
-    const outputPath = workspaceConfigPath(project, "docker");
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     delete doc.user_profile;
     delete doc.credentials;
@@ -555,7 +576,7 @@ test("registry-backed credentials override legacy auth for the same purpose", as
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker");
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -620,7 +641,7 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker");
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -685,7 +706,7 @@ test("credential registry rejects inline secret material", async () => {
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker");
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -727,7 +748,7 @@ test("provided-key user profile requires staged SSH private-key material", async
       "utf8",
     );
     try {
-      const outputPath = workspaceConfigPath(project, "docker");
+      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "provided-key-test";
       delete doc.credentials;
@@ -807,7 +828,7 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {
   const project = uniqueProjectName("docker-full");
   await withTempWorkspaceSpec(project, "docker", async () => {
-    const outputPath = workspaceConfigPath(project, "docker");
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.runtime = {
       ...(doc.runtime ?? {}),
@@ -831,7 +852,7 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 });
 
 test("pod backend returns structured observations", async () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadDefaultDemoWorkspace();
   const driver = getBackendDriver("pod");
   await withFakeCommands(
     {
@@ -867,9 +888,9 @@ exit 0
 test("runtime controller computes degraded status and reconcile plan from observations when daemon is missing", async () => {
   cleanupSelectionFile("demo");
   const workspace = {
-    ...loadWorkspace("demo"),
+    ...loadDefaultDemoWorkspace(),
     agent: {
-      ...loadWorkspace("demo").agent,
+      ...loadDefaultDemoWorkspace().agent,
       pairingFile: "/root/.paseo/pairing.json",
     },
   };
@@ -919,7 +940,7 @@ exit 0
 test("CLI status defaults to the status command and persists ready pod status", async () => {
   cleanupSelectionFile("demo");
   cleanupStatusFile("demo");
-  const expectedStatusFile = path.join(STATUS_DIR, "demo.status.json");
+  const expectedStatusFile = workspaceStatusPath("demo", DEMO_USER_PROFILE_ID);
 
   await withFakeCommands(
     {
@@ -1052,10 +1073,10 @@ exit 0
         });
 
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("up -d")));
-        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("stop")));
-        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("restart")));
-        assert.ok(commands.some((entry) => entry.includes(`${project}.yaml`) && entry.includes("up -d --force-recreate")));
+        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("up -d")));
+        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("stop")));
+        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("restart")));
+        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
 
         const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
         assert.ok(Array.isArray(parsed.reconcilePlan.actions));
@@ -1260,7 +1281,7 @@ exit 0
 });
 
 test("docker backend returns structured observations and executes compose actions", async () => {
-  const base = loadWorkspace("demo");
+  const base = loadDefaultDemoWorkspace();
   const workspace = {
     ...base,
     backend: {
@@ -1304,7 +1325,7 @@ exit 0
 });
 
 test("docker lifecycle actions execute through docker compose", async () => {
-  const base = loadWorkspace("demo");
+  const base = loadDefaultDemoWorkspace();
   const workspace = {
     ...base,
     backend: {

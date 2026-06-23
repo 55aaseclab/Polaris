@@ -32,7 +32,16 @@ config/users/*
 !config/users/profiles/
 config/users/profiles/**
 !config/users/*/
+!config/users/*/projects/
+!config/users/*/projects/*/
 config/users/*/**
+!config/users/*/projects/*/*.agent.yaml
 !config/users/profiles/100000000000000001.yaml
 !config/users/100000000000000001/.gitignore
-!config/users/100000000000000001/**
+!config/users/100000000000000001/credentials/
+!config/users/100000000000000001/credentials/**
+!config/users/100000000000000001/docker/
+!config/users/100000000000000001/docker/**
+!config/users/100000000000000001/projects/
+!config/users/100000000000000001/projects/demo/
+!config/users/100000000000000001/projects/demo/**

@@ -35,7 +35,7 @@ export async function createCommand(projectRef: string): Promise<void> {
         secretsRoot: userProfile.secretsRoot,
       },
       credentials: {
-        registryRoot: `config/users/credentials/${userProfile.id}`,
+        registryRoot: `config/users/${userProfile.id}/credentials`,
         defaults: ["codex-default", "github-ssh"],
       },
       nextSteps: [

@@ -14,8 +14,8 @@ Source of truth and flow:
 
 ```text
 apps/polaris/scripts/polaris.ts
--> config/specs/docker/projects/<project>.agent.yaml
--> config/generated/docker/<project>.yaml
+-> config/users/<user>/projects/<project>/docker.agent.yaml
+-> config/users/<user>/projects/<project>/generated/docker.yaml
 -> docker compose runtime
 ```
 
@@ -44,10 +44,10 @@ pnpm --dir apps/polaris run polaris -- create <project>
 
 If the project does not already exist, `create` scaffolds:
 
-- `config/specs/docker/projects/<project>.agent.yaml`
+- `config/users/<user>/projects/<project>/docker.agent.yaml`
 - `config/users/profiles/local-<identity>.yaml` when a matching local user
   profile does not already exist
-- `config/users/credentials/local-<identity>/*.yaml` for default Codex and SSH
+- `config/users/local-<identity>/credentials/*.yaml` for default Codex and SSH
   credentials
 
 The scaffolded spec references that local user profile and default bindings:
@@ -94,18 +94,21 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 `render`
 
 - Loads the saved spec and writes generated output to:
-  `config/generated/docker/<project>.yaml` for Docker workspaces.
+  `config/users/<user>/projects/<project>/generated/docker.yaml`
+  for Docker workspaces.
 - Does not start the runtime by itself.
 
 `start`
 
-- Renders first, then runs `docker compose -f config/generated/docker/<project>.yaml up -d`.
+- Renders first, then runs
+  `docker compose -f config/users/<user>/projects/<project>/generated/docker.yaml up -d`.
 - This is the normal way to launch a Docker workspace.
 
 `status`
 
 - Inspects the live backend and synthesizes a control-plane status view.
-- Writes a status snapshot to `config/state/<project>.status.json`.
+- Writes a status snapshot to
+  `config/users/<user>/projects/<project>/state/status.json`.
 - Reports backend liveness, workspace readiness, daemon readiness, attachment
   checks, runtime assembly checks, and drift.
 
@@ -120,7 +123,7 @@ Credential metadata lives in a pure file-backed registry:
 
 ```text
 config/users/profiles/<user>.yaml
-config/users/credentials/<user>/*.yaml
+config/users/<user>/credentials/*.yaml
 ```
 
 The default Docker scaffold expects secret material under the user-owned
@@ -128,11 +131,12 @@ credential root reported by `create`, for example:
 
 ```text
 config/users/local-<identity>/
-  codex/auth.json
-  codex/config.toml
-  claude/settings.json
-  ssh/id_ed25519
-  ssh/id_ed25519.pub
+  credentials/
+    codex/auth.json
+    codex/config.toml
+    claude/settings.json
+    ssh/id_ed25519
+    ssh/id_ed25519.pub
 ```
 
 Workspace specs bind those credentials by purpose:

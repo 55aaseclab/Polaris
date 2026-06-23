@@ -52,20 +52,17 @@ Long-term target layout:
 
 ```text
 config/
-  specs/
-    base/
-    pod/
-      profiles/
+  pod/
+    profiles/
+  users/
+    profiles/
+    <user>/
+      credentials/
       projects/
-    kubevirt/
-      projects/
-    docker/
-      projects/
-  generated/
-    pod/
-    kubevirt/
-    docker/
-  state/
+        <project>/
+          *.agent.yaml
+          generated/
+          state/
 ```
 
 Profiles are part of the workspace intent layer. A workspace may select a
@@ -84,7 +81,7 @@ Credential registry layout:
 
 ```text
 config/users/profiles/<user>.yaml
-config/users/credentials/<user>/*.yaml
+config/users/<user>/credentials/*.yaml
 ```
 
 Each credential declares stable metadata and `materialRef`.
@@ -104,9 +101,11 @@ credentials:
 
 ## Current Reality
 
-- New onboarding should start from `config/specs/docker/projects/*.agent.yaml`
-  and `config/generated/docker/*.yaml`.
-- New TypeScript code prefers `config/specs/**` and `config/generated/**`.
+- New onboarding should start from
+  `config/users/<user>/projects/<project>/docker.agent.yaml`
+  and `config/users/<user>/projects/<project>/generated/docker.yaml`.
+- New TypeScript code prefers user-scoped saved specs and generated artifacts
+  under `config/users/**`.
 - Repo-managed specs now declare attachment classes directly.
 - Repo-managed specs may also declare credential bindings directly.
 - The control plane translates legacy path-centric persistence fields only as a
@@ -122,10 +121,12 @@ credentials:
 
 For Docker specifically:
 
-- saved intent lives under `config/specs/docker/projects/`
-- rendered output lives under `config/generated/docker/`
+- saved intent lives under `config/users/<user>/projects/<project>/`
+- rendered output lives under
+  `config/users/<user>/projects/<project>/generated/`
 - the rendered artifact is a Docker Compose file consumed by `docker compose`
-- `status` also writes a synthesized control-plane view to `config/state/`
+- `status` also writes a synthesized control-plane view to
+  `config/users/<user>/projects/<project>/state/`
 - when the same project name exists across multiple backends, operators can use
   `<project>@docker`, `<project>@pod`, or `<project>@kubevirt-vm` to select the
   intended saved spec

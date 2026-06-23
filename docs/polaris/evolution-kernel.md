@@ -65,7 +65,7 @@ Inside the control plane, Polaris also keeps its own local evolution state for
 inspection and bootstrap preparation under:
 
 ```text
-config/state/evolution/<project>/
+config/users/<user>/projects/<project>/state/evolution/
   store.db
   bootstrap-context.md
 ```
@@ -113,7 +113,8 @@ Before `render` or `start`, Polaris prepares a bootstrap context by:
    profile
 3. Rendering them into a compact markdown snapshot
 4. Writing that snapshot to:
-   - control-plane path: `config/state/evolution/<project>/bootstrap-context.md`
+   - control-plane path:
+     `config/users/<user>/projects/<project>/state/evolution/bootstrap-context.md`
    - runtime path: `<evolutionRoot>/bootstrap-context.md`
 
 The runtime receives:

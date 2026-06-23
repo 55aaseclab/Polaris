@@ -32,6 +32,6 @@ export async function reconcileCommand(project: string): Promise<void> {
     ...(await getEvolutionSummary(workspace)),
     ...(evolutionSessionId ? { lastSessionId: evolutionSessionId } : {}),
   };
-  const outputPath = writeWorkspaceStatus(status);
+  const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
   process.stdout.write(`${JSON.stringify({ ...status, reconcilePlan: plan, statusFile: outputPath }, null, 2)}\n`);
 }

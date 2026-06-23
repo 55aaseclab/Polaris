@@ -51,6 +51,7 @@ export interface UserProfile {
   name: string;
   email: string;
   secretsRoot: string;
+  workspaces: string[];
   github: {
     account?: string;
   };

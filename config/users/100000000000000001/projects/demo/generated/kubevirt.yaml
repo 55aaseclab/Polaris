@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo-vm-cloudinit
+  namespace: demo
+stringData:
+  userdata: |
+    #cloud-config
+    bootcmd:
+      - rm -f /identity /ssh
+      - mkdir -p /workspace
+      - mkdir -p /workspace/project /workspace/state /identity /ssh
+      - /bin/sh -lc 'mountpoint -q /workspace/project || mount -t virtiofs workspace-data /workspace/project'
+      - /bin/sh -lc 'mountpoint -q /workspace/state || mount -t virtiofs workspace-runtime-state /workspace/state'
+      - /bin/sh -lc 'mountpoint -q /identity || mount -t virtiofs user-identity-state /identity'
+      - /bin/sh -lc 'mountpoint -q /ssh || mount -t virtiofs user-ssh-state /ssh'
+      - mkdir -p /workspace/state/paseo /workspace/state/paseo/evolution /identity/codex /identity/claude /ssh /run/workspace/tmp /root/.local /root/.npm
+      - /bin/sh -lc 'rm -f /root/.codex /root/.claude /root/.paseo /root/.ssh /root/workspace; ln -sfn /identity/codex /root/.codex; ln -sfn /identity/claude /root/.claude; ln -sfn /workspace/state/paseo /root/.paseo; ln -sfn /ssh /root/.ssh; ln -sfn /workspace/project /root/workspace'
+      - /bin/sh -lc 'mkdir -p /ssh && chmod 700 /ssh || true'
+      - chmod 1777 /run/workspace/tmp
+      - |
+        cat >/root/.paseo/evolution/bootstrap-context.md <<'EOF'
+        # Polaris Evolution Context
+        
+        - project: demo
+        - manager: paseo
+        - user-profile: 100000000000000001
+        - retrieved-artifacts: 0
+        _No prior evolution artifacts were retrieved for this workspace yet._
+        EOF
+      - /bin/sh -lc 'rm -f /var/lib/cloud/instance/sem/config_scripts_user /var/lib/cloud/instance/sem/scripts_user /var/lib/cloud/instance/sem/config_runcmd 2>/dev/null || true; find /var/lib/cloud/instances -path "*/sem/*" \( -name "config_scripts_user" -o -name "scripts_user" -o -name "config_runcmd" \) -delete 2>/dev/null || true'
+      - python3 -c "import base64, pathlib; p = pathlib.Path('/identity/codex/auth.json'); p.parent.mkdir(parents=True, exist_ok=True); (not p.exists()) and p.write_bytes(base64.b64decode('ewogICJwcm92aWRlciI6ICJkZW1vIiwKICAibm90ZSI6ICJzeW50aGV0aWMgZml4dHVyZSBmb3IgUG9sYXJpcyBkZW1vIHdvcmtzcGFjZXMiCn0K'))"
+      - python3 -c "import base64, pathlib; p = pathlib.Path('/identity/codex/config.toml'); p.parent.mkdir(parents=True, exist_ok=True); (not p.exists()) and p.write_bytes(base64.b64decode('bW9kZWwgPSAiZ3B0LTUiCgpbcHJvZmlsZXMuZGVtb10KYXBwcm92YWxfcG9saWN5ID0gIm5ldmVyIgo='))"
+      - python3 -c "import base64, pathlib; p = pathlib.Path('/identity/claude/settings.json'); p.parent.mkdir(parents=True, exist_ok=True); (not p.exists()) and p.write_bytes(base64.b64decode('ewogICJ0aGVtZSI6ICJkZW1vIiwKICAibm90ZSI6ICJzeW50aGV0aWMgZml4dHVyZSBmb3IgUG9sYXJpcyBkZW1vIHdvcmtzcGFjZXMiCn0K'))"
+    runcmd:
+      - /bin/sh -lc 'if ! command -v git >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v nvim >/dev/null 2>&1 || ! command -v rg >/dev/null 2>&1 || ! command -v tmux >/dev/null 2>&1 || ! command -v zsh >/dev/null 2>&1 || ! test -x /usr/sbin/sshd; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bash ca-certificates curl fd-find git jq neovim openssh-client openssh-server procps python3 ripgrep tmux wget xdg-utils zsh xz-utils; fi'
+      - /bin/sh -lc 'if [ -x /root/guest-firstboot.sh ]; then sh /root/guest-firstboot.sh && rm -f /root/guest-firstboot.sh; fi'
+      - mkdir -p /root/.local/node /root/.local/polaris /root/.npm
+      - /bin/sh -lc 'if [ ! -x /root/.local/node/bin/node ]; then curl -fsSL https://nodejs.org/dist/v20.19.2/node-v20.19.2-linux-x64.tar.xz -o /tmp/node.tar.xz && tar -xJf /tmp/node.tar.xz -C /root/.local/node --strip-components=1 && rm -f /tmp/node.tar.xz; fi'
+      - /bin/sh -lc 'if [ ! -x /root/.local/polaris/bin/paseo ]; then PATH=/root/.local/node/bin:$PATH NPM_CONFIG_PREFIX=/root/.local/polaris npm_config_cache=/root/.npm /root/.local/node/bin/npm install -g @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm; fi'
+      - /bin/sh -lc 'printf "%s\n" "#!/usr/bin/env bash" "set -euo pipefail" "export PATH=/root/.local/node/bin:/root/.local/polaris/bin:\$PATH" "exec /root/.local/polaris/bin/paseo \"\$@\"" > /usr/local/bin/paseo && chmod 755 /usr/local/bin/paseo'
+      - /bin/sh -lc 'printf "%s\n" "#!/usr/bin/env bash" "set -euo pipefail" "export PATH=/root/.local/node/bin:/root/.local/polaris/bin:\$PATH" "exec /root/.local/polaris/bin/pnpm \"\$@\"" > /usr/local/bin/pnpm && chmod 755 /usr/local/bin/pnpm'
+      - /bin/sh -lc 'printf "%s\n" "#!/usr/bin/env bash" "set -euo pipefail" "export PATH=/root/.local/node/bin:/root/.local/polaris/bin:\$PATH" "export CODEX_HOME=/root/.codex" "export NPM_CONFIG_PREFIX=/root/.local/polaris" "export npm_config_cache=/root/.npm" "mkdir -p /root/.codex" "exec /root/.local/polaris/bin/codex \"\$@\"" > /usr/local/bin/codex && chmod 755 /usr/local/bin/codex'
+      - /bin/sh -lc 'printf "%s\n" "#!/usr/bin/env bash" "set -euo pipefail" "export PATH=/root/.local/node/bin:/root/.local/polaris/bin:\$PATH" "export NPM_CONFIG_PREFIX=/root/.local/polaris" "export npm_config_cache=/root/.npm" "exec /root/.local/polaris/bin/claude \"\$@\"" > /usr/local/bin/claude && chmod 755 /usr/local/bin/claude'
+      - /bin/sh -lc 'python3 - <<'"'"'PY'"'"'\nimport json\nfrom pathlib import Path\npath = Path(\"/root/.paseo/config.json\")\nif path.exists():\n    data = json.loads(path.read_text())\n    data.setdefault(\"daemon\", {})[\"listen\"] = \"0.0.0.0:6767\"\n    path.write_text(json.dumps(data, indent=2) + \"\\n\")\nPY'
+      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C demo@example.com -N "" -f /ssh/id_ed25519; fi'
+      - /bin/sh -lc 'mkdir -p /run/sshd && systemctl enable ssh >/dev/null 2>&1 || true; systemctl restart ssh'
+      - /bin/sh -lc 'if ! test -f /root/.paseo/paseo.pid || ! kill -0 "$(cat /root/.paseo/paseo.pid)" 2>/dev/null; then PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767; fi'
+      - /bin/sh -lc 'paired=0; for i in $(seq 1 30); do PASEO_HOME=/root/.paseo paseo daemon pair --json > /root/.paseo/pairing.json.tmp 2>/dev/null && mv /root/.paseo/pairing.json.tmp /root/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$paired" = 1'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-workspace-data
+  namespace: demo
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 120Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-workspace-runtime-state
+  namespace: demo
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-user-identity-state
+  namespace: demo
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-user-ssh-state
+  namespace: demo
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: demo
+spec:
+  type: NodePort
+  selector:
+    vm.kubevirt.io/name: demo-vm
+  ports:
+    - name: paseo
+      port: 6767
+      targetPort: 6767
+      nodePort: 32677
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-vm
+  namespace: demo
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        vm.kubevirt.io/name: demo-vm
+    spec:
+      domain:
+        resources:
+          requests:
+            memory: 4Gi
+        memory:
+          guest: 16Gi
+        devices:
+          interfaces:
+            - name: default
+              masquerade: {}
+              ports:
+                - port: 6767
+                  protocol: TCP
+          filesystems:
+            - name: workspace-data
+              virtiofs: {}
+            - name: workspace-runtime-state
+              virtiofs: {}
+            - name: user-identity-state
+              virtiofs: {}
+            - name: user-ssh-state
+              virtiofs: {}
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: ttl.sh/polaris-demo-kubevirt-rootdisk-1782200980:24h
+        - name: workspace-data
+          persistentVolumeClaim:
+            claimName: demo-workspace-data
+        - name: workspace-runtime-state
+          persistentVolumeClaim:
+            claimName: demo-workspace-runtime-state
+        - name: user-identity-state
+          persistentVolumeClaim:
+            claimName: demo-user-identity-state
+        - name: user-ssh-state
+          persistentVolumeClaim:
+            claimName: demo-user-ssh-state
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: demo-vm-cloudinit
+      networks:
+        - name: default
+          pod: {}

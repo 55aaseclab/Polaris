@@ -5,19 +5,41 @@ import yaml from "js-yaml";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
-const USER_CREDENTIALS_DIR = path.join(REPO_ROOT, "config", "users", "credentials");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 
-export function workspaceConfigPath(project: string, backendKind: "docker" | "pod" | "kubevirt-vm" = "docker"): string {
-  const backendDir = backendKind === "kubevirt-vm" ? "kubevirt" : backendKind;
-  return path.join(REPO_ROOT, "config", "specs", backendDir, "projects", `${project}.agent.yaml`);
+export function workspaceConfigPath(
+  project: string,
+  backendKind: "docker" | "pod" | "kubevirt-vm" = "docker",
+  userProfileId: string,
+): string {
+  const backendFile =
+    backendKind === "kubevirt-vm"
+      ? "kubevirt.agent.yaml"
+      : `${backendKind}.agent.yaml`;
+  return path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userProfileId.trim(),
+    "projects",
+    project,
+    backendFile,
+  );
 }
 
 export function workspaceConfigExists(project: string): boolean {
+  const userScopedRoot = path.join(REPO_ROOT, "config", "users");
+  const userScopedMatches = fs.existsSync(userScopedRoot)
+    ? fs.readdirSync(userScopedRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => [
+        workspaceConfigPath(project, "docker", entry.name),
+        workspaceConfigPath(project, "pod", entry.name),
+        workspaceConfigPath(project, "kubevirt-vm", entry.name),
+      ])
+    : [];
   return [
-    workspaceConfigPath(project, "docker"),
-    workspaceConfigPath(project, "pod"),
-    workspaceConfigPath(project, "kubevirt-vm"),
+    ...userScopedMatches,
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`),
   ].some((candidate) => fs.existsSync(candidate));
 }
@@ -56,14 +78,30 @@ function userProfilePath(userProfileId: string): string {
 }
 
 function userCredentialRegistryDir(userProfileId: string): string {
-  return path.join(USER_CREDENTIALS_DIR, userProfileId);
+  return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
+}
+
+function ensureWorkspaceListedInUserProfile(userProfileId: string, project: string): void {
+  const profilePath = userProfilePath(userProfileId);
+  if (!fs.existsSync(profilePath)) {
+    return;
+  }
+  const data = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+  const workspaces = Array.isArray(data.workspaces)
+    ? data.workspaces.map((item) => String(item)).filter(Boolean)
+    : [];
+  if (workspaces.includes(project)) {
+    return;
+  }
+  data.workspaces = [...workspaces, project].sort();
+  fs.writeFileSync(profilePath, yaml.dump(data, { lineWidth: 120, noRefs: true }), "utf8");
 }
 
 function writeUserSecretsLayout(userProfileId: string): void {
   const secretsRoot = path.join(USER_SECRETS_ROOT, userProfileId);
-  fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
-  fs.mkdirSync(path.join(secretsRoot, "claude"), { recursive: true });
-  fs.mkdirSync(path.join(secretsRoot, "ssh"), { recursive: true });
+  fs.mkdirSync(path.join(secretsRoot, "credentials", "codex"), { recursive: true });
+  fs.mkdirSync(path.join(secretsRoot, "credentials", "claude"), { recursive: true });
+  fs.mkdirSync(path.join(secretsRoot, "credentials", "ssh"), { recursive: true });
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
 }
 
@@ -88,6 +126,7 @@ export function ensureScaffoldUserProfile(): {
         id: profile.id,
         name: profile.name,
         email: profile.email,
+        workspaces: [],
         github: {
           account: null,
         },
@@ -112,15 +151,15 @@ export function ensureScaffoldUserProfile(): {
           files: [
             {
               key: "codex-auth.json",
-              source_path: "codex/auth.json",
+              source_path: "credentials/codex/auth.json",
             },
             {
               key: "codex-config.toml",
-              source_path: "codex/config.toml",
+              source_path: "credentials/codex/config.toml",
             },
             {
               key: "claude-settings.json",
-              source_path: "claude/settings.json",
+              source_path: "credentials/claude/settings.json",
             },
           ],
         },
@@ -145,11 +184,11 @@ export function ensureScaffoldUserProfile(): {
           files: [
             {
               key: "id_ed25519",
-              source_path: "ssh/id_ed25519",
+              source_path: "credentials/ssh/id_ed25519",
             },
             {
               key: "id_ed25519.pub",
-              source_path: "ssh/id_ed25519.pub",
+              source_path: "credentials/ssh/id_ed25519.pub",
             },
           ],
         },
@@ -173,8 +212,9 @@ export function ensureScaffoldUserProfile(): {
 }
 
 export function scaffoldDockerWorkspace(project: string, userProfileId: string): string {
-  const outputPath = workspaceConfigPath(project, "docker");
+  const outputPath = workspaceConfigPath(project, "docker", userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  ensureWorkspaceListedInUserProfile(userProfileId, project);
   const doc = {
     project,
     user_profile: userProfileId,

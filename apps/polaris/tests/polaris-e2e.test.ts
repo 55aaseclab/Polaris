@@ -5,10 +5,17 @@ import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
-import { writeWorkspaceDriverSelection } from "../scripts/output/state-store.js";
+import { loadWorkspace } from "../scripts/config/load.js";
+import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import { generatedOutputPath } from "../scripts/output/write-generated.js";
+import {
+  workspaceSelectionPath,
+  writeWorkspaceDriverSelection,
+} from "../scripts/output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
+const DEMO_USER_PROFILE_ID = "100000000000000001";
 
 function getStdoutCaptureQueue(): Promise<void> {
   const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
@@ -124,6 +131,11 @@ function removeIfExists(target: string): void {
   }
 }
 
+function cleanupSelectionFile(project: string): void {
+  removeIfExists(workspaceSelectionPath(project, DEMO_USER_PROFILE_ID));
+  removeIfExists(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`));
+}
+
 function parseJsonOutput<T>(stdout: string): T {
   const trimmed = stdout.trim();
   const start = trimmed.indexOf("{");
@@ -134,14 +146,12 @@ function parseJsonOutput<T>(stdout: string): T {
   return JSON.parse(trimmed.slice(start, end + 1)) as T;
 }
 
-function selectionPath(project: string): string {
-  return path.join(REPO_ROOT, "config", "state", `${project}.selection.json`);
-}
-
 function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: string): string {
-  const sourcePath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", "demo.agent.yaml");
-  const outputPath = path.join(REPO_ROOT, "config", "specs", backendDir, "projects", `${project}.agent.yaml`);
+  const backendKind = backendDir === "kubevirt" ? "kubevirt-vm" : backendDir;
+  const sourcePath = workspaceConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
+  const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   const source = fs.readFileSync(sourcePath, "utf8").replace(/^project: demo$/m, `project: ${project}`);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, source, "utf8");
   return outputPath;
 }
@@ -149,11 +159,11 @@ function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: st
 test("create scaffolds a docker-first saved spec when the project is new", async () => {
   const project = `e2e-create-${Date.now()}`;
   const profileEmail = `${project}@polaris.local`;
-  const configPath = path.join(REPO_ROOT, "config", "specs", "docker", "projects", `${project}.agent.yaml`);
   const userProfileId = `local-${project}-polaris.local`;
+  const configPath = workspaceConfigPath(project, "docker", userProfileId);
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const credentialRoot = path.join(REPO_ROOT, "config", "users", "credentials", userProfileId);
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
 
   try {
     await withEnv(
@@ -193,9 +203,11 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.userProfile.created, true);
         assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
         assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
-        assert.equal(parsed.credentials.registryRoot, `config/users/credentials/${userProfileId}`);
+        assert.equal(parsed.credentials.registryRoot, `config/users/${userProfileId}/credentials`);
         assert.deepEqual(parsed.credentials.defaults, ["codex-default", "github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
+        const scaffoldedProfile = yaml.load(fs.readFileSync(profilePath, "utf8")) as { workspaces?: string[] };
+        assert.ok(scaffoldedProfile.workspaces?.includes(project));
         assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
         assert.equal(fs.existsSync(path.join(credentialRoot, "codex-default.yaml")), true);
         assert.equal(fs.existsSync(path.join(credentialRoot, "github-ssh.yaml")), true);
@@ -271,10 +283,10 @@ exit 0
 
 test("switch stops the previous backend, starts the new backend, and updates defaults", async () => {
   const project = "demo";
-  const driverSelectionPath = selectionPath(project);
+  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
   const dockerStateFile = `/tmp/polaris-switch-basic-docker-state-${process.pid}-${Date.now()}`;
   const podStateFile = `/tmp/polaris-switch-basic-pod-state-${process.pid}-${Date.now()}`;
-  removeIfExists(driverSelectionPath);
+  cleanupSelectionFile(project);
 
   try {
     await withFakePath(
@@ -379,7 +391,7 @@ exit 0
       },
     );
   } finally {
-    removeIfExists(driverSelectionPath);
+    cleanupSelectionFile(project);
     removeIfExists(dockerStateFile);
     removeIfExists(podStateFile);
   }
@@ -387,8 +399,8 @@ exit 0
 
 test("switch accepts pod driver variants such as kata", async () => {
   const project = "demo";
-  const driverSelectionPath = selectionPath(project);
-  removeIfExists(driverSelectionPath);
+  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+  cleanupSelectionFile(project);
 
   try {
     await withFakePath(
@@ -434,15 +446,15 @@ exit 0
       },
     );
   } finally {
-    removeIfExists(driverSelectionPath);
+    cleanupSelectionFile(project);
   }
 });
 
 test("e2e switch chain keeps daemon connectivity across docker, pod:gvisor, pod:kata-container, and kubevirt while exposing timing from logs", async () => {
   const project = "demo";
-  const driverSelectionPath = selectionPath(project);
-  const podProfilePath = path.join(REPO_ROOT, "config", "specs", "pod", "profiles", "kata-container.yaml");
-  removeIfExists(driverSelectionPath);
+  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+  const podProfilePath = path.join(REPO_ROOT, "config", "pod", "profiles", "kata-container.yaml");
+  cleanupSelectionFile(project);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-switch-sim-"));
   const statePath = path.join(tempDir, "backend-state.sh");
@@ -487,7 +499,7 @@ test("e2e switch chain keeps daemon connectivity across docker, pod:gvisor, pod:
   }
 
   try {
-    writeWorkspaceDriverSelection(project, { backend: "docker" });
+    writeWorkspaceDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
     await withFakePath(
       {
         docker: `#!/usr/bin/env bash
@@ -549,13 +561,13 @@ KUBEVIRT_EXISTS=$KUBEVIRT_EXISTS
 KUBEVIRT_RUNNING=$KUBEVIRT_RUNNING
 EOF
 }
-if [[ "$*" == *"apply -f "*"/config/generated/pod/"* ]]; then
+if [[ "$*" == *"/generated/pod.yaml"* ]]; then
   POD_EXISTS=1
   POD_RUNNING=1
   save_state
   exit 0
 fi
-if [[ "$*" == *"apply -f "*"/config/generated/kubevirt/"* ]]; then
+if [[ "$*" == *"/generated/kubevirt.yaml"* ]]; then
   KUBEVIRT_EXISTS=1
   save_state
   exit 0
@@ -770,7 +782,7 @@ exit 0
       },
     );
   } finally {
-    removeIfExists(driverSelectionPath);
+    cleanupSelectionFile(project);
     removeIfExists(podProfilePath);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -783,6 +795,9 @@ test("logs command dispatches to each backend implementation", async () => {
   const podSpec = writeProjectSpec("pod", podProject);
   const dockerSpec = writeProjectSpec("docker", dockerProject);
   const vmSpec = writeProjectSpec("kubevirt", vmProject);
+  const podGeneratedPath = generatedOutputPath(loadWorkspace(`${podProject}@pod`));
+  const dockerGeneratedPath = generatedOutputPath(loadWorkspace(`${dockerProject}@docker`));
+  const vmGeneratedPath = generatedOutputPath(loadWorkspace(`${vmProject}@kubevirt-vm`));
   const traceDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-trace-"));
   const traceFile = path.join(traceDir, "commands.log");
 
@@ -815,15 +830,15 @@ exit 0
 
     const trace = fs.readFileSync(traceFile, "utf8");
     assert.match(trace, new RegExp(`logs ${podProject}-pod --tail=200`));
-    assert.match(trace, new RegExp(`compose -f .*${dockerProject}\\.yaml logs --tail 200 ${dockerProject}`));
+    assert.match(trace, new RegExp(`compose -f .*/projects/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${dockerProject}`));
     assert.match(trace, new RegExp(`logs ${vmProject}-launcher --tail=200`));
   } finally {
     removeIfExists(podSpec);
     removeIfExists(dockerSpec);
     removeIfExists(vmSpec);
-    removeIfExists(path.join(REPO_ROOT, "config", "generated", "pod", `${podProject}.yaml`));
-    removeIfExists(path.join(REPO_ROOT, "config", "generated", "docker", `${dockerProject}.yaml`));
-    removeIfExists(path.join(REPO_ROOT, "config", "generated", "kubevirt", `${vmProject}.yaml`));
+    removeIfExists(podGeneratedPath);
+    removeIfExists(dockerGeneratedPath);
+    removeIfExists(vmGeneratedPath);
     removeIfExists(traceDir);
   }
 });

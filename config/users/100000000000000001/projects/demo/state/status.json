@@ -1,0 +1,131 @@
+{
+  "project": "demo",
+  "backend": {
+    "kind": "docker",
+    "profile": "legacy",
+    "instanceState": "running"
+  },
+  "lifecycleAction": "status",
+  "state": "ready",
+  "health": {
+    "backendLiveness": "running",
+    "workspaceReadiness": "ready",
+    "daemonReadiness": "ready"
+  },
+  "details": {
+    "backendDetail": "docker-id",
+    "serviceDetail": "docker compose service is present",
+    "agentDetail": "paseo + codex + claude",
+    "userProfileDetail": "100000000000000001 <demo@example.com>"
+  },
+  "ssh": {
+    "mode": "managed-key",
+    "selfCheck": {
+      "state": "not-configured",
+      "message": "No github.account is configured in the user profile."
+    }
+  },
+  "attachments": {
+    "workspaceData": {
+      "state": "ok",
+      "detail": "/workspace/project"
+    },
+    "workspaceRuntimeState": {
+      "state": "ok",
+      "detail": "/workspace/state"
+    },
+    "userIdentityState": {
+      "state": "ok",
+      "detail": "/identity"
+    },
+    "userSshState": {
+      "state": "ok",
+      "detail": "/ssh"
+    }
+  },
+  "runtimeAssembly": {
+    "home": {
+      "state": "ok",
+      "detail": "/root"
+    },
+    "projectRoot": {
+      "state": "ok",
+      "detail": "/root/workspace"
+    },
+    "managerState": {
+      "state": "ok",
+      "detail": "/root/.paseo"
+    },
+    "evolutionState": {
+      "state": "ok",
+      "detail": "/root/.paseo/evolution"
+    },
+    "codex": {
+      "state": "ok",
+      "detail": "/root/.codex"
+    },
+    "claude": {
+      "state": "ok",
+      "detail": "/root/.claude"
+    },
+    "ssh": {
+      "state": "ok",
+      "detail": "/root/.ssh"
+    }
+  },
+  "daemon": {
+    "manager": {
+      "state": "ok",
+      "detail": "/root/.paseo/pairing.json"
+    },
+    "pairing": {
+      "state": "ok",
+      "detail": "/root/.paseo/pairing.json"
+    }
+  },
+  "drift": {
+    "items": [],
+    "hasErrors": false,
+    "hasWarnings": false
+  },
+  "evolution": {
+    "artifactCount": 9,
+    "activeWorkspaceArtifacts": 0,
+    "activeUserArtifacts": 0,
+    "latestTitles": [
+      "No durable lesson",
+      "No durable lesson",
+      "No durable lesson",
+      "No durable lesson",
+      "No durable lesson"
+    ],
+    "latestArtifacts": [
+      {
+        "title": "No durable lesson",
+        "kind": "discarded-observation",
+        "status": "suppressed"
+      },
+      {
+        "title": "No durable lesson",
+        "kind": "discarded-observation",
+        "status": "suppressed"
+      },
+      {
+        "title": "No durable lesson",
+        "kind": "discarded-observation",
+        "status": "suppressed"
+      },
+      {
+        "title": "No durable lesson",
+        "kind": "discarded-observation",
+        "status": "suppressed"
+      },
+      {
+        "title": "No durable lesson",
+        "kind": "discarded-observation",
+        "status": "suppressed"
+      }
+    ],
+    "lastSessionId": "status-5b71d839-7944-43d5-9539-3a9583abb16e"
+  }
+}

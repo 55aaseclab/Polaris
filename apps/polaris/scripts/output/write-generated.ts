@@ -5,13 +5,22 @@ import type { WorkspaceSpec } from "../core/workspace.js";
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 
 export function generatedOutputPath(workspace: WorkspaceSpec): string {
-  const backendDir =
+  const backendFile =
     workspace.backend.kind === "pod"
-      ? "pod"
+      ? "pod.yaml"
       : workspace.backend.kind === "kubevirt-vm"
-        ? "kubevirt"
-        : "docker";
-  return path.join(REPO_ROOT, "config", "generated", backendDir, `${workspace.identity.projectName}.yaml`);
+        ? "kubevirt.yaml"
+        : "docker.yaml";
+  return path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    workspace.userProfile.id,
+    "projects",
+    workspace.identity.projectName,
+    "generated",
+    backendFile,
+  );
 }
 
 export function writeGeneratedManifest(workspace: WorkspaceSpec, yamlText: string): string {

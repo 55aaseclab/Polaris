@@ -147,10 +147,4 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.health.requiresDaemon !== workspace.agent.capabilities.requiresDaemon) {
     throw new Error("Workspace health daemon requirement must match manager capabilities");
   }
-
-  if (workspace.backend.kind === "kubevirt-vm") {
-    if (workspace.backend.specFiles.length === 0) {
-      throw new Error("Workspace backend 'kubevirt-vm' requires backend spec files");
-    }
-  }
 }
