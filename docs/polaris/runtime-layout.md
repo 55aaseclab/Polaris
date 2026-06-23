@@ -77,6 +77,30 @@ Polaris now distinguishes between:
 - workspace profile: backend/runtime-oriented defaults
 - user profile: Git identity, SSH policy, and ownership of user-scoped
   identity state
+- user credential registry: reusable auth declarations and material references
+- workspace credential bindings: per-workspace credential selection by purpose
+
+Credential registry layout:
+
+```text
+config/users/profiles/<user>.yaml
+config/users/credentials/<user>/*.yaml
+```
+
+Each credential declares stable metadata and `materialRef`.
+Secret material stays outside the registry document.
+
+Workspace config binds credentials separately from driver selection:
+
+```yaml
+backend:
+  kind: docker
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: codex-default
+      required: true
+```
 
 ## Current Reality
 
@@ -84,8 +108,11 @@ Polaris now distinguishes between:
   and `config/generated/docker/*.yaml`.
 - New TypeScript code prefers `config/specs/**` and `config/generated/**`.
 - Repo-managed specs now declare attachment classes directly.
+- Repo-managed specs may also declare credential bindings directly.
 - The control plane translates legacy path-centric persistence fields only as a
   compatibility path when direct attachment declarations are absent.
+- The control plane also treats legacy inline auth fields as compatibility-only
+  when direct credential bindings are present.
 - Backend implementations may still realize the same attachment classes with
   different physical mount primitives, but they are expected to preserve the
   same scope and lifecycle semantics.

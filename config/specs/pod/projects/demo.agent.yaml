@@ -1,21 +1,26 @@
-project: morpheus
-user_profile: "100000000000000002"
+project: demo
+user_profile: '100000000000000001'
 backend:
-  kind: kubevirt-vm
-  spec_files:
-  - config/kubevirt/specs/morpheus.agent.yaml
+  kind: pod
+  spec_files: null
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: demo-codex
+      required: true
 runtime:
   class: gvisor
-  base_image: ttl.sh/morpheus-prebuilt-1781600969:24h
+  base_image: ttl.sh/polaris-demo-debian13-1782126452:24h
   user: root
+  storage_claim_name: null
   privileged: null
-  docker_enabled: null
+  docker_enabled: true
 resources:
-  cpu: '12'
-  memory: 24Gi
-  ephemeral_storage: 300Gi
-  cpu_request: '4'
-  memory_request: 8Gi
+  cpu: '8'
+  memory: 16Gi
+  ephemeral_storage: 120Gi
+  cpu_request: '2'
+  memory_request: 4Gi
   ephemeral_storage_request: 20Gi
   unbounded: true
 agent:
@@ -25,25 +30,17 @@ agent:
   persist_state: true
 tooling:
   bootstrap_profile: prebuilt
-  install_rustup: true
+  install_rustup: false
   git_core_editor: vi
-  git_user_name: Qiang Liu
-  git_user_email: cyruscyliu@gmail.com
 env:
   plain: {}
 service:
   enabled: true
   mode: nodeport
   ports:
-  - container_port: '6767'
-    node_port: '31677'
-    name: paseo
-  - container_port: '8080'
-    node_port: '31678'
-    name: web-1
-  - container_port: '8081'
-    node_port: '31679'
-    name: web-2
+    - container_port: '6767'
+      node_port: '32677'
+      name: paseo
   host: null
   path: /
 attachments:
@@ -52,30 +49,30 @@ attachments:
     sharing: exclusive
     mount_root: /workspace/project
     durable_paths:
-    - /workspace/project
+      - /workspace/project
     source:
       kind: persistent-volume
-      volume_ref: morpheus-project
-      description: workspace-scoped persistent storage for morpheus
+      volume_ref: demo-project
+      description: reusable workspace data for demo
   workspace-runtime-state:
     scope: workspace
     sharing: exclusive
     mount_root: /workspace/state
     durable_paths:
-    - /workspace/state/paseo
-    - /workspace/state/paseo/evolution
+      - /workspace/state/paseo
+      - /workspace/state/paseo/evolution
     source:
       kind: persistent-volume
-      volume_ref: morpheus-project
+      volume_ref: demo-project
       sub_path: state
-      description: workspace runtime state for morpheus
+      description: reusable workspace runtime state for demo
   user-identity-state:
     scope: user
     sharing: cross-workspace
     mount_root: /identity
     durable_paths:
-    - /identity/codex
-    - /identity/claude
+      - /identity/codex
+      - /identity/claude
     source:
       kind: secret-material
       description: user identity material sourced from spec auth files
@@ -84,17 +81,16 @@ attachments:
     sharing: cross-workspace
     mount_root: /ssh
     durable_paths:
-    - /ssh
+      - /ssh
     source:
       kind: generated-material
       description: user SSH material
   ephemeral-runtime:
     mount_root: /run/workspace
     paths:
-    - /run/workspace/tmp
-    - /run/workspace/pids
-    - /run/workspace/sockets
+      - /run/workspace/tmp
+      - /run/workspace/pids
+      - /run/workspace/sockets
     stale_artifacts:
-    - /root/.paseo/paseo.pid
-    - /run/workspace/pids/paseo.pid
-profile: morpheus
+      - /root/.paseo/paseo.pid
+      - /run/workspace/pids/paseo.pid

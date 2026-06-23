@@ -10,7 +10,7 @@ import { renderDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { renderPodWorkspace } from "../scripts/backends/pod/render.js";
 
 test("prepareEvolutionBootstrapContext writes a control-plane snapshot and injects runtime paths", async () => {
-  const workspace = loadWorkspace("morpheus@docker");
+  const workspace = loadWorkspace("demo@docker");
   const dbPath = controlPlaneEvolutionDbPath(workspace);
   try {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -45,7 +45,7 @@ test("prepareEvolutionBootstrapContext writes a control-plane snapshot and injec
 });
 
 test("renderers expose evolution bootstrap context to runtime consumers", async () => {
-  const workspace = loadWorkspace("morpheus@docker");
+  const workspace = loadWorkspace("demo@docker");
   const dbPath = controlPlaneEvolutionDbPath(workspace);
 
   try {

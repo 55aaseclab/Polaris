@@ -3,9 +3,14 @@ user_profile: '100000000000000001'
 backend:
   kind: docker
   spec_files: null
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: demo-codex
+      required: true
 runtime:
   class: docker
-  base_image: polaris-demo-debian13:local
+  base_image: ttl.sh/polaris-demo-debian13-1782126452:24h
   user: root
   storage_claim_name: null
   privileged: null
@@ -46,8 +51,9 @@ attachments:
     durable_paths:
       - /workspace/project
     source:
-      kind: generated-material
-      description: docker workspace data for demo
+      kind: persistent-volume
+      volume_ref: demo-project
+      description: reusable docker workspace data for demo
   workspace-runtime-state:
     scope: workspace
     sharing: exclusive
@@ -56,8 +62,10 @@ attachments:
       - /workspace/state/paseo
       - /workspace/state/paseo/evolution
     source:
-      kind: generated-material
-      description: docker workspace runtime state for demo
+      kind: persistent-volume
+      volume_ref: demo-project
+      sub_path: state
+      description: reusable docker workspace runtime state for demo
   user-identity-state:
     scope: user
     sharing: cross-workspace

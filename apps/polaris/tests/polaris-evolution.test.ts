@@ -19,7 +19,7 @@ test("evolution store records events and retrieves curated artifacts", async () 
   try {
     store.recordEvent({
       id: "evt-1",
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       managerId: "paseo",
       sessionId: "session-1",
       kind: "task-failed",
@@ -29,11 +29,11 @@ test("evolution store records events and retrieves curated artifacts", async () 
       },
     });
 
-    const events = store.listEventsForSession("morpheus", "session-1");
+    const events = store.listEventsForSession("demo", "session-1");
     assert.equal(events.length, 1);
 
     const review = await reviewExecutionCandidate({
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "100000000000000001",
       managerId: "paseo",
       sessionId: "session-1",
@@ -46,7 +46,7 @@ test("evolution store records events and retrieves curated artifacts", async () 
     }
 
     const retrieved = await retrieveEvolutionContext(store, {
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "100000000000000001",
       prompt: "prefer verifier",
       limit: 5,
@@ -65,7 +65,7 @@ test("evolution store records events and retrieves curated artifacts", async () 
 });
 
 test("paseo manager adapter normalizes transcript events and runtime paths", () => {
-  const workspace = loadWorkspace("morpheus");
+  const workspace = loadWorkspace("demo");
   const adapter = new PaseoManagerAdapter();
   assert.equal(adapter.supports(workspace), true);
 
@@ -86,7 +86,7 @@ test("paseo manager adapter normalizes transcript events and runtime paths", () 
   });
   assert.equal(events.length, 1);
   assert.equal(events[0]?.managerId, "paseo");
-  assert.equal(events[0]?.workspaceId, "morpheus");
+  assert.equal(events[0]?.workspaceId, "demo");
 });
 
 test("curator records promotion, suppression, and decay decisions with explainability", async () => {
@@ -99,7 +99,7 @@ test("curator records promotion, suppression, and decay decisions with explainab
     const artifacts = [
       {
         id: "promoted-1",
-        workspaceId: "morpheus",
+        workspaceId: "demo",
         userProfileId: "100000000000000001",
         kind: "workspace-playbook" as const,
         scope: "workspace" as const,
@@ -114,7 +114,7 @@ test("curator records promotion, suppression, and decay decisions with explainab
       },
       {
         id: "suppressed-1",
-        workspaceId: "morpheus",
+        workspaceId: "demo",
         userProfileId: "100000000000000001",
         kind: "workspace-playbook" as const,
         scope: "workspace" as const,
@@ -129,7 +129,7 @@ test("curator records promotion, suppression, and decay decisions with explainab
       },
       {
         id: "decayed-1",
-        workspaceId: "morpheus",
+        workspaceId: "demo",
         userProfileId: "100000000000000001",
         kind: "workspace-playbook" as const,
         scope: "workspace" as const,
@@ -153,7 +153,7 @@ test("curator records promotion, suppression, and decay decisions with explainab
     assert.ok(result.decayedIds?.includes("decayed-1"));
 
     const queried = store.queryArtifacts({
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "100000000000000001",
       limit: 10,
     });
@@ -173,7 +173,7 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     const now = new Date().toISOString();
     store.upsertArtifact({
       id: "workspace-1",
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "user-1",
       kind: "workspace-playbook",
       scope: "workspace",
@@ -192,7 +192,7 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     });
     store.upsertArtifact({
       id: "user-1-artifact",
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "user-1",
       kind: "lesson",
       scope: "user",
@@ -209,7 +209,7 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     });
     store.upsertArtifact({
       id: "other-user-artifact",
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "user-2",
       kind: "lesson",
       scope: "user",
@@ -224,7 +224,7 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     });
 
     const filtered = store.queryArtifacts({
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "user-1",
       kinds: ["workspace-playbook"],
       text: "verifier",
@@ -232,10 +232,10 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     });
     assert.deepEqual(filtered.map((artifact) => artifact.id), ["workspace-1"]);
 
-    const noUserSummary = store.summarize("morpheus");
+    const noUserSummary = store.summarize("demo");
     assert.equal(noUserSummary.activeUserArtifacts, 0);
 
-    const summary = store.summarize("morpheus", "user-1");
+    const summary = store.summarize("demo", "user-1");
     assert.equal(summary.artifactCount, 3);
     assert.equal(summary.activeWorkspaceArtifacts, 1);
     assert.equal(summary.activeUserArtifacts, 1);
@@ -249,7 +249,7 @@ test("evolution store filters, archives, and summarizes artifacts across scopes"
     store.archiveArtifacts([]);
     store.archiveArtifacts(["workspace-1"]);
     const afterArchive = store.queryArtifacts({
-      workspaceId: "morpheus",
+      workspaceId: "demo",
       userProfileId: "user-1",
       limit: 10,
     });
