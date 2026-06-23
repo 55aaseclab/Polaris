@@ -1,25 +1,31 @@
 import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
+import { assertProjectNameAvailable } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
 import {
   ensureScaffoldUserProfile,
   scaffoldDockerWorkspace,
   workspaceConfigExists,
 } from "../../config/scaffold.js";
+import { ensureWorkspaceConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
 
 export async function createCommand(projectRef: string): Promise<void> {
-  const { project, backendHint } = parseWorkspaceReference(projectRef);
+  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  assertProjectNameAvailable(project);
   if (!workspaceConfigExists(project)) {
     const scaffoldBackend = backendHint === "pod" || backendHint === "kubevirt-vm" ? backendHint : "docker";
-    if (scaffoldBackend !== "docker") {
-      throw new Error(`Scaffolding for backend '${scaffoldBackend}' is not implemented yet; use '${project}@docker' or omit the backend selector`);
-    }
     const userProfile = ensureScaffoldUserProfile();
     const outputPath = scaffoldDockerWorkspace(project, userProfile.id);
+    const requestedRef = scaffoldBackend === "pod" && profileHint
+      ? `${project}@${scaffoldBackend}:${profileHint}`
+      : `${project}@${scaffoldBackend}`;
+    const backendConfigPath = scaffoldBackend === "docker"
+      ? outputPath
+      : ensureWorkspaceConfig(requestedRef)?.configPath ?? outputPath;
     logInfo("cli", "workspace-scaffolded", {
       project,
       backend: scaffoldBackend,
-      configPath: outputPath,
+      configPath: backendConfigPath,
       userProfileId: userProfile.id,
       userProfileCreated: userProfile.created,
     });
@@ -27,7 +33,7 @@ export async function createCommand(projectRef: string): Promise<void> {
       project,
       backend: scaffoldBackend,
       created: "saved-spec",
-      configPath: outputPath,
+      configPath: backendConfigPath,
       userProfile: {
         id: userProfile.id,
         created: userProfile.created,

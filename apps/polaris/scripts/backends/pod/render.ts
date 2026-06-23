@@ -245,6 +245,26 @@ function serviceName(port: ServicePort, index: number): string {
   return port.name || (index === 0 ? "http" : `http-${index + 1}`);
 }
 
+function persistentVolumeClaims(workspace: WorkspaceSpec): Array<{
+  name: string;
+  size: string;
+}> {
+  const claims: Array<{ name: string; size: string }> = [];
+  for (const attachment of [
+    workspace.attachments.workspaceData,
+    workspace.attachments.workspaceRuntimeState,
+  ]) {
+    if (attachment.source.kind !== "persistent-volume" || !attachment.source.volumeRef) {
+      continue;
+    }
+    claims.push({
+      name: attachment.source.volumeRef,
+      size: attachment.source.volumeSize ?? workspace.resources.ephemeralStorage,
+    });
+  }
+  return Array.from(new Map(claims.map((claim) => [claim.name, claim])).values());
+}
+
 export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   const docs: string[] = [];
   docs.push(
@@ -259,20 +279,20 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     ].join("\n"),
   );
 
-  if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
+  for (const claim of persistentVolumeClaims(workspace)) {
     docs.push(
       [
         "apiVersion: v1",
         "kind: PersistentVolumeClaim",
         "metadata:",
-        `  name: ${workspace.attachments.workspaceData.source.volumeRef ?? workspace.storage.claimName}`,
+        `  name: ${claim.name}`,
         `  namespace: ${workspace.identity.projectName}`,
         "spec:",
         "  accessModes:",
         "  - ReadWriteOnce",
         "  resources:",
         "    requests:",
-        `      storage: ${q(workspace.resources.ephemeralStorage)}`,
+        `      storage: ${q(claim.size)}`,
       ].join("\n"),
     );
   }

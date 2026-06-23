@@ -21,6 +21,7 @@ import type {
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
+import { assertNoProjectNameCollision } from "./project-ownership.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 
@@ -116,17 +117,13 @@ function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"][
     backendHint === "kubevirt-vm"
       ? "kubevirt"
       : backendHint;
-  const configuredSpecs = [
-    ...userScopedSpecs("pod"),
-    ...userScopedSpecs("kubevirt"),
-    ...userScopedSpecs("docker"),
-  ];
   const orderedSpecs = preferredBackend
-    ? [
-        ...userScopedSpecs(preferredBackend),
-        ...configuredSpecs.filter((candidate) => !candidate.includes(`/${preferredBackend}/`)),
-      ]
-    : configuredSpecs;
+    ? userScopedSpecs(preferredBackend)
+    : [
+        ...userScopedSpecs("pod"),
+        ...userScopedSpecs("kubevirt"),
+        ...userScopedSpecs("docker"),
+      ];
   return Array.from(new Set([
     ...orderedSpecs,
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`)
@@ -843,6 +840,7 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
 
 export function loadWorkspace(projectRef: string): WorkspaceSpec {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  assertNoProjectNameCollision(project);
   const resolvedBackendHint = resolveBackendHint(project, backendHint);
   const resolvedProfileHint = resolveProfileHint(project, profileHint);
   const configPath = specCandidates(project, resolvedBackendHint).find((candidate) => fs.existsSync(candidate));
