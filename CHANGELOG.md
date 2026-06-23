@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-06-23
+
+Expanded Polaris profile switching, credential scaffolding, and KubeVirt
+workspace support.
+
+### Added
+
+- Added a `switch` CLI command to move workspaces across supported Polaris
+  backends.
+- Added credential-oriented config scaffolding for Codex and Claude user
+  profiles.
+- Added KubeVirt VM and cloud-init templates plus a dedicated `demo` project
+  spec.
+- Added an OpenSpec change for the credential entity model and related
+  workspace attachment specs.
+- Added operator scripts for building KubeVirt root disk images and printing
+  k3s worker join details.
+- Added a repo-level `skills/use-polaris/SKILL.md` guide.
+
+### Changed
+
+- Refined backend renderers and drivers across Docker, Pod, and KubeVirt to
+  support switching and guest runtime improvements.
+- Expanded Polaris config loading, scaffolding, workspace handling, and state
+  tracking.
+- Strengthened CLI, end-to-end, and evolution test coverage around backend
+  switching and credential setup.
+- Moved Polaris docs from `apps/polaris/docs` into `docs/polaris` and refreshed
+  top-level documentation links.
+- Renamed sandbox setup scripts to reflect broader k3s runtime support.
+
+### Removed
+
+- Removed older `morpheus` demo project specs in favor of the current `demo`
+  profile set.
+- Removed the app-local Polaris skill copy and the obsolete Paseo smoke test
+  script.
+
 ## [0.1.0] - 2026-06-21
 
 Initial Polaris release.
