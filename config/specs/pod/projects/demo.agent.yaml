@@ -5,7 +5,7 @@ backend:
   spec_files: null
 runtime:
   class: gvisor
-  base_image: polaris-demo-debian13:local
+  base_image: ttl.sh/polaris-demo-debian13-1782126452:24h
   user: root
   storage_claim_name: null
   privileged: null
@@ -89,4 +89,3 @@ attachments:
     stale_artifacts:
       - /root/.paseo/paseo.pid
       - /run/workspace/pids/paseo.pid
-profile: morpheus

@@ -152,14 +152,15 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (workspace.health.requiresDaemon) {
-      const manager = observation.daemon.manager;
-      if (manager && !manager.observed) {
-        items.push({
-          kind: "daemon",
-          target: "manager",
-          severity: "warning",
-          message: manager?.detail || "manager daemon is not ready",
-        });
+      for (const [target, observed] of Object.entries(observation.daemon)) {
+        if (observed && !observed.observed) {
+          items.push({
+            kind: "daemon",
+            target,
+            severity: "warning",
+            message: observed.detail || `${target} daemon check is not ready`,
+          });
+        }
       }
     }
 
@@ -250,6 +251,7 @@ export function synthesizeWorkspaceStatus(
     },
     daemon: {
       manager: daemonCheck(observation.daemon.manager),
+      pairing: daemonCheck(observation.daemon.pairing),
     },
     drift,
   };

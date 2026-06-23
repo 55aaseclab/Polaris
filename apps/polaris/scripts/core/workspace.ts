@@ -87,6 +87,7 @@ export interface DurableAttachment {
   source: {
     kind: AttachmentSourceKind;
     volumeRef?: string;
+    volumeSize?: string;
     subPath?: string;
     description?: string;
   };
@@ -100,6 +101,7 @@ export interface DirectDurableAttachmentConfig {
   source: {
     kind: AttachmentSourceKind;
     volumeRef?: string;
+    volumeSize?: string;
     subPath?: string;
     description?: string;
   };
@@ -145,6 +147,7 @@ export interface WorkspaceResources {
 
 export interface WorkspaceRuntime {
   baseImage: string;
+  rootdiskImage?: string;
   user: string;
   home: string;
   privileged: boolean;
@@ -176,7 +179,6 @@ export interface WorkspaceAgentContract {
     supportsPairing: boolean;
   };
   harnesses: Array<"codex" | "claude">;
-  bootstrapSecretsRoot: string;
   runtime: {
     stateRoot: string;
     evolutionRoot: string;
@@ -312,6 +314,7 @@ export interface BackendObservation {
   };
   daemon: {
     manager?: ObservationItem;
+    pairing?: ObservationItem;
   };
   services: {
     declared?: number;

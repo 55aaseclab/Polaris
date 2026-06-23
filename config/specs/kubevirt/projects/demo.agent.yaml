@@ -6,7 +6,8 @@ backend:
     - config/kubevirt/specs/demo.agent.yaml
 runtime:
   class: gvisor
-  base_image: polaris-demo-debian13:local
+  base_image: ttl.sh/polaris-demo-debian13-1782126452:24h
+  rootdisk_image: ttl.sh/polaris-demo-kubevirt-rootdisk-1782200980:24h
   user: root
   privileged: null
   docker_enabled: true
@@ -47,7 +48,8 @@ attachments:
       - /workspace/project
     source:
       kind: persistent-volume
-      volume_ref: demo-project
+      volume_ref: demo-workspace-data
+      volume_size: 120Gi
       description: reusable workspace data for demo
   workspace-runtime-state:
     scope: workspace
@@ -58,8 +60,8 @@ attachments:
       - /workspace/state/paseo/evolution
     source:
       kind: persistent-volume
-      volume_ref: demo-project
-      sub_path: state
+      volume_ref: demo-workspace-runtime-state
+      volume_size: 20Gi
       description: reusable workspace runtime state for demo
   user-identity-state:
     scope: user
@@ -69,8 +71,10 @@ attachments:
       - /identity/codex
       - /identity/claude
     source:
-      kind: secret-material
-      description: user identity material sourced from spec auth files
+      kind: persistent-volume
+      volume_ref: demo-user-identity-state
+      volume_size: 5Gi
+      description: persistent user identity state for demo
   user-ssh-state:
     scope: user
     sharing: cross-workspace
@@ -78,8 +82,10 @@ attachments:
     durable_paths:
       - /ssh
     source:
-      kind: generated-material
-      description: user SSH material
+      kind: persistent-volume
+      volume_ref: demo-user-ssh-state
+      volume_size: 1Gi
+      description: persistent user SSH state for demo
   ephemeral-runtime:
     mount_root: /run/workspace
     paths:
