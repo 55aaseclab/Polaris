@@ -4,6 +4,7 @@ import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ObservationItem, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
 import { renderAndWriteKubevirtWorkspace } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
+import { workspaceDataClaimName } from "../../core/netfs.js";
 
 function hasKubectlVirt(): boolean {
   const result = spawnSync("kubectl", ["virt", "--help"], { encoding: "utf8" });
@@ -324,9 +325,7 @@ export class KubevirtDriver implements BackendDriver {
       { encoding: "utf8" },
     );
     const cloudInitPresent = cloudInit.status === 0 && Boolean((cloudInit.stdout || "").trim());
-    const workspaceDataVolume =
-      workspace.attachments.workspaceData.source.volumeRef ??
-      workspace.storage.claimName;
+    const workspaceDataVolume = workspaceDataClaimName(workspace);
     const workspaceRuntimeStateVolume =
       workspace.attachments.workspaceRuntimeState.source.volumeRef ??
       workspace.storage.claimName;

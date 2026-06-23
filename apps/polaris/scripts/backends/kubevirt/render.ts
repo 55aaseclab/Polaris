@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceSpec } from "../../core/workspace.js";
+import {
+  isNetfsSource,
+  netfsResolvedPath,
+  requireNetfsField,
+  workspaceDataClaimName,
+  workspaceDataPersistentVolumeName,
+} from "../../core/netfs.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
@@ -32,6 +39,9 @@ function requireAttachmentVolumeRef(
     | "userSshState",
 ): string {
   const source = workspace.attachments[attachment].source;
+  if (attachment === "workspaceData" && isNetfsSource(source)) {
+    return workspaceDataClaimName(workspace);
+  }
   if (source.kind !== "persistent-volume" || !source.volumeRef?.trim()) {
     throw new Error(
       `KubeVirt render requires '${workspace.attachments[attachment].kind}' to use a dedicated persistent-volume source`,
@@ -65,43 +75,82 @@ function attachmentVolumeSize(
 }
 
 function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
-  const claims = [
-    {
-      name: requireAttachmentVolumeRef(workspace, "workspaceData"),
-      size: attachmentVolumeSize(workspace, "workspaceData"),
-    },
-    {
-      name: requireAttachmentVolumeRef(workspace, "workspaceRuntimeState"),
-      size: attachmentVolumeSize(workspace, "workspaceRuntimeState"),
-    },
-    {
-      name: requireAttachmentVolumeRef(workspace, "userIdentityState"),
-      size: attachmentVolumeSize(workspace, "userIdentityState"),
-    },
-    {
-      name: requireAttachmentVolumeRef(workspace, "userSshState"),
-      size: attachmentVolumeSize(workspace, "userSshState"),
-    },
-  ];
-  return Array.from(
-    new Map(claims.map((claim) => [claim.name, claim])).values(),
-  )
-    .map((claim) =>
-      [
-        "apiVersion: v1",
-        "kind: PersistentVolumeClaim",
-        "metadata:",
-        `  name: ${claim.name}`,
-        `  namespace: ${workspace.identity.projectName}`,
-        "spec:",
-        "  accessModes:",
-        "  - ReadWriteOnce",
-        "  resources:",
-        "    requests:",
-        `      storage: ${claim.size}`,
-      ].join("\n"),
-    )
-    .join("\n---\n");
+  const docs: string[] = [];
+  if (isNetfsSource(workspace.attachments.workspaceData.source)) {
+    const source = workspace.attachments.workspaceData.source;
+    const claimName = workspaceDataClaimName(workspace);
+    docs.push([
+      "apiVersion: v1",
+      "kind: PersistentVolume",
+      "metadata:",
+      `  name: ${workspaceDataPersistentVolumeName(workspace)}`,
+      "spec:",
+      "  accessModes:",
+      "  - ReadWriteMany",
+      "  capacity:",
+      `    storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+      "  persistentVolumeReclaimPolicy: Retain",
+      "  storageClassName: ''",
+      "  mountOptions:",
+      ...((source.mountOptions?.length ? source.mountOptions : ["nfsvers=4.1", "hard", "rw"])
+        .map((entry) => `  - ${entry}`)),
+      "  nfs:",
+      `    server: ${requireNetfsField(source.server, "server", "workspace-data")}`,
+      `    path: ${netfsResolvedPath(source)}`,
+      "  claimRef:",
+      `    namespace: ${workspace.identity.projectName}`,
+      `    name: ${claimName}`,
+    ].join("\n"));
+    docs.push([
+      "apiVersion: v1",
+      "kind: PersistentVolumeClaim",
+      "metadata:",
+      `  name: ${claimName}`,
+      `  namespace: ${workspace.identity.projectName}`,
+      "spec:",
+      "  accessModes:",
+      "  - ReadWriteMany",
+      "  resources:",
+      "    requests:",
+      `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+      "  storageClassName: ''",
+      `  volumeName: ${workspaceDataPersistentVolumeName(workspace)}`,
+    ].join("\n"));
+  } else {
+    docs.push([
+      "apiVersion: v1",
+      "kind: PersistentVolumeClaim",
+      "metadata:",
+      `  name: ${requireAttachmentVolumeRef(workspace, "workspaceData")}`,
+      `  namespace: ${workspace.identity.projectName}`,
+      "spec:",
+      "  accessModes:",
+      "  - ReadWriteOnce",
+      "  resources:",
+      "    requests:",
+      `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+    ].join("\n"));
+  }
+  for (const attachment of [
+    "workspaceRuntimeState",
+    "userIdentityState",
+    "userSshState",
+  ] as const) {
+    docs.push([
+      "apiVersion: v1",
+      "kind: PersistentVolumeClaim",
+      "metadata:",
+      `  name: ${requireAttachmentVolumeRef(workspace, attachment)}`,
+      `  namespace: ${workspace.identity.projectName}`,
+      "spec:",
+      "  accessModes:",
+      "  - ReadWriteOnce",
+      "  resources:",
+      "    requests:",
+      `      storage: ${attachmentVolumeSize(workspace, attachment)}`,
+    ].join("\n"));
+  }
+  return docs.join("\n---\n");
 }
 
 function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {

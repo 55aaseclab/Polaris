@@ -19,6 +19,7 @@ import {
 } from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
+import { renderAndWriteKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 
@@ -184,6 +185,10 @@ test("loadWorkspace normalizes demo pod config through the TypeScript control pl
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
+  assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
+  assert.equal(workspace.attachments.workspaceData.source.server, "netfs.local");
+  assert.equal(workspace.attachments.workspaceData.source.exportPath, "/exports/polaris/workspaces");
+  assert.equal(workspace.attachments.workspaceData.source.subPath, "demo");
   assert.ok(!workspace.userProfile.github.account || workspace.userProfile.github.account.length > 0);
   assert.equal(workspace.credentialBindings.length, 1);
   assert.equal(workspace.credentialBindings[0]?.purpose, "agent-auth");
@@ -270,7 +275,10 @@ test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of tru
     assert.equal(podDoc.backend.kind, "pod");
     assert.equal(podDoc.runtime.class, "gvisor");
     assert.equal(podDoc.runtime.base_image, sourceDoc.runtime.base_image);
-    assert.equal(podDoc.attachments["workspace-data"].source.volume_ref, `${project}-workspace-data`);
+    assert.equal(podDoc.attachments["workspace-data"].source.kind, "netfs");
+    assert.equal(podDoc.attachments["workspace-data"].source.server, "netfs.local");
+    assert.equal(podDoc.attachments["workspace-data"].source.export_path, "/exports/polaris/workspaces");
+    assert.equal(podDoc.attachments["workspace-data"].source.sub_path, project);
     assert.equal(
       podDoc.attachments["workspace-runtime-state"].source.volume_ref,
       `${project}-workspace-runtime-state`,
@@ -560,7 +568,7 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
 test("direct attachment config is present in migrated saved specs", () => {
   const workspace = loadDefaultDemoWorkspace();
   assert.equal(workspace.profile.name, "morpheus");
-  assert.equal(workspace.attachments.workspaceData.source.kind, "persistent-volume");
+  assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
   assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
@@ -1023,10 +1031,13 @@ test("demo specs reuse the demo profile across docker, pod, and kubevirt backend
     assert.equal(workspace.runtime.gitUserEmail, "demo@example.com");
   }
 
-  assert.equal(dockerWorkspace.attachments.workspaceData.source.volumeRef, "demo-project");
+  assert.equal(dockerWorkspace.attachments.workspaceData.source.volumeRef, "demo-workspace-data");
+  assert.equal(dockerWorkspace.attachments.workspaceData.source.kind, "netfs");
+  assert.equal(podWorkspace.attachments.workspaceData.source.kind, "netfs");
+  assert.equal(kubevirtWorkspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(
     podWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
-    "demo-project",
+    "demo-workspace-runtime-state",
   );
   assert.equal(
     kubevirtWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
@@ -1039,10 +1050,56 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
-  assert.match(rendered, /source: demo-project\b/);
+  assert.match(rendered, /source: demo-workspace-data\b/);
   assert.match(rendered, /source: demo-project-state\b/);
-  assert.match(rendered, /demo-project:\n    name: demo-project/);
+  assert.match(rendered, /driver_opts:\n      type: "nfs"/);
+  assert.match(rendered, /o: "addr=netfs\.local,nfsvers=4\.1,hard,rw"/);
+  assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
+  assert.match(rendered, /demo-workspace-data:\n    name: demo-workspace-data/);
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
+});
+
+test("loadWorkspace rejects a netfs workspace-data attachment without a server", () => {
+  const project = uniqueProjectName("netfs-missing-server");
+  const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), outputPath);
+
+  try {
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.project = project;
+    delete doc.attachments["workspace-data"].source.server;
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+    assert.throws(
+      () => loadWorkspace(`${project}@docker`),
+      /workspace-data netfs source requires a server/,
+    );
+  } finally {
+    fs.rmSync(outputPath, { force: true });
+  }
+});
+
+test("pod render mounts demo workspace data through netfs", () => {
+  const workspace = loadWorkspace("demo@pod");
+  const outputPath = renderAndWritePodWorkspace(workspace);
+  const rendered = fs.readFileSync(outputPath, "utf8");
+
+  assert.match(rendered, /- name: workspace-data\n        nfs:/);
+  assert.match(rendered, /server: netfs\.local/);
+  assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
+});
+
+test("kubevirt render bridges netfs workspace data through a PV and PVC", () => {
+  const workspace = loadWorkspace("demo@kubevirt-vm");
+  const outputPath = renderAndWriteKubevirtWorkspace(workspace);
+  const rendered = fs.readFileSync(outputPath, "utf8");
+
+  assert.match(rendered, /kind: PersistentVolume/);
+  assert.match(rendered, /name: demo-workspace-data-pv/);
+  assert.match(rendered, /kind: PersistentVolumeClaim/);
+  assert.match(rendered, /name: demo-workspace-data/);
+  assert.match(rendered, /server: netfs\.local/);
+  assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
 });
 
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {
@@ -1399,6 +1456,102 @@ exit 0
         assert.equal(parsed.reconcilePlan.safe, true);
       },
     );
+  });
+});
+
+test("switch migrates only small durable attachments when workspace-data is netfs", async () => {
+  const project = uniqueProjectName("switch-netfs");
+  const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
+  cleanupSelectionFile(project);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+    try {
+      ensureWorkspaceConfig(`${project}@pod:gvisor`);
+      writeWorkspaceDriverSelection(
+        project,
+        { backend: "docker" },
+        DEMO_USER_PROFILE_ID,
+      );
+
+      await withFakeCommands(
+        {
+          docker: `
+state_file=${JSON.stringify(dockerStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'docker-id'
+  fi
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '[{"State":{"Running":true}}]'
+  else
+    printf '[{"State":{"Running":false}}]'
+  fi
+  exit 0
+fi
+if [[ "$1" == "exec" || "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *" stop"* ]]; then
+  printf 'stopped\n' > "$state_file"
+  exit 0
+fi
+exit 0
+`,
+          kubectl: `
+if [[ "$*" == *"apply -f "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get deployment ${project}"* ]]; then
+  printf '{"metadata":{"name":"${project}"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=${project}"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$*" == *"get svc ${project}"* ]]; then
+  printf '${project}'
+  exit 0
+fi
+if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *"rollout restart"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"scale deployment ${project} --replicas=0"* ]]; then
+  exit 0
+fi
+exit 0
+`,
+        },
+        async ({ readCommandLog }) => {
+          await captureStdout(async () => {
+            await runCli(["switch", `${project}@pod`]);
+          });
+
+          const commands = readCommandLog();
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/ssh/.")));
+          assert.equal(
+            commands.some((entry) => entry.includes("/workspace/project/.")),
+            false,
+          );
+        },
+      );
+    } finally {
+      cleanupSelectionFile(project);
+      fs.rmSync(podPath, { force: true });
+      fs.rmSync(dockerStateFile, { force: true });
+    }
   });
 });
 

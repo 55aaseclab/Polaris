@@ -8,6 +8,19 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 
+function workspaceDataNetfsSource(project: string): Record<string, any> {
+  return {
+    kind: "netfs",
+    server: "netfs.local",
+    export_path: "/exports/polaris/workspaces",
+    sub_path: project,
+    mount_options: ["nfsvers=4.1", "hard", "rw"],
+    volume_ref: `${project}-workspace-data`,
+    volume_size: "120Gi",
+    description: `shared workspace data for ${project}`,
+  };
+}
+
 function sanitizeImageTagComponent(raw: string, fallback: string): string {
   const sanitized = raw
     .trim()
@@ -311,10 +324,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
         sharing: "exclusive",
         mount_root: "/workspace/project",
         durable_paths: ["/workspace/project"],
-        source: {
-          kind: "generated-material",
-          description: `docker workspace data for ${project}`,
-        },
+        source: workspaceDataNetfsSource(project),
       },
       "workspace-runtime-state": {
         scope: "workspace",

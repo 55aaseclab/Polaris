@@ -10,6 +10,19 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 
 type BackendKind = "docker" | "pod" | "kubevirt-vm";
 
+function workspaceDataNetfsSource(project: string): Record<string, any> {
+  return {
+    kind: "netfs",
+    server: "netfs.local",
+    export_path: "/exports/polaris/workspaces",
+    sub_path: project,
+    mount_options: ["nfsvers=4.1", "hard", "rw"],
+    volume_ref: `${project}-workspace-data`,
+    volume_size: "120Gi",
+    description: `shared workspace data for ${project}`,
+  };
+}
+
 interface WorkspaceConfigMatch {
   userProfileId: string;
   project: string;
@@ -90,12 +103,7 @@ function synthesizeAttachments(
   const userSshState = ((attachments["user-ssh-state"] ??= {}) as Record<string, any>);
 
   if (backendKind === "kubevirt-vm") {
-    workspaceData.source = {
-      kind: "persistent-volume",
-      volume_ref: `${project}-workspace-data`,
-      volume_size: "120Gi",
-      description: `reusable workspace data for ${project}`,
-    };
+    workspaceData.source = workspaceDataNetfsSource(project);
     workspaceRuntimeState.source = {
       kind: "persistent-volume",
       volume_ref: `${project}-workspace-runtime-state`,
@@ -118,12 +126,7 @@ function synthesizeAttachments(
   }
 
   if (backendKind === "pod") {
-    workspaceData.source = {
-      kind: "persistent-volume",
-      volume_ref: `${project}-workspace-data`,
-      volume_size: "120Gi",
-      description: `reusable workspace data for ${project}`,
-    };
+    workspaceData.source = workspaceDataNetfsSource(project);
     workspaceRuntimeState.source = {
       kind: "persistent-volume",
       volume_ref: `${project}-workspace-runtime-state`,
@@ -142,11 +145,7 @@ function synthesizeAttachments(
   }
 
   const volumeRef = `${project}-project`;
-  workspaceData.source = {
-    kind: "persistent-volume",
-    volume_ref: volumeRef,
-    description: `reusable ${backendKind} workspace data for ${project}`,
-  };
+  workspaceData.source = workspaceDataNetfsSource(project);
   workspaceRuntimeState.source = {
     kind: "persistent-volume",
     volume_ref: volumeRef,

@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceSpec } from "../../core/workspace.js";
+import {
+  isNetfsSource,
+  netfsMountOptions,
+  netfsResolvedPath,
+  requireNetfsField,
+  workspaceDataDockerVolumeName,
+} from "../../core/netfs.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 function q(value: string): string {
@@ -27,6 +34,51 @@ function resolveDockerVolume(args: {
   return {
     key: volumeKey(name),
     name,
+  };
+}
+
+function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
+  mountBlock: string[];
+  volumeBlock: string[];
+} {
+  const source = workspace.attachments.workspaceData.source;
+  if (isNetfsSource(source)) {
+    const server = requireNetfsField(source.server, "server", "workspace-data");
+    const device = `:${netfsResolvedPath(source)}`;
+    const options = [`addr=${server}`, ...netfsMountOptions(source)].join(",");
+    const volumeName = workspaceDataDockerVolumeName(workspace);
+    const volumeToken = volumeKey(volumeName);
+    return {
+      mountBlock: [
+        "      - type: volume",
+        `        source: ${volumeToken}`,
+        "        target: /workspace/project",
+      ],
+      volumeBlock: [
+        `  ${volumeToken}:`,
+        `    name: ${volumeName}`,
+        "    driver: local",
+        "    driver_opts:",
+        '      type: "nfs"',
+        `      o: ${JSON.stringify(options)}`,
+        `      device: ${JSON.stringify(device)}`,
+      ],
+    };
+  }
+  const workspaceDataVolume = resolveDockerVolume({
+    fallbackName: `${workspace.identity.projectName}-workspace-data`,
+    source,
+  });
+  return {
+    mountBlock: [
+      "      - type: volume",
+      `        source: ${workspaceDataVolume.key}`,
+      "        target: /workspace/project",
+    ],
+    volumeBlock: [
+      `  ${workspaceDataVolume.key}:`,
+      `    name: ${workspaceDataVolume.name}`,
+    ],
   };
 }
 
@@ -78,10 +130,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
   const serviceName = project;
   const containerName = `${project}-docker`;
-  const workspaceDataVolume = resolveDockerVolume({
-    fallbackName: `${project}-workspace-data`,
-    source: workspace.attachments.workspaceData.source,
-  });
+  const workspaceDataVolume = renderDockerWorkspaceDataVolume(workspace);
   const workspaceRuntimeVolume = resolveDockerVolume({
     fallbackName: `${project}-workspace-runtime-state`,
     source: workspace.attachments.workspaceRuntimeState.source,
@@ -166,6 +215,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     ...(workspace.agent.enabled
       ? [
           `rm -f ${home}/.paseo/paseo.pid ${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`,
+          `rm -f ${home}/.paseo/daemon.log`,
           `PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
           `paired=0; for i in $(seq 1 30); do PASEO_HOME=${home}/.paseo paseo daemon pair --json > ${home}/.paseo/pairing.json.tmp 2>/dev/null && mv ${home}/.paseo/pairing.json.tmp ${home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$$paired" = 1`,
           ...buildRuntimeObserverLines(workspace),
@@ -194,9 +244,7 @@ ${portLines || '      - "6767:6767"'}
       POLARIS_EVOLUTION_ROOT: ${workspace.agent.runtime.evolutionRoot}
       POLARIS_EVOLUTION_CONTEXT_FILE: ${workspace.evolution?.bootstrapContextFile ?? ""}
     volumes:
-      - type: volume
-        source: ${workspaceDataVolume.key}
-        target: /workspace/project
+${workspaceDataVolume.mountBlock.join("\n")}
       - type: volume
         source: ${workspaceRuntimeVolume.key}
         target: /workspace/state
@@ -210,8 +258,7 @@ ${portLines || '      - "6767:6767"'}
       - /run/workspace
 
 volumes:
-  ${workspaceDataVolume.key}:
-    name: ${workspaceDataVolume.name}
+${workspaceDataVolume.volumeBlock.join("\n")}
   ${workspaceRuntimeVolume.key}:
     name: ${workspaceRuntimeVolume.name}
   ${identityVolume.key}:

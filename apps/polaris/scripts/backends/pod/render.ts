@@ -1,4 +1,9 @@
 import type { AuthFile, PlainEnvVar, ServicePort, WorkspaceSpec } from "../../core/workspace.js";
+import {
+  isNetfsSource,
+  netfsResolvedPath,
+  requireNetfsField,
+} from "../../core/netfs.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 function q(value: string): string {
@@ -139,6 +144,7 @@ function buildPaseoBootstrapLine(enabled: boolean, home: string): string[] {
   }
   return [
     `          rm -f ${home}/.paseo/paseo.pid && \\`,
+    `          rm -f ${home}/.paseo/daemon.log && \\`,
     "          echo 'starting paseo daemon' && \\",
     `          PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767 && \\`,
     "          echo 'pairing paseo daemon' && \\",
@@ -359,7 +365,21 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   }
   deploymentLines.push("      volumes:");
   deploymentLines.push("      - name: workspace-data");
-  if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
+  if (isNetfsSource(workspace.attachments.workspaceData.source)) {
+    deploymentLines.push("        nfs:");
+    deploymentLines.push(
+      `          server: ${requireNetfsField(
+        workspace.attachments.workspaceData.source.server,
+        "server",
+        "workspace-data",
+      )}`,
+    );
+    deploymentLines.push(
+      `          path: ${netfsResolvedPath(
+        workspace.attachments.workspaceData.source,
+      )}`,
+    );
+  } else if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
     deploymentLines.push(`          claimName: ${workspace.attachments.workspaceData.source.volumeRef ?? workspace.storage.claimName}`);
   } else {
