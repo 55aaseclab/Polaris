@@ -7,6 +7,29 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 
+function sanitizeImageTagComponent(raw: string, fallback: string): string {
+  const sanitized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || fallback;
+}
+
+function neutralUserImageTagSegment(userProfileId: string): string {
+  const trimmed = userProfileId.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return `user-${trimmed.slice(-3).padStart(3, "0")}`;
+  }
+  return `user-${sanitizeImageTagComponent(trimmed, "default").slice(0, 24)}`;
+}
+
+export function workspaceLocalImageTag(userProfileId: string, project: string): string {
+  const userSegment = neutralUserImageTagSegment(userProfileId);
+  const projectSegment = sanitizeImageTagComponent(project, "workspace").slice(0, 32);
+  return `${userSegment}-${projectSegment}:local`;
+}
+
 export function workspaceConfigPath(
   project: string,
   backendKind: "docker" | "pod" | "kubevirt-vm" = "docker",
@@ -238,7 +261,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
     },
     runtime: {
       class: "docker",
-      base_image: "ttl.sh/morpheus-prebuilt-1781875178:24h",
+      base_image: workspaceLocalImageTag(userProfileId, project),
       user: "root",
       storage_claim_name: null,
       privileged: null,

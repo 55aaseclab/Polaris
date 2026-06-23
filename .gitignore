@@ -44,4 +44,4 @@ config/users/*/**
 !config/users/100000000000000001/docker/**
 !config/users/100000000000000001/projects/
 !config/users/100000000000000001/projects/demo/
-!config/users/100000000000000001/projects/demo/**
+!config/users/100000000000000001/projects/demo/*.agent.yaml
