@@ -200,12 +200,7 @@ function attachmentExportDir(root: string, attachment: MigratedAttachment): stri
 }
 
 function attachmentDataPath(workspace: WorkspaceSpec, attachment: MigratedAttachment): string {
-  switch (attachment) {
-    case "workspaceRuntimeState":
-      return `${attachmentRootPath(workspace, attachment)}/paseo`;
-    default:
-      return attachmentRootPath(workspace, attachment);
-  }
+  return attachmentRootPath(workspace, attachment);
 }
 
 function kubevirtAttachmentDataPath(

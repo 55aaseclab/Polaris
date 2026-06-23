@@ -253,6 +253,8 @@ function persistentVolumeClaims(workspace: WorkspaceSpec): Array<{
   for (const attachment of [
     workspace.attachments.workspaceData,
     workspace.attachments.workspaceRuntimeState,
+    workspace.attachments.userIdentityState,
+    workspace.attachments.userSshState,
   ]) {
     if (attachment.source.kind !== "persistent-volume" || !attachment.source.volumeRef) {
       continue;
@@ -371,9 +373,19 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     deploymentLines.push("        emptyDir: {}");
   }
   deploymentLines.push("      - name: user-identity-state");
-  deploymentLines.push("        emptyDir: {}");
+  if (workspace.attachments.userIdentityState.source.kind === "persistent-volume") {
+    deploymentLines.push("        persistentVolumeClaim:");
+    deploymentLines.push(`          claimName: ${workspace.attachments.userIdentityState.source.volumeRef}`);
+  } else {
+    deploymentLines.push("        emptyDir: {}");
+  }
   deploymentLines.push("      - name: user-ssh-state");
-  deploymentLines.push("        emptyDir: {}");
+  if (workspace.attachments.userSshState.source.kind === "persistent-volume") {
+    deploymentLines.push("        persistentVolumeClaim:");
+    deploymentLines.push(`          claimName: ${workspace.attachments.userSshState.source.volumeRef}`);
+  } else {
+    deploymentLines.push("        emptyDir: {}");
+  }
   deploymentLines.push("      - name: ephemeral-runtime");
   deploymentLines.push("        emptyDir: {}");
   docs.push(deploymentLines.join("\n"));
