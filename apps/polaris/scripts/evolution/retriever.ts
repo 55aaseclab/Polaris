@@ -1,5 +1,7 @@
-import type { EvolutionArtifact } from "./types.js";
-import { EvolutionStore } from "./store.js";
+import type {
+  EvolutionMemoryEntry,
+  EvolutionMemoryProviderEntry,
+} from "./types.js";
 
 export interface RetrievalContext {
   workspaceId: string;
@@ -8,33 +10,36 @@ export interface RetrievalContext {
   limit?: number;
 }
 
-export async function retrieveEvolutionContext(
-  store: EvolutionStore,
+export async function retrieveMemoryContext(
+  entries: EvolutionMemoryEntry[],
   context: RetrievalContext,
-): Promise<EvolutionArtifact[]> {
+): Promise<EvolutionMemoryEntry[]> {
   const prompt = context.prompt.trim().toLowerCase();
-  const candidates = store.queryArtifacts({
-    workspaceId: context.workspaceId,
-    userProfileId: context.userProfileId,
-    limit: Math.max((context.limit ?? 8) * 4, 12),
-  });
-  const scored = candidates
-    .map((artifact) => {
-      const metadata = typeof artifact.metadata === "object" && artifact.metadata ? artifact.metadata : {};
+  return entries
+    .filter((entry) => {
+      if (entry.workspaceId !== context.workspaceId) {
+        return false;
+      }
+      if (entry.target === "user-memory" && context.userProfileId && entry.userProfileId !== context.userProfileId) {
+        return false;
+      }
+      return entry.status === "active";
+    })
+    .map((entry) => {
+      const metadata = typeof entry.metadata === "object" && entry.metadata ? entry.metadata : {};
       const tags = Array.isArray(metadata.tags) ? metadata.tags.map((tag) => String(tag).toLowerCase()) : [];
       const reasons: string[] = [];
-      let score = artifact.confidence * 100;
-
-      if (artifact.scope === "workspace") {
+      let score = entry.confidence * 100;
+      if (entry.target === "workspace-memory") {
         score += 8;
-        reasons.push("workspace-scoped");
+        reasons.push("workspace-memory");
       }
-      if (context.userProfileId && artifact.userProfileId === context.userProfileId) {
+      if (context.userProfileId && entry.userProfileId === context.userProfileId) {
         score += 6;
         reasons.push("same user profile");
       }
       if (prompt) {
-        const haystack = `${artifact.title}\n${artifact.content}`.toLowerCase();
+        const haystack = `${entry.title}\n${entry.body}`.toLowerCase();
         if (haystack.includes(prompt)) {
           score += 20;
           reasons.push("direct prompt text match");
@@ -45,7 +50,7 @@ export async function retrieveEvolutionContext(
           reasons.push(`matched tags: ${matchedTags.join(", ")}`);
         }
       }
-      const updatedAt = Date.parse(artifact.updatedAt);
+      const updatedAt = Date.parse(entry.updatedAt);
       if (!Number.isNaN(updatedAt)) {
         const ageDays = Math.max(0, (Date.now() - updatedAt) / (1000 * 60 * 60 * 24));
         score += Math.max(0, 10 - ageDays / 7);
@@ -53,43 +58,56 @@ export async function retrieveEvolutionContext(
           reasons.push("recently updated");
         }
       }
-      const explainability = {
-        ...(metadata as Record<string, unknown>),
-        retrieval: {
-          score,
-          reasons,
-          prompt: context.prompt,
-          retrievedAt: new Date().toISOString(),
-        },
-      };
       return {
-        artifact: {
-          ...artifact,
-          metadata: explainability,
+        entry: {
+          ...entry,
+          metadata: {
+            ...metadata,
+            retrieval: {
+              score,
+              reasons,
+              prompt: context.prompt,
+              retrievedAt: new Date().toISOString(),
+            },
+          },
         },
         score,
       };
     })
     .sort((left, right) => right.score - left.score)
     .slice(0, context.limit ?? 8)
-    .map((entry) => entry.artifact);
-  return scored;
+    .map((row) => row.entry);
 }
 
-export function renderRetrievedArtifacts(artifacts: EvolutionArtifact[]): string {
-  if (artifacts.length === 0) {
-    return "";
+export function renderMemoryEntries(entries: EvolutionMemoryEntry[]): string {
+  if (entries.length === 0) {
+    return "_No durable memory entries were retrieved._";
   }
-  return [
-    "Relevant prior lessons:",
-    ...artifacts.map((artifact) => {
-      const retrieval = typeof artifact.metadata?.retrieval === "object" && artifact.metadata?.retrieval
-        ? artifact.metadata.retrieval as { reasons?: unknown }
-        : null;
-      const reasons = Array.isArray(retrieval?.reasons)
-        ? retrieval.reasons.map((reason) => String(reason)).join("; ")
-        : "";
-      return `- [${artifact.kind}] ${artifact.title}: ${artifact.content}${reasons ? ` (why retrieved: ${reasons})` : ""}`;
-    }),
-  ].join("\n");
+  const bySection = new Map<string, EvolutionMemoryEntry[]>();
+  for (const entry of entries) {
+    const section = entry.section || "Memory";
+    const bucket = bySection.get(section) ?? [];
+    bucket.push(entry);
+    bySection.set(section, bucket);
+  }
+  const lines: string[] = [];
+  for (const [section, sectionEntries] of bySection.entries()) {
+    lines.push(`## ${section}`);
+    lines.push("");
+    for (const entry of sectionEntries) {
+      lines.push(`- \`${entry.key}\` ${entry.title}.`);
+      lines.push(`  ${entry.body}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+
+export function renderProviderMemory(entries: EvolutionMemoryProviderEntry[]): string {
+  if (entries.length === 0) {
+    return "_No external memory provider configured._";
+  }
+  return entries
+    .map((entry) => `- [${entry.source}] ${entry.title}: ${entry.body}`)
+    .join("\n");
 }
