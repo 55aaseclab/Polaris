@@ -3,6 +3,11 @@ user_profile: '100000000000000001'
 backend:
   kind: docker
   spec_files: null
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: demo-codex
+      required: true
 runtime:
   class: docker
   base_image: ttl.sh/polaris-demo-debian13-1782126452:24h

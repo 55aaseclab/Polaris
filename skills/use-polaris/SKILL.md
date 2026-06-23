@@ -22,8 +22,12 @@ pnpm --dir apps/polaris run polaris --
 ### Phase 1: Create User
 
 1. Run `create <project>`.
-2. If the referenced user profile does not exist yet, let Polaris create it first.
-3. Confirm the saved spec points at the intended `user_profile`.
+2. If the referenced user profile does not exist yet, let Polaris create it
+   first.
+3. Expect Polaris to create the user profile and the default credential
+   registry together.
+4. Confirm the saved spec points at the intended `user_profile`.
+5. Confirm the saved spec also contains the default credential bindings.
 
 ### Phase 2: Prepare Image
 
@@ -65,6 +69,13 @@ The required order is:
 - `create` scaffolds a saved spec for a new Docker workspace.
 - `create` also provisions a local user profile when the scaffolded spec would
   otherwise point at a missing profile.
+- `create` also provisions default user credentials at
+  `config/users/credentials/<user>/`.
+- The default credential set is:
+  - `codex-default`
+  - `github-ssh`
+- The scaffolded workspace should bind those credentials by purpose instead of
+  relying only on legacy inline auth fields.
 - `render` writes generated backend output and does not start the runtime.
 - `apply` applies rendered backend output without implying runtime health.
 - `start` should be treated as runtime launch only after image preparation is complete.

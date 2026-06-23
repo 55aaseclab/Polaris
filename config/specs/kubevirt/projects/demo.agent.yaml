@@ -4,6 +4,11 @@ backend:
   kind: kubevirt-vm
   spec_files:
     - config/kubevirt/specs/demo.agent.yaml
+credentials:
+  bindings:
+    - purpose: agent-auth
+      credentialId: demo-codex
+      required: true
 runtime:
   class: gvisor
   base_image: ttl.sh/polaris-demo-debian13-1782126452:24h

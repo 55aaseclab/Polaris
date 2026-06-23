@@ -58,7 +58,6 @@ Validate changes with:
 ```bash
 pnpm run check
 pnpm run test
-bash tests/smoke-polaris-paseo.sh
 ```
 
 If you change command flow, backend behavior, or onboarding, update the
