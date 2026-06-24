@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-06-24
+
+Stabilized Polaris backend switching across Docker and KubeVirt for shared
+workspace state.
+
+### Added
+
+- Added stronger switch coverage for Docker and KubeVirt migration and
+  selection handling.
+- Added KubeVirt guest bootstrap helpers for shared-state sync and daemon
+  recovery in cloud-init.
+
+### Changed
+
+- Updated Docker workspace volume handling to respect rendered NetFS source
+  configuration before start and rebuild.
+- Hardened Docker, Pod, and KubeVirt runtime bootstrap flow so Paseo daemon
+  readiness is retried and validated instead of assumed.
+- Improved KubeVirt guest probing to use direct node SSH when available and to
+  wait for guest runtime readiness after start.
+- Refined backend switching flow to better coordinate state export/import and
+  KubeVirt handoff timing.
+
 ## [0.2.0] - 2026-06-23
 
 Expanded Polaris profile switching, credential scaffolding, and KubeVirt
