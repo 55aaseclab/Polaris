@@ -161,6 +161,46 @@ function canAccessAttachmentEndpoint(workspace: WorkspaceSpec, detail: string): 
   return result.status === 0;
 }
 
+async function waitForKubevirtAttachmentRelease(
+  workspace: WorkspaceSpec,
+  timeoutMs = 120000,
+  intervalMs = 1500,
+): Promise<void> {
+  if (workspace.backend.kind !== "kubevirt-vm") {
+    return;
+  }
+  const project = workspace.identity.projectName;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const vmi = spawnSync(
+      "kubectl",
+      ["-n", project, "get", "vmi", `${project}-vm`, "-o", "jsonpath={.metadata.name}"],
+      { encoding: "utf8" },
+    );
+    const launcherPods = spawnSync(
+      "kubectl",
+      [
+        "-n",
+        project,
+        "get",
+        "pod",
+        "-l",
+        `vm.kubevirt.io/name=${project}-vm`,
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}:{.status.phase}{\"\\n\"}{end}",
+      ],
+      { encoding: "utf8" },
+    );
+    const hasVmi = vmi.status === 0 && Boolean(String(vmi.stdout || "").trim());
+    const hasLauncherPods = Boolean(String(launcherPods.stdout || "").trim());
+    if (!hasVmi && !hasLauncherPods) {
+      return;
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error(`KubeVirt volumes for '${workspace.identity.projectName}' were not released within ${timeoutMs}ms`);
+}
+
 type MigratedAttachment = "workspaceRuntimeState" | "userIdentityState" | "userSshState";
 
 const MIGRATED_ATTACHMENTS: MigratedAttachment[] = [
@@ -271,8 +311,16 @@ function relativeDurablePath(root: string, durablePath: string): string {
 }
 
 function pruneExportedAttachmentState(attachment: MigratedAttachment, dir: string): void {
-  void attachment;
-  void dir;
+  if (attachment !== "workspaceRuntimeState") {
+    return;
+  }
+  for (const relativePath of [
+    path.join("paseo", "models"),
+    path.join("paseo", "daemon.log"),
+    path.join("paseo", "paseo.pid"),
+  ]) {
+    fs.rmSync(path.join(dir, relativePath), { recursive: true, force: true });
+  }
 }
 
 function shellSingleQuote(value: string): string {
@@ -391,10 +439,37 @@ function normalizeImportedAttachmentOwnership(
 }
 
 function deleteTransferPod(namespace: string, podName: string): void {
-  spawnSync("kubectl", ["-n", namespace, "delete", "pod", podName, "--ignore-not-found"], { encoding: "utf8" });
   spawnSync(
     "kubectl",
-    ["-n", namespace, "wait", "--for=delete", `pod/${podName}`, "--timeout=60s"],
+    ["-n", namespace, "delete", "pod", podName, "--ignore-not-found", "--wait=false"],
+    { encoding: "utf8" },
+  );
+  const waitResult = spawnSync(
+    "kubectl",
+    ["-n", namespace, "wait", "--for=delete", `pod/${podName}`, "--timeout=5s"],
+    { encoding: "utf8" },
+  );
+  if (waitResult.status === 0) {
+    return;
+  }
+  spawnSync(
+    "kubectl",
+    [
+      "-n",
+      namespace,
+      "delete",
+      "pod",
+      podName,
+      "--ignore-not-found",
+      "--wait=false",
+      "--grace-period=0",
+      "--force",
+    ],
+    { encoding: "utf8" },
+  );
+  spawnSync(
+    "kubectl",
+    ["-n", namespace, "wait", "--for=delete", `pod/${podName}`, "--timeout=5s"],
     { encoding: "utf8" },
   );
 }
@@ -402,6 +477,7 @@ function deleteTransferPod(namespace: string, podName: string): void {
 async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | null> {
   const exportRoot = fs.mkdtempSync(path.join(switchScratchRoot(), "state-"));
   if (workspace.backend.kind === "kubevirt-vm") {
+    await waitForKubevirtAttachmentRelease(workspace);
     const pvcPodName = `${workspace.identity.projectName}-pvc-export`;
     const manifestPath = path.join(exportRoot, "pvc-export.yaml");
     const manifestLines = [
@@ -614,7 +690,10 @@ async function stopCompetingBackends(project: string, targetBackend: WorkspaceSp
     }
     const driver = getBackendDriver(workspace.backend.kind);
     const observation = await driver.inspect(workspace);
-    if (!observation.backend.exists && !observation.backend.running) {
+    if (!observation.backend.exists) {
+      continue;
+    }
+    if (!observation.backend.running) {
       continue;
     }
     logInfo("cli", "switch-stop-previous-backend", {
@@ -672,11 +751,22 @@ export async function switchCommand(projectRef: string): Promise<void> {
 
   const previousSelection = readWorkspaceDriverSelection(project);
   const previousBackend = previousSelection?.backend;
+  const previousSelectionWorkspace = previousBackend
+    ? loadWorkspaceForBackend(project, previousBackend)
+    : null;
   const runningBackends = await runningBackendsForProject(project, backendHint);
   const selectedRunningWorkspace = previousBackend
     ? runningBackends.find((entry) => entry.backend === previousBackend)?.workspace ?? null
     : null;
-  const previousWorkspace = selectedRunningWorkspace
+  const selectedExportableWorkspace =
+    previousSelectionWorkspace &&
+    previousBackend &&
+    previousBackend !== backendHint &&
+    (selectedRunningWorkspace !== null || previousBackend === "kubevirt-vm")
+      ? previousSelectionWorkspace
+      : null;
+  const previousWorkspace = selectedExportableWorkspace
+    ?? selectedRunningWorkspace
     ?? (runningBackends.length === 1 ? runningBackends[0]?.workspace ?? null : null);
   const effectivePreviousBackend = previousWorkspace?.backend.kind ?? previousBackend ?? null;
   const shouldStopBeforeExport =
@@ -693,15 +783,19 @@ export async function switchCommand(projectRef: string): Promise<void> {
   const finalizedStoppedBackends = shouldStopBeforeExport
     ? stoppedBackends
     : await stopCompetingBackends(project, backendHint);
-  const selectionFile = writeWorkspaceDriverSelection(project, {
-    backend: backendHint,
-    profile: backendHint === "pod" ? profileHint : undefined,
-  });
   await setWorkspaceDataExportDesiredState(project, backendHint === "docker");
   const { workspace, driver } = await loadExecutableWorkspaceForCommand("start", targetRef);
-  const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm" ? 600000 : 45000;
+  const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm"
+    ? 600000
+    : workspace.backend.kind === "docker"
+      ? 120000
+      : 45000;
+  let selectionFile: string | undefined;
   try {
-    if (exportedSwitchState && workspace.backend.kind === "docker") {
+    if (
+      exportedSwitchState &&
+      (workspace.backend.kind === "docker" || workspace.backend.kind === "kubevirt-vm")
+    ) {
       logInfo("cli", "switch-migrate-small-state", {
         project,
         fromBackend: effectivePreviousBackend,
@@ -711,7 +805,7 @@ export async function switchCommand(projectRef: string): Promise<void> {
       await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
     }
     await driver.start(workspace);
-    if (exportedSwitchState && workspace.backend.kind !== "docker") {
+    if (exportedSwitchState && workspace.backend.kind === "pod") {
       logInfo("cli", "switch-migrate-small-state", {
         project,
         fromBackend: effectivePreviousBackend,
@@ -722,6 +816,10 @@ export async function switchCommand(projectRef: string): Promise<void> {
       await importSwitchState(workspace, exportedSwitchState, POST_RESTART_ATTACHMENTS);
     }
     await waitForWorkspaceReady(workspace, readyTimeoutMs);
+    selectionFile = writeWorkspaceDriverSelection(project, {
+      backend: backendHint,
+      profile: backendHint === "pod" ? profileHint : undefined,
+    });
   } finally {
     if (exportedSwitchState) {
       fs.rmSync(exportedSwitchState, { recursive: true, force: true });
@@ -735,6 +833,6 @@ export async function switchCommand(projectRef: string): Promise<void> {
     selectedBackend: backendHint,
     selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
     stoppedBackends: finalizedStoppedBackends,
-    selectionFile,
+    selectionFile: selectionFile ?? null,
   }, null, 2)}\n`);
 }

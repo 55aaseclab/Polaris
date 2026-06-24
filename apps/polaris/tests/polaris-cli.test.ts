@@ -20,7 +20,7 @@ import {
 } from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
-import { renderAndWriteKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
+import { renderAndWriteKubevirtWorkspace, renderKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
@@ -1070,7 +1070,7 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   assert.match(rendered, /source: demo-project-state\b/);
   assert.match(rendered, /driver_opts:\n      type: "nfs"/);
   assert.match(rendered, /o: "addr=127\.0\.0\.1,nfsvers=4\.1,hard,rw"/);
-  assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
+  assert.match(rendered, /device: ":\/"/);
   assert.match(rendered, /demo-workspace-data:\n    name: demo-workspace-data/);
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
 });
@@ -1346,6 +1346,16 @@ exit 1
         assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
       },
     );
+  });
+});
+
+test("kubevirt render reuses persisted daemon pairing metadata", async () => {
+  const project = uniqueProjectName("vm-pair-bootstrap");
+  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
+    const workspace = loadWorkspace(`${project}@kubevirt-vm`);
+    const rendered = renderKubevirtWorkspace(workspace);
+    assert.doesNotMatch(rendered, /paseo daemon pair --json/);
+    assert.match(rendered, /test -f \/root\/\.paseo\/pairing\.json/);
   });
 });
 
@@ -1731,6 +1741,344 @@ exit 0
       fs.rmSync(podPath, { force: true });
       fs.rmSync(vmPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
+    }
+  });
+});
+
+test("switch imports runtime state into kubevirt before first boot without a restart sync-out", async () => {
+  const project = uniqueProjectName("switch-vm-serverid");
+  const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
+  cleanupSelectionFile(project);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+    try {
+      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
+      writeWorkspaceDriverSelection(
+        project,
+        { backend: "docker" },
+        DEMO_USER_PROFILE_ID,
+      );
+
+      await withFakeCommands(
+        {
+          docker: `
+state_file=${JSON.stringify(dockerStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'docker-id'
+  fi
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '[{"State":{"Running":true}}]'
+  else
+    printf '[{"State":{"Running":false}}]'
+  fi
+  exit 0
+fi
+if [[ "$1" == "exec" || "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *" stop"* ]]; then
+  printf 'stopped\n' > "$state_file"
+  exit 0
+fi
+exit 0
+`,
+          kubectl: `
+if [[ "$*" == *"apply -f "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pvc-import"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"delete pod ${project}-pvc-import"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"wait --for=delete pod/${project}-pvc-import"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get vm ${project}-vm"* ]]; then
+  printf '${project}-vm'
+  exit 0
+fi
+if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+  printf 'Running'
+  exit 0
+fi
+if [[ "$*" == *"get svc ${project}"* ]]; then
+  printf '${project}'
+  exit 0
+fi
+if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
+  printf '${project}-vm-cloudinit'
+  exit 0
+fi
+if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
+  printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
+  sleep 30
+  exit 0
+fi
+if [[ "$*" == *"patch vm ${project}-vm"* ]]; then
+  exit 0
+fi
+if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
+  exit 0
+fi
+exit 0
+`,
+          sshpass: `
+if [[ "$*" == *" bash -lc "* && "$*" == *" true"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"systemctl restart polaris-runtime-bootstrap.service"* ]]; then
+  printf 'active\n'
+  exit 0
+fi
+if [[ "$*" == *"guestReachable=1"* ]]; then
+  printf 'guestReachable=1\n'
+  printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
+  printf 'persistedServerId<<EOF\nsrv_switch\nEOF\n'
+  printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}\nEOF\n'
+  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  exit 0
+fi
+exit 1
+`,
+        },
+        async ({ readCommandLog }) => {
+          await captureStdout(async () => {
+            await runCli(["switch", `${project}@kubevirt-vm`]);
+          });
+
+          const commands = readCommandLog();
+          const pvcImportCopyIndex = commands.findIndex((entry) =>
+            entry.includes(`cp /tmp/`) === false
+              ? entry.includes(`cp`) && entry.includes(`${project}-pvc-import:/root/.paseo`)
+              : false,
+          );
+          const generatedApplyIndex = commands.findIndex((entry) =>
+            entry.includes(`/projects/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
+          );
+          assert.equal(
+            commands.some((entry) => entry.includes(`patch vm ${project}-vm`) && entry.includes(`"runStrategy":"Halted"`)),
+            false,
+          );
+          assert.ok(
+            commands.some((entry) => entry.includes(`${project}-pvc-import`) && entry.includes("cp")),
+          );
+          assert.ok(
+            commands.some((entry) => entry.includes(`delete pod ${project}-pvc-import --ignore-not-found --wait=false`)),
+          );
+          assert.ok(generatedApplyIndex >= 0);
+          const firstPvcImportCommand = commands.findIndex((entry) =>
+            entry.includes(`${project}-pvc-import`) && entry.includes("cp"),
+          );
+          assert.ok(firstPvcImportCommand >= 0);
+          assert.ok(firstPvcImportCommand < generatedApplyIndex);
+          void pvcImportCopyIndex;
+        },
+      );
+    } finally {
+      cleanupSelectionFile(project);
+      fs.rmSync(vmPath, { force: true });
+      fs.rmSync(dockerStateFile, { force: true });
+    }
+  });
+});
+
+test("switch keeps the previous selection when the target backend start fails", async () => {
+  const project = uniqueProjectName("switch-selection-failure");
+  const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
+  cleanupSelectionFile(project);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+    try {
+      ensureWorkspaceConfig(`${project}@pod`);
+      writeWorkspaceDriverSelection(
+        project,
+        { backend: "docker" },
+        DEMO_USER_PROFILE_ID,
+      );
+
+      await withFakeCommands(
+        {
+          docker: `
+state_file=${JSON.stringify(dockerStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'docker-id'
+  fi
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '[{"State":{"Running":true}}]'
+  else
+    printf '[{"State":{"Running":false}}]'
+  fi
+  exit 0
+fi
+if [[ "$1" == "exec" || "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *" stop"* ]]; then
+  printf 'stopped\n' > "$state_file"
+  exit 0
+fi
+exit 0
+`,
+          kubectl: `
+if [[ "$*" == *"get deployment ${project}-workspace-data-export"* ]]; then
+  exit 1
+fi
+if [[ "$*" == *"apply -f "* ]]; then
+  printf 'apply failed' >&2
+  exit 1
+fi
+if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
+  exit 0
+fi
+exit 0
+`,
+        },
+        async () => {
+          await assert.rejects(
+            captureStdout(async () => {
+              await runCli(["switch", `${project}@pod`]);
+            }),
+          );
+        },
+      );
+
+      const selectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+      const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
+      assert.equal(parsed.backend, "docker");
+      assert.equal(parsed.profile, undefined);
+    } finally {
+      cleanupSelectionFile(project);
+      fs.rmSync(podPath, { force: true });
+      fs.rmSync(dockerStateFile, { force: true });
+    }
+  });
+});
+
+test("switch exports from the selected kubevirt pvc even when the vm is already stopped", async () => {
+  const project = uniqueProjectName("switch-stopped-vm-source");
+  cleanupSelectionFile(project);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+    try {
+      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
+      writeWorkspaceDriverSelection(
+        project,
+        { backend: "kubevirt-vm" },
+        DEMO_USER_PROFILE_ID,
+      );
+
+      await withFakeCommands(
+        {
+          docker: `
+if [[ "$*" == *"compose"* && "$*" == *"up -d"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  printf 'docker-id'
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_switch'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}'
+  exit 0
+fi
+if [[ "$1" == "run" || "$1" == "volume" || "$1" == "exec" || "$1" == "cp" ]]; then
+  exit 0
+fi
+exit 0
+`,
+          kubectl: `
+if [[ "$*" == *"get deployment ${project}-workspace-data-export"* ]]; then
+  exit 1
+fi
+if [[ "$*" == *"get vm ${project}-vm"* ]]; then
+  printf '${project}-vm'
+  exit 0
+fi
+if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+  printf ''
+  exit 0
+fi
+if [[ "$*" == *"apply -f "* && "$*" == *"pvc-export.yaml"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pvc-export"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"delete pod ${project}-pvc-export"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"wait --for=delete pod/${project}-pvc-export"* ]]; then
+  exit 0
+fi
+if [[ "$1" == "-n" && "$3" == "cp" ]] || [[ "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *"patch vm ${project}-vm"* ]]; then
+  printf 'unexpected stop' >&2
+  exit 1
+fi
+exit 0
+`,
+        },
+        async ({ readCommandLog }) => {
+          await captureStdout(async () => {
+            await runCli(["switch", `${project}@docker`]);
+          });
+
+          const commands = readCommandLog();
+          const pvcExportIndex = commands.findIndex((entry) =>
+            entry.includes(`${project}-pvc-export`) && entry.includes(" cp "),
+          );
+          const dockerUpIndex = commands.findIndex((entry) =>
+            entry.includes("docker") && entry.includes("compose") && entry.includes("up -d"),
+          );
+
+          assert.ok(pvcExportIndex >= 0);
+          assert.ok(dockerUpIndex >= 0);
+          assert.ok(pvcExportIndex < dockerUpIndex);
+          assert.ok(
+            commands.some((entry) => entry.includes(`delete pod ${project}-pvc-export --ignore-not-found --wait=false`)),
+          );
+          assert.equal(
+            commands.some((entry) => entry.includes(`patch vm ${project}-vm`)),
+            false,
+          );
+        },
+      );
+    } finally {
+      cleanupSelectionFile(project);
+      fs.rmSync(vmPath, { force: true });
     }
   });
 });
