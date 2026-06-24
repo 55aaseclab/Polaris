@@ -21,6 +21,7 @@ import {
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
+import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 
@@ -1112,6 +1113,10 @@ test("kubevirt render bridges netfs workspace data through a PV and PVC", () => 
   assert.match(rendered, /name: demo-workspace-data/);
   assert.match(rendered, /server: netfs\.local/);
   assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
+  assert.match(rendered, new RegExp(`root:${kubevirtProbePassword(workspace)}`));
+  assert.doesNotMatch(rendered, /BEGIN OPENSSH PRIVATE KEY/);
+  assert.doesNotMatch(rendered, /authorized_keys/);
+  assert.doesNotMatch(rendered, /ssh-keygen -q -t ed25519/);
 });
 
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {
@@ -1152,6 +1157,18 @@ if [[ "$*" == *"get deployment demo"* ]]; then
 fi
 if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_demo'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
   exit 0
 fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
@@ -1288,26 +1305,34 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
   printf '${project}-vm-cloudinit'
   exit 0
 fi
-if [[ "$*" == *"apply -f -"* ]]; then
-  exit 0
-fi
-if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pairing-inspect"* ]]; then
-  exit 0
-fi
-if [[ "$*" == *"cat /workspace/state/paseo/pairing.json"* ]]; then
-  printf '{"url":"https://app.paseo.sh/#offer=vmtest"}'
-  exit 0
-fi
-if [[ "$*" == *"exec ${project}-pairing-inspect"* ]]; then
-  exit 0
-fi
-if [[ "$*" == *"delete pod ${project}-pairing-inspect"* ]]; then
+if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
+  printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
+  sleep 30
   exit 0
 fi
 if [[ "$*" == *"logs"* ]]; then
   exit 0
 fi
 exit 0
+`,
+        sshpass: `
+if [[ "$*" == *"printf ok"* ]]; then
+  printf 'ok'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_vmtest","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_vmtest'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ"}'
+  exit 0
+fi
+exit 1
 `,
       },
       async () => {
@@ -1316,7 +1341,7 @@ exit 0
         });
         const parsed = parseJsonOutput<{ daemon?: { pairing?: { url?: string; state?: string } } }>(output);
         assert.equal(parsed.daemon?.pairing?.state, "ok");
-        assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=vmtest");
+        assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
       },
     );
   });
@@ -1336,6 +1361,18 @@ if [[ "$*" == *"get deployment demo"* ]]; then
 fi
 if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_demo'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
   exit 0
 fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
@@ -1593,19 +1630,34 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
   printf '${project}-vm-cloudinit'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project} "* ]]; then
-  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
-  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
-  server_pid=$!
-  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
-  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
-  wait $server_pid
+if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
+  printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
+  sleep 30
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
 exit 0
+`,
+        sshpass: `
+if [[ "$*" == *"printf ok"* ]]; then
+  printf 'ok'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_ready","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_ready'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9yZWFkeSJ9"}'
+  exit 0
+fi
+exit 1
 `,
       },
       async () => {

@@ -14,10 +14,7 @@ spec:
   selector:
     vm.kubevirt.io/name: __PROJECT__-vm
   ports:
-    - name: paseo
-      port: __SERVICE_PORT__
-      targetPort: __SERVICE_PORT__
-      nodePort: __NODE_PORT__
+__SERVICE_PORTS__
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -42,8 +39,7 @@ spec:
             - name: default
               masquerade: {}
               ports:
-                - port: __SERVICE_PORT__
-                  protocol: TCP
+__INTERFACE_PORTS__
           filesystems:
             - name: workspace-data
               virtiofs: {}

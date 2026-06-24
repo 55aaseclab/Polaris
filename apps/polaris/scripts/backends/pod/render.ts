@@ -44,17 +44,20 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
   const projectRoot = workspace.attachments.workspaceData.mountRoot;
   const paseoRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo`;
   const evolutionRoot = `${paseoRoot}/evolution`;
+  const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
   const identityRoot = workspace.attachments.userIdentityState.mountRoot;
   const sshRoot = workspace.attachments.userSshState.mountRoot;
   const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
   return [
-    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets && \\`,
+    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityRoot}/codex ${identityRoot}/claude ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.local /tmp/npm-cache && \\`,
     `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
-    `          rm -f ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh && \\`,
+    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
     `          ln -sfn ${paseoRoot} ${home}/.paseo && \\`,
     `          ln -sfn ${sshRoot} ${home}/.ssh && \\`,
+    `          if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${home}/.local/polaris/bin/paseo ] && [ ! -L ${home}/.local/polaris ]; then cp -a ${home}/.local/polaris/. ${toolRoot}/; fi && \\`,
+    `          ln -sfn ${toolRoot} ${home}/.local/polaris && \\`,
     `          ln -sfn ${projectRoot} ${home}/workspace && \\`,
     ...(workspace.profile.workspaceAlias ? [`          ln -sfn ${projectRoot} ${home}/${workspace.profile.workspaceAlias} && \\`] : []),
   ];
@@ -67,7 +70,7 @@ function buildRootProfileFixLine(home: string): string[] {
     `          [ -f ${home}/.profile ] || profile_fix_needed=1 && \\`,
     `          for rc in ${home}/.profile ${home}/.bashrc ${home}/.zshrc; do [ -f "$rc" ] || continue; grep -Eq "/root/root/\\\\.cargo/env|\\\\$HOME/root/\\\\.cargo/env|^\\. \\"\\\\$HOME/\\\\.cargo/env\\"$|^source \\"\\\\$HOME/\\\\.cargo/env\\"$" "$rc" && profile_fix_needed=1 && break; done && \\`,
     `          if [ "$profile_fix_needed" = 1 ]; then touch ${home}/.profile && for rc in ${home}/.profile ${home}/.bashrc ${home}/.zshrc; do [ -f "$rc" ] || continue; awk 'BEGIN{seen=0} { if ($0 ~ /\\/root\\/root\\/\\.cargo\\/env/ || $0 ~ /\\$HOME\\/root\\/\\.cargo\\/env/) { if (!seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\""; seen=1; next } if ($0 == ". \\"$HOME/.cargo/env\\"" || $0 == "source \\"$HOME/.cargo/env\\"" || $0 == "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\"") { if (!seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\""; seen=1; next } print } END{ if (ARGV[1] ~ /\\.profile$/ && !seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\"" }' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"; done; fi && \\`,
-    `          if [ ! -L /usr/local/bin/pnpm ] || [ "$(readlink /usr/local/bin/pnpm 2>/dev/null)" != "${toolRoot}/bin/pnpm" ]; then ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm; fi && \\`,
+      `          if [ ! -L /usr/local/bin/pnpm ] || [ "$(readlink /usr/local/bin/pnpm 2>/dev/null)" != "${toolRoot}/bin/pnpm" ]; then ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm; fi && \\`,
   ];
 }
 

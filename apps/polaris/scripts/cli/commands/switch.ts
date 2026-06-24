@@ -115,6 +115,35 @@ function runChecked(command: string, args: string[]): void {
   }
 }
 
+function workspaceDataExportDeploymentName(project: string): string {
+  return `${project}-workspace-data-export`;
+}
+
+function hasWorkspaceDataExportDeployment(project: string): boolean {
+  const deploymentName = workspaceDataExportDeploymentName(project);
+  const result = spawnSync(
+    "kubectl",
+    ["-n", project, "get", "deployment", deploymentName, "-o", "jsonpath={.metadata.name}"],
+    { encoding: "utf8" },
+  );
+  return result.status === 0 && Boolean((result.stdout || "").trim());
+}
+
+async function setWorkspaceDataExportDesiredState(project: string, running: boolean): Promise<void> {
+  if (!hasWorkspaceDataExportDeployment(project)) {
+    return;
+  }
+  const deploymentName = workspaceDataExportDeploymentName(project);
+  const replicas = running ? "1" : "0";
+  logInfo("cli", "switch-workspace-data-export", {
+    project,
+    deployment: deploymentName,
+    replicas: Number(replicas),
+  });
+  runChecked("kubectl", ["-n", project, "scale", "deployment", deploymentName, `--replicas=${replicas}`]);
+  runChecked("kubectl", ["-n", project, "rollout", "status", `deployment/${deploymentName}`, "--timeout=180s"]);
+}
+
 function switchScratchRoot(): string {
   const preferred = path.join(process.cwd(), ".tmp", "polaris-switch-state");
   fs.mkdirSync(preferred, { recursive: true });
@@ -427,6 +456,7 @@ export async function switchCommand(projectRef: string): Promise<void> {
     backend: backendHint,
     profile: backendHint === "pod" ? profileHint : undefined,
   });
+  await setWorkspaceDataExportDesiredState(project, backendHint === "docker");
   const { workspace, driver } = await loadExecutableWorkspaceForCommand("start", targetRef);
   const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm" ? 600000 : 45000;
   try {
