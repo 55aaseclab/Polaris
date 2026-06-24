@@ -19,6 +19,15 @@ export function netfsMountOptions(source: AttachmentSource): string[] {
   return options?.length ? options : defaultNetfsMountOptions();
 }
 
+export function dockerNetfsServer(source: AttachmentSource): string {
+  const server = requireNetfsField(
+    source.server,
+    "server",
+    "workspace-data",
+  );
+  return server === "netfs.local" ? "127.0.0.1" : server;
+}
+
 export function requireNetfsField(
   value: string | undefined,
   field: "server" | "exportPath",

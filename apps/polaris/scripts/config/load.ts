@@ -636,6 +636,12 @@ function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig |
 }
 
 function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfig): WorkspaceAttachments {
+  const userIdentityDurablePaths = Array.from(new Set([
+    ...config["user-identity-state"].durablePaths,
+    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/config`,
+    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/data`,
+    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/state`,
+  ]));
   const runtimeDurablePaths = Array.from(new Set([
     ...config["workspace-runtime-state"].durablePaths,
     `${config["workspace-runtime-state"].mountRoot.replace(/\/+$/, "")}/paseo/evolution`,
@@ -662,7 +668,7 @@ function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfi
       config["user-identity-state"].scope,
       config["user-identity-state"].sharing,
       config["user-identity-state"].mountRoot,
-      config["user-identity-state"].durablePaths,
+      userIdentityDurablePaths,
       config["user-identity-state"].source,
     ),
     userSshState: buildAttachment(
@@ -728,7 +734,13 @@ function translateLegacyAttachments(args: {
       "user",
       "cross-workspace",
       "/identity",
-      ["/identity/codex", "/identity/claude"],
+      [
+        "/identity/codex",
+        "/identity/claude",
+        "/identity/codex-xdg/config",
+        "/identity/codex-xdg/data",
+        "/identity/codex-xdg/state",
+      ],
       {
         kind: "secret-material",
         description: identityFiles.length
@@ -989,6 +1001,7 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
         `${agentContract.runtime.stateRoot} SHALL assemble from workspace-runtime-state`,
         `${agentContract.runtime.evolutionRoot} SHALL assemble from workspace-runtime-state`,
         `${home}/.codex and ${home}/.claude SHALL assemble from user-identity-state`,
+        `Codex XDG config/data/state SHALL assemble from user-identity-state`,
         `${home}/.ssh SHALL assemble from user-ssh-state with strict key permissions`,
       ],
       staleRuntimeArtifacts: [...agentContract.runtime.staleRuntimeArtifacts, ...attachments.ephemeralRuntime.staleArtifacts],

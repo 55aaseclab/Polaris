@@ -19,6 +19,25 @@ function hasKubectlVirt(): boolean {
   return result.status === 0 || !/unknown command "virt"/i.test(output);
 }
 
+function terminateChildProcess(child: ReturnType<typeof spawn>): void {
+  if (child.killed) {
+    return;
+  }
+  if (typeof child.pid !== "number") {
+    child.kill("SIGTERM");
+    return;
+  }
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+      return;
+    } catch {
+      // Fall back to the direct child kill path below.
+    }
+  }
+  child.kill("SIGTERM");
+}
+
 function waitForPortForwardReady(
   project: string,
   serviceName: string,
@@ -38,6 +57,7 @@ function waitForPortForwardReady(
         "127.0.0.1",
       ],
       {
+        detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -47,7 +67,7 @@ function waitForPortForwardReady(
         return;
       }
       settled = true;
-      child.kill("SIGTERM");
+      terminateChildProcess(child);
       reject(new Error("Timed out waiting for kubectl port-forward"));
     }, 8000);
     const onData = (chunk: Buffer): void => {
@@ -107,6 +127,27 @@ function shellSingleQuote(input: string): string {
   return `'${input.replace(/'/g, `'\\''`)}'`;
 }
 
+function kubevirtProbeShellCommand(command: string): string {
+  const wrapped = [
+    "set -euo pipefail",
+    command,
+  ].join("\n");
+  return `bash -lc ${shellSingleQuote(wrapped)}`;
+}
+
+function kubevirtPaseoSyncCommand(src: string, dest: string): string {
+  return [
+    `mkdir -p ${src} ${dest}`,
+    [
+      "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times",
+      "--exclude 'models/'",
+      "--exclude 'models/**'",
+      `${src}/`,
+      `${dest}/`,
+    ].join(" "),
+  ].join("\n");
+}
+
 async function runKubevirtSshCommand(
   workspace: WorkspaceSpec,
   serviceName: string,
@@ -140,7 +181,7 @@ async function runKubevirtSshCommand(
         "-p",
         String(localPort),
         "root@127.0.0.1",
-        `sh -lc ${shellSingleQuote(command)}`,
+        kubevirtProbeShellCommand(command),
       ],
       { encoding: "utf8" },
     );
@@ -152,9 +193,118 @@ async function runKubevirtSshCommand(
     return { ok: false, stdout: "" };
   } finally {
     if (child && !child.killed) {
-      child.kill("SIGTERM");
+      terminateChildProcess(child);
     }
   }
+}
+
+interface KubevirtRuntimeSnapshot {
+  guestReachable: boolean;
+  daemonStatusRaw: string;
+  persistedServerId: string | null;
+  pairingRaw: string;
+  workspaceDataObserved: boolean;
+  workspaceRuntimeObserved: boolean;
+  userIdentityObserved: boolean;
+  userSshObserved: boolean;
+  homeObserved: boolean;
+  projectRootObserved: boolean;
+  managerStateObserved: boolean;
+  evolutionStateObserved: boolean;
+  codexObserved: boolean;
+  claudeObserved: boolean;
+  sshObserved: boolean;
+}
+
+async function collectKubevirtRuntimeSnapshot(
+  workspace: WorkspaceSpec,
+  serviceName: string,
+): Promise<KubevirtRuntimeSnapshot> {
+  const command = [
+    "set -eu",
+    "printf 'guestReachable=1\\n'",
+    "printf 'daemonStatusRaw<<EOF\\n'",
+    `PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`,
+    "printf 'EOF\\n'",
+    "printf 'persistedServerId<<EOF\\n'",
+    `cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null || true`,
+    "printf 'EOF\\n'",
+    "printf 'pairingRaw<<EOF\\n'",
+    `cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null || true`,
+    "printf 'EOF\\n'",
+    `test -d ${workspace.attachments.workspaceData.mountRoot} && echo workspaceDataObserved=1 || echo workspaceDataObserved=0`,
+    `test -d ${workspace.attachments.workspaceRuntimeState.mountRoot} && echo workspaceRuntimeObserved=1 || echo workspaceRuntimeObserved=0`,
+    `test -d ${workspace.attachments.userIdentityState.mountRoot} && echo userIdentityObserved=1 || echo userIdentityObserved=0`,
+    `test -d ${workspace.attachments.userSshState.mountRoot} && echo userSshObserved=1 || echo userSshObserved=0`,
+    `test -d ${workspace.runtime.home} && echo homeObserved=1 || echo homeObserved=0`,
+    `if test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}; then echo projectRootObserved=1; else echo projectRootObserved=0; fi`,
+    `test -L ${workspace.runtime.home}/.paseo && echo managerStateObserved=1 || echo managerStateObserved=0`,
+    `test -d ${workspace.agent.runtime.evolutionRoot} && echo evolutionStateObserved=1 || echo evolutionStateObserved=0`,
+    `test -L ${workspace.runtime.home}/.codex && echo codexObserved=1 || echo codexObserved=0`,
+    `test -L ${workspace.runtime.home}/.claude && echo claudeObserved=1 || echo claudeObserved=0`,
+    `if test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh; then echo sshObserved=1; else echo sshObserved=0; fi`,
+  ].join("\n");
+  const result = await runKubevirtSshCommand(workspace, serviceName, command);
+  if (!result.ok) {
+    return {
+      guestReachable: false,
+      daemonStatusRaw: "",
+      persistedServerId: null,
+      pairingRaw: "",
+      workspaceDataObserved: false,
+      workspaceRuntimeObserved: false,
+      userIdentityObserved: false,
+      userSshObserved: false,
+      homeObserved: false,
+      projectRootObserved: false,
+      managerStateObserved: false,
+      evolutionStateObserved: false,
+      codexObserved: false,
+      claudeObserved: false,
+      sshObserved: false,
+    };
+  }
+  const lines = result.stdout.split(/\r?\n/);
+  const scalars = new Map<string, string>();
+  const blocks = new Map<string, string>();
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const blockMatch = line.match(/^([A-Za-z0-9_]+)<<EOF$/);
+    if (blockMatch) {
+      const key = blockMatch[1] ?? "";
+      const content: string[] = [];
+      i += 1;
+      while (i < lines.length && lines[i] !== "EOF") {
+        content.push(lines[i] ?? "");
+        i += 1;
+      }
+      blocks.set(key, content.join("\n").trim());
+      continue;
+    }
+    const scalarMatch = line.match(/^([A-Za-z0-9_]+)=(.*)$/);
+    if (scalarMatch) {
+      scalars.set(scalarMatch[1] ?? "", scalarMatch[2] ?? "");
+    }
+  }
+  const flag = (key: string): boolean => scalars.get(key) === "1";
+  const block = (key: string): string => blocks.get(key) ?? "";
+  return {
+    guestReachable: flag("guestReachable"),
+    daemonStatusRaw: block("daemonStatusRaw"),
+    persistedServerId: block("persistedServerId") || null,
+    pairingRaw: block("pairingRaw"),
+    workspaceDataObserved: flag("workspaceDataObserved"),
+    workspaceRuntimeObserved: flag("workspaceRuntimeObserved"),
+    userIdentityObserved: flag("userIdentityObserved"),
+    userSshObserved: flag("userSshObserved"),
+    homeObserved: flag("homeObserved"),
+    projectRootObserved: flag("projectRootObserved"),
+    managerStateObserved: flag("managerStateObserved"),
+    evolutionStateObserved: flag("evolutionStateObserved"),
+    codexObserved: flag("codexObserved"),
+    claudeObserved: flag("claudeObserved"),
+    sshObserved: flag("sshObserved"),
+  };
 }
 
 function normalizeKubevirtCommandRef(
@@ -202,6 +352,65 @@ function extractPairingUrl(raw: string): string | undefined {
   }
 }
 
+function kubevirtServiceName(workspace: WorkspaceSpec): string | null {
+  const service = spawnSync(
+    "kubectl",
+    ["-n", workspace.identity.projectName, "get", "svc", workspace.identity.projectName, "-o", "jsonpath={.metadata.name}"],
+    { encoding: "utf8" },
+  );
+  const name = (service.stdout || "").trim();
+  return service.status === 0 && name ? name : null;
+}
+
+async function syncKubevirtGuestState(
+  workspace: WorkspaceSpec,
+  mode: "sync-in" | "sync-out",
+): Promise<void> {
+  const vmi = spawnSync(
+    "kubectl",
+    ["-n", workspace.identity.projectName, "get", "vmi", `${workspace.identity.projectName}-vm`, "-o", "jsonpath={.status.phase}"],
+    { encoding: "utf8" },
+  );
+  if ((vmi.stdout || "").trim() !== "Running") {
+    return;
+  }
+  const serviceName = kubevirtServiceName(workspace);
+  if (!serviceName) {
+    return;
+  }
+  const command = mode === "sync-out"
+    ? [
+        "if ! command -v rsync >/dev/null 2>&1; then exit 0; fi",
+        "mkdir -p /mnt/polaris-shared/user-identity-state /mnt/polaris-shared/user-ssh-state",
+        "mkdir -p /workspace/state/paseo /identity /ssh",
+        kubevirtPaseoSyncCommand(
+          "/workspace/state/paseo",
+          "/mnt/polaris-shared/workspace-runtime-state/paseo",
+        ),
+        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /identity/ /mnt/polaris-shared/user-identity-state/",
+        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /ssh/ /mnt/polaris-shared/user-ssh-state/",
+      ].join("\n")
+    : [
+        "if ! command -v rsync >/dev/null 2>&1; then exit 0; fi",
+        "mkdir -p /workspace/state/paseo /workspace/state/paseo/evolution /identity /ssh",
+        "mkdir -p /mnt/polaris-shared/user-identity-state /mnt/polaris-shared/user-ssh-state",
+        kubevirtPaseoSyncCommand(
+          "/mnt/polaris-shared/workspace-runtime-state/paseo",
+          "/workspace/state/paseo",
+        ),
+        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /mnt/polaris-shared/user-identity-state/ /identity/",
+        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /mnt/polaris-shared/user-ssh-state/ /ssh/",
+      ].join("\n");
+  const result = await runKubevirtSshCommand(
+    workspace,
+    serviceName,
+    command,
+  );
+  if (!result.ok) {
+    throw new Error(`Failed to ${mode} VM shared state for ${workspace.identity.projectName}`);
+  }
+}
+
 export class KubevirtDriver implements BackendDriver {
   readonly kind = "kubevirt-vm" as const;
 
@@ -216,10 +425,12 @@ export class KubevirtDriver implements BackendDriver {
   }
 
   async stop(workspace: WorkspaceSpec): Promise<void> {
+    await syncKubevirtGuestState(workspace, "sync-out");
     runVmLifecycleAction(workspace.identity.projectName, "stop");
   }
 
   async restart(workspace: WorkspaceSpec): Promise<void> {
+    await syncKubevirtGuestState(workspace, "sync-out");
     runVmLifecycleAction(workspace.identity.projectName, "restart");
   }
 
@@ -280,23 +491,19 @@ export class KubevirtDriver implements BackendDriver {
       workspace.attachments.userIdentityState.source.volumeRef ?? "missing";
     const userSshStateVolume =
       workspace.attachments.userSshState.source.volumeRef ?? "missing";
-    const execCheck = async (command: string): Promise<boolean> => {
-      if (!exists || !running || serviceName.length === 0) return false;
-      return (await runKubevirtSshCommand(workspace, serviceName, command)).ok;
-    };
-    const execOutput = async (command: string): Promise<string> => {
-      if (!exists || !running || serviceName.length === 0) return "";
-      return (await runKubevirtSshCommand(workspace, serviceName, command)).stdout;
-    };
-    const guestReachable = await execCheck("printf ok");
+    const runtimeSnapshot =
+      exists && running && serviceName.length > 0
+        ? await collectKubevirtRuntimeSnapshot(workspace, serviceName)
+        : null;
+    const guestReachable = runtimeSnapshot?.guestReachable ?? false;
     const daemonStatusRaw =
       workspace.agent.enabled && guestReachable
-        ? await execOutput(`PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json`)
+        ? runtimeSnapshot?.daemonStatusRaw ?? ""
         : "";
     const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
     const persistedServerId =
       workspace.agent.enabled && guestReachable
-        ? (await execOutput(`cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null`)).trim() || null
+        ? runtimeSnapshot?.persistedServerId ?? null
         : null;
     const daemonObserved =
       workspace.agent.enabled && exists && running
@@ -310,7 +517,7 @@ export class KubevirtDriver implements BackendDriver {
           : { observed: true, detail: "daemon not required" };
     const pairingUrl =
       workspace.agent.enabled && guestReachable
-        ? extractPairingUrl(await execOutput(`cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null`))
+        ? extractPairingUrl(runtimeSnapshot?.pairingRaw ?? "")
         : undefined;
     const pairingObserved =
       workspace.agent.enabled && exists && running
@@ -332,27 +539,27 @@ export class KubevirtDriver implements BackendDriver {
       },
       attachments: {
         workspaceData: exists
-          ? { observed: await execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: `pvc/${workspaceDataVolume} -> ${workspace.attachments.workspaceData.mountRoot}` }
+          ? { observed: runtimeSnapshot?.workspaceDataObserved ?? false, detail: `pvc/${workspaceDataVolume} -> ${workspace.attachments.workspaceData.mountRoot}` }
           : undefined,
         workspaceRuntimeState: exists
-          ? { observed: await execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: `pvc/${workspaceRuntimeStateVolume} -> ${workspace.attachments.workspaceRuntimeState.mountRoot}` }
+          ? { observed: runtimeSnapshot?.workspaceRuntimeObserved ?? false, detail: `pvc/${workspaceRuntimeStateVolume} -> ${workspace.attachments.workspaceRuntimeState.mountRoot}` }
           : undefined,
         userIdentityState: exists
-          ? { observed: await execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
+          ? { observed: runtimeSnapshot?.userIdentityObserved ?? false, detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
           : undefined,
         userSshState: exists
-          ? { observed: await execCheck(`test -d ${workspace.attachments.userSshState.mountRoot}`), detail: `pvc/${userSshStateVolume} -> ${workspace.attachments.userSshState.mountRoot}` }
+          ? { observed: runtimeSnapshot?.userSshObserved ?? false, detail: `pvc/${userSshStateVolume} -> ${workspace.attachments.userSshState.mountRoot}` }
           : undefined,
       },
       runtimeAssembly: exists && running
         ? {
-            home: { observed: await execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
-            projectRoot: { observed: await execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
-            managerState: { observed: await execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },
-            evolutionState: { observed: await execCheck(`test -d ${workspace.agent.runtime.evolutionRoot}`), detail: workspace.agent.runtime.evolutionRoot },
-            codex: { observed: await execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
-            claude: { observed: await execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
-            ssh: { observed: await execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
+            home: { observed: runtimeSnapshot?.homeObserved ?? false, detail: workspace.runtime.home },
+            projectRoot: { observed: runtimeSnapshot?.projectRootObserved ?? false, detail: `${workspace.runtime.home}/workspace` },
+            managerState: { observed: runtimeSnapshot?.managerStateObserved ?? false, detail: workspace.agent.runtime.stateRoot },
+            evolutionState: { observed: runtimeSnapshot?.evolutionStateObserved ?? false, detail: workspace.agent.runtime.evolutionRoot },
+            codex: { observed: runtimeSnapshot?.codexObserved ?? false, detail: `${workspace.runtime.home}/.codex` },
+            claude: { observed: runtimeSnapshot?.claudeObserved ?? false, detail: `${workspace.runtime.home}/.claude` },
+            ssh: { observed: runtimeSnapshot?.sshObserved ?? false, detail: `${workspace.runtime.home}/.ssh` },
           }
         : {},
       daemon: workspace.agent.enabled
@@ -383,10 +590,12 @@ export class KubevirtDriver implements BackendDriver {
         continue;
       }
       if (action.kind === "restart-runtime") {
+        await syncKubevirtGuestState(workspace, "sync-out");
         runVmLifecycleAction(workspace.identity.projectName, "restart");
         continue;
       }
       if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
+        await syncKubevirtGuestState(workspace, "sync-out");
         runVmLifecycleAction(workspace.identity.projectName, "restart");
         continue;
       }
