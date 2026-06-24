@@ -1,55 +1,71 @@
 # Isolation Maturity
 
-## Short Version
+This document describes the current Polaris isolation model as a workspace
+control-plane boundary.
 
-For `Isolation`, Polaris has the more explicit substrate model.
-`Coder` has the more mature production operating model.
+## Purpose
 
-## Polaris Today
+Polaris owns workspace intent, attachment semantics, runtime assembly checks,
+and drift/reconcile logic rather than treating isolation as a thin backend
+rendering detail.
 
-- Isolation is a core design concern.
-- Polaris can target:
-  - `pod`
-  - `kubevirt-vm`
-  - `docker`
-- Pod and VM paths are treated as first-class runtime backends.
-- The control plane reasons about runtime assembly and state inside those
-  environments.
+## Scope And Files
 
-## Coder Today
+Polaris now keeps saved workspace intent, generated backend artifacts,
+operator state, and runtime attachments separate.
 
-Coder is mature on workspace provisioning and secure self-hosted environments,
-but its product center of gravity is not "multi-backend isolation as a first
-class abstraction" in the same explicit way Polaris models it.
+| Concern | Contents | Control-plane source of truth | Runtime / user-facing realization |
+|---|---|---|---|
+| Saved workspace intent | Project, backend, attachments, user profile, credentials, service settings | `config/users/<user>/projects/<project>/<backend>.agent.yaml` | none |
+| User profile | User identity, Git identity, SSH policy, agent identity defaults, owned workspace list | `config/users/profiles/<user>.yaml` | selected by `user_profile` in workspace specs |
+| Credential registry | User-owned reusable auth declarations and material references | `config/users/<user>/credentials/*.yaml` | resolved into identity or SSH attachments |
+| Generated backend artifact | Rendered manifest consumed by the backend runtime | `config/users/<user>/projects/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or `kubectl` + KubeVirt objects |
+| Driver selection state | Preferred backend and optional pod profile for ambiguous project names | `config/users/<user>/projects/<project>/state/selection.json` | CLI default resolution for `<project>` |
+| Status snapshot | Synthesized backend, attachment, runtime-assembly, daemon, SSH, and drift status | `config/users/<user>/projects/<project>/state/status.json` | `polaris status <project>` output |
+| Workspace data attachment | Project files and workspace-local durable content | Saved spec `attachments.workspace-data` | mounted at `/workspace/project` |
+| Workspace runtime-state attachment | Durable manager state, pairing state, and evolution state | Saved spec `attachments.workspace-runtime-state` | mounted at `/workspace/state` |
+| User identity attachment | Cross-workspace Codex and Claude identity state | Saved spec `attachments.user-identity-state` | mounted at `/identity`, assembled into `~/.codex` and `~/.claude` |
+| User SSH attachment | Cross-workspace SSH key material | Saved spec `attachments.user-ssh-state` | mounted at `/ssh`, assembled into `~/.ssh` |
+| Ephemeral runtime state | PID files, sockets, temp state, and stale runtime artifacts | Saved spec `attachments.ephemeral-runtime` or compatibility defaults | mounted at `/run/workspace` |
 
-Coder is stronger on:
+Current gaps versus a more mature platform:
 
-- production deployment maturity
-- admin controls
-- enterprise governance
-- broad infrastructure integration
+- backend parity is incomplete
+- KubeVirt inspection still depends on SSH and port-forward probing
+- install and bootstrap flows are still operator-heavy
+- backend capability matrices and preflight validation remain thin
+- reconcile repair behavior is still coarse and restart-heavy
 
-## Gap
+## Polaris vs Coder
 
-Polaris has the more explicit isolation substrate model.
+| Capability | Polaris Today | Coder Today |
+|---|---|---|
+| Isolation abstraction | 1. Model workspace intent separately from backend realization. 2. Preserve one logical contract across `docker`, `pod`, and `kubevirt-vm`. 3. Treat attachment classes as the persistence boundary. | 1. Strong workspace provisioning product. 2. Mature secure environment operations. 3. Isolation is not exposed as the same explicit multi-backend substrate model. |
+| Saved spec model | 1. Load per-user saved specs from `config/users/<user>/projects/<project>/`. 2. Normalize attachments, credentials, user profile, and runtime contract. 3. Validate the workspace object before backend use. | 1. Template- and deployment-centered product model. 2. Strong admin and governance controls. 3. Less emphasis on repo-visible attachment semantics. |
+| Backend realization | 1. Dispatch through backend drivers for `docker`, `pod`, and `kubevirt-vm`. 2. Render generated artifacts per backend. 3. Start, stop, restart, render, apply, logs, inspect, and reconcile through the same CLI surface. | 1. More mature operational runtime stories. 2. Richer deployment and governance controls. 3. Less focus on backend switching inside one repo-native control plane. |
+| Attachment semantics | 1. Keep workspace data and workspace runtime state exclusive to one workspace. 2. Keep identity and SSH state cross-workspace at user scope. 3. Assemble runtime home as symlinks and mounts instead of using home directories as the persistence boundary. | 1. Durable home/workspace behavior is operationally mature. 2. Product semantics are less explicitly exposed as attachment classes. |
+| Runtime truth and drift | 1. Inspect live backend state. 2. Check attachment presence, runtime assembly, daemon readiness, and services. 3. Synthesize status and build a reconcile plan from drift. | 1. Stronger production operations and observability. 2. More mature platform-level health and governance. |
+| Backend switching | 1. Allow `<project>@docker`, `<project>@pod`, and `<project>@kubevirt-vm`. 2. Persist default backend selection. 3. Synthesize missing backend specs from an existing source spec. | 1. Mature provisioning lifecycle. 2. Not centered on "same workspace, multiple isolation substrates" as a first-class repo-native operator flow. |
 
-Coder has the more mature production operational model.
+## Backend Surface
 
-## Polaris Strength
+Polaris currently supports three backend kinds:
 
-- Stronger conceptual split between workspace intent and backend realization
-- Clearer runtime-state and attachment semantics across isolation surfaces
-- Better foundation for saying "this workspace can move across pod/vm/docker
-  while keeping the same logical contract"
-
-## Backend Model
-
-- `pod`
-  - profiles: `gvisor`, `kata-qemu`, `kata-clh`, `kata-qemu-tdx`
-- `kubevirt-vm`
 - `docker`
-  - clean default onboarding path
-  - first-class backend target for spec -> render -> runtime flow
+- `pod`
+- `kubevirt-vm`
+
+Pod-specific isolation variants are modeled as pod profiles, not top-level
+backend kinds:
+
+- `gvisor`
+- `kata-qemu`
+- `kata-clh`
+- `kata-qemu-tdx`
+
+The current code also supports profile aliases through saved driver selection
+and profile specs, such as `kata` or `kata-container`, which resolve to a pod
+backend profile during load or switch flows.
 
 ## Attachment Model
 
@@ -57,127 +73,176 @@ Durable state is modeled as attachment classes, not as a persisted runtime
 home:
 
 - `workspace-data`
-  - workspace-scoped
-  - not shared across workspaces
+  - scope: `workspace`
+  - sharing: `exclusive`
+  - default mount: `/workspace/project`
 - `workspace-runtime-state`
-  - workspace-scoped
-  - not shared across workspaces
-  - includes durable manager state
-  - includes workspace evolution state
+  - scope: `workspace`
+  - sharing: `exclusive`
+  - default mount: `/workspace/state`
+  - durable paths include `/workspace/state/paseo`
+  - durable paths include `/workspace/state/paseo/evolution`
 - `user-identity-state`
-  - user-scoped
-  - cross-workspace
-  - includes `codex` and `claude`
+  - scope: `user`
+  - sharing: `cross-workspace`
+  - default mount: `/identity`
+  - assembled into `~/.codex` and `~/.claude`
 - `user-ssh-state`
-  - user-scoped
-  - cross-workspace
-  - includes SSH private/public material and related state
+  - scope: `user`
+  - sharing: `cross-workspace`
+  - default mount: `/ssh`
+  - assembled into `~/.ssh`
 
 Non-durable runtime state is modeled separately:
 
 - `ephemeral-runtime`
-  - pid files
-  - sockets
-  - temp state
-  - transient runtime leftovers
+  - default mount: `/run/workspace`
+  - paths include temp files, PID files, and sockets
+  - stale artifacts include `/run/workspace/pids/paseo.pid`
 
 Runtime home paths are assembled views of these attachments rather than the
 persistence boundary itself.
 
-For the current Paseo-backed runtime, the default realization is:
+## User Management
 
-- manager state: `/workspace/state/paseo`
-- evolution state: `/workspace/state/paseo/evolution`
+Polaris now treats the user profile as a first-class control-plane object
+rather than inferring durable identity only from the runtime UNIX user.
 
-## Config Layout
+Current user-profile semantics:
 
-Long-term target layout:
+- the workspace spec selects a user through `user_profile`
+- the user profile lives in `config/users/profiles/<user>.yaml`
+- the profile carries name, email, GitHub account, SSH mode, and agent
+  identity defaults
+- the profile may also list owned workspaces through `workspaces`
+- scaffold flows update that workspace list when new projects are created
 
-```text
-config/
-  specs/
-    base/
-    pod/
-      profiles/
-      projects/
-    kubevirt/
-      projects/
-    docker/
-      projects/
-  generated/
-    pod/
-    kubevirt/
-    docker/
-  state/
-```
+Current ownership boundaries:
 
-Profiles are part of the workspace intent layer. A workspace may select a
-built-in profile such as `morpheus`, and backend renderers consume profile
-defaults rather than branching directly on the workspace name.
+- one workspace spec belongs to one user profile
+- one user profile can own many workspaces
+- one project name cannot currently be owned by multiple users at the same
+  time
+- Polaris rejects cross-user project-name collisions until user-qualified
+  runtime naming exists
 
-Polaris now distinguishes between:
+Compatibility still exists for older specs:
 
-- workspace profile: backend/runtime-oriented defaults
-- user profile: Git identity, SSH policy, and ownership of user-scoped
-  identity state
-- user credential registry: reusable auth declarations and material references
-- workspace credential bindings: per-workspace credential selection by purpose
+- if `user_profile` is absent, Polaris derives a compatibility user profile
+  from runtime user and inline Git identity
+- that path is explicitly a fallback, not the preferred long-term model
 
-Credential registry layout:
+## Credential Model
 
-```text
-config/users/profiles/<user>.yaml
-config/users/<user>/credentials/*.yaml
-```
+Polaris now separates credential selection from backend selection.
 
-Each credential declares stable metadata and `materialRef`.
-Secret material stays outside the registry document.
+Current credential semantics:
 
-Workspace config binds credentials separately from driver selection:
+- credentials are user-owned registry objects
+- the active registry root is `config/users/<user>/credentials/`
+- a legacy fallback registry path still exists at
+  `config/users/credentials/<user>/`
+- each credential declares stable metadata, supported purposes, and a
+  `materialRef`
+- secret material must stay external to the registry entry and is referenced
+  through `materialRef.files[].source_path`
 
-```yaml
-backend:
-  kind: docker
-credentials:
-  bindings:
-    - purpose: agent-auth
-      credentialId: codex-default
-      required: true
-```
+Workspace specs bind credentials by purpose:
+
+- `agent-auth`
+- `git-auth`
+- `ssh-auth`
+
+Current resolution rules:
+
+- if explicit `credentials.bindings` exist, Polaris resolves only those
+  registry credentials
+- the bound credential must be owned by the selected user profile
+- the bound credential must declare support for the requested purpose
+- registry-backed credentials override legacy inline auth for the same purpose
+- if no direct bindings exist, Polaris derives compatibility credentials from
+  inline auth material
+
+Credential resolution also chooses the attachment boundary:
+
+- `codex-auth` and similar non-SSH credentials resolve into
+  `user-identity-state`
+- `ssh-key` credentials resolve into `user-ssh-state`
+
+This matters for isolation because Polaris treats credentials as control-plane
+bindings onto attachment classes, not as backend-local mount hacks.
+
+## Workspace Model
+
+Polaris now treats the workspace as a first-class object that sits between user
+ownership and backend realization.
+
+Current workspace semantics:
+
+- the workspace identity is the project name
+- the workspace spec selects one backend kind and may select a pod profile
+- the workspace spec binds one user profile and zero or more credentials
+- the workspace spec declares attachment classes directly when using the newer
+  model
+- generated backend artifacts are derived from that workspace object
+
+Current lifecycle and ownership implications:
+
+- `create` scaffolds a user profile when needed and creates a Docker-first
+  saved spec
+- the same logical workspace can later be targeted as `@docker`, `@pod`, or
+  `@kubevirt-vm`
+- missing backend specs can be synthesized from an existing workspace spec
+- backend preference can be persisted per workspace in `state/selection.json`
+- status, drift, and reconcile operate on the normalized workspace object, not
+  directly on hand-maintained manifests
+
+The practical result is that user management, credential binding, and isolation
+policy are now centered on the workspace object rather than split across ad hoc
+backend-specific files.
 
 ## Current Reality
 
-- New onboarding should start from `config/specs/docker/projects/*.agent.yaml`
-  and `config/generated/docker/*.yaml`.
-- New TypeScript code prefers `config/specs/**` and `config/generated/**`.
-- Repo-managed specs now declare attachment classes directly.
-- Repo-managed specs may also declare credential bindings directly.
-- The control plane translates legacy path-centric persistence fields only as a
-  compatibility path when direct attachment declarations are absent.
-- The control plane also treats legacy inline auth fields as compatibility-only
-  when direct credential bindings are present.
-- Backend implementations may still realize the same attachment classes with
-  different physical mount primitives, but they are expected to preserve the
-  same scope and lifecycle semantics.
-- Pod currently has the deepest runtime-controller support.
-- KubeVirt and Docker are expected to converge on the same controller model.
-- Morpheus remains a built-in profile/example, not a backend-special-case name.
+Polaris has moved beyond the older "future config/specs layout" document
+direction. The code today actually does the following:
 
-For Docker specifically:
+- loads saved specs from `config/users/<user>/projects/<project>/`
+- writes generated backend artifacts under each project's `generated/`
+  directory
+- writes status and backend-selection state under each project's `state/`
+  directory
+- validates attachment semantics in the TypeScript control plane before backend
+  execution
+- supports direct attachment declarations in repo-managed specs
+- keeps legacy path-centric persistence fields only as a compatibility path
+- separates user profile identity from workspace profile defaults
+- resolves credentials separately from backend selection
+- rejects project ownership collisions across multiple users
+- requires registry credentials to be owned by the selected user profile
+- treats generated manifests as derived artifacts, not the primary source of
+  truth
 
-- saved intent lives under `config/specs/docker/projects/`
-- rendered output lives under `config/generated/docker/`
-- the rendered artifact is a Docker Compose file consumed by `docker compose`
-- `status` also writes a synthesized control-plane view to `config/state/`
-- when the same project name exists across multiple backends, operators can use
-  `<project>@docker`, `<project>@pod`, or `<project>@kubevirt-vm` to select the
-  intended saved spec
-- user-scoped identity storage is expected to derive from explicit user profile
-  identity rather than only from runtime UNIX user
+For backend realization today:
 
-## Runtime Controller Pipeline
+- `docker`
+  - is the default onboarding path
+  - renders a Docker Compose file
+  - bootstraps runtime assembly inside the container
+  - uses inspect checks based on `docker compose`, `docker inspect`, and
+    `docker exec`
+- `pod`
+  - has the deepest Kubernetes-native controller flow
+  - renders Deployment and related Kubernetes objects
+  - inspects runtime state with `kubectl get` and `kubectl exec`
+- `kubevirt-vm`
+  - has a real backend driver and render/inspect flow
+  - starts and stops through `kubectl virt` when available or VM patch fallback
+  - still probes guest state through service reachability, port-forward, and
+    SSH, which is less mature than the pod path
 
-Polaris is moving toward a runtime-controller model:
+## Runtime Controller
+
+Polaris now has an explicit runtime-controller pipeline:
 
 ```text
 WorkspaceSpec
@@ -188,15 +253,36 @@ WorkspaceSpec
   -> Backend action execution
 ```
 
-This makes live workspace truth a control-plane concern rather than a thin
-backend-local status response.
+This means live isolation truth is no longer just "backend says it is up."
+Polaris checks:
 
-## TODO Toward Coder Maturity
+- backend existence and liveness
+- attachment presence
+- runtime assembly invariants
+- daemon readiness and pairing
+- service object presence
+- SSH self-check semantics for user profiles with GitHub identity
 
-- Make backend parity boring:
-  same lifecycle quality, same diagnostics, same docs, same recovery behavior.
-- Add stronger backend capability matrices and preflight validation.
-- Add operational SLO-level observability for backend provisioning and runtime
-  failures.
-- Add safer rollback and repair flows for backend-specific failures.
-- Add platform install stories that are simpler than reading repo internals.
+## Backend Switching
+
+Polaris now has a concrete cross-backend switch path rather than only a design
+goal:
+
+- operators can target `<project>@docker`
+- operators can target `<project>@pod[:profile]`
+- operators can target `<project>@kubevirt-vm`
+- the selected backend can be persisted in `state/selection.json`
+- when a requested backend spec is missing, Polaris can synthesize it from an
+  existing source spec
+
+This is one of Polaris's strongest isolation-specific differentiators.
+
+## Current Boundaries
+
+The current implementation deliberately does **not**:
+
+- provide Coder-level production operations or governance maturity
+- provide equal operational depth across all three backends
+- hide KubeVirt guest probing complexity behind a richer guest agent model
+- expose a full backend capability matrix or strong preflight diagnostics yet
+- provide fine-grained repair actions for every backend-specific failure mode
