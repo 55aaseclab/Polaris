@@ -6,8 +6,8 @@ This directory is the workspace-root documentation index.
 
 - [polaris/README.md](./polaris/README.md): Polaris control plane and runtime
   model
-- [polaris/workspace-maturity.md](./polaris/workspace-maturity.md): workspace
-  maturity against Coder
+- [polaris/control-plane-maturity.md](./polaris/control-plane-maturity.md):
+  Polaris control-plane maturity
 - [polaris/isolation-maturity.md](./polaris/isolation-maturity.md): isolation
   maturity and backend model
 - [polaris/agent-swarm-maturity.md](./polaris/agent-swarm-maturity.md): agent
