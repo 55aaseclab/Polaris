@@ -239,18 +239,167 @@ function kubevirtAttachmentDataPath(
   return attachmentDataPath(workspace, attachment);
 }
 
+function attachmentDurablePaths(
+  workspace: WorkspaceSpec,
+  attachment: MigratedAttachment,
+): string[] {
+  const durablePaths = (() => {
+    switch (attachment) {
+      case "workspaceRuntimeState":
+        return workspace.attachments.workspaceRuntimeState.durablePaths;
+      case "userIdentityState":
+        return workspace.attachments.userIdentityState.durablePaths;
+      case "userSshState":
+        return workspace.attachments.userSshState.durablePaths;
+    }
+  })();
+  const sorted = [...durablePaths].sort((a, b) => a.length - b.length);
+  const minimal: string[] = [];
+  for (const candidate of sorted) {
+    const normalized = candidate.replace(/\/+$/, "");
+    if (minimal.some((existing) => normalized === existing || normalized.startsWith(`${existing}/`))) {
+      continue;
+    }
+    minimal.push(normalized);
+  }
+  return minimal;
+}
+
+function relativeDurablePath(root: string, durablePath: string): string {
+  const relative = path.relative(root, durablePath);
+  return relative === "" ? "." : relative;
+}
+
 function pruneExportedAttachmentState(attachment: MigratedAttachment, dir: string): void {
   void attachment;
   void dir;
 }
 
-async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | null> {
-  const driver = getBackendDriver(workspace.backend.kind);
-  const observation = await driver.inspect(workspace);
-  if (!observation.backend.exists) {
-    return null;
-  }
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
+function sanitizeVolumeToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function resolveDockerAttachmentVolumeName(
+  workspace: WorkspaceSpec,
+  attachment: MigratedAttachment,
+): string {
+  const source = (() => {
+    switch (attachment) {
+      case "workspaceRuntimeState":
+        return workspace.attachments.workspaceRuntimeState.source;
+      case "userIdentityState":
+        return workspace.attachments.userIdentityState.source;
+      case "userSshState":
+        return workspace.attachments.userSshState.source;
+    }
+  })();
+  const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const fallbackName = (() => {
+    switch (attachment) {
+      case "workspaceRuntimeState":
+        return `${workspace.identity.projectName}-workspace-runtime-state`;
+      case "userIdentityState":
+        return `polaris-${userScope}-identity`;
+      case "userSshState":
+        return `polaris-${userScope}-ssh`;
+    }
+  })();
+  const baseName = source.volumeRef?.trim() || fallbackName;
+  const suffix = source.subPath?.trim()
+    ? `-${sanitizeVolumeToken(source.subPath.trim())}`
+    : "";
+  return `${baseName}${suffix}`;
+}
+
+function ensureDockerVolume(name: string): void {
+  runChecked("docker", ["volume", "create", name]);
+}
+
+function importSwitchStateIntoDockerVolumes(
+  workspace: WorkspaceSpec,
+  exportRoot: string,
+  attachments: MigratedAttachment[],
+): void {
+  for (const attachment of attachments) {
+    const volumeName = resolveDockerAttachmentVolumeName(workspace, attachment);
+    ensureDockerVolume(volumeName);
+    const exportDir = attachmentExportDir(exportRoot, attachment);
+    const rootPath = attachmentDataPath(workspace, attachment);
+    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+      const relativePath = relativeDurablePath(rootPath, durablePath);
+      const localSource = relativePath === "."
+        ? exportDir
+        : path.join(exportDir, relativePath);
+      if (!fs.existsSync(localSource)) {
+        continue;
+      }
+      const targetPath = relativePath === "."
+        ? "/target"
+        : `/target/${relativePath.replace(/^\/+/, "")}`;
+      const copyCommand = [
+        "set -e",
+        `mkdir -p ${shellSingleQuote(targetPath)}`,
+        `find ${shellSingleQuote(targetPath)} -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true`,
+        `cp -a /source/. ${shellSingleQuote(targetPath)}`,
+      ].join(" ; ");
+      runChecked("docker", [
+        "run",
+        "--rm",
+        "-v",
+        `${volumeName}:/target`,
+        "-v",
+        `${localSource}:/source:ro`,
+        "busybox:1.36",
+        "sh",
+        "-lc",
+        copyCommand,
+      ]);
+    }
+  }
+}
+
+function normalizeImportedAttachmentOwnershipCommand(
+  workspace: WorkspaceSpec,
+  attachment: MigratedAttachment,
+): string {
+  const owner = workspace.runtime.user === "root"
+    ? "0:0"
+    : `${workspace.runtime.user}:${workspace.runtime.user}`;
+  const durablePaths = attachmentDurablePaths(workspace, attachment)
+    .map((entry) => `if [ -e ${shellSingleQuote(entry)} ]; then chown -R ${owner} ${shellSingleQuote(entry)}; fi`);
+  return durablePaths.join(" ; ");
+}
+
+function normalizeImportedAttachmentOwnership(
+  workspace: WorkspaceSpec,
+  endpoint: AttachmentEndpoint,
+  attachment: MigratedAttachment,
+): void {
+  const command = normalizeImportedAttachmentOwnershipCommand(workspace, attachment);
+  if (!command.trim()) {
+    return;
+  }
+  if (endpoint.kind === "docker") {
+    runChecked("docker", ["exec", endpoint.containerId, "sh", "-lc", command]);
+    return;
+  }
+  runChecked("kubectl", ["-n", endpoint.namespace, "exec", endpoint.podName, "--", "sh", "-lc", command]);
+}
+
+function deleteTransferPod(namespace: string, podName: string): void {
+  spawnSync("kubectl", ["-n", namespace, "delete", "pod", podName, "--ignore-not-found"], { encoding: "utf8" });
+  spawnSync(
+    "kubectl",
+    ["-n", namespace, "wait", "--for=delete", `pod/${podName}`, "--timeout=60s"],
+    { encoding: "utf8" },
+  );
+}
+
+async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | null> {
   const exportRoot = fs.mkdtempSync(path.join(switchScratchRoot(), "state-"));
   if (workspace.backend.kind === "kubevirt-vm") {
     const pvcPodName = `${workspace.identity.projectName}-pvc-export`;
@@ -291,14 +440,30 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
       for (const attachment of MIGRATED_ATTACHMENTS) {
         const exportDir = attachmentExportDir(exportRoot, attachment);
         fs.mkdirSync(exportDir, { recursive: true });
-        const sourceRoot = `${kubevirtAttachmentDataPath(workspace, attachment)}/.`;
-        runChecked("kubectl", ["-n", workspace.identity.projectName, "cp", `${pvcPodName}:${sourceRoot}`, exportDir]);
+        const rootPath = kubevirtAttachmentDataPath(workspace, attachment);
+        for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+          const relativePath = relativeDurablePath(rootPath, durablePath);
+          const localTarget = relativePath === "."
+            ? exportDir
+            : path.join(exportDir, relativePath);
+          fs.mkdirSync(localTarget, { recursive: true });
+          runChecked(
+            "kubectl",
+            ["-n", workspace.identity.projectName, "cp", `${pvcPodName}:${durablePath}/.`, localTarget],
+          );
+        }
         pruneExportedAttachmentState(attachment, exportDir);
       }
     } finally {
-      spawnSync("kubectl", ["-n", workspace.identity.projectName, "delete", "pod", pvcPodName, "--ignore-not-found"], { encoding: "utf8" });
+      deleteTransferPod(workspace.identity.projectName, pvcPodName);
     }
     return exportRoot;
+  }
+
+  const driver = getBackendDriver(workspace.backend.kind);
+  const observation = await driver.inspect(workspace);
+  if (!observation.backend.exists) {
+    return null;
   }
 
   if (!observation.backend.running) {
@@ -315,11 +480,19 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
   for (const attachment of MIGRATED_ATTACHMENTS) {
     const exportDir = attachmentExportDir(exportRoot, attachment);
     fs.mkdirSync(exportDir, { recursive: true });
-    const sourceRoot = `${attachmentDataPath(workspace, attachment)}/.`;
-    if (endpoint.kind === "docker") {
-      runChecked("docker", ["cp", `${endpoint.containerId}:${sourceRoot}`, exportDir]);
-    } else {
-      runChecked("kubectl", ["-n", endpoint.namespace, "cp", `${endpoint.podName}:${sourceRoot}`, exportDir]);
+    const rootPath = attachmentDataPath(workspace, attachment);
+    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+      const relativePath = relativeDurablePath(rootPath, durablePath);
+      const localTarget = relativePath === "."
+        ? exportDir
+        : path.join(exportDir, relativePath);
+      fs.mkdirSync(localTarget, { recursive: true });
+      const sourceRoot = `${durablePath}/.`;
+      if (endpoint.kind === "docker") {
+        runChecked("docker", ["cp", `${endpoint.containerId}:${sourceRoot}`, localTarget]);
+      } else {
+        runChecked("kubectl", ["-n", endpoint.namespace, "cp", `${endpoint.podName}:${sourceRoot}`, localTarget]);
+      }
     }
     pruneExportedAttachmentState(attachment, exportDir);
   }
@@ -331,6 +504,10 @@ async function importSwitchState(
   exportRoot: string,
   attachments: MigratedAttachment[],
 ): Promise<void> {
+  if (workspace.backend.kind === "docker") {
+    importSwitchStateIntoDockerVolumes(workspace, exportRoot, attachments);
+    return;
+  }
   if (workspace.backend.kind === "kubevirt-vm") {
     const pvcPodName = `${workspace.identity.projectName}-pvc-import`;
     const manifestPath = path.join(exportRoot, "pvc-import.yaml");
@@ -367,14 +544,29 @@ async function importSwitchState(
     try {
       runChecked("kubectl", ["apply", "-f", manifestPath]);
       runChecked("kubectl", ["-n", workspace.identity.projectName, "wait", "--for=condition=Ready", `pod/${pvcPodName}`, "--timeout=60s"]);
+      const importEndpoint: AttachmentEndpoint = {
+        kind: "pod",
+        namespace: workspace.identity.projectName,
+        podName: pvcPodName,
+      };
       for (const attachment of attachments) {
         const exportDir = attachmentExportDir(exportRoot, attachment);
-        const targetDir = kubevirtAttachmentDataPath(workspace, attachment);
-        runChecked("kubectl", ["-n", workspace.identity.projectName, "exec", pvcPodName, "--", "sh", "-lc", `mkdir -p '${targetDir}'`]);
-        runChecked("kubectl", ["-n", workspace.identity.projectName, "cp", `${exportDir}/.`, `${pvcPodName}:${targetDir}`]);
+        const rootPath = kubevirtAttachmentDataPath(workspace, attachment);
+        for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+          const relativePath = relativeDurablePath(rootPath, durablePath);
+          const localSource = relativePath === "."
+            ? exportDir
+            : path.join(exportDir, relativePath);
+          if (!fs.existsSync(localSource)) {
+            continue;
+          }
+          runChecked("kubectl", ["-n", workspace.identity.projectName, "exec", pvcPodName, "--", "sh", "-lc", `mkdir -p '${durablePath}'`]);
+          runChecked("kubectl", ["-n", workspace.identity.projectName, "cp", `${localSource}/.`, `${pvcPodName}:${durablePath}`]);
+        }
+        normalizeImportedAttachmentOwnership(workspace, importEndpoint, attachment);
       }
     } finally {
-      spawnSync("kubectl", ["-n", workspace.identity.projectName, "delete", "pod", pvcPodName, "--ignore-not-found"], { encoding: "utf8" });
+      deleteTransferPod(workspace.identity.projectName, pvcPodName);
     }
     return;
   }
@@ -391,12 +583,22 @@ async function importSwitchState(
 
   for (const attachment of attachments) {
     const exportDir = attachmentExportDir(exportRoot, attachment);
-    const targetDir = attachmentDataPath(workspace, attachment);
-    if (endpoint.kind === "docker") {
-      runChecked("docker", ["cp", `${exportDir}/.`, `${endpoint.containerId}:${targetDir}`]);
-    } else {
-      runChecked("kubectl", ["-n", endpoint.namespace, "cp", `${exportDir}/.`, `${endpoint.podName}:${targetDir}`]);
+    const rootPath = attachmentDataPath(workspace, attachment);
+    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+      const relativePath = relativeDurablePath(rootPath, durablePath);
+      const localSource = relativePath === "."
+        ? exportDir
+        : path.join(exportDir, relativePath);
+      if (!fs.existsSync(localSource)) {
+        continue;
+      }
+      if (endpoint.kind === "docker") {
+        runChecked("docker", ["cp", `${localSource}/.`, `${endpoint.containerId}:${durablePath}`]);
+      } else {
+        runChecked("kubectl", ["-n", endpoint.namespace, "cp", `${localSource}/.`, `${endpoint.podName}:${durablePath}`]);
+      }
     }
+    normalizeImportedAttachmentOwnership(workspace, endpoint, attachment);
   }
 }
 
@@ -427,6 +629,34 @@ async function stopCompetingBackends(project: string, targetBackend: WorkspaceSp
   return stopped;
 }
 
+async function runningBackendsForProject(
+  project: string,
+  targetBackend: WorkspaceSpec["backend"]["kind"],
+): Promise<Array<{
+  backend: WorkspaceSpec["backend"]["kind"];
+  workspace: WorkspaceSpec;
+}>> {
+  const running: Array<{
+    backend: WorkspaceSpec["backend"]["kind"];
+    workspace: WorkspaceSpec;
+  }> = [];
+  for (const backend of SUPPORTED_BACKENDS) {
+    if (backend === targetBackend) {
+      continue;
+    }
+    const workspace = loadWorkspaceForBackend(project, backend);
+    if (!workspace) {
+      continue;
+    }
+    const observation = await getBackendDriver(workspace.backend.kind).inspect(workspace);
+    if (!observation.backend.running) {
+      continue;
+    }
+    running.push({ backend, workspace });
+  }
+  return running;
+}
+
 export async function switchCommand(projectRef: string): Promise<void> {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
@@ -442,16 +672,27 @@ export async function switchCommand(projectRef: string): Promise<void> {
 
   const previousSelection = readWorkspaceDriverSelection(project);
   const previousBackend = previousSelection?.backend;
-  const previousRef = previousBackend
-    ? workspaceRefForSelection(project, previousBackend, previousSelection?.profile)
+  const runningBackends = await runningBackendsForProject(project, backendHint);
+  const selectedRunningWorkspace = previousBackend
+    ? runningBackends.find((entry) => entry.backend === previousBackend)?.workspace ?? null
     : null;
-  const previousWorkspace = previousRef && previousBackend
-    ? loadWorkspaceForBackend(project, previousBackend)
-    : null;
-  const exportedSwitchState = previousWorkspace && previousBackend && previousBackend !== backendHint
+  const previousWorkspace = selectedRunningWorkspace
+    ?? (runningBackends.length === 1 ? runningBackends[0]?.workspace ?? null : null);
+  const effectivePreviousBackend = previousWorkspace?.backend.kind ?? previousBackend ?? null;
+  const shouldStopBeforeExport =
+    previousWorkspace &&
+    effectivePreviousBackend &&
+    effectivePreviousBackend !== backendHint &&
+    effectivePreviousBackend === "kubevirt-vm";
+  const stoppedBackends = shouldStopBeforeExport
+    ? await stopCompetingBackends(project, backendHint)
+    : [];
+  const exportedSwitchState = previousWorkspace && effectivePreviousBackend && effectivePreviousBackend !== backendHint
     ? await exportSwitchState(previousWorkspace)
     : null;
-  const stoppedBackends = await stopCompetingBackends(project, backendHint);
+  const finalizedStoppedBackends = shouldStopBeforeExport
+    ? stoppedBackends
+    : await stopCompetingBackends(project, backendHint);
   const selectionFile = writeWorkspaceDriverSelection(project, {
     backend: backendHint,
     profile: backendHint === "pod" ? profileHint : undefined,
@@ -460,11 +701,20 @@ export async function switchCommand(projectRef: string): Promise<void> {
   const { workspace, driver } = await loadExecutableWorkspaceForCommand("start", targetRef);
   const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm" ? 600000 : 45000;
   try {
-    await driver.start(workspace);
-    if (exportedSwitchState) {
+    if (exportedSwitchState && workspace.backend.kind === "docker") {
       logInfo("cli", "switch-migrate-small-state", {
         project,
-        fromBackend: previousBackend,
+        fromBackend: effectivePreviousBackend,
+        toBackend: backendHint,
+        phase: "pre-start",
+      });
+      await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+    }
+    await driver.start(workspace);
+    if (exportedSwitchState && workspace.backend.kind !== "docker") {
+      logInfo("cli", "switch-migrate-small-state", {
+        project,
+        fromBackend: effectivePreviousBackend,
         toBackend: backendHint,
       });
       await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
@@ -480,11 +730,11 @@ export async function switchCommand(projectRef: string): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     project,
-    previousBackend: previousBackend ?? null,
+    previousBackend: effectivePreviousBackend ?? null,
     previousProfile: previousSelection?.profile ?? null,
     selectedBackend: backendHint,
     selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
-    stoppedBackends,
+    stoppedBackends: finalizedStoppedBackends,
     selectionFile,
   }, null, 2)}\n`);
 }

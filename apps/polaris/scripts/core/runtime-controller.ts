@@ -155,6 +155,9 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
 
     if (workspace.health.requiresDaemon) {
       for (const [target, observed] of Object.entries(observation.daemon)) {
+        if (target === "pairing") {
+          continue;
+        }
         if (observed && !observed.observed) {
           items.push({
             kind: "daemon",

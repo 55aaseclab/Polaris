@@ -585,6 +585,9 @@ test("direct attachment config is present in migrated saved specs", () => {
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
   assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/config"));
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/data"));
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/state"));
 });
 
 test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
@@ -1066,7 +1069,7 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   assert.match(rendered, /source: demo-workspace-data\b/);
   assert.match(rendered, /source: demo-project-state\b/);
   assert.match(rendered, /driver_opts:\n      type: "nfs"/);
-  assert.match(rendered, /o: "addr=netfs\.local,nfsvers=4\.1,hard,rw"/);
+  assert.match(rendered, /o: "addr=127\.0\.0\.1,nfsvers=4\.1,hard,rw"/);
   assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
   assert.match(rendered, /demo-workspace-data:\n    name: demo-workspace-data/);
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
@@ -1096,6 +1099,7 @@ test("pod render mounts demo workspace data through netfs", () => {
   const workspace = loadWorkspace("demo@pod");
   const outputPath = renderAndWritePodWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
+  assert.doesNotThrow(() => yaml.loadAll(rendered));
 
   assert.match(rendered, /- name: workspace-data\n        nfs:/);
   assert.match(rendered, /server: netfs\.local/);
@@ -1114,6 +1118,12 @@ test("kubevirt render bridges netfs workspace data through a PV and PVC", () => 
   assert.match(rendered, /server: netfs\.local/);
   assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
   assert.match(rendered, new RegExp(`root:${kubevirtProbePassword(workspace)}`));
+  assert.match(rendered, /mount -t virtiofs workspace-runtime-state \/mnt\/polaris-shared\/workspace-runtime-state/);
+  assert.match(rendered, /polaris-sync-shared-state/);
+  assert.match(
+    rendered,
+    /rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times/,
+  );
   assert.doesNotMatch(rendered, /BEGIN OPENSSH PRIVATE KEY/);
   assert.doesNotMatch(rendered, /authorized_keys/);
   assert.doesNotMatch(rendered, /ssh-keygen -q -t ed25519/);
@@ -1236,7 +1246,7 @@ exit 0
       assert.equal(status.lifecycleAction, "status");
       assert.equal(status.state, "degraded");
       assert.equal(status.health.daemonReadiness, "degraded");
-      assert.match(status.health.reason || "", /pairing\.json|paseo/i);
+      assert.match(status.health.reason || "", /daemon status unavailable|pairing\.json|paseo/i);
       assert.deepEqual(plan.actions, [{ kind: "restart-runtime" }]);
     },
   );
@@ -1316,20 +1326,12 @@ fi
 exit 0
 `,
         sshpass: `
-if [[ "$*" == *"printf ok"* ]]; then
-  printf 'ok'
-  exit 0
-fi
-if [[ "$*" == *"paseo daemon status --json"* ]]; then
-  printf '{"serverId":"srv_vmtest","localDaemon":"running","connectedDaemon":"reachable"}'
-  exit 0
-fi
-if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
-  printf 'srv_vmtest'
-  exit 0
-fi
-if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
-  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ"}'
+if [[ "$*" == *"guestReachable=1"* ]]; then
+  printf 'guestReachable=1\n'
+  printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_vmtest","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
+  printf 'persistedServerId<<EOF\nsrv_vmtest\nEOF\n'
+  printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ"}\nEOF\n'
+  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 exit 1
@@ -1569,6 +1571,18 @@ if [[ "$*" == *"get svc ${project}"* ]]; then
   printf '${project}'
   exit 0
 fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_switch'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}'
+  exit 0
+fi
 if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
   exit 0
 fi
@@ -1587,8 +1601,9 @@ exit 0
           });
 
           const commands = readCommandLog();
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/.")));
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/ssh/.")));
           assert.equal(
             commands.some((entry) => entry.includes("/workspace/project/.")),
@@ -1599,6 +1614,122 @@ exit 0
     } finally {
       cleanupSelectionFile(project);
       fs.rmSync(podPath, { force: true });
+      fs.rmSync(dockerStateFile, { force: true });
+    }
+  });
+});
+
+test("switch exports durable state from the actually running backend when selection is stale", async () => {
+  const project = uniqueProjectName("switch-stale-selection");
+  const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
+  cleanupSelectionFile(project);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+    try {
+      ensureWorkspaceConfig(`${project}@pod:gvisor`);
+      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
+      writeWorkspaceDriverSelection(
+        project,
+        { backend: "kubevirt-vm" },
+        DEMO_USER_PROFILE_ID,
+      );
+
+      await withFakeCommands(
+        {
+          docker: `
+state_file=${JSON.stringify(dockerStateFile)}
+if [[ ! -f "$state_file" ]]; then
+  printf 'running\n' > "$state_file"
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf 'docker-id'
+  fi
+  exit 0
+fi
+if [[ "$*" == *"inspect docker-id"* ]]; then
+  if [[ "$(cat "$state_file")" == "running" ]]; then
+    printf '[{"State":{"Running":true}}]'
+  else
+    printf '[{"State":{"Running":false}}]'
+  fi
+  exit 0
+fi
+if [[ "$1" == "exec" || "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *" stop"* ]]; then
+  printf 'stopped\n' > "$state_file"
+  exit 0
+fi
+exit 0
+`,
+          kubectl: `
+if [[ "$*" == *"get vm ${project}-vm"* ]]; then
+  printf '${project}-vm'
+  exit 0
+fi
+if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+  printf 'Succeeded'
+  exit 0
+fi
+if [[ "$*" == *"apply -f "* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"get deployment ${project}"* ]]; then
+  printf '{"metadata":{"name":"${project}"}}'
+  exit 0
+fi
+if [[ "$*" == *"get pod -l app=${project}"* ]]; then
+  printf 'pod-1'
+  exit 0
+fi
+if [[ "$*" == *"get svc ${project}"* ]]; then
+  printf '${project}'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_switch'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}'
+  exit 0
+fi
+if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
+  exit 0
+fi
+if [[ "$*" == *"rollout restart"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"scale deployment ${project} --replicas=0"* ]]; then
+  exit 0
+fi
+exit 0
+`,
+        },
+        async ({ readCommandLog }) => {
+          await captureStdout(async () => {
+            await runCli(["switch", `${project}@pod`]);
+          });
+
+          const commands = readCommandLog();
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/ssh/.")));
+        },
+      );
+    } finally {
+      cleanupSelectionFile(project);
+      fs.rmSync(podPath, { force: true });
+      fs.rmSync(vmPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
     }
   });
@@ -1641,20 +1772,12 @@ fi
 exit 0
 `,
         sshpass: `
-if [[ "$*" == *"printf ok"* ]]; then
-  printf 'ok'
-  exit 0
-fi
-if [[ "$*" == *"paseo daemon status --json"* ]]; then
-  printf '{"serverId":"srv_ready","localDaemon":"running","connectedDaemon":"reachable"}'
-  exit 0
-fi
-if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
-  printf 'srv_ready'
-  exit 0
-fi
-if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
-  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9yZWFkeSJ9"}'
+if [[ "$*" == *"guestReachable=1"* ]]; then
+  printf 'guestReachable=1\n'
+  printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_ready","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
+  printf 'persistedServerId<<EOF\nsrv_ready\nEOF\n'
+  printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9yZWFkeSJ9"}\nEOF\n'
+  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 exit 1
@@ -1750,13 +1873,9 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
   printf '${project}-vm-cloudinit'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project} "* ]]; then
-  local_port=$(printf '%s\n' "$*" | sed -n 's/.*port-forward svc\\/[^ ]* \\([0-9][0-9]*\\):6767.*/\\1/p')
-  python3 -m http.server "$local_port" --bind 127.0.0.1 >/dev/null 2>&1 &
-  server_pid=$!
-  trap 'kill $server_pid >/dev/null 2>&1 || true' EXIT
-  printf 'Forwarding from 127.0.0.1:%s -> 6767\n' "$local_port"
-  wait $server_pid
+if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
+  printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
+  sleep 30
   exit 0
 fi
 if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${project}-vm"* ]]; then
@@ -1768,6 +1887,17 @@ if [[ "$1" == "-n" && "$3" == "logs" && "$4" == "virt-launcher-0" && "$5" == "--
   exit 0
 fi
 exit 0
+`,
+        sshpass: `
+if [[ "$*" == *"guestReachable=1"* ]]; then
+  printf 'guestReachable=1\n'
+  printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_vmcli","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
+  printf 'persistedServerId<<EOF\nsrv_vmcli\nEOF\n'
+  printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bWNsaSJ9"}\nEOF\n'
+  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  exit 0
+fi
+exit 1
 `,
       },
       async ({ readCommandLog }) => {

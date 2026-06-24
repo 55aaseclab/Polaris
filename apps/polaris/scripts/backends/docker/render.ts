@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import {
+  dockerNetfsServer,
   isNetfsSource,
   netfsMountOptions,
   netfsResolvedPath,
@@ -12,6 +13,10 @@ import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
+}
+
+function composeEscape(value: string): string {
+  return value.replace(/\$/g, "$$$$");
 }
 
 function sanitizeVolumeToken(value: string): string {
@@ -43,7 +48,7 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
 } {
   const source = workspace.attachments.workspaceData.source;
   if (isNetfsSource(source)) {
-    const server = requireNetfsField(source.server, "server", "workspace-data");
+    const server = dockerNetfsServer(source);
     const device = `:${netfsResolvedPath(source)}`;
     const options = [`addr=${server}`, ...netfsMountOptions(source)].join(",");
     const volumeName = workspaceDataDockerVolumeName(workspace);
@@ -120,18 +125,73 @@ function persistentPolarisToolRoot(workspace: WorkspaceSpec): string {
   return `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
 }
 
+function codexXdgRoots(workspace: WorkspaceSpec): {
+  config: string;
+  data: string;
+  state: string;
+} {
+  const base = `${workspace.attachments.userIdentityState.mountRoot}/codex-xdg`;
+  return {
+    config: `${base}/config`,
+    data: `${base}/data`,
+    state: `${base}/state`,
+  };
+}
+
 function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
+  const xdg = codexXdgRoots(workspace);
   return [
-    `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local`,
+    `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local ${xdg.config} ${xdg.data} ${xdg.state}`,
     `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm`,
     `ln -sf ${toolRoot}/bin/paseo /usr/local/bin/paseo`,
     `ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm`,
-    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
     "chmod 755 /usr/local/bin/claude",
+  ];
+}
+
+function buildAgentCliWrapperLines(workspace: WorkspaceSpec): string[] {
+  const home = workspace.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(workspace);
+  const xdg = codexXdgRoots(workspace);
+  return [
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
+    "chmod 755 /usr/local/bin/codex",
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
+    "chmod 755 /usr/local/bin/claude",
+  ];
+}
+
+function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
+  if (!workspace.agent.enabled) {
+    return [];
+  }
+  const home = workspace.runtime.home;
+  const pidFile = `${home}/.paseo/paseo.pid`;
+  const daemonLog = `${home}/.paseo/daemon.log`;
+  const runtimePidFile = `${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`;
+  return [
+    `paseo_status=$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true)`,
+    `if ! printf '%s' "$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then`,
+    `  paseo_pid=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${pidFile} 2>/dev/null | head -n 1)`,
+    `  if [ -z "$paseo_pid" ]; then paseo_pid=$(cat ${pidFile} 2>/dev/null | tr -cd '0-9'); fi`,
+    `  if [ -n "$paseo_pid" ] && ps -o args= -p "$paseo_pid" 2>/dev/null | grep -Fq "daemon-runner"; then kill "$paseo_pid" 2>/dev/null || true; sleep 1; fi`,
+    `  rm -f ${pidFile} ${runtimePidFile}`,
+    `  rm -f ${daemonLog}`,
+    `  PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+    `  sleep 2`,
+    `  paseo_status=$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true)`,
+    `  if ! printf '%s' "$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then`,
+    `    rm -f ${pidFile} ${runtimePidFile}`,
+    `    rm -f ${daemonLog}`,
+    `    PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+    `  fi`,
+    "fi",
+    ...buildRuntimeObserverLines(workspace),
   ];
 }
 
@@ -155,6 +215,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   });
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
+  const xdg = codexXdgRoots(workspace);
   const imageToolRoot = `${home}/.local/polaris`;
   const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
     const content = file.content ?? "";
@@ -164,6 +225,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       return name
         ? [
             `if [ ! -f /identity/codex/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/codex/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            ...(workspace.runtime.user === "root" ? [`chown root:root /identity/codex/${name} || true`] : []),
             `chmod 600 /identity/codex/${name}`,
           ]
         : [];
@@ -173,6 +235,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       return name
         ? [
             `if [ ! -f /identity/claude/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/claude/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
+            ...(workspace.runtime.user === "root" ? [`chown root:root /identity/claude/${name} || true`] : []),
             `chmod 600 /identity/claude/${name}`,
           ]
         : [];
@@ -182,6 +245,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       return name
         ? [
             `${workspace.userProfile.ssh.mode === "provided-key" ? "" : `if [ ! -f /ssh/${name} ]; then `}python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/ssh/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)};${workspace.userProfile.ssh.mode === "provided-key" ? "" : " fi"}`,
+            ...(workspace.runtime.user === "root" ? [`chown root:root /ssh/${name} || true`] : []),
             `chmod 600 /ssh/${name} || true`,
           ]
         : [];
@@ -201,7 +265,10 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
             : []),
           ...buildAgentCliInstallLines(workspace),
         ]),
-    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.local /tmp/npm-cache`,
+    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${xdg.config} ${xdg.data} ${xdg.state} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.local /tmp/npm-cache`,
+    ...(workspace.runtime.user === "root"
+      ? [`chown -R root:root ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
+      : []),
     `if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
     `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
@@ -210,6 +277,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     `ln -sfn ${workspace.attachments.userSshState.mountRoot} ${home}/.ssh`,
     `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
     `ln -sfn ${toolRoot} ${home}/.local/polaris`,
+    ...buildAgentCliWrapperLines(workspace),
     ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
     ...authBootstrapLines,
     ...(workspace.userProfile.ssh.mode === "managed-key"
@@ -225,18 +293,12 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
         ]),
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildEvolutionBootstrapLines(workspace),
-    ...(workspace.agent.enabled
-      ? [
-          `rm -f ${home}/.paseo/paseo.pid ${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`,
-          `rm -f ${home}/.paseo/daemon.log`,
-          `PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
-          `paired=0; for i in $(seq 1 30); do PASEO_HOME=${home}/.paseo paseo daemon pair --json > ${home}/.paseo/pairing.json.tmp 2>/dev/null && mv ${home}/.paseo/pairing.json.tmp ${home}/.paseo/pairing.json && paired=1 && break; sleep 2; done; test "$$paired" = 1`,
-          ...buildRuntimeObserverLines(workspace),
-        ]
-      : []),
+    ...buildPaseoBootstrapLines(workspace),
     "touch /tmp/.ready",
     "sleep infinity",
-  ].join("\n");
+  ]
+    .map((line) => composeEscape(line))
+    .join("\n");
   const portLines = workspace.connectivity.servicePorts
     .map((port) => `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");

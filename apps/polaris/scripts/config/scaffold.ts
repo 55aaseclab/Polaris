@@ -340,7 +340,13 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
         scope: "user",
         sharing: "cross-workspace",
         mount_root: "/identity",
-        durable_paths: ["/identity/codex", "/identity/claude"],
+        durable_paths: [
+          "/identity/codex",
+          "/identity/claude",
+          "/identity/codex-xdg/config",
+          "/identity/codex-xdg/data",
+          "/identity/codex-xdg/state",
+        ],
         source: {
           kind: "secret-material",
           description: "user identity material sourced from spec auth files",

@@ -144,12 +144,11 @@ function synthesizeAttachments(
     return;
   }
 
-  const volumeRef = `${project}-project`;
   workspaceData.source = workspaceDataNetfsSource(project);
   workspaceRuntimeState.source = {
     kind: "persistent-volume",
-    volume_ref: volumeRef,
-    sub_path: "state",
+    volume_ref: `${project}-workspace-runtime-state`,
+    volume_size: "20Gi",
     description: `reusable ${backendKind} workspace runtime state for ${project}`,
   };
   userIdentityState.source ??= {

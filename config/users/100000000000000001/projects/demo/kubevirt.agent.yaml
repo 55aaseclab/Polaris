@@ -81,6 +81,9 @@ attachments:
     durable_paths:
       - /identity/codex
       - /identity/claude
+      - /identity/codex-xdg/config
+      - /identity/codex-xdg/data
+      - /identity/codex-xdg/state
     source:
       kind: persistent-volume
       volume_ref: demo-user-identity-state
