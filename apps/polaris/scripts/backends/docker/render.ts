@@ -116,16 +116,21 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function buildAgentCliInstallLines(home: string): string[] {
-  const toolRoot = `${home}/.local/polaris`;
+function persistentPolarisToolRoot(workspace: WorkspaceSpec): string {
+  return `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
+}
+
+function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
+  const home = workspace.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(workspace);
   return [
-    `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.npm`,
+    `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local`,
     `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm`,
     `ln -sf ${toolRoot}/bin/paseo /usr/local/bin/paseo`,
     `ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm`,
-    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=${home}/.npm' 'mkdir -p ${home}/.codex' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
-    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=${home}/.npm' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
+    `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
     "chmod 755 /usr/local/bin/claude",
   ];
 }
@@ -149,6 +154,8 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     source: workspace.attachments.userSshState.source,
   });
   const home = workspace.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(workspace);
+  const imageToolRoot = `${home}/.local/polaris`;
   const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
@@ -192,15 +199,17 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
           ...(workspace.runtime.installRustup
             ? ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"]
             : []),
-          ...buildAgentCliInstallLines(home),
+          ...buildAgentCliInstallLines(workspace),
         ]),
-    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets`,
-    `rm -f ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
+    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.local /tmp/npm-cache`,
+    `if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
+    `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
     `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
     `ln -sfn ${workspace.attachments.userSshState.mountRoot} ${home}/.ssh`,
     `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
+    `ln -sfn ${toolRoot} ${home}/.local/polaris`,
     ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
     ...authBootstrapLines,
     ...(workspace.userProfile.ssh.mode === "managed-key"

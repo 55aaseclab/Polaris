@@ -29,17 +29,33 @@ pnpm --dir apps/polaris run polaris --
 4. Confirm the saved spec points at the intended `user_profile`.
 5. Confirm the saved spec also contains the default credential bindings.
 
-### Phase 2: Prepare Image
+### Phase 2: Prepare Specs And Images
+
+For every backend:
+
+1. Ensure the saved spec exists for the exact backend you will operate.
+2. Build or refresh the required image set first.
+3. For KubeVirt image preparation, use
+   `scripts/operations/build-kubevirt-images.sh <rootdisk-ref>` as the
+   authoritative build entrypoint.
+4. Generate or refresh the backend manifest after image preparation.
+5. Treat the saved spec and generated output as prerequisites, not optional
+   follow-up steps.
 
 For `docker` and `pod`:
 
-1. Ensure the workspace `base_image` exists and is the image you intend to run.
+1. Ensure the workspace `base_image` exists and is the image you intend to
+   run.
+2. Build or refresh the Docker workspace image before `start`.
+3. Generate or refresh the backend manifest after the image is ready.
 
 For `kubevirt-vm`:
 
 1. Ensure the workspace `base_image` exists.
-2. Build or refresh the guest `rootdisk_image`.
-3. Update the saved spec so `rootdisk_image` points at the new tag.
+2. Build or refresh the Docker workspace image first.
+3. Build or refresh the guest `rootdisk_image`.
+4. Update the saved spec so `rootdisk_image` points at the new tag.
+5. Generate or refresh the backend manifest after both images are ready.
 
 ### Phase 3: Start
 
@@ -61,32 +77,15 @@ For `kubevirt-vm`:
 The required order is:
 
 1. Create user
-2. Prepare image(s)
+2. Prepare specs and required image(s)
 3. Start
-
-## Command Model
-
-- `create` scaffolds a saved spec for a new Docker workspace.
-- `create` also provisions a local user profile when the scaffolded spec would
-  otherwise point at a missing profile.
-- `create` also provisions default user credentials at
-  `config/users/credentials/<user>/`.
-- The default credential set is:
-  - `codex-default`
-  - `github-ssh`
-- The scaffolded workspace should bind those credentials by purpose instead of
-  relying only on legacy inline auth fields.
-- `render` writes generated backend output and does not start the runtime.
-- `apply` applies rendered backend output without implying runtime health.
-- `start` should be treated as runtime launch only after image preparation is complete.
-- `status` checks backend liveness, readiness, and drift.
-- `logs` tails runtime logs for the selected backend.
 
 For KubeVirt image work:
 
-- Use `scripts/operations/build-kubevirt-rootdisk-image.sh <rootdisk-ref>`.
+- Build the workspace OCI image first.
+- Use `scripts/operations/build-kubevirt-images.sh <rootdisk-ref>`.
 - The rootdisk build is guest-state aware and is the authoritative way to
-  refresh the KubeVirt guest image.
+  refresh the KubeVirt guest image and its workspace image lineage.
 - KubeVirt requires two images in practice:
   - `base_image`
   - `rootdisk_image`
@@ -104,13 +103,3 @@ Read `docs/polaris/README.md` when you need:
 - backend-specific operator guidance
 
 Read `docs/README.md` for the documentation entrypoint.
-
-## Guardrails
-
-- Treat saved specs as the source of truth.
-- Treat `config/generated/` output as rendered artifacts.
-- Do not hand-maintain generated manifests.
-- Do not bypass the four attachment protocol with ad hoc bind mounts.
-- Do not start a backend before its required image set is ready.
-- Prefer `status` before deep debugging.
-- When restart issues come from leftovers, clean stale runtime artifacts only.

@@ -2,13 +2,13 @@
 set -euo pipefail
 
 log() {
-  printf '[build-kubevirt-rootdisk-image.sh] %s\n' "$*"
+  printf '[build-kubevirt-images.sh] %s\n' "$*"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/operations/build-kubevirt-rootdisk-image.sh <rootdisk-image-ref> [options]
+  ./scripts/operations/build-kubevirt-images.sh <rootdisk-image-ref> [options]
 
 Options:
   --namespace <ns>              Kubernetes namespace that holds the VM.
@@ -30,10 +30,10 @@ Options:
                                 Default: value of --workspace-image
 
 Examples:
-  ./scripts/operations/build-kubevirt-rootdisk-image.sh \
+  ./scripts/operations/build-kubevirt-images.sh \
     ttl.sh/polaris-demo-kubevirt-rootdisk-1234567890:24h
 
-  ./scripts/operations/build-kubevirt-rootdisk-image.sh \
+  ./scripts/operations/build-kubevirt-images.sh \
     ttl.sh/polaris-demo-kubevirt-rootdisk-1234567890:24h \
     --build-workspace-image \
     --workspace-image-output ttl.sh/polaris-demo-debian13-1234567890:24h
@@ -286,7 +286,9 @@ print(largest[0], largest[1])
     > "${patch_root}/resolv.conf"
   printf '%s\n' \
     'PermitRootLogin yes' \
+    'PubkeyAuthentication yes' \
     'PasswordAuthentication yes' \
+    'StrictModes no' \
     'PermitEmptyPasswords yes' \
     'UsePAM no' \
     > "${patch_root}/90-polaris-sshd.conf"

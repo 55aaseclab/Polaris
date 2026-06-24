@@ -1,10 +1,17 @@
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import type { BackendDriver } from "../types.js";
-import type { BackendObservation, ObservationItem, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
+import {
+  evaluateDaemonStatusObservation,
+  evaluatePairingObservation,
+  parsePaseoDaemonStatus,
+  parseConnectionOfferServerId,
+} from "../../core/paseo.js";
 import { renderAndWriteKubevirtWorkspace } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
 import { workspaceDataClaimName } from "../../core/netfs.js";
+import { kubevirtProbePassword } from "./probe-access.js";
 
 function hasKubectlVirt(): boolean {
   const result = spawnSync("kubectl", ["virt", "--help"], { encoding: "utf8" });
@@ -16,6 +23,7 @@ function waitForPortForwardReady(
   project: string,
   serviceName: string,
   localPort: number,
+  remotePort: number,
 ): Promise<ReturnType<typeof spawn>> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -25,7 +33,7 @@ function waitForPortForwardReady(
         project,
         "port-forward",
         `svc/${serviceName}`,
-        `${localPort}:6767`,
+        `${localPort}:${remotePort}`,
         "--address",
         "127.0.0.1",
       ],
@@ -73,30 +81,6 @@ function waitForPortForwardReady(
   });
 }
 
-function connectTcpOnce(localPort: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: "127.0.0.1", port: localPort });
-    const finish = (result: boolean): void => {
-      socket.destroy();
-      resolve(result);
-    };
-    socket.setTimeout(1000);
-    socket.once("connect", () => finish(true));
-    socket.once("timeout", () => finish(false));
-    socket.once("error", () => finish(false));
-  });
-}
-
-async function connectTcp(localPort: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (await connectTcpOnce(localPort)) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  return false;
-}
-
 async function reserveLocalPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -108,7 +92,7 @@ async function reserveLocalPort(): Promise<number> {
         return;
       }
       const { port } = address;
-      server.close((error) => {
+      server.close((error?: Error | null) => {
         if (error) {
           reject(error);
           return;
@@ -119,19 +103,64 @@ async function reserveLocalPort(): Promise<number> {
   });
 }
 
-async function probeTcpReachability(project: string, serviceName: string): Promise<boolean> {
+function shellSingleQuote(input: string): string {
+  return `'${input.replace(/'/g, `'\\''`)}'`;
+}
+
+async function runKubevirtSshCommand(
+  workspace: WorkspaceSpec,
+  serviceName: string,
+  command: string,
+): Promise<{ ok: boolean; stdout: string }> {
   const localPort = await reserveLocalPort();
   let child: ReturnType<typeof spawn> | undefined;
   try {
-    child = await waitForPortForwardReady(project, serviceName, localPort);
-    return await connectTcp(localPort);
+    child = await waitForPortForwardReady(
+      workspace.identity.projectName,
+      serviceName,
+      localPort,
+      22,
+    );
+    const result = spawnSync(
+      "sshpass",
+      [
+        "-p",
+        kubevirtProbePassword(workspace),
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "PreferredAuthentications=password",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-p",
+        String(localPort),
+        "root@127.0.0.1",
+        `sh -lc ${shellSingleQuote(command)}`,
+      ],
+      { encoding: "utf8" },
+    );
+    return {
+      ok: result.status === 0,
+      stdout: result.status === 0 ? String(result.stdout || "") : "",
+    };
   } catch {
-    return false;
+    return { ok: false, stdout: "" };
   } finally {
     if (child && !child.killed) {
       child.kill("SIGTERM");
     }
   }
+}
+
+function normalizeKubevirtCommandRef(
+  workspace: WorkspaceSpec,
+): string {
+  return workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json";
 }
 
 function patchVmRunStrategy(project: string, runStrategy: "Always" | "Halted"): void {
@@ -171,88 +200,6 @@ function extractPairingUrl(raw: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function probeKubevirtPairingState(project: string, claimName: string): ObservationItem {
-  const podName = `${project}-pairing-inspect`;
-  const manifest = [
-    "apiVersion: v1",
-    "kind: Pod",
-    "metadata:",
-    `  name: ${podName}`,
-    `  namespace: ${project}`,
-    "spec:",
-    "  restartPolicy: Never",
-    "  containers:",
-    "    - name: inspect",
-    "      image: busybox:1.36",
-    "      command: [\"sh\", \"-lc\", \"sleep 60\"]",
-    "      volumeMounts:",
-    "        - name: workspace-runtime-state",
-    "          mountPath: /workspace/state",
-    "  volumes:",
-    "    - name: workspace-runtime-state",
-    "      persistentVolumeClaim:",
-    `        claimName: ${claimName}`,
-    "",
-  ].join("\n");
-  const result = (() => {
-    try {
-      const apply = spawnSync("kubectl", ["apply", "-f", "-"], {
-        input: manifest,
-        encoding: "utf8",
-      });
-      if (apply.status !== 0) {
-        return { observed: false, detail: "pairing inspection pod apply failed" };
-      }
-      const ready = spawnSync(
-        "kubectl",
-        ["-n", project, "wait", "--for=condition=Ready", `pod/${podName}`, "--timeout=60s"],
-        { encoding: "utf8" },
-      );
-      if (ready.status !== 0) {
-        return { observed: false, detail: "pairing inspection pod not ready" };
-      }
-      const inspect = spawnSync(
-        "kubectl",
-        [
-          "-n",
-          project,
-          "exec",
-          podName,
-          "--",
-          "sh",
-          "-lc",
-          "test -s /workspace/state/paseo/pairing.json && test -s /workspace/state/paseo/server-id && test -s /workspace/state/paseo/daemon-keypair.json && ! tail -n 40 /workspace/state/paseo/daemon.log 2>/dev/null | grep -q 'missing hello'",
-        ],
-        { encoding: "utf8" },
-      );
-      const pairingFile = spawnSync(
-        "kubectl",
-        [
-          "-n",
-          project,
-          "exec",
-          podName,
-          "--",
-          "sh",
-          "-lc",
-          "cat /workspace/state/paseo/pairing.json",
-        ],
-        { encoding: "utf8" },
-      );
-      const pairingUrl = pairingFile.status === 0
-        ? extractPairingUrl(String(pairingFile.stdout || ""))
-        : undefined;
-      return inspect.status === 0
-        ? { observed: true, detail: "/root/.paseo/pairing.json", url: pairingUrl }
-        : { observed: false, detail: "/root/.paseo/pairing.json" };
-    } catch {
-      return { observed: false, detail: "pairing inspection failed" };
-    }
-  })();
-  spawnSync("kubectl", ["-n", project, "delete", "pod", podName, "--ignore-not-found"], { encoding: "utf8" });
-  return result;
 }
 
 export class KubevirtDriver implements BackendDriver {
@@ -333,18 +280,46 @@ export class KubevirtDriver implements BackendDriver {
       workspace.attachments.userIdentityState.source.volumeRef ?? "missing";
     const userSshStateVolume =
       workspace.attachments.userSshState.source.volumeRef ?? "missing";
-    const guestReachable =
-      exists &&
-      running &&
-      workspace.connectivity.servicePorts.length > 0 &&
-      serviceName.length > 0 &&
-      await probeTcpReachability(workspace.identity.projectName, serviceName);
+    const execCheck = async (command: string): Promise<boolean> => {
+      if (!exists || !running || serviceName.length === 0) return false;
+      return (await runKubevirtSshCommand(workspace, serviceName, command)).ok;
+    };
+    const execOutput = async (command: string): Promise<string> => {
+      if (!exists || !running || serviceName.length === 0) return "";
+      return (await runKubevirtSshCommand(workspace, serviceName, command)).stdout;
+    };
+    const guestReachable = await execCheck("printf ok");
+    const daemonStatusRaw =
+      workspace.agent.enabled && guestReachable
+        ? await execOutput(`PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json`)
+        : "";
+    const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
+    const persistedServerId =
+      workspace.agent.enabled && guestReachable
+        ? (await execOutput(`cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null`)).trim() || null
+        : null;
+    const daemonObserved =
+      workspace.agent.enabled && exists && running
+        ? evaluateDaemonStatusObservation({
+            status: daemonStatus,
+            persistedServerId,
+            readyFileDetail: workspace.agent.runtime.readyFile ?? "/tmp/.ready",
+          })
+        : workspace.agent.enabled
+          ? { observed: false, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" }
+          : { observed: true, detail: "daemon not required" };
+    const pairingUrl =
+      workspace.agent.enabled && guestReachable
+        ? extractPairingUrl(await execOutput(`cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null`))
+        : undefined;
     const pairingObserved =
       workspace.agent.enabled && exists && running
-        ? probeKubevirtPairingState(
-            workspace.identity.projectName,
-            workspaceRuntimeStateVolume,
-          )
+          ? evaluatePairingObservation({
+            expectedServerId: daemonStatus?.serverId ?? persistedServerId,
+            cachedServerId: pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null,
+            pairingUrl,
+            pairingFileDetail: workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json",
+          })
         : workspace.agent.enabled
           ? { observed: false, detail: workspace.agent.runtime.pairingFile }
           : { observed: true, detail: "daemon not required" };
@@ -356,26 +331,34 @@ export class KubevirtDriver implements BackendDriver {
         detail: exists ? (running ? `vmi phase ${phase}` : `vm exists, vmi phase ${phase || "missing"}`) : "vm object missing",
       },
       attachments: {
-        workspaceData: exists ? { observed: true, detail: `pvc/${workspaceDataVolume} -> ${workspace.attachments.workspaceData.mountRoot}` } : undefined,
-        workspaceRuntimeState: exists ? { observed: true, detail: `pvc/${workspaceRuntimeStateVolume} -> ${workspace.attachments.workspaceRuntimeState.mountRoot}` } : undefined,
-        userIdentityState: exists ? { observed: true, detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` } : undefined,
-        userSshState: exists ? { observed: true, detail: `pvc/${userSshStateVolume} -> ${workspace.attachments.userSshState.mountRoot}` } : undefined,
+        workspaceData: exists
+          ? { observed: await execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: `pvc/${workspaceDataVolume} -> ${workspace.attachments.workspaceData.mountRoot}` }
+          : undefined,
+        workspaceRuntimeState: exists
+          ? { observed: await execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: `pvc/${workspaceRuntimeStateVolume} -> ${workspace.attachments.workspaceRuntimeState.mountRoot}` }
+          : undefined,
+        userIdentityState: exists
+          ? { observed: await execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
+          : undefined,
+        userSshState: exists
+          ? { observed: await execCheck(`test -d ${workspace.attachments.userSshState.mountRoot}`), detail: `pvc/${userSshStateVolume} -> ${workspace.attachments.userSshState.mountRoot}` }
+          : undefined,
       },
       runtimeAssembly: exists && running
         ? {
-            home: { observed: true, detail: workspace.runtime.home },
-            projectRoot: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
-            managerState: { observed: workspace.agent.enabled && guestReachable, detail: workspace.agent.enabled ? workspace.agent.runtime.stateRoot : "daemon disabled" },
-            evolutionState: { observed: workspace.agent.enabled && guestReachable, detail: workspace.agent.enabled ? workspace.agent.runtime.evolutionRoot : "daemon disabled" },
-            codex: { observed: cloudInitPresent, detail: workspace.attachments.userIdentityState.mountRoot },
-            claude: { observed: cloudInitPresent, detail: workspace.attachments.userIdentityState.mountRoot },
-            ssh: { observed: guestReachable, detail: workspace.attachments.userSshState.mountRoot },
+            home: { observed: await execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
+            projectRoot: { observed: await execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
+            managerState: { observed: await execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },
+            evolutionState: { observed: await execCheck(`test -d ${workspace.agent.runtime.evolutionRoot}`), detail: workspace.agent.runtime.evolutionRoot },
+            codex: { observed: await execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
+            claude: { observed: await execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
+            ssh: { observed: await execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
           }
         : {},
       daemon: workspace.agent.enabled
         ? {
             manager: exists && running
-              ? { observed: cloudInitPresent && guestReachable, detail: cloudInitPresent && guestReachable ? "guest service reachable" : "guest service unreachable" }
+              ? daemonObserved
               : { observed: false, detail: workspace.agent.runtime.readyFile },
             pairing: pairingObserved,
           }

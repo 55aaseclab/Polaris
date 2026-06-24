@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import type { WorkspaceSpec } from "../../core/workspace.js";
+import { kubevirtProbePassword } from "./probe-access.js";
 import {
   isNetfsSource,
   netfsResolvedPath,
@@ -74,48 +76,71 @@ function attachmentVolumeSize(
   }
 }
 
+function existingPersistentVolumeClaimName(
+  workspace: WorkspaceSpec,
+  claimName: string,
+): string | null {
+  const result = spawnSync(
+    "kubectl",
+    [
+      "-n",
+      workspace.identity.projectName,
+      "get",
+      "pvc",
+      claimName,
+      "-o",
+      "jsonpath={.metadata.name}",
+    ],
+    { encoding: "utf8" },
+  );
+  const name = String(result.stdout || "").trim();
+  return result.status === 0 && name ? name : null;
+}
+
 function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
   const docs: string[] = [];
   if (isNetfsSource(workspace.attachments.workspaceData.source)) {
     const source = workspace.attachments.workspaceData.source;
     const claimName = workspaceDataClaimName(workspace);
-    docs.push([
-      "apiVersion: v1",
-      "kind: PersistentVolume",
-      "metadata:",
-      `  name: ${workspaceDataPersistentVolumeName(workspace)}`,
-      "spec:",
-      "  accessModes:",
-      "  - ReadWriteMany",
-      "  capacity:",
-      `    storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
-      "  persistentVolumeReclaimPolicy: Retain",
-      "  storageClassName: ''",
-      "  mountOptions:",
-      ...((source.mountOptions?.length ? source.mountOptions : ["nfsvers=4.1", "hard", "rw"])
-        .map((entry) => `  - ${entry}`)),
-      "  nfs:",
-      `    server: ${requireNetfsField(source.server, "server", "workspace-data")}`,
-      `    path: ${netfsResolvedPath(source)}`,
-      "  claimRef:",
-      `    namespace: ${workspace.identity.projectName}`,
-      `    name: ${claimName}`,
-    ].join("\n"));
-    docs.push([
-      "apiVersion: v1",
-      "kind: PersistentVolumeClaim",
-      "metadata:",
-      `  name: ${claimName}`,
-      `  namespace: ${workspace.identity.projectName}`,
-      "spec:",
-      "  accessModes:",
-      "  - ReadWriteMany",
-      "  resources:",
-      "    requests:",
-      `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
-      "  storageClassName: ''",
-      `  volumeName: ${workspaceDataPersistentVolumeName(workspace)}`,
-    ].join("\n"));
+    if (!existingPersistentVolumeClaimName(workspace, claimName)) {
+      docs.push([
+        "apiVersion: v1",
+        "kind: PersistentVolume",
+        "metadata:",
+        `  name: ${workspaceDataPersistentVolumeName(workspace)}`,
+        "spec:",
+        "  accessModes:",
+        "  - ReadWriteMany",
+        "  capacity:",
+        `    storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+        "  persistentVolumeReclaimPolicy: Retain",
+        "  storageClassName: ''",
+        "  mountOptions:",
+        ...((source.mountOptions?.length ? source.mountOptions : ["nfsvers=4.1", "hard", "rw"])
+          .map((entry) => `  - ${entry}`)),
+        "  nfs:",
+        `    server: ${requireNetfsField(source.server, "server", "workspace-data")}`,
+        `    path: ${netfsResolvedPath(source)}`,
+        "  claimRef:",
+        `    namespace: ${workspace.identity.projectName}`,
+        `    name: ${claimName}`,
+      ].join("\n"));
+      docs.push([
+        "apiVersion: v1",
+        "kind: PersistentVolumeClaim",
+        "metadata:",
+        `  name: ${claimName}`,
+        `  namespace: ${workspace.identity.projectName}`,
+        "spec:",
+        "  accessModes:",
+        "  - ReadWriteMany",
+        "  resources:",
+        "    requests:",
+        `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+        "  storageClassName: ''",
+        `  volumeName: ${workspaceDataPersistentVolumeName(workspace)}`,
+      ].join("\n"));
+    }
   } else {
     docs.push([
       "apiVersion: v1",
@@ -154,21 +179,42 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
 }
 
 function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
-  const servicePort =
-    workspace.connectivity.servicePorts[0]?.containerPort ?? "6767";
-  const nodePort =
-    workspace.connectivity.servicePorts[0]?.nodePort ?? servicePort;
   const rootdiskImage =
     workspace.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
   const memoryGuest =
     workspace.resources.memory || "4Gi";
   const memoryRequest =
     workspace.resources.memoryRequest || memoryGuest;
+  const declaredPorts = workspace.connectivity.servicePorts.map((port, index) => ({
+    name: port.name?.trim() || `service-${index + 1}`,
+    containerPort: String(port.containerPort),
+    nodePort: port.nodePort ? String(port.nodePort) : undefined,
+  }));
+  const sshDeclared = declaredPorts.some((port) => port.containerPort === "22" || port.name === "ssh");
+  const servicePorts = sshDeclared
+    ? declaredPorts
+    : [...declaredPorts, { name: "ssh", containerPort: "22" as const, nodePort: undefined }];
+  const renderedServicePorts = servicePorts
+    .map((port) => [
+      `    - name: ${port.name}`,
+      `      port: ${port.containerPort}`,
+      `      targetPort: ${port.containerPort}`,
+      ...(port.nodePort ? [`      nodePort: ${port.nodePort}`] : []),
+    ].join("\n"))
+    .join("\n");
+  const renderedInterfacePorts = servicePorts
+    .map((port) => [
+      `                - port: ${port.containerPort}`,
+      "                  protocol: TCP",
+    ].join("\n"))
+    .join("\n");
   return text
     .replaceAll(
       "__PERSISTENT_VOLUME_CLAIMS__",
       `${buildPersistentVolumeClaimDocs(workspace)}\n`,
     )
+    .replaceAll("__SERVICE_PORTS__", renderedServicePorts)
+    .replaceAll("__INTERFACE_PORTS__", renderedInterfacePorts)
     .replaceAll("__PROJECT__", workspace.identity.projectName)
     .replaceAll(
       "__WORKSPACE_DATA_VOLUME__",
@@ -186,8 +232,6 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
       "__USER_SSH_STATE_VOLUME__",
       requireAttachmentVolumeRef(workspace, "userSshState"),
     )
-    .replaceAll("__SERVICE_PORT__", servicePort)
-    .replaceAll("__NODE_PORT__", nodePort)
     .replaceAll("__ROOTDISK_IMAGE__", rootdiskImage)
     .replaceAll("__MEMORY_GUEST__", memoryGuest)
     .replaceAll("__MEMORY_REQUEST__", memoryRequest);
@@ -219,19 +263,14 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
   const codexConfig = workspace.runtime.authFiles.find((item) => item.key === "codex-config.toml")?.content;
   const claudeSettings = workspace.runtime.authFiles.find((item) => item.key === "claude-settings.json")?.content;
-  const sshPrivateKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !item.mountPath.endsWith(".pub"))?.content;
-  const sshPublicKey = workspace.runtime.authFiles.find((item) => item.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && item.mountPath.endsWith(".pub"))?.content;
   if (workspace.agent.enabled && (!codexAuth || !codexConfig || !claudeSettings)) {
     throw new Error("KubeVirt render requires codex-auth.json, codex-config.toml, and claude-settings.json");
   }
   let renderedCloudinit = cloudinitTemplate
     .replace("__CODEX_AUTH_JSON_B64__", Buffer.from(codexAuth ?? "{}", "utf8").toString("base64"))
     .replace("__CODEX_CONFIG_TOML_B64__", Buffer.from(codexConfig ?? "", "utf8").toString("base64"))
-    .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from(claudeSettings ?? "{}", "utf8").toString("base64"));
-  renderedCloudinit = renderedCloudinit.replace(
-    `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C fixture@polaris -N "" -f /ssh/id_ed25519; fi'`,
-    `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
-  );
+    .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from(claudeSettings ?? "{}", "utf8").toString("base64"))
+    .replace("__PROBE_PASSWORD__", kubevirtProbePassword(workspace));
   const evolutionOutputs = [
     [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
     [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
@@ -245,12 +284,6 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     renderedCloudinit = renderedCloudinit.replace(
       "      - chmod 1777 /run/workspace/tmp",
       `      - chmod 1777 /run/workspace/tmp\n${writes}`,
-    );
-  }
-  if (sshPrivateKey) {
-    renderedCloudinit = renderedCloudinit.replace(
-      `      - /bin/sh -lc 'if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N "" -f /ssh/id_ed25519; fi'`,
-      `      - |\n        cat >/ssh/id_ed25519 <<'EOF'\n${indentBlock(sshPrivateKey, 8)}\n        EOF\n      - chmod 400 /ssh/id_ed25519${sshPublicKey ? `\n      - |\n        cat >/ssh/id_ed25519.pub <<'EOF'\n${indentBlock(sshPublicKey, 8)}\n        EOF\n      - chmod 644 /ssh/id_ed25519.pub` : ""}`,
     );
   }
   return `${renderedCloudinit.trimEnd()}\n---\n${vmTemplate.trimEnd()}\n`;
