@@ -28,6 +28,18 @@ export function dockerNetfsServer(source: AttachmentSource): string {
   return server === "netfs.local" ? "127.0.0.1" : server;
 }
 
+export function dockerNetfsDevicePath(source: AttachmentSource): string {
+  const server = requireNetfsField(
+    source.server,
+    "server",
+    "workspace-data",
+  );
+  if (server === "netfs.local") {
+    return ":/";
+  }
+  return `:${netfsResolvedPath(source)}`;
+}
+
 export function requireNetfsField(
   value: string | undefined,
   field: "server" | "exportPath",

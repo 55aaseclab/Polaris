@@ -156,17 +156,17 @@ function buildPaseoBootstrapLine(enabled: boolean, home: string): string[] {
     return [];
   }
   return [
-    `          paseo_status=$$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true) && \\`,
-    `          if ! printf '%s' "$$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then \\`,
-    `            paseo_pid=$$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${home}/.paseo/paseo.pid 2>/dev/null | head -n 1) && \\`,
-    `            if [ -z "$$paseo_pid" ]; then paseo_pid=$$(cat ${home}/.paseo/paseo.pid 2>/dev/null | tr -cd '0-9'); fi && \\`,
-    `            if [ -n "$$paseo_pid" ] && ps -o args= -p "$$paseo_pid" 2>/dev/null | grep -Fq "daemon-runner"; then kill "$$paseo_pid" 2>/dev/null || true; sleep 1; fi && \\`,
-    `            rm -f ${home}/.paseo/paseo.pid && \\`,
-    `            rm -f ${home}/.paseo/daemon.log && \\`,
+    `          paseo_ready() { printf '%s' "$$1" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' && printf '%s' "$$1" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; } && \\`,
+    `          paseo_wait_ready() { for _ in $$(seq 1 15); do paseo_status=$$(timeout 5s env PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true); if paseo_ready "$$paseo_status"; then return 0; fi; sleep 1; done; return 1; } && \\`,
+    `          paseo_stop_runner() { paseo_pid=$$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${home}/.paseo/paseo.pid 2>/dev/null | head -n 1); if [ -z "$$paseo_pid" ]; then paseo_pid=$$(cat ${home}/.paseo/paseo.pid 2>/dev/null | tr -cd '0-9'); fi; if [ -n "$$paseo_pid" ]; then paseo_args=$$(ps -o args= -p "$$paseo_pid" 2>/dev/null || true); if printf '%s' "$$paseo_args" | grep -Eq 'daemon-runner|Paseo Supervisor|paseo daemon start'; then pkill -TERM -P "$$paseo_pid" 2>/dev/null || true; kill "$$paseo_pid" 2>/dev/null || true; sleep 1; pkill -KILL -P "$$paseo_pid" 2>/dev/null || true; kill -KILL "$$paseo_pid" 2>/dev/null || true; fi; fi; rm -f ${home}/.paseo/paseo.pid ${home}/.paseo/daemon.log; } && \\`,
+    `          if ! paseo_wait_ready; then \\`,
+    `            paseo_stop_runner && \\`,
     `            PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767 && \\`,
-    "            sleep 2 && \\",
-    `            paseo_status=$$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true) && \\`,
-    `            if ! printf '%s' "$$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then rm -f ${home}/.paseo/paseo.pid ${home}/.paseo/daemon.log && PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767; fi; \\`,
+    `            if ! paseo_wait_ready; then \\`,
+    `              paseo_stop_runner && \\`,
+    `              PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767 && \\`,
+    `              paseo_wait_ready; \\`,
+    `            fi; \\`,
     "          fi && \\",
   ];
 }

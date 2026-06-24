@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import {
+  dockerNetfsDevicePath,
   dockerNetfsServer,
   isNetfsSource,
   netfsMountOptions,
-  netfsResolvedPath,
   requireNetfsField,
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
@@ -49,7 +49,7 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
   const source = workspace.attachments.workspaceData.source;
   if (isNetfsSource(source)) {
     const server = dockerNetfsServer(source);
-    const device = `:${netfsResolvedPath(source)}`;
+    const device = dockerNetfsDevicePath(source);
     const options = [`addr=${server}`, ...netfsMountOptions(source)].join(",");
     const volumeName = workspaceDataDockerVolumeName(workspace);
     const volumeToken = volumeKey(volumeName);
@@ -101,9 +101,21 @@ function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
     }
     const encoded = Buffer.from(content, "utf8").toString("base64");
     return [
-      `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
+      `if [ ! -f ${filePath} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(filePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
     ];
   });
+}
+
+function buildGitHubKnownHostsLines(): string[] {
+  return [
+    "if command -v ssh-keyscan >/dev/null 2>&1; then",
+    "  touch /ssh/known_hosts",
+    "  chmod 600 /ssh/known_hosts || true",
+    "  if ! ssh-keygen -F github.com -f /ssh/known_hosts >/dev/null 2>&1; then",
+    "    ssh-keyscan -H github.com >> /ssh/known_hosts 2>/dev/null || true",
+    "  fi",
+    "fi",
+  ];
 }
 
 function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
@@ -175,22 +187,18 @@ function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
   const daemonLog = `${home}/.paseo/daemon.log`;
   const runtimePidFile = `${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`;
   return [
-    `paseo_status=$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true)`,
-    `if ! printf '%s' "$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then`,
-    `  paseo_pid=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${pidFile} 2>/dev/null | head -n 1)`,
-    `  if [ -z "$paseo_pid" ]; then paseo_pid=$(cat ${pidFile} 2>/dev/null | tr -cd '0-9'); fi`,
-    `  if [ -n "$paseo_pid" ] && ps -o args= -p "$paseo_pid" 2>/dev/null | grep -Fq "daemon-runner"; then kill "$paseo_pid" 2>/dev/null || true; sleep 1; fi`,
-    `  rm -f ${pidFile} ${runtimePidFile}`,
-    `  rm -f ${daemonLog}`,
+    `paseo_ready() { printf '%s' "$1" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' && printf '%s' "$1" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; }`,
+    `paseo_wait_ready() { for _ in $(seq 1 15); do paseo_status=$(timeout 5s env PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true); if paseo_ready "$paseo_status"; then return 0; fi; sleep 1; done; return 1; }`,
+    `paseo_stop_runner() { paseo_pid=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${pidFile} 2>/dev/null | head -n 1); if [ -z "$paseo_pid" ]; then paseo_pid=$(cat ${pidFile} 2>/dev/null | tr -cd '0-9'); fi; if [ -n "$paseo_pid" ]; then paseo_args=$(ps -o args= -p "$paseo_pid" 2>/dev/null || true); if printf '%s' "$paseo_args" | grep -Eq 'daemon-runner|Paseo Supervisor|paseo daemon start'; then pkill -TERM -P "$paseo_pid" 2>/dev/null || true; kill "$paseo_pid" 2>/dev/null || true; sleep 1; pkill -KILL -P "$paseo_pid" 2>/dev/null || true; kill -KILL "$paseo_pid" 2>/dev/null || true; fi; fi; rm -f ${pidFile} ${runtimePidFile} ${daemonLog}; }`,
+    `if ! paseo_wait_ready; then`,
+    `  paseo_stop_runner`,
     `  PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
-    `  sleep 2`,
-    `  paseo_status=$(PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true)`,
-    `  if ! printf '%s' "$paseo_status" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' || ! printf '%s' "$paseo_status" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; then`,
-    `    rm -f ${pidFile} ${runtimePidFile}`,
-    `    rm -f ${daemonLog}`,
+    `  if ! paseo_wait_ready; then`,
+    `    paseo_stop_runner`,
     `    PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+    `    paseo_wait_ready`,
     `  fi`,
-    "fi",
+    `fi`,
     ...buildRuntimeObserverLines(workspace),
   ];
 }
@@ -291,6 +299,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
           "chmod 400 /ssh/id_ed25519 || true",
           "if [ -f /ssh/id_ed25519.pub ]; then chmod 644 /ssh/id_ed25519.pub || true; fi",
         ]),
+    ...buildGitHubKnownHostsLines(),
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildEvolutionBootstrapLines(workspace),
     ...buildPaseoBootstrapLines(workspace),

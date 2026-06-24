@@ -135,24 +135,123 @@ function kubevirtProbeShellCommand(command: string): string {
   return `bash -lc ${shellSingleQuote(wrapped)}`;
 }
 
-function kubevirtPaseoSyncCommand(src: string, dest: string): string {
-  return [
-    `mkdir -p ${src} ${dest}`,
+function kubevirtNodeSshEndpoint(
+  workspace: WorkspaceSpec,
+  serviceName: string,
+): { host: string; port: number } | null {
+  const vmiNode = spawnSync(
+    "kubectl",
     [
-      "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times",
-      "--exclude 'models/'",
-      "--exclude 'models/**'",
-      `${src}/`,
-      `${dest}/`,
-    ].join(" "),
-  ].join("\n");
+      "-n",
+      workspace.identity.projectName,
+      "get",
+      "vmi",
+      `${workspace.identity.projectName}-vm`,
+      "-o",
+      "jsonpath={.status.nodeName}",
+    ],
+    { encoding: "utf8" },
+  );
+  const nodeName = String(vmiNode.stdout || "").trim();
+  if (vmiNode.status !== 0 || !nodeName) {
+    return null;
+  }
+  const nodeAddress = spawnSync(
+    "kubectl",
+    [
+      "get",
+      "node",
+      nodeName,
+      "-o",
+      "jsonpath={.status.addresses[?(@.type==\"InternalIP\")].address}",
+    ],
+    { encoding: "utf8" },
+  );
+  const host = String(nodeAddress.stdout || "").trim();
+  if (nodeAddress.status !== 0 || !host) {
+    return null;
+  }
+  const sshPort = spawnSync(
+    "kubectl",
+    [
+      "-n",
+      workspace.identity.projectName,
+      "get",
+      "svc",
+      serviceName,
+      "-o",
+      "jsonpath={.spec.ports[?(@.name==\"ssh\")].nodePort}",
+    ],
+    { encoding: "utf8" },
+  );
+  const portText = String(sshPort.stdout || "").trim();
+  const port = Number(portText);
+  if (sshPort.status !== 0 || !Number.isInteger(port) || port <= 0) {
+    return null;
+  }
+  return { host, port };
+}
+
+function runKubevirtSshPass(args: {
+  host: string;
+  port: number;
+  workspace: WorkspaceSpec;
+  command: string;
+  timeoutMs?: number;
+}): { ok: boolean; stdout: string } {
+  const result = spawnSync(
+    "sshpass",
+    [
+      "-p",
+      kubevirtProbePassword(args.workspace),
+      "ssh",
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "UserKnownHostsFile=/dev/null",
+      "-o",
+      "ConnectTimeout=10",
+      "-o",
+      "PreferredAuthentications=password",
+      "-o",
+      "PubkeyAuthentication=no",
+      "-p",
+      String(args.port),
+      `root@${args.host}`,
+      kubevirtProbeShellCommand(args.command),
+    ],
+    {
+      encoding: "utf8",
+      timeout: args.timeoutMs ?? 15000,
+      killSignal: "SIGTERM",
+    },
+  );
+  return {
+    ok: result.status === 0,
+    stdout: result.status === 0 ? String(result.stdout || "") : "",
+  };
 }
 
 async function runKubevirtSshCommand(
   workspace: WorkspaceSpec,
   serviceName: string,
   command: string,
+  timeoutMs?: number,
 ): Promise<{ ok: boolean; stdout: string }> {
+  const directEndpoint = kubevirtNodeSshEndpoint(workspace, serviceName);
+  if (directEndpoint) {
+    const directResult = runKubevirtSshPass({
+      host: directEndpoint.host,
+      port: directEndpoint.port,
+      workspace,
+      command,
+      timeoutMs,
+    });
+    if (directResult.ok) {
+      return directResult;
+    }
+  }
+
   const localPort = await reserveLocalPort();
   let child: ReturnType<typeof spawn> | undefined;
   try {
@@ -183,7 +282,11 @@ async function runKubevirtSshCommand(
         "root@127.0.0.1",
         kubevirtProbeShellCommand(command),
       ],
-      { encoding: "utf8" },
+      {
+        encoding: "utf8",
+        timeout: timeoutMs ?? 15000,
+        killSignal: "SIGTERM",
+      },
     );
     return {
       ok: result.status === 0,
@@ -196,6 +299,71 @@ async function runKubevirtSshCommand(
       terminateChildProcess(child);
     }
   }
+}
+
+async function waitForKubevirtSshReachable(
+  workspace: WorkspaceSpec,
+  serviceName: string,
+  timeoutMs = 120000,
+  intervalMs = 2000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await runKubevirtSshCommand(workspace, serviceName, "true");
+    if (result.ok) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`KubeVirt SSH probe did not become reachable for ${workspace.identity.projectName} within ${timeoutMs}ms`);
+}
+
+async function ensureKubevirtGuestRuntime(
+  workspace: WorkspaceSpec,
+): Promise<void> {
+  const serviceName = kubevirtServiceName(workspace);
+  if (!serviceName) {
+    throw new Error(`No KubeVirt service found for ${workspace.identity.projectName}`);
+  }
+  await waitForKubevirtSshReachable(workspace, serviceName);
+
+  const waitForDaemonReady = async (timeoutMs: number): Promise<boolean> => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const daemonStatus = await runKubevirtSshCommand(
+        workspace,
+        serviceName,
+        `timeout 10s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json`,
+        20000,
+      );
+      const parsed = daemonStatus.ok ? parsePaseoDaemonStatus(daemonStatus.stdout) : null;
+      if (parsed?.localDaemon === "running" && parsed.connectedDaemon === "reachable") {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    return false;
+  };
+
+  if (await waitForDaemonReady(120000)) {
+    return;
+  }
+
+  const result = await runKubevirtSshCommand(
+    workspace,
+    serviceName,
+    "systemctl restart polaris-runtime-bootstrap.service",
+    300000,
+  );
+  if (!result.ok) {
+    throw new Error(`Failed to restart Polaris runtime bootstrap in VM ${workspace.identity.projectName}`);
+  }
+
+  if (await waitForDaemonReady(120000)) {
+    return;
+  }
+
+  throw new Error(`Polaris runtime bootstrap did not make the daemon ready in VM ${workspace.identity.projectName}`);
 }
 
 interface KubevirtRuntimeSnapshot {
@@ -378,29 +546,9 @@ async function syncKubevirtGuestState(
   if (!serviceName) {
     return;
   }
-  const command = mode === "sync-out"
-    ? [
-        "if ! command -v rsync >/dev/null 2>&1; then exit 0; fi",
-        "mkdir -p /mnt/polaris-shared/user-identity-state /mnt/polaris-shared/user-ssh-state",
-        "mkdir -p /workspace/state/paseo /identity /ssh",
-        kubevirtPaseoSyncCommand(
-          "/workspace/state/paseo",
-          "/mnt/polaris-shared/workspace-runtime-state/paseo",
-        ),
-        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /identity/ /mnt/polaris-shared/user-identity-state/",
-        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /ssh/ /mnt/polaris-shared/user-ssh-state/",
-      ].join("\n")
-    : [
-        "if ! command -v rsync >/dev/null 2>&1; then exit 0; fi",
-        "mkdir -p /workspace/state/paseo /workspace/state/paseo/evolution /identity /ssh",
-        "mkdir -p /mnt/polaris-shared/user-identity-state /mnt/polaris-shared/user-ssh-state",
-        kubevirtPaseoSyncCommand(
-          "/mnt/polaris-shared/workspace-runtime-state/paseo",
-          "/workspace/state/paseo",
-        ),
-        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /mnt/polaris-shared/user-identity-state/ /identity/",
-        "rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times /mnt/polaris-shared/user-ssh-state/ /ssh/",
-      ].join("\n");
+  const command = `if ! command -v rsync >/dev/null 2>&1; then exit 0; fi
+if ! test -x /usr/local/bin/polaris-sync-shared-state; then exit 0; fi
+/usr/local/bin/polaris-sync-shared-state ${mode}`;
   const result = await runKubevirtSshCommand(
     workspace,
     serviceName,
@@ -422,6 +570,7 @@ export class KubevirtDriver implements BackendDriver {
     const outputPath = renderAndWriteKubevirtWorkspace(workspace);
     runCommand("kubectl", ["apply", "-f", outputPath]);
     runVmLifecycleAction(workspace.identity.projectName, "start");
+    await ensureKubevirtGuestRuntime(workspace);
   }
 
   async stop(workspace: WorkspaceSpec): Promise<void> {

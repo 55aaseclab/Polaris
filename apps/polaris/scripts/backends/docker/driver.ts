@@ -7,6 +7,13 @@ import {
   parseConnectionOfferServerId,
   parsePaseoDaemonStatus,
 } from "../../core/paseo.js";
+import {
+  dockerNetfsDevicePath,
+  dockerNetfsServer,
+  isNetfsSource,
+  netfsMountOptions,
+  workspaceDataDockerVolumeName,
+} from "../../core/netfs.js";
 import { renderAndWriteDockerWorkspace } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
 
@@ -19,6 +26,50 @@ function extractPairingUrl(raw: string): string | undefined {
   }
 }
 
+function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
+  const source = workspace.attachments.workspaceData.source;
+  if (!isNetfsSource(source)) {
+    return;
+  }
+  const volumeName = workspaceDataDockerVolumeName(workspace);
+  const expectedOptions = {
+    device: dockerNetfsDevicePath(source),
+    o: [`addr=${dockerNetfsServer(source)}`, ...netfsMountOptions(source)].join(","),
+    type: "nfs",
+  };
+  const inspect = spawnSync("docker", ["volume", "inspect", volumeName], { encoding: "utf8" });
+  if (inspect.status !== 0 || !inspect.stdout.trim()) {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(inspect.stdout) as Array<{ Options?: Record<string, string> }>;
+    const options = parsed[0]?.Options ?? {};
+    const matches = options.device === expectedOptions.device
+      && options.o === expectedOptions.o
+      && options.type === expectedOptions.type;
+    if (matches) {
+      return;
+    }
+  } catch {
+    // Fall through and recreate the volume with the rendered config.
+  }
+  const existingContainer = `${workspace.identity.projectName}-docker`;
+  const removeVolume = (): void => {
+    runCommand("docker", ["volume", "rm", "-f", volumeName]);
+  };
+  try {
+    removeVolume();
+  } catch (error) {
+    const inspectContainer = spawnSync("docker", ["inspect", existingContainer], { encoding: "utf8" });
+    if (inspectContainer.status === 0) {
+      runCommand("docker", ["rm", "-f", existingContainer]);
+      removeVolume();
+      return;
+    }
+    throw error;
+  }
+}
+
 export class DockerDriver implements BackendDriver {
   readonly kind = "docker" as const;
 
@@ -27,6 +78,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async start(workspace: WorkspaceSpec): Promise<void> {
+    ensureDockerWorkspaceDataVolumeConfig(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
   }
@@ -42,6 +94,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async rebuild(workspace: WorkspaceSpec): Promise<void> {
+    ensureDockerWorkspaceDataVolumeConfig(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d", "--force-recreate"]);
   }
@@ -51,6 +104,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async apply(workspace: WorkspaceSpec): Promise<void> {
+    ensureDockerWorkspaceDataVolumeConfig(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
   }
