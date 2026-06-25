@@ -35,14 +35,69 @@ export interface PortalWorkspaceStatus {
     kind?: string;
     profile?: string;
   };
+  paseo?: {
+    daemonAddress: string;
+    supportedHarnesses: string[];
+    liveTarget: string | null;
+  };
   daemon?: {
     manager?: { state?: string };
     pairing?: { state?: string; url?: string };
+  };
+  evolution?: {
+    artifactCount: number;
+    activeWorkspaceArtifacts: number;
+    activeUserArtifacts: number;
+    latestTitles: string[];
+    latestArtifacts?: Array<{
+      title: string;
+      kind: string;
+      status: string;
+      whyExists?: string;
+      whyRetrieved?: string[];
+      curatorAction?: string;
+      curatorReason?: string;
+      suppressedBecause?: string;
+    }>;
+    pendingMemoryChanges?: number;
+    lastSessionId?: string;
   };
   details: {
     backendDetail?: string;
     serviceDetail?: string;
     userProfileDetail?: string;
+  };
+  assets?: {
+    dockerfile: {
+      file: string;
+      path: string;
+    };
+    specs: Array<{
+      driver: string;
+      file: string;
+      path: string;
+    }>;
+    generatedManifests: Array<{
+      driver: string;
+      file: string;
+      path: string;
+    }>;
+    imageTags: Array<{
+      name: string;
+      tag: string;
+    }>;
+    evolutionFiles: Array<{
+      name: string;
+      path: string;
+      scope: "runtime" | "control-plane";
+    }>;
+    persistentVolumes: Array<{
+      name: string;
+      sourceKind: string;
+      sourceRef?: string;
+      mountRoot: string;
+      durablePaths: string[];
+    }>;
   };
 }
 
@@ -169,6 +224,30 @@ export async function switchWorkspaceDriver(
     {
       method: "POST",
       body: JSON.stringify({ driver }),
+    },
+  );
+}
+
+export async function deleteWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ removed: true }> {
+  return apiFetch<{ removed: true }>(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function stopWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ stopped: true }> {
+  return apiFetch<{ stopped: true }>(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
+    {
+      method: "POST",
     },
   );
 }

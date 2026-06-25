@@ -244,6 +244,7 @@ export interface WorkspaceAgentContract {
   runtime: {
     stateRoot: string;
     evolutionRoot: string;
+    daemonAddress: string;
     readyFile?: string;
     pairingFile?: string;
     staleRuntimeArtifacts: string[];
@@ -319,6 +320,11 @@ export interface WorkspaceStatus {
     daemonReadiness: string;
     reason?: string;
   };
+  paseo?: {
+    daemonAddress: string;
+    supportedHarnesses: string[];
+    liveTarget: string | null;
+  };
   details: Record<string, string | undefined>;
   evolution?: {
     artifactCount: number;
@@ -345,6 +351,38 @@ export interface WorkspaceStatus {
       state: "ready" | "warning" | "error" | "not-configured";
       message: string;
     };
+  };
+  assets?: {
+    dockerfile: {
+      file: string;
+      path: string;
+    };
+    specs: Array<{
+      driver: string;
+      file: string;
+      path: string;
+    }>;
+    generatedManifests: Array<{
+      driver: string;
+      file: string;
+      path: string;
+    }>;
+    imageTags: Array<{
+      name: string;
+      tag: string;
+    }>;
+    evolutionFiles: Array<{
+      name: string;
+      path: string;
+      scope: "runtime" | "control-plane";
+    }>;
+    persistentVolumes: Array<{
+      name: string;
+      sourceKind: string;
+      sourceRef?: string;
+      mountRoot: string;
+      durablePaths: string[];
+    }>;
   };
   drift?: WorkspaceDrift;
   attachments?: Record<string, CheckStatus>;

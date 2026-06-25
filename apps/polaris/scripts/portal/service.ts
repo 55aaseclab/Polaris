@@ -23,6 +23,8 @@ import {
 } from "../core/portal.js";
 import { loadWorkspace } from "../config/load.js";
 import { performWorkspaceSwitch } from "../cli/commands/switch.js";
+import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
+import { stopCommand } from "../cli/commands/stop.js";
 import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
@@ -244,4 +246,18 @@ export function upsertPortalCredential(userId: string, credential: {
 export async function switchPortalWorkspace(userId: string, workspace: string, target: PortalDriverTarget): Promise<ReturnType<typeof performWorkspaceSwitch>> {
   const ref = workspaceRefFromTarget(workspace, target);
   return performWorkspaceSwitch(ref);
+}
+
+export async function deletePortalWorkspace(userId: string, workspace: string): Promise<{ removed: true }> {
+  await deleteWorkspaceOwnedByUser(userId, workspace);
+  return { removed: true };
+}
+
+export async function stopPortalWorkspace(userId: string, workspace: string): Promise<{ stopped: true }> {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  await stopCommand(workspaceRefFromTarget(workspace, summary.selectedDriver));
+  return { stopped: true };
 }
