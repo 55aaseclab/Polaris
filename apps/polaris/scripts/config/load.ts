@@ -815,6 +815,7 @@ function buildAgentContract(home: string, agentKind: string): WorkspaceAgentCont
     runtime: {
       stateRoot,
       evolutionRoot,
+      daemonAddress: "0.0.0.0:6767",
       readyFile: "/tmp/.ready",
       pairingFile: enabled ? `${stateRoot}/pairing.json` : undefined,
       staleRuntimeArtifacts: enabled ? [`${stateRoot}/paseo.pid`, "/run/workspace/pids/paseo.pid"] : [],

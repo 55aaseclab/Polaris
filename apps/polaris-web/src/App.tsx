@@ -1,3 +1,4 @@
+import * as React from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -12,17 +13,22 @@ import {
 import {
   ArrowUpRight,
   FolderKanban,
+  Info,
   PlusCircle,
   RefreshCw,
+  Link2,
+  Trash2,
 } from "lucide-react";
 import {
   createWorkspace,
+  deleteWorkspace,
   getDefaultUserId,
   getUserProfile,
   getWorkspaceDetail,
   listCredentials,
   listUsers,
   listWorkspaces,
+  stopWorkspace,
   switchWorkspaceDriver,
   updateUserProfile,
   type PortalCredentialSummary,
@@ -33,11 +39,23 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 type Language = "en" | "zh";
 
@@ -71,6 +89,13 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver_desc: "Reuse the existing Polaris switch workflow.",
     switching: "Switching...",
     switch_workspace_action: "Switch workspace",
+    stop_workspace: "Stop workspace",
+    remove_workspace: "Delete workspace",
+    remove_workspace_confirm_title: "Delete workspace?",
+    remove_workspace_confirm_description: "This removes the workspace definition and its saved runtime data. Running workspaces must be stopped before deletion.",
+    deleting: "Deleting...",
+    stopping: "Stopping...",
+    cancel: "Cancel",
     current_driver: "Current driver",
     loading_workspace: "Loading workspace...",
     workspace_state: "Workspace state",
@@ -79,6 +104,17 @@ const COPY: Record<Language, Record<string, string>> = {
     live_target: "Live target",
     provisioning_title: "Provisioning",
     open_live_target: "Open live target",
+    base_dockerfile: "Base Dockerfile",
+    workspace_specs: "Workspace specs",
+    generated_manifests: "Generated manifests",
+    image_tags: "Image tags",
+    evolution_assets: "Evolution assets",
+    persistent_volumes: "Persistent volumes",
+    asset_type: "Type",
+    asset_name: "Name",
+    asset_path: "Path / Tag",
+    asset_details: "Details",
+    no_assets: "No asset metadata yet.",
     credentials: "Credentials",
     credentials_for_user: "User-owned credentials for this user.",
     loading_credentials: "Loading credentials...",
@@ -101,12 +137,39 @@ const COPY: Record<Language, Record<string, string>> = {
     no_service_detail: "No service detail.",
     no_profile_detail: "No profile detail.",
     workspace_overview: "Workspace overview",
-    status_ready: "Ready",
+    paseo_status: "Paseo status",
+    isolated_dev_env: "Isolated development environment",
+    evolution_memory: "Evolution memory",
+    daemon_address: "Daemon address",
+    supported_harnesses: "Supported harnesses",
+    status_ready: "Ready to pair",
     status_unknown: "Unknown",
     status_error: "Error",
     status_failed: "Failed",
     status_provisioning: "Provisioning",
     status_not_selected: "Not selected",
+    workspace_not_started: "Not started",
+    workspace_stopped: "Stopped",
+    workspace_ready: "Driver ready",
+    workspace_attention: "Needs attention",
+    workspace_unknown: "Unknown",
+    runtime_not_started: "Not started",
+    runtime_stopped: "Stopped",
+    runtime_starting: "Starting",
+    runtime_backend_ready: "Backend ready",
+    runtime_daemon_ready: "Daemon ready",
+    runtime_ready_to_pair: "Ready to pair",
+    runtime_ready: "Ready",
+    runtime_attention: "Needs attention",
+    pairing_ready: "Ready",
+    pairing_unknown: "Pairing unknown",
+    pairing_error: "Pairing error",
+    pairing_failed: "Pairing failed",
+    paseo_starting: "Starting",
+    paseo_daemon_ready: "Daemon ready",
+    paseo_ready_to_pair: "Ready to pair",
+    paseo_attention: "Needs attention",
+    paseo_unknown: "Unknown",
     none: "none",
     saving: "Saving...",
     save_profile: "Save profile",
@@ -141,6 +204,13 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver_desc: "复用现有的 Polaris 切换流程。",
     switching: "切换中…",
     switch_workspace_action: "切换工作空间",
+    stop_workspace: "停止工作空间",
+    remove_workspace: "删除工作空间",
+    remove_workspace_confirm_title: "删除这个工作空间？",
+    remove_workspace_confirm_description: "这会删除工作空间定义及其已保存的运行时数据。运行中的工作空间必须先停止，才能删除。",
+    deleting: "删除中…",
+    stopping: "停止中…",
+    cancel: "取消",
     current_driver: "当前驱动",
     loading_workspace: "正在加载工作空间…",
     workspace_state: "工作空间状态",
@@ -149,6 +219,17 @@ const COPY: Record<Language, Record<string, string>> = {
     live_target: "访问入口",
     provisioning_title: "准备进度",
     open_live_target: "打开访问入口",
+    base_dockerfile: "基础 Dockerfile",
+    workspace_specs: "工作空间规格",
+    generated_manifests: "生成的清单",
+    image_tags: "镜像标签",
+    evolution_assets: "演进资产",
+    persistent_volumes: "持久卷",
+    asset_type: "类型",
+    asset_name: "名称",
+    asset_path: "路径 / 标签",
+    asset_details: "详情",
+    no_assets: "暂无资产元数据。",
     credentials: "凭证",
     credentials_for_user: "该用户所属的凭证。",
     loading_credentials: "正在加载凭证…",
@@ -171,12 +252,39 @@ const COPY: Record<Language, Record<string, string>> = {
     no_service_detail: "暂无服务详情。",
     no_profile_detail: "暂无用户配置详情。",
     workspace_overview: "工作空间概览",
-    status_ready: "就绪",
+    paseo_status: "Paseo 状态",
+    isolated_dev_env: "隔离开发环境",
+    evolution_memory: "演进记忆",
+    daemon_address: "守护进程地址",
+    supported_harnesses: "支持的协作者",
+    status_ready: "可配对",
     status_unknown: "未知",
     status_error: "错误",
     status_failed: "失败",
     status_provisioning: "准备中",
     status_not_selected: "未选中",
+    workspace_not_started: "未启动",
+    workspace_stopped: "已停止",
+    workspace_ready: "驱动就绪",
+    workspace_attention: "需要处理",
+    workspace_unknown: "未知",
+    runtime_not_started: "未启动",
+    runtime_stopped: "已停止",
+    runtime_starting: "启动中",
+    runtime_backend_ready: "后端就绪",
+    runtime_daemon_ready: "守护进程就绪",
+    runtime_ready_to_pair: "可配对",
+    runtime_ready: "就绪",
+    runtime_attention: "需要处理",
+    pairing_ready: "就绪",
+    pairing_unknown: "配对状态未知",
+    pairing_error: "配对异常",
+    pairing_failed: "配对失败",
+    paseo_starting: "启动中",
+    paseo_daemon_ready: "守护进程就绪",
+    paseo_ready_to_pair: "可配对",
+    paseo_attention: "需要处理",
+    paseo_unknown: "未知",
     none: "无",
     saving: "保存中…",
     save_profile: "保存资料",
@@ -219,6 +327,27 @@ function useLanguage(): LanguageContextValue {
   return context;
 }
 
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  render(): React.ReactNode {
+    if (this.state.hasError) {
+      return <div className="p-6 text-sm text-destructive">App error.</div>;
+    }
+    return this.props.children;
+  }
+}
+
 function driverLabel(driver: { backend: string; profile?: string } | null): string {
   if (!driver) {
     return "not-selected";
@@ -253,6 +382,75 @@ function translateState(
   }
 }
 
+function translatePairingState(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (!value) {
+    return t("pairing_unknown");
+  }
+  switch (value) {
+    case "ok":
+    case "ready":
+      return t("pairing_ready");
+    case "unknown":
+      return t("pairing_unknown");
+    case "error":
+    case "warning":
+      return t("pairing_error");
+    case "failed":
+      return t("pairing_failed");
+    default:
+      return value;
+  }
+}
+
+function translateWorkspaceRuntimeState(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (!value) {
+    return t("workspace_unknown");
+  }
+  switch (value) {
+    case "not-applied":
+      return t("workspace_not_started");
+    case "saved":
+      return t("workspace_stopped");
+    case "ready":
+      return t("workspace_ready");
+    case "degraded":
+      return t("workspace_attention");
+    default:
+      return value;
+  }
+}
+
+function translatePaseoState(
+  daemon: PortalWorkspaceDetail["status"] extends infer T
+    ? T extends { daemon?: infer D }
+      ? D | undefined
+      : undefined
+    : undefined,
+  t: (key: string) => string,
+): string {
+  const pairingState = daemon?.pairing?.state;
+  const managerState = daemon?.manager?.state;
+  if (pairingState === "ok" || pairingState === "ready") {
+    return t("paseo_ready_to_pair");
+  }
+  if (managerState === "ok" || managerState === "ready") {
+    return t("paseo_daemon_ready");
+  }
+  if (managerState === "missing" || managerState === "unknown" || !managerState) {
+    return t("paseo_starting");
+  }
+  if (managerState === "error" || managerState === "failed" || managerState === "warning") {
+    return t("paseo_attention");
+  }
+  return t("paseo_unknown");
+}
+
 function formatBackendValue(
   data: PortalWorkspaceDetail,
   t: (key: string) => string,
@@ -270,6 +468,71 @@ function statusTone(state?: string): "default" | "secondary" | "destructive" {
     return "destructive";
   }
   return "secondary";
+}
+
+type AssetRow = {
+  name: string;
+  path: string;
+  detail?: string;
+};
+
+type AssetSection = {
+  label: string;
+  rows: AssetRow[];
+};
+
+function WorkspaceAssetTable(props: {
+  t: (key: string) => string;
+  sections: AssetSection[];
+  emptyLabel: string;
+}) {
+  const visibleSections = props.sections.filter((section) => section.rows.length > 0);
+  if (visibleSections.length === 0) {
+    return <p className="text-sm text-muted-foreground">{props.emptyLabel}</p>;
+  }
+
+  return (
+    <div className="overflow-hidden border border-border bg-white">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[44rem] table-auto text-sm">
+          <thead className="bg-muted/35 text-left text-xs uppercase tracking-[0.14em] text-muted-foreground">
+            <tr>
+              <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_type")}</th>
+              <th className="px-4 py-3 font-medium">{props.t("asset_name")}</th>
+              <th className="px-4 py-3 w-full font-medium">{props.t("asset_path")}</th>
+              <th className="px-4 py-3 font-medium">{props.t("asset_details")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleSections.map((section) =>
+              section.rows.map((row, index) => (
+                <tr key={`${section.label}:${row.name}:${row.path}`} className="border-t border-border/70 align-top">
+                  {index === 0 && (
+                    <td className="w-0 whitespace-nowrap px-4 py-3 align-middle text-right text-muted-foreground" rowSpan={section.rows.length}>
+                      {section.label}
+                    </td>
+                  )}
+                  <td className="whitespace-nowrap px-4 py-3">{row.name}</td>
+                  <td className="w-full px-4 py-3">
+                    <span className="inline-flex" title={row.path}>
+                      <Link2 className="h-4 w-4" />
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                    {row.detail ? (
+                      <span className="inline-flex" title={row.detail}>
+                        <Info className="h-4 w-4" />
+                      </span>
+                    ) : "-"}
+                  </td>
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function useAsyncValue<T>(
@@ -603,6 +866,7 @@ function WorkspaceIndexPage() {
 function WorkspaceDetailPage() {
   const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
+  const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
@@ -610,6 +874,64 @@ function WorkspaceDetailPage() {
   );
   const [driver, setDriver] = useState("");
   const [switching, setSwitching] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const assets = data?.status?.assets;
+  const developmentSections: AssetSection[] = assets
+    ? [
+        {
+          label: t("base_dockerfile"),
+          rows: assets.dockerfile
+            ? [{
+                name: assets.dockerfile.file,
+                path: assets.dockerfile.path,
+              }]
+            : [],
+        },
+        {
+          label: t("workspace_specs"),
+          rows: assets.specs.map((item) => ({
+            name: `${item.driver} · ${item.file}`,
+            path: item.path,
+          })),
+        },
+        {
+          label: t("generated_manifests"),
+          rows: assets.generatedManifests.map((item) => ({
+            name: `${item.driver} · ${item.file}`,
+            path: item.path,
+          })),
+        },
+        {
+          label: t("image_tags"),
+          rows: assets.imageTags.map((item) => ({
+            name: item.name,
+            path: item.tag,
+          })),
+        },
+        {
+          label: t("persistent_volumes"),
+          rows: assets.persistentVolumes.map((item) => ({
+            name: item.name,
+            path: item.mountRoot,
+            detail: [item.sourceRef ?? item.sourceKind, ...item.durablePaths].join(" | "),
+          })),
+        },
+      ]
+    : [];
+  const evolutionSections: AssetSection[] = assets?.evolutionFiles
+    ? [
+        {
+          label: t("evolution_assets"),
+          rows: assets.evolutionFiles.map((item) => ({
+            name: item.name,
+            path: item.path,
+            detail: item.scope,
+          })),
+        },
+      ]
+    : [];
 
   useEffect(() => {
     if (data?.selectedDriver) {
@@ -621,6 +943,7 @@ function WorkspaceDetailPage() {
     if (!driver) {
       return;
     }
+    setActionError(null);
     setSwitching(true);
     try {
       await switchWorkspaceDriver(userId, workspaceName, driver);
@@ -630,70 +953,56 @@ function WorkspaceDetailPage() {
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    setActionError(null);
+    setDeleting(true);
+    try {
+      await deleteWorkspace(userId, workspaceName);
+      navigate(`/users/${encodeURIComponent(userId)}/workspaces`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleStop(): Promise<void> {
+    setActionError(null);
+    setStopping(true);
+    try {
+      await stopWorkspace(userId, workspaceName);
+      window.location.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setStopping(false);
+    }
+  }
+
   return (
     <PortalShell users={users ?? []}>
       <div className="grid w-full grid-cols-1 content-start gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle>{t("switch_driver")}</CardTitle>
-            <CardDescription>
-              {t("switch_driver_desc")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid w-full gap-4">
-            <Select value={driver} onValueChange={setDriver}>
-              <SelectTrigger>
-                <SelectValue placeholder={t("select_driver")} />
-              </SelectTrigger>
-              <SelectContent>
-                {data?.availableDrivers.map((item) => {
-                  const label = driverLabel(item);
-                  return (
-                    <SelectItem key={label} value={label}>
-                      {item.available ? label : `${label} (${t("create_suffix")})`}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <Button className="justify-self-start" onClick={() => void handleSwitch()} disabled={switching || !driver}>
-              <RefreshCw className="h-4 w-4" />
-              {switching ? t("switching") : t("switch_workspace_action")}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("workspace_overview")}</CardTitle>
-            <CardDescription>
-              {workspaceName} · {t("current_driver")}:{" "}
-              {data ? driverLabel(data.selectedDriver) : t("loading_workspace")}
-            </CardDescription>
+          <CardHeader className="gap-4">
+            <div className="min-w-0">
+              <CardTitle>{t("workspace_overview")}</CardTitle>
+              <CardDescription>
+                {workspaceName}
+                {" · "}
+                {data ? driverLabel(data.selectedDriver) : t("loading_workspace")}
+                {" · "}
+                {data ? translateWorkspaceRuntimeState(data.status?.state, t) : t("loading_workspace")}
+                {" · "}
+                {data ? translatePaseoState(data.status?.daemon, t) : t("loading_workspace")}
+              </CardDescription>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4">
             {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
             {data && (
               <>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <MetricCard
-                    label={t("workspace_state")}
-                    value={translateState(data.status?.state, t)}
-                  />
-                  <MetricCard
-                    label={t("daemon_pairing")}
-                    value={translateState(data.status?.daemon?.pairing?.state, t)}
-                  />
-                  <MetricCard
-                    label={t("backend")}
-                    value={formatBackendValue(data, t)}
-                  />
-                  <MetricCard
-                    label={t("live_target")}
-                    value={data.liveTarget ?? t("status_unknown")}
-                  />
-                </div>
                 {data.progress && (
                   <Card className="border-dashed bg-background/80 shadow-none">
                     <CardHeader className="pb-3">
@@ -709,28 +1018,169 @@ function WorkspaceDetailPage() {
                     </CardContent>
                   </Card>
                 )}
-                <div className="box-border grid w-full min-w-0 gap-2 rounded-[1.25rem] border border-border bg-white p-4 text-sm text-muted-foreground">
-                  <div className="min-w-0 break-words">
-                    {data.status?.details.backendDetail ?? t("no_backend_detail")}
-                  </div>
-                  <div className="min-w-0 break-words">
-                    {data.status?.details.serviceDetail ?? t("no_service_detail")}
-                  </div>
-                  <div className="min-w-0 break-words">
-                    {data.status?.details.userProfileDetail ?? t("no_profile_detail")}
-                  </div>
+
+                <div className="border border-border bg-white px-4">
+                  <Accordion type="multiple" className="w-full">
+                    <AccordionItem value="paseo">
+                      <AccordionTrigger>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                            {t("paseo_status")}
+                          </div>
+                          <div className="mt-1 text-sm font-normal text-muted-foreground">
+                            {translatePaseoState(data.status?.daemon, t)}
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="grid gap-3 lg:grid-cols-3">
+                          <div className="border border-border p-3">
+                            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                              {t("daemon_address")}
+                            </div>
+                            <div className="mt-1 break-all font-medium">
+                              {data.status?.paseo?.daemonAddress ?? t("unknown")}
+                            </div>
+                          </div>
+                          <div className="border border-border p-3">
+                            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                              {t("supported_harnesses")}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
+                                ? data.status?.paseo?.supportedHarnesses.map((item) => (
+                                    <Badge key={item} variant="secondary">{item}</Badge>
+                                  ))
+                                : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
+                            </div>
+                          </div>
+                          <div className="border border-border p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                                  {t("live_target")}
+                                </div>
+                                <div className="mt-1 break-all text-sm text-muted-foreground">
+                                  {data.liveTarget ?? data.status?.paseo?.liveTarget ?? t("unknown")}
+                                </div>
+                              </div>
+                              {data.status?.paseo?.liveTarget && (
+                                <a
+                                  className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-primary"
+                                  href={data.status.paseo.liveTarget}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {t("open_live_target")}
+                                  <ArrowUpRight className="h-4 w-4" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="development">
+                      <AccordionTrigger>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                            {t("isolated_dev_env")}
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <WorkspaceAssetTable
+                          t={t}
+                          sections={developmentSections}
+                          emptyLabel={t("no_assets")}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    <AccordionItem value="evolution">
+                      <AccordionTrigger>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                            {t("evolution_memory")}
+                          </div>
+                          {data.status?.evolution && (
+                            <div className="mt-1 text-sm font-normal text-muted-foreground">
+                              {data.status.evolution.artifactCount} {t("evolution_assets")}
+                            </div>
+                          )}
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <WorkspaceAssetTable
+                          t={t}
+                          sections={evolutionSections}
+                          emptyLabel={t("no_assets")}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
                 </div>
-                {data.liveTarget && (
-                  <a
-                    className="inline-flex min-w-0 items-center gap-2 break-all text-sm font-medium text-primary"
-                    href={data.liveTarget}
-                    target="_blank"
-                    rel="noreferrer"
+
+                <div className="grid gap-3 pt-2 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-end">
+                  <Select value={driver} onValueChange={setDriver}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t("select_driver")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data.availableDrivers.map((item) => {
+                        const label = driverLabel(item);
+                        return (
+                          <SelectItem key={label} value={label}>
+                            {item.available ? label : `${label} (${t("create_suffix")})`}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    className="w-full lg:w-auto"
+                    onClick={() => void handleSwitch()}
+                    disabled={switching || !driver}
                   >
-                    {t("open_live_target")}
-                    <ArrowUpRight className="h-4 w-4" />
-                  </a>
-                )}
+                    <RefreshCw className="h-4 w-4" />
+                    {switching ? t("switching") : t("switch_workspace_action")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={() => void handleStop()}
+                    disabled={loading || stopping || deleting}
+                  >
+                    {stopping ? t("stopping") : t("stop_workspace")}
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        className="w-full sm:w-auto"
+                        disabled={loading || stopping || deleting}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deleting ? t("deleting") : t("remove_workspace")}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t("remove_workspace_confirm_description")}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => void handleDelete()}>
+                          {deleting ? t("deleting") : t("remove_workspace")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
               </>
             )}
           </CardContent>
@@ -930,14 +1380,16 @@ export default function App() {
   };
 
   return (
-    <LanguageContext.Provider value={value}>
-      <Routes>
-        <Route path="/" element={<OverviewPage />} />
-        <Route path="/users/:userId/profile" element={<ProfilePage />} />
-        <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
-        <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
-        <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
-      </Routes>
-    </LanguageContext.Provider>
+    <AppErrorBoundary>
+      <LanguageContext.Provider value={value}>
+        <Routes>
+          <Route path="/" element={<OverviewPage />} />
+          <Route path="/users/:userId/profile" element={<ProfilePage />} />
+          <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
+          <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+          <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+        </Routes>
+      </LanguageContext.Provider>
+    </AppErrorBoundary>
   );
 }

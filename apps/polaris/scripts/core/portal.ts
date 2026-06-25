@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { loadWorkspace } from "../config/load.js";
+import { buildStatusAssets } from "./status-assets.js";
 import {
   readWorkspaceDriverSelection,
   workspaceSelectionPath,
@@ -336,7 +337,7 @@ export function clearWorkspaceProvisionProgress(userId: string, workspace: strin
 }
 
 export function resolveLiveTarget(status: WorkspaceStatus | null): string | null {
-  return status?.daemon?.pairing?.url ?? null;
+  return status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url ?? null;
 }
 
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
@@ -368,11 +369,63 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
 }
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
-  const status = readWorkspaceStatus(userId, workspace);
+  const selectedDriver = readWorkspaceSelection(userId, workspace);
+  let status = readWorkspaceStatus(userId, workspace);
+  const assets = status?.assets as
+    | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
+    | undefined;
+  if (status && (!assets || !Array.isArray(assets.evolutionFiles) || assets.evolutionFiles.length === 0)) {
+    const preferredTargets = [
+      selectedDriver,
+      { backend: "docker" as const },
+      { backend: "pod" as const, profile: "gvisor" },
+      { backend: "kubevirt-vm" as const },
+    ].filter(Boolean) as PortalDriverTarget[];
+    for (const target of preferredTargets) {
+      try {
+        const loaded = loadWorkspace(workspaceRefFromTarget(workspace, target));
+        const nextAssets = buildStatusAssets(loaded);
+        status = {
+          ...status,
+          assets: {
+            ...(status.assets ?? nextAssets),
+            evolutionFiles: nextAssets.evolutionFiles,
+          },
+        };
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
+  if (status && !status.paseo) {
+    const preferredTargets = [
+      selectedDriver,
+      { backend: "docker" as const },
+      { backend: "pod" as const, profile: "gvisor" },
+      { backend: "kubevirt-vm" as const },
+    ].filter(Boolean) as PortalDriverTarget[];
+    for (const target of preferredTargets) {
+      try {
+        const loaded = loadWorkspace(workspaceRefFromTarget(workspace, target));
+        status = {
+          ...status,
+          paseo: {
+            daemonAddress: loaded.agent.runtime.daemonAddress,
+            supportedHarnesses: loaded.agent.harnesses,
+            liveTarget: resolveLiveTarget(status),
+          },
+        };
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
   return {
     name: workspace,
     drivers: PORTAL_DRIVER_TARGETS,
-    selectedDriver: readWorkspaceSelection(userId, workspace),
+    selectedDriver,
     status,
     progress: readWorkspaceProvisionProgress(userId, workspace),
     liveTarget: resolveLiveTarget(status),

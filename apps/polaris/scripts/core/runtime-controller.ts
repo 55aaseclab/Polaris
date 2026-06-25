@@ -227,6 +227,11 @@ export function synthesizeWorkspaceStatus(
         : "not-applicable",
       reason: drift.items[0]?.message,
     },
+    paseo: {
+      daemonAddress: workspace.agent.runtime.daemonAddress,
+      supportedHarnesses: workspace.agent.harnesses,
+      liveTarget: observation.daemon.pairing?.url ?? null,
+    },
     details: {
       backendDetail: observation.backend.detail,
       serviceDetail: observation.services.detail,

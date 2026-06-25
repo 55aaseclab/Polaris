@@ -1268,8 +1268,16 @@ if [[ "$*" == *"get pod -l app=demo"* ]]; then
   printf 'pod-1'
   exit 0
 fi
+if [[ "$*" == *"paseo daemon status --json"* ]]; then
+  printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+  printf 'srv_demo'
+  exit 0
+fi
 if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
-  printf '{"url":"https://app.paseo.sh/#offer=test"}'
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
   exit 0
 fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
@@ -1286,9 +1294,15 @@ exit 0
       const output = await captureStdout(async () => {
         await runCli(["status", "demo@pod"]);
       });
-      const parsed = parseJsonOutput<{ daemon?: { pairing?: { state?: string; url?: string } } }>(output);
+      const parsed = parseJsonOutput<{
+        daemon?: { pairing?: { state?: string; url?: string } };
+        paseo?: { daemonAddress?: string; supportedHarnesses?: string[]; liveTarget?: string | null };
+      }>(output);
       assert.equal(parsed.daemon?.pairing?.state, "ok");
-      assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=test");
+      assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
+      assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
+      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
     },
   );
 });
@@ -1317,7 +1331,7 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
 fi
 if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 30
+  sleep 1
   exit 0
 fi
 if [[ "$*" == *"logs"* ]]; then
@@ -1341,9 +1355,15 @@ exit 1
         const output = await captureStdout(async () => {
           await runCli(["status", `${project}@kubevirt-vm`]);
         });
-        const parsed = parseJsonOutput<{ daemon?: { pairing?: { url?: string; state?: string } } }>(output);
+        const parsed = parseJsonOutput<{
+          daemon?: { pairing?: { url?: string; state?: string } };
+          paseo?: { daemonAddress?: string; supportedHarnesses?: string[]; liveTarget?: string | null };
+        }>(output);
         assert.equal(parsed.daemon?.pairing?.state, "ok");
         assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
+        assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
+        assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+        assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
       },
     );
   });
@@ -1409,6 +1429,7 @@ exit 0
         state: string;
         backend: { kind: string; instanceState: string };
         health: { backendLiveness: string; workspaceReadiness: string; daemonReadiness: string };
+        paseo?: { daemonAddress: string; supportedHarnesses: string[]; liveTarget: string | null };
         evolution?: { artifactCount: number };
       };
 
@@ -1420,6 +1441,9 @@ exit 0
       assert.equal(parsed.health.backendLiveness, "running");
       assert.equal(parsed.health.workspaceReadiness, "ready");
       assert.equal(parsed.health.daemonReadiness, "ready");
+      assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
+      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
       assert.ok(parsed.evolution);
     },
   );
@@ -1821,7 +1845,7 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
 fi
 if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 30
+  sleep 1
   exit 0
 fi
 if [[ "$*" == *"patch vm ${project}-vm"* ]]; then
@@ -2111,7 +2135,7 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
 fi
 if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 30
+  sleep 1
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
@@ -2182,12 +2206,25 @@ exit 0
           backend: { kind: string; instanceState: string };
           state: string;
           health: { daemonReadiness: string };
+          assets: {
+            dockerfile: { file: string; path: string };
+            specs: Array<{ driver: string; file: string; path: string }>;
+            generatedManifests: Array<{ driver: string; file: string; path: string }>;
+            imageTags: Array<{ name: string; tag: string }>;
+            persistentVolumes: Array<{ name: string; mountRoot: string; durablePaths: string[] }>;
+          };
         }>(stdout);
 
         assert.equal(parsed.backend.kind, "docker");
         assert.equal(parsed.backend.instanceState, "running");
         assert.equal(parsed.state, "ready");
         assert.equal(parsed.health.daemonReadiness, "ready");
+        assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
+        assert.equal(parsed.assets.dockerfile.path, `config/users/${DEMO_USER_PROFILE_ID}/docker/workspace-prebuilt.Dockerfile`);
+        assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
+        assert.deepEqual(parsed.assets.generatedManifests.map((item) => item.file), ["docker.yaml", "pod.yaml", "kubevirt.yaml"]);
+        assert.equal(parsed.assets.imageTags.find((item) => item.name === "workspace")?.tag, workspaceImageRef(DEMO_USER_PROFILE_ID, project));
+        assert.ok(parsed.assets.persistentVolumes.some((item) => item.name === "workspace-data" && item.mountRoot === "/workspace/project"));
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
@@ -2223,7 +2260,7 @@ if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
 fi
 if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 30
+  sleep 1
   exit 0
 fi
 if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${project}-vm"* ]]; then
@@ -2351,6 +2388,29 @@ test("docker lifecycle actions execute through docker compose", async () => {
   await withFakeCommands(
     {
       docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$*" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_docker","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
+    printf 'srv_docker'
+    exit 0
+  fi
+  if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+    printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kb2NrZXIifQ"}'
+    exit 0
+  fi
+  exit 0
+fi
 exit 0
 `,
     },

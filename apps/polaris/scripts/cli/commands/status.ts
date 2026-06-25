@@ -1,5 +1,6 @@
 import { writeWorkspaceStatus } from "../../output/state-store.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
+import { buildStatusAssets } from "../../core/status-assets.js";
 import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSession, getEvolutionSummary } from "../../evolution/runtime.js";
 import { loadWorkspaceForCommand } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
@@ -10,6 +11,7 @@ export async function statusCommand(project: string): Promise<void> {
   const observation = await driver.inspect(workspace);
   const drift = computeWorkspaceDrift(workspace, observation);
   const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+  status.assets = buildStatusAssets(workspace);
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",

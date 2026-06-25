@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
+import yaml from "js-yaml";
 import { createPortalServer } from "../scripts/portal/server.js";
 import {
   listOwnedWorkspaces,
@@ -149,6 +150,44 @@ test("portal API reads and updates user profiles", async () => {
     original,
     "utf8",
   );
+});
+
+test("portal API deletes a stopped workspace and removes it from the profile index", async () => {
+  const userId = "100000000000000002";
+  const workspace = uniqueName("portal-delete");
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const originalProfile = fs.readFileSync(profileFile, "utf8");
+  const profileData = (yaml.load(originalProfile) ?? {}) as Record<string, unknown>;
+  const workspaces = Array.isArray(profileData.workspaces)
+    ? profileData.workspaces.map((value) => String(value)).filter(Boolean)
+    : [];
+
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  profileData.workspaces = [...workspaces, workspace].sort();
+  fs.writeFileSync(profileFile, yaml.dump(profileData, { lineWidth: 120, noRefs: true }), "utf8");
+
+  try {
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
+        { method: "DELETE" },
+      );
+      assert.equal(response.status, 200);
+      const payload = await response.json() as { removed: boolean };
+      assert.equal(payload.removed, true);
+    });
+
+    assert.equal(fs.existsSync(workspaceRoot), false);
+    const profileAfter = (yaml.load(fs.readFileSync(profileFile, "utf8")) ?? {}) as Record<string, unknown>;
+    const remaining = Array.isArray(profileAfter.workspaces)
+      ? profileAfter.workspaces.map((value) => String(value))
+      : [];
+    assert.equal(remaining.includes(workspace), false);
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.writeFileSync(profileFile, originalProfile, "utf8");
+  }
 });
 
 test("portal root advertises the API surface and default user", async () => {

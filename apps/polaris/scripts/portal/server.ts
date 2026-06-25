@@ -8,10 +8,12 @@ import {
   updatePortalProfile,
 } from "../core/portal.js";
 import {
+  deletePortalWorkspace,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
   provisionWorkspace,
+  stopPortalWorkspace,
   switchPortalWorkspace,
   upsertPortalCredential,
 } from "./service.js";
@@ -24,7 +26,7 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers": "content-type",
   });
   res.end(payload);
@@ -134,6 +136,24 @@ async function handleWorkspaceProvision(
   sendJson(res, 202, progress);
 }
 
+async function handleWorkspaceDelete(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const result = await deletePortalWorkspace(userId, workspace);
+  sendJson(res, 200, result);
+}
+
+async function handleWorkspaceStop(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const result = await stopPortalWorkspace(userId, workspace);
+  sendJson(res, 200, result);
+}
+
 async function handleCredentialUpsert(
   req: IncomingMessage,
   res: ServerResponse,
@@ -198,7 +218,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (req.method === "OPTIONS" && isApiPath(segments)) {
         res.writeHead(204, {
           "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,OPTIONS",
+          "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
           "access-control-allow-headers": "content-type",
         });
         res.end();
@@ -278,8 +298,16 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, getPortalWorkspaceDetail(routeUserId, workspace));
           return;
         }
+        if (segments[3] === "workspaces" && segments.length === 5 && req.method === "DELETE") {
+          await handleWorkspaceDelete(res, routeUserId, workspace);
+          return;
+        }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "switch" && req.method === "POST") {
           await handleWorkspaceSwitch(req, res, routeUserId, workspace);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "stop" && req.method === "POST") {
+          await handleWorkspaceStop(res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
