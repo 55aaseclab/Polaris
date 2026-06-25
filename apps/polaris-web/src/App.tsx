@@ -41,6 +41,20 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -616,139 +630,129 @@ function PortalShell(props: {
   }
 
   return (
-    <div className="box-border w-full px-4 py-4 sm:px-6 sm:py-6 lg:h-dvh lg:overflow-hidden">
-      <div className="grid w-full grid-cols-1 content-start gap-6 lg:h-full lg:grid-rows-[auto,minmax(0,1fr)]">
-        <Card>
-          <CardContent className="grid gap-4 p-5 lg:flex lg:items-center lg:justify-between">
-            <div className="grid min-w-0 gap-4 lg:flex lg:w-full lg:items-center lg:justify-between">
-              <div className="-m-2 min-w-0 rounded-[1rem] p-2">
-                <div className="text-lg font-semibold">{t("app_name")}</div>
-              </div>
-              <div className="grid min-w-0 gap-3 lg:flex lg:min-w-0 lg:items-center">
-                <div className="w-full min-w-0 lg:max-w-[22rem]">
-                  <Select value={activeUser?.id ?? ""} onValueChange={onUserChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={t("switch_user")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {props.users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name || user.id}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+    <SidebarProvider defaultOpen>
+      <Sidebar collapsible="offcanvas">
+        <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 text-lg font-semibold">{t("app_name")}</div>
+            {activeUser && (
+              <Badge variant="secondary" className="max-w-[10rem] truncate">
+                {activeUser.name || activeUser.id}
+              </Badge>
+            )}
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              <span className="flex items-center gap-2">
+                <FolderKanban className="h-4 w-4" />
+                {t("workspaces")}
+              </span>
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
                 {activeUser && (
-                  <div className="w-full min-w-0 lg:hidden">
-                    <Select value={currentWorkspaceName} onValueChange={onWorkspaceChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t("switch_workspace")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sidebarWorkspaces?.map((workspace) => (
-                          <SelectItem key={workspace.name} value={workspace.name}>
-                            {workspace.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setLanguage(language === "en" ? "zh" : "en")}
-                >
-                  {language === "en" ? t("lang_zh") : t("lang_en")}
-                </Button>
-                {activeUser && (
-                  <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
-                    <Button variant="secondary">
-                      {activeUser.name || activeUser.id}
-                    </Button>
-                  </Link>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid w-full min-w-0 grid-cols-1 items-start gap-6 lg:min-h-0 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
-          <aside className="hidden lg:block lg:min-h-0">
-            <div className="h-full min-h-0">
-              <Card className="flex h-full min-h-0 flex-col overflow-hidden">
-                <CardHeader className="shrink-0 gap-2 pb-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                    <FolderKanban className="h-4 w-4" />
-                    {t("workspaces")}
-                  </div>
-                </CardHeader>
-                <CardContent className="grid min-h-0 auto-rows-max content-start flex-1 gap-2 overflow-y-auto pr-4">
-                      <Link
-                        to={`${userWorkspaceIndexLink()}#create-workspace`}
-                        className="box-border block w-full min-w-0 rounded-[1.1rem] border border-dashed border-primary/35 bg-primary/5 px-4 py-3 text-sm font-medium text-primary transition hover:bg-primary/10"
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <PlusCircle className="h-4 w-4" />
-                          <span className="truncate">{t("add_workspace")}</span>
-                        </span>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild>
+                      <Link to={`${userWorkspaceIndexLink()}#create-workspace`}>
+                        <PlusCircle />
+                        <span>{t("add_workspace")}</span>
                       </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+                {sidebarWorkspacesLoading && (
+                  <div className="px-2 py-3 text-sm text-muted-foreground">
+                    {t("loading_workspaces")}
+                  </div>
+                )}
+                {sidebarWorkspaces?.map((workspace) => {
+                  const active = location.pathname.includes(
+                    `/workspaces/${encodeURIComponent(workspace.name)}`,
+                  );
+                  return (
+                    <SidebarMenuItem key={workspace.name}>
+                      <SidebarMenuButton asChild isActive={active}>
+                        <Link to={workspaceLink(workspace.name)}>
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate">{workspace.name}</span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              {driverLabel(workspace.selectedDriver) || t("not_selected")}
+                            </span>
+                          </span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+                {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
+                  <div className="px-2 py-3 text-sm text-muted-foreground">
+                    {t("no_workspaces")}
+                  </div>
+                )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
 
-                      {sidebarWorkspacesLoading && (
-                        <div className="box-border w-full min-w-0 rounded-[1.1rem] border border-border bg-white px-4 py-3 text-sm text-muted-foreground">
-                          {t("loading_workspaces")}
-                        </div>
-                      )}
-
-                      {sidebarWorkspaces?.map((workspace) => {
-                        const active = location.pathname.includes(
-                          `/workspaces/${encodeURIComponent(workspace.name)}`,
-                        );
-                        return (
-                          <Link
-                            key={workspace.name}
-                            to={workspaceLink(workspace.name)}
-                            className={[
-                              "box-border block w-full min-w-0 rounded-[1.1rem] border px-4 py-3 transition",
-                              active
-                                ? "border-primary/30 bg-primary/10 text-foreground"
-                                : "border-border bg-white hover:bg-muted/40",
-                            ].join(" ")}
-                          >
-                            <div className="flex min-w-0 items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium">
-                                  {workspace.name}
-                                </div>
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {driverLabel(workspace.selectedDriver) || t("not_selected")}
-                                </div>
-                              </div>
-                              <Badge variant={statusTone(workspace.status?.state)}>
-                                {translateState(workspace.status?.state, t)}
-                              </Badge>
-                            </div>
-                          </Link>
-                        );
-                      })}
-
-                      {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
-                        <div className="box-border w-full min-w-0 rounded-[1.1rem] border border-border bg-white px-4 py-3 text-sm text-muted-foreground">
-                          {t("no_workspaces")}
-                        </div>
-                      )}
-                </CardContent>
-              </Card>
+      <SidebarInset className="overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
+          <SidebarTrigger />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{t("app_name")}</div>
+          </div>
+          {activeUser && (
+            <div className="hidden w-[14rem] min-w-0 md:block">
+              <Select value={currentWorkspaceName} onValueChange={onWorkspaceChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("switch_workspace")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {sidebarWorkspaces?.map((workspace) => (
+                    <SelectItem key={workspace.name} value={workspace.name}>
+                      {workspace.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </aside>
-
-          <main className="grid w-full min-w-0 grid-cols-1 content-start gap-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-            {props.children}
-          </main>
+          )}
+          <div className="w-[12rem] min-w-0">
+            <Select value={activeUser?.id ?? ""} onValueChange={onUserChange}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("switch_user")} />
+              </SelectTrigger>
+              <SelectContent>
+                {props.users.map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.name || user.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setLanguage(language === "en" ? "zh" : "en")}
+          >
+            {language === "en" ? t("lang_zh") : t("lang_en")}
+          </Button>
+          {activeUser && (
+            <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
+              <Button variant="secondary">
+                {activeUser.name || activeUser.id}
+              </Button>
+            </Link>
+          )}
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+          {props.children}
         </div>
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
