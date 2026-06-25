@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Link,
@@ -39,6 +39,186 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+type Language = "en" | "zh";
+
+type LanguageContextValue = {
+  language: Language;
+  setLanguage: (value: Language) => void;
+  t: (key: string) => string;
+};
+
+const COPY: Record<Language, Record<string, string>> = {
+  en: {
+    app_name: "Polaris",
+    select_user: "Select a user",
+    switch_user: "Switch user",
+    switch_workspace: "Select workspace",
+    workspaces: "Workspaces",
+    add_workspace: "Add workspace",
+    loading_workspaces: "Loading workspaces...",
+    no_workspaces: "No workspaces yet.",
+    users: "Users",
+    select_user_route: "Select a user route to manage workspaces.",
+    loading_users: "Loading users...",
+    workspaces_title: "Workspaces",
+    loading_first_workspace: "Loading first workspace...",
+    opening_first_workspace: "Opening the first workspace.",
+    no_workspace_for_user: "No workspace exists yet for this user.",
+    workspace_name: "Workspace name",
+    provisioning: "Provisioning...",
+    create_workspace: "Create workspace",
+    switch_driver: "Switch driver",
+    switch_driver_desc: "Reuse the existing Polaris switch workflow.",
+    switching: "Switching...",
+    switch_workspace_action: "Switch workspace",
+    current_driver: "Current driver",
+    loading_workspace: "Loading workspace...",
+    workspace_state: "Workspace state",
+    daemon_pairing: "Daemon pairing",
+    backend: "Backend",
+    live_target: "Live target",
+    provisioning_title: "Provisioning",
+    open_live_target: "Open live target",
+    credentials: "Credentials",
+    credentials_for_user: "User-owned credentials for this user.",
+    loading_credentials: "Loading credentials...",
+    no_credentials: "No credentials found.",
+    user_profile: "User profile",
+    user_profile_desc: "Edit the active user information.",
+    loading_profile: "Loading profile...",
+    name: "Name",
+    email: "Email",
+    github_account: "GitHub account",
+    ssh_comment: "SSH comment",
+    user_id: "User id",
+    ssh_mode: "SSH mode",
+    tracked_workspaces: "Tracked workspaces",
+    purposes: "Purposes",
+    workspace_example: "morpheus",
+    select_driver: "Select driver",
+    create_suffix: "create",
+    no_backend_detail: "No backend detail.",
+    no_service_detail: "No service detail.",
+    no_profile_detail: "No profile detail.",
+    workspace_overview: "Workspace overview",
+    status_ready: "Ready",
+    status_unknown: "Unknown",
+    status_error: "Error",
+    status_failed: "Failed",
+    status_provisioning: "Provisioning",
+    status_not_selected: "Not selected",
+    none: "none",
+    saving: "Saving...",
+    save_profile: "Save profile",
+    not_selected: "not-selected",
+    unknown: "unknown",
+    ready: "ready",
+    lang_en: "EN",
+    lang_zh: "中文",
+    language: "Language",
+    profile: "Profile",
+  },
+  zh: {
+    app_name: "Polaris",
+    select_user: "选择用户",
+    switch_user: "切换用户",
+    switch_workspace: "选择工作空间",
+    workspaces: "工作空间",
+    add_workspace: "新增工作空间",
+    loading_workspaces: "正在加载工作空间…",
+    no_workspaces: "暂无工作空间。",
+    users: "用户",
+    select_user_route: "选择一个用户以管理其工作空间。",
+    loading_users: "正在加载用户…",
+    workspaces_title: "工作空间",
+    loading_first_workspace: "正在加载首个工作空间…",
+    opening_first_workspace: "正在打开首个工作空间。",
+    no_workspace_for_user: "该用户还没有工作空间。",
+    workspace_name: "工作空间名称",
+    provisioning: "正在准备…",
+    create_workspace: "创建工作空间",
+    switch_driver: "切换驱动",
+    switch_driver_desc: "复用现有的 Polaris 切换流程。",
+    switching: "切换中…",
+    switch_workspace_action: "切换工作空间",
+    current_driver: "当前驱动",
+    loading_workspace: "正在加载工作空间…",
+    workspace_state: "工作空间状态",
+    daemon_pairing: "配对状态",
+    backend: "后端",
+    live_target: "访问入口",
+    provisioning_title: "准备进度",
+    open_live_target: "打开访问入口",
+    credentials: "凭证",
+    credentials_for_user: "该用户所属的凭证。",
+    loading_credentials: "正在加载凭证…",
+    no_credentials: "暂无凭证。",
+    user_profile: "用户资料",
+    user_profile_desc: "编辑当前用户信息。",
+    loading_profile: "正在加载用户资料…",
+    name: "名称",
+    email: "邮箱",
+    github_account: "GitHub 账号",
+    ssh_comment: "SSH 注释",
+    user_id: "用户 ID",
+    ssh_mode: "SSH 模式",
+    tracked_workspaces: "已跟踪工作空间",
+    purposes: "用途",
+    workspace_example: "morpheus",
+    select_driver: "选择驱动",
+    create_suffix: "创建",
+    no_backend_detail: "暂无后端详情。",
+    no_service_detail: "暂无服务详情。",
+    no_profile_detail: "暂无用户配置详情。",
+    workspace_overview: "工作空间概览",
+    status_ready: "就绪",
+    status_unknown: "未知",
+    status_error: "错误",
+    status_failed: "失败",
+    status_provisioning: "准备中",
+    status_not_selected: "未选中",
+    none: "无",
+    saving: "保存中…",
+    save_profile: "保存资料",
+    not_selected: "未选中",
+    unknown: "未知",
+    ready: "就绪",
+    lang_en: "EN",
+    lang_zh: "中文",
+    language: "语言",
+    profile: "资料",
+  },
+};
+
+const LanguageContext = createContext<LanguageContextValue | null>(null);
+
+function useStoredLanguage(): [Language, (value: Language) => void] {
+  const [language, setLanguage] = useState<Language>(() => {
+    if (typeof window === "undefined") {
+      return "zh";
+    }
+    const stored = window.localStorage.getItem("polaris-language");
+    return stored === "en" ? "en" : "zh";
+  });
+
+  function updateLanguage(next: Language): void {
+    setLanguage(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("polaris-language", next);
+    }
+  }
+
+  return [language, updateLanguage];
+}
+
+function useLanguage(): LanguageContextValue {
+  const context = useContext(LanguageContext);
+  if (!context) {
+    throw new Error("Language context is not available");
+  }
+  return context;
+}
+
 function driverLabel(driver: { backend: string; profile?: string } | null): string {
   if (!driver) {
     return "not-selected";
@@ -46,6 +226,40 @@ function driverLabel(driver: { backend: string; profile?: string } | null): stri
   return driver.backend === "pod" && driver.profile
     ? `pod:${driver.profile}`
     : driver.backend;
+}
+
+function translateState(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (!value) {
+    return t("status_unknown");
+  }
+  switch (value) {
+    case "ready":
+      return t("status_ready");
+    case "unknown":
+      return t("status_unknown");
+    case "error":
+      return t("status_error");
+    case "failed":
+      return t("status_failed");
+    case "provisioning":
+      return t("status_provisioning");
+    case "not-selected":
+      return t("status_not_selected");
+    default:
+      return value;
+  }
+}
+
+function formatBackendValue(
+  data: PortalWorkspaceDetail,
+  t: (key: string) => string,
+): string {
+  const kind = data.status?.backend.kind ?? t("status_unknown");
+  const profile = data.status?.backend.profile ?? t("status_unknown");
+  return `${kind} / ${profile}`;
 }
 
 function statusTone(state?: string): "default" | "secondary" | "destructive" {
@@ -98,6 +312,7 @@ function PortalShell(props: {
   children: ReactNode;
   users: PortalProfileSummary[];
 }) {
+  const { language, setLanguage, t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const activeUser = props.users.find((user) =>
@@ -143,22 +358,14 @@ function PortalShell(props: {
         <Card>
           <CardContent className="grid gap-4 p-5 lg:flex lg:items-center lg:justify-between">
             <div className="grid min-w-0 gap-4 lg:flex lg:w-full lg:items-center lg:justify-between">
-              <Link
-                to={activeUser ? `/users/${encodeURIComponent(activeUser.id)}/profile` : "/"}
-                className="-m-2 min-w-0 rounded-[1rem] p-2 transition hover:bg-muted/40"
-              >
-                <div className="text-lg font-semibold">Polaris</div>
-                <div className="truncate text-sm text-muted-foreground">
-                  {activeUser
-                    ? `${activeUser.name || activeUser.id} · ${activeUser.email}`
-                    : "Select a user"}
-                </div>
-              </Link>
+              <div className="-m-2 min-w-0 rounded-[1rem] p-2">
+                <div className="text-lg font-semibold">{t("app_name")}</div>
+              </div>
               <div className="grid min-w-0 gap-3 lg:flex lg:min-w-0 lg:items-center">
                 <div className="w-full min-w-0 lg:max-w-[22rem]">
                   <Select value={activeUser?.id ?? ""} onValueChange={onUserChange}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Switch user" />
+                      <SelectValue placeholder={t("switch_user")} />
                     </SelectTrigger>
                     <SelectContent>
                       {props.users.map((user) => (
@@ -173,7 +380,7 @@ function PortalShell(props: {
                   <div className="w-full min-w-0 lg:hidden">
                     <Select value={currentWorkspaceName} onValueChange={onWorkspaceChange}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select workspace" />
+                        <SelectValue placeholder={t("switch_workspace")} />
                       </SelectTrigger>
                       <SelectContent>
                         {sidebarWorkspaces?.map((workspace) => (
@@ -184,6 +391,20 @@ function PortalShell(props: {
                       </SelectContent>
                     </Select>
                   </div>
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setLanguage(language === "en" ? "zh" : "en")}
+                >
+                  {language === "en" ? t("lang_zh") : t("lang_en")}
+                </Button>
+                {activeUser && (
+                  <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
+                    <Button variant="secondary">
+                      {activeUser.name || activeUser.id}
+                    </Button>
+                  </Link>
                 )}
               </div>
             </div>
@@ -197,7 +418,7 @@ function PortalShell(props: {
                 <CardHeader className="shrink-0 gap-2 pb-4">
                   <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                     <FolderKanban className="h-4 w-4" />
-                    Workspaces
+                    {t("workspaces")}
                   </div>
                 </CardHeader>
                 <CardContent className="grid min-h-0 auto-rows-max content-start flex-1 gap-2 overflow-y-auto pr-4">
@@ -207,13 +428,13 @@ function PortalShell(props: {
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <PlusCircle className="h-4 w-4" />
-                          <span className="truncate">Add workspace</span>
+                          <span className="truncate">{t("add_workspace")}</span>
                         </span>
                       </Link>
 
                       {sidebarWorkspacesLoading && (
                         <div className="box-border w-full min-w-0 rounded-[1.1rem] border border-border bg-white px-4 py-3 text-sm text-muted-foreground">
-                          Loading workspaces...
+                          {t("loading_workspaces")}
                         </div>
                       )}
 
@@ -238,11 +459,11 @@ function PortalShell(props: {
                                   {workspace.name}
                                 </div>
                                 <div className="truncate text-xs text-muted-foreground">
-                                  {driverLabel(workspace.selectedDriver)}
+                                  {driverLabel(workspace.selectedDriver) || t("not_selected")}
                                 </div>
                               </div>
                               <Badge variant={statusTone(workspace.status?.state)}>
-                                {workspace.status?.state ?? "unknown"}
+                                {translateState(workspace.status?.state, t)}
                               </Badge>
                             </div>
                           </Link>
@@ -251,7 +472,7 @@ function PortalShell(props: {
 
                       {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
                         <div className="box-border w-full min-w-0 rounded-[1.1rem] border border-border bg-white px-4 py-3 text-sm text-muted-foreground">
-                          No workspaces yet.
+                          {t("no_workspaces")}
                         </div>
                       )}
                 </CardContent>
@@ -269,6 +490,7 @@ function PortalShell(props: {
 }
 
 function OverviewPage() {
+  const { t } = useLanguage();
   const { data: users, error, loading } = useAsyncValue(listUsers, []);
   const { data: defaultUserId } = useAsyncValue(getDefaultUserId, []);
 
@@ -280,13 +502,13 @@ function OverviewPage() {
     <PortalShell users={users ?? []}>
       <Card>
         <CardHeader>
-          <CardTitle>Users</CardTitle>
+          <CardTitle>{t("users")}</CardTitle>
           <CardDescription>
-            Select a user route to manage workspaces.
+            {t("select_user_route")}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          {loading && <p className="text-sm text-muted-foreground">Loading users...</p>}
+          {loading && <p className="text-sm text-muted-foreground">{t("loading_users")}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
           {users?.map((user) => (
             <Link
@@ -305,6 +527,7 @@ function OverviewPage() {
 }
 
 function WorkspaceIndexPage() {
+  const { t } = useLanguage();
   const { userId = "" } = useParams();
   const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
@@ -342,32 +565,32 @@ function WorkspaceIndexPage() {
   return (
     <PortalShell users={users ?? []}>
         <Card>
-          <CardHeader>
-            <CardTitle>Workspaces</CardTitle>
+        <CardHeader>
+            <CardTitle>{t("workspaces_title")}</CardTitle>
           <CardDescription>
             {loading
-              ? "Loading first workspace..."
+              ? t("loading_first_workspace")
               : error
                 ? error
                 : workspaces?.length
-                  ? "Opening the first workspace."
-                  : `No workspace exists yet for ${userId}.`}
+                  ? t("opening_first_workspace")
+                  : t("no_workspace_for_user")}
           </CardDescription>
         </CardHeader>
         {!workspaces?.length && (
           <CardContent id="create-workspace">
             <form className="grid w-full gap-4" onSubmit={(event) => void handleCreate(event)}>
               <div className="grid gap-2">
-                <Label htmlFor="workspace-name">Workspace name</Label>
+                <Label htmlFor="workspace-name">{t("workspace_name")}</Label>
                 <Input
                   id="workspace-name"
                   value={workspaceName}
                   onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="morpheus"
+                  placeholder={t("workspace_example")}
                 />
               </div>
               <Button className="justify-self-start" disabled={creating || workspaceName.trim().length === 0}>
-                {creating ? "Provisioning..." : "Create workspace"}
+                {creating ? t("provisioning") : t("create_workspace")}
               </Button>
             </form>
           </CardContent>
@@ -378,6 +601,7 @@ function WorkspaceIndexPage() {
 }
 
 function WorkspaceDetailPage() {
+  const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(
@@ -411,22 +635,22 @@ function WorkspaceDetailPage() {
       <div className="grid w-full grid-cols-1 content-start gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Switch driver</CardTitle>
+            <CardTitle>{t("switch_driver")}</CardTitle>
             <CardDescription>
-              Reuse the existing Polaris switch workflow.
+              {t("switch_driver_desc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid w-full gap-4">
             <Select value={driver} onValueChange={setDriver}>
               <SelectTrigger>
-                <SelectValue placeholder="Select driver" />
+                <SelectValue placeholder={t("select_driver")} />
               </SelectTrigger>
               <SelectContent>
                 {data?.availableDrivers.map((item) => {
                   const label = driverLabel(item);
                   return (
                     <SelectItem key={label} value={label}>
-                      {item.available ? label : `${label} (create)`}
+                      {item.available ? label : `${label} (${t("create_suffix")})`}
                     </SelectItem>
                   );
                 })}
@@ -434,45 +658,46 @@ function WorkspaceDetailPage() {
             </Select>
             <Button className="justify-self-start" onClick={() => void handleSwitch()} disabled={switching || !driver}>
               <RefreshCw className="h-4 w-4" />
-              {switching ? "Switching..." : "Switch workspace"}
+              {switching ? t("switching") : t("switch_workspace_action")}
             </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>{workspaceName}</CardTitle>
+            <CardTitle>{t("workspace_overview")}</CardTitle>
             <CardDescription>
-              Current driver: {data ? driverLabel(data.selectedDriver) : "loading"}
+              {workspaceName} · {t("current_driver")}:{" "}
+              {data ? driverLabel(data.selectedDriver) : t("loading_workspace")}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            {loading && <p className="text-sm text-muted-foreground">Loading workspace...</p>}
+            {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
             {data && (
               <>
                 <div className="grid gap-3 md:grid-cols-2">
                   <MetricCard
-                    label="Workspace state"
-                    value={data.status?.state ?? "unknown"}
+                    label={t("workspace_state")}
+                    value={translateState(data.status?.state, t)}
                   />
                   <MetricCard
-                    label="Daemon pairing"
-                    value={data.status?.daemon?.pairing?.state ?? "unknown"}
+                    label={t("daemon_pairing")}
+                    value={translateState(data.status?.daemon?.pairing?.state, t)}
                   />
                   <MetricCard
-                    label="Backend"
-                    value={`${data.status?.backend.kind ?? "unknown"} / ${data.status?.backend.profile ?? "unknown"}`}
+                    label={t("backend")}
+                    value={formatBackendValue(data, t)}
                   />
                   <MetricCard
-                    label="Live target"
-                    value={data.liveTarget ?? "not-ready"}
+                    label={t("live_target")}
+                    value={data.liveTarget ?? t("status_unknown")}
                   />
                 </div>
                 {data.progress && (
                   <Card className="border-dashed bg-background/80 shadow-none">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Provisioning</CardTitle>
+                      <CardTitle className="text-base">{t("provisioning_title")}</CardTitle>
                       <CardDescription>{data.progress.message}</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-2">
@@ -485,9 +710,15 @@ function WorkspaceDetailPage() {
                   </Card>
                 )}
                 <div className="box-border grid w-full min-w-0 gap-2 rounded-[1.25rem] border border-border bg-white p-4 text-sm text-muted-foreground">
-                  <div className="min-w-0 break-words">{data.status?.details.backendDetail ?? "no backend detail"}</div>
-                  <div className="min-w-0 break-words">{data.status?.details.serviceDetail ?? "no service detail"}</div>
-                  <div className="min-w-0 break-words">{data.status?.details.userProfileDetail ?? "no profile detail"}</div>
+                  <div className="min-w-0 break-words">
+                    {data.status?.details.backendDetail ?? t("no_backend_detail")}
+                  </div>
+                  <div className="min-w-0 break-words">
+                    {data.status?.details.serviceDetail ?? t("no_service_detail")}
+                  </div>
+                  <div className="min-w-0 break-words">
+                    {data.status?.details.userProfileDetail ?? t("no_profile_detail")}
+                  </div>
                 </div>
                 {data.liveTarget && (
                   <a
@@ -496,7 +727,7 @@ function WorkspaceDetailPage() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Open live target
+                    {t("open_live_target")}
                     <ArrowUpRight className="h-4 w-4" />
                   </a>
                 )}
@@ -519,6 +750,7 @@ function MetricCard(props: { label: string; value: string }) {
 }
 
 function CredentialsPage() {
+  const { language, t } = useLanguage();
   const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(() => listCredentials(userId), [userId]);
@@ -527,15 +759,17 @@ function CredentialsPage() {
     <PortalShell users={users ?? []}>
       <Card>
         <CardHeader>
-          <CardTitle>Credentials</CardTitle>
+          <CardTitle>{t("credentials")}</CardTitle>
           <CardDescription>
-            User-owned credentials for {userId}
+            {t("credentials_for_user")}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
-          {loading && <p className="text-sm text-muted-foreground">Loading credentials...</p>}
+          {loading && <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
-          {data?.map((credential) => <CredentialCard key={credential.id} credential={credential} />)}
+          {data?.map((credential) => (
+            <CredentialCard key={credential.id} credential={credential} language={language} />
+          ))}
         </CardContent>
       </Card>
     </PortalShell>
@@ -543,6 +777,7 @@ function CredentialsPage() {
 }
 
 function ProfilePage() {
+  const { language, t } = useLanguage();
   const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data: profile, error, loading } = useAsyncValue(() => getUserProfile(userId), [userId]);
@@ -587,26 +822,26 @@ function ProfilePage() {
       <div className="grid w-full grid-cols-1 content-start gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>User profile</CardTitle>
+            <CardTitle>{t("user_profile")}</CardTitle>
             <CardDescription>
-              Edit the active user information for {userId}.
+              {t("user_profile_desc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {loading && <p className="text-sm text-muted-foreground">Loading profile...</p>}
+            {loading && <p className="text-sm text-muted-foreground">{t("loading_profile")}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
             {profile && (
               <form className="grid gap-4" onSubmit={(event) => void handleSave(event)}>
                 <div className="grid gap-2">
-                  <Label htmlFor="profile-name">Name</Label>
+                  <Label htmlFor="profile-name">{t("name")}</Label>
                   <Input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="profile-email">Email</Label>
+                  <Label htmlFor="profile-email">{t("email")}</Label>
                   <Input id="profile-email" value={email} onChange={(event) => setEmail(event.target.value)} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="profile-github">GitHub account</Label>
+                  <Label htmlFor="profile-github">{t("github_account")}</Label>
                   <Input
                     id="profile-github"
                     value={githubAccount}
@@ -614,7 +849,7 @@ function ProfilePage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="profile-ssh-comment">SSH comment</Label>
+                  <Label htmlFor="profile-ssh-comment">{t("ssh_comment")}</Label>
                   <Input
                     id="profile-ssh-comment"
                     value={sshComment}
@@ -622,12 +857,12 @@ function ProfilePage() {
                   />
                 </div>
                 <div className="grid gap-2 text-sm text-muted-foreground">
-                  <div>User id: {profile.id}</div>
-                  <div>SSH mode: {profile.sshMode ?? "unknown"}</div>
-                  <div>Tracked workspaces: {profile.workspaces.join(", ") || "none"}</div>
+                  <div>{t("user_id")}: {profile.id}</div>
+                  <div>{t("ssh_mode")}: {profile.sshMode ?? t("unknown")}</div>
+                  <div>{t("tracked_workspaces")}: {profile.workspaces.join(", ") || t("none")}</div>
                 </div>
                 <Button className="justify-self-start" disabled={saving}>
-                  {saving ? "Saving..." : "Save profile"}
+                  {saving ? t("saving") : t("save_profile")}
                 </Button>
               </form>
             )}
@@ -635,17 +870,17 @@ function ProfilePage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Credentials</CardTitle>
+            <CardTitle>{t("credentials")}</CardTitle>
             <CardDescription>
-              User-owned credentials for this profile.
+              {t("credentials_for_user")}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             {credentials?.map((credential) => (
-              <CredentialCard key={credential.id} credential={credential} />
+              <CredentialCard key={credential.id} credential={credential} language={language} />
             ))}
             {!credentials?.length && (
-              <p className="text-sm text-muted-foreground">No credentials found.</p>
+              <p className="text-sm text-muted-foreground">{t("no_credentials")}</p>
             )}
           </CardContent>
         </Card>
@@ -654,8 +889,12 @@ function ProfilePage() {
   );
 }
 
-function CredentialCard(props: { credential: PortalCredentialSummary }) {
-  const { credential } = props;
+function CredentialCard(props: {
+  credential: PortalCredentialSummary;
+  language: Language;
+}) {
+  const { credential, language } = props;
+  const t = (key: string): string => COPY[language][key] ?? key;
   return (
     <div className="box-border grid w-full min-w-0 gap-3 rounded-[1.25rem] border border-border bg-white p-4 md:grid-cols-[1fr_auto]">
       <div className="grid gap-1">
@@ -665,12 +904,12 @@ function CredentialCard(props: { credential: PortalCredentialSummary }) {
         </div>
         <div className="min-w-0 break-words text-sm text-muted-foreground">{credential.id}</div>
         <div className="min-w-0 break-words text-sm text-muted-foreground">
-          Purposes: {credential.purposes.join(", ") || "none"}
+          {t("purposes")}: {credential.purposes.join(", ") || t("none")}
         </div>
       </div>
       <div className="flex flex-col items-start gap-2 md:items-end">
         <Badge variant={credential.status === "ready" ? "default" : "secondary"}>
-          {credential.status}
+          {translateState(credential.status, t)}
         </Badge>
         {credential.paths.map((item) => (
           <div key={item} className="min-w-0 break-words text-xs text-muted-foreground">
@@ -683,13 +922,22 @@ function CredentialCard(props: { credential: PortalCredentialSummary }) {
 }
 
 export default function App() {
+  const [language, setLanguage] = useStoredLanguage();
+  const value: LanguageContextValue = {
+    language,
+    setLanguage,
+    t: (key: string): string => COPY[language][key] ?? key,
+  };
+
   return (
-    <Routes>
-      <Route path="/" element={<OverviewPage />} />
-      <Route path="/users/:userId/profile" element={<ProfilePage />} />
-      <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
-      <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
-      <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
-    </Routes>
+    <LanguageContext.Provider value={value}>
+      <Routes>
+        <Route path="/" element={<OverviewPage />} />
+        <Route path="/users/:userId/profile" element={<ProfilePage />} />
+        <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
+        <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+        <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+      </Routes>
+    </LanguageContext.Provider>
   );
 }
