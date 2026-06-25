@@ -33,6 +33,16 @@ declare const _default: {
                     DEFAULT: string;
                     foreground: string;
                 };
+                sidebar: {
+                    DEFAULT: string;
+                    foreground: string;
+                    primary: string;
+                    'primary-foreground': string;
+                    accent: string;
+                    'accent-foreground': string;
+                    border: string;
+                    ring: string;
+                };
             };
             borderRadius: {
                 lg: string;
