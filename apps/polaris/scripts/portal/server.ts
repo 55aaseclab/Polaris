@@ -3,8 +3,9 @@ import { URL } from "node:url";
 import {
   listPortalProfiles,
   parsePortalDriverTarget,
+  readPortalProfile,
   type PortalProfileSummary,
-  type PortalSessionContext,
+  updatePortalProfile,
 } from "../core/portal.js";
 import {
   getPortalWorkspaceDetail,
@@ -14,7 +15,6 @@ import {
   switchPortalWorkspace,
   upsertPortalCredential,
 } from "./service.js";
-import { renderCredentialsPage, renderProvisionPage, renderWorkspaceDetailPage, renderWorkspaceIndexPage } from "./render.js";
 
 type ParsedBody = Record<string, string>;
 
@@ -23,29 +23,32 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type",
   });
   res.end(payload);
 }
 
-function sendHtml(res: ServerResponse, statusCode: number, body: string): void {
+function sendText(
+  res: ServerResponse,
+  statusCode: number,
+  body: string,
+  contentType = "text/plain; charset=utf-8",
+): void {
   res.writeHead(statusCode, {
-    "content-type": "text/html; charset=utf-8",
+    "content-type": contentType,
     "content-length": Buffer.byteLength(body),
   });
   res.end(body);
 }
 
-function redirect(res: ServerResponse, location: string): void {
-  res.writeHead(302, { location });
-  res.end();
-}
-
 function notFound(res: ServerResponse): void {
-  sendHtml(res, 404, "<h1>Not found</h1>");
+  sendJson(res, 404, { error: "Not found" });
 }
 
 function badRequest(res: ServerResponse, message: string): void {
-  sendHtml(res, 400, `<h1>Bad request</h1><p>${message}</p>`);
+  sendJson(res, 400, { error: message });
 }
 
 function parseFormBody(raw: string): ParsedBody {
@@ -82,10 +85,6 @@ function routeSegments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
 }
 
-function getSelfRedirect(sessionUserId: string): string {
-  return `/users/${encodeURIComponent(sessionUserId)}/workspaces`;
-}
-
 function findProfile(userId: string): PortalProfileSummary | null {
   return listPortalProfiles().find((profile) => profile.id === userId) ?? null;
 }
@@ -93,16 +92,6 @@ function findProfile(userId: string): PortalProfileSummary | null {
 function defaultPortalUserId(): string | null {
   const firstProfile = listPortalProfiles()[0];
   return firstProfile?.id ?? null;
-}
-
-function routeSession(user: PortalProfileSummary): PortalSessionContext {
-  return {
-    clerkUserId: user.id,
-    polarisUserId: user.id,
-    email: user.email,
-    roles: [],
-    isAdmin: false,
-  };
 }
 
 function requireProfile(
@@ -182,8 +171,19 @@ async function handleCredentialUpsert(
   sendJson(res, 200, saved);
 }
 
-function renderHomeRedirect(sessionUserId: string): string {
-  return getSelfRedirect(sessionUserId);
+async function handleProfileUpdate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const updated = updatePortalProfile(userId, {
+    ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+    ...(body.email !== undefined ? { email: body.email.trim() } : {}),
+    ...(body.githubAccount !== undefined ? { githubAccount: body.githubAccount.trim() } : {}),
+    ...(body.sshComment !== undefined ? { sshComment: body.sshComment.trim() } : {}),
+  });
+  sendJson(res, 200, updated);
 }
 
 function isApiPath(segments: string[]): boolean {
@@ -195,23 +195,42 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const segments = routeSegments(url);
-
-      if (segments.length === 0) {
-        const userId = defaultPortalUserId();
-        if (!userId) {
-          notFound(res);
-          return;
-        }
-        redirect(res, renderHomeRedirect(userId));
+      if (req.method === "OPTIONS" && isApiPath(segments)) {
+        res.writeHead(204, {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,OPTIONS",
+          "access-control-allow-headers": "content-type",
+        });
+        res.end();
         return;
       }
 
-      if (segments[0] === "users" && segments.length === 2) {
-        redirect(res, `/users/${encodeURIComponent(segments[1])}/workspaces`);
+      if (segments.length === 0) {
+        sendJson(res, 200, {
+          service: "polaris-portal-api",
+          defaultUserId: defaultPortalUserId(),
+          endpoints: [
+            "/api/default-user",
+            "/api/users",
+            "/api/users/:userId/workspaces",
+            "/api/users/:userId/workspaces/:workspaceName",
+            "/api/users/:userId/credentials",
+          ],
+        });
         return;
       }
 
       if (isApiPath(segments)) {
+        if (segments.length === 2 && segments[1] === "users") {
+          sendJson(res, 200, listPortalProfiles());
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "default-user") {
+          sendJson(res, 200, {
+            defaultUserId: defaultPortalUserId(),
+          });
+          return;
+        }
         if (segments[1] === "session") {
           sendJson(res, 200, {
             authEnabled: false,
@@ -234,6 +253,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             user: profile,
             workspaces: listPortalWorkspaces(routeUserId),
           });
+          return;
+        }
+        if (segments[3] === "profile" && segments.length === 4 && req.method === "GET") {
+          sendJson(res, 200, readPortalProfile(routeUserId));
+          return;
+        }
+        if (segments[3] === "profile" && segments.length === 4 && req.method === "POST") {
+          await handleProfileUpdate(req, res, routeUserId);
           return;
         }
         if (segments[3] === "credentials" && segments.length === 4) {
@@ -274,93 +301,13 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         return;
       }
 
-      if (segments[0] === "users" && segments[2] === "workspaces" && req.method === "GET" && segments.length === 3) {
-        const routeUserId = decodeURIComponent(segments[1]);
-        const profile = requireProfile(res, routeUserId);
-        if (!profile) {
-          notFound(res);
-          return;
-        }
-        sendHtml(res, 200, renderWorkspaceIndexPage({
-          session: routeSession(profile),
-          user: profile,
-          workspaces: listPortalWorkspaces(routeUserId),
-        }));
-        return;
-      }
-
-      if (segments[0] === "users" && segments[2] === "credentials" && req.method === "GET" && segments.length === 3) {
-        const routeUserId = decodeURIComponent(segments[1]);
-        const profile = requireProfile(res, routeUserId);
-        if (!profile) {
-          notFound(res);
-          return;
-        }
-        sendHtml(res, 200, renderCredentialsPage({
-          session: routeSession(profile),
-          user: profile,
-          credentials: listUserPortalCredentials(routeUserId),
-        }));
-        return;
-      }
-
-      if (segments[0] === "users" && segments[2] === "workspaces" && req.method === "GET" && segments.length === 4) {
-        const routeUserId = decodeURIComponent(segments[1]);
-        const workspaceName = decodeURIComponent(segments[3]);
-        const profile = requireProfile(res, routeUserId);
-        if (!profile) {
-          notFound(res);
-          return;
-        }
-        sendHtml(res, 200, renderWorkspaceDetailPage({
-          session: routeSession(profile),
-          user: profile,
-          workspace: getPortalWorkspaceDetail(routeUserId, workspaceName),
-        }));
-        return;
-      }
-
-      if (segments[0] === "users" && segments[2] === "workspaces" && segments.length === 3 && req.method === "POST") {
-        const routeUserId = decodeURIComponent(segments[1]);
-        const profile = requireProfile(res, routeUserId);
-        if (!profile) {
-          return;
-        }
-        const body = await readBody(req);
-        const workspaceName = body.workspaceName?.trim();
-        if (!workspaceName) {
-          badRequest(res, "workspaceName is required");
-          return;
-        }
-        void provisionWorkspace(routeUserId, workspaceName);
-        sendHtml(res, 202, renderProvisionPage({
-          session: routeSession(profile),
-          user: profile,
-          workspace: getPortalWorkspaceDetail(routeUserId, workspaceName),
-        }));
-        return;
-      }
-
-      if (segments[0] === "users" && segments[2] === "workspaces" && segments.length === 5 && segments[4] === "switch" && req.method === "POST") {
-        const routeUserId = decodeURIComponent(segments[1]);
-        const workspaceName = decodeURIComponent(segments[3]);
-        const profile = requireProfile(res, routeUserId);
-        if (!profile) {
-          return;
-        }
-        const body = await readBody(req);
-        const driver = body.driver?.trim();
-        if (!driver) {
-          badRequest(res, "driver is required");
-          return;
-        }
-        await handleWorkspaceSwitch(req, res, routeUserId, workspaceName);
-        return;
-      }
-
       notFound(res);
     } catch (error) {
-      sendHtml(res, 500, `<h1>Portal error</h1><pre>${String(error instanceof Error ? error.message : error)}</pre>`);
+      sendText(
+        res,
+        500,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }).listen(port, host);
 }

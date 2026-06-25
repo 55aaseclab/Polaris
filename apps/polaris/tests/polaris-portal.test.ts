@@ -118,10 +118,50 @@ test("portal API serves route-scoped workspaces and credentials without auth", a
   });
 });
 
-test("portal root redirects to the first available user workspace", async () => {
+test("portal API reads and updates user profiles", async () => {
+  const userId = "100000000000000001";
+  const original = fs.readFileSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), "utf8");
+
   await withPortalServer(async (baseUrl) => {
-    const response = await fetch(baseUrl, { redirect: "manual" });
-    assert.equal(response.status, 302);
-    assert.equal(response.headers.get("location"), "/users/100000000000000001/workspaces");
+    const getResponse = await fetch(`${baseUrl}/api/users/${userId}/profile`);
+    assert.equal(getResponse.status, 200);
+    const profile = await getResponse.json() as { name: string; email: string };
+    assert.equal(profile.name, "Demo User");
+
+    const postResponse = await fetch(`${baseUrl}/api/users/${userId}/profile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Demo User Updated",
+        email: "demo@example.com",
+        githubAccount: "demo-account",
+        sshComment: "demo@example.com",
+      }),
+    });
+    assert.equal(postResponse.status, 200);
+    const updated = await postResponse.json() as { name: string; githubAccount?: string };
+    assert.equal(updated.name, "Demo User Updated");
+    assert.equal(updated.githubAccount, "demo-account");
+  });
+
+  fs.writeFileSync(
+    path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
+    original,
+    "utf8",
+  );
+});
+
+test("portal root advertises the API surface and default user", async () => {
+  await withPortalServer(async (baseUrl) => {
+    const response = await fetch(baseUrl);
+    assert.equal(response.status, 200);
+    const payload = await response.json() as {
+      service: string;
+      defaultUserId: string | null;
+      endpoints: string[];
+    };
+    assert.equal(payload.service, "polaris-portal-api");
+    assert.equal(payload.defaultUserId, "100000000000000001");
+    assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
   });
 });
