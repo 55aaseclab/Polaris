@@ -138,8 +138,8 @@ function PortalShell(props: {
   }
 
   return (
-    <div className="box-border w-full px-4 py-4 sm:px-6 sm:py-6">
-      <div className="grid w-full grid-cols-1 content-start gap-6">
+    <div className="box-border w-full px-4 py-4 sm:px-6 sm:py-6 lg:h-dvh lg:overflow-hidden">
+      <div className="grid w-full grid-cols-1 content-start gap-6 lg:h-full lg:grid-rows-[auto,minmax(0,1fr)]">
         <Card>
           <CardContent className="grid gap-4 p-5 lg:flex lg:items-center lg:justify-between">
             <div className="grid min-w-0 gap-4 lg:flex lg:w-full lg:items-center lg:justify-between">
@@ -147,7 +147,7 @@ function PortalShell(props: {
                 to={activeUser ? `/users/${encodeURIComponent(activeUser.id)}/profile` : "/"}
                 className="-m-2 min-w-0 rounded-[1rem] p-2 transition hover:bg-muted/40"
               >
-                <div className="text-lg font-semibold">Portal</div>
+                <div className="text-lg font-semibold">Polaris</div>
                 <div className="truncate text-sm text-muted-foreground">
                   {activeUser
                     ? `${activeUser.name || activeUser.id} · ${activeUser.email}`
@@ -190,17 +190,17 @@ function PortalShell(props: {
           </CardContent>
         </Card>
 
-        <div className="grid w-full min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="hidden lg:block">
-            <div className="lg:sticky lg:top-6">
-              <Card className="overflow-hidden">
-                <CardHeader className="gap-6 pb-6">
-                  <div>
-                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                      <FolderKanban className="h-4 w-4" />
-                      Workspaces
-                    </div>
-                    <div className="grid gap-2">
+        <div className="grid w-full min-w-0 grid-cols-1 items-start gap-6 lg:min-h-0 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
+          <aside className="hidden lg:block lg:min-h-0">
+            <div className="h-full min-h-0">
+              <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+                <CardHeader className="shrink-0 gap-2 pb-4">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    <FolderKanban className="h-4 w-4" />
+                    Workspaces
+                  </div>
+                </CardHeader>
+                <CardContent className="grid min-h-0 auto-rows-max content-start flex-1 gap-2 overflow-y-auto pr-4">
                       <Link
                         to={`${userWorkspaceIndexLink()}#create-workspace`}
                         className="box-border block w-full min-w-0 rounded-[1.1rem] border border-dashed border-primary/35 bg-primary/5 px-4 py-3 text-sm font-medium text-primary transition hover:bg-primary/10"
@@ -254,14 +254,12 @@ function PortalShell(props: {
                           No workspaces yet.
                         </div>
                       )}
-                    </div>
-                  </div>
-                </CardHeader>
+                </CardContent>
               </Card>
             </div>
           </aside>
 
-          <main className="grid w-full min-w-0 grid-cols-1 content-start gap-6">
+          <main className="grid w-full min-w-0 grid-cols-1 content-start gap-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
             {props.children}
           </main>
         </div>
