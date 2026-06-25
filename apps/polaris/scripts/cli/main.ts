@@ -9,12 +9,13 @@ import { statusCommand } from "./commands/status.js";
 import { reconcileCommand } from "./commands/reconcile.js";
 import { logsCommand } from "./commands/logs.js";
 import { switchCommand } from "./commands/switch.js";
+import { portalCommand } from "./commands/portal.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch"]);
+const COMMANDS = new Set(["create", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch", "portal"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <status|create|start|stop|restart|rebuild|apply|render|reconcile|logs|switch> <project>");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <status|create|start|stop|restart|rebuild|apply|render|reconcile|logs|switch|portal> <project>");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -23,6 +24,10 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   const [first, second] = argv;
+  if (first === "portal") {
+    await portalCommand(second, argv[2]);
+    return;
+  }
   const command = COMMANDS.has(first) ? first : "status";
   const project = COMMANDS.has(first) ? second : first;
   if (!project) {
