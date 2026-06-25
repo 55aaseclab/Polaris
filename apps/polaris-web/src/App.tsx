@@ -11,7 +11,6 @@ import {
   useParams,
 } from "react-router-dom";
 import {
-  ArrowUpRight,
   ChevronRight,
   CircleUser,
   FolderKanban,
@@ -135,7 +134,6 @@ const COPY: Record<Language, Record<string, string>> = {
     backend: "Backend",
     live_target: "Live target",
     provisioning_title: "Provisioning",
-    open_live_target: "Open live target",
     base_dockerfile: "Base Dockerfile",
     workspace_specs: "Workspace specs",
     generated_manifests: "Generated manifests",
@@ -263,7 +261,6 @@ const COPY: Record<Language, Record<string, string>> = {
     backend: "后端",
     live_target: "访问入口",
     provisioning_title: "准备进度",
-    open_live_target: "打开访问入口",
     base_dockerfile: "基础 Dockerfile",
     workspace_specs: "工作空间规格",
     generated_manifests: "生成的清单",
@@ -509,6 +506,53 @@ function translatePaseoState(
   return t("paseo_unknown");
 }
 
+function extractOfferFragment(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const fragment = "#offer=";
+  const index = trimmed.indexOf(fragment);
+  if (index === -1) {
+    return null;
+  }
+  const encoded = trimmed.slice(index + fragment.length).trim();
+  return encoded || null;
+}
+
+function configuredPaseoAppBaseUrl(): string | null {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  const configured = env?.VITE_PASEO_APP_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const url = new URL(window.location.href);
+  url.port = "8082";
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+function normalizePaseoPortalUrl(input: string | null | undefined): string | null {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  const offer = extractOfferFragment(trimmed);
+  if (!offer) {
+    return trimmed;
+  }
+  const appBaseUrl = configuredPaseoAppBaseUrl();
+  if (!appBaseUrl) {
+    return trimmed;
+  }
+  return `${appBaseUrl}/#offer=${offer}`;
+}
+
 function formatBackendValue(
   data: PortalWorkspaceDetail,
   t: (key: string) => string,
@@ -727,22 +771,13 @@ function PortalShell(props: {
                     const expanded = expandedWorkspaces.includes(workspace.name);
                     return (
                       <SidebarMenuItem key={workspace.name}>
-                        <SidebarMenuButton
-                          isActive={active}
-                          tooltip={workspace.name}
-                          aria-expanded={expanded}
-                          onClick={() => {
-                            setExpandedWorkspaces((current) =>
-                              current.includes(workspace.name)
-                                ? current.filter((value) => value !== workspace.name)
-                                : [...current, workspace.name],
-                            );
-                          }}
-                        >
+                        <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
+                          <Link to={workspaceLink(workspace.name)}>
                             <FolderKanban />
                             <span className="flex min-w-0 flex-col">
                               <span className="truncate">{workspace.name}</span>
                             </span>
+                          </Link>
                         </SidebarMenuButton>
                         <SidebarMenuAction
                           onClick={() => {
@@ -1035,6 +1070,9 @@ function WorkspaceDetailPage() {
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentPane = pathParts[4] ?? "";
   const assets = data?.status?.assets;
+  const embeddedPortalUrl = normalizePaseoPortalUrl(
+    data?.liveTarget ?? data?.status?.paseo?.liveTarget,
+  );
   const developmentSections: AssetSection[] = assets
     ? [
         {
@@ -1146,29 +1184,54 @@ function WorkspaceDetailPage() {
       );
     }
 
+    if (currentPane === "") {
+      return embeddedPortalUrl ? (
+        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-[1.25rem] border border-border bg-background shadow-sm">
+            <iframe
+              key={embeddedPortalUrl}
+              title={`${workspaceName} paseo`}
+              src={embeddedPortalUrl}
+              className="h-full min-h-[70dvh] w-full border-0"
+            />
+          </div>
+        </div>
+      ) : (
+        <EmptyPane
+          title={workspaceName}
+          description={t("pairing_unknown")}
+        />
+      );
+    }
+
     if (currentPane === "paseo") {
+      const liveTarget = normalizePaseoPortalUrl(
+        data.liveTarget ?? data.status?.paseo?.liveTarget,
+      );
       return (
-        <div className="grid gap-4">
-          <div className="grid gap-1">
-            <div className="text-sm font-medium text-muted-foreground">{t("paseo_status")}</div>
+        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col">
+          <div className="grid gap-1 pb-6">
+            <div className="text-sm font-medium text-muted-foreground">
+              {t("paseo_status")}
+            </div>
             <div className="text-base font-medium">
               {translatePaseoState(data.status?.daemon, t)}
             </div>
           </div>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+          <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-0 overflow-hidden border-y border-border">
+            <div className="grid gap-2 border-b border-border px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
               <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
                 {t("daemon_address")}
               </div>
-              <div className="mt-2 break-all text-sm font-medium">
+              <div className="break-all text-sm font-medium">
                 {data.status?.paseo?.daemonAddress ?? t("unknown")}
               </div>
             </div>
-            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+            <div className="grid gap-2 border-b border-border px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
               <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
                 {t("supported_harnesses")}
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                 {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
                   ? data.status?.paseo?.supportedHarnesses?.map((item) => (
                       <Badge key={item} variant="secondary">{item}</Badge>
@@ -1176,26 +1239,15 @@ function WorkspaceDetailPage() {
                   : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
               </div>
             </div>
-            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+            <div className="grid gap-2 px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
               <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
                 {t("live_target")}
               </div>
-              <div className="mt-2 break-all text-sm text-muted-foreground">
-                {data.liveTarget ?? data.status?.paseo?.liveTarget ?? t("unknown")}
+              <div className="break-all text-sm text-muted-foreground">
+                {liveTarget ?? t("unknown")}
               </div>
             </div>
           </div>
-          {data.status?.paseo?.liveTarget && (
-            <a
-              className="inline-flex items-center gap-2 text-sm font-medium text-primary"
-              href={data.status.paseo.liveTarget}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("open_live_target")}
-              <ArrowUpRight className="h-4 w-4" />
-            </a>
-          )}
         </div>
       );
     }

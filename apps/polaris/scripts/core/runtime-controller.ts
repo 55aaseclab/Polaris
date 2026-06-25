@@ -7,6 +7,7 @@ import type {
   WorkspaceSpec,
   WorkspaceStatus,
 } from "./workspace.js";
+import { normalizePairingUrl } from "./pairing-url.js";
 
 function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
   return workspace.runtime.authFiles.some((entry) => {
@@ -87,9 +88,10 @@ function daemonCheck(observed: BackendObservation["daemon"][keyof BackendObserva
   if (!observed) {
     return { state: "unknown" };
   }
+  const normalizedUrl = normalizePairingUrl(observed.url);
   return observed.observed
-    ? { state: "ok", detail: observed.detail, ...(observed.url ? { url: observed.url } : {}) }
-    : { state: "missing", detail: observed.detail, ...(observed.url ? { url: observed.url } : {}) };
+    ? { state: "ok", detail: observed.detail, ...(normalizedUrl ? { url: normalizedUrl } : {}) }
+    : { state: "missing", detail: observed.detail, ...(normalizedUrl ? { url: normalizedUrl } : {}) };
 }
 
 export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: BackendObservation): WorkspaceDrift {
@@ -193,6 +195,7 @@ export function synthesizeWorkspaceStatus(
   drift: WorkspaceDrift,
   lifecycleAction: WorkspaceStatus["lifecycleAction"],
 ): WorkspaceStatus {
+  const liveTarget = normalizePairingUrl(observation.daemon.pairing?.url) ?? null;
   const backendState = !observation.backend.exists
     ? "missing"
     : observation.backend.running
@@ -230,7 +233,7 @@ export function synthesizeWorkspaceStatus(
     paseo: {
       daemonAddress: workspace.agent.runtime.daemonAddress,
       supportedHarnesses: workspace.agent.harnesses,
-      liveTarget: observation.daemon.pairing?.url ?? null,
+      liveTarget,
     },
     details: {
       backendDetail: observation.backend.detail,

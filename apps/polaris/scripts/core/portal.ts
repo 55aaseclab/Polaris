@@ -3,6 +3,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { loadWorkspace } from "../config/load.js";
 import { buildStatusAssets } from "./status-assets.js";
+import { normalizePairingUrl } from "./pairing-url.js";
 import {
   readWorkspaceDriverSelection,
   workspaceSelectionPath,
@@ -337,7 +338,7 @@ export function clearWorkspaceProvisionProgress(userId: string, workspace: strin
 }
 
 export function resolveLiveTarget(status: WorkspaceStatus | null): string | null {
-  return status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url ?? null;
+  return normalizePairingUrl(status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url) ?? null;
 }
 
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
