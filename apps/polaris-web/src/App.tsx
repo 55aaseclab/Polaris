@@ -12,15 +12,20 @@ import {
 } from "react-router-dom";
 import {
   ArrowUpRight,
+  ChevronRight,
+  CircleUser,
   FolderKanban,
   Info,
+  CreditCard,
   PlusCircle,
   RefreshCw,
   Link2,
+  LogOut,
+  Settings2,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import {
-  createWorkspace,
   deleteWorkspace,
   getDefaultUserId,
   getUserProfile,
@@ -39,8 +44,16 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -48,10 +61,15 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarFooter,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
@@ -135,6 +153,17 @@ const COPY: Record<Language, Record<string, string>> = {
     no_credentials: "No credentials found.",
     user_profile: "User profile",
     user_profile_desc: "Edit the active user information.",
+    administration: "Administration",
+    administration_desc: "Switch users and manage portal-level actions.",
+    settings_title: "Settings",
+    settings_desc: "Choose the language used across the portal.",
+    workspace_controls: "Controls",
+    select_submenu: "Select a workspace submenu.",
+    sidebar_tier: "Free",
+    menu_upgrade: "Upgrade to Pro",
+    menu_account: "Account",
+    menu_billing: "Billing",
+    menu_logout: "Log out",
     loading_profile: "Loading profile...",
     name: "Name",
     email: "Email",
@@ -190,10 +219,12 @@ const COPY: Record<Language, Record<string, string>> = {
     not_selected: "not-selected",
     unknown: "unknown",
     ready: "ready",
+    settings: "Settings",
     lang_en: "EN",
     lang_zh: "中文",
     language: "Language",
     profile: "Profile",
+    empty_pane: "Empty pane",
   },
   zh: {
     app_name: "Polaris",
@@ -250,6 +281,17 @@ const COPY: Record<Language, Record<string, string>> = {
     no_credentials: "暂无凭证。",
     user_profile: "用户资料",
     user_profile_desc: "编辑当前用户信息。",
+    administration: "管理",
+    administration_desc: "切换用户并管理门户级操作。",
+    settings_title: "设置",
+    settings_desc: "选择整个门户使用的语言。",
+    workspace_controls: "控制",
+    select_submenu: "请选择工作空间子页面。",
+    sidebar_tier: "免费版",
+    menu_upgrade: "升级到 Pro",
+    menu_account: "账号",
+    menu_billing: "账单",
+    menu_logout: "退出登录",
     loading_profile: "正在加载用户资料…",
     name: "名称",
     email: "邮箱",
@@ -305,10 +347,12 @@ const COPY: Record<Language, Record<string, string>> = {
     not_selected: "未选中",
     unknown: "未知",
     ready: "就绪",
+    settings: "设置",
     lang_en: "EN",
     lang_zh: "中文",
     language: "语言",
     profile: "资料",
+    empty_pane: "空白页",
   },
 };
 
@@ -506,36 +550,36 @@ function WorkspaceAssetTable(props: {
   }
 
   return (
-    <div className="overflow-hidden border border-border bg-white">
+    <div className="overflow-hidden rounded-[1.25rem] border border-border bg-background shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[44rem] table-auto text-sm">
-          <thead className="bg-muted/35 text-left text-xs uppercase tracking-[0.14em] text-muted-foreground">
-            <tr>
+          <thead className="bg-muted/30 text-left text-xs uppercase tracking-[0.14em] text-muted-foreground">
+            <tr className="border-b border-border/70">
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_type")}</th>
-              <th className="px-4 py-3 font-medium">{props.t("asset_name")}</th>
-              <th className="px-4 py-3 w-full font-medium">{props.t("asset_path")}</th>
-              <th className="px-4 py-3 font-medium">{props.t("asset_details")}</th>
+              <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_name")}</th>
+              <th className="w-full px-4 py-3 font-medium">{props.t("asset_path")}</th>
+              <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_details")}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-border/50">
             {visibleSections.map((section) =>
               section.rows.map((row, index) => (
-                <tr key={`${section.label}:${row.name}:${row.path}`} className="border-t border-border/70 align-top">
+                <tr key={`${section.label}:${row.name}:${row.path}`} className="align-middle">
                   {index === 0 && (
-                    <td className="w-0 whitespace-nowrap px-4 py-3 align-middle text-right text-muted-foreground" rowSpan={section.rows.length}>
+                    <td className="w-0 whitespace-nowrap px-4 py-4 align-middle text-right text-muted-foreground" rowSpan={section.rows.length}>
                       {section.label}
                     </td>
                   )}
-                  <td className="whitespace-nowrap px-4 py-3">{row.name}</td>
-                  <td className="w-full px-4 py-3">
-                    <span className="inline-flex" title={row.path}>
-                      <Link2 className="h-4 w-4" />
+                  <td className="w-0 whitespace-nowrap px-4 py-4 text-right font-medium">{row.name}</td>
+                  <td className="w-full px-4 py-4">
+                    <span className="block max-w-full truncate text-sm text-muted-foreground" title={row.path}>
+                      {row.path}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                  <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
                     {row.detail ? (
-                      <span className="inline-flex" title={row.detail}>
-                        <Info className="h-4 w-4" />
+                      <span className="block max-w-[18rem] truncate text-sm" title={row.detail}>
+                        {row.detail}
                       </span>
                     ) : "-"}
                   </td>
@@ -589,7 +633,7 @@ function PortalShell(props: {
   children: ReactNode;
   users: PortalProfileSummary[];
 }) {
-  const { language, setLanguage, t } = useLanguage();
+  const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const activeUser = props.users.find((user) =>
@@ -603,56 +647,66 @@ function PortalShell(props: {
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId],
   );
-  const currentWorkspaceName = location.pathname.includes("/workspaces/")
-    ? decodeURIComponent(location.pathname.split("/workspaces/")[1] ?? "")
-    : "";
+  const pathParts = location.pathname.split("/").filter(Boolean);
+  const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
+  const currentWorkspacePane = pathParts[4] ?? "";
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>([]);
 
   function workspaceLink(workspaceName: string): string {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(workspaceName)}`;
+  }
+
+  function workspacePaneLink(workspaceName: string, pane?: string): string {
+    return pane ? `${workspaceLink(workspaceName)}/${pane}` : workspaceLink(workspaceName);
   }
 
   function userWorkspaceIndexLink(): string {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces`;
   }
 
-  function onUserChange(nextUserId: string): void {
-    if (!nextUserId) {
-      return;
-    }
-    navigate(`/users/${encodeURIComponent(nextUserId)}/workspaces`);
-  }
-
-  function onWorkspaceChange(nextWorkspace: string): void {
-    if (!nextWorkspace) {
-      return;
-    }
-    navigate(workspaceLink(nextWorkspace));
-  }
+  const activeUserInitial = (activeUser?.name || activeUser?.id || "?")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  const activeUserName = activeUser?.name || activeUser?.id || t("switch_user");
+  const currentPaneTitle = location.pathname.includes("/admin")
+    ? t("administration")
+    : currentWorkspacePane === "paseo"
+    ? t("paseo_status")
+    : currentWorkspacePane === "dev-env"
+      ? t("isolated_dev_env")
+      : currentWorkspacePane === "memory"
+        ? t("evolution_memory")
+        : currentWorkspacePane === "controls"
+          ? t("workspace_controls")
+          : location.pathname.includes("/workspaces/") && currentWorkspacePane === ""
+            ? currentWorkspaceName || t("empty_pane")
+          : location.pathname.includes("/workspaces/")
+            ? t("workspace_overview")
+            : t("app_name");
 
   return (
     <SidebarProvider defaultOpen>
       <Sidebar collapsible="offcanvas">
-        <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 text-lg font-semibold">{t("app_name")}</div>
-            {activeUser && (
-              <Badge variant="secondary" className="max-w-[10rem] truncate">
-                {activeUser.name || activeUser.id}
-              </Badge>
-            )}
+        <SidebarHeader className="p-4">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+            <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+              P
+            </div>
+            <div className="grid min-w-0 gap-0.5">
+              <div className="truncate text-sm font-medium leading-none">{t("app_name")}</div>
+              <div className="truncate text-xs text-muted-foreground">{t("sidebar_tier")}</div>
+            </div>
           </div>
         </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              <span className="flex items-center gap-2">
-                <FolderKanban className="h-4 w-4" />
+        <SidebarContent className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <SidebarGroup>
+              <SidebarGroupLabel>
                 {t("workspaces")}
-              </span>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {activeUser && (
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild>
                       <Link to={`${userWorkspaceIndexLink()}#create-workspace`}>
@@ -661,92 +715,190 @@ function PortalShell(props: {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                )}
-                {sidebarWorkspacesLoading && (
-                  <div className="px-2 py-3 text-sm text-muted-foreground">
-                    {t("loading_workspaces")}
-                  </div>
-                )}
-                {sidebarWorkspaces?.map((workspace) => {
-                  const active = location.pathname.includes(
-                    `/workspaces/${encodeURIComponent(workspace.name)}`,
-                  );
-                  return (
-                    <SidebarMenuItem key={workspace.name}>
-                      <SidebarMenuButton asChild isActive={active}>
-                        <Link to={workspaceLink(workspace.name)}>
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate">{workspace.name}</span>
-                            <span className="truncate text-xs text-muted-foreground">
-                              {driverLabel(workspace.selectedDriver) || t("not_selected")}
+                  {sidebarWorkspacesLoading && (
+                    <div className="px-2 py-3 text-sm text-muted-foreground">
+                      {t("loading_workspaces")}
+                    </div>
+                  )}
+                  {sidebarWorkspaces?.map((workspace) => {
+                    const active = location.pathname.includes(
+                      `/workspaces/${encodeURIComponent(workspace.name)}`,
+                    );
+                    const expanded = expandedWorkspaces.includes(workspace.name);
+                    return (
+                      <SidebarMenuItem key={workspace.name}>
+                        <SidebarMenuButton
+                          isActive={active}
+                          tooltip={workspace.name}
+                          aria-expanded={expanded}
+                          onClick={() => {
+                            setExpandedWorkspaces((current) =>
+                              current.includes(workspace.name)
+                                ? current.filter((value) => value !== workspace.name)
+                                : [...current, workspace.name],
+                            );
+                          }}
+                        >
+                            <FolderKanban />
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate">{workspace.name}</span>
                             </span>
-                          </span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-                {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
-                  <div className="px-2 py-3 text-sm text-muted-foreground">
-                    {t("no_workspaces")}
-                  </div>
-                )}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                        </SidebarMenuButton>
+                        <SidebarMenuAction
+                          onClick={() => {
+                            setExpandedWorkspaces((current) =>
+                              current.includes(workspace.name)
+                                ? current.filter((value) => value !== workspace.name)
+                                : [...current, workspace.name],
+                            );
+                          }}
+                          aria-label={expanded ? `Collapse ${workspace.name}` : `Expand ${workspace.name}`}
+                        >
+                          <ChevronRight className={[
+                            "h-4 w-4 transition-transform",
+                            expanded ? "rotate-90" : "",
+                          ].join(" ")} />
+                        </SidebarMenuAction>
+                        {expanded && (
+                          <SidebarMenuSub>
+                            <SidebarMenuSubItem>
+                              <SidebarMenuSubButton asChild>
+                                <Link to={workspacePaneLink(workspace.name, "paseo")}>
+                                  {t("paseo_status")}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                            <SidebarMenuSubItem>
+                              <SidebarMenuSubButton asChild>
+                                <Link to={workspacePaneLink(workspace.name, "dev-env")}>
+                                  {t("isolated_dev_env")}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                            <SidebarMenuSubItem>
+                              <SidebarMenuSubButton asChild>
+                                <Link to={workspacePaneLink(workspace.name, "memory")}>
+                                  {t("evolution_memory")}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                            <SidebarMenuSubItem>
+                              <SidebarMenuSubButton asChild>
+                                <Link to={workspacePaneLink(workspace.name, "controls")}>
+                                  {t("workspace_controls")}
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          </SidebarMenuSub>
+                        )}
+                      </SidebarMenuItem>
+                    );
+                  })}
+                  {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
+                    <div className="px-2 py-3 text-sm text-muted-foreground">
+                      {t("no_workspaces")}
+                    </div>
+                  )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </div>
+          {activeUser && (
+            <SidebarGroup className="shrink-0 pt-4">
+              <SidebarGroupLabel>
+                {t("administration")}
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname.includes("/admin")}>
+                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/admin`}>
+                        <CircleUser />
+                        <span>{t("switch_user")}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
         </SidebarContent>
+        {activeUser && (
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton
+                      size="lg"
+                      className="data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground"
+                    >
+                      <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                        {activeUserInitial}
+                      </div>
+                      <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                        <span className="truncate font-medium">
+                          {activeUserName}
+                        </span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {activeUser.email}
+                        </span>
+                      </div>
+                      <ChevronRight className="ml-auto h-4 w-4" />
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="end" className="w-64">
+                    <DropdownMenuLabel className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                        {activeUserInitial}
+                      </div>
+                      <div className="grid min-w-0 gap-0.5">
+                        <div className="truncate">{activeUserName}</div>
+                        <div className="truncate text-xs font-normal text-muted-foreground">
+                          {activeUser.email}
+                        </div>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem disabled>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      {t("menu_upgrade")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
+                        <CircleUser className="mr-2 h-4 w-4" />
+                        {t("menu_account")}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled>
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      {t("menu_billing")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/settings`}>
+                        <Settings2 className="mr-2 h-4 w-4" />
+                        {t("settings")}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem disabled>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      {t("menu_logout")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        )}
       </Sidebar>
 
       <SidebarInset className="overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background px-4">
           <SidebarTrigger />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{t("app_name")}</div>
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {currentPaneTitle}
           </div>
-          {activeUser && (
-            <div className="hidden w-[14rem] min-w-0 md:block">
-              <Select value={currentWorkspaceName} onValueChange={onWorkspaceChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("switch_workspace")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {sidebarWorkspaces?.map((workspace) => (
-                    <SelectItem key={workspace.name} value={workspace.name}>
-                      {workspace.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <div className="w-[12rem] min-w-0">
-            <Select value={activeUser?.id ?? ""} onValueChange={onUserChange}>
-              <SelectTrigger>
-                <SelectValue placeholder={t("switch_user")} />
-              </SelectTrigger>
-              <SelectContent>
-                {props.users.map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {user.name || user.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setLanguage(language === "en" ? "zh" : "en")}
-          >
-            {language === "en" ? t("lang_zh") : t("lang_en")}
-          </Button>
-          {activeUser && (
-            <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
-              <Button variant="secondary">
-                {activeUser.name || activeUser.id}
-              </Button>
-            </Link>
-          )}
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
           {props.children}
@@ -795,81 +947,80 @@ function OverviewPage() {
 
 function WorkspaceIndexPage() {
   const { t } = useLanguage();
-  const { userId = "" } = useParams();
-  const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
-  const { data: workspaces, error, loading } = useAsyncValue(
-    () => listWorkspaces(userId),
-    [userId],
-  );
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  async function handleCreate(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!workspaceName.trim()) {
-      return;
-    }
-    setCreating(true);
-    try {
-      await createWorkspace(userId, workspaceName.trim());
-      navigate(`/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName.trim())}`);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!workspaces?.length) {
-      return;
-    }
-    void navigate(
-      `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaces[0]!.name)}`,
-      { replace: true },
-    );
-  }, [navigate, userId, workspaces]);
 
   return (
     <PortalShell users={users ?? []}>
-        <Card>
-        <CardHeader>
-            <CardTitle>{t("workspaces_title")}</CardTitle>
-          <CardDescription>
-            {loading
-              ? t("loading_first_workspace")
-              : error
-                ? error
-                : workspaces?.length
-                  ? t("opening_first_workspace")
-                  : t("no_workspace_for_user")}
-          </CardDescription>
-        </CardHeader>
-        {!workspaces?.length && (
-          <CardContent id="create-workspace">
-            <form className="grid w-full gap-4" onSubmit={(event) => void handleCreate(event)}>
-              <div className="grid gap-2">
-                <Label htmlFor="workspace-name">{t("workspace_name")}</Label>
-                <Input
-                  id="workspace-name"
-                  value={workspaceName}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder={t("workspace_example")}
-                />
-              </div>
-              <Button className="justify-self-start" disabled={creating || workspaceName.trim().length === 0}>
-                {creating ? t("provisioning") : t("create_workspace")}
-              </Button>
-            </form>
-          </CardContent>
-        )}
-      </Card>
+      <EmptyPane
+        title={t("empty_pane")}
+        description={t("select_user_route")}
+      />
     </PortalShell>
+  );
+}
+
+function AdminPage() {
+  const { t } = useLanguage();
+  const { userId = "" } = useParams();
+  const navigate = useNavigate();
+  const { data: users } = useAsyncValue(listUsers, []);
+
+  return (
+    <PortalShell users={users ?? []}>
+      <div className="grid w-full gap-6">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{t("administration")}</div>
+          <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
+        </div>
+        <Separator />
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t("switch_user")}</div>
+            <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
+          </div>
+          <div className="w-full min-w-0 sm:w-[18rem]">
+            <Select
+              value={userId}
+              onValueChange={(value) => {
+                if (!value) {
+                  return;
+                }
+                navigate(`/users/${encodeURIComponent(value)}/admin`);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t("switch_user")} />
+              </SelectTrigger>
+              <SelectContent>
+                {(users ?? []).map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.name || user.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    </PortalShell>
+  );
+}
+
+function EmptyPane(props: { title: string; description: string }) {
+  return (
+    <div className="flex min-h-[40dvh] w-full items-center justify-center">
+      <div className="grid gap-2 text-center">
+        <div className="text-lg font-medium">{props.title}</div>
+        <div className="text-sm text-muted-foreground">{props.description}</div>
+      </div>
+    </div>
   );
 }
 
 function WorkspaceDetailPage() {
   const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(
@@ -881,6 +1032,8 @@ function WorkspaceDetailPage() {
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const pathParts = location.pathname.split("/").filter(Boolean);
+  const currentPane = pathParts[4] ?? "";
   const assets = data?.status?.assets;
   const developmentSections: AssetSection[] = assets
     ? [
@@ -895,28 +1048,28 @@ function WorkspaceDetailPage() {
         },
         {
           label: t("workspace_specs"),
-          rows: assets.specs.map((item) => ({
+          rows: (assets.specs ?? []).map((item) => ({
             name: `${item.driver} · ${item.file}`,
             path: item.path,
           })),
         },
         {
           label: t("generated_manifests"),
-          rows: assets.generatedManifests.map((item) => ({
+          rows: (assets.generatedManifests ?? []).map((item) => ({
             name: `${item.driver} · ${item.file}`,
             path: item.path,
           })),
         },
         {
           label: t("image_tags"),
-          rows: assets.imageTags.map((item) => ({
+          rows: (assets.imageTags ?? []).map((item) => ({
             name: item.name,
             path: item.tag,
           })),
         },
         {
           label: t("persistent_volumes"),
-          rows: assets.persistentVolumes.map((item) => ({
+          rows: (assets.persistentVolumes ?? []).map((item) => ({
             name: item.name,
             path: item.mountRoot,
             detail: [item.sourceRef ?? item.sourceKind, ...item.durablePaths].join(" | "),
@@ -983,212 +1136,198 @@ function WorkspaceDetailPage() {
     }
   }
 
-  return (
-    <PortalShell users={users ?? []}>
-      <div className="grid w-full grid-cols-1 content-start gap-6">
-        <Card>
-          <CardHeader className="gap-4">
-            <div className="min-w-0">
-              <CardTitle>{t("workspace_overview")}</CardTitle>
-              <CardDescription>
-                {workspaceName}
-                {" · "}
-                {data ? driverLabel(data.selectedDriver) : t("loading_workspace")}
-                {" · "}
-                {data ? translateWorkspaceRuntimeState(data.status?.state, t) : t("loading_workspace")}
-                {" · "}
-                {data ? translatePaseoState(data.status?.daemon, t) : t("loading_workspace")}
-              </CardDescription>
+  function renderPane(): ReactNode {
+    if (!data) {
+      return (
+        <EmptyPane
+          title={t("empty_pane")}
+          description={t("select_submenu")}
+        />
+      );
+    }
+
+    if (currentPane === "paseo") {
+      return (
+        <div className="grid gap-4">
+          <div className="grid gap-1">
+            <div className="text-sm font-medium text-muted-foreground">{t("paseo_status")}</div>
+            <div className="text-base font-medium">
+              {translatePaseoState(data.status?.daemon, t)}
             </div>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-            {data && (
-              <>
-                {data.progress && (
-                  <Card className="border-dashed bg-background/80 shadow-none">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">{t("provisioning_title")}</CardTitle>
-                      <CardDescription>{data.progress.message}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-2">
-                      <div className="flex justify-between text-sm text-muted-foreground">
-                        <span>{data.progress.phase}</span>
-                        <span>{data.progress.percent}%</span>
-                      </div>
-                      <Progress value={data.progress.percent} />
-                    </CardContent>
-                  </Card>
-                )}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                {t("daemon_address")}
+              </div>
+              <div className="mt-2 break-all text-sm font-medium">
+                {data.status?.paseo?.daemonAddress ?? t("unknown")}
+              </div>
+            </div>
+            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                {t("supported_harnesses")}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
+                  ? data.status?.paseo?.supportedHarnesses?.map((item) => (
+                      <Badge key={item} variant="secondary">{item}</Badge>
+                    ))
+                  : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
+              </div>
+            </div>
+            <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                {t("live_target")}
+              </div>
+              <div className="mt-2 break-all text-sm text-muted-foreground">
+                {data.liveTarget ?? data.status?.paseo?.liveTarget ?? t("unknown")}
+              </div>
+            </div>
+          </div>
+          {data.status?.paseo?.liveTarget && (
+            <a
+              className="inline-flex items-center gap-2 text-sm font-medium text-primary"
+              href={data.status.paseo.liveTarget}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("open_live_target")}
+              <ArrowUpRight className="h-4 w-4" />
+            </a>
+          )}
+        </div>
+      );
+    }
 
-                <div className="border border-border bg-white px-4">
-                  <Accordion type="multiple" className="w-full">
-                    <AccordionItem value="paseo">
-                      <AccordionTrigger>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                            {t("paseo_status")}
-                          </div>
-                          <div className="mt-1 text-sm font-normal text-muted-foreground">
-                            {translatePaseoState(data.status?.daemon, t)}
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="grid gap-3 lg:grid-cols-3">
-                          <div className="border border-border p-3">
-                            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                              {t("daemon_address")}
-                            </div>
-                            <div className="mt-1 break-all font-medium">
-                              {data.status?.paseo?.daemonAddress ?? t("unknown")}
-                            </div>
-                          </div>
-                          <div className="border border-border p-3">
-                            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                              {t("supported_harnesses")}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2">
-                              {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
-                                ? data.status?.paseo?.supportedHarnesses.map((item) => (
-                                    <Badge key={item} variant="secondary">{item}</Badge>
-                                  ))
-                                : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
-                            </div>
-                          </div>
-                          <div className="border border-border p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="min-w-0">
-                                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                                  {t("live_target")}
-                                </div>
-                                <div className="mt-1 break-all text-sm text-muted-foreground">
-                                  {data.liveTarget ?? data.status?.paseo?.liveTarget ?? t("unknown")}
-                                </div>
-                              </div>
-                              {data.status?.paseo?.liveTarget && (
-                                <a
-                                  className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-primary"
-                                  href={data.status.paseo.liveTarget}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {t("open_live_target")}
-                                  <ArrowUpRight className="h-4 w-4" />
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
+    if (currentPane === "dev-env") {
+      return (
+        <div className="grid gap-4">
+          <div className="grid gap-1">
+            <div className="text-sm font-medium text-muted-foreground">{t("isolated_dev_env")}</div>
+            <div className="text-base font-medium">{t("workspace_specs")}</div>
+          </div>
+          <WorkspaceAssetTable
+            t={t}
+            sections={developmentSections}
+            emptyLabel={t("no_assets")}
+          />
+        </div>
+      );
+    }
 
-                    <AccordionItem value="development">
-                      <AccordionTrigger>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                            {t("isolated_dev_env")}
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <WorkspaceAssetTable
-                          t={t}
-                          sections={developmentSections}
-                          emptyLabel={t("no_assets")}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
+    if (currentPane === "memory") {
+      return (
+        <div className="grid gap-4">
+          <div className="grid gap-1">
+            <div className="text-sm font-medium text-muted-foreground">{t("evolution_memory")}</div>
+            <div className="text-base font-medium">
+              {data.status?.evolution
+                ? `${data.status.evolution.artifactCount} ${t("evolution_assets")}`
+                : t("no_assets")}
+            </div>
+          </div>
+          <WorkspaceAssetTable
+            t={t}
+            sections={evolutionSections}
+            emptyLabel={t("no_assets")}
+          />
+        </div>
+      );
+    }
 
-                    <AccordionItem value="evolution">
-                      <AccordionTrigger>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                            {t("evolution_memory")}
-                          </div>
-                          {data.status?.evolution && (
-                            <div className="mt-1 text-sm font-normal text-muted-foreground">
-                              {data.status.evolution.artifactCount} {t("evolution_assets")}
-                            </div>
-                          )}
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <WorkspaceAssetTable
-                          t={t}
-                          sections={evolutionSections}
-                          emptyLabel={t("no_assets")}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
+    if (currentPane === "controls") {
+      return (
+        <div className="grid gap-4">
+          <div className="grid gap-1">
+            <div className="text-sm font-medium text-muted-foreground">{t("workspace_controls")}</div>
+            <div className="text-base font-medium">{workspaceName}</div>
+          </div>
+          <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
+            {data.progress && (
+              <div className="grid gap-2">
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>{data.progress.phase}</span>
+                  <span>{data.progress.percent}%</span>
                 </div>
-
-                <div className="grid gap-3 pt-2 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-end">
-                  <Select value={driver} onValueChange={setDriver}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={t("select_driver")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data.availableDrivers.map((item) => {
-                        const label = driverLabel(item);
-                        return (
-                          <SelectItem key={label} value={label}>
-                            {item.available ? label : `${label} (${t("create_suffix")})`}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
+                <Progress value={data.progress.percent} />
+              </div>
+            )}
+            <div className="mt-5 flex flex-wrap items-end gap-3">
+              <div className="w-full min-w-0 sm:w-[18rem]">
+                <Select value={driver} onValueChange={setDriver}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("select_driver")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(data.availableDrivers ?? []).map((item) => {
+                      const label = driverLabel(item);
+                      return (
+                        <SelectItem key={label} value={label}>
+                          {item.available ? label : `${label} (${t("create_suffix")})`}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
+                <RefreshCw className="h-4 w-4" />
+                {switching ? t("switching") : t("switch_workspace_action")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void handleStop()}
+                disabled={loading || stopping || deleting}
+              >
+                {stopping ? t("stopping") : t("stop_workspace")}
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
                   <Button
-                    className="w-full lg:w-auto"
-                    onClick={() => void handleSwitch()}
-                    disabled={switching || !driver}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    {switching ? t("switching") : t("switch_workspace_action")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    onClick={() => void handleStop()}
+                    variant="destructive"
                     disabled={loading || stopping || deleting}
                   >
-                    {stopping ? t("stopping") : t("stop_workspace")}
+                    <Trash2 className="h-4 w-4" />
+                    {deleting ? t("deleting") : t("remove_workspace")}
                   </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="destructive"
-                        className="w-full sm:w-auto"
-                        disabled={loading || stopping || deleting}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        {deleting ? t("deleting") : t("remove_workspace")}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {t("remove_workspace_confirm_description")}
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => void handleDelete()}>
-                          {deleting ? t("deleting") : t("remove_workspace")}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("remove_workspace_confirm_description")}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void handleDelete()}>
+                      {deleting ? t("deleting") : t("remove_workspace")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <EmptyPane
+        title={t("empty_pane")}
+        description={t("select_submenu")}
+      />
+    );
+  }
+
+  return (
+    <PortalShell users={users ?? []}>
+      <div className="grid w-full min-w-0 gap-6">
+        {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+        {renderPane()}
       </div>
     </PortalShell>
   );
@@ -1343,6 +1482,41 @@ function ProfilePage() {
   );
 }
 
+function SettingsPage() {
+  const { language, setLanguage, t } = useLanguage();
+  const { userId = "" } = useParams();
+  const { data: users } = useAsyncValue(listUsers, []);
+
+  return (
+    <PortalShell users={users ?? []}>
+      <div className="grid w-full gap-6">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{t("settings_title")}</div>
+          <div className="text-sm text-muted-foreground">{t("settings_desc")}</div>
+        </div>
+        <Separator />
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t("language")}</div>
+            <div className="text-sm text-muted-foreground">{t("settings_desc")}</div>
+          </div>
+          <div className="w-full min-w-0 sm:w-[14rem]">
+            <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("language")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="zh">{t("lang_zh")}</SelectItem>
+                <SelectItem value="en">{t("lang_en")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    </PortalShell>
+  );
+}
+
 function CredentialCard(props: {
   credential: PortalCredentialSummary;
   language: Language;
@@ -1389,8 +1563,14 @@ export default function App() {
         <Routes>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/users/:userId/profile" element={<ProfilePage />} />
+          <Route path="/users/:userId/admin" element={<AdminPage />} />
+          <Route path="/users/:userId/settings" element={<SettingsPage />} />
           <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
           <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+          <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+          <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<WorkspaceDetailPage />} />
+          <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<WorkspaceDetailPage />} />
+          <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
           <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
         </Routes>
       </LanguageContext.Provider>
