@@ -15,6 +15,7 @@ nohup.out
 __pycache__/
 *.pyc
 node_modules/
+.pnpm-store/
 dist/
 apps/polaris/.coverage/
 

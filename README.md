@@ -23,11 +23,29 @@ while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
+This local Polaris stack uses three separate ports by default:
+
+- `6767`: Paseo workspace daemon inside a workspace runtime.
+- `8082`: Self-hosted Paseo web app.
+- `8787`: Polaris portal API.
+- `4173`: Polaris web portal frontend.
+
+The workspace daemon on `6767` is separate from the self-hosted Paseo web app
+on `8082`.
+
 Start the Polaris backend API:
 
 ```bash
 pnpm --dir apps/polaris run polaris -- portal 8787 0.0.0.0
 ```
+
+Or start the self-hosted Paseo web app through Docker Compose:
+
+```bash
+docker compose -f docker-compose.polaris.yml up -d
+```
+
+That compose path publishes the app on `http://127.0.0.1:8082/`.
 
 Start the Polaris web portal:
 
