@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { WorkspaceSpec } from "../../core/workspace.js";
+import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { kubevirtProbePassword } from "./probe-access.js";
 import {
   isNetfsSource,
@@ -179,6 +180,7 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
 }
 
 function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
+  const paseoAppBaseUrl = resolveConfiguredPaseoAppBaseUrl();
   const rootdiskImage =
     workspace.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
   const memoryGuest =
@@ -234,7 +236,13 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
     )
     .replaceAll("__ROOTDISK_IMAGE__", rootdiskImage)
     .replaceAll("__MEMORY_GUEST__", memoryGuest)
-    .replaceAll("__MEMORY_REQUEST__", memoryRequest);
+    .replaceAll("__MEMORY_REQUEST__", memoryRequest)
+    .replaceAll(
+      "__PASEO_APP_BASE_URL_ASSIGNMENT__",
+      paseoAppBaseUrl
+        ? `data.setdefault("app", {})["baseUrl"] = ${JSON.stringify(paseoAppBaseUrl)}; `
+        : "",
+    );
 }
 
 export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {

@@ -4,6 +4,7 @@ import {
   netfsResolvedPath,
   requireNetfsField,
 } from "../../core/netfs.js";
+import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 function q(value: string): string {
@@ -155,7 +156,20 @@ function buildPaseoBootstrapLine(enabled: boolean, home: string): string[] {
   if (!enabled) {
     return [];
   }
+  const paseoAppBaseUrl = resolveConfiguredPaseoAppBaseUrl();
+  const configScript = [
+    "import json, pathlib",
+    `path = pathlib.Path(${JSON.stringify(`${home}/.paseo/config.json`)})`,
+    "data = json.loads(path.read_text()) if path.exists() else {}",
+    'data.setdefault("daemon", {})["listen"] = "0.0.0.0:6767"',
+    ...(paseoAppBaseUrl
+      ? [`data.setdefault("app", {})["baseUrl"] = ${JSON.stringify(paseoAppBaseUrl)}`]
+      : []),
+    "path.parent.mkdir(parents=True, exist_ok=True)",
+    'path.write_text(json.dumps(data, indent=2) + "\\n")',
+  ].join("; ");
   return [
+    `          python3 -c ${q(configScript)} && \\`,
     `          paseo_ready() { printf '%s' "$$1" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' && printf '%s' "$$1" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; } && \\`,
     `          paseo_wait_ready() { for _ in $$(seq 1 15); do paseo_status=$$(timeout 5s env PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true); if paseo_ready "$$paseo_status"; then return 0; fi; sleep 1; done; return 1; } && \\`,
     `          paseo_stop_runner() { paseo_pid=$$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${home}/.paseo/paseo.pid 2>/dev/null | head -n 1); if [ -z "$$paseo_pid" ]; then paseo_pid=$$(cat ${home}/.paseo/paseo.pid 2>/dev/null | tr -cd '0-9'); fi; if [ -n "$$paseo_pid" ]; then paseo_args=$$(ps -o args= -p "$$paseo_pid" 2>/dev/null || true); if printf '%s' "$$paseo_args" | grep -Eq 'daemon-runner|Paseo Supervisor|paseo daemon start'; then pkill -TERM -P "$$paseo_pid" 2>/dev/null || true; kill "$$paseo_pid" 2>/dev/null || true; sleep 1; pkill -KILL -P "$$paseo_pid" 2>/dev/null || true; kill -KILL "$$paseo_pid" 2>/dev/null || true; fi; fi; rm -f ${home}/.paseo/paseo.pid ${home}/.paseo/daemon.log; } && \\`,
