@@ -23,19 +23,25 @@ while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
+Start the Polaris backend API:
+
+```bash
+pnpm --dir apps/polaris run polaris -- portal 8787 0.0.0.0
+```
+
 Start the Polaris web portal:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- portal
+pnpm --dir apps/polaris-web run dev:host
 ```
 
 Then open the portal in your browser:
 
 ```text
-http://127.0.0.1:8787/
+http://127.0.0.1:4173/
 ```
 
-The portal redirects to the first configured user and exposes workspaces under
+The frontend talks to the Polaris portal API and exposes workspaces under
 explicit user routes such as:
 
 ```text

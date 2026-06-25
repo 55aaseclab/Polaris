@@ -22,19 +22,17 @@ export interface PortalDriverTarget {
   profile?: string;
 }
 
-export interface PortalSessionContext {
-  clerkUserId: string;
-  polarisUserId: string;
-  email?: string;
-  roles: string[];
-  isAdmin: boolean;
-}
-
 export interface PortalProfileSummary {
   id: string;
   name: string;
   email: string;
   workspaces: string[];
+}
+
+export interface PortalProfileDetail extends PortalProfileSummary {
+  githubAccount?: string;
+  sshMode?: string;
+  sshComment?: string;
 }
 
 export interface PortalCredentialSummary {
@@ -134,6 +132,19 @@ function readYAML(filePath: string): Record<string, unknown> | null {
   }
 }
 
+function writeYAML(filePath: string, value: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(
+    filePath,
+    yaml.dump(value, { lineWidth: 120, noRefs: true }),
+    "utf8",
+  );
+}
+
+function profilePath(userId: string): string {
+  return path.join(USER_PROFILES_DIR, `${userId}.yaml`);
+}
+
 function parseDriverTarget(backend: string, profile?: string): PortalDriverTarget {
   if (backend === "pod" && profile) {
     return { backend: "pod", profile };
@@ -181,6 +192,73 @@ export function listPortalProfiles(): PortalProfileSummary[] {
       };
     })
     .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function readPortalProfile(userId: string): PortalProfileDetail | null {
+  const data = readYAML(profilePath(userId));
+  if (!data) {
+    return null;
+  }
+  return {
+    id: userId,
+    name: String(data.name ?? ""),
+    email: String(data.email ?? ""),
+    workspaces: Array.isArray(data.workspaces)
+      ? data.workspaces.map((value) => String(value)).filter(Boolean)
+      : [],
+    githubAccount: typeof data.github === "object" && data.github
+      ? String((data.github as Record<string, unknown>).account ?? "") || undefined
+      : undefined,
+    sshMode: typeof data.ssh === "object" && data.ssh
+      ? String((data.ssh as Record<string, unknown>).mode ?? "") || undefined
+      : undefined,
+    sshComment: typeof data.ssh === "object" && data.ssh
+      ? String((data.ssh as Record<string, unknown>).comment ?? "") || undefined
+      : undefined,
+  };
+}
+
+export function updatePortalProfile(
+  userId: string,
+  patch: {
+    name?: string;
+    email?: string;
+    githubAccount?: string;
+    sshComment?: string;
+  },
+): PortalProfileDetail {
+  const filePath = profilePath(userId);
+  const current = readYAML(filePath);
+  if (!current) {
+    throw new Error(`User profile '${userId}' was not found`);
+  }
+  const next = { ...current };
+  if (patch.name !== undefined) {
+    next.name = patch.name;
+  }
+  if (patch.email !== undefined) {
+    next.email = patch.email;
+  }
+  const currentGithub = typeof next.github === "object" && next.github
+    ? { ...(next.github as Record<string, unknown>) }
+    : {};
+  if (patch.githubAccount !== undefined) {
+    currentGithub.account = patch.githubAccount;
+    next.github = currentGithub;
+  }
+  const currentSsh = typeof next.ssh === "object" && next.ssh
+    ? { ...(next.ssh as Record<string, unknown>) }
+    : {};
+  if (patch.sshComment !== undefined) {
+    currentSsh.comment = patch.sshComment;
+    next.ssh = currentSsh;
+  }
+  writeYAML(filePath, next);
+  const updated = readPortalProfile(userId);
+  if (!updated) {
+    throw new Error(`User profile '${userId}' could not be reloaded`);
+  }
+  return updated;
 }
 
 export function resolvePolarisUserIdFromIdentity(params: {
