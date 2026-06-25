@@ -736,7 +736,17 @@ async function runningBackendsForProject(
   return running;
 }
 
-export async function switchCommand(projectRef: string): Promise<void> {
+export interface SwitchResult {
+  project: string;
+  previousBackend: WorkspaceSpec["backend"]["kind"] | null;
+  previousProfile: string | null;
+  selectedBackend: WorkspaceSpec["backend"]["kind"];
+  selectedProfile: string | null;
+  stoppedBackends: WorkspaceSpec["backend"]["kind"][];
+  selectionFile: string | null;
+}
+
+export async function performWorkspaceSwitch(projectRef: string): Promise<SwitchResult> {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
     throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
@@ -826,7 +836,7 @@ export async function switchCommand(projectRef: string): Promise<void> {
     }
   }
 
-  process.stdout.write(`${JSON.stringify({
+  return {
     project,
     previousBackend: effectivePreviousBackend ?? null,
     previousProfile: previousSelection?.profile ?? null,
@@ -834,5 +844,10 @@ export async function switchCommand(projectRef: string): Promise<void> {
     selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
     stoppedBackends: finalizedStoppedBackends,
     selectionFile: selectionFile ?? null,
-  }, null, 2)}\n`);
+  };
+}
+
+export async function switchCommand(projectRef: string): Promise<void> {
+  const result = await performWorkspaceSwitch(projectRef);
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }

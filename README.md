@@ -23,22 +23,25 @@ while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
-Install the repo skill if you want the shorter prompt:
+Start the Polaris web portal:
 
 ```bash
-pnpm exec tsx scripts/install-skills.ts --target codex use-polaris
+pnpm --dir apps/polaris run polaris -- portal
 ```
 
-Install into Claude instead with:
-
-```bash
-pnpm exec tsx scripts/install-skills.ts --target claude use-polaris
-```
-
-Then use this prompt for the fastest local Docker path:
+Then open the portal in your browser:
 
 ```text
-Use $use-polaris to set up Polaris locally with Docker for project <project>.
+http://127.0.0.1:8787/
+```
+
+The portal redirects to the first configured user and exposes workspaces under
+explicit user routes such as:
+
+```text
+/users/<user_id>/workspaces
+/users/<user_id>/workspaces/<workspace_name>
+/users/<user_id>/credentials
 ```
 
 ## Documentation
