@@ -476,10 +476,10 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
       unbounded: true,
     },
     agent: {
-      kind: "disabled",
-      label: "Disabled by default",
+      kind: "multi",
+      label: "Codex + Claude Code",
       args: [],
-      persist_state: false,
+      persist_state: true,
     },
     tooling: {
       bootstrap_profile: "prebuilt",
