@@ -7,7 +7,8 @@ export function resolveRepoRoot(importMetaUrl: string): string {
   while (true) {
     const rootPackage = path.join(current, "package.json");
     const polarisPackage = path.join(current, "apps", "polaris", "package.json");
-    if (fs.existsSync(rootPackage) && fs.existsSync(polarisPackage)) {
+    const polarisDist = path.join(current, "apps", "polaris", "dist", "scripts", "polaris.js");
+    if (fs.existsSync(rootPackage) && (fs.existsSync(polarisPackage) || fs.existsSync(polarisDist))) {
       return current;
     }
     const parent = path.dirname(current);
