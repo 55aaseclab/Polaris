@@ -7,6 +7,7 @@ import { assertNoProjectNameCollision } from "./project-ownership.js";
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
+const DEMO_USER_PROFILE_ID = "100000000000000001";
 
 function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
@@ -117,6 +118,28 @@ function userProfilePath(userProfileId: string): string {
 
 function userCredentialRegistryDir(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
+}
+
+function userDockerfilePath(userProfileId: string): string {
+  return path.join(USER_SECRETS_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+}
+
+export function ensureWorkspaceDockerfile(userProfileId: string): string {
+  const target = userDockerfilePath(userProfileId);
+  if (fs.existsSync(target)) {
+    return target;
+  }
+
+  const template = userDockerfilePath(DEMO_USER_PROFILE_ID);
+  if (!fs.existsSync(template)) {
+    throw new Error(
+      `Default workspace Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
+    );
+  }
+
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(template, target);
+  return target;
 }
 
 function ensureWorkspaceListedInUserProfile(userProfileId: string, project: string): void {
@@ -290,6 +313,7 @@ export function userProfileExists(userProfileId: string): boolean {
 export function scaffoldDockerWorkspace(project: string, userProfileId: string): string {
   const outputPath = workspaceConfigPath(project, "docker", userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  ensureWorkspaceDockerfile(userProfileId);
   ensureWorkspaceListedInUserProfile(userProfileId, project);
   const doc = {
     project,

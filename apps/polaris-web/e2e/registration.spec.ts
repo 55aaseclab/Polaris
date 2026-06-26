@@ -353,6 +353,14 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
     "projects",
     workspaceName,
   );
+  const userDockerfilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    USER001_POLARIS_ID,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
 
   try {
     await signInAsUsername(page, USER001_CLERK_USERNAME, USER001_PASSWORD);
@@ -369,12 +377,16 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
       )
       .toBe(true);
 
+    expect(fs.existsSync(userDockerfilePath)).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "generated", "docker.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml"))).toBe(false);
     expect(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml"))).toBe(false);
 
     await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName);
+    await expect
+      .poll(() => fs.existsSync(workspaceRoot), { timeout: 30_000 })
+      .toBe(false);
   } finally {
     await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName, {
       bestEffort: true,
