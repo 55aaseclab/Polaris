@@ -324,7 +324,10 @@ function writeDefaultSshCredentialAssets(profile: {
       },
     );
     if (generated.status !== 0) {
-      throw new Error(generated.stderr.trim() || generated.stdout.trim() || "ssh-keygen failed");
+      const stderr = typeof generated.stderr === "string" ? generated.stderr.trim() : "";
+      const stdout = typeof generated.stdout === "string" ? generated.stdout.trim() : "";
+      const spawnError = generated.error instanceof Error ? generated.error.message : "";
+      throw new Error(stderr || stdout || spawnError || "ssh-keygen failed");
     }
   }
 }
