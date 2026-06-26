@@ -135,7 +135,7 @@ export class DockerDriver implements BackendDriver {
     };
     const daemonStatusRaw =
       workspace.agent.enabled && exists && running
-        ? execOutput(`PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json`)
+        ? execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`)
         : "";
     const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
     const persistedServerId =
@@ -158,18 +158,18 @@ export class DockerDriver implements BackendDriver {
         : false;
     const pairingUrl =
       workspace.agent.enabled && exists && running
-        ? extractPairingUrl(execOutput(`cat ${workspace.agent.runtime.pairingFile}`))
+        ? extractPairingUrl(execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon pair --json 2>/dev/null || true`))
         : undefined;
     const pairingServerId = pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null;
     const pairingObserved = workspace.agent.enabled && exists && running
-      ? evaluatePairingObservation({
+          ? evaluatePairingObservation({
           expectedServerId: daemonStatus?.serverId ?? persistedServerId,
           cachedServerId: pairingServerId,
           pairingUrl,
-          pairingFileDetail: workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json",
+          pairingFileDetail: "paseo daemon pair",
         })
       : workspace.agent.enabled
-        ? { observed: false, detail: workspace.agent.runtime.pairingFile }
+        ? { observed: false, detail: "paseo daemon pair" }
         : { observed: true, detail: "daemon not required" };
 
     return {
@@ -206,7 +206,7 @@ export class DockerDriver implements BackendDriver {
         pairing: workspace.health.requiresDaemon && exists && running
           ? pairingObserved
           : workspace.health.requiresDaemon
-            ? { observed: false, detail: workspace.agent.runtime.pairingFile }
+            ? { observed: false, detail: "paseo daemon pair" }
             : { observed: true, detail: "daemon not required" },
       },
       services: {

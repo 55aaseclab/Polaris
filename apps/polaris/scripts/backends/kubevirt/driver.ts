@@ -392,13 +392,13 @@ async function collectKubevirtRuntimeSnapshot(
     "set -eu",
     "printf 'guestReachable=1\\n'",
     "printf 'daemonStatusRaw<<EOF\\n'",
-    `PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`,
+    `timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`,
     "printf 'EOF\\n'",
     "printf 'persistedServerId<<EOF\\n'",
     `cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null || true`,
     "printf 'EOF\\n'",
     "printf 'pairingRaw<<EOF\\n'",
-    `cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null || true`,
+    `timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon pair --json 2>/dev/null || true`,
     "printf 'EOF\\n'",
     `test -d ${workspace.attachments.workspaceData.mountRoot} && echo workspaceDataObserved=1 || echo workspaceDataObserved=0`,
     `test -d ${workspace.attachments.workspaceRuntimeState.mountRoot} && echo workspaceRuntimeObserved=1 || echo workspaceRuntimeObserved=0`,
@@ -674,10 +674,10 @@ export class KubevirtDriver implements BackendDriver {
             expectedServerId: daemonStatus?.serverId ?? persistedServerId,
             cachedServerId: pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null,
             pairingUrl,
-            pairingFileDetail: workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json",
+            pairingFileDetail: "paseo daemon pair",
           })
         : workspace.agent.enabled
-          ? { observed: false, detail: workspace.agent.runtime.pairingFile }
+          ? { observed: false, detail: "paseo daemon pair" }
           : { observed: true, detail: "daemon not required" };
     return {
       backend: {

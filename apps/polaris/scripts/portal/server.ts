@@ -542,7 +542,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "GET") {
-          sendJson(res, 200, getPortalWorkspaceDetail(routeUserId, workspace));
+          sendJson(res, 200, await getPortalWorkspaceDetail(routeUserId, workspace));
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "preview" && req.method === "GET") {
