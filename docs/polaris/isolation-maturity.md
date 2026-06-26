@@ -188,8 +188,8 @@ Current workspace semantics:
 
 Current lifecycle and ownership implications:
 
-- `create` scaffolds a user profile when needed and creates a Docker-first
-  saved spec
+- `create-user` scaffolds the user profile and default credentials
+- `create` creates a Docker-first saved spec for an existing user
 - the same logical workspace can later be targeted as `@docker`, `@pod`, or
   `@kubevirt-vm`
 - missing backend specs can be synthesized from an existing workspace spec

@@ -865,7 +865,20 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
   if (!configPath) {
     throw new Error(`Config not found for project '${project}'`);
   }
+  return loadWorkspaceFromConfigPath(
+    configPath,
+    project,
+    resolvedBackendHint,
+    resolvedProfileHint,
+  );
+}
 
+export function loadWorkspaceFromConfigPath(
+  configPath: string,
+  project = "",
+  backendHint?: WorkspaceSpec["backend"]["kind"],
+  profileHint?: string,
+): WorkspaceSpec {
   const data = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
   const backend = (data.backend ?? {}) as Record<string, unknown>;
   const runtime = (data.runtime ?? {}) as Record<string, unknown>;
@@ -889,8 +902,8 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     gitUserEmail: toolingGitUserEmail,
   });
   const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
-  const podProfileDefaults = backendKind === "pod" && resolvedProfileHint
-    ? loadPodProfileDefaults(resolvedProfileHint)
+  const podProfileDefaults = backendKind === "pod" && profileHint
+    ? loadPodProfileDefaults(profileHint)
     : {};
   const workspaceAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
   const registryCredentials = loadUserCredentials(userProfile.id, home);
@@ -942,7 +955,7 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
     backend: {
       kind: backendKind,
       profile: backendKind === "pod"
-        ? String(podProfileDefaults.backendProfile ?? resolvedProfileHint ?? runtime.class ?? "kata-qemu")
+        ? String(podProfileDefaults.backendProfile ?? profileHint ?? runtime.class ?? "kata-qemu")
         : backendKind === "docker" ? "legacy" : "vm",
       specFiles: Array.isArray(backend.spec_files) ? backend.spec_files.map((item) => String(item)) : [],
       dockerRuntimeMode: runtime.docker_enabled ? "legacy" : "disabled"

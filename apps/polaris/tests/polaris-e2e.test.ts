@@ -172,8 +172,9 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         GIT_AUTHOR_EMAIL: profileEmail,
       },
       async () => {
+        await runCli(["create-user", userProfileId, "--name", "E2E Create", "--email", profileEmail]);
         const output = await captureStdout(async () => {
-          await runCli(["create", project]);
+          await runCli(["create", project, "--user", userProfileId]);
         });
         const parsed = parseJsonOutput<{
           created: string;
@@ -200,7 +201,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.created, "saved-spec");
         assert.equal(parsed.project, project);
         assert.equal(parsed.userProfile.id, userProfileId);
-        assert.equal(parsed.userProfile.created, true);
+        assert.equal(parsed.userProfile.created, false);
         assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
         assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
         assert.equal(parsed.credentials.registryRoot, `config/users/${userProfileId}/credentials`);
@@ -238,8 +239,9 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
         GIT_AUTHOR_EMAIL: profileEmail,
       },
       async () => {
+        await runCli(["create-user", userProfileId, "--name", "E2E Create Pod", "--email", profileEmail]);
         const output = await captureStdout(async () => {
-          await runCli(["create", `${project}@pod:gvisor`]);
+          await runCli(["create", `${project}@pod:gvisor`, "--user", userProfileId]);
         });
         const parsed = parseJsonOutput<{
           backend: string;

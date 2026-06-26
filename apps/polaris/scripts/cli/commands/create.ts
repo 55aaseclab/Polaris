@@ -2,20 +2,33 @@ import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
 import { assertProjectNameAvailable } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
 import {
-  ensureScaffoldUserProfile,
   scaffoldDockerWorkspace,
+  userProfileExists,
   workspaceConfigExists,
 } from "../../config/scaffold.js";
 import { ensureWorkspaceConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
 
-export async function createCommand(projectRef: string): Promise<void> {
+function parseCreateArgs(argv: string[]): { projectRef: string; userProfileId: string } {
+  const projectRef = argv[0]?.trim();
+  const userFlagIndex = argv.findIndex((value) => value === "--user");
+  const userProfileId = userFlagIndex >= 0 ? argv[userFlagIndex + 1]?.trim() : "";
+  if (!projectRef || !userProfileId) {
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>");
+  }
+  return { projectRef, userProfileId };
+}
+
+export async function createCommand(argv: string[]): Promise<void> {
+  const { projectRef, userProfileId } = parseCreateArgs(argv);
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   assertProjectNameAvailable(project);
+  if (!userProfileExists(userProfileId)) {
+    throw new Error(`User profile '${userProfileId}' was not found. Create it first with create-user.`);
+  }
   if (!workspaceConfigExists(project)) {
     const scaffoldBackend = backendHint === "pod" || backendHint === "kubevirt-vm" ? backendHint : "docker";
-    const userProfile = ensureScaffoldUserProfile();
-    const outputPath = scaffoldDockerWorkspace(project, userProfile.id);
+    const outputPath = scaffoldDockerWorkspace(project, userProfileId);
     const requestedRef = scaffoldBackend === "pod" && profileHint
       ? `${project}@${scaffoldBackend}:${profileHint}`
       : `${project}@${scaffoldBackend}`;
@@ -26,8 +39,7 @@ export async function createCommand(projectRef: string): Promise<void> {
       project,
       backend: scaffoldBackend,
       configPath: backendConfigPath,
-      userProfileId: userProfile.id,
-      userProfileCreated: userProfile.created,
+      userProfileId,
     });
     process.stdout.write(`${JSON.stringify({
       project,
@@ -35,17 +47,17 @@ export async function createCommand(projectRef: string): Promise<void> {
       created: "saved-spec",
       configPath: backendConfigPath,
       userProfile: {
-        id: userProfile.id,
-        created: userProfile.created,
-        profilePath: userProfile.profilePath,
-        secretsRoot: userProfile.secretsRoot,
+        id: userProfileId,
+        created: false,
+        profilePath: `config/users/profiles/${userProfileId}.yaml`,
+        secretsRoot: `config/users/${userProfileId}`,
       },
       credentials: {
-        registryRoot: `config/users/${userProfile.id}/credentials`,
+        registryRoot: `config/users/${userProfileId}/credentials`,
         defaults: ["codex-default", "github-ssh"],
       },
       nextSteps: [
-        `Stage credentials under ${userProfile.secretsRoot}/`,
+        `Stage credentials under config/users/${userProfileId}/`,
         `pnpm --dir apps/polaris run polaris -- render ${project}@${scaffoldBackend}`,
         `pnpm --dir apps/polaris run polaris -- start ${project}@${scaffoldBackend}`,
       ],

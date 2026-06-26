@@ -3,9 +3,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
-import { scaffoldDockerWorkspace } from "../config/scaffold.js";
+import { workspaceConfigPath } from "../config/scaffold.js";
 import {
   clearWorkspaceProvisionProgress,
+  readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
   listPortalProfiles,
@@ -21,7 +22,9 @@ import {
   workspaceRefFromTarget,
   writeWorkspaceProvisionProgress,
 } from "../core/portal.js";
-import { loadWorkspace } from "../config/load.js";
+import { loadWorkspaceFromConfigPath } from "../config/load.js";
+import { createCommand } from "../cli/commands/create.js";
+import { createUserCommand } from "../cli/commands/create-user.js";
 import { performWorkspaceSwitch } from "../cli/commands/switch.js";
 import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import { stopCommand } from "../cli/commands/stop.js";
@@ -84,20 +87,39 @@ function ensureImageRefAvailable(imageRef: string): void {
   throw new Error(`Image '${imageRef}' is not available`);
 }
 
-function renderWorkspaceTargets(workspace: string): void {
-  const dockerWorkspace = loadWorkspace(`${workspace}@docker`);
+function loadUserWorkspace(
+  userId: string,
+  workspace: string,
+  backend: "docker" | "pod" | "kubevirt-vm",
+  profileHint?: string,
+): WorkspaceSpec {
+  const projectRef = backend === "pod" && profileHint
+    ? `${workspace}@${backend}:${profileHint}`
+    : `${workspace}@${backend}`;
+  const ensuredConfig = ensureWorkspaceConfig(projectRef);
+  const configPath = ensuredConfig?.configPath ?? workspaceConfigPath(workspace, backend, userId);
+  return loadWorkspaceFromConfigPath(
+    configPath,
+    workspace,
+    backend,
+    profileHint,
+  );
+}
+
+function renderWorkspaceTargets(userId: string, workspace: string): void {
+  const dockerWorkspace = loadUserWorkspace(userId, workspace, "docker");
   renderAndWriteDockerWorkspace(dockerWorkspace);
-  const podWorkspace = loadWorkspace(`${workspace}@pod:gvisor`);
+  const podWorkspace = loadUserWorkspace(userId, workspace, "pod", "gvisor");
   renderAndWritePodWorkspace(podWorkspace);
-  const kubevirtWorkspace = loadWorkspace(`${workspace}@kubevirt-vm`);
+  const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
   renderAndWriteKubevirtWorkspace(kubevirtWorkspace);
 }
 
-function ensureWorkspaceImageTargets(workspace: string): void {
+function ensureWorkspaceImageTargets(userId: string, workspace: string): void {
   ensureCanonicalWorkspaceImage(`${workspace}@docker`);
   ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`);
   ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`);
-  const kubevirtWorkspace = loadWorkspace(`${workspace}@kubevirt-vm`);
+  const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
   ensureImageRefAvailable(kubevirtWorkspace.runtime.rootdiskImage ?? "quay.io/containerdisks/debian:13");
 }
 
@@ -114,20 +136,20 @@ function ensureWorkspaceTargetSpecs(userId: string, workspace: string): void {
 }
 
 async function provisionWorkspaceInternal(userId: string, workspace: string): Promise<void> {
-  updateProgress(userId, workspace, { phase: "starting", step: 0, message: "starting workspace provisioning" });
-
-  if (!listOwnedWorkspaces(userId).includes(workspace)) {
-    scaffoldDockerWorkspace(workspace, userId);
+  if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
+    await createCommand([workspace, "--user", userId]);
   }
+
+  updateProgress(userId, workspace, { phase: "starting", step: 0, message: "starting workspace provisioning" });
 
   updateProgress(userId, workspace, { phase: "specs", step: 1, message: "ensuring driver specs" });
   ensureWorkspaceTargetSpecs(userId, workspace);
 
   updateProgress(userId, workspace, { phase: "images", step: 2, message: "ensuring workspace images" });
-  ensureWorkspaceImageTargets(workspace);
+  ensureWorkspaceImageTargets(userId, workspace);
 
   updateProgress(userId, workspace, { phase: "manifests", step: 3, message: "rendering backend manifests" });
-  renderWorkspaceTargets(workspace);
+  renderWorkspaceTargets(userId, workspace);
 
   updateProgress(userId, workspace, { phase: "status", step: 4, message: "collecting workspace status" });
   const summary = loadWorkspaceSummary(userId, workspace);
@@ -260,4 +282,33 @@ export async function stopPortalWorkspace(userId: string, workspace: string): Pr
   }
   await stopCommand(workspaceRefFromTarget(workspace, summary.selectedDriver));
   return { stopped: true };
+}
+
+export async function createPortalUser(input: {
+  userProfileId?: string;
+  clerkUsername: string;
+  email?: string;
+  name?: string;
+  role?: "admin" | "user";
+  plan?: "free" | "pro";
+}): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
+  const userProfileId = input.userProfileId?.trim() || input.clerkUsername.trim();
+  const email = input.email?.trim() || `${userProfileId}@polaris.local`;
+  await createUserCommand([
+    userProfileId,
+    ...(input.name ? ["--name", input.name] : []),
+    "--email",
+    email,
+    "--clerk",
+    input.clerkUsername,
+    "--role",
+    input.role ?? "user",
+    "--plan",
+    input.plan ?? "free",
+  ]);
+  const created = readPortalProfile(userProfileId);
+  if (!created) {
+    throw new Error(`User profile '${userProfileId}' could not be loaded after creation`);
+  }
+  return created;
 }
