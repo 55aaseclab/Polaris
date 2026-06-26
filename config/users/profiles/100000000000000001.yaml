@@ -1,8 +1,12 @@
-id: "100000000000000001"
+id: '100000000000000001'
 name: Demo User
 email: demo@example.com
 workspaces:
   - demo
+  - e2e-ws-1782458020470-tc8f
+  - e2e-ws-1782462622409-7kwx
+  - e2e-ws-1782463262475-wysj
+  - e2e-ws-1782463723415-i7k4
 ssh:
   mode: managed-key
   comment: demo@example.com
