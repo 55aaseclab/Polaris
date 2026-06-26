@@ -1,17 +1,17 @@
 upstream polaris_server {
-  server polaris-server:8787;
+  server ${POLARIS_SERVER_UPSTREAM};
 }
 
 upstream polaris_webportal {
-  server polaris-webportal:80;
+  server ${POLARIS_WEBPORTAL_UPSTREAM};
 }
 
 upstream paseo_app {
-  server paseo-app:8082;
+  server ${PASEO_APP_UPSTREAM};
 }
 
 server {
-  listen 80 default_server;
+  listen ${NGINX_HTTP_PORT} default_server;
   server_name ${NGINX_SERVER_NAME} _;
 
   location /api/ {

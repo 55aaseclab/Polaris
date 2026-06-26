@@ -11,6 +11,7 @@ config/nvim/lazy-lock.json
 .idea/
 .vscode/
 nohup.out
+.runtime/
 
 # Python caches
 __pycache__/

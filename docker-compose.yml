@@ -8,23 +8,10 @@ services:
         PASEO_GIT_REF: 3d6b4adc68dc426789974e7c0bbad9d783a34c1f
         PASEO_WEB_BASE_URL: /paseo
     restart: unless-stopped
+    ports:
+      - "${PASEO_APP_BIND_HOST:-127.0.0.1}:${PASEO_APP_PORT:-8082}:8082"
     expose:
       - "8082"
-
-  polaris-server:
-    build:
-      context: .
-      dockerfile: apps/polaris/Dockerfile
-    environment:
-      POLARIS_AUTH_SHARED_SECRET: ${POLARIS_AUTH_SHARED_SECRET:-}
-      POLARIS_PASEO_APP_BASE_URL: ${POLARIS_PASEO_APP_BASE_URL:-http://localhost/paseo}
-      PASEO_APP_BASE_URL: ${PASEO_APP_BASE_URL:-}
-    restart: unless-stopped
-    expose:
-      - "8787"
-    volumes:
-      - ./config:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock
 
   polaris-webportal:
     build:
@@ -35,6 +22,8 @@ services:
         VITE_PASEO_APP_BASE_URL: ${VITE_PASEO_APP_BASE_URL:-http://localhost/paseo}
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
     restart: unless-stopped
+    ports:
+      - "${POLARIS_WEBPORTAL_BIND_HOST:-127.0.0.1}:${POLARIS_WEBPORTAL_PORT:-8081}:80"
     expose:
       - "80"
 
@@ -42,12 +31,14 @@ services:
     image: nginx:1.27-alpine
     depends_on:
       - paseo-app
-      - polaris-server
       - polaris-webportal
     environment:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
-    ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
+      NGINX_HTTP_PORT: ${NGINX_HTTP_PORT:-80}
+      POLARIS_SERVER_UPSTREAM: ${POLARIS_SERVER_UPSTREAM:-127.0.0.1:8787}
+      POLARIS_WEBPORTAL_UPSTREAM: ${POLARIS_WEBPORTAL_UPSTREAM:-127.0.0.1:8081}
+      PASEO_APP_UPSTREAM: ${PASEO_APP_UPSTREAM:-127.0.0.1:8082}
+    network_mode: host
     restart: unless-stopped
     volumes:
       - ./docker/nginx/templates:/etc/nginx/templates:ro
