@@ -1,4 +1,5 @@
 import * as React from "react";
+import { SignIn, SignUp, useAuth, useClerk, useUser } from "@clerk/react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -41,6 +42,7 @@ import {
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
+import { explicitUserMap } from "./user-map";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -403,6 +405,160 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
+function portalSignInUrl(): string {
+  if (typeof window === "undefined") {
+    return "/sign-in";
+  }
+  const target = new URL("/sign-in", window.location.origin);
+  target.searchParams.set("redirect_url", window.location.href);
+  return target.pathname + target.search;
+}
+
+function AuthGate(props: { children: ReactNode }) {
+  const { isLoaded, userId } = useAuth();
+
+  useEffect(() => {
+    if (!isLoaded || userId) {
+      return;
+    }
+    window.location.assign(portalSignInUrl());
+  }, [isLoaded, userId]);
+
+  if (!isLoaded || !userId) {
+    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
+  }
+  return <>{props.children}</>;
+}
+
+function redirectTarget(): string {
+  if (typeof window === "undefined") {
+    return "/";
+  }
+  const params = new URLSearchParams(window.location.search);
+  return params.get("redirect_url")?.trim() || "/";
+}
+
+function normalizeClerkUsername(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function useCurrentUserMapping() {
+  const { user } = useUser();
+  const clerkUsername = normalizeClerkUsername(
+    user?.username
+      ?? user?.primaryEmailAddress?.emailAddress?.split("@")[0]
+      ?? null,
+  );
+  const mapping = clerkUsername ? explicitUserMap[clerkUsername] ?? null : null;
+  return { clerkUsername, mapping };
+}
+
+function ClerkDebug(props: { page: "sign-in" | "sign-up" }) {
+  const { isLoaded, userId } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const navEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    console.log("[clerk-debug] render", {
+      page: props.page,
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      hash: window.location.hash,
+      redirectTarget: redirectTarget(),
+      isLoaded,
+      userId,
+      navigationType: navEntry?.type ?? "unknown",
+    });
+  }, [props.page, location.pathname, location.search, location.hash, isLoaded, userId]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      console.log("[clerk-debug] beforeunload", {
+        page: props.page,
+        href: window.location.href,
+      });
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      console.log("[clerk-debug] pageshow", {
+        page: props.page,
+        href: window.location.href,
+        persisted: event.persisted,
+      });
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [props.page]);
+
+  return null;
+}
+
+function SignInPage() {
+  const { isLoaded, userId } = useAuth();
+  if (isLoaded && userId) {
+    return <Navigate to="/" replace />;
+  }
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <ClerkDebug page="sign-in" />
+      <SignIn
+        path="/sign-in"
+        routing="path"
+        signUpUrl="/sign-up"
+      />
+    </div>
+  );
+}
+
+function SignUpPage() {
+  const { isLoaded, userId } = useAuth();
+  if (isLoaded && userId) {
+    return <Navigate to="/" replace />;
+  }
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <ClerkDebug page="sign-up" />
+      <SignUp
+        path="/sign-up"
+        routing="path"
+        signInUrl="/sign-in"
+      />
+    </div>
+  );
+}
+
+function AuthTestPage() {
+  const signInHref = (() => {
+    if (typeof window === "undefined") {
+      return "/sign-in";
+    }
+    const target = new URL("/sign-in", window.location.origin);
+    target.searchParams.set("redirect_url", `${window.location.origin}/`);
+    return `${target.pathname}${target.search}`;
+  })();
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="grid gap-4 rounded-2xl border border-border bg-white p-6 shadow-sm">
+        <div className="text-lg font-semibold">Auth Test</div>
+        <div className="text-sm text-muted-foreground break-all">
+          Return target: <code>{typeof window === "undefined" ? "/" : `${window.location.origin}/`}</code>
+        </div>
+        <a
+          className="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm text-white"
+          href={signInHref}
+        >
+          Sign in with Clerk
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function driverLabel(driver: { backend: string; profile?: string } | null): string {
   if (!driver) {
     return "not-selected";
@@ -678,8 +834,11 @@ function PortalShell(props: {
   users: PortalProfileSummary[];
 }) {
   const { t } = useLanguage();
+  const clerk = useClerk();
+  const { mapping } = useCurrentUserMapping();
   const location = useLocation();
   const navigate = useNavigate();
+  const isAdmin = mapping?.role === "admin";
   const activeUser = props.users.find((user) =>
     location.pathname.includes(`/users/${user.id}/`),
   ) ?? null;
@@ -838,7 +997,7 @@ function PortalShell(props: {
               </SidebarGroupContent>
             </SidebarGroup>
           </div>
-          {activeUser && (
+          {activeUser && isAdmin && (
             <SidebarGroup className="shrink-0 pt-4">
               <SidebarGroupLabel>
                 {t("administration")}
@@ -916,7 +1075,11 @@ function PortalShell(props: {
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        void clerk.signOut({ redirectUrl: "/sign-in" });
+                      }}
+                    >
                       <LogOut className="mr-2 h-4 w-4" />
                       {t("menu_logout")}
                     </DropdownMenuItem>
@@ -945,11 +1108,23 @@ function PortalShell(props: {
 
 function OverviewPage() {
   const { t } = useLanguage();
+  const { clerkUsername, mapping: explicitMapping } = useCurrentUserMapping();
   const { data: users, error, loading } = useAsyncValue(listUsers, []);
-  const { data: defaultUserId } = useAsyncValue(getDefaultUserId, []);
 
-  if (defaultUserId) {
-    return <Navigate to={`/users/${encodeURIComponent(defaultUserId)}/workspaces`} replace />;
+  const explicitMappedUserId = explicitMapping?.polarisUserId ?? null;
+
+  if (explicitMappedUserId) {
+    return <Navigate to={`/users/${encodeURIComponent(explicitMappedUserId)}/workspaces`} replace />;
+  }
+
+  const matchedUserId = users?.find((entry) => {
+    const name = normalizeClerkUsername(entry.name);
+    const emailLocal = normalizeClerkUsername(entry.email.split("@")[0]);
+    return Boolean(clerkUsername) && (name === clerkUsername || emailLocal === clerkUsername);
+  })?.id ?? null;
+
+  if (matchedUserId) {
+    return <Navigate to={`/users/${encodeURIComponent(matchedUserId)}/workspaces`} replace />;
   }
 
   return (
@@ -964,6 +1139,11 @@ function OverviewPage() {
         <CardContent className="grid gap-4">
           {loading && <p className="text-sm text-muted-foreground">{t("loading_users")}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
+          {!loading && !error && clerkUsername && !explicitMappedUserId && !matchedUserId && (
+            <p className="text-sm text-destructive">
+              No Polaris user mapping exists for Clerk username "{clerkUsername}".
+            </p>
+          )}
           {users?.map((user) => (
             <Link
               key={user.id}
@@ -999,6 +1179,11 @@ function AdminPage() {
   const { userId = "" } = useParams();
   const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
+  const { mapping } = useCurrentUserMapping();
+
+  if (mapping?.role !== "admin") {
+    return <Navigate to={`/users/${encodeURIComponent(userId)}/workspaces`} replace />;
+  }
 
   return (
     <PortalShell users={users ?? []}>
@@ -1613,17 +1798,29 @@ export default function App() {
     <AppErrorBoundary>
       <LanguageContext.Provider value={value}>
         <Routes>
-          <Route path="/" element={<OverviewPage />} />
-          <Route path="/users/:userId/profile" element={<ProfilePage />} />
-          <Route path="/users/:userId/admin" element={<AdminPage />} />
-          <Route path="/users/:userId/settings" element={<SettingsPage />} />
-          <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
-          <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
-          <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
-          <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<WorkspaceDetailPage />} />
-          <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<WorkspaceDetailPage />} />
-          <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
-          <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+          <Route path="/sign-in/*" element={<SignInPage />} />
+          <Route path="/sign-up/*" element={<SignUpPage />} />
+          <Route path="/auth-test" element={<AuthTestPage />} />
+          <Route
+            path="*"
+            element={(
+              <AuthGate>
+                <Routes>
+                  <Route path="/" element={<OverviewPage />} />
+                  <Route path="/users/:userId/profile" element={<ProfilePage />} />
+                  <Route path="/users/:userId/admin" element={<AdminPage />} />
+                  <Route path="/users/:userId/settings" element={<SettingsPage />} />
+                  <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
+                  <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+                  <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+                  <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<WorkspaceDetailPage />} />
+                  <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<WorkspaceDetailPage />} />
+                  <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
+                  <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+                </Routes>
+              </AuthGate>
+            )}
+          />
         </Routes>
       </LanguageContext.Provider>
     </AppErrorBoundary>
