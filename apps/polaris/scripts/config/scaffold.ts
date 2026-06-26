@@ -142,6 +142,65 @@ export function ensureWorkspaceDockerfile(userProfileId: string): string {
   return target;
 }
 
+function resolveDefaultCredentialBindings(userProfileId: string): {
+  bindings: Array<{
+    purpose: "agent-auth" | "git-auth";
+    credentialId: string;
+    required: boolean;
+  }>;
+  defaults: string[];
+} {
+  const registryDir = userCredentialRegistryDir(userProfileId);
+  if (!fs.existsSync(registryDir)) {
+    return { bindings: [], defaults: [] };
+  }
+
+  const credentials = fs.readdirSync(registryDir)
+    .filter((entry) => entry.endsWith(".yaml"))
+    .map((entry) => {
+      const absolute = path.join(registryDir, entry);
+      const doc = (yaml.load(fs.readFileSync(absolute, "utf8")) ?? {}) as {
+        id?: string;
+        purposes?: unknown;
+      };
+      return {
+        id: String(doc.id ?? "").trim(),
+        purposes: Array.isArray(doc.purposes)
+          ? doc.purposes.map((value) => String(value).trim()).filter(Boolean)
+          : [],
+      };
+    })
+    .filter((entry) => entry.id);
+
+  const agentAuth = credentials.find((entry) => entry.purposes.includes("agent-auth"));
+  const gitAuth = credentials.find((entry) => entry.purposes.includes("git-auth"));
+  const bindings = [
+    ...(agentAuth ? [{ purpose: "agent-auth" as const, credentialId: agentAuth.id, required: true }] : []),
+    ...(gitAuth ? [{ purpose: "git-auth" as const, credentialId: gitAuth.id, required: false }] : []),
+  ];
+  return {
+    bindings,
+    defaults: bindings.map((binding) => binding.credentialId),
+  };
+}
+
+export function listDefaultCredentialIds(userProfileId: string): string[] {
+  return resolveDefaultCredentialBindings(userProfileId).defaults;
+}
+
+function requireWorkspaceGitAuth(userProfileId: string, bindings: Array<{
+  purpose: "agent-auth" | "git-auth";
+  credentialId: string;
+  required: boolean;
+}>): void {
+  if (bindings.some((binding) => binding.purpose === "git-auth")) {
+    return;
+  }
+  throw new Error(
+    `Workspace create requires a git-auth credential for user '${userProfileId}'. Stage SSH credentials first.`,
+  );
+}
+
 function ensureWorkspaceListedInUserProfile(userProfileId: string, project: string): void {
   const profilePath = userProfilePath(userProfileId);
   if (!fs.existsSync(profilePath)) {
@@ -160,10 +219,35 @@ function ensureWorkspaceListedInUserProfile(userProfileId: string, project: stri
 
 function writeUserSecretsLayout(userProfileId: string): void {
   const secretsRoot = path.join(USER_SECRETS_ROOT, userProfileId);
-  fs.mkdirSync(path.join(secretsRoot, "credentials", "codex"), { recursive: true });
-  fs.mkdirSync(path.join(secretsRoot, "credentials", "claude"), { recursive: true });
   fs.mkdirSync(path.join(secretsRoot, "credentials", "ssh"), { recursive: true });
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
+}
+
+function writeDefaultSshCredentialAssets(profile: {
+  id: string;
+  email: string;
+}): void {
+  const secretsRoot = path.join(USER_SECRETS_ROOT, profile.id);
+  const sshPrivateKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519");
+  const sshPublicKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub");
+
+  fs.mkdirSync(path.dirname(sshPrivateKeyPath), { recursive: true });
+
+  if (!fs.existsSync(sshPrivateKeyPath) || !fs.existsSync(sshPublicKeyPath)) {
+    fs.rmSync(sshPrivateKeyPath, { force: true });
+    fs.rmSync(sshPublicKeyPath, { force: true });
+    const generated = spawnSync(
+      "ssh-keygen",
+      ["-q", "-t", "ed25519", "-N", "", "-C", profile.email, "-f", sshPrivateKeyPath],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      },
+    );
+    if (generated.status !== 0) {
+      throw new Error(generated.stderr.trim() || generated.stdout.trim() || "ssh-keygen failed");
+    }
+  }
 }
 
 export function createScaffoldUserProfile(profile: {
@@ -202,39 +286,6 @@ export function createScaffoldUserProfile(profile: {
       "utf8",
     );
     fs.writeFileSync(
-      path.join(userCredentialRegistryDir(profile.id), "codex-default.yaml"),
-      yaml.dump({
-        id: "codex-default",
-        userId: profile.id,
-        kind: "codex-auth",
-        label: "Default Codex + Claude auth",
-        purposes: ["agent-auth"],
-        materialRef: {
-          type: "file",
-          key: "user-identity-state/default",
-          files: [
-            {
-              key: "codex-auth.json",
-              source_path: "credentials/codex/auth.json",
-            },
-            {
-              key: "codex-config.toml",
-              source_path: "credentials/codex/config.toml",
-            },
-            {
-              key: "claude-settings.json",
-              source_path: "credentials/claude/settings.json",
-            },
-          ],
-        },
-        metadata: {
-          provider: "local",
-        },
-        status: "ready",
-      }, { lineWidth: 120, noRefs: true }),
-      "utf8",
-    );
-    fs.writeFileSync(
       path.join(userCredentialRegistryDir(profile.id), "github-ssh.yaml"),
       yaml.dump({
         id: "github-ssh",
@@ -266,6 +317,7 @@ export function createScaffoldUserProfile(profile: {
   }
 
   writeUserSecretsLayout(profile.id);
+  writeDefaultSshCredentialAssets(profile);
 
   return {
     ...profile,
@@ -315,6 +367,8 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   ensureWorkspaceDockerfile(userProfileId);
   ensureWorkspaceListedInUserProfile(userProfileId, project);
+  const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
+  requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const doc = {
     project,
     user_profile: userProfileId,
@@ -323,18 +377,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
       spec_files: null,
     },
     credentials: {
-      bindings: [
-        {
-          purpose: "agent-auth",
-          credentialId: "codex-default",
-          required: true,
-        },
-        {
-          purpose: "git-auth",
-          credentialId: "github-ssh",
-          required: false,
-        },
-      ],
+      bindings: defaultCredentials.bindings,
     },
     runtime: {
       class: "docker",
@@ -354,10 +397,10 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
       unbounded: true,
     },
     agent: {
-      kind: "multi",
-      label: "Codex + Claude Code",
+      kind: "disabled",
+      label: "Disabled by default",
       args: [],
-      persist_state: true,
+      persist_state: false,
     },
     tooling: {
       bootstrap_profile: "prebuilt",

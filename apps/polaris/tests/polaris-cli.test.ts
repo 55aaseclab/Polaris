@@ -232,10 +232,11 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
 
     assert.equal(parsed.userProfile.id, userProfileId);
     assert.equal(parsed.userProfile.created, true);
-    assert.deepEqual(parsed.credentials.defaults, ["codex-default", "github-ssh"]);
+    assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
     assert.equal(fs.existsSync(profilePath), true);
-    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex-default.yaml")), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "github-ssh.yaml")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "id_ed25519.pub")), true);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -370,7 +371,7 @@ test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of tru
   }
 });
 
-test("ensureCanonicalWorkspaceImage builds and pushes the canonical ttl image when it is missing", async () => {
+test("ensureCanonicalWorkspaceImage builds the canonical docker image locally when it is missing", async () => {
   const project = uniqueProjectName("image-provision");
   const imageRef = workspaceImageRef(DEMO_USER_PROFILE_ID, project);
   const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
@@ -402,7 +403,6 @@ exit 0
           `image inspect ${imageRef}`,
           `pull ${imageRef}`,
           `build -f ${path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")} -t ${imageRef} .`,
-          `push ${imageRef}`,
         ]);
       },
     );
@@ -2304,6 +2304,10 @@ exit 0
         assert.deepEqual(parsed.assets.generatedManifests.map((item) => item.file), ["docker.yaml", "pod.yaml", "kubevirt.yaml"]);
         assert.equal(parsed.assets.imageTags.find((item) => item.name === "workspace")?.tag, workspaceImageRef(DEMO_USER_PROFILE_ID, project));
         assert.ok(parsed.assets.persistentVolumes.some((item) => item.name === "workspace-data" && item.mountRoot === "/workspace/project"));
+        assert.deepEqual(
+          parsed.assets.persistentVolumes.map((item) => item.name).sort(),
+          ["workspace-data", "workspace-runtime-state"],
+        );
 
         await runCli(["logs", project]);
         const commands = readCommandLog();

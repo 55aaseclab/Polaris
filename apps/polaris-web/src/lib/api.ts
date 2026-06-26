@@ -135,6 +135,12 @@ export interface PortalCredentialSummary {
   paths: string[];
 }
 
+export interface PortalCredentialPreview {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 function apiBase(): string {
   return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_POLARIS_API_BASE?.replace(/\/$/, "") ?? "";
 }
@@ -249,6 +255,15 @@ export async function listCredentials(userId: string): Promise<PortalCredentialS
     `/api/users/${encodeURIComponent(userId)}/credentials`,
   );
   return payload.credentials;
+}
+
+export async function getCredentialPreview(
+  userId: string,
+  credentialPath: string,
+): Promise<PortalCredentialPreview> {
+  return apiFetch<PortalCredentialPreview>(
+    `/api/users/${encodeURIComponent(userId)}/credentials/preview?path=${encodeURIComponent(credentialPath)}`,
+  );
 }
 
 export async function createWorkspace(

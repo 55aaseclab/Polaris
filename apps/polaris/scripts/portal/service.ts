@@ -10,11 +10,13 @@ import {
   listOwnedWorkspaces,
   listPortalCredentials,
   listPortalProfiles,
+  readPortalCredentialPreview,
   listWorkspaceDriverTargets,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
   readWorkspaceProvisionProgress,
   type PortalCredentialSummary,
+  type PortalCredentialPreview,
   type PortalDriverTarget,
   type PortalProvisionProgress,
   type PortalWorkspaceDetail,
@@ -256,6 +258,10 @@ export function getPortalWorkspaceDetail(userId: string, workspace: string): Por
 
 export function listUserPortalCredentials(userId: string): PortalCredentialSummary[] {
   return listPortalCredentials(userId);
+}
+
+export function readUserPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
+  return readPortalCredentialPreview(userId, credentialPath);
 }
 
 export function upsertPortalCredential(userId: string, credential: {

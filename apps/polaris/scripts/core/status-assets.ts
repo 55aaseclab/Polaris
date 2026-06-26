@@ -184,20 +184,6 @@ export function buildStatusAssets(workspace: WorkspaceSpec): NonNullable<Workspa
         mountRoot: workspace.attachments.workspaceRuntimeState.mountRoot,
         durablePaths: workspace.attachments.workspaceRuntimeState.durablePaths,
       },
-      {
-        name: "user-identity-state",
-        sourceKind: workspace.attachments.userIdentityState.source.kind,
-        sourceRef: workspace.attachments.userIdentityState.source.volumeRef,
-        mountRoot: workspace.attachments.userIdentityState.mountRoot,
-        durablePaths: workspace.attachments.userIdentityState.durablePaths,
-      },
-      {
-        name: "user-ssh-state",
-        sourceKind: workspace.attachments.userSshState.source.kind,
-        sourceRef: workspace.attachments.userSshState.source.volumeRef,
-        mountRoot: workspace.attachments.userSshState.mountRoot,
-        durablePaths: workspace.attachments.userSshState.durablePaths,
-      },
     ],
   };
 }

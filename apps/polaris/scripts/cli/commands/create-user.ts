@@ -66,7 +66,7 @@ export async function createUserCommand(argv: string[]): Promise<void> {
     },
     credentials: {
       registryRoot: `config/users/${created.id}/credentials`,
-      defaults: ["codex-default", "github-ssh"],
+      defaults: ["github-ssh"],
     },
   }, null, 2)}\n`);
 }

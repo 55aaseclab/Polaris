@@ -189,6 +189,48 @@ test("portal API serves route-scoped workspaces and credentials without auth", a
   });
 });
 
+test("portal API previews credential asset content", async () => {
+  const credentialId = uniqueName("portal-preview");
+  const userId = DEMO_USER_ID;
+
+  try {
+    await withPortalServer(async (baseUrl) => {
+      const createResponse = await fetch(
+        `${baseUrl}/api/users/${userId}/credentials/create`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            credentialId,
+            kind: "api-key",
+            label: "Portal Preview Credential",
+            purposes: "agent-auth",
+            content: "{\"token\":\"preview-test\"}\n",
+          }),
+        },
+      );
+      assert.equal(createResponse.status, 200);
+
+      const previewResponse = await fetch(
+        `${baseUrl}/api/users/${userId}/credentials/preview?path=${encodeURIComponent(`credentials/generated/${credentialId}/auth.json`)}`,
+      );
+      assert.equal(previewResponse.status, 200);
+      const preview = await previewResponse.json() as { path: string; content: string; truncated: boolean };
+      assert.equal(preview.path, `credentials/generated/${credentialId}/auth.json`);
+      assert.match(preview.content, /preview-test/);
+      assert.equal(preview.truncated, false);
+    });
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
+      force: true,
+    });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "generated", credentialId), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
 test("portal API reads and updates user profiles", async () => {
   const userId = "100000000000000001";
   const original = fs.readFileSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), "utf8");
@@ -268,8 +310,9 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
     });
 
     assert.equal(fs.existsSync(profilePath), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "codex-default.yaml")), true);
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub")), true);
 
     const userMap = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
       users?: Record<string, { polarisUserId: string; role: string; plan: string }>;
@@ -315,7 +358,9 @@ test("portal API creates a user profile without a Clerk email by using a synthet
     });
 
     assert.equal(fs.existsSync(profilePath), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "codex-default.yaml")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub")), true);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
