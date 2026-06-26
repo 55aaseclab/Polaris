@@ -24,7 +24,7 @@ export default defineConfig({
       cwd: path.resolve(DIRNAME, "../.."),
     },
     {
-      command: `POLARIS_WEB_PORT=${PLAYWRIGHT_WEB_PORT} POLARIS_API_PROXY_TARGET=http://127.0.0.1:${PLAYWRIGHT_API_PORT} pnpm --filter polaris-web run dev:host`,
+      command: `POLARIS_WEB_PORT=${PLAYWRIGHT_WEB_PORT} POLARIS_API_PROXY_TARGET=http://127.0.0.1:${PLAYWRIGHT_API_PORT} pnpm --filter polaris-web run dev -- --host 0.0.0.0`,
       url: `http://127.0.0.1:${PLAYWRIGHT_WEB_PORT}`,
       reuseExistingServer: false,
       cwd: path.resolve(DIRNAME, "../.."),
