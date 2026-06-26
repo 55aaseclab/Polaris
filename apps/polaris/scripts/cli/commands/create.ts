@@ -1,4 +1,4 @@
-import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
+import { parseWorkspaceReference } from "../../config/load.js";
 import { assertProjectNameAvailable } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../../config/scaffold.js";
 import { ensureWorkspaceConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
+import { loadWorkspaceForProjectRef } from "./shared.js";
 
 function parseCreateArgs(argv: string[]): { projectRef: string; userProfileId: string } {
   const projectRef = argv[0]?.trim();
@@ -66,7 +67,7 @@ export async function createCommand(argv: string[]): Promise<void> {
     }, null, 2)}\n`);
     return;
   }
-  const workspace = loadWorkspace(projectRef);
+  const workspace = loadWorkspaceForProjectRef(projectRef);
   logInfo("cli", "workspace-create-dispatch", {
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,

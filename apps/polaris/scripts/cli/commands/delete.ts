@@ -6,10 +6,11 @@ import { renderAndWriteDockerWorkspace } from "../../backends/docker/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../../backends/kubevirt/render.js";
 import { renderAndWritePodWorkspace } from "../../backends/pod/render.js";
 import { getBackendDriver } from "../../backends/index.js";
-import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
+import { parseWorkspaceReference } from "../../config/load.js";
 import { projectOwners } from "../../config/project-ownership.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { logInfo } from "../../utils/log.js";
+import { loadWorkspaceForProjectRef } from "./shared.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
 
@@ -47,7 +48,7 @@ function existingTargets(userId: string, workspace: string): BackendTarget[] {
 function loadExistingWorkspaces(userId: string, workspace: string): WorkspaceSpec[] {
   return existingTargets(userId, workspace).flatMap((target) => {
     try {
-      return [loadWorkspace(workspaceProjectRef(workspace, target))];
+      return [loadWorkspaceForProjectRef(workspaceProjectRef(workspace, target))];
     } catch {
       return [];
     }

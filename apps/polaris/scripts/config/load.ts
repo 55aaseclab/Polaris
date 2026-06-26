@@ -856,7 +856,12 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
   return [];
 }
 
-export function loadWorkspace(projectRef: string): WorkspaceSpec {
+export function resolveWorkspaceConfigPath(projectRef: string): {
+  configPath: string;
+  project: string;
+  backendHint?: WorkspaceSpec["backend"]["kind"];
+  profileHint?: string;
+} {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   assertNoProjectNameCollision(project);
   const resolvedBackendHint = resolveBackendHint(project, backendHint);
@@ -865,12 +870,12 @@ export function loadWorkspace(projectRef: string): WorkspaceSpec {
   if (!configPath) {
     throw new Error(`Config not found for project '${project}'`);
   }
-  return loadWorkspaceFromConfigPath(
-    configPath,
+  return {
     project,
-    resolvedBackendHint,
-    resolvedProfileHint,
-  );
+    configPath,
+    backendHint: resolvedBackendHint,
+    profileHint: resolvedProfileHint,
+  };
 }
 
 export function loadWorkspaceFromConfigPath(
