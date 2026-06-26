@@ -135,16 +135,6 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     if (!workspace.agent.capabilities.supportsTranscriptReplay) {
       throw new Error("Agent-enabled workspaces require transcript replay support");
     }
-    const requiredFiles = ["codex-auth.json", "codex-config.toml"];
-    for (const key of requiredFiles) {
-      const authFile = workspace.runtime.authFiles.find((entry) => entry.key === key);
-      if (!authFile) {
-        throw new Error(`Agent-enabled workspaces require auth file '${key}'`);
-      }
-      if (!authFile.content && !authFile.sourcePath) {
-        throw new Error(`Auth file '${key}' must define inline content or a source path`);
-      }
-    }
   }
 
   if (workspace.userProfile.ssh.mode === "provided-key") {

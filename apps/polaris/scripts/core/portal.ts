@@ -693,13 +693,7 @@ export function updatePortalWorkspaceAgentBinding(input: {
       ...rawCredentials,
       bindings: credentialBindings,
     },
-    agent: {
-      ...rawAgent,
-      kind: input.enabled ? "multi" : "disabled",
-      label: input.enabled ? "Codex + Claude Code" : "Disabled by default",
-      args: [],
-      persist_state: input.enabled,
-    },
+    agent: rawAgent,
   };
   writeYAML(configPath, next);
 

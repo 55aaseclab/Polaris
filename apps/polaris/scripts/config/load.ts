@@ -788,37 +788,37 @@ function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] 
 function normalizeAgentKind(rawKind: unknown): string {
   const kind = String(rawKind ?? "").trim().toLowerCase();
   if (!kind || kind === "none" || kind === "disabled") {
-    return "";
+    return "multi";
   }
   return kind;
 }
 
 function buildAgentContract(home: string, agentKind: string): WorkspaceAgentContract {
-  const enabled = Boolean(agentKind);
+  const enabled = true;
   const stateRoot = `${home}/.paseo`;
   const evolutionRoot = `${stateRoot}/evolution`;
   return {
     enabled,
-    managerId: enabled ? "paseo" : "none",
+    managerId: "paseo",
     contractVersion: "v1",
     capabilities: {
-      supportsEventStream: enabled,
-      supportsTranscriptReplay: enabled,
-      supportsStructuredArtifacts: enabled,
-      supportsReview: enabled,
-      supportsRetrieval: enabled,
-      supportsCuration: enabled,
-      requiresDaemon: enabled,
-      supportsPairing: enabled,
+      supportsEventStream: true,
+      supportsTranscriptReplay: true,
+      supportsStructuredArtifacts: true,
+      supportsReview: true,
+      supportsRetrieval: true,
+      supportsCuration: true,
+      requiresDaemon: true,
+      supportsPairing: true,
     },
-    harnesses: enabled ? ["codex"] : [],
+    harnesses: agentKind === "multi" ? ["codex", "claude"] : ["codex"],
     runtime: {
       stateRoot,
       evolutionRoot,
       daemonAddress: "0.0.0.0:6767",
       readyFile: "/tmp/.ready",
-      pairingFile: enabled ? `${stateRoot}/pairing.json` : undefined,
-      staleRuntimeArtifacts: enabled ? [`${stateRoot}/paseo.pid`, "/run/workspace/pids/paseo.pid"] : [],
+      pairingFile: `${stateRoot}/pairing.json`,
+      staleRuntimeArtifacts: [`${stateRoot}/paseo.pid`, "/run/workspace/pids/paseo.pid"],
     },
   };
 }
