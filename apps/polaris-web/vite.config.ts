@@ -2,7 +2,8 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const apiTarget = "http://127.0.0.1:8787";
+const apiTarget = process.env.POLARIS_API_PROXY_TARGET?.trim() || "http://127.0.0.1:8787";
+const port = Number(process.env.POLARIS_WEB_PORT || "4173");
 
 export default defineConfig({
   plugins: [react()],
@@ -12,8 +13,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4173,
-    allowedHosts: ["595f833d.r5.cpolar.top"],
+    port,
     proxy: {
       "/api": apiTarget,
     },
