@@ -343,6 +343,31 @@ export async function provisionWorkspace(
   });
 }
 
+export function queueProvisionWorkspace(
+  userId: string,
+  workspace: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
+  },
+): PortalProvisionProgress {
+  const progress = readWorkspaceProvisionProgress(userId, workspace) ?? updateProgress(userId, workspace, {
+    phase: "queued",
+    step: 0,
+    percent: 0,
+    done: false,
+    message: "workspace provisioning queued",
+  });
+  void startProvisionWorkspace(userId, workspace, options).catch((error) => {
+    logWarn("portal", "workspace-provision-background-failed", {
+      userId,
+      workspace,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  });
+  return progress;
+}
+
 export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
   return listOwnedWorkspaces(userId).map((workspace) => loadWorkspaceSummary(userId, workspace));
 }
