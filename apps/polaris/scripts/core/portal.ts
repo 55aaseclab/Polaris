@@ -624,7 +624,7 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
         purpose: binding.purpose,
         credentialId: binding.credentialId,
         required: binding.required,
-      }));
+        }));
       break;
     } catch {
       continue;
