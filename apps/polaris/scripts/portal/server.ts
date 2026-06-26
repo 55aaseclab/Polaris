@@ -19,7 +19,7 @@ import {
   listUserPortalCredentials,
   readUserPortalCredentialPreview,
   readUserPortalWorkspaceAssetPreview,
-  provisionWorkspace,
+  queueProvisionWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   unbindPortalWorkspaceAgent,
@@ -197,8 +197,11 @@ async function handleWorkspaceProvision(
   userId: string,
   workspace: string,
 ): Promise<void> {
-  void req;
-  const progress = await provisionWorkspace(userId, workspace);
+  const body = await readBody(req);
+  const progress = queueProvisionWorkspace(userId, workspace, {
+    defaultDockerOnly: body.defaultDockerOnly === "true",
+    startAfterCreate: body.startAfterCreate === "true",
+  });
   sendJson(res, 202, progress);
 }
 
@@ -585,7 +588,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             badRequest(res, "workspaceName is required");
             return;
           }
-          const provision = await provisionWorkspace(routeUserId, workspaceName, {
+          const provision = queueProvisionWorkspace(routeUserId, workspaceName, {
             defaultDockerOnly: body.defaultDockerOnly === "true",
             startAfterCreate: body.startAfterCreate === "true",
           });
