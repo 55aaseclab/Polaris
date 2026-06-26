@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
 import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
 
@@ -133,6 +134,75 @@ function cleanupPolarisRegistration(clerkUsername: string, userId: string): void
   fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }
 
+function ensureUser001GitAuthFixture(): () => void {
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", USER001_POLARIS_ID, "credentials");
+  const sshRoot = path.join(credentialRoot, "ssh");
+  const credentialPath = path.join(credentialRoot, "github-ssh.yaml");
+  const privateKeyPath = path.join(sshRoot, "id_ed25519");
+  const publicKeyPath = path.join(sshRoot, "id_ed25519.pub");
+  const originalCredential = fs.existsSync(credentialPath) ? fs.readFileSync(credentialPath, "utf8") : null;
+  const created: string[] = [];
+
+  fs.mkdirSync(sshRoot, { recursive: true });
+
+  if (!fs.existsSync(privateKeyPath)) {
+    fs.writeFileSync(
+      privateKeyPath,
+      [
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "placeholder-user001-test-key",
+        "-----END OPENSSH PRIVATE KEY-----",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    created.push(privateKeyPath);
+  }
+  if (!fs.existsSync(publicKeyPath)) {
+    fs.writeFileSync(
+      publicKeyPath,
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestUser001 user001@polaris.local\n",
+      "utf8",
+    );
+    created.push(publicKeyPath);
+  }
+  fs.writeFileSync(
+    credentialPath,
+    [
+      "id: github-ssh",
+      `userId: \"${USER001_POLARIS_ID}\"`,
+      "kind: ssh-key",
+      "label: Demo SSH key",
+      "purposes:",
+      "  - git-auth",
+      "  - ssh-auth",
+      "materialRef:",
+      "  type: file",
+      "  key: user-ssh-state/default",
+      "  files:",
+      "    - key: id_ed25519",
+      "      source_path: credentials/ssh/id_ed25519",
+      "    - key: id_ed25519.pub",
+      "      source_path: credentials/ssh/id_ed25519.pub",
+      "status: ready",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  if (originalCredential === null) {
+    created.push(credentialPath);
+  }
+
+  return () => {
+    if (originalCredential !== null) {
+      fs.writeFileSync(credentialPath, originalCredential, "utf8");
+    }
+    for (const filePath of created) {
+      fs.rmSync(filePath, { force: true });
+    }
+  };
+}
+
 async function createMappedPolarisUser(
   request: import("@playwright/test").APIRequestContext,
   userProfileId: string,
@@ -199,6 +269,22 @@ async function deleteWorkspaceByApi(
     return;
   }
   expect(response.ok()).toBeTruthy();
+}
+
+function dockerContainerState(containerName: string): "running" | "stopped" | "missing" {
+  const inspect = spawnSync("docker", ["inspect", containerName], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  if (inspect.status !== 0) {
+    return "missing";
+  }
+  try {
+    const parsed = JSON.parse(inspect.stdout) as Array<{ State?: { Running?: boolean } }>;
+    return parsed[0]?.State?.Running ? "running" : "stopped";
+  } catch {
+    return "stopped";
+  }
 }
 
 async function signInAsUsername(
@@ -344,7 +430,9 @@ test("deleting a Polaris user from settings removes the profile, secrets root, a
 
 test("user001 can create a default-docker workspace, inspect docker assets, and delete it", async ({ page }) => {
   test.setTimeout(900_000);
+  const cleanupGitAuthFixture = ensureUser001GitAuthFixture();
   const workspaceName = `e2e-ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const containerName = `${workspaceName}-docker`;
   const workspaceRoot = path.join(
     REPO_ROOT,
     "config",
@@ -368,7 +456,12 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
 
     await page.getByRole("button", { name: /Add workspace|新增工作空间/ }).click();
     await page.getByLabel(/Workspace name|工作空间名称/).fill(workspaceName);
+    await expect(page.getByLabel(/Create and start|创建并启动/)).toBeChecked();
     await page.getByRole("button", { name: /Create workspace|创建工作空间/ }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/users/${USER001_POLARIS_ID}/workspaces/${encodeURIComponent(workspaceName)}$`),
+      { timeout: 900_000 },
+    );
 
     await expect
       .poll(
@@ -377,13 +470,26 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
       )
       .toBe(true);
 
+    await expect
+      .poll(() => dockerContainerState(containerName), { timeout: 900_000 })
+      .toBe("running");
+
     expect(fs.existsSync(userDockerfilePath)).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "generated", "docker.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml"))).toBe(false);
     expect(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml"))).toBe(false);
 
-    await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName);
+    await page.goto(`/users/${USER001_POLARIS_ID}/workspaces/${encodeURIComponent(workspaceName)}/controls`);
+    await page.getByRole("button", { name: /Stop workspace|停止工作空间/ }).click();
+
+    await expect
+      .poll(() => dockerContainerState(containerName), { timeout: 60_000 })
+      .toBe("stopped");
+
+    await page.getByRole("button", { name: /Delete workspace|删除工作空间/ }).click();
+    await page.getByRole("button", { name: /Delete workspace|删除工作空间/ }).last().click();
+    await expect(page).toHaveURL(new RegExp(`/users/${USER001_POLARIS_ID}/workspaces$`));
     await expect
       .poll(() => fs.existsSync(workspaceRoot), { timeout: 30_000 })
       .toBe(false);
@@ -391,5 +497,6 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
     await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName, {
       bestEffort: true,
     });
+    cleanupGitAuthFixture();
   }
 });

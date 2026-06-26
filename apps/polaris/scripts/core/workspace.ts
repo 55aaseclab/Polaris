@@ -356,16 +356,19 @@ export interface WorkspaceStatus {
     dockerfile: {
       file: string;
       path: string;
+      exists?: boolean;
     };
     specs: Array<{
       driver: string;
       file: string;
       path: string;
+      exists?: boolean;
     }>;
     generatedManifests: Array<{
       driver: string;
       file: string;
       path: string;
+      exists?: boolean;
     }>;
     imageTags: Array<{
       name: string;

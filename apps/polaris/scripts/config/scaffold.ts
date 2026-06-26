@@ -8,6 +8,8 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+const WORKSPACE_SERVICE_PORT_START = 32000;
+const WORKSPACE_SERVICE_PORT_END = 32999;
 
 function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
@@ -99,6 +101,29 @@ function readGitConfig(key: "user.name" | "user.email"): string {
   return result.stdout.trim();
 }
 
+function currentlyListeningPorts(): Set<number> {
+  const result = spawnSync("ss", ["-ltnH"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) {
+    return new Set();
+  }
+
+  const ports = new Set<number>();
+  for (const line of result.stdout.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    const localAddress = fields[3] ?? "";
+    const portRaw = localAddress.includes(":") ? localAddress.slice(localAddress.lastIndexOf(":") + 1) : "";
+    const port = Number.parseInt(portRaw, 10);
+    if (Number.isInteger(port) && port > 0) {
+      ports.add(port);
+    }
+  }
+  return ports;
+}
+
 function localUserProfileSeed(): { id: string; name: string; email: string } {
   const gitName = process.env.GIT_AUTHOR_NAME?.trim() || readGitConfig("user.name");
   const gitEmail = process.env.GIT_AUTHOR_EMAIL?.trim() || readGitConfig("user.email");
@@ -118,6 +143,61 @@ function userProfilePath(userProfileId: string): string {
 
 function userCredentialRegistryDir(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
+}
+
+function configuredWorkspaceServicePorts(): Set<number> {
+  const configured = new Set<number>();
+  const usersRoot = path.join(REPO_ROOT, "config", "users");
+  if (!fs.existsSync(usersRoot)) {
+    return configured;
+  }
+
+  for (const userEntry of fs.readdirSync(usersRoot, { withFileTypes: true })) {
+    if (!userEntry.isDirectory()) {
+      continue;
+    }
+    const projectsRoot = path.join(usersRoot, userEntry.name, "projects");
+    if (!fs.existsSync(projectsRoot)) {
+      continue;
+    }
+    for (const projectEntry of fs.readdirSync(projectsRoot, { withFileTypes: true })) {
+      if (!projectEntry.isDirectory()) {
+        continue;
+      }
+      const dockerSpecPath = path.join(projectsRoot, projectEntry.name, "docker.agent.yaml");
+      if (!fs.existsSync(dockerSpecPath)) {
+        continue;
+      }
+      const doc = (yaml.load(fs.readFileSync(dockerSpecPath, "utf8")) ?? {}) as {
+        service?: { ports?: Array<{ node_port?: unknown }> };
+      };
+      for (const portEntry of doc.service?.ports ?? []) {
+        const value = Number.parseInt(String(portEntry.node_port ?? ""), 10);
+        if (Number.isInteger(value) && value > 0) {
+          configured.add(value);
+        }
+      }
+    }
+  }
+
+  return configured;
+}
+
+function allocateWorkspaceServicePort(): string {
+  const unavailable = new Set<number>([
+    ...configuredWorkspaceServicePorts(),
+    ...currentlyListeningPorts(),
+  ]);
+
+  for (let port = WORKSPACE_SERVICE_PORT_START; port <= WORKSPACE_SERVICE_PORT_END; port += 1) {
+    if (!unavailable.has(port)) {
+      return String(port);
+    }
+  }
+
+  throw new Error(
+    `No free workspace service port is available in range ${WORKSPACE_SERVICE_PORT_START}-${WORKSPACE_SERVICE_PORT_END}`,
+  );
 }
 
 function userDockerfilePath(userProfileId: string): string {
@@ -369,6 +449,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
   ensureWorkspaceListedInUserProfile(userProfileId, project);
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
+  const workspaceServicePort = allocateWorkspaceServicePort();
   const doc = {
     project,
     user_profile: userProfileId,
@@ -416,7 +497,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
       ports: [
         {
           container_port: "6767",
-          node_port: "6767",
+          node_port: workspaceServicePort,
           name: "paseo",
         },
       ],

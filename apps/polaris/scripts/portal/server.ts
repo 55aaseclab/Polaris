@@ -9,6 +9,7 @@ import {
 } from "../core/portal.js";
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
+  bindPortalWorkspaceAgent,
   createPortalCodexCredential,
   deletePortalCredential,
   deletePortalWorkspace,
@@ -17,9 +18,11 @@ import {
   listPortalWorkspaces,
   listUserPortalCredentials,
   readUserPortalCredentialPreview,
+  readUserPortalWorkspaceAssetPreview,
   provisionWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
+  unbindPortalWorkspaceAgent,
   upsertPortalCredential,
   createPortalUser,
 } from "./service.js";
@@ -214,6 +217,66 @@ async function handleWorkspaceStop(
   workspace: string,
 ): Promise<void> {
   const result = await stopPortalWorkspace(userId, workspace);
+  sendJson(res, 200, result);
+}
+
+function handleWorkspacePreview(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+  assetPath: string,
+): void {
+  try {
+    sendJson(res, 200, readUserPortalWorkspaceAssetPreview(userId, workspace, assetPath));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "workspace asset not found") {
+      sendJson(res, 404, { error: message });
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handleWorkspacePaseoBind(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const credentialId = body.credentialId?.trim();
+  if (!credentialId) {
+    badRequest(res, "credentialId is required");
+    return;
+  }
+  const driver = body.driver?.trim()
+    ? parsePortalDriverTarget(body.driver)
+    : undefined;
+  const result = await bindPortalWorkspaceAgent({
+    userId,
+    workspace,
+    credentialId,
+    driver,
+  });
+  sendJson(res, 200, result);
+}
+
+async function handleWorkspacePaseoUnbind(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const driver = body.driver?.trim()
+    ? parsePortalDriverTarget(body.driver)
+    : undefined;
+  const result = await unbindPortalWorkspaceAgent({
+    userId,
+    workspace,
+    driver,
+  });
   sendJson(res, 200, result);
 }
 
@@ -482,6 +545,15 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, getPortalWorkspaceDetail(routeUserId, workspace));
           return;
         }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "preview" && req.method === "GET") {
+          const assetPath = url.searchParams.get("path")?.trim() || "";
+          if (!assetPath) {
+            badRequest(res, "path is required");
+            return;
+          }
+          handleWorkspacePreview(res, routeUserId, workspace, assetPath);
+          return;
+        }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "DELETE") {
           await handleWorkspaceDelete(res, routeUserId, workspace);
           return;
@@ -492,6 +564,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "stop" && req.method === "POST") {
           await handleWorkspaceStop(res, routeUserId, workspace);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "bind" && req.method === "POST") {
+          await handleWorkspacePaseoBind(req, res, routeUserId, workspace);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "unbind" && req.method === "POST") {
+          await handleWorkspacePaseoUnbind(req, res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {

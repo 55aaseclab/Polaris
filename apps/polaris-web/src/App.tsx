@@ -28,6 +28,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  bindWorkspacePaseoCredential,
   createCodexCredential,
   createWorkspace,
   createPortalUser,
@@ -50,6 +51,7 @@ import {
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
+  unbindWorkspacePaseoCredential,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -199,6 +201,15 @@ const COPY: Record<Language, Record<string, string>> = {
     delete_user_confirm_description: "This deletes the Polaris user profile, user-scoped secrets, and Clerk username mapping. This action cannot be undone.",
     deleting_user: "Deleting user...",
     workspace_controls: "Controls",
+    paseo_credential: "Paseo credential",
+    paseo_credential_desc: "Bind an agent-auth credential to enable Paseo for this driver.",
+    loading_paseo_credentials: "Loading agent credentials...",
+    no_paseo_credentials: "No agent-auth credential found.",
+    current_paseo_credential: "Current Paseo credential",
+    bind_paseo: "Bind and start Paseo",
+    binding_paseo: "Binding Paseo...",
+    unbind_paseo: "Unbind Paseo",
+    unbinding_paseo: "Unbinding Paseo...",
     select_submenu: "Select a workspace submenu.",
     sidebar_tier: "Free",
     menu_upgrade: "Upgrade to Pro",
@@ -356,6 +367,15 @@ const COPY: Record<Language, Record<string, string>> = {
     delete_user_confirm_description: "这会删除 Polaris 用户资料、用户级 secrets，以及 Clerk 用户名映射。此操作不可恢复。",
     deleting_user: "正在删除用户…",
     workspace_controls: "控制",
+    paseo_credential: "Paseo 凭证",
+    paseo_credential_desc: "为当前 driver 绑定一个 agent-auth credential，并启用 Paseo。",
+    loading_paseo_credentials: "正在加载 agent 凭证…",
+    no_paseo_credentials: "没有可用的 agent-auth credential。",
+    current_paseo_credential: "当前 Paseo 凭证",
+    bind_paseo: "绑定并启动 Paseo",
+    binding_paseo: "正在绑定 Paseo…",
+    unbind_paseo: "解除 Paseo 绑定",
+    unbinding_paseo: "正在解除 Paseo 绑定…",
     select_submenu: "请选择工作空间子页面。",
     sidebar_tier: "免费版",
     menu_upgrade: "升级到 Pro",
@@ -1546,20 +1566,41 @@ function WorkspaceDetailPage() {
   const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
     [userId, workspaceName],
   );
+  const {
+    data: credentials,
+    error: credentialsError,
+    loading: credentialsLoading,
+  } = useAsyncValue(
+    () => listCredentials(userId),
+    [userId],
+  );
   const [driver, setDriver] = useState("");
+  const [paseoCredentialId, setPaseoCredentialId] = useState("");
   const [switching, setSwitching] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [bindingPaseo, setBindingPaseo] = useState(false);
+  const [unbindingPaseo, setUnbindingPaseo] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentPane = pathParts[4] ?? "";
   const assets = data?.status?.assets;
+  const agentCredentials = (credentials ?? []).filter((credential) =>
+    credential.purposes.includes("agent-auth")
+  );
+  const rawCurrentPaseoCredentialId = data?.credentialBindings.find((binding) =>
+    binding.purpose === "agent-auth"
+  )?.credentialId ?? "";
+  const currentPaseoCredentialId = agentCredentials.some((credential) =>
+    credential.id === rawCurrentPaseoCredentialId
+  )
+    ? rawCurrentPaseoCredentialId
+    : "";
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
   );
@@ -1637,6 +1678,16 @@ function WorkspaceDetailPage() {
     }
   }, [data]);
 
+  useEffect(() => {
+    if (currentPaseoCredentialId) {
+      setPaseoCredentialId(currentPaseoCredentialId);
+      return;
+    }
+    if (!paseoCredentialId && agentCredentials.length > 0) {
+      setPaseoCredentialId(agentCredentials[0]?.id ?? "");
+    }
+  }, [agentCredentials, currentPaseoCredentialId, paseoCredentialId]);
+
   async function handleSwitch(): Promise<void> {
     if (!driver) {
       return;
@@ -1656,7 +1707,7 @@ function WorkspaceDetailPage() {
     setDeleting(true);
     try {
       await deleteWorkspace(userId, workspaceName);
-      navigate(`/users/${encodeURIComponent(userId)}/workspaces`);
+      window.location.assign(`/users/${encodeURIComponent(userId)}/workspaces`);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1674,6 +1725,41 @@ function WorkspaceDetailPage() {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setStopping(false);
+    }
+  }
+
+  async function handleBindPaseo(): Promise<void> {
+    if (!paseoCredentialId || !driver) {
+      return;
+    }
+    setActionError(null);
+    setBindingPaseo(true);
+    try {
+      await bindWorkspacePaseoCredential(userId, workspaceName, {
+        credentialId: paseoCredentialId,
+        driver,
+      });
+      window.location.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBindingPaseo(false);
+    }
+  }
+
+  async function handleUnbindPaseo(): Promise<void> {
+    if (!driver) {
+      return;
+    }
+    setActionError(null);
+    setUnbindingPaseo(true);
+    try {
+      await unbindWorkspacePaseoCredential(userId, workspaceName, { driver });
+      window.location.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUnbindingPaseo(false);
     }
   }
 
@@ -1798,8 +1884,8 @@ function WorkspaceDetailPage() {
       return (
         <div className="grid gap-4">
           <div className="grid gap-1">
-            <div className="text-sm font-medium text-muted-foreground">{t("workspace_controls")}</div>
-            <div className="text-base font-medium">{workspaceName}</div>
+            <div className="text-sm font-medium">{t("workspace_controls")}</div>
+            <div className="text-sm text-muted-foreground">{workspaceName}</div>
           </div>
           <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
             {data.progress && (
@@ -1865,6 +1951,64 @@ function WorkspaceDetailPage() {
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+            </div>
+            <Separator className="my-5" />
+            <div className="grid gap-3">
+              <div className="grid gap-1">
+                <div className="text-sm font-medium">{t("paseo_credential")}</div>
+                <div className="text-sm text-muted-foreground">{t("paseo_credential_desc")}</div>
+              </div>
+              {credentialsLoading && (
+                <p className="text-sm text-muted-foreground">{t("loading_paseo_credentials")}</p>
+              )}
+              {credentialsError && (
+                <p className="text-sm text-destructive">{credentialsError}</p>
+              )}
+              {!credentialsLoading && !credentialsError && (
+                <div className="grid gap-3">
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,18rem)_auto_auto] sm:items-end">
+                    <div className="min-w-0">
+                      <Label htmlFor="paseo-credential">{t("paseo_credential")}</Label>
+                      <Select
+                        value={paseoCredentialId}
+                        onValueChange={setPaseoCredentialId}
+                        disabled={agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
+                      >
+                        <SelectTrigger id="paseo-credential">
+                          <SelectValue placeholder={t("paseo_credential")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agentCredentials.map((credential) => (
+                            <SelectItem key={credential.id} value={credential.id}>
+                              {credential.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      onClick={() => void handleBindPaseo()}
+                      disabled={!paseoCredentialId || !driver || agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
+                    >
+                      {bindingPaseo ? t("binding_paseo") : t("bind_paseo")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleUnbindPaseo()}
+                      disabled={!driver || !currentPaseoCredentialId || bindingPaseo || unbindingPaseo}
+                    >
+                      {unbindingPaseo ? t("unbinding_paseo") : t("unbind_paseo")}
+                    </Button>
+                  </div>
+                  {currentPaseoCredentialId ? (
+                    <div className="text-sm text-muted-foreground">
+                      {t("current_paseo_credential")}: {currentPaseoCredentialId}
+                    </div>
+                  ) : agentCredentials.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">{t("no_paseo_credentials")}</div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </div>

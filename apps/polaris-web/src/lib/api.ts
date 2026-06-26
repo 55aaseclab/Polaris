@@ -129,6 +129,17 @@ export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
   }>;
 }
 
+export interface PortalWorkspaceAgentBindingResult {
+  enabled: boolean;
+  driver: string;
+  restarted: boolean;
+  credentialBindings: Array<{
+    purpose: string;
+    credentialId: string;
+    required: boolean;
+  }>;
+}
+
 export interface PortalCredentialSummary {
   id: string;
   kind: string;
@@ -382,6 +393,39 @@ export async function stopWorkspace(
     `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function bindWorkspacePaseoCredential(
+  userId: string,
+  workspace: string,
+  input: {
+    credentialId: string;
+    driver?: string;
+  },
+): Promise<PortalWorkspaceAgentBindingResult> {
+  return apiFetch<PortalWorkspaceAgentBindingResult>(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/bind`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function unbindWorkspacePaseoCredential(
+  userId: string,
+  workspace: string,
+  input?: {
+    driver?: string;
+  },
+): Promise<PortalWorkspaceAgentBindingResult> {
+  return apiFetch<PortalWorkspaceAgentBindingResult>(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/unbind`,
+    {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
     },
   );
 }
