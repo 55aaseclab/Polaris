@@ -453,7 +453,9 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             badRequest(res, "workspaceName is required");
             return;
           }
-          const provision = await provisionWorkspace(routeUserId, workspaceName);
+          const provision = await provisionWorkspace(routeUserId, workspaceName, {
+            defaultDockerOnly: body.defaultDockerOnly === "true",
+          });
           sendJson(res, 202, provision);
           return;
         }

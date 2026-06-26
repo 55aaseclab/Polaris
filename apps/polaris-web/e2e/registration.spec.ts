@@ -20,6 +20,10 @@ interface PolarisUserResponse {
   email: string;
 }
 
+const USER001_CLERK_USERNAME = "user001";
+const USER001_PASSWORD = "user001";
+const USER001_POLARIS_ID = "100000000000000001";
+
 function publishableKey(): string {
   const value = process.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
   if (!value) {
@@ -180,6 +184,23 @@ async function deletePolarisUser(
   expect(response.ok()).toBeTruthy();
 }
 
+async function deleteWorkspaceByApi(
+  request: import("@playwright/test").APIRequestContext,
+  userId: string,
+  workspaceName: string,
+  options?: {
+    bestEffort?: boolean;
+  },
+): Promise<void> {
+  const response = await request.delete(
+    `http://127.0.0.1:8788/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}`,
+  );
+  if (response.status() === 404 || options?.bestEffort) {
+    return;
+  }
+  expect(response.ok()).toBeTruthy();
+}
+
 async function signInAsUsername(
   page: import("@playwright/test").Page,
   username: string,
@@ -318,5 +339,45 @@ test("deleting a Polaris user from settings removes the profile, secrets root, a
   } finally {
     cleanupPolarisRegistration(username, username);
     await deleteClerkUser(clerkUserId);
+  }
+});
+
+test("user001 can create a default-docker workspace, inspect docker assets, and delete it", async ({ page }) => {
+  test.setTimeout(900_000);
+  const workspaceName = `e2e-ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const workspaceRoot = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    USER001_POLARIS_ID,
+    "projects",
+    workspaceName,
+  );
+
+  try {
+    await signInAsUsername(page, USER001_CLERK_USERNAME, USER001_PASSWORD);
+    await page.goto(`/users/${USER001_POLARIS_ID}/workspaces`);
+
+    await page.getByRole("button", { name: /Add workspace|新增工作空间/ }).click();
+    await page.getByLabel(/Workspace name|工作空间名称/).fill(workspaceName);
+    await page.getByRole("button", { name: /Create workspace|创建工作空间/ }).click();
+
+    await expect
+      .poll(
+        async () => fs.existsSync(path.join(workspaceRoot, "generated", "docker.yaml")),
+        { timeout: 900_000 },
+      )
+      .toBe(true);
+
+    expect(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(workspaceRoot, "generated", "docker.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml"))).toBe(false);
+
+    await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName);
+  } finally {
+    await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName, {
+      bestEffort: true,
+    });
   }
 });

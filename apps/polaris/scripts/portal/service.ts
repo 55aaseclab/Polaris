@@ -124,28 +124,36 @@ function loadUserWorkspace(
   );
 }
 
-function renderWorkspaceTargets(userId: string, workspace: string): void {
+function renderWorkspaceTargets(userId: string, workspace: string, defaultDockerOnly = false): void {
   const dockerWorkspace = loadUserWorkspace(userId, workspace, "docker");
   renderAndWriteDockerWorkspace(dockerWorkspace);
+  if (defaultDockerOnly) {
+    return;
+  }
   const podWorkspace = loadUserWorkspace(userId, workspace, "pod", "gvisor");
   renderAndWritePodWorkspace(podWorkspace);
   const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
   renderAndWriteKubevirtWorkspace(kubevirtWorkspace);
 }
 
-function ensureWorkspaceImageTargets(userId: string, workspace: string): void {
+function ensureWorkspaceImageTargets(userId: string, workspace: string, defaultDockerOnly = false): void {
   ensureCanonicalWorkspaceImage(`${workspace}@docker`);
+  if (defaultDockerOnly) {
+    return;
+  }
   ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`);
   ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`);
   const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
   ensureImageRefAvailable(kubevirtWorkspace.runtime.rootdiskImage ?? "quay.io/containerdisks/debian:13");
 }
 
-function ensureWorkspaceTargetSpecs(userId: string, workspace: string): void {
+function ensureWorkspaceTargetSpecs(userId: string, workspace: string, defaultDockerOnly = false): void {
   fs.mkdirSync(portalRoot(userId, workspace), { recursive: true });
   ensureWorkspaceConfig(`${workspace}@docker`);
-  ensureWorkspaceConfig(`${workspace}@pod:gvisor`);
-  ensureWorkspaceConfig(`${workspace}@kubevirt-vm`);
+  if (!defaultDockerOnly) {
+    ensureWorkspaceConfig(`${workspace}@pod:gvisor`);
+    ensureWorkspaceConfig(`${workspace}@kubevirt-vm`);
+  }
   const selectionPath = path.join(portalRoot(userId, workspace), "state", "selection.json");
   if (!fs.existsSync(selectionPath)) {
     fs.mkdirSync(path.dirname(selectionPath), { recursive: true });
@@ -153,7 +161,14 @@ function ensureWorkspaceTargetSpecs(userId: string, workspace: string): void {
   }
 }
 
-async function provisionWorkspaceInternal(userId: string, workspace: string): Promise<void> {
+async function provisionWorkspaceInternal(
+  userId: string,
+  workspace: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+  },
+): Promise<void> {
+  const defaultDockerOnly = options?.defaultDockerOnly ?? false;
   if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
     await createCommand([workspace, "--user", userId]);
   }
@@ -161,13 +176,13 @@ async function provisionWorkspaceInternal(userId: string, workspace: string): Pr
   updateProgress(userId, workspace, { phase: "starting", step: 0, message: "starting workspace provisioning" });
 
   updateProgress(userId, workspace, { phase: "specs", step: 1, message: "ensuring driver specs" });
-  ensureWorkspaceTargetSpecs(userId, workspace);
+  ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
 
   updateProgress(userId, workspace, { phase: "images", step: 2, message: "ensuring workspace images" });
-  ensureWorkspaceImageTargets(userId, workspace);
+  ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
 
   updateProgress(userId, workspace, { phase: "manifests", step: 3, message: "rendering backend manifests" });
-  renderWorkspaceTargets(userId, workspace);
+  renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
 
   updateProgress(userId, workspace, { phase: "status", step: 4, message: "collecting workspace status" });
   const summary = loadWorkspaceSummary(userId, workspace);
@@ -184,7 +199,13 @@ async function provisionWorkspaceInternal(userId: string, workspace: string): Pr
   });
 }
 
-export function startProvisionWorkspace(userId: string, workspace: string): Promise<void> {
+export function startProvisionWorkspace(
+  userId: string,
+  workspace: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+  },
+): Promise<void> {
   const key = rootKey(userId, workspace);
   const existing = provisionJobs.get(key);
   if (existing) {
@@ -192,7 +213,7 @@ export function startProvisionWorkspace(userId: string, workspace: string): Prom
   }
   const job = (async () => {
     try {
-      await provisionWorkspaceInternal(userId, workspace);
+      await provisionWorkspaceInternal(userId, workspace, options);
     } catch (error) {
       updateProgress(userId, workspace, {
         phase: "error",
@@ -208,8 +229,14 @@ export function startProvisionWorkspace(userId: string, workspace: string): Prom
   return job;
 }
 
-export async function provisionWorkspace(userId: string, workspace: string): Promise<PortalProvisionProgress> {
-  await startProvisionWorkspace(userId, workspace);
+export async function provisionWorkspace(
+  userId: string,
+  workspace: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+  },
+): Promise<PortalProvisionProgress> {
+  await startProvisionWorkspace(userId, workspace, options);
   return readWorkspaceProvisionProgress(userId, workspace) ?? updateProgress(userId, workspace, {
     phase: "done",
     step: PROVISION_TOTAL_STEPS,
