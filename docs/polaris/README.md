@@ -15,9 +15,6 @@ Polaris currently uses four distinct ports in the operator stack:
 - `8787`: Polaris portal API when started directly from the repo.
 - `4173`: Polaris web portal frontend in local dev mode.
 
-The Compose helper at `docker-compose.polaris.yml` publishes the self-hosted
-Paseo web app on `8082`.
-
 ## Default Path
 
 Use `docker` as the clean default onboarding path.
