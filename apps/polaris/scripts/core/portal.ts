@@ -52,6 +52,12 @@ export interface PortalCredentialPreview {
   truncated: boolean;
 }
 
+export interface PortalWorkspaceAssetPreview {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 export interface PortalProvisionProgress {
   workspace: string;
   userId: string;
@@ -438,6 +444,46 @@ export function readPortalCredentialPreview(userId: string, credentialPath: stri
   };
 }
 
+export function readPortalWorkspaceAssetPreview(
+  userId: string,
+  workspace: string,
+  assetPath: string,
+): PortalWorkspaceAssetPreview {
+  const trimmed = assetPath.trim();
+  if (!trimmed) {
+    throw new Error("workspace asset path is required");
+  }
+  const userRoot = path.resolve(path.join(USER_ROOT, userId));
+  const workspaceDir = path.resolve(workspaceRoot(userId, workspace));
+  if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
+    throw new Error(`workspace '${workspace}' not found for user '${userId}'`);
+  }
+  const absolute = path.resolve(REPO_ROOT, trimmed);
+  if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
+    throw new Error("workspace asset path must stay within the user root");
+  }
+  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+    throw new Error("workspace asset not found");
+  }
+  const raw = fs.readFileSync(absolute);
+  if (raw.includes(0)) {
+    return {
+      path: trimmed,
+      content: "[binary content hidden]",
+      truncated: false,
+    };
+  }
+  const MAX_PREVIEW_CHARS = 4000;
+  const content = raw.toString("utf8");
+  return {
+    path: trimmed,
+    content: content.length > MAX_PREVIEW_CHARS
+      ? `${content.slice(0, MAX_PREVIEW_CHARS)}\n…`
+      : content,
+    truncated: content.length > MAX_PREVIEW_CHARS,
+  };
+}
+
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
   const selectedDriver = readWorkspaceSelection(userId, workspace);
   let status = readWorkspaceStatus(userId, workspace);
@@ -492,6 +538,12 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
         continue;
       }
     }
+  }
+  if (status?.assets) {
+    status = {
+      ...status,
+      assets: normalizeWorkspaceAssets(status.assets),
+    };
   }
   return {
     name: workspace,
