@@ -24,15 +24,31 @@ function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
 }
 
-async function withFakePath(commands: Record<string, string>, fn: () => Promise<void> | void): Promise<void> {
+async function withFakePath(
+  commands: Record<string, string>,
+  fn: (ctx: { readCommandLog: () => string[] }) => Promise<void> | void,
+): Promise<void> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-portal-"));
+  const commandLogPath = path.join(tempDir, "commands.log");
   const originalPath = process.env.PATH || "";
   for (const [name, body] of Object.entries(commands)) {
-    fs.writeFileSync(path.join(tempDir, name), body, { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(tempDir, name),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> ${JSON.stringify(commandLogPath)}
+${body}
+`,
+      { mode: 0o755 },
+    );
   }
   process.env.PATH = `${tempDir}:${originalPath}`;
   try {
-    await fn();
+    await fn({
+      readCommandLog: () =>
+        fs.existsSync(commandLogPath)
+          ? fs.readFileSync(commandLogPath, "utf8").split("\n").map((line) => line.trim()).filter(Boolean)
+          : [],
+    });
   } finally {
     process.env.PATH = originalPath;
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -228,6 +244,206 @@ test("portal API previews credential asset content", async () => {
       recursive: true,
       force: true,
     });
+  }
+});
+
+test("portal API creates and deletes a codex credential for an existing user", async () => {
+  const userId = uniqueName("portal-credential-user");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Credential User", "--email", `${userId}@polaris.local`]);
+
+    let createdCredentialId = "";
+    await withPortalServer(async (baseUrl) => {
+      const createResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          harness: "codex",
+          label: "RightCode Codex",
+          providerName: "rightcode",
+          baseUrl: "https://right.codes/codex/v1",
+          apiKey: "test-api-key",
+        }),
+      });
+      const createBody = await createResponse.text();
+      assert.equal(createResponse.status, 201, createBody);
+      const created = JSON.parse(createBody) as {
+        id: string;
+        kind: string;
+        paths: string[];
+      };
+      createdCredentialId = created.id;
+      assert.equal(created.kind, "codex-auth");
+      assert.deepEqual(created.paths, [
+        `credentials/codex/${created.id}/auth.json`,
+        `credentials/codex/${created.id}/config.toml`,
+      ]);
+
+      const createdRegistryPath = path.join(userRoot, "credentials", `${created.id}.yaml`);
+      const createdAuthPath = path.join(userRoot, "credentials", "codex", created.id, "auth.json");
+      const createdConfigPath = path.join(userRoot, "credentials", "codex", created.id, "config.toml");
+      assert.equal(fs.existsSync(createdRegistryPath), true);
+      assert.equal(fs.existsSync(createdAuthPath), true);
+      assert.equal(fs.existsSync(createdConfigPath), true);
+
+      const registry = (yaml.load(fs.readFileSync(createdRegistryPath, "utf8")) ?? {}) as {
+        id?: string;
+        kind?: string;
+        label?: string;
+        purposes?: string[];
+        materialRef?: {
+          files?: Array<{ key?: string; source_path?: string }>;
+        };
+      };
+      assert.equal(registry.id, created.id);
+      assert.equal(registry.kind, "codex-auth");
+      assert.equal(registry.label, "RightCode Codex");
+      assert.deepEqual(registry.purposes, ["agent-auth"]);
+      assert.deepEqual(registry.materialRef?.files, [
+        {
+          key: "codex-auth.json",
+          source_path: `credentials/codex/${created.id}/auth.json`,
+        },
+        {
+          key: "codex-config.toml",
+          source_path: `credentials/codex/${created.id}/config.toml`,
+        },
+      ]);
+
+      const auth = JSON.parse(fs.readFileSync(createdAuthPath, "utf8")) as {
+        OPENAI_API_KEY?: string;
+      };
+      assert.equal(auth.OPENAI_API_KEY, "test-api-key");
+
+      const configToml = fs.readFileSync(createdConfigPath, "utf8");
+      assert.match(configToml, /model_provider = "rightcode"/);
+      assert.match(configToml, /model = "gpt-5\.4"/);
+      assert.match(configToml, /\[model_providers\.rightcode\]/);
+      assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
+
+      const deleteResponse = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(createdCredentialId)}`,
+        { method: "DELETE" },
+      );
+      const deleteBody = await deleteResponse.text();
+      assert.equal(deleteResponse.status, 200, deleteBody);
+      const deleted = JSON.parse(deleteBody) as {
+        credential: {
+          id: string;
+          removed: boolean;
+          removedPaths: string[];
+        };
+      };
+      assert.equal(deleted.credential.id, createdCredentialId);
+      assert.equal(deleted.credential.removed, true);
+      assert.deepEqual(deleted.credential.removedPaths, [
+        `credentials/codex/${createdCredentialId}/auth.json`,
+        `credentials/codex/${createdCredentialId}/config.toml`,
+      ]);
+    });
+
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", `${createdCredentialId}.yaml`)), false);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex", createdCredentialId, "auth.json")), false);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex", createdCredentialId, "config.toml")), false);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API creates and deletes a codex credential for demo user 001", async () => {
+  const userId = DEMO_USER_ID;
+  const credentialId = uniqueName("demo-codex");
+  const registryPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`);
+  const authPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId, "auth.json");
+  const configPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId, "config.toml");
+
+  try {
+    await withPortalServer(async (baseUrl) => {
+      const createResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          harness: "codex",
+          credentialId,
+          label: "rightcode",
+          providerName: "rightcode",
+          baseUrl: "https://right.codes/codex/v1",
+          apiKey: "demo-user-test-key",
+        }),
+      });
+      const createBody = await createResponse.text();
+      assert.equal(createResponse.status, 201, createBody);
+      const created = JSON.parse(createBody) as {
+        id: string;
+        kind: string;
+        label: string;
+        paths: string[];
+      };
+      assert.equal(created.id, credentialId);
+      assert.equal(created.kind, "codex-auth");
+      assert.equal(created.label, "rightcode");
+      assert.deepEqual(created.paths, [
+        `credentials/codex/${credentialId}/auth.json`,
+        `credentials/codex/${credentialId}/config.toml`,
+      ]);
+      assert.equal(fs.existsSync(registryPath), true);
+      assert.equal(fs.existsSync(authPath), true);
+      assert.equal(fs.existsSync(configPath), true);
+
+      const registry = (yaml.load(fs.readFileSync(registryPath, "utf8")) ?? {}) as {
+        id?: string;
+        kind?: string;
+        label?: string;
+        purposes?: string[];
+      };
+      assert.equal(registry.id, credentialId);
+      assert.equal(registry.kind, "codex-auth");
+      assert.equal(registry.label, "rightcode");
+      assert.deepEqual(registry.purposes, ["agent-auth"]);
+
+      const auth = JSON.parse(fs.readFileSync(authPath, "utf8")) as {
+        OPENAI_API_KEY?: string;
+      };
+      assert.equal(auth.OPENAI_API_KEY, "demo-user-test-key");
+
+      const configToml = fs.readFileSync(configPath, "utf8");
+      assert.match(configToml, /model_provider = "rightcode"/);
+      assert.match(configToml, /model = "gpt-5\.4"/);
+      assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
+
+      const deleteResponse = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
+        { method: "DELETE" },
+      );
+      const deleteBody = await deleteResponse.text();
+      assert.equal(deleteResponse.status, 200, deleteBody);
+      const deleted = JSON.parse(deleteBody) as {
+        credential: {
+          id: string;
+          removed: boolean;
+          removedPaths: string[];
+        };
+      };
+      assert.equal(deleted.credential.id, credentialId);
+      assert.equal(deleted.credential.removed, true);
+      assert.deepEqual(deleted.credential.removedPaths, [
+        `credentials/codex/${credentialId}/auth.json`,
+        `credentials/codex/${credentialId}/config.toml`,
+      ]);
+    });
+
+    assert.equal(fs.existsSync(registryPath), false);
+    assert.equal(fs.existsSync(authPath), false);
+    assert.equal(fs.existsSync(configPath), false);
+  } finally {
+    fs.rmSync(registryPath, { force: true });
+    fs.rmSync(authPath, { force: true });
+    fs.rmSync(configPath, { force: true });
+    fs.rmSync(path.dirname(authPath), { recursive: true, force: true });
   }
 });
 
@@ -633,6 +849,56 @@ test("portal API stops the selected workspace driver", async () => {
     fs.rmSync(userRoot, { recursive: true, force: true });
     fs.rmSync(privateKey, { force: true });
     fs.rmSync(publicKey, { force: true });
+  }
+});
+
+test("portal API can create and start a new workspace in one flow", async () => {
+  const userId = uniqueName("portal-start-user");
+  const workspace = uniqueName("portal-start");
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Start User", "--email", `${userId}@polaris.local`]);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then exit 0; fi
+if [[ "$1" == "pull" ]]; then exit 0; fi
+if [[ "$1" == "volume" && "$2" == "inspect" ]]; then exit 1; fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then printf 'docker-started-id'; exit 0; fi
+if [[ "$1" == "inspect" && "$2" == "docker-started-id" ]]; then printf '[{"State":{"Running":true}}]'; exit 0; fi
+if [[ "$1" == "exec" ]]; then exit 0; fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        await withPortalServer(async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              workspaceName: workspace,
+              defaultDockerOnly: true,
+              startAfterCreate: true,
+            }),
+          });
+          const bodyText = await response.text();
+          assert.equal(response.status, 202, bodyText);
+        });
+
+        assert.ok(
+          readCommandLog().some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")),
+        );
+      },
+    );
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(profileFile, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 

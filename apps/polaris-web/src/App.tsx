@@ -28,8 +28,10 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  createCodexCredential,
   createWorkspace,
   createPortalUser,
+  deleteCredential,
   deletePortalUser,
   deleteWorkspace,
   getCredentialPreview,
@@ -118,6 +120,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspaces: "Workspaces",
     add_workspace: "Add workspace",
     add_workspace_desc: "Create a new workspace for this user.",
+    start_after_create_option: "Create and start",
     docker_only_option: "Default docker only",
     loading_workspaces: "Loading workspaces...",
     no_workspaces: "No workspaces yet.",
@@ -165,6 +168,21 @@ const COPY: Record<Language, Record<string, string>> = {
     credentials_for_user: "User-owned credentials for this user.",
     loading_credentials: "Loading credentials...",
     no_credentials: "No credentials found.",
+    add_credential: "Add credential",
+    add_credential_desc: "Create a harness credential for this user.",
+    credential_type: "Credential type",
+    credential_label: "Credential label",
+    credential_provider_name: "Provider name",
+    credential_base_url: "Base URL",
+    credential_api_key: "API key",
+    credential_codex_option: "Codex",
+    create_credential: "Create credential",
+    creating_credential: "Creating credential...",
+    delete_credential: "Delete credential",
+    delete_credential_confirm_title: "Delete credential?",
+    delete_credential_confirm_description: "This removes the credential registry entry and its generated auth files.",
+    deleting_credential: "Deleting credential...",
+    credential_paths: "Credential files",
     user_profile: "User profile",
     user_profile_desc: "Edit the active user information.",
     administration: "Administration",
@@ -259,6 +277,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspaces: "工作空间",
     add_workspace: "新增工作空间",
     add_workspace_desc: "为当前用户创建一个新的工作空间。",
+    start_after_create_option: "创建并启动",
     docker_only_option: "仅默认 docker",
     loading_workspaces: "正在加载工作空间…",
     no_workspaces: "暂无工作空间。",
@@ -306,6 +325,21 @@ const COPY: Record<Language, Record<string, string>> = {
     credentials_for_user: "该用户所属的凭证。",
     loading_credentials: "正在加载凭证…",
     no_credentials: "暂无凭证。",
+    add_credential: "新增凭证",
+    add_credential_desc: "为当前用户创建 agent harness 凭证。",
+    credential_type: "凭证类型",
+    credential_label: "Credential label",
+    credential_provider_name: "提供方名称",
+    credential_base_url: "Base URL",
+    credential_api_key: "API Key",
+    credential_codex_option: "Codex",
+    create_credential: "创建凭证",
+    creating_credential: "正在创建凭证…",
+    delete_credential: "删除凭证",
+    delete_credential_confirm_title: "删除这个凭证？",
+    delete_credential_confirm_description: "这会删除凭证注册文件以及生成出的鉴权文件。",
+    deleting_credential: "正在删除凭证…",
+    credential_paths: "凭证文件",
     user_profile: "用户资料",
     user_profile_desc: "编辑当前用户信息。",
     administration: "管理",
@@ -757,6 +791,7 @@ type AssetSection = {
   label: string;
   labelLines?: string[];
   rows: AssetRow[];
+  action?: ReactNode;
 };
 
 function WorkspaceAssetTable(props: {
@@ -769,6 +804,7 @@ function WorkspaceAssetTable(props: {
   const hasStatusOrNotes = visibleSections.some((section) =>
     section.rows.some((row) => row.status),
   );
+  const hasActions = visibleSections.some((section) => Boolean(section.action));
   if (visibleSections.length === 0) {
     return <p className="text-sm text-muted-foreground">{props.emptyLabel}</p>;
   }
@@ -780,6 +816,9 @@ function WorkspaceAssetTable(props: {
           <thead className="bg-muted/30 text-left text-xs uppercase tracking-[0.14em] text-muted-foreground">
             <tr className="border-b border-border/70">
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_type")}</th>
+              {hasActions ? (
+                <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">Action</th>
+              ) : null}
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_name")}</th>
               <th className="w-full px-4 py-3 font-medium">{props.t("asset_path")}</th>
               {hasStatusOrNotes ? (
@@ -828,6 +867,16 @@ function WorkspaceAssetTable(props: {
                       )}
                     </td>
                   )}
+                  {hasActions ? (
+                    index === 0 ? (
+                      <td
+                        className="w-0 whitespace-nowrap px-4 py-4 align-middle text-right"
+                        rowSpan={section.rows.length}
+                      >
+                        {section.action ?? <span className="text-muted-foreground">-</span>}
+                      </td>
+                    ) : null
+                  ) : null}
                   <td className="w-0 whitespace-nowrap px-4 py-4 text-right font-medium">{row.name}</td>
                   <td className="w-full px-4 py-4">
                     <CredentialPathCell
@@ -932,6 +981,7 @@ function PortalShell(props: {
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>([]);
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [startAfterCreate, setStartAfterCreate] = useState(true);
   const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
@@ -973,10 +1023,12 @@ function PortalShell(props: {
     try {
       await createWorkspace(activeUserId, trimmedName, {
         defaultDockerOnly,
+        startAfterCreate,
       });
       setCreateWorkspaceProgress(100);
       setCreateWorkspaceOpen(false);
       setNewWorkspaceName("");
+      setStartAfterCreate(true);
       setDefaultDockerOnly(true);
       window.location.assign(
         `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
@@ -1038,6 +1090,7 @@ function PortalShell(props: {
                         setCreateWorkspaceOpen(open);
                         if (!open) {
                           setNewWorkspaceName("");
+                          setStartAfterCreate(true);
                           setDefaultDockerOnly(true);
                           setCreateWorkspaceError(null);
                           setCreatingWorkspace(false);
@@ -1069,6 +1122,16 @@ function PortalShell(props: {
                               disabled={creatingWorkspace}
                             />
                           </div>
+                          <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-border"
+                              checked={startAfterCreate}
+                              onChange={(event) => setStartAfterCreate(event.target.checked)}
+                              disabled={creatingWorkspace}
+                            />
+                            <span>{t("start_after_create_option")}</span>
+                          </label>
                           <label className="flex items-center gap-3 text-sm text-muted-foreground">
                             <input
                               type="checkbox"
@@ -1846,23 +1909,169 @@ function ProfilePage() {
   const { t } = useLanguage();
   const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
-  const { data, error, loading } = useAsyncValue(() => listCredentials(userId), [userId]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const {
+    data: credentials,
+    error: credentialsError,
+    loading: credentialsLoading,
+  } = useAsyncValue(() => listCredentials(userId), [userId, reloadKey]);
+  const [credentialForm, setCredentialForm] = useState({
+    harness: "codex",
+    label: "rightcode",
+    providerName: "rightcode",
+    baseUrl: "https://right.codes/codex/v1",
+    apiKey: "",
+  });
+  const [credentialLabelTouched, setCredentialLabelTouched] = useState(false);
+  const [credentialCreating, setCredentialCreating] = useState(false);
+  const [credentialActionError, setCredentialActionError] = useState<string | null>(null);
+  const [deletingCredentialId, setDeletingCredentialId] = useState<string | null>(null);
+
+  async function handleCredentialCreate(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event?.preventDefault();
+    if (credentialCreating) {
+      return;
+    }
+    setCredentialCreating(true);
+    setCredentialActionError(null);
+    try {
+      await createCodexCredential(userId, {
+        label: credentialForm.label.trim() || credentialForm.providerName.trim() || "rightcode",
+        providerName: credentialForm.providerName.trim() || "rightcode",
+        baseUrl: credentialForm.baseUrl.trim() || "https://right.codes/codex/v1",
+        apiKey: credentialForm.apiKey,
+      });
+      setCredentialForm({
+        harness: "codex",
+        label: "rightcode",
+        providerName: "rightcode",
+        baseUrl: "https://right.codes/codex/v1",
+        apiKey: "",
+      });
+      setCredentialLabelTouched(false);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCredentialCreating(false);
+    }
+  }
+
+  async function handleCredentialDelete(credentialId: string): Promise<void> {
+    if (deletingCredentialId) {
+      return;
+    }
+    setDeletingCredentialId(credentialId);
+    setCredentialActionError(null);
+    try {
+      await deleteCredential(userId, credentialId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingCredentialId(null);
+    }
+  }
 
   return (
     <PortalShell users={users ?? []}>
-      <div className="grid w-full min-w-0 gap-6">
-        <div className="grid gap-1">
-          <div className="text-sm font-medium">{t("credentials")}</div>
-          <div className="text-sm text-muted-foreground">{t("credentials_for_user")}</div>
+      <div className="grid w-full gap-6">
+        <div className="grid gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("credentials")}</div>
+              <div className="text-sm text-muted-foreground">{t("add_credential_desc")}</div>
+            </div>
+          </div>
+          <form className="grid gap-4 rounded-[1.25rem] border border-border bg-background p-5 shadow-sm" onSubmit={(event) => void handleCredentialCreate(event)}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="credential-type">{t("credential_type")}</Label>
+                <Select
+                  value={credentialForm.harness}
+                  onValueChange={(value) => setCredentialForm((current) => ({ ...current, harness: value }))}
+                >
+                  <SelectTrigger id="credential-type" type="button">
+                    <SelectValue placeholder={t("credential_type")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="codex">{t("credential_codex_option")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="credential-label">{t("credential_label")}</Label>
+                <Input
+                  id="credential-label"
+                  value={credentialForm.label}
+                  onChange={(event) => {
+                    setCredentialLabelTouched(true);
+                    setCredentialForm((current) => ({ ...current, label: event.target.value }));
+                  }}
+                  disabled={credentialCreating}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="credential-provider-name">{t("credential_provider_name")}</Label>
+                <Input
+                  id="credential-provider-name"
+                  value={credentialForm.providerName}
+                  onChange={(event) => {
+                    const nextProviderName = event.target.value;
+                    setCredentialForm((current) => ({
+                      ...current,
+                      providerName: nextProviderName,
+                      label: credentialLabelTouched ? current.label : nextProviderName,
+                    }));
+                  }}
+                  disabled={credentialCreating}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="credential-base-url">{t("credential_base_url")}</Label>
+                <Input
+                  id="credential-base-url"
+                  value={credentialForm.baseUrl}
+                  onChange={(event) => setCredentialForm((current) => ({ ...current, baseUrl: event.target.value }))}
+                  disabled={credentialCreating}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="credential-api-key">{t("credential_api_key")}</Label>
+              <Input
+                id="credential-api-key"
+                type="password"
+                value={credentialForm.apiKey}
+                onChange={(event) => setCredentialForm((current) => ({ ...current, apiKey: event.target.value }))}
+                disabled={credentialCreating}
+              />
+            </div>
+            {credentialActionError && (
+              <p className="text-sm text-destructive">{credentialActionError}</p>
+            )}
+            <div className="flex justify-end">
+              <Button type="submit" disabled={credentialCreating}>
+                {credentialCreating ? t("creating_credential") : t("create_credential")}
+              </Button>
+            </div>
+          </form>
+          {credentialsLoading && (
+            <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>
+          )}
+          {credentialsError && (
+            <p className="text-sm text-destructive">{credentialsError}</p>
+          )}
+          <WorkspaceAssetTable
+            t={t}
+            sections={credentialAssetSections(credentials ?? [], t, {
+              deletingCredentialId,
+              onDelete: (credentialId) => void handleCredentialDelete(credentialId),
+            })}
+            emptyLabel={t("no_credentials")}
+            userId={userId}
+          />
         </div>
-        {loading && <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>}
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <WorkspaceAssetTable
-          t={t}
-          sections={credentialAssetSections(data ?? [], t)}
-          emptyLabel={t("no_credentials")}
-          userId={userId}
-        />
       </div>
     </PortalShell>
   );
@@ -2065,40 +2274,49 @@ function CredentialPathCell(props: {
 function credentialAssetSections(
   credentials: PortalCredentialSummary[],
   t: (key: string) => string,
+  options?: {
+    deletingCredentialId?: string | null;
+    onDelete?: (credentialId: string) => void;
+  },
 ): AssetSection[] {
-  function assetNameForPath(path: string, fallback: string): string {
-    if (path.includes("/codex/")) {
-      return "Default Codex";
-    }
-    if (path.includes("/claude/")) {
-      return "Default Claude";
-    }
-    if (path.includes("/ssh/")) {
-      return "SSH Key";
-    }
-    return fallback;
-  }
-
-  const grouped = new Map<string, AssetRow[]>();
-
-  for (const credential of credentials) {
-    const paths = credential.paths.length > 0 ? credential.paths : [t("none")];
-    for (const item of paths) {
-      const group = assetNameForPath(item, credential.kind);
-      const rows = grouped.get(group) ?? [];
-      rows.push({
-        name: item === t("none") ? group : basenameForDisplay(item),
-        path: item,
-        status: translateState(credential.status, t),
-        previewPath: item !== t("none") ? item : undefined,
-      });
-      grouped.set(group, rows);
-    }
-  }
-
-  return Array.from(grouped.entries()).map(([label, rows]) => ({
-    label,
-    rows,
+  return credentials.map((credential) => ({
+    label: credential.label,
+    rows: (credential.paths.length > 0 ? credential.paths : [t("none")]).map((item) => ({
+      name: item === t("none") ? credential.kind : basenameForDisplay(item),
+      path: item,
+      status: translateState(credential.status, t),
+      previewPath: item !== t("none") ? item : undefined,
+    })),
+    action: options?.onDelete ? (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={options.deletingCredentialId === credential.id}
+            aria-label={t("delete_credential")}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("delete_credential_confirm_title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("delete_credential_confirm_description")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => options.onDelete?.(credential.id)}>
+              {options.deletingCredentialId === credential.id
+                ? t("deleting_credential")
+                : t("delete_credential")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    ) : undefined,
   }));
 }
 

@@ -9,6 +9,8 @@ import {
 } from "../core/portal.js";
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
+  createPortalCodexCredential,
+  deletePortalCredential,
   deletePortalWorkspace,
   deletePortalUser,
   getPortalWorkspaceDetail,
@@ -228,7 +230,7 @@ async function handleCredentialUpsert(
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const sourcePath = body.sourcePath?.trim() || `credentials/generated/${id}/${id}.json`;
+  const sourcePath = body.sourcePath?.trim() || `credentials/generated/${id}/auth.json`;
   const content = body.content ?? "{}\n";
   if (!id || !kind || purposes.length === 0) {
     badRequest(res, "credentialId, kind, and purposes are required");
@@ -241,7 +243,7 @@ async function handleCredentialUpsert(
     purposes,
     files: [
       {
-        key: body.fileKey?.trim() || `${id}.json`,
+        key: body.fileKey?.trim() || "auth.json",
         sourcePath,
         content,
         ...(body.mountPath?.trim() ? { mountPath: body.mountPath.trim() } : {}),
@@ -250,6 +252,37 @@ async function handleCredentialUpsert(
     ...(body.status?.trim() ? { status: body.status.trim() } : {}),
   });
   sendJson(res, 200, saved);
+}
+
+async function handleCredentialCreate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const harness = body.harness?.trim() || "codex";
+  if (harness !== "codex") {
+    badRequest(res, `Unsupported harness '${harness}'`);
+    return;
+  }
+  const saved = await createPortalCodexCredential({
+    userId,
+    ...(body.credentialId?.trim() ? { credentialId: body.credentialId.trim() } : {}),
+    ...(body.label?.trim() ? { label: body.label.trim() } : {}),
+    ...(body.providerName?.trim() ? { providerName: body.providerName.trim() } : {}),
+    ...(body.baseUrl?.trim() ? { baseUrl: body.baseUrl.trim() } : {}),
+    ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
+  });
+  sendJson(res, 201, saved);
+}
+
+async function handleCredentialDelete(
+  res: ServerResponse,
+  userId: string,
+  credentialId: string,
+): Promise<void> {
+  const deleted = await deletePortalCredential(userId, credentialId);
+  sendJson(res, 200, deleted);
 }
 
 async function handleProfileUpdate(
@@ -417,10 +450,19 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
         if (segments[3] === "credentials" && segments.length === 4) {
+          if (req.method === "POST") {
+            await handleCredentialCreate(req, res, routeUserId);
+            return;
+          }
           sendJson(res, 200, {
             user: profile,
             credentials: listUserPortalCredentials(routeUserId),
           });
+          return;
+        }
+        if (segments[3] === "credentials" && segments.length === 5 && req.method === "DELETE") {
+          const credentialId = decodeURIComponent(segments[4]);
+          await handleCredentialDelete(res, routeUserId, credentialId);
           return;
         }
         if (segments[3] === "credentials" && segments[4] === "preview" && req.method === "GET") {
@@ -465,6 +507,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           }
           const provision = await provisionWorkspace(routeUserId, workspaceName, {
             defaultDockerOnly: body.defaultDockerOnly === "true",
+            startAfterCreate: body.startAfterCreate === "true",
           });
           sendJson(res, 202, provision);
           return;

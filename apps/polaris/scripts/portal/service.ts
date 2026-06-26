@@ -28,8 +28,13 @@ import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createCommand } from "../cli/commands/create.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
+import {
+  createUserCredentialCommand,
+  deleteUserCredentialCommand,
+} from "../cli/commands/user-credential.js";
 import { performWorkspaceSwitch } from "../cli/commands/switch.js";
 import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
+import { startCommand } from "../cli/commands/start.js";
 import { stopCommand } from "../cli/commands/stop.js";
 import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
@@ -37,7 +42,7 @@ import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js"
 import type { WorkspaceSpec } from "../core/workspace.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
-const PROVISION_TOTAL_STEPS = 6;
+const PROVISION_TOTAL_STEPS = 7;
 const provisionJobs = new Map<string, Promise<void>>();
 const CLERK_DELETE_SCRIPT = path.join(REPO_ROOT, "apps", "polaris-web", "scripts", "delete-clerk-users.mjs");
 
@@ -168,9 +173,11 @@ async function provisionWorkspaceInternal(
   workspace: string,
   options?: {
     defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
   },
 ): Promise<void> {
   const defaultDockerOnly = options?.defaultDockerOnly ?? false;
+  const startAfterCreate = options?.startAfterCreate ?? false;
   if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
     await createCommand([workspace, "--user", userId]);
   }
@@ -192,6 +199,11 @@ async function provisionWorkspaceInternal(
     updateProgress(userId, workspace, { phase: "selection", step: 5, message: "defaulting driver selection" });
   }
 
+  if (startAfterCreate) {
+    updateProgress(userId, workspace, { phase: "start", step: 6, message: "starting workspace" });
+    await startCommand(`${workspace}@docker`);
+  }
+
   updateProgress(userId, workspace, {
     phase: "done",
     step: PROVISION_TOTAL_STEPS,
@@ -206,6 +218,7 @@ export function startProvisionWorkspace(
   workspace: string,
   options?: {
     defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
   },
 ): Promise<void> {
   const key = rootKey(userId, workspace);
@@ -236,6 +249,7 @@ export async function provisionWorkspace(
   workspace: string,
   options?: {
     defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
   },
 ): Promise<PortalProvisionProgress> {
   await startProvisionWorkspace(userId, workspace, options);
@@ -262,6 +276,86 @@ export function listUserPortalCredentials(userId: string): PortalCredentialSumma
 
 export function readUserPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
   return readPortalCredentialPreview(userId, credentialPath);
+}
+
+export async function createPortalCodexCredential(input: {
+  userId: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  credentialId?: string;
+}): Promise<PortalCredentialSummary> {
+  const stdoutChunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+    callback?.();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    await createUserCredentialCommand([
+      input.userId,
+      "--harness",
+      "codex",
+      ...(input.credentialId?.trim() ? ["--credential-id", input.credentialId.trim()] : []),
+      ...(input.label?.trim() ? ["--label", input.label.trim()] : []),
+      ...(input.providerName?.trim() ? ["--provider-name", input.providerName.trim()] : []),
+      ...(input.baseUrl?.trim() ? ["--base-url", input.baseUrl.trim()] : []),
+      ...(input.apiKey !== undefined ? ["--api-key", input.apiKey] : []),
+    ]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const stdout = stdoutChunks.join("").trim();
+  const created = parseJsonFromText<{
+    credential: {
+      id: string;
+    };
+  }>(stdout);
+  const summary = listPortalCredentials(input.userId).find((credential) => credential.id === created.credential.id);
+  if (!summary) {
+    throw new Error(`Credential '${created.credential.id}' could not be loaded after creation`);
+  }
+  return summary;
+}
+
+export async function deletePortalCredential(userId: string, credentialId: string): Promise<{
+  credential: {
+    id: string;
+    userId: string;
+    removed: boolean;
+    registryPath: string;
+    removedPaths: string[];
+  };
+}> {
+  const stdoutChunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+    callback?.();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    await deleteUserCredentialCommand([userId, credentialId]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  return parseJsonFromText<{
+    credential: {
+      id: string;
+      userId: string;
+      removed: boolean;
+      registryPath: string;
+      removedPaths: string[];
+    };
+  }>(stdoutChunks.join("").trim());
 }
 
 export function upsertPortalCredential(userId: string, credential: {

@@ -811,7 +811,7 @@ function buildAgentContract(home: string, agentKind: string): WorkspaceAgentCont
       requiresDaemon: enabled,
       supportsPairing: enabled,
     },
-    harnesses: enabled ? ["codex", "claude"] : [],
+    harnesses: enabled ? ["codex"] : [],
     runtime: {
       stateRoot,
       evolutionRoot,

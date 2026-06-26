@@ -270,14 +270,13 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
   );
   const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
   const codexConfig = workspace.runtime.authFiles.find((item) => item.key === "codex-config.toml")?.content;
-  const claudeSettings = workspace.runtime.authFiles.find((item) => item.key === "claude-settings.json")?.content;
-  if (workspace.agent.enabled && (!codexAuth || !codexConfig || !claudeSettings)) {
-    throw new Error("KubeVirt render requires codex-auth.json, codex-config.toml, and claude-settings.json");
+  if (workspace.agent.enabled && (!codexAuth || !codexConfig)) {
+    throw new Error("KubeVirt render requires codex-auth.json and codex-config.toml");
   }
   let renderedCloudinit = cloudinitTemplate
     .replace("__CODEX_AUTH_JSON_B64__", Buffer.from(codexAuth ?? "{}", "utf8").toString("base64"))
     .replace("__CODEX_CONFIG_TOML_B64__", Buffer.from(codexConfig ?? "", "utf8").toString("base64"))
-    .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from(claudeSettings ?? "{}", "utf8").toString("base64"))
+    .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from("{}", "utf8").toString("base64"))
     .replace("__PROBE_PASSWORD__", kubevirtProbePassword(workspace));
   const evolutionOutputs = [
     [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
