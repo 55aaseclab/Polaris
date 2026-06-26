@@ -196,8 +196,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.match(rendered, /backend:\n  kind: docker/);
         assert.match(rendered, /profile: morpheus/);
         assert.match(rendered, new RegExp(`user_profile: '?${userProfileId}'?`));
-        assert.match(rendered, /credentials:\n  bindings:/);
-        assert.match(rendered, /credentialId: codex-default/);
+        assert.match(rendered, /agent:\n  kind: disabled/);
         assert.equal(parsed.created, "saved-spec");
         assert.equal(parsed.project, project);
         assert.equal(parsed.userProfile.id, userProfileId);
@@ -205,12 +204,11 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
         assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
         assert.equal(parsed.credentials.registryRoot, `config/users/${userProfileId}/credentials`);
-        assert.deepEqual(parsed.credentials.defaults, ["codex-default", "github-ssh"]);
+        assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
         const scaffoldedProfile = yaml.load(fs.readFileSync(profilePath, "utf8")) as { workspaces?: string[] };
         assert.ok(scaffoldedProfile.workspaces?.includes(project));
         assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
-        assert.equal(fs.existsSync(path.join(credentialRoot, "codex-default.yaml")), true);
         assert.equal(fs.existsSync(path.join(credentialRoot, "github-ssh.yaml")), true);
       },
     );
@@ -260,6 +258,135 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
   } finally {
     removeIfExists(dockerConfigPath);
     removeIfExists(podConfigPath);
+    removeIfExists(profilePath);
+    removeIfExists(secretsRoot);
+    removeIfExists(credentialRoot);
+  }
+});
+
+test("create adapts workspace credential bindings to the user's available registry credentials", async () => {
+  const project = `e2e-create-adaptive-${Date.now()}`;
+  const profileEmail = `${project}@polaris.local`;
+  const userProfileId = `local-${project}-polaris.local`;
+  const configPath = workspaceConfigPath(project, "docker", userProfileId);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+  const legacyAgentCredential = path.join(credentialRoot, "codex-default.yaml");
+  const legacyGitCredential = path.join(credentialRoot, "github-ssh.yaml");
+  const adaptiveAgentCredential = path.join(credentialRoot, "demo-codex.yaml");
+  const adaptiveGitCredential = path.join(credentialRoot, "demo-ssh.yaml");
+
+  try {
+    await withEnv(
+      {
+        GIT_AUTHOR_NAME: "E2E Create Adaptive",
+        GIT_AUTHOR_EMAIL: profileEmail,
+      },
+      async () => {
+        await runCli(["user", "create", userProfileId, "--name", "E2E Create Adaptive", "--email", profileEmail]);
+        fs.rmSync(legacyAgentCredential, { force: true });
+        fs.rmSync(legacyGitCredential, { force: true });
+        fs.writeFileSync(
+          adaptiveAgentCredential,
+          yaml.dump({
+            id: "demo-codex",
+            userId: userProfileId,
+            kind: "codex-auth",
+            label: "Demo Codex auth",
+            purposes: ["agent-auth"],
+            materialRef: {
+              type: "file",
+              key: "user-identity-state/default",
+              files: [
+                {
+                  key: "codex-auth.json",
+                  source_path: "credentials/codex/auth.json",
+                },
+              ],
+            },
+            status: "ready",
+          }, { lineWidth: 120, noRefs: true }),
+          "utf8",
+        );
+        fs.writeFileSync(
+          adaptiveGitCredential,
+          yaml.dump({
+            id: "demo-ssh",
+            userId: userProfileId,
+            kind: "ssh-key",
+            label: "Demo SSH key",
+            purposes: ["git-auth"],
+            materialRef: {
+              type: "file",
+              key: "user-ssh-state/default",
+              files: [
+                {
+                  key: "id_ed25519",
+                  source_path: "credentials/ssh/id_ed25519",
+                },
+              ],
+            },
+            status: "ready",
+          }, { lineWidth: 120, noRefs: true }),
+          "utf8",
+        );
+
+        const output = await captureStdout(async () => {
+          await runCli(["create", project, "--user", userProfileId]);
+        });
+        const parsed = parseJsonOutput<{
+          credentials: {
+            defaults: string[];
+          };
+        }>(output);
+
+        assert.equal(fs.existsSync(configPath), true);
+        const rendered = fs.readFileSync(configPath, "utf8");
+        assert.match(rendered, /agent:\n  kind: disabled/);
+        assert.match(rendered, /credentialId: demo-codex/);
+        assert.match(rendered, /credentialId: demo-ssh/);
+        assert.doesNotMatch(rendered, /credentialId: codex-default/);
+        assert.deepEqual(parsed.credentials.defaults, ["demo-codex", "demo-ssh"]);
+      },
+    );
+  } finally {
+    removeIfExists(configPath);
+    removeIfExists(profilePath);
+    removeIfExists(secretsRoot);
+    removeIfExists(credentialRoot);
+  }
+});
+
+test("create fails when the user has no git-auth credential", async () => {
+  const project = `e2e-create-unbound-${Date.now()}`;
+  const profileEmail = `${project}@polaris.local`;
+  const userProfileId = `local-${project}-polaris.local`;
+  const configPath = workspaceConfigPath(project, "docker", userProfileId);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+
+  try {
+    await withEnv(
+      {
+        GIT_AUTHOR_NAME: "E2E Create Unbound",
+        GIT_AUTHOR_EMAIL: profileEmail,
+      },
+      async () => {
+        await runCli(["user", "create", userProfileId, "--name", "E2E Create Unbound", "--email", profileEmail]);
+        removeIfExists(credentialRoot);
+        fs.mkdirSync(credentialRoot, { recursive: true });
+
+        await assert.rejects(
+          () => runCli(["create", project, "--user", userProfileId]),
+          /Workspace create requires a git-auth credential/,
+        );
+        assert.equal(fs.existsSync(configPath), false);
+      },
+    );
+  } finally {
+    removeIfExists(configPath);
     removeIfExists(profilePath);
     removeIfExists(secretsRoot);
     removeIfExists(credentialRoot);

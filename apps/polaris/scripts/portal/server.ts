@@ -14,6 +14,7 @@ import {
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
+  readUserPortalCredentialPreview,
   provisionWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
@@ -420,6 +421,15 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             user: profile,
             credentials: listUserPortalCredentials(routeUserId),
           });
+          return;
+        }
+        if (segments[3] === "credentials" && segments[4] === "preview" && req.method === "GET") {
+          const credentialPath = url.searchParams.get("path")?.trim() || "";
+          if (!credentialPath) {
+            badRequest(res, "path is required");
+            return;
+          }
+          sendJson(res, 200, readUserPortalCredentialPreview(routeUserId, credentialPath));
           return;
         }
         if (segments[3] === "credentials" && segments[4] === "create" && req.method === "POST") {

@@ -14,6 +14,8 @@ import {
 import {
   ChevronRight,
   CircleUser,
+  Eye,
+  EyeOff,
   FolderKanban,
   Info,
   CreditCard,
@@ -30,7 +32,7 @@ import {
   createPortalUser,
   deletePortalUser,
   deleteWorkspace,
-  getUserProfile,
+  getCredentialPreview,
   getWorkspaceDetail,
   listCredentials,
   listUsers,
@@ -38,9 +40,8 @@ import {
   listWorkspaces,
   stopWorkspace,
   switchWorkspaceDriver,
-  updateUserProfile,
   type PortalCredentialSummary,
-  type PortalProfileDetail,
+  type PortalCredentialPreview,
   type PortalProfileSummary,
   type PortalUserMapping,
   type PortalWorkspaceDetail,
@@ -95,6 +96,12 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Language = "en" | "zh";
+
+function basenameForDisplay(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || filePath;
+}
 
 type LanguageContextValue = {
   language: Language;
@@ -151,6 +158,7 @@ const COPY: Record<Language, Record<string, string>> = {
     asset_type: "Type",
     asset_name: "Name",
     asset_path: "Path / Tag",
+    asset_status: "Status",
     asset_details: "Details",
     no_assets: "No asset metadata yet.",
     credentials: "Credentials",
@@ -291,6 +299,7 @@ const COPY: Record<Language, Record<string, string>> = {
     asset_type: "类型",
     asset_name: "名称",
     asset_path: "路径 / 标签",
+    asset_status: "状态",
     asset_details: "详情",
     no_assets: "暂无资产元数据。",
     credentials: "凭证",
@@ -738,10 +747,15 @@ type AssetRow = {
   name: string;
   path: string;
   detail?: string;
+  detailLines?: string[];
+  status?: string;
+  previewPath?: string;
+  previewOpen?: boolean;
 };
 
 type AssetSection = {
   label: string;
+  labelLines?: string[];
   rows: AssetRow[];
 };
 
@@ -749,8 +763,12 @@ function WorkspaceAssetTable(props: {
   t: (key: string) => string;
   sections: AssetSection[];
   emptyLabel: string;
+  userId?: string;
 }) {
   const visibleSections = props.sections.filter((section) => section.rows.length > 0);
+  const hasStatusOrNotes = visibleSections.some((section) =>
+    section.rows.some((row) => row.status),
+  );
   if (visibleSections.length === 0) {
     return <p className="text-sm text-muted-foreground">{props.emptyLabel}</p>;
   }
@@ -764,7 +782,13 @@ function WorkspaceAssetTable(props: {
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_type")}</th>
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_name")}</th>
               <th className="w-full px-4 py-3 font-medium">{props.t("asset_path")}</th>
-              <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_details")}</th>
+              {hasStatusOrNotes ? (
+                <>
+                  <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_status")}</th>
+                </>
+              ) : (
+                <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_details")}</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
@@ -773,22 +797,68 @@ function WorkspaceAssetTable(props: {
                 <tr key={`${section.label}:${row.name}:${row.path}`} className="align-middle">
                   {index === 0 && (
                     <td className="w-0 whitespace-nowrap px-4 py-4 align-middle text-right text-muted-foreground" rowSpan={section.rows.length}>
-                      {section.label}
+                      {section.labelLines && section.labelLines.length === section.rows.length ? (
+                        <div
+                          className="grid min-w-[10rem] whitespace-normal text-right"
+                          style={{ gridTemplateRows: `repeat(${section.rows.length}, minmax(0, 1fr))` }}
+                        >
+                          {section.labelLines.map((line, lineIndex) => (
+                            <div
+                              key={`${section.label}:${line}`}
+                              className={[
+                                "flex items-center justify-end py-4",
+                                lineIndex > 0 ? "border-t border-border/70" : "",
+                              ].join(" ")}
+                            >
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                      ) : section.labelLines && section.labelLines.length > 1 ? (
+                        <div className="grid min-w-[10rem] gap-2 whitespace-normal text-right">
+                          {section.labelLines.map((line, lineIndex) => (
+                            <React.Fragment key={`${section.label}:${line}`}>
+                              {lineIndex > 0 ? <div className="h-px w-full bg-border/70" /> : null}
+                              <div>{line}</div>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        section.label
+                      )}
                     </td>
                   )}
                   <td className="w-0 whitespace-nowrap px-4 py-4 text-right font-medium">{row.name}</td>
                   <td className="w-full px-4 py-4">
-                    <span className="block max-w-full truncate text-sm text-muted-foreground" title={row.path}>
-                      {row.path}
-                    </span>
+                    <CredentialPathCell
+                      path={row.path}
+                      userId={props.userId}
+                      previewPath={row.previewPath}
+                    />
                   </td>
-                  <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
-                    {row.detail ? (
-                      <span className="block max-w-[18rem] truncate text-sm" title={row.detail}>
-                        {row.detail}
-                      </span>
-                    ) : "-"}
-                  </td>
+                  {hasStatusOrNotes ? (
+                    <>
+                      <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
+                        {row.status ?? "-"}
+                      </td>
+                    </>
+                  ) : (
+                    <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
+                      {row.detailLines && row.detailLines.length > 0 ? (
+                        <div className="grid max-w-[18rem] gap-1 text-sm whitespace-normal">
+                          {row.detailLines.map((line) => (
+                            <span key={line} className="block break-words" title={line}>
+                              {line}
+                            </span>
+                          ))}
+                        </div>
+                      ) : row.detail ? (
+                        <span className="block max-w-[18rem] truncate text-sm" title={row.detail}>
+                          {row.detail}
+                        </span>
+                      ) : "-"}
+                    </td>
+                  )}
                 </tr>
               )),
             )}
@@ -1332,15 +1402,11 @@ function OverviewPage() {
 }
 
 function WorkspaceIndexPage() {
-  const { t } = useLanguage();
   const { data: users } = useAsyncValue(listUsers, []);
 
   return (
     <PortalShell users={users ?? []}>
-      <EmptyPane
-        title={t("empty_pane")}
-        description={t("select_user_route")}
-      />
+      <div className="min-h-[40dvh]" />
     </PortalShell>
   );
 }
@@ -1751,140 +1817,52 @@ function MetricCard(props: { label: string; value: string }) {
 }
 
 function CredentialsPage() {
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
   const { data, error, loading } = useAsyncValue(() => listCredentials(userId), [userId]);
 
   return (
     <PortalShell users={users ?? []}>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("credentials")}</CardTitle>
-          <CardDescription>
-            {t("credentials_for_user")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {loading && <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {data?.map((credential) => (
-            <CredentialCard key={credential.id} credential={credential} language={language} />
-          ))}
-        </CardContent>
-      </Card>
+      <div className="grid w-full min-w-0 gap-6">
+        <div className="grid gap-1">
+          <div className="text-sm font-medium">{t("credentials")}</div>
+          <div className="text-sm text-muted-foreground">{t("credentials_for_user")}</div>
+        </div>
+        {loading && <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <WorkspaceAssetTable
+          t={t}
+          sections={credentialAssetSections(data ?? [], t)}
+          emptyLabel={t("no_credentials")}
+          userId={userId}
+        />
+      </div>
     </PortalShell>
   );
 }
 
 function ProfilePage() {
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
-  const { data: profile, error, loading } = useAsyncValue(() => getUserProfile(userId), [userId]);
-  const { data: credentials } = useAsyncValue(() => listCredentials(userId), [userId]);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [githubAccount, setGithubAccount] = useState("");
-  const [sshComment, setSshComment] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!profile) {
-      return;
-    }
-    setName(profile.name);
-    setEmail(profile.email);
-    setGithubAccount(profile.githubAccount ?? "");
-    setSshComment(profile.sshComment ?? "");
-  }, [profile]);
-
-  async function handleSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      const updated = await updateUserProfile(userId, {
-        name,
-        email,
-        githubAccount,
-        sshComment,
-      });
-      setName(updated.name);
-      setEmail(updated.email);
-      setGithubAccount(updated.githubAccount ?? "");
-      setSshComment(updated.sshComment ?? "");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const { data, error, loading } = useAsyncValue(() => listCredentials(userId), [userId]);
 
   return (
     <PortalShell users={users ?? []}>
-      <div className="grid w-full grid-cols-1 content-start gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("user_profile")}</CardTitle>
-            <CardDescription>
-              {t("user_profile_desc")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading && <p className="text-sm text-muted-foreground">{t("loading_profile")}</p>}
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {profile && (
-              <form className="grid gap-4" onSubmit={(event) => void handleSave(event)}>
-                <div className="grid gap-2">
-                  <Label htmlFor="profile-name">{t("name")}</Label>
-                  <Input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="profile-email">{t("email")}</Label>
-                  <Input id="profile-email" value={email} onChange={(event) => setEmail(event.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="profile-github">{t("github_account")}</Label>
-                  <Input
-                    id="profile-github"
-                    value={githubAccount}
-                    onChange={(event) => setGithubAccount(event.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="profile-ssh-comment">{t("ssh_comment")}</Label>
-                  <Input
-                    id="profile-ssh-comment"
-                    value={sshComment}
-                    onChange={(event) => setSshComment(event.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2 text-sm text-muted-foreground">
-                  <div>{t("user_id")}: {profile.id}</div>
-                  <div>{t("ssh_mode")}: {profile.sshMode ?? t("unknown")}</div>
-                  <div>{t("tracked_workspaces")}: {profile.workspaces.join(", ") || t("none")}</div>
-                </div>
-                <Button className="justify-self-start" disabled={saving}>
-                  {saving ? t("saving") : t("save_profile")}
-                </Button>
-              </form>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("credentials")}</CardTitle>
-            <CardDescription>
-              {t("credentials_for_user")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {credentials?.map((credential) => (
-              <CredentialCard key={credential.id} credential={credential} language={language} />
-            ))}
-            {!credentials?.length && (
-              <p className="text-sm text-muted-foreground">{t("no_credentials")}</p>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid w-full min-w-0 gap-6">
+        <div className="grid gap-1">
+          <div className="text-sm font-medium">{t("credentials")}</div>
+          <div className="text-sm text-muted-foreground">{t("credentials_for_user")}</div>
+        </div>
+        {loading && <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <WorkspaceAssetTable
+          t={t}
+          sections={credentialAssetSections(data ?? [], t)}
+          emptyLabel={t("no_credentials")}
+          userId={userId}
+        />
       </div>
     </PortalShell>
   );
@@ -2005,36 +1983,123 @@ function SettingsPage() {
   );
 }
 
-function CredentialCard(props: {
-  credential: PortalCredentialSummary;
-  language: Language;
+function CredentialPathCell(props: {
+  path: string;
+  userId?: string;
+  previewPath?: string;
 }) {
-  const { credential, language } = props;
-  const t = (key: string): string => COPY[language][key] ?? key;
+  const showPreview = Boolean(props.userId && props.previewPath);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<PortalCredentialPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setLoading(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !showPreview || preview) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void getCredentialPreview(props.userId as string, props.previewPath as string)
+      .then((value) => {
+        if (!cancelled) {
+          setPreview(value);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, preview, props.previewPath, props.userId, showPreview]);
+
   return (
-    <div className="box-border grid w-full min-w-0 gap-3 rounded-[1.25rem] border border-border bg-white p-4 md:grid-cols-[1fr_auto]">
-      <div className="grid gap-1">
-        <div className="flex items-center gap-2">
-          <div className="font-medium">{credential.label}</div>
-          <Badge variant="outline">{credential.kind}</Badge>
-        </div>
-        <div className="min-w-0 break-words text-sm text-muted-foreground">{credential.id}</div>
-        <div className="min-w-0 break-words text-sm text-muted-foreground">
-          {t("purposes")}: {credential.purposes.join(", ") || t("none")}
-        </div>
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="block max-w-full truncate text-sm text-muted-foreground" title={props.path}>
+          {props.path}
+        </span>
+        {showPreview ? (
+          <button
+            type="button"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label={`Preview ${props.previewPath}`}
+            onClick={() => setOpen((current) => !current)}
+          >
+            {open ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
       </div>
-      <div className="flex flex-col items-start gap-2 md:items-end">
-        <Badge variant={credential.status === "ready" ? "default" : "secondary"}>
-          {translateState(credential.status, t)}
-        </Badge>
-        {credential.paths.map((item) => (
-          <div key={item} className="min-w-0 break-words text-xs text-muted-foreground">
-            {item}
-          </div>
-        ))}
-      </div>
+      {showPreview && open ? (
+        <div className="grid gap-2 rounded-md border border-border bg-muted/20 p-3">
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : error ? (
+            <div className="text-sm text-destructive">{error}</div>
+          ) : (
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
+              {preview?.content ?? ""}
+            </pre>
+          )}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function credentialAssetSections(
+  credentials: PortalCredentialSummary[],
+  t: (key: string) => string,
+): AssetSection[] {
+  function assetNameForPath(path: string, fallback: string): string {
+    if (path.includes("/codex/")) {
+      return "Default Codex";
+    }
+    if (path.includes("/claude/")) {
+      return "Default Claude";
+    }
+    if (path.includes("/ssh/")) {
+      return "SSH Key";
+    }
+    return fallback;
+  }
+
+  const grouped = new Map<string, AssetRow[]>();
+
+  for (const credential of credentials) {
+    const paths = credential.paths.length > 0 ? credential.paths : [t("none")];
+    for (const item of paths) {
+      const group = assetNameForPath(item, credential.kind);
+      const rows = grouped.get(group) ?? [];
+      rows.push({
+        name: item === t("none") ? group : basenameForDisplay(item),
+        path: item,
+        status: translateState(credential.status, t),
+        previewPath: item !== t("none") ? item : undefined,
+      });
+      grouped.set(group, rows);
+    }
+  }
+
+  return Array.from(grouped.entries()).map(([label, rows]) => ({
+    label,
+    rows,
+  }));
 }
 
 export default function App() {

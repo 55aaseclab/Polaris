@@ -46,6 +46,12 @@ export interface PortalCredentialSummary {
   paths: string[];
 }
 
+export interface PortalCredentialPreview {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 export interface PortalProvisionProgress {
   workspace: string;
   userId: string;
@@ -355,6 +361,8 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
       const files = Array.isArray(material?.files)
         ? material?.files as Array<Record<string, unknown>>
         : [];
+      const paths = files.map((file) => String(file.source_path ?? file.sourcePath ?? file.key ?? "" )).filter(Boolean);
+      const status = credentialMaterialStatus(userId, paths, String(data.status ?? "unknown"));
       return {
         id: String(data.id ?? entry.name.replace(/\.ya?ml$/, "")),
         kind: String(data.kind ?? "unknown") as Credential["kind"],
@@ -362,11 +370,72 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
         purposes: Array.isArray(data.purposes)
           ? data.purposes.map((value) => String(value)).filter(Boolean)
           : [],
-        status: String(data.status ?? "unknown"),
-        paths: files.map((file) => String(file.source_path ?? file.sourcePath ?? file.key ?? "" )).filter(Boolean),
+        status,
+        paths,
       };
     })
     .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function credentialMaterialStatus(userId: string, paths: string[], declaredStatus: string): string {
+  if (paths.length === 0) {
+    return declaredStatus;
+  }
+  const userRoot = path.resolve(USER_ROOT, userId);
+  for (const relativePath of paths) {
+    const absolute = path.resolve(userRoot, relativePath);
+    if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
+      return "error";
+    }
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+      return "error";
+    }
+    try {
+      const content = fs.readFileSync(absolute, "utf8");
+      if (content.includes("placeholder-managed-key")) {
+        return "error";
+      }
+    } catch {
+      continue;
+    }
+  }
+  return declaredStatus;
+}
+
+export function readPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
+  const trimmed = credentialPath.trim();
+  if (!trimmed) {
+    throw new Error("credential path is required");
+  }
+  const userRoot = path.resolve(USER_ROOT, userId);
+  const absolute = path.resolve(userRoot, trimmed);
+  if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
+    throw new Error("credential path must stay within the user root");
+  }
+  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+    return {
+      path: trimmed,
+      content: "[credential asset not found]",
+      truncated: false,
+    };
+  }
+  const raw = fs.readFileSync(absolute);
+  if (raw.includes(0)) {
+    return {
+      path: trimmed,
+      content: "[binary content hidden]",
+      truncated: false,
+    };
+  }
+  const MAX_PREVIEW_CHARS = 4000;
+  const content = raw.toString("utf8");
+  return {
+    path: trimmed,
+    content: content.length > MAX_PREVIEW_CHARS
+      ? `${content.slice(0, MAX_PREVIEW_CHARS)}\n…`
+      : content,
+    truncated: content.length > MAX_PREVIEW_CHARS,
+  };
 }
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
@@ -389,7 +458,8 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
         status = {
           ...status,
           assets: {
-            ...(status.assets ?? nextAssets),
+            ...nextAssets,
+            ...(status.assets ?? {}),
             evolutionFiles: nextAssets.evolutionFiles,
           },
         };
