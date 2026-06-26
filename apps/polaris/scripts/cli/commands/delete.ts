@@ -10,9 +10,10 @@ import { parseWorkspaceReference } from "../../config/load.js";
 import { projectOwners } from "../../config/project-ownership.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { logInfo } from "../../utils/log.js";
+import { resolveRepoRoot } from "../../utils/repo-root.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 type BackendTarget = {
   backend: WorkspaceSpec["backend"]["kind"];

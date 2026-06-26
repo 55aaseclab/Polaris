@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceStatus } from "../core/workspace.js";
 import { assertNoProjectNameCollision } from "../config/project-ownership.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const LEGACY_STATE_DIR = path.join(REPO_ROOT, "config", "state");
 
 export interface WorkspaceDriverSelection {

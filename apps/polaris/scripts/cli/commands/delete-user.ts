@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { deleteUserMapEntriesForPolarisUserId } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
+import { resolveRepoRoot } from "../../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 function profilePathFor(userProfileId: string): string {
   return path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);

@@ -46,8 +46,9 @@ import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js"
 import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec } from "../core/workspace.js";
 import { logWarn } from "../utils/log.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const PROVISION_TOTAL_STEPS = 7;
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();

@@ -4,9 +4,10 @@ import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
 import { workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
 import { logInfo } from "../utils/log.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 import { runCommand } from "../utils/shell.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 type BackendKind = "docker" | "pod" | "kubevirt-vm";
 

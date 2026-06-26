@@ -1,0 +1,56 @@
+services:
+  paseo-app:
+    build:
+      context: ./apps/paseo
+      dockerfile: Dockerfile
+      args:
+        PASEO_GIT_URL: https://github.com/cyruscyliu/paseo.git
+        PASEO_GIT_REF: main
+    restart: unless-stopped
+    expose:
+      - "8082"
+
+  polaris-server:
+    build:
+      context: .
+      dockerfile: apps/polaris/Dockerfile
+    environment:
+      POLARIS_AUTH_SHARED_SECRET: ${POLARIS_AUTH_SHARED_SECRET:-}
+      POLARIS_PASEO_APP_BASE_URL: ${POLARIS_PASEO_APP_BASE_URL:-http://localhost/paseo}
+      PASEO_APP_BASE_URL: ${PASEO_APP_BASE_URL:-}
+    restart: unless-stopped
+    expose:
+      - "8787"
+    volumes:
+      - ./config:/workspace/config
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  polaris-webportal:
+    build:
+      context: .
+      dockerfile: apps/polaris-web/Dockerfile
+      args:
+        VITE_POLARIS_API_BASE: ${VITE_POLARIS_API_BASE:-/api}
+        VITE_PASEO_APP_BASE_URL: ${VITE_PASEO_APP_BASE_URL:-http://localhost/paseo}
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - paseo-app
+      - polaris-server
+      - polaris-webportal
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
+      NGINX_SSL_CERTIFICATE: ${NGINX_SSL_CERTIFICATE:-/etc/nginx/certs/polaris.jianxiaoyitech.com_cert_chain.crt}
+      NGINX_SSL_CERTIFICATE_KEY: ${NGINX_SSL_CERTIFICATE_KEY:-/etc/nginx/certs/polaris.jianxiaoyitech.com_key.key}
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-334}:443"
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/templates:/etc/nginx/templates:ro
+      - ./.cert/Nginx:/etc/nginx/certs:ro
