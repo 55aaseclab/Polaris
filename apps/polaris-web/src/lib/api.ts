@@ -11,6 +11,12 @@ export interface PortalProfileDetail extends PortalProfileSummary {
   sshComment?: string;
 }
 
+export interface PortalUserMapping {
+  polarisUserId: string;
+  role: "admin" | "user";
+  plan: "free" | "pro";
+}
+
 export interface PortalDriverTarget {
   backend: "docker" | "pod" | "kubevirt-vm";
   profile?: string;
@@ -142,7 +148,8 @@ async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw new Error(`API request failed (${response.status}): ${pathname}`);
+    const body = await response.text();
+    throw new Error(body.trim() || `API request failed (${response.status}): ${pathname}`);
   }
   return response.json() as Promise<T>;
 }
@@ -151,9 +158,28 @@ export async function listUsers(): Promise<PortalProfileSummary[]> {
   return apiFetch<PortalProfileSummary[]>("/api/users");
 }
 
-export async function getDefaultUserId(): Promise<string | null> {
-  const payload = await apiFetch<{ defaultUserId: string | null }>("/api/default-user");
-  return payload.defaultUserId;
+export async function createPortalUser(input: {
+  userProfileId: string;
+  clerkUsername: string;
+  email?: string;
+  name?: string;
+  role?: "admin" | "user";
+  plan?: "free" | "pro";
+}): Promise<PortalProfileDetail> {
+  return apiFetch<PortalProfileDetail>("/api/users", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function resolvePortalUserMapping(
+  clerkUsername: string,
+): Promise<PortalUserMapping | null> {
+  const payload = await apiFetch<{
+    clerkUsername: string;
+    mapping: PortalUserMapping | null;
+  }>(`/api/user-mapping?clerkUsername=${encodeURIComponent(clerkUsername)}`);
+  return payload.mapping;
 }
 
 export async function listWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {

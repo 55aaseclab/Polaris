@@ -49,6 +49,7 @@ Current control-plane responsibilities:
 
 Current command surface:
 
+- `create-user`
 - `create`
 - `render`
 - `apply`
@@ -125,8 +126,8 @@ experience is still closer to "operate a precise infrastructure tool" than
 
 For Polaris itself, the current UX strengths are:
 
-- one consistent CLI surface across create, render, apply, start, status,
-  reconcile, logs, and switch
+- one consistent CLI surface across create-user, create, render,
+  apply, start, status, reconcile, logs, and switch
 - explicit generated files and state snapshots that are easy to inspect
 - explicit backend targeting through `<project>@<backend>`
 - explicit status and drift output instead of opaque lifecycle failures
@@ -207,9 +208,9 @@ Polaris currently supports three backend drivers:
 - `pod`
 - `kubevirt-vm`
 
-All three drivers now expose the same broad control-plane shape:
+All three drivers now participate in the same broad workspace lifecycle shape:
 
-- `create`
+- workspace creation
 - `start`
 - `stop`
 - `restart`

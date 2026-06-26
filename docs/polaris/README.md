@@ -48,23 +48,30 @@ Polaris also treats `Credential` as a first-class user-owned entity:
 
 ## Recommended Flow
 
-Create a new workspace spec:
+Create a user first:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- create <project>
+pnpm --dir apps/polaris run polaris -- create-user <userProfileId>
 ```
+
+Then create a workspace spec for that user:
+
+```bash
+pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
+```
+
+If the user profile does not already exist, `create-user` scaffolds:
+
+- `config/users/profiles/<user>.yaml`
+- `config/users/<user>/credentials/*.yaml` for default Codex and SSH credentials
 
 If the project does not already exist, `create` scaffolds:
 
 - `config/users/<user>/projects/<project>/docker.agent.yaml`
-- `config/users/profiles/local-<identity>.yaml` when a matching local user
-  profile does not already exist
-- `config/users/local-<identity>/credentials/*.yaml` for default Codex and SSH
-  credentials
 
 The scaffolded spec references that local user profile and default bindings:
 
-- `user_profile: local-<identity>`
+- `user_profile: <userProfileId>`
 - `credentials.bindings[].credentialId: codex-default`
 
 Then stage bootstrap secrets and render/start the workspace:
@@ -97,11 +104,15 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 
 ## Command Model
 
+`create-user`
+
+- Creates a user profile plus default credential registry.
+
 `create`
 
-- Default onboarding command.
 - Scaffolds a Docker saved spec when no workspace config exists yet.
-- If a saved spec already exists, dispatches to the configured backend.
+- Requires `--user <userProfileId>`.
+- Fails if that user profile does not already exist.
 
 `render`
 
@@ -139,7 +150,7 @@ config/users/<user>/credentials/*.yaml
 ```
 
 The default Docker scaffold expects secret material under the user-owned
-credential root reported by `create`, for example:
+credential root reported by `create-user`, for example:
 
 ```text
 config/users/local-<identity>/
@@ -224,6 +235,7 @@ pnpm --dir apps/polaris run polaris -- status <project>
 
 ## More Docs
 
+- [portal-business-flow.md](./portal-business-flow.md)
 - [control-plane-maturity.md](./control-plane-maturity.md)
 - [isolation-maturity.md](./isolation-maturity.md)
 - [agent-swarm-maturity.md](./agent-swarm-maturity.md)

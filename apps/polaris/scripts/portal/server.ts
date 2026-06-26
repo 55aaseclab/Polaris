@@ -7,6 +7,7 @@ import {
   type PortalProfileSummary,
   updatePortalProfile,
 } from "../core/portal.js";
+import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   deletePortalWorkspace,
   getPortalWorkspaceDetail,
@@ -16,6 +17,7 @@ import {
   stopPortalWorkspace,
   switchPortalWorkspace,
   upsertPortalCredential,
+  createPortalUser,
 } from "./service.js";
 
 type ParsedBody = Record<string, string>;
@@ -263,6 +265,40 @@ async function handleProfileUpdate(
   sendJson(res, 200, updated);
 }
 
+async function handleUserCreate(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = await readBody(req);
+  const userProfileId = body.userProfileId?.trim() || "";
+  const clerkUsername = body.clerkUsername?.trim() || "";
+  if (!userProfileId) {
+    badRequest(res, "Missing userProfileId");
+    return;
+  }
+  if (!clerkUsername) {
+    badRequest(res, "Missing clerkUsername");
+    return;
+  }
+  try {
+    const created = await createPortalUser({
+      userProfileId,
+      clerkUsername,
+      ...(body.email?.trim() ? { email: body.email.trim() } : {}),
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
+      ...(body.plan === "free" || body.plan === "pro" ? { plan: body.plan } : {}),
+    });
+    sendJson(res, 201, created);
+  } catch (error) {
+    if (error instanceof UserMapConflictError) {
+      sendJson(res, 409, { error: error.message });
+      return;
+    }
+    throw error;
+  }
+}
+
 function isApiPath(segments: string[]): boolean {
   return segments[0] === "api";
 }
@@ -300,6 +336,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       if (isApiPath(segments)) {
         if (segments.length === 2 && segments[1] === "users") {
+          if (req.method === "POST") {
+            await handleUserCreate(req, res);
+            return;
+          }
           const profiles = listPortalProfiles();
           sendJson(
             res,
@@ -313,6 +353,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         if (segments.length === 2 && segments[1] === "default-user") {
           sendJson(res, 200, {
             defaultUserId: resolveDefaultPortalUserId(trustedSession),
+          });
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "user-mapping" && req.method === "GET") {
+          const clerkUsername = url.searchParams.get("clerkUsername")?.trim() || "";
+          sendJson(res, 200, {
+            clerkUsername,
+            mapping: clerkUsername ? findUserMapEntry(clerkUsername) : null,
           });
           return;
         }
@@ -333,7 +381,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
         const workspace = decodeURIComponent(segments[4] ?? "");
-        if (segments.length === 4 && segments[3] === "workspaces") {
+        if (segments.length === 4 && segments[3] === "workspaces" && req.method === "GET") {
           sendJson(res, 200, {
             user: profile,
             workspaces: listPortalWorkspaces(routeUserId),

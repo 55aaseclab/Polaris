@@ -143,7 +143,11 @@ function writeUserSecretsLayout(userProfileId: string): void {
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
 }
 
-export function ensureScaffoldUserProfile(): {
+export function createScaffoldUserProfile(profile: {
+  id: string;
+  name: string;
+  email: string;
+}): {
   id: string;
   name: string;
   email: string;
@@ -151,7 +155,6 @@ export function ensureScaffoldUserProfile(): {
   profilePath: string;
   secretsRoot: string;
 } {
-  const profile = localUserProfileSeed();
   const profilePath = userProfilePath(profile.id);
   const created = fs.existsSync(profilePath) === false;
 
@@ -247,6 +250,41 @@ export function ensureScaffoldUserProfile(): {
     profilePath: path.join("config", "users", "profiles", `${profile.id}.yaml`),
     secretsRoot: path.join("config", "users", profile.id),
   };
+}
+
+export function ensureScaffoldUserProfile(): {
+  id: string;
+  name: string;
+  email: string;
+  created: boolean;
+  profilePath: string;
+  secretsRoot: string;
+} {
+  return createScaffoldUserProfile(localUserProfileSeed());
+}
+
+export function scaffoldUserProfileById(input: {
+  id: string;
+  name?: string;
+  email?: string;
+}): {
+  id: string;
+  name: string;
+  email: string;
+  created: boolean;
+  profilePath: string;
+  secretsRoot: string;
+} {
+  const id = sanitizeUserProfileId(input.id);
+  return createScaffoldUserProfile({
+    id,
+    name: input.name?.trim() || id,
+    email: input.email?.trim() || `${id}@polaris.local`,
+  });
+}
+
+export function userProfileExists(userProfileId: string): boolean {
+  return fs.existsSync(userProfilePath(userProfileId));
 }
 
 export function scaffoldDockerWorkspace(project: string, userProfileId: string): string {
