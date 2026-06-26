@@ -752,14 +752,21 @@ function configuredPaseoAppBaseUrl(): string | null {
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
   const configured = env?.VITE_PASEO_APP_BASE_URL?.trim();
   if (configured) {
-    return configured.replace(/\/$/, "");
+    if (typeof window === "undefined") {
+      return configured.replace(/\/$/, "");
+    }
+    const current = new URL(window.location.href);
+    const url = new URL(configured, current.href);
+    if (current.protocol === "https:" && url.protocol === "http:" && url.host === current.host) {
+      url.protocol = "https:";
+    }
+    return url.toString().replace(/\/$/, "");
   }
   if (typeof window === "undefined") {
     return null;
   }
   const url = new URL(window.location.href);
-  url.port = "8082";
-  url.pathname = "/";
+  url.pathname = "/paseo/";
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
