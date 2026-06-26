@@ -1,5 +1,7 @@
 import { createCommand } from "./commands/create.js";
 import { createUserCommand } from "./commands/create-user.js";
+import { deleteUserCommand } from "./commands/delete-user.js";
+import { userCommand } from "./commands/user.js";
 import { applyCommand } from "./commands/apply.js";
 import { renderCommand } from "./commands/render.js";
 import { startCommand } from "./commands/start.js";
@@ -14,10 +16,10 @@ import { portalCommand } from "./commands/portal.js";
 import { deleteCommand } from "./commands/delete.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "create-user", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch", "delete", "portal"]);
+const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch", "delete", "portal"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <create-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|switch|delete|portal> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|switch|delete|portal> ...");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -30,8 +32,16 @@ export async function runCli(argv: string[]): Promise<void> {
     await portalCommand(second, argv[2]);
     return;
   }
+  if (first === "user") {
+    await userCommand(argv.slice(1));
+    return;
+  }
   if (first === "create-user") {
     await createUserCommand(argv.slice(1));
+    return;
+  }
+  if (first === "delete-user") {
+    await deleteUserCommand(argv.slice(1));
     return;
   }
   if (first === "create") {

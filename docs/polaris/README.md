@@ -51,7 +51,7 @@ Polaris also treats `Credential` as a first-class user-owned entity:
 Create a user first:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- create-user <userProfileId>
+pnpm --dir apps/polaris run polaris -- user create <userProfileId>
 ```
 
 Then create a workspace spec for that user:
@@ -60,7 +60,7 @@ Then create a workspace spec for that user:
 pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
 ```
 
-If the user profile does not already exist, `create-user` scaffolds:
+If the user profile does not already exist, `user create` scaffolds:
 
 - `config/users/profiles/<user>.yaml`
 - `config/users/<user>/credentials/*.yaml` for default Codex and SSH credentials
@@ -104,9 +104,14 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 
 ## Command Model
 
-`create-user`
+`user create`
 
 - Creates a user profile plus default credential registry.
+
+`user delete`
+
+- Removes a user profile, its user-scoped secrets root, and any Clerk username
+  mappings that point at that Polaris user.
 
 `create`
 
@@ -150,7 +155,7 @@ config/users/<user>/credentials/*.yaml
 ```
 
 The default Docker scaffold expects secret material under the user-owned
-credential root reported by `create-user`, for example:
+credential root reported by `user create`, for example:
 
 ```text
 config/users/local-<identity>/

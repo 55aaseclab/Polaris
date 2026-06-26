@@ -63,3 +63,32 @@ export function upsertUserMapEntry(
   writeUserMap(current);
   return current.users[normalized];
 }
+
+export function deleteUserMapEntry(clerkUsername: string): boolean {
+  const normalized = normalizeClerkUsername(clerkUsername);
+  if (!normalized) {
+    return false;
+  }
+  const current = readUserMap();
+  if (!current.users[normalized]) {
+    return false;
+  }
+  delete current.users[normalized];
+  writeUserMap(current);
+  return true;
+}
+
+export function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): string[] {
+  const current = readUserMap();
+  const removedUsernames = Object.entries(current.users)
+    .filter(([, entry]) => entry.polarisUserId === polarisUserId)
+    .map(([clerkUsername]) => clerkUsername);
+  if (removedUsernames.length === 0) {
+    return [];
+  }
+  for (const clerkUsername of removedUsernames) {
+    delete current.users[clerkUsername];
+  }
+  writeUserMap(current);
+  return removedUsernames;
+}

@@ -327,6 +327,57 @@ test("portal API creates a user profile without a Clerk email by using a synthet
   }
 });
 
+test("portal API deletes a user profile and its Clerk mapping", async () => {
+  const userProfileId = uniqueName("portal-delete-user");
+  const clerkUsername = uniqueName("clerk-delete-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+
+  try {
+    await createUserCommand([
+      userProfileId,
+      "--name",
+      "Portal Delete User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+      "--clerk",
+      clerkUsername,
+    ]);
+
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/users/${encodeURIComponent(userProfileId)}`, {
+        method: "DELETE",
+      });
+      assert.equal(response.status, 200);
+      const payload = await response.json() as {
+        userProfile: { id: string; removed: boolean };
+        mappings: { removedClerkUsernames: string[] };
+      };
+      assert.equal(payload.userProfile.id, userProfileId);
+      assert.equal(payload.userProfile.removed, true);
+      assert.deepEqual(payload.mappings.removedClerkUsernames, [clerkUsername]);
+    });
+
+    assert.equal(fs.existsSync(profilePath), false);
+    assert.equal(fs.existsSync(userRoot), false);
+    const userMap = fs.existsSync(USER_MAP_PATH)
+      ? JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+        users?: Record<string, { polarisUserId: string }>;
+      }
+      : { users: {} };
+    assert.equal(userMap.users?.[clerkUsername], undefined);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
 test("portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
   const userProfileId = uniqueName("portal-map-user");

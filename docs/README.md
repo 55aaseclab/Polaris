@@ -6,6 +6,8 @@ This directory is the workspace-root documentation index.
 
 - [polaris/README.md](./polaris/README.md): Polaris control plane and runtime
   model
+- [polaris/portal-business-flow.md](./polaris/portal-business-flow.md):
+  Polaris 门户业务流程
 - [polaris/control-plane-maturity.md](./polaris/control-plane-maturity.md):
   Polaris control-plane maturity
 - [polaris/isolation-maturity.md](./polaris/isolation-maturity.md): isolation
