@@ -40,6 +40,14 @@ export function findUserMapEntry(clerkUsername: string): PortalUserMapEntry | nu
   return readUserMap().users[normalized] ?? null;
 }
 
+export function findUserMapEntriesForPolarisUserId(
+  polarisUserId: string,
+): Array<{ clerkUsername: string; entry: PortalUserMapEntry }> {
+  return Object.entries(readUserMap().users)
+    .filter(([, entry]) => entry.polarisUserId === polarisUserId)
+    .map(([clerkUsername, entry]) => ({ clerkUsername, entry }));
+}
+
 export function upsertUserMapEntry(
   clerkUsername: string,
   entry: PortalUserMapEntry,

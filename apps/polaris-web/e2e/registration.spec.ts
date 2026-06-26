@@ -92,9 +92,23 @@ async function deleteClerkUser(userId: string | null): Promise<void> {
   if (!userId) {
     return;
   }
-  await clerkApi<void>(`/users/${encodeURIComponent(userId)}`, {
-    method: "DELETE",
-  });
+  try {
+    await clerkApi<void>(`/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("(404)")) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function findClerkUserByUsername(username: string): Promise<ClerkApiUser | null> {
+  const params = new URLSearchParams();
+  params.append("username", username);
+  const users = await clerkApi<ClerkApiUser[]>(`/users?${params.toString()}`);
+  return users.find((user) => user.username?.trim().toLowerCase() === username.trim().toLowerCase()) ?? null;
 }
 
 function cleanupPolarisRegistration(clerkUsername: string, userId: string): void {
@@ -266,6 +280,7 @@ test("deleting a Polaris user through the API removes the profile, secrets root,
     expect(fs.existsSync(profilePath)).toBeFalsy();
     expect(fs.existsSync(userRoot)).toBeFalsy();
     await expectPolarisMapping(page.request, username, null);
+    await expect.poll(async () => (await findClerkUserByUsername(username))?.id ?? null).toBe(null);
   } finally {
     cleanupPolarisRegistration(username, username);
     await deleteClerkUser(clerkUserId);
@@ -299,6 +314,7 @@ test("deleting a Polaris user from settings removes the profile, secrets root, a
     expect(fs.existsSync(profilePath)).toBeFalsy();
     expect(fs.existsSync(userRoot)).toBeFalsy();
     await expectPolarisMapping(page.request, username, null);
+    await expect.poll(async () => (await findClerkUserByUsername(username))?.id ?? null).toBe(null);
   } finally {
     cleanupPolarisRegistration(username, username);
     await deleteClerkUser(clerkUserId);

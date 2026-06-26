@@ -184,6 +184,9 @@ export async function deletePortalUser(
   mappings: {
     removedClerkUsernames: string[];
   };
+  clerk: {
+    removedUserIds: string[];
+  };
 }> {
   return apiFetch(
     `/api/users/${encodeURIComponent(userId)}`,
