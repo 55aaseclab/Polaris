@@ -1335,7 +1335,13 @@ function PortalShellLayout(props: {
                       <ChevronRight className="ml-auto h-4 w-4" />
                     </SidebarMenuButton>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent side="right" align="end" className="w-64">
+                  <DropdownMenuContent
+                    side={isMobile ? "top" : "right"}
+                    align={isMobile ? "start" : "end"}
+                    sideOffset={8}
+                    collisionPadding={16}
+                    className="w-64 max-w-[calc(100vw-2rem)]"
+                  >
                     <DropdownMenuLabel className="flex items-center gap-2">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                         {activeUserInitial}
