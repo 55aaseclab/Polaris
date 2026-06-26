@@ -13,7 +13,6 @@ export default defineConfig({
     },
     server: {
         port: port,
-        allowedHosts: ["595f833d.r5.cpolar.top"],
         proxy: {
             "/api": apiTarget,
         },
