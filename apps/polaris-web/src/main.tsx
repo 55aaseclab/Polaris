@@ -4,15 +4,11 @@ import { ClerkProvider } from "@clerk/react";
 import { enUS, zhCN } from "@clerk/localizations";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { clerkPublishableKey, clerkSignInUrl, clerkSignUpUrl } from "./lib/clerk";
 import { type Language, readStoredLanguage } from "./lib/language";
 import "./index.css";
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-const publishableKey = env?.VITE_CLERK_PUBLISHABLE_KEY?.trim();
-
-if (!publishableKey) {
-  throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required");
-}
+const publishableKey = clerkPublishableKey();
 
 function resolveClerkLocalization(language: Language) {
   return language === "zh" ? zhCN : enUS;
@@ -25,11 +21,11 @@ function Root() {
     <ClerkProvider
       publishableKey={publishableKey}
       localization={resolveClerkLocalization(language)}
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
+      signInUrl={clerkSignInUrl()}
+      signUpUrl={clerkSignUpUrl()}
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
-      afterSignOutUrl="/sign-in"
+      afterSignOutUrl={clerkSignInUrl()}
     >
       <BrowserRouter>
         <App language={language} setLanguage={setLanguage} />

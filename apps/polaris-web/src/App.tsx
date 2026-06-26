@@ -101,6 +101,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  buildClerkUrl,
+  clerkSignInUrl,
+  clerkSignUpUrl,
+  isExternalAuthUrl,
+} from "@/lib/clerk";
 import { type Language, writeStoredLanguage } from "@/lib/language";
 
 function basenameForDisplay(filePath: string): string {
@@ -483,11 +489,27 @@ class AppErrorBoundary extends React.Component<
 
 function portalSignInUrl(): string {
   if (typeof window === "undefined") {
-    return "/sign-in";
+    return clerkSignInUrl();
   }
-  const target = new URL("/sign-in", window.location.origin);
-  target.searchParams.set("redirect_url", window.location.href);
-  return target.pathname + target.search;
+  const redirectTarget = normalizePath(window.location.pathname) === "/sign-in"
+    || normalizePath(window.location.pathname) === "/sign-up"
+    ? new URL("/", window.location.origin).toString()
+    : window.location.href;
+  return buildClerkUrl(clerkSignInUrl(), redirectTarget);
+}
+
+function portalSignUpUrl(): string {
+  if (typeof window === "undefined") {
+    return clerkSignUpUrl();
+  }
+  return buildClerkUrl(
+    clerkSignUpUrl(),
+    new URL("/?registered=1", window.location.origin).toString(),
+  );
+}
+
+function normalizePath(pathname: string): string {
+  return pathname.replace(/\/+$/, "") || "/";
 }
 
 const REGISTRATION_INTENT_KEY = "polaris-pending-registration";
@@ -567,11 +589,23 @@ function useCurrentUserMapping() {
 function SignInPage() {
   const { isLoaded, userId } = useAuth();
   const { language } = useLanguage();
+  const signInUrl = clerkSignInUrl();
   useEffect(() => {
     setRegistrationIntent(false);
   }, []);
+  useEffect(() => {
+    if (isLoaded && userId) {
+      return;
+    }
+    if (isExternalAuthUrl(signInUrl)) {
+      window.location.assign(portalSignInUrl());
+    }
+  }, [isLoaded, signInUrl, userId]);
   if (isLoaded && userId) {
     return <Navigate to="/" replace />;
+  }
+  if (isExternalAuthUrl(signInUrl)) {
+    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
@@ -579,7 +613,7 @@ function SignInPage() {
         key={`sign-in-${language}`}
         path="/sign-in"
         routing="path"
-        signUpUrl="/sign-up"
+        signUpUrl={clerkSignUpUrl()}
       />
     </div>
   );
@@ -589,6 +623,7 @@ function SignUpPage() {
   const { isLoaded, userId } = useAuth();
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const signUpUrl = clerkSignUpUrl();
 
   useEffect(() => {
     setRegistrationIntent(true);
@@ -599,9 +634,20 @@ function SignUpPage() {
       navigate("/?registered=1", { replace: true });
     }
   }, [isLoaded, navigate, userId]);
+  useEffect(() => {
+    if (isLoaded && userId) {
+      return;
+    }
+    if (isExternalAuthUrl(signUpUrl)) {
+      window.location.assign(portalSignUpUrl());
+    }
+  }, [isLoaded, signUpUrl, userId]);
 
   if (isLoaded && userId) {
     return <div className="p-6 text-sm text-muted-foreground">Finishing registration...</div>;
+  }
+  if (isExternalAuthUrl(signUpUrl)) {
+    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign up...</div>;
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
@@ -609,7 +655,7 @@ function SignUpPage() {
         key={`sign-up-${language}`}
         path="/sign-up"
         routing="path"
-        signInUrl="/sign-in"
+        signInUrl={clerkSignInUrl()}
       />
     </div>
   );
@@ -1361,7 +1407,7 @@ function PortalShellLayout(props: {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => {
-                        void clerk.signOut({ redirectUrl: "/sign-in" });
+                        void clerk.signOut({ redirectUrl: clerkSignInUrl() });
                       }}
                     >
                       <LogOut className="mr-2 h-4 w-4" />
@@ -2334,8 +2380,7 @@ function SettingsPage() {
     setDeleteError(null);
     try {
       await deletePortalUser(userId);
-      await clerk.signOut({ redirectUrl: "/sign-in" });
-      navigate("/sign-in", { replace: true });
+      await clerk.signOut({ redirectUrl: clerkSignInUrl() });
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : String(error));
     } finally {
