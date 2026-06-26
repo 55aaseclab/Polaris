@@ -266,11 +266,54 @@ export async function getCredentialPreview(
   );
 }
 
+export async function createCodexCredential(
+  userId: string,
+  input: {
+    credentialId?: string;
+    label?: string;
+    providerName: string;
+    baseUrl: string;
+    apiKey: string;
+  },
+): Promise<PortalCredentialSummary> {
+  return apiFetch<PortalCredentialSummary>(
+    `/api/users/${encodeURIComponent(userId)}/credentials`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        harness: "codex",
+        ...input,
+      }),
+    },
+  );
+}
+
+export async function deleteCredential(
+  userId: string,
+  credentialId: string,
+): Promise<{
+  credential: {
+    id: string;
+    userId: string;
+    removed: boolean;
+    registryPath: string;
+    removedPaths: string[];
+  };
+}> {
+  return apiFetch(
+    `/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export async function createWorkspace(
   userId: string,
   workspaceName: string,
   options?: {
     defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
   },
 ): Promise<PortalProvisionProgress> {
   return apiFetch<PortalProvisionProgress>(
@@ -280,6 +323,7 @@ export async function createWorkspace(
       body: JSON.stringify({
         workspaceName,
         defaultDockerOnly: options?.defaultDockerOnly ?? false,
+        startAfterCreate: options?.startAfterCreate ?? false,
       }),
     },
   );
