@@ -195,12 +195,12 @@ const COPY: Record<Language, Record<string, string>> = {
     settings_desc: "Choose the language used across the portal.",
     danger_zone: "Danger zone",
     danger_zone_desc: "Delete this Polaris user, local credentials, and Clerk mapping.",
+    workspace_danger_zone_desc: "Stop or delete this workspace.",
     danger_zone_tooltip: "This permanently deletes the Polaris user profile, user-scoped secrets, default credentials, and Clerk username mapping.",
     delete_user: "Delete user",
     delete_user_confirm_title: "Delete this user?",
     delete_user_confirm_description: "This deletes the Polaris user profile, user-scoped secrets, and Clerk username mapping. This action cannot be undone.",
     deleting_user: "Deleting user...",
-    workspace_controls: "Controls",
     paseo_credential: "Paseo credential",
     paseo_credential_desc: "Bind an agent-auth credential to enable Paseo for this driver.",
     loading_paseo_credentials: "Loading agent credentials...",
@@ -361,12 +361,12 @@ const COPY: Record<Language, Record<string, string>> = {
     settings_desc: "选择整个门户使用的语言。",
     danger_zone: "危险操作",
     danger_zone_desc: "删除这个 Polaris 用户、本地凭据和 Clerk 映射。",
+    workspace_danger_zone_desc: "停止或删除这个工作空间。",
     danger_zone_tooltip: "这会永久删除 Polaris 用户资料、用户级 secrets、默认凭据，以及 Clerk 用户名映射。",
     delete_user: "删除用户",
     delete_user_confirm_title: "删除这个用户？",
     delete_user_confirm_description: "这会删除 Polaris 用户资料、用户级 secrets，以及 Clerk 用户名映射。此操作不可恢复。",
     deleting_user: "正在删除用户…",
-    workspace_controls: "控制",
     paseo_credential: "Paseo 凭证",
     paseo_credential_desc: "为当前 driver 绑定一个 agent-auth credential，并启用 Paseo。",
     loading_paseo_credentials: "正在加载 agent 凭证…",
@@ -1078,12 +1078,10 @@ function PortalShell(props: {
       ? t("isolated_dev_env")
       : currentWorkspacePane === "memory"
         ? t("evolution_memory")
-        : currentWorkspacePane === "controls"
-          ? t("workspace_controls")
-          : location.pathname.includes("/workspaces/") && currentWorkspacePane === ""
+        : location.pathname.includes("/workspaces/") && currentWorkspacePane === ""
             ? currentWorkspaceName || t("empty_pane")
-          : location.pathname.includes("/workspaces/")
-            ? t("workspace_overview")
+            : location.pathname.includes("/workspaces/")
+              ? t("workspace_overview")
             : t("app_name");
 
   return (
@@ -1246,13 +1244,6 @@ function PortalShell(props: {
                               <SidebarMenuSubButton asChild>
                                 <Link to={workspacePaneLink(workspace.name, "memory")}>
                                   {t("evolution_memory")}
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                            <SidebarMenuSubItem>
-                              <SidebarMenuSubButton asChild>
-                                <Link to={workspacePaneLink(workspace.name, "controls")}>
-                                  {t("workspace_controls")}
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>
@@ -1771,6 +1762,179 @@ function WorkspaceDetailPage() {
     }
   }
 
+  function renderControlsCard(): ReactNode {
+    return (
+      <div className="grid gap-6">
+        {data?.progress && (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t("provisioning_title")}</div>
+                <div className="text-sm text-muted-foreground">{data.progress.phase}</div>
+              </div>
+              <div className="w-full min-w-0 sm:w-[18rem]">
+                <div className="mb-2 flex justify-between text-sm text-muted-foreground">
+                  <span>{t("provisioning")}</span>
+                  <span>{data.progress.percent}%</span>
+                </div>
+                <Progress value={data.progress.percent} />
+              </div>
+            </div>
+            <Separator />
+          </>
+        )}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t("switch_driver")}</div>
+            <div className="text-sm text-muted-foreground">{t("switch_driver_desc")}</div>
+          </div>
+          <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
+            <div className="w-full min-w-0 sm:w-[18rem]">
+              <Select value={driver} onValueChange={setDriver}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("select_driver")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(data?.availableDrivers ?? []).map((item) => {
+                    const label = driverLabel(item);
+                    return (
+                      <SelectItem key={label} value={label}>
+                        {item.available ? label : `${label} (${t("create_suffix")})`}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
+              <RefreshCw className="h-4 w-4" />
+              {switching ? t("switching") : t("switch_workspace_action")}
+            </Button>
+          </div>
+        </div>
+        <Separator />
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("paseo_credential")}</div>
+              <div className="text-sm text-muted-foreground">{t("paseo_credential_desc")}</div>
+            </div>
+            <div className="w-full min-w-0 sm:w-[28rem]">
+              {credentialsLoading ? (
+                <p className="text-sm text-muted-foreground">{t("loading_paseo_credentials")}</p>
+              ) : credentialsError ? (
+                <p className="text-sm text-destructive">{credentialsError}</p>
+              ) : (
+                <div className="grid gap-3">
+                  <div className="flex flex-wrap items-end justify-end gap-3">
+                    <div className="min-w-[8rem] flex-1">
+                      <Select
+                        value={paseoCredentialId}
+                        onValueChange={setPaseoCredentialId}
+                        disabled={agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
+                      >
+                        <SelectTrigger id="paseo-credential">
+                          <SelectValue placeholder={t("paseo_credential")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agentCredentials.map((credential) => (
+                            <SelectItem key={credential.id} value={credential.id}>
+                              {credential.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      className="shrink-0"
+                      onClick={() => void handleBindPaseo()}
+                      disabled={!paseoCredentialId || !driver || agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
+                    >
+                      {bindingPaseo ? t("binding_paseo") : t("bind_paseo")}
+                    </Button>
+                    <Button
+                      className="shrink-0"
+                      variant="outline"
+                      onClick={() => void handleUnbindPaseo()}
+                      disabled={!driver || !currentPaseoCredentialId || bindingPaseo || unbindingPaseo}
+                    >
+                      {unbindingPaseo ? t("unbinding_paseo") : t("unbind_paseo")}
+                    </Button>
+                  </div>
+                  {agentCredentials.length === 0 ? (
+                    <div className="text-right text-sm text-muted-foreground">
+                      {t("no_paseo_credentials")}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <Separator />
+        <div className="grid gap-6">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-destructive">{t("danger_zone")}</div>
+            <div className="text-sm text-muted-foreground">
+              {t("workspace_danger_zone_desc")}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("stop_workspace")}</div>
+              <div className="text-sm text-muted-foreground">
+                {translateWorkspaceRuntimeState(data?.status?.state, t)}
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void handleStop()}
+              disabled={loading || stopping || deleting}
+            >
+              {stopping ? t("stopping") : t("stop_workspace")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-destructive">{t("remove_workspace")}</div>
+              <div className="text-sm text-muted-foreground">
+                {t("remove_workspace_confirm_description")}
+              </div>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  disabled={loading || stopping || deleting}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {deleting ? t("deleting") : t("remove_workspace")}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t("remove_workspace_confirm_description")}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleDelete()}>
+                    {deleting ? t("deleting") : t("remove_workspace")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </div>
+        {actionError ? (
+          <p className="text-sm text-destructive">{actionError}</p>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderPane(): ReactNode {
     if (!data) {
       return (
@@ -1806,29 +1970,35 @@ function WorkspaceDetailPage() {
         data.liveTarget ?? data.status?.paseo?.liveTarget,
       );
       return (
-        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col">
-          <div className="grid gap-1 pb-6">
-            <div className="text-sm font-medium text-muted-foreground">
+        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
+          <div className="grid gap-1">
+            <div className="text-sm font-medium">
               {t("paseo_status")}
             </div>
-            <div className="text-base font-medium">
+            <div className="text-sm text-muted-foreground">
               {translatePaseoState(data.status?.daemon, t)}
             </div>
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-0 overflow-hidden border-y border-border">
-            <div className="grid gap-2 border-b border-border px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
-              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                {t("daemon_address")}
+          <Separator />
+          <div className="grid gap-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t("daemon_address")}</div>
+                <div className="text-sm text-muted-foreground">{t("paseo_status")}</div>
               </div>
-              <div className="break-all text-sm font-medium">
-                {data.status?.paseo?.daemonAddress ?? t("unknown")}
+              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                <span className="break-all">
+                  {data.status?.paseo?.daemonAddress ?? t("unknown")}
+                </span>
               </div>
             </div>
-            <div className="grid gap-2 border-b border-border px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
-              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                {t("supported_harnesses")}
+            <Separator />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t("supported_harnesses")}</div>
+                <div className="text-sm text-muted-foreground">{t("paseo_status")}</div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex w-full flex-wrap justify-start gap-2 sm:w-[28rem] sm:justify-end">
                 {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
                   ? data.status?.paseo?.supportedHarnesses?.map((item) => (
                       <Badge key={item} variant="secondary">{item}</Badge>
@@ -1836,15 +2006,22 @@ function WorkspaceDetailPage() {
                   : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
               </div>
             </div>
-            <div className="grid gap-2 px-0 py-5 lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6">
-              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                {t("live_target")}
+            <Separator />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t("live_target")}</div>
+                <div className="text-sm text-muted-foreground">
+                  {translatePairingState(data.status?.daemon?.pairing?.state, t)}
+                </div>
               </div>
-              <div className="break-all text-sm text-muted-foreground">
-                {liveTarget ?? t("unknown")}
+              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                <span className="break-all">
+                  {liveTarget ?? t("unknown")}
+                </span>
               </div>
             </div>
           </div>
+          {renderControlsCard()}
         </div>
       );
     }
@@ -1887,141 +2064,6 @@ function WorkspaceDetailPage() {
             workspaceName={workspaceName}
             hideDetailsColumn
           />
-        </div>
-      );
-    }
-
-    if (currentPane === "controls") {
-      return (
-        <div className="grid gap-4">
-          <div className="grid gap-1">
-            <div className="text-sm font-medium">{t("workspace_controls")}</div>
-            <div className="text-sm text-muted-foreground">{workspaceName}</div>
-          </div>
-          <div className="rounded-[1.25rem] border border-border bg-background p-5 shadow-sm">
-            {data.progress && (
-              <div className="grid gap-2">
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>{data.progress.phase}</span>
-                  <span>{data.progress.percent}%</span>
-                </div>
-                <Progress value={data.progress.percent} />
-              </div>
-            )}
-            <div className="mt-5 flex flex-wrap items-end gap-3">
-              <div className="w-full min-w-0 sm:w-[18rem]">
-                <Select value={driver} onValueChange={setDriver}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("select_driver")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(data.availableDrivers ?? []).map((item) => {
-                      const label = driverLabel(item);
-                      return (
-                        <SelectItem key={label} value={label}>
-                          {item.available ? label : `${label} (${t("create_suffix")})`}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
-                <RefreshCw className="h-4 w-4" />
-                {switching ? t("switching") : t("switch_workspace_action")}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void handleStop()}
-                disabled={loading || stopping || deleting}
-              >
-                {stopping ? t("stopping") : t("stop_workspace")}
-              </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="destructive"
-                    disabled={loading || stopping || deleting}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {deleting ? t("deleting") : t("remove_workspace")}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {t("remove_workspace_confirm_description")}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void handleDelete()}>
-                      {deleting ? t("deleting") : t("remove_workspace")}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-            <Separator className="my-5" />
-            <div className="grid gap-3">
-              <div className="grid gap-1">
-                <div className="text-sm font-medium">{t("paseo_credential")}</div>
-                <div className="text-sm text-muted-foreground">{t("paseo_credential_desc")}</div>
-              </div>
-              {credentialsLoading && (
-                <p className="text-sm text-muted-foreground">{t("loading_paseo_credentials")}</p>
-              )}
-              {credentialsError && (
-                <p className="text-sm text-destructive">{credentialsError}</p>
-              )}
-              {!credentialsLoading && !credentialsError && (
-                <div className="grid gap-3">
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,18rem)_auto_auto] sm:items-end">
-                    <div className="min-w-0">
-                      <Label htmlFor="paseo-credential">{t("paseo_credential")}</Label>
-                      <Select
-                        value={paseoCredentialId}
-                        onValueChange={setPaseoCredentialId}
-                        disabled={agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
-                      >
-                        <SelectTrigger id="paseo-credential">
-                          <SelectValue placeholder={t("paseo_credential")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {agentCredentials.map((credential) => (
-                            <SelectItem key={credential.id} value={credential.id}>
-                              {credential.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      onClick={() => void handleBindPaseo()}
-                      disabled={!paseoCredentialId || !driver || agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
-                    >
-                      {bindingPaseo ? t("binding_paseo") : t("bind_paseo")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => void handleUnbindPaseo()}
-                      disabled={!driver || !currentPaseoCredentialId || bindingPaseo || unbindingPaseo}
-                    >
-                      {unbindingPaseo ? t("unbinding_paseo") : t("unbind_paseo")}
-                    </Button>
-                  </div>
-                  {currentPaseoCredentialId ? (
-                    <div className="text-sm text-muted-foreground">
-                      {t("current_paseo_credential")}: {currentPaseoCredentialId}
-                    </div>
-                  ) : agentCredentials.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">{t("no_paseo_credentials")}</div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       );
     }
@@ -2546,7 +2588,6 @@ export default function App() {
                   <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
                   <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<WorkspaceDetailPage />} />
                   <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<WorkspaceDetailPage />} />
-                  <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
                   <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
                 </Routes>
               </AuthGate>
