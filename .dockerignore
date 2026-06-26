@@ -18,6 +18,8 @@ apps/polaris-web/node_modules
 apps/polaris-web/node_modules/**
 config/users
 config/users/**
+!config/users/
+!config/users/user-map.example.json
 certs
 certs/**
 apps/polaris-web/.vite

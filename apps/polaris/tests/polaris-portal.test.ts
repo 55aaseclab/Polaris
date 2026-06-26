@@ -17,7 +17,7 @@ import {
 import { writeWorkspaceDriverSelection } from "../scripts/output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
-const USER_MAP_PATH = path.join(REPO_ROOT, "apps", "polaris-web", "config", "user-map.json");
+const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
 
 function uniqueName(prefix: string): string {

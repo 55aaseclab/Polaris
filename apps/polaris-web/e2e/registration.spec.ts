@@ -7,7 +7,7 @@ import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
 
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(DIRNAME, "../../..");
-const USER_MAP_PATH = path.join(REPO_ROOT, "apps", "polaris-web", "config", "user-map.json");
+const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
 const CLERK_API_BASE = "https://api.clerk.com/v1";
 
 interface ClerkApiUser {
