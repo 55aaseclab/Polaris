@@ -77,16 +77,19 @@ export interface PortalWorkspaceStatus {
     dockerfile: {
       file: string;
       path: string;
+      exists?: boolean;
     };
     specs: Array<{
       driver: string;
       file: string;
       path: string;
+      exists?: boolean;
     }>;
     generatedManifests: Array<{
       driver: string;
       file: string;
       path: string;
+      exists?: boolean;
     }>;
     imageTags: Array<{
       name: string;
@@ -136,6 +139,12 @@ export interface PortalCredentialSummary {
 }
 
 export interface PortalCredentialPreview {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
+export interface PortalWorkspaceAssetPreview {
   path: string;
   content: string;
   truncated: boolean;
@@ -263,6 +272,16 @@ export async function getCredentialPreview(
 ): Promise<PortalCredentialPreview> {
   return apiFetch<PortalCredentialPreview>(
     `/api/users/${encodeURIComponent(userId)}/credentials/preview?path=${encodeURIComponent(credentialPath)}`,
+  );
+}
+
+export async function getWorkspaceAssetPreview(
+  userId: string,
+  workspace: string,
+  assetPath: string,
+): Promise<PortalWorkspaceAssetPreview> {
+  return apiFetch<PortalWorkspaceAssetPreview>(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/preview?path=${encodeURIComponent(assetPath)}`,
   );
 }
 

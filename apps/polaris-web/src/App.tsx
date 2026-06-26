@@ -35,6 +35,7 @@ import {
   deletePortalUser,
   deleteWorkspace,
   getCredentialPreview,
+  getWorkspaceAssetPreview,
   getWorkspaceDetail,
   listCredentials,
   listUsers,
@@ -46,6 +47,7 @@ import {
   type PortalCredentialPreview,
   type PortalProfileSummary,
   type PortalUserMapping,
+  type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
@@ -780,10 +782,12 @@ function statusTone(state?: string): "default" | "secondary" | "destructive" {
 type AssetRow = {
   name: string;
   path: string;
+  displayPath?: string;
   detail?: string;
   detailLines?: string[];
   status?: string;
   previewPath?: string;
+  previewScope?: "credential" | "workspace";
   previewOpen?: boolean;
 };
 
@@ -799,12 +803,15 @@ function WorkspaceAssetTable(props: {
   sections: AssetSection[];
   emptyLabel: string;
   userId?: string;
+  workspaceName?: string;
+  hideDetailsColumn?: boolean;
 }) {
   const visibleSections = props.sections.filter((section) => section.rows.length > 0);
   const hasStatusOrNotes = visibleSections.some((section) =>
     section.rows.some((row) => row.status),
   );
   const hasActions = visibleSections.some((section) => Boolean(section.action));
+  const showDetailsColumn = !hasStatusOrNotes && !props.hideDetailsColumn;
   if (visibleSections.length === 0) {
     return <p className="text-sm text-muted-foreground">{props.emptyLabel}</p>;
   }
@@ -822,12 +829,10 @@ function WorkspaceAssetTable(props: {
               <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_name")}</th>
               <th className="w-full px-4 py-3 font-medium">{props.t("asset_path")}</th>
               {hasStatusOrNotes ? (
-                <>
-                  <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_status")}</th>
-                </>
-              ) : (
+                <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_status")}</th>
+              ) : showDetailsColumn ? (
                 <th className="w-0 px-4 py-3 text-right font-medium whitespace-nowrap">{props.t("asset_details")}</th>
-              )}
+              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
@@ -880,18 +885,18 @@ function WorkspaceAssetTable(props: {
                   <td className="w-0 whitespace-nowrap px-4 py-4 text-right font-medium">{row.name}</td>
                   <td className="w-full px-4 py-4">
                     <CredentialPathCell
-                      path={row.path}
+                      path={row.displayPath ?? row.path}
                       userId={props.userId}
                       previewPath={row.previewPath}
+                      previewScope={row.previewScope}
+                      workspaceName={props.workspaceName}
                     />
                   </td>
                   {hasStatusOrNotes ? (
-                    <>
-                      <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
-                        {row.status ?? "-"}
-                      </td>
-                    </>
-                  ) : (
+                    <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
+                      {row.status ?? "-"}
+                    </td>
+                  ) : showDetailsColumn ? (
                     <td className="w-0 whitespace-nowrap px-4 py-4 text-right text-muted-foreground">
                       {row.detailLines && row.detailLines.length > 0 ? (
                         <div className="grid max-w-[18rem] gap-1 text-sm whitespace-normal">
@@ -907,7 +912,7 @@ function WorkspaceAssetTable(props: {
                         </span>
                       ) : "-"}
                     </td>
-                  )}
+                  ) : null}
                 </tr>
               )),
             )}
@@ -1562,26 +1567,39 @@ function WorkspaceDetailPage() {
     ? [
         {
           label: t("base_dockerfile"),
-          rows: assets.dockerfile
+          rows: assets.dockerfile && assets.dockerfile.exists !== false
             ? [{
                 name: assets.dockerfile.file,
                 path: assets.dockerfile.path,
+                displayPath: trimUserAssetPath(assets.dockerfile.path, userId),
+                previewPath: assets.dockerfile.path,
+                previewScope: "workspace",
               }]
             : [],
         },
         {
           label: t("workspace_specs"),
-          rows: (assets.specs ?? []).map((item) => ({
-            name: `${item.driver} · ${item.file}`,
-            path: item.path,
-          })),
+          rows: (assets.specs ?? [])
+            .filter((item) => item.exists !== false)
+            .map((item) => ({
+              name: `${item.driver} · ${item.file}`,
+              path: item.path,
+              displayPath: trimUserAssetPath(item.path, userId),
+              previewPath: item.path,
+              previewScope: "workspace",
+            })),
         },
         {
           label: t("generated_manifests"),
-          rows: (assets.generatedManifests ?? []).map((item) => ({
-            name: `${item.driver} · ${item.file}`,
-            path: item.path,
-          })),
+          rows: (assets.generatedManifests ?? [])
+            .filter((item) => item.exists !== false)
+            .map((item) => ({
+              name: `${item.driver} · ${item.file}`,
+              path: item.path,
+              displayPath: trimUserAssetPath(item.path, userId),
+              previewPath: item.path,
+              previewScope: "workspace",
+            })),
         },
         {
           label: t("image_tags"),
@@ -1741,13 +1759,16 @@ function WorkspaceDetailPage() {
       return (
         <div className="grid gap-4">
           <div className="grid gap-1">
-            <div className="text-sm font-medium text-muted-foreground">{t("isolated_dev_env")}</div>
-            <div className="text-base font-medium">{t("workspace_specs")}</div>
+            <div className="text-sm font-medium">{t("isolated_dev_env")}</div>
+            <div className="text-sm text-muted-foreground">{t("workspace_specs")}</div>
           </div>
           <WorkspaceAssetTable
             t={t}
             sections={developmentSections}
             emptyLabel={t("no_assets")}
+            userId={userId}
+            workspaceName={workspaceName}
+            hideDetailsColumn
           />
         </div>
       );
@@ -2192,15 +2213,22 @@ function SettingsPage() {
   );
 }
 
+function trimUserAssetPath(pathValue: string, userId: string): string {
+  const prefix = `config/users/${userId}/`;
+  return pathValue.startsWith(prefix) ? pathValue.slice(prefix.length) : pathValue;
+}
+
 function CredentialPathCell(props: {
   path: string;
   userId?: string;
   previewPath?: string;
+  previewScope?: "credential" | "workspace";
+  workspaceName?: string;
 }) {
   const showPreview = Boolean(props.userId && props.previewPath);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<PortalCredentialPreview | null>(null);
+  const [preview, setPreview] = useState<PortalCredentialPreview | PortalWorkspaceAssetPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2216,7 +2244,14 @@ function CredentialPathCell(props: {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    void getCredentialPreview(props.userId as string, props.previewPath as string)
+    const loader = props.previewScope === "workspace"
+      ? getWorkspaceAssetPreview(
+          props.userId as string,
+          props.workspaceName as string,
+          props.previewPath as string,
+        )
+      : getCredentialPreview(props.userId as string, props.previewPath as string);
+    void loader
       .then((value) => {
         if (!cancelled) {
           setPreview(value);
@@ -2235,7 +2270,15 @@ function CredentialPathCell(props: {
     return () => {
       cancelled = true;
     };
-  }, [open, preview, props.previewPath, props.userId, showPreview]);
+  }, [
+    open,
+    preview,
+    props.previewPath,
+    props.previewScope,
+    props.userId,
+    props.workspaceName,
+    showPreview,
+  ]);
 
   return (
     <div className="grid gap-2">
