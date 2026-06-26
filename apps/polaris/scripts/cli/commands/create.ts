@@ -2,6 +2,7 @@ import { loadWorkspace, parseWorkspaceReference } from "../../config/load.js";
 import { assertProjectNameAvailable } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
 import {
+  listDefaultCredentialIds,
   scaffoldDockerWorkspace,
   userProfileExists,
   workspaceConfigExists,
@@ -29,6 +30,7 @@ export async function createCommand(argv: string[]): Promise<void> {
   if (!workspaceConfigExists(project)) {
     const scaffoldBackend = backendHint === "pod" || backendHint === "kubevirt-vm" ? backendHint : "docker";
     const outputPath = scaffoldDockerWorkspace(project, userProfileId);
+    const defaultCredentialIds = listDefaultCredentialIds(userProfileId);
     const requestedRef = scaffoldBackend === "pod" && profileHint
       ? `${project}@${scaffoldBackend}:${profileHint}`
       : `${project}@${scaffoldBackend}`;
@@ -54,7 +56,7 @@ export async function createCommand(argv: string[]): Promise<void> {
       },
       credentials: {
         registryRoot: `config/users/${userProfileId}/credentials`,
-        defaults: ["codex-default", "github-ssh"],
+        defaults: defaultCredentialIds,
       },
       nextSteps: [
         `Stage credentials under config/users/${userProfileId}/`,
