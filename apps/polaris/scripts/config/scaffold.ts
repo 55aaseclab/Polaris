@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
+import { ensureDefaultCodexCredential } from "./credentials.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 
@@ -223,7 +224,10 @@ export function ensureWorkspaceDockerfile(userProfileId: string): string {
   return target;
 }
 
-function resolveDefaultCredentialBindings(userProfileId: string): {
+function resolveDefaultCredentialBindings(
+  userProfileId: string,
+  defaultAgentCredentialId?: string,
+): {
   bindings: Array<{
     purpose: "agent-auth" | "git-auth";
     credentialId: string;
@@ -254,7 +258,11 @@ function resolveDefaultCredentialBindings(userProfileId: string): {
     .filter((entry) => entry.id);
 
   const gitAuth = credentials.find((entry) => entry.purposes.includes("git-auth"));
+  const agentAuth = defaultAgentCredentialId
+    ? credentials.find((entry) => entry.id === defaultAgentCredentialId && entry.purposes.includes("agent-auth"))
+    : credentials.find((entry) => entry.purposes.includes("agent-auth"));
   const bindings = [
+    ...(agentAuth ? [{ purpose: "agent-auth" as const, credentialId: agentAuth.id, required: true }] : []),
     ...(gitAuth ? [{ purpose: "git-auth" as const, credentialId: gitAuth.id, required: false }] : []),
   ];
   return {
@@ -449,7 +457,11 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   ensureWorkspaceDockerfile(userProfileId);
   ensureWorkspaceListedInUserProfile(userProfileId, project);
-  const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
+  const defaultAgentCredential = ensureDefaultCodexCredential(userProfileId);
+  const defaultCredentials = resolveDefaultCredentialBindings(
+    userProfileId,
+    defaultAgentCredential.credentialId,
+  );
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const workspaceServicePort = allocateWorkspaceServicePort();
   const doc = {
