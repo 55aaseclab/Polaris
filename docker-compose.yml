@@ -22,7 +22,7 @@ services:
     expose:
       - "8787"
     volumes:
-      - ./config:/workspace/config
+      - ./config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock
 
   polaris-webportal:
@@ -45,6 +45,7 @@ services:
       - polaris-webportal
     environment:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
+      NGINX_PASEO_SERVER_NAME: ${NGINX_PASEO_SERVER_NAME:-paseo.localhost}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
     restart: unless-stopped

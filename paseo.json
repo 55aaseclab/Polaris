@@ -8,9 +8,14 @@
       "type": "service",
       "command": "docker compose --env-file .env.deploy up -d --build"
     },
-    "publish": {
-      "type": "service",
+    "publish-polaris": {
       "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+    },
+    "publish-paseo": {
+      "command": "cpolar http -hostname=paseo.polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+    },
+    "publish": {
+      "command": "printf 'Run publish-polaris and publish-paseo in separate tabs to see both logs.\\n'"
     }
   }
 }

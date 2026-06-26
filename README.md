@@ -29,9 +29,7 @@ Run the local stack through Docker Compose:
 docker compose --env-file .env.dev up -d --build
 ```
 
-Access it through nginx:
-
-- `http://127.0.0.1:8080/`
+Access it through nginx on the mapped host port.
 
 Only nginx is exposed to the host.
 
@@ -50,6 +48,7 @@ docker compose --env-file .env.deploy up -d --build
 Access it through nginx:
 
 - `http://polaris.jianxiaoyitech.com/`
+- `http://paseo.polaris.jianxiaoyitech.com/`
 
 Keep real values in `.env.deploy`.
 
