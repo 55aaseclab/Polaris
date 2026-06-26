@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
-import { loadWorkspace } from "../scripts/config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
@@ -16,6 +16,16 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+function loadWorkspaceFromRefForTest(projectRef: string) {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
 
 function getStdoutCaptureQueue(): Promise<void> {
   const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
@@ -967,9 +977,9 @@ test("logs command dispatches to each backend implementation", async () => {
   const podSpec = writeProjectSpec("pod", podProject);
   const dockerSpec = writeProjectSpec("docker", dockerProject);
   const vmSpec = writeProjectSpec("kubevirt", vmProject);
-  const podGeneratedPath = generatedOutputPath(loadWorkspace(`${podProject}@pod`));
-  const dockerGeneratedPath = generatedOutputPath(loadWorkspace(`${dockerProject}@docker`));
-  const vmGeneratedPath = generatedOutputPath(loadWorkspace(`${vmProject}@kubevirt-vm`));
+  const podGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${podProject}@pod`));
+  const dockerGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${dockerProject}@docker`));
+  const vmGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${vmProject}@kubevirt-vm`));
   const traceDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-trace-"));
   const traceFile = path.join(traceDir, "commands.log");
 

@@ -7,9 +7,19 @@ import path from "node:path";
 import { PaseoManagerAdapter } from "../scripts/evolution/adapter.js";
 import { applyCuratorResult, curateMemoryEntries } from "../scripts/evolution/curator.js";
 import { ensureDir, parseMemoryMarkdown, renderMemoryMarkdown, summarizeMemory, writePendingMemoryChanges } from "../scripts/evolution/files.js";
-import { loadWorkspace } from "../scripts/config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { retrieveMemoryContext, renderMemoryEntries } from "../scripts/evolution/retriever.js";
 import { reviewExecutionCandidate } from "../scripts/evolution/reviewer.js";
+
+function loadWorkspaceFromRefForTest(projectRef: string) {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
 
 test("memory retrieval renders relevant entries from markdown files", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-memory-"));
@@ -63,7 +73,7 @@ test("memory retrieval renders relevant entries from markdown files", async () =
 });
 
 test("paseo manager adapter normalizes transcript events and runtime paths", () => {
-  const workspace = loadWorkspace("demo");
+  const workspace = loadWorkspaceFromRefForTest("demo");
   const adapter = new PaseoManagerAdapter();
   assert.equal(adapter.supports(workspace), true);
   const runtimePaths = adapter.buildRuntimePaths(workspace);

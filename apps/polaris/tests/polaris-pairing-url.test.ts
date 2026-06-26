@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import { loadWorkspace } from "../scripts/config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
@@ -13,6 +13,16 @@ import { extractOfferFragment, normalizePairingUrl } from "../scripts/core/pairi
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+function loadWorkspaceFromRefForTest(projectRef: string) {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
 
 async function withTempWorkspaceSpec(
   project: string,
@@ -31,7 +41,7 @@ async function withTempWorkspaceSpec(
   };
 
   fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-  const generatedPath = generatedOutputPath(loadWorkspace(`${project}@${backendKind}`));
+  const generatedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${project}@${backendKind}`));
   try {
     await fn();
   } finally {
@@ -57,7 +67,7 @@ test("docker render persists the configured Paseo app base URL into the runtime 
   const project = `pairing-docker-${process.pid}-${Date.now()}`;
   try {
     await withTempWorkspaceSpec(project, "docker", async () => {
-      const workspace = loadWorkspace(`${project}@docker`);
+      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
       const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
       assert.match(rendered, /baseUrl\\"\] = \\"http:\/\/portal\.example\.test:8082\\"/);
     });
@@ -76,7 +86,7 @@ test("pod render persists the configured Paseo app base URL into the runtime con
   const project = `pairing-pod-${process.pid}-${Date.now()}`;
   try {
     await withTempWorkspaceSpec(project, "pod", async () => {
-      const workspace = loadWorkspace(`${project}@pod`);
+      const workspace = loadWorkspaceFromRefForTest(`${project}@pod`);
       const rendered = fs.readFileSync(renderAndWritePodWorkspace(workspace), "utf8");
       assert.match(rendered, /baseUrl\\"\] = \\"http:\/\/portal\.example\.test:8082\\"/);
     });
@@ -95,7 +105,7 @@ test("kubevirt render persists the configured Paseo app base URL into cloud-init
   const project = `pairing-vm-${process.pid}-${Date.now()}`;
   try {
     await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-      const workspace = loadWorkspace(`${project}@kubevirt-vm`);
+      const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
       const rendered = renderKubevirtWorkspace(workspace);
       assert.match(rendered, /data\.setdefault\("app", \{\}\)\["baseUrl"\] = "http:\/\/portal\.example\.test:8082";/);
     });

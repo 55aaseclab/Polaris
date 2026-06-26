@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
-import { loadWorkspace } from "../scripts/config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
 import { assertNoProjectNameCollision } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
@@ -28,6 +28,16 @@ import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+function loadWorkspaceFromRefForTest(projectRef: string) {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
 
 function getStdoutCaptureQueue(): Promise<void> {
   const existing = (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY];
@@ -131,7 +141,7 @@ function cleanupSelectionFile(project: string): void {
 
 function loadDefaultDemoWorkspace() {
   cleanupSelectionFile("demo");
-  return loadWorkspace("demo");
+  return loadWorkspaceFromRefForTest("demo");
 }
 
 async function withTempWorkspaceSpec(
@@ -158,7 +168,7 @@ async function withTempWorkspaceSpec(
   }
 
   fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-  const generatedPath = generatedOutputPath(loadWorkspace(`${project}@${backendKind}`));
+  const generatedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${project}@${backendKind}`));
   try {
     await fn();
   } finally {
@@ -432,7 +442,7 @@ test("stored pod driver selection influences default workspace loading", () => {
   const project = "demo";
   writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" }, DEMO_USER_PROFILE_ID);
   try {
-    const workspace = loadWorkspace(project);
+    const workspace = loadWorkspaceFromRefForTest(project);
     assert.equal(workspace.backend.kind, "pod");
     assert.equal(workspace.backend.profile, "kata-qemu");
   } finally {
@@ -444,7 +454,7 @@ test("stored docker driver selection influences default workspace loading", () =
   const project = "demo";
   writeWorkspaceDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
   try {
-    const workspace = loadWorkspace(project);
+    const workspace = loadWorkspaceFromRefForTest(project);
     assert.equal(workspace.backend.kind, "docker");
   } finally {
     cleanupSelectionFile(project);
@@ -454,7 +464,7 @@ test("stored docker driver selection influences default workspace loading", () =
 test("status command exposes evolution explainability details", async () => {
   const project = uniqueProjectName("explained-status");
   await withTempWorkspaceSpec(project, "docker", async () => {
-    const workspace = loadWorkspace(`${project}@docker`);
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
     const evolutionDir = workspaceEvolutionStateDir(
       workspace.identity.projectName,
       workspace.userProfile.id,
@@ -708,7 +718,7 @@ test("workspace compatibility path derives a legacy user profile from inline git
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspace(`${project}@docker`);
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
     assert.equal(workspace.userProfile.id, "legacy-legacy-example.com");
     assert.equal(workspace.userProfile.name, "Legacy User");
     assert.equal(workspace.userProfile.email, "legacy@example.com");
@@ -794,7 +804,7 @@ test("registry-backed credentials override legacy auth for the same purpose", as
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspace(`${project}@docker`);
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
     const codexAuth = workspace.runtime.authFiles.find((file) => file.key === "codex-auth.json");
     assert.equal(codexAuth?.content, "{\"source\":\"registry\"}\n");
     assert.equal(workspace.resolvedCredentialBindings[0]?.credential.id, "codex-default");
@@ -860,7 +870,7 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
     assert.throws(
-      () => loadWorkspace(`${project}@docker`),
+      () => loadWorkspaceFromRefForTest(`${project}@docker`),
       /must be owned by user/,
     );
   }).finally(() => {
@@ -925,7 +935,7 @@ test("credential registry rejects inline secret material", async () => {
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
     assert.throws(
-      () => loadWorkspace(`${project}@docker`),
+      () => loadWorkspaceFromRefForTest(`${project}@docker`),
       /must externalize secret material/,
     );
   }).finally(() => {
@@ -976,7 +986,7 @@ test("provided-key user profile requires staged SSH private-key material", async
         ],
       };
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-      assert.throws(() => loadWorkspace(`${project}@docker`), /provided-key/);
+      assert.throws(() => loadWorkspaceFromRefForTest(`${project}@docker`), /provided-key/);
     } finally {
       fs.rmSync(profilePath, { force: true });
     }
@@ -1094,7 +1104,7 @@ test("provided-key user profile requires matching public-key comment", async () 
         ],
       };
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-      assert.throws(() => loadWorkspace(`${project}@docker`), /public-key comment 'expected@example.com'/);
+      assert.throws(() => loadWorkspaceFromRefForTest(`${project}@docker`), /public-key comment 'expected@example.com'/);
     } finally {
       fs.rmSync(profilePath, { force: true });
       fs.rmSync(userRoot, { recursive: true, force: true });
@@ -1103,7 +1113,7 @@ test("provided-key user profile requires matching public-key comment", async () 
 });
 
 test("docker render keys user-scoped identity volumes by user profile id", () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
   const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1113,9 +1123,9 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
 });
 
 test("demo specs reuse the demo profile across docker, pod, and kubevirt backends", () => {
-  const dockerWorkspace = loadWorkspace("demo@docker");
-  const podWorkspace = loadWorkspace("demo@pod");
-  const kubevirtWorkspace = loadWorkspace("demo@kubevirt-vm");
+  const dockerWorkspace = loadWorkspaceFromRefForTest("demo@docker");
+  const podWorkspace = loadWorkspaceFromRefForTest("demo@pod");
+  const kubevirtWorkspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
 
   for (const workspace of [dockerWorkspace, podWorkspace, kubevirtWorkspace]) {
     assert.equal(workspace.identity.projectName, "demo");
@@ -1141,7 +1151,7 @@ test("demo specs reuse the demo profile across docker, pod, and kubevirt backend
 });
 
 test("docker render uses stable named volumes for reusable demo attachments", () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
@@ -1166,7 +1176,7 @@ test("loadWorkspace rejects a netfs workspace-data attachment without a server",
     delete doc.attachments["workspace-data"].source.server;
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
     assert.throws(
-      () => loadWorkspace(`${project}@docker`),
+      () => loadWorkspaceFromRefForTest(`${project}@docker`),
       /workspace-data netfs source requires a server/,
     );
   } finally {
@@ -1175,7 +1185,7 @@ test("loadWorkspace rejects a netfs workspace-data attachment without a server",
 });
 
 test("pod render mounts demo workspace data through netfs", () => {
-  const workspace = loadWorkspace("demo@pod");
+  const workspace = loadWorkspaceFromRefForTest("demo@pod");
   const outputPath = renderAndWritePodWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
   assert.doesNotThrow(() => yaml.loadAll(rendered));
@@ -1186,7 +1196,7 @@ test("pod render mounts demo workspace data through netfs", () => {
 });
 
 test("kubevirt render bridges netfs workspace data through a PV and PVC", () => {
-  const workspace = loadWorkspace("demo@kubevirt-vm");
+  const workspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
   const outputPath = renderAndWriteKubevirtWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
@@ -1224,7 +1234,7 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspace(`${project}@docker`);
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
     const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
     assert.match(rendered, /apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 neovim zsh tmux/);
     assert.match(rendered, /npm install -g --prefix \/root\/\.local\/polaris @getpaseo\/cli@latest @openai\/codex @anthropic-ai\/claude-code @fission-ai\/openspec@latest pnpm/);
@@ -1451,7 +1461,7 @@ exit 1
 test("kubevirt render reuses persisted daemon pairing metadata", async () => {
   const project = uniqueProjectName("vm-pair-bootstrap");
   await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-    const workspace = loadWorkspace(`${project}@kubevirt-vm`);
+    const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
     const rendered = renderKubevirtWorkspace(workspace);
     assert.doesNotMatch(rendered, /paseo daemon pair --json/);
     assert.match(rendered, /test -f \/root\/\.paseo\/pairing\.json/);
@@ -2190,7 +2200,7 @@ test("kubevirt backend returns structured observations and current status semant
   const project = uniqueProjectName("vm-status");
 
   await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-    const workspace = loadWorkspace(project);
+    const workspace = loadWorkspaceFromRefForTest(project);
     const driver = getBackendDriver("kubevirt-vm");
 
     await withFakeCommands(
@@ -2393,7 +2403,7 @@ exit 1
 });
 
 test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
-  const workspace = loadWorkspace("demo@kubevirt-vm");
+  const workspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
   const driver = getBackendDriver("kubevirt-vm");
 
   await withFakeCommands(
