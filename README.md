@@ -23,50 +23,37 @@ while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
-This local Polaris stack uses three separate ports by default:
-
-- `6767`: Paseo workspace daemon inside a workspace runtime.
-- `8082`: Self-hosted Paseo web app.
-- `8787`: Polaris portal API.
-- `4173`: Polaris web portal frontend.
-
-The workspace daemon on `6767` is separate from the self-hosted Paseo web app
-on `8082`.
-
-Start the Polaris backend API:
+Run the local stack through Docker Compose:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- portal 8787 0.0.0.0
+docker compose --env-file .env.dev up -d --build
 ```
 
-Or start the self-hosted Paseo web app through Docker Compose:
+Access it through nginx:
+
+- `http://127.0.0.1:8080/`
+- `https://127.0.0.1:33443/`
+
+Only nginx is exposed to the host.
+
+Use `.env.dev` for real local values.
+
+Use `.env.dev.example` and `.env.deploy.example` as templates.
+
+## Deploy
+
+Deploy the stack:
 
 ```bash
-docker compose -f docker-compose.polaris.yml up -d
+docker compose --env-file .env.deploy up -d --build
 ```
 
-That compose path publishes the app on `http://127.0.0.1:8082/`.
+Access it through nginx:
 
-Start the Polaris web portal:
+- `http://polaris.jianxiaoyitech.com/`
+- `https://polaris.jianxiaoyitech.com/` via host port `334`
 
-```bash
-pnpm --dir apps/polaris-web run dev:host
-```
-
-Then open the portal in your browser:
-
-```text
-http://127.0.0.1:4173/
-```
-
-The frontend talks to the Polaris portal API and exposes workspaces under
-explicit user routes such as:
-
-```text
-/users/<user_id>/workspaces
-/users/<user_id>/workspaces/<workspace_name>
-/users/<user_id>/credentials
-```
+Keep real values in `.env.deploy`.
 
 ## Documentation
 

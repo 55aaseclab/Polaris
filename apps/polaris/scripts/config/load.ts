@@ -22,8 +22,9 @@ import type {
 import { validateWorkspace } from "../core/capabilities.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
   morpheus: {

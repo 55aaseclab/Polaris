@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { workspaceImageRef } from "../config/scaffold.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "./workspace.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath) || ".";

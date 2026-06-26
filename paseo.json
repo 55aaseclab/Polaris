@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "stack": {
+      "type": "service",
+      "command": "docker compose --env-file .env.dev up -d --build"
+    },
+    "deploy": {
+      "type": "service",
+      "command": "docker compose --env-file .env.deploy up -d --build"
+    },
+    "publish": {
+      "type": "service",
+      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+    }
+  }
+}

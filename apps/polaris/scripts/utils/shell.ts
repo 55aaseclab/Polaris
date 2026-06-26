@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { logDebug, logInfo } from "./log.js";
+import { resolveRepoRoot } from "./repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 export function runCommand(command: string, args: string[]): void {
   logInfo("shell", "exec", { command, args });

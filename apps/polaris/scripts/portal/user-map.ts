@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const USER_MAP_PATH = path.join(REPO_ROOT, "apps", "polaris-web", "config", "user-map.json");
 
 export type PolarisRole = "admin" | "user";

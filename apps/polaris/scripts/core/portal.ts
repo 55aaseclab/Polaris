@@ -11,8 +11,9 @@ import {
   workspaceStatusPath,
 } from "../output/state-store.js";
 import type { Credential, WorkspaceStatus } from "./workspace.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const USER_ROOT = path.join(REPO_ROOT, "config", "users");
 const USER_PROFILES_DIR = path.join(USER_ROOT, "profiles");
 

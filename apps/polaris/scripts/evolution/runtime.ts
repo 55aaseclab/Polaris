@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceSpec } from "../core/workspace.js";
 import { workspaceEvolutionStateDir } from "../output/state-store.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 import { applyCuratorResult } from "./curator.js";
 import {
   appendJsonLine,
@@ -23,7 +24,7 @@ import type {
   EvolutionMemoryProviderEntry,
 } from "./types.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
 function userPolarisStateDir(workspace: WorkspaceSpec): string {
   return path.join(REPO_ROOT, workspace.userProfile.secretsRoot, "polaris");

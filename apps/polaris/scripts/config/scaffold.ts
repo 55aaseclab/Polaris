@@ -3,8 +3,9 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
+import { resolveRepoRoot } from "../utils/repo-root.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
 const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
 const DEMO_USER_PROFILE_ID = "100000000000000001";

@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
+import { resolveRepoRoot } from "../../utils/repo-root.js";
 import { kubevirtProbePassword } from "./probe-access.js";
 import {
   isNetfsSource,
@@ -13,7 +14,7 @@ import {
 } from "../../core/netfs.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../../");
+const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const GENERATED_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "generated", "kubevirt");
 const FALLBACK_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "kubevirt", "templates");
 
