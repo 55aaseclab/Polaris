@@ -1663,11 +1663,19 @@ function WorkspaceDetailPage() {
     ? [
         {
           label: t("evolution_assets"),
-          rows: assets.evolutionFiles.map((item) => ({
-            name: item.name,
-            path: item.path,
-            detail: item.scope,
-          })),
+          rows: assets.evolutionFiles
+            .filter((item) => item.exists !== false)
+            .map((item) => ({
+              name: `${item.scope} · ${item.name}`,
+              path: item.path,
+              displayPath: item.path.startsWith(`config/users/${userId}/`)
+                ? trimUserAssetPath(item.path, userId)
+                : item.path,
+              previewPath: item.path.startsWith(`config/users/${userId}/`) && item.exists !== false
+                ? item.path
+                : undefined,
+              previewScope: "workspace",
+            })),
         },
       ]
     : [];
@@ -1864,8 +1872,8 @@ function WorkspaceDetailPage() {
       return (
         <div className="grid gap-4">
           <div className="grid gap-1">
-            <div className="text-sm font-medium text-muted-foreground">{t("evolution_memory")}</div>
-            <div className="text-base font-medium">
+            <div className="text-sm font-medium">{t("evolution_memory")}</div>
+            <div className="text-sm text-muted-foreground">
               {data.status?.evolution
                 ? `${data.status.evolution.artifactCount} ${t("evolution_assets")}`
                 : t("no_assets")}
@@ -1875,6 +1883,9 @@ function WorkspaceDetailPage() {
             t={t}
             sections={evolutionSections}
             emptyLabel={t("no_assets")}
+            userId={userId}
+            workspaceName={workspaceName}
+            hideDetailsColumn
           />
         </div>
       );

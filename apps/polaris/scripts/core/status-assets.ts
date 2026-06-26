@@ -88,21 +88,25 @@ function evolutionAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus[
       name: "workspace-memory",
       path: repoRelative(path.join(projectRoot, "state", "MEMORY.md")),
       scope: "control-plane",
+      exists: fs.existsSync(path.join(projectRoot, "state", "MEMORY.md")),
     },
     {
       name: "user-memory",
       path: repoRelative(path.join(userPolarisRoot, "USER.md")),
       scope: "control-plane",
+      exists: fs.existsSync(path.join(userPolarisRoot, "USER.md")),
     },
     {
       name: "session-snapshot",
       path: repoRelative(path.join(projectRoot, "state", "sessions", "bootstrap", "memory-snapshot.md")),
       scope: "control-plane",
+      exists: fs.existsSync(path.join(projectRoot, "state", "sessions", "bootstrap", "memory-snapshot.md")),
     },
     {
       name: "pending-memory",
       path: repoRelative(path.join(projectRoot, "state", "pending-memory.json")),
       scope: "control-plane",
+      exists: fs.existsSync(path.join(projectRoot, "state", "pending-memory.json")),
     },
   ];
 }
