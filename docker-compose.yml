@@ -45,12 +45,8 @@ services:
       - polaris-webportal
     environment:
       NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
-      NGINX_SSL_CERTIFICATE: ${NGINX_SSL_CERTIFICATE:-/etc/nginx/certs/polaris.jianxiaoyitech.com_cert_chain.crt}
-      NGINX_SSL_CERTIFICATE_KEY: ${NGINX_SSL_CERTIFICATE_KEY:-/etc/nginx/certs/polaris.jianxiaoyitech.com_key.key}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-334}:443"
     restart: unless-stopped
     volumes:
       - ./docker/nginx/templates:/etc/nginx/templates:ro
-      - ./.cert/Nginx:/etc/nginx/certs:ro

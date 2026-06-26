@@ -10,7 +10,7 @@
     },
     "publish": {
       "type": "service",
-      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
     }
   }
 }
