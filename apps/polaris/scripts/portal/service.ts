@@ -38,16 +38,19 @@ import {
 import { performWorkspaceSwitch } from "../cli/commands/switch.js";
 import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import { startCommand } from "../cli/commands/start.js";
+import { statusCommand } from "../cli/commands/status.js";
 import { stopCommand } from "../cli/commands/stop.js";
 import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
 import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec } from "../core/workspace.js";
+import { logWarn } from "../utils/log.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const PROVISION_TOTAL_STEPS = 7;
 const provisionJobs = new Map<string, Promise<void>>();
+const statusRefreshJobs = new Map<string, Promise<void>>();
 const CLERK_DELETE_SCRIPT = path.join(REPO_ROOT, "apps", "polaris-web", "scripts", "delete-clerk-users.mjs");
 
 function parseJsonFromText<T>(value: string): T {
@@ -102,6 +105,53 @@ function updateProgress(userId: string, workspace: string, patch: Partial<Portal
   };
   writeWorkspaceProvisionProgress(userId, workspace, next);
   return next;
+}
+
+async function captureStdout<T>(fn: () => Promise<T>): Promise<{ result: T; stdout: string }> {
+  const stdoutChunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+    callback?.();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    const result = await fn();
+    return { result, stdout: stdoutChunks.join("").trim() };
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+}
+
+async function refreshPortalWorkspaceStatus(userId: string, workspace: string): Promise<void> {
+  const key = rootKey(userId, workspace);
+  const existing = statusRefreshJobs.get(key);
+  if (existing) {
+    return existing;
+  }
+  const job = (async () => {
+    const summary = loadWorkspaceSummary(userId, workspace);
+    if (!summary.selectedDriver) {
+      return;
+    }
+    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+    try {
+      await captureStdout(() => statusCommand(ref));
+    } catch (error) {
+      logWarn("portal", "workspace-status-refresh-failed", {
+        userId,
+        workspace,
+        ref,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      statusRefreshJobs.delete(key);
+    }
+  })();
+  statusRefreshJobs.set(key, job);
+  return job;
 }
 
 function ensureImageRefAvailable(imageRef: string): void {
@@ -297,6 +347,7 @@ export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
 }
 
 export function getPortalWorkspaceDetail(userId: string, workspace: string): PortalWorkspaceDetail {
+  void refreshPortalWorkspaceStatus(userId, workspace);
   return loadWorkspaceDetail(userId, workspace);
 }
 
@@ -324,16 +375,7 @@ export async function createPortalCodexCredential(input: {
   apiKey?: string;
   credentialId?: string;
 }): Promise<PortalCredentialSummary> {
-  const stdoutChunks: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
-    callback?.();
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
+  const { stdout } = await captureStdout(async () => {
     await createUserCredentialCommand([
       input.userId,
       "--harness",
@@ -344,11 +386,7 @@ export async function createPortalCodexCredential(input: {
       ...(input.baseUrl?.trim() ? ["--base-url", input.baseUrl.trim()] : []),
       ...(input.apiKey !== undefined ? ["--api-key", input.apiKey] : []),
     ]);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-
-  const stdout = stdoutChunks.join("").trim();
+  });
   const created = parseJsonFromText<{
     credential: {
       id: string;
@@ -370,20 +408,9 @@ export async function deletePortalCredential(userId: string, credentialId: strin
     removedPaths: string[];
   };
 }> {
-  const stdoutChunks: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
-    callback?.();
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
+  const { stdout } = await captureStdout(async () => {
     await deleteUserCredentialCommand([userId, credentialId]);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
+  });
 
   return parseJsonFromText<{
     credential: {
@@ -393,7 +420,7 @@ export async function deletePortalCredential(userId: string, credentialId: strin
       registryPath: string;
       removedPaths: string[];
     };
-  }>(stdoutChunks.join("").trim());
+  }>(stdout);
 }
 
 export function upsertPortalCredential(userId: string, credential: {
@@ -584,22 +611,9 @@ export async function deletePortalUser(userProfileId: string): Promise<{
     removedUserIds: string[];
   };
 }> {
-  const stdoutChunks: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
-    callback?.();
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
+  const { stdout } = await captureStdout(async () => {
     await deleteUserCommand([userProfileId]);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-
-  const stdout = stdoutChunks.join("").trim();
+  });
   const deleted = parseJsonFromText<{
     userProfile: {
       id: string;
