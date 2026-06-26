@@ -1,0 +1,9 @@
+{
+  "users": {
+    "example_user": {
+      "polarisUserId": "example_polaris_user",
+      "role": "user",
+      "plan": "free"
+    }
+  }
+}

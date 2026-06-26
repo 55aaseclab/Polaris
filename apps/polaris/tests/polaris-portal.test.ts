@@ -35,6 +35,23 @@ async function withPortalServer(
   }
 }
 
+async function withPortalAuthEnv(
+  secret: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = process.env.POLARIS_AUTH_SHARED_SECRET;
+  process.env.POLARIS_AUTH_SHARED_SECRET = secret;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.POLARIS_AUTH_SHARED_SECRET;
+    } else {
+      process.env.POLARIS_AUTH_SHARED_SECRET = previous;
+    }
+  }
+}
+
 test("workspace ownership is derived from the project directory", () => {
   const userId = "100000000000000001";
   const workspace = uniqueName("portal-owned");
@@ -202,5 +219,51 @@ test("portal root advertises the API surface and default user", async () => {
     assert.equal(payload.service, "polaris-portal-api");
     assert.equal(payload.defaultUserId, "100000000000000001");
     assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
+  });
+});
+
+test("portal API restricts normal users to their own scope when trusted auth headers are enabled", async () => {
+  await withPortalAuthEnv("test-secret", async () => {
+    await withPortalServer(async (baseUrl) => {
+      const ownResponse = await fetch(`${baseUrl}/api/users/100000000000000002/workspaces`, {
+        headers: {
+          "x-polaris-auth-shared-secret": "test-secret",
+          "x-polaris-user-id": "100000000000000002",
+          "x-polaris-user-role": "user",
+          "x-polaris-user-email": "member@example.com",
+          "x-polaris-user-plan": "free",
+        },
+      });
+      assert.equal(ownResponse.status, 200);
+
+      const crossResponse = await fetch(`${baseUrl}/api/users/100000000000000001/workspaces`, {
+        headers: {
+          "x-polaris-auth-shared-secret": "test-secret",
+          "x-polaris-user-id": "100000000000000002",
+          "x-polaris-user-role": "user",
+          "x-polaris-user-email": "member@example.com",
+          "x-polaris-user-plan": "free",
+        },
+      });
+      assert.equal(crossResponse.status, 403);
+    });
+  });
+});
+
+test("portal API allows admin users to access cross-user scopes when trusted auth headers are enabled", async () => {
+  await withPortalAuthEnv("test-secret", async () => {
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/users/100000000000000001/workspaces`, {
+        headers: {
+          "x-polaris-auth-shared-secret": "test-secret",
+          "x-polaris-user-id": "100000000000000001",
+          "x-polaris-user-role": "admin",
+          "x-polaris-user-email": "admin@example.com",
+        },
+      });
+      assert.equal(response.status, 200);
+      const payload = await response.json() as { workspaces: Array<{ name: string }> };
+      assert.ok(payload.workspaces.some((workspace) => workspace.name === "demo"));
+    });
   });
 });

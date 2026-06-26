@@ -18,6 +18,8 @@ node_modules/
 .pnpm-store/
 dist/
 apps/polaris/.coverage/
+.env.local
+apps/polaris-web/config/user-map.json
 
 # K3S kata configs
 agents

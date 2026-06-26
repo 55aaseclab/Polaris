@@ -19,6 +19,15 @@ import {
 } from "./service.js";
 
 type ParsedBody = Record<string, string>;
+type TrustedSessionRole = "admin" | "user";
+type TrustedSessionPlan = "free" | "pro";
+
+interface TrustedPortalSession {
+  polarisUserId: string;
+  email: string | null;
+  role: TrustedSessionRole;
+  plan: TrustedSessionPlan | null;
+}
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = `${JSON.stringify(body, null, 2)}\n`;
@@ -51,6 +60,10 @@ function notFound(res: ServerResponse): void {
 
 function badRequest(res: ServerResponse, message: string): void {
   sendJson(res, 400, { error: message });
+}
+
+function forbidden(res: ServerResponse, message = "Forbidden"): void {
+  sendJson(res, 403, { error: message });
 }
 
 function parseFormBody(raw: string): ParsedBody {
@@ -87,6 +100,38 @@ function routeSegments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
 }
 
+function readHeader(req: IncomingMessage, name: string): string | null {
+  const value = req.headers[name];
+  if (Array.isArray(value)) {
+    return value[0]?.trim() || null;
+  }
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readTrustedPortalSession(req: IncomingMessage): TrustedPortalSession | null {
+  const sharedSecret = process.env.POLARIS_AUTH_SHARED_SECRET?.trim();
+  if (!sharedSecret) {
+    return null;
+  }
+  const providedSecret = readHeader(req, "x-polaris-auth-shared-secret");
+  if (providedSecret !== sharedSecret) {
+    return null;
+  }
+  const polarisUserId = readHeader(req, "x-polaris-user-id");
+  const role = readHeader(req, "x-polaris-user-role");
+  const email = readHeader(req, "x-polaris-user-email");
+  const plan = readHeader(req, "x-polaris-user-plan");
+  if (!polarisUserId || (role !== "admin" && role !== "user")) {
+    return null;
+  }
+  return {
+    polarisUserId,
+    email,
+    role,
+    plan: plan === "free" || plan === "pro" ? plan : null,
+  };
+}
+
 function findProfile(userId: string): PortalProfileSummary | null {
   return listPortalProfiles().find((profile) => profile.id === userId) ?? null;
 }
@@ -96,10 +141,22 @@ function defaultPortalUserId(): string | null {
   return firstProfile?.id ?? null;
 }
 
+function resolveDefaultPortalUserId(session: TrustedPortalSession | null): string | null {
+  if (session) {
+    return session.role === "admin" ? defaultPortalUserId() : session.polarisUserId;
+  }
+  return defaultPortalUserId();
+}
+
 function requireProfile(
   res: ServerResponse,
   routeUserId: string,
+  session: TrustedPortalSession | null,
 ): PortalProfileSummary | null {
+  if (session && session.role !== "admin" && routeUserId !== session.polarisUserId) {
+    forbidden(res, "Normal users can access only their own Polaris user scope");
+    return null;
+  }
   const profile = findProfile(routeUserId);
   if (!profile) {
     notFound(res);
@@ -215,6 +272,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const segments = routeSegments(url);
+      const trustedSession = readTrustedPortalSession(req);
       if (req.method === "OPTIONS" && isApiPath(segments)) {
         res.writeHead(204, {
           "access-control-allow-origin": "*",
@@ -228,7 +286,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (segments.length === 0) {
         sendJson(res, 200, {
           service: "polaris-portal-api",
-          defaultUserId: defaultPortalUserId(),
+          defaultUserId: resolveDefaultPortalUserId(trustedSession),
           endpoints: [
             "/api/default-user",
             "/api/users",
@@ -242,19 +300,26 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       if (isApiPath(segments)) {
         if (segments.length === 2 && segments[1] === "users") {
-          sendJson(res, 200, listPortalProfiles());
+          const profiles = listPortalProfiles();
+          sendJson(
+            res,
+            200,
+            trustedSession && trustedSession.role !== "admin"
+              ? profiles.filter((profile) => profile.id === trustedSession.polarisUserId)
+              : profiles,
+          );
           return;
         }
         if (segments.length === 2 && segments[1] === "default-user") {
           sendJson(res, 200, {
-            defaultUserId: defaultPortalUserId(),
+            defaultUserId: resolveDefaultPortalUserId(trustedSession),
           });
           return;
         }
         if (segments[1] === "session") {
           sendJson(res, 200, {
-            authEnabled: false,
-            session: null,
+            authEnabled: Boolean(process.env.POLARIS_AUTH_SHARED_SECRET?.trim()),
+            session: trustedSession,
           });
           return;
         }
@@ -263,7 +328,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
         const routeUserId = decodeURIComponent(segments[2]);
-        const profile = requireProfile(res, routeUserId);
+        const profile = requireProfile(res, routeUserId, trustedSession);
         if (!profile) {
           return;
         }
