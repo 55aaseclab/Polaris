@@ -2,20 +2,14 @@
   "scripts": {
     "stack": {
       "type": "service",
-      "command": "docker compose --env-file .env.dev up -d --build"
+      "command": "bash ./scripts/deploy-polaris-host.sh .env.dev"
     },
     "deploy": {
       "type": "service",
-      "command": "docker compose --env-file .env.deploy up -d --build"
-    },
-    "publish-polaris": {
-      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
-    },
-    "publish-paseo": {
-      "command": "cpolar http -hostname=paseo.polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+      "command": "bash ./scripts/deploy-polaris-host.sh .env.deploy"
     },
     "publish": {
-      "command": "printf 'Run publish-polaris and publish-paseo in separate tabs to see both logs.\\n'"
+      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
     }
   }
 }
