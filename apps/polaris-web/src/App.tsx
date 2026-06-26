@@ -83,6 +83,7 @@ import {
   SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
@@ -983,11 +984,23 @@ function PortalShell(props: {
   children: ReactNode;
   users: PortalProfileSummary[];
 }) {
+  return (
+    <SidebarProvider defaultOpen>
+      <PortalShellLayout users={props.users}>{props.children}</PortalShellLayout>
+    </SidebarProvider>
+  );
+}
+
+function PortalShellLayout(props: {
+  children: ReactNode;
+  users: PortalProfileSummary[];
+}) {
   const { t } = useLanguage();
   const clerk = useClerk();
   const { mapping } = useCurrentUserMapping();
   const location = useLocation();
   const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
   const isAdmin = mapping?.role === "admin";
   const activeUser = props.users.find((user) =>
     location.pathname.includes(`/users/${user.id}/`),
@@ -1011,6 +1024,16 @@ function PortalShell(props: {
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(12);
+
+  function closeMobileSidebar(): void {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }
+
+  function handleSidebarNavigate(): void {
+    closeMobileSidebar();
+  }
 
   function workspaceLink(workspaceName: string): string {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(workspaceName)}`;
@@ -1085,7 +1108,7 @@ function PortalShell(props: {
             : t("app_name");
 
   return (
-    <SidebarProvider defaultOpen>
+    <>
       <Sidebar collapsible="offcanvas">
         <SidebarHeader className="p-4">
           <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -1202,7 +1225,7 @@ function PortalShell(props: {
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
-                          <Link to={workspaceLink(workspace.name)}>
+                          <Link to={workspaceLink(workspace.name)} onClick={handleSidebarNavigate}>
                             <FolderKanban />
                             <span className="flex min-w-0 flex-col">
                               <span className="truncate">{workspace.name}</span>
@@ -1228,21 +1251,21 @@ function PortalShell(props: {
                           <SidebarMenuSub>
                             <SidebarMenuSubItem>
                               <SidebarMenuSubButton asChild>
-                                <Link to={workspacePaneLink(workspace.name, "paseo")}>
+                                <Link to={workspacePaneLink(workspace.name, "paseo")} onClick={handleSidebarNavigate}>
                                   {t("paseo_status")}
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>
                             <SidebarMenuSubItem>
                               <SidebarMenuSubButton asChild>
-                                <Link to={workspacePaneLink(workspace.name, "dev-env")}>
+                                <Link to={workspacePaneLink(workspace.name, "dev-env")} onClick={handleSidebarNavigate}>
                                   {t("isolated_dev_env")}
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>
                             <SidebarMenuSubItem>
                               <SidebarMenuSubButton asChild>
-                                <Link to={workspacePaneLink(workspace.name, "memory")}>
+                                <Link to={workspacePaneLink(workspace.name, "memory")} onClick={handleSidebarNavigate}>
                                   {t("evolution_memory")}
                                 </Link>
                               </SidebarMenuSubButton>
@@ -1354,7 +1377,6 @@ function PortalShell(props: {
           </SidebarFooter>
         )}
       </Sidebar>
-
       <SidebarInset className="overflow-hidden">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background px-4">
           <SidebarTrigger />
@@ -1366,7 +1388,7 @@ function PortalShell(props: {
           {props.children}
         </div>
       </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }
 
