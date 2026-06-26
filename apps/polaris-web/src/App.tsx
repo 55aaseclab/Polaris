@@ -1,5 +1,5 @@
 import * as React from "react";
-import { SignIn, SignUp, useAuth, useClerk, useUser } from "@clerk/react";
+import { useAuth, useClerk, useUser } from "@clerk/react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -105,7 +105,6 @@ import {
   buildClerkUrl,
   clerkSignInUrl,
   clerkSignUpUrl,
-  isExternalAuthUrl,
 } from "@/lib/clerk";
 import { type Language, writeStoredLanguage } from "@/lib/language";
 
@@ -588,8 +587,6 @@ function useCurrentUserMapping() {
 
 function SignInPage() {
   const { isLoaded, userId } = useAuth();
-  const { language } = useLanguage();
-  const signInUrl = clerkSignInUrl();
   useEffect(() => {
     setRegistrationIntent(false);
   }, []);
@@ -597,33 +594,17 @@ function SignInPage() {
     if (isLoaded && userId) {
       return;
     }
-    if (isExternalAuthUrl(signInUrl)) {
-      window.location.assign(portalSignInUrl());
-    }
-  }, [isLoaded, signInUrl, userId]);
+    window.location.assign(portalSignInUrl());
+  }, [isLoaded, userId]);
   if (isLoaded && userId) {
     return <Navigate to="/" replace />;
   }
-  if (isExternalAuthUrl(signInUrl)) {
-    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
-  }
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <SignIn
-        key={`sign-in-${language}`}
-        path="/sign-in"
-        routing="path"
-        signUpUrl={clerkSignUpUrl()}
-      />
-    </div>
-  );
+  return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
 }
 
 function SignUpPage() {
   const { isLoaded, userId } = useAuth();
   const navigate = useNavigate();
-  const { language } = useLanguage();
-  const signUpUrl = clerkSignUpUrl();
 
   useEffect(() => {
     setRegistrationIntent(true);
@@ -638,27 +619,13 @@ function SignUpPage() {
     if (isLoaded && userId) {
       return;
     }
-    if (isExternalAuthUrl(signUpUrl)) {
-      window.location.assign(portalSignUpUrl());
-    }
-  }, [isLoaded, signUpUrl, userId]);
+    window.location.assign(portalSignUpUrl());
+  }, [isLoaded, userId]);
 
   if (isLoaded && userId) {
     return <div className="p-6 text-sm text-muted-foreground">Finishing registration...</div>;
   }
-  if (isExternalAuthUrl(signUpUrl)) {
-    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign up...</div>;
-  }
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <SignUp
-        key={`sign-up-${language}`}
-        path="/sign-up"
-        routing="path"
-        signInUrl={clerkSignInUrl()}
-      />
-    </div>
-  );
+  return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign up...</div>;
 }
 
 function driverLabel(driver: { backend: string; profile?: string } | null): string {

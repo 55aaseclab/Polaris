@@ -37,6 +37,10 @@ Use `.env.dev` for real local values.
 
 Use `.env.dev.example` and `.env.deploy.example` as templates.
 
+Polaris expects shared Clerk auth URLs in the env file.
+
+It no longer serves local `/sign-in` or `/sign-up` Clerk UI pages.
+
 ## Deploy
 
 Deploy the stack:

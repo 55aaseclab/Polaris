@@ -5,6 +5,18 @@ function trimValue(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+function requiredAbsoluteUrl(name: string): string {
+  const value = trimValue(env?.[name]);
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new Error(`${name} must be an absolute URL`);
+  }
+}
+
 export function clerkPublishableKey(): string {
   const value = trimValue(env?.VITE_CLERK_PUBLISHABLE_KEY);
   if (!value) {
@@ -14,28 +26,43 @@ export function clerkPublishableKey(): string {
 }
 
 export function clerkSignInUrl(): string {
-  return trimValue(env?.VITE_CLERK_SIGN_IN_URL) ?? "/sign-in";
+  return requiredAbsoluteUrl("VITE_CLERK_SIGN_IN_URL");
 }
 
 export function clerkSignUpUrl(): string {
-  return trimValue(env?.VITE_CLERK_SIGN_UP_URL) ?? "/sign-up";
+  return requiredAbsoluteUrl("VITE_CLERK_SIGN_UP_URL");
 }
 
-export function isExternalAuthUrl(target: string): boolean {
-  if (typeof window === "undefined") {
-    return /^https?:\/\//.test(target);
+function defaultAfterAuthUrl(): string {
+  return new URL("/", window.location.origin).toString();
+}
+
+function normalizePath(pathname: string): string {
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
+function resolveAfterAuthUrl(value: string | undefined): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    return defaultAfterAuthUrl();
   }
-  const resolved = new URL(target, window.location.origin);
-  return resolved.origin !== window.location.origin;
+
+  try {
+    const resolved = new URL(trimmed, window.location.origin);
+    const normalizedPath = normalizePath(resolved.pathname);
+    if (normalizedPath === "/sign-in" || normalizedPath === "/sign-up") {
+      return defaultAfterAuthUrl();
+    }
+    return resolved.toString();
+  } catch {
+    return defaultAfterAuthUrl();
+  }
 }
 
 export function buildClerkUrl(target: string, redirectUrl?: string): string {
-  if (typeof window === "undefined") {
-    return target;
-  }
-  const resolved = new URL(target, window.location.origin);
+  const resolved = new URL(target);
   if (redirectUrl) {
-    resolved.searchParams.set("redirect_url", redirectUrl);
+    resolved.searchParams.set("redirect_url", resolveAfterAuthUrl(redirectUrl));
   }
   return resolved.toString();
 }
