@@ -258,7 +258,7 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   const clerkUsername = `${userProfileId}-clerk`;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const userMapPath = path.join(REPO_ROOT, "apps", "polaris-web", "config", "user-map.json");
+  const userMapPath = path.join(REPO_ROOT, "config", "user-map.json");
   const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
 
   try {

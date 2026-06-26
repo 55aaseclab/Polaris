@@ -13,11 +13,15 @@ ENV PNPM_STORE_DIR=/pnpm/store
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY apps/polaris-web/package.json apps/polaris-web/package.json
+COPY config/users/user-map.example.json config/users/user-map.example.json
 
 RUN --mount=type=cache,target=/pnpm/store \
   pnpm install --no-frozen-lockfile --filter polaris-web...
 
 COPY apps/polaris-web ./apps/polaris-web
+
+RUN mkdir -p config/users \
+  && cp config/users/user-map.example.json config/users/user-map.json
 
 ARG VITE_POLARIS_API_BASE=/api
 ARG VITE_PASEO_APP_BASE_URL=http://localhost/paseo

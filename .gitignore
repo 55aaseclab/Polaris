@@ -24,7 +24,7 @@ apps/polaris-web/test-results/
 .env.local
 .env.dev
 .env.deploy
-apps/polaris-web/config/user-map.json
+config/users/user-map.json
 
 # K3S kata configs
 agents
@@ -37,6 +37,7 @@ secrets/agentctl/**
 !secrets/agentctl/.gitignore
 !secrets/agentctl/README.md
 config/users/*
+!config/users/user-map.example.json
 !config/users/profiles/
 config/users/profiles/**
 config/users/*/**
