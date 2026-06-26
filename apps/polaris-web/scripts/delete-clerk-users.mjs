@@ -3,14 +3,19 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
 
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: path.resolve(DIRNAME, "../.env.local"), quiet: true });
+const REPO_ROOT = path.resolve(DIRNAME, "../../..");
+const ENV_FILE = process.env.POLARIS_ENV_FILE?.trim() || path.join(REPO_ROOT, ".env.dev");
+
+loadEnv({ path: ENV_FILE, quiet: true });
 
 const CLERK_API_BASE = "https://api.clerk.com/v1";
 
 async function clerkApi(pathname, init = {}) {
   const secretKey = process.env.CLERK_SECRET_KEY?.trim();
   if (!secretKey) {
-    return { skipped: true, payload: [] };
+    throw new Error(
+      "CLERK_SECRET_KEY is required for Clerk deletion. Set it in the current environment or repo root .env.deploy/.env.dev.",
+    );
   }
   const response = await fetch(`${CLERK_API_BASE}${pathname}`, {
     ...init,
@@ -41,9 +46,6 @@ async function findClerkUserIdsByUsername(usernames) {
     params.append("username", username);
   }
   const result = await clerkApi(`/users?${params.toString()}`);
-  if (result.skipped) {
-    return { skipped: true, userIds: [] };
-  }
   const userIds = (result.payload ?? [])
     .filter((user) => user.username && normalized.includes(user.username.trim().toLowerCase()))
     .map((user) => user.id);
