@@ -303,7 +303,6 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
     dockerfile: path.relative(REPO_ROOT, dockerfile),
   });
   runCommand("docker", ["build", "-f", dockerfile, "-t", imageRef, "."]);
-  runCommand("docker", ["push", imageRef]);
 }
 
 export function ensureProvisionedWorkspace(projectRef: string): void {

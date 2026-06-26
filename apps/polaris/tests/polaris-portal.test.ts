@@ -497,6 +497,94 @@ test("portal API returns workspace detail for a user-scoped workspace", async ()
   });
 });
 
+test("portal API workspace detail does not leak bindings from another user with the same workspace name", async () => {
+  const workspace = uniqueName("shared-name");
+  const firstUserId = uniqueName("portal-scope-a");
+  const secondUserId = uniqueName("portal-scope-b");
+  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
+  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+
+  try {
+    await createUserCommand([firstUserId, "--name", "Scope A", "--email", `${firstUserId}@polaris.local`]);
+    await createUserCommand([secondUserId, "--name", "Scope B", "--email", `${secondUserId}@polaris.local`]);
+    await createCommand([workspace, "--user", firstUserId]);
+
+    const firstSpecPath = path.join(firstUserRoot, "projects", workspace, "docker.agent.yaml");
+    const secondWorkspaceRoot = path.join(secondUserRoot, "projects", workspace);
+    const secondSpecPath = path.join(secondWorkspaceRoot, "docker.agent.yaml");
+    const firstSpec = (yaml.load(fs.readFileSync(firstSpecPath, "utf8")) ?? {}) as Record<string, unknown>;
+    const firstCredentials = typeof firstSpec.credentials === "object" && firstSpec.credentials
+      ? { ...(firstSpec.credentials as Record<string, unknown>) }
+      : {};
+    firstSpec.credentials = {
+      ...firstCredentials,
+      bindings: [
+        { purpose: "agent-auth", credentialId: "scope-a-codex", required: true },
+        { purpose: "git-auth", credentialId: "github-ssh", required: false },
+      ],
+    };
+    firstSpec.agent = {
+      ...(typeof firstSpec.agent === "object" && firstSpec.agent ? firstSpec.agent as Record<string, unknown> : {}),
+      kind: "multi",
+      persist_state: true,
+    };
+    fs.writeFileSync(firstSpecPath, yaml.dump(firstSpec, { lineWidth: 120, noRefs: true }), "utf8");
+
+    fs.mkdirSync(secondWorkspaceRoot, { recursive: true });
+    const secondSpec = JSON.parse(JSON.stringify(firstSpec)) as Record<string, unknown>;
+    secondSpec.user_profile = secondUserId;
+    secondSpec.credentials = {
+      bindings: [
+        { purpose: "git-auth", credentialId: "github-ssh", required: false },
+      ],
+    };
+    secondSpec.agent = {
+      ...(typeof secondSpec.agent === "object" && secondSpec.agent ? secondSpec.agent as Record<string, unknown> : {}),
+      kind: "disabled",
+      persist_state: false,
+    };
+    fs.writeFileSync(secondSpecPath, yaml.dump(secondSpec, { lineWidth: 120, noRefs: true }), "utf8");
+
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(secondUserId)}/workspaces/${encodeURIComponent(workspace)}`,
+      );
+      const bodyText = await response.text();
+      assert.equal(response.status, 200, bodyText);
+      const payload = JSON.parse(bodyText) as {
+        credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
+      };
+      assert.deepEqual(payload.credentialBindings, [
+        { purpose: "git-auth", credentialId: "github-ssh", required: false },
+      ]);
+    });
+  } finally {
+    fs.rmSync(firstProfilePath, { force: true });
+    fs.rmSync(secondProfilePath, { force: true });
+    fs.rmSync(firstUserRoot, { recursive: true, force: true });
+    fs.rmSync(secondUserRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API previews workspace asset content", async () => {
+  await withPortalServer(async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/users/${DEMO_USER_ID}/workspaces/demo/preview?path=${encodeURIComponent("config/users/100000000000000001/projects/demo/docker.agent.yaml")}`,
+    );
+    assert.equal(response.status, 200);
+    const payload = await response.json() as {
+      path: string;
+      content: string;
+      truncated: boolean;
+    };
+    assert.equal(payload.path, "config/users/100000000000000001/projects/demo/docker.agent.yaml");
+    assert.match(payload.content, /backend:/);
+    assert.equal(payload.truncated, false);
+  });
+});
+
 test("portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
   const userProfileId = uniqueName("portal-user");
   const clerkUsername = uniqueName("clerk-user");
@@ -892,6 +980,152 @@ exit 0
         assert.ok(
           readCommandLog().some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")),
         );
+      },
+    );
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(profileFile, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API binds and unbinds paseo agent credentials on the selected workspace driver", async () => {
+  const userId = uniqueName("portal-paseo-bind-user");
+  const workspace = uniqueName("portal-paseo-bind");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(userRoot, "projects", workspace);
+  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const dockerSpecPath = path.join(workspaceRoot, "docker.agent.yaml");
+  const credentialId = uniqueName("portal-codex");
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Paseo Bind User", "--email", `${userId}@polaris.local`]);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then exit 0; fi
+if [[ "$1" == "pull" ]]; then exit 0; fi
+if [[ "$1" == "volume" && "$2" == "inspect" ]]; then exit 1; fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then printf 'docker-bind-id'; exit 0; fi
+if [[ "$1" == "inspect" && "$2" == "docker-bind-id" ]]; then printf '[{"State":{"Running":true}}]'; exit 0; fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$5" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_test","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$5" == *"/server-id"* ]]; then
+    printf 'srv_test'
+    exit 0
+  fi
+  if [[ "$5" == *"/pairing.json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJzZXJ2ZXJJZCI6InNydl90ZXN0In0"}'
+    exit 0
+  fi
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        await withPortalServer(async (baseUrl) => {
+          const createWorkspaceResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              workspaceName: workspace,
+              defaultDockerOnly: true,
+              startAfterCreate: true,
+            }),
+          });
+          const createWorkspaceBody = await createWorkspaceResponse.text();
+          assert.equal(createWorkspaceResponse.status, 202, createWorkspaceBody);
+
+          const createCredentialResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              harness: "codex",
+              credentialId,
+              label: "Portal Bind Credential",
+              providerName: "test-provider",
+              baseUrl: "https://example.invalid/codex/v1",
+              apiKey: "test-api-key",
+            }),
+          });
+          const createCredentialBody = await createCredentialResponse.text();
+          assert.equal(createCredentialResponse.status, 201, createCredentialBody);
+
+          const bindResponse = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/bind`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                driver: "docker",
+                credentialId,
+              }),
+            },
+          );
+          const bindBody = await bindResponse.text();
+          assert.equal(bindResponse.status, 200, bindBody);
+          const bindPayload = JSON.parse(bindBody) as {
+            enabled: boolean;
+            restarted: boolean;
+            credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
+          };
+          assert.equal(bindPayload.enabled, true);
+          assert.equal(bindPayload.restarted, true);
+          assert.deepEqual(bindPayload.credentialBindings, [
+            { purpose: "agent-auth", credentialId, required: true },
+            { purpose: "git-auth", credentialId: "github-ssh", required: false },
+          ]);
+
+          const boundSpec = (yaml.load(fs.readFileSync(dockerSpecPath, "utf8")) ?? {}) as {
+            agent?: { kind?: string; persist_state?: boolean };
+            credentials?: { bindings?: Array<{ purpose?: string; credentialId?: string; required?: boolean }> };
+          };
+          assert.equal(boundSpec.agent?.kind, "multi");
+          assert.equal(boundSpec.agent?.persist_state, true);
+          assert.deepEqual(boundSpec.credentials?.bindings, [
+            { purpose: "agent-auth", credentialId, required: true },
+            { purpose: "git-auth", credentialId: "github-ssh", required: false },
+          ]);
+
+          const unbindResponse = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/unbind`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                driver: "docker",
+              }),
+            },
+          );
+          const unbindBody = await unbindResponse.text();
+          assert.equal(unbindResponse.status, 200, unbindBody);
+          const unbindPayload = JSON.parse(unbindBody) as {
+            enabled: boolean;
+            restarted: boolean;
+            credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
+          };
+          assert.equal(unbindPayload.enabled, false);
+          assert.equal(unbindPayload.restarted, true);
+          assert.deepEqual(unbindPayload.credentialBindings, [
+            { purpose: "git-auth", credentialId: "github-ssh", required: false },
+          ]);
+
+          const unboundSpec = (yaml.load(fs.readFileSync(dockerSpecPath, "utf8")) ?? {}) as {
+            agent?: { kind?: string; persist_state?: boolean };
+            credentials?: { bindings?: Array<{ purpose?: string; credentialId?: string; required?: boolean }> };
+          };
+          assert.equal(unboundSpec.agent?.kind, "disabled");
+          assert.equal(unboundSpec.agent?.persist_state, false);
+          assert.deepEqual(unboundSpec.credentials?.bindings, [
+            { purpose: "git-auth", credentialId: "github-ssh", required: false },
+          ]);
+        });
       },
     );
   } finally {

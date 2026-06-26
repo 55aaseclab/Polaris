@@ -11,16 +11,19 @@ import {
   listPortalCredentials,
   listPortalProfiles,
   readPortalCredentialPreview,
+  readPortalWorkspaceAssetPreview,
   listWorkspaceDriverTargets,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
   readWorkspaceProvisionProgress,
   type PortalCredentialSummary,
   type PortalCredentialPreview,
+  type PortalWorkspaceAssetPreview,
   type PortalDriverTarget,
   type PortalProvisionProgress,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
+  updatePortalWorkspaceAgentBinding,
   workspaceRefFromTarget,
   writeWorkspaceProvisionProgress,
 } from "../core/portal.js";
@@ -39,6 +42,7 @@ import { stopCommand } from "../cli/commands/stop.js";
 import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
+import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec } from "../core/workspace.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
@@ -141,6 +145,32 @@ function renderWorkspaceTargets(userId: string, workspace: string, defaultDocker
   renderAndWritePodWorkspace(podWorkspace);
   const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
   renderAndWriteKubevirtWorkspace(kubevirtWorkspace);
+}
+
+function renderWorkspaceTarget(
+  userId: string,
+  workspace: string,
+  target: PortalDriverTarget,
+): void {
+  if (target.backend === "docker") {
+    renderAndWriteDockerWorkspace(loadUserWorkspace(userId, workspace, "docker"));
+    return;
+  }
+  if (target.backend === "pod") {
+    renderAndWritePodWorkspace(loadUserWorkspace(userId, workspace, "pod", target.profile ?? "gvisor"));
+    return;
+  }
+  renderAndWriteKubevirtWorkspace(loadUserWorkspace(userId, workspace, "kubevirt-vm"));
+}
+
+async function shouldRecycleRunningWorkspace(
+  userId: string,
+  workspace: string,
+  target: PortalDriverTarget,
+): Promise<boolean> {
+  const loaded = loadUserWorkspace(userId, workspace, target.backend, target.profile);
+  const observation = await getBackendDriver(loaded.backend.kind).inspect(loaded);
+  return Boolean(observation.backend.exists && observation.backend.running);
 }
 
 function ensureWorkspaceImageTargets(userId: string, workspace: string, defaultDockerOnly = false): void {
@@ -276,6 +306,14 @@ export function listUserPortalCredentials(userId: string): PortalCredentialSumma
 
 export function readUserPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
   return readPortalCredentialPreview(userId, credentialPath);
+}
+
+export function readUserPortalWorkspaceAssetPreview(
+  userId: string,
+  workspace: string,
+  assetPath: string,
+): PortalWorkspaceAssetPreview {
+  return readPortalWorkspaceAssetPreview(userId, workspace, assetPath);
 }
 
 export async function createPortalCodexCredential(input: {
@@ -427,6 +465,80 @@ export async function stopPortalWorkspace(userId: string, workspace: string): Pr
   }
   await stopCommand(workspaceRefFromTarget(workspace, summary.selectedDriver));
   return { stopped: true };
+}
+
+export async function bindPortalWorkspaceAgent(input: {
+  userId: string;
+  workspace: string;
+  credentialId: string;
+  driver?: PortalDriverTarget;
+}): Promise<{
+  enabled: true;
+  driver: string;
+  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
+  restarted: boolean;
+}> {
+  const summary = loadWorkspaceSummary(input.userId, input.workspace);
+  const target = input.driver ?? summary.selectedDriver;
+  if (!target) {
+    throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(input.workspace, target);
+  const restarted = await shouldRecycleRunningWorkspace(input.userId, input.workspace, target);
+  if (restarted) {
+    await stopCommand(ref);
+  }
+  const updated = updatePortalWorkspaceAgentBinding({
+    userId: input.userId,
+    workspace: input.workspace,
+    target,
+    credentialId: input.credentialId,
+    enabled: true,
+  });
+  renderWorkspaceTarget(input.userId, input.workspace, target);
+  await startCommand(ref);
+  return {
+    enabled: true,
+    driver: ref,
+    credentialBindings: updated.credentialBindings,
+    restarted,
+  };
+}
+
+export async function unbindPortalWorkspaceAgent(input: {
+  userId: string;
+  workspace: string;
+  driver?: PortalDriverTarget;
+}): Promise<{
+  enabled: false;
+  driver: string;
+  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
+  restarted: boolean;
+}> {
+  const summary = loadWorkspaceSummary(input.userId, input.workspace);
+  const target = input.driver ?? summary.selectedDriver;
+  if (!target) {
+    throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(input.workspace, target);
+  const restarted = await shouldRecycleRunningWorkspace(input.userId, input.workspace, target);
+  if (restarted) {
+    await stopCommand(ref);
+  }
+  const updated = updatePortalWorkspaceAgentBinding({
+    userId: input.userId,
+    workspace: input.workspace,
+    target,
+    enabled: false,
+  });
+  renderWorkspaceTarget(input.userId, input.workspace, target);
+  await startCommand(ref);
+  return {
+    enabled: false,
+    driver: ref,
+    credentialBindings: updated.credentialBindings,
+    restarted,
+  };
 }
 
 export async function createPortalUser(input: {
