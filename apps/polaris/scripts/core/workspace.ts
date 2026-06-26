@@ -378,6 +378,7 @@ export interface WorkspaceStatus {
       name: string;
       path: string;
       scope: "runtime" | "control-plane";
+      exists?: boolean;
     }>;
     persistentVolumes: Array<{
       name: string;
