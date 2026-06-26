@@ -37,6 +37,23 @@ import type { WorkspaceSpec } from "../core/workspace.js";
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../");
 const PROVISION_TOTAL_STEPS = 6;
 const provisionJobs = new Map<string, Promise<void>>();
+const CLERK_DELETE_SCRIPT = path.join(REPO_ROOT, "apps", "polaris-web", "scripts", "delete-clerk-users.mjs");
+
+function parseJsonFromText<T>(value: string): T {
+  const trimmed = value.trim();
+  const jsonEnd = trimmed.lastIndexOf("}");
+  if (jsonEnd === -1) {
+    throw new Error(`No JSON object found in output: ${JSON.stringify(trimmed)}`);
+  }
+  for (let jsonStart = trimmed.lastIndexOf("{", jsonEnd); jsonStart !== -1; jsonStart = trimmed.lastIndexOf("{", jsonStart - 1)) {
+    try {
+      return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as T;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`No JSON object found in output: ${JSON.stringify(trimmed)}`);
+}
 
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
@@ -324,6 +341,9 @@ export async function deletePortalUser(userProfileId: string): Promise<{
   mappings: {
     removedClerkUsernames: string[];
   };
+  clerk: {
+    removedUserIds: string[];
+  };
 }> {
   const stdoutChunks: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
@@ -341,26 +361,36 @@ export async function deletePortalUser(userProfileId: string): Promise<{
   }
 
   const stdout = stdoutChunks.join("").trim();
-  const jsonEnd = stdout.lastIndexOf("}");
-  if (jsonEnd === -1) {
-    throw new Error(`Delete user command did not return JSON output: ${JSON.stringify(stdout)}`);
+  const deleted = parseJsonFromText<{
+    userProfile: {
+      id: string;
+      removed: boolean;
+      profilePath: string;
+      secretsRoot: string;
+    };
+    mappings: {
+      removedClerkUsernames: string[];
+    };
+  }>(stdout);
+  const clerkDelete = spawnSync(
+    "node",
+    [CLERK_DELETE_SCRIPT, ...deleted.mappings.removedClerkUsernames],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    },
+  );
+  if (clerkDelete.status !== 0) {
+    throw new Error(clerkDelete.stderr.trim() || clerkDelete.stdout.trim() || "Clerk delete helper failed");
   }
-  for (let jsonStart = stdout.lastIndexOf("{", jsonEnd); jsonStart !== -1; jsonStart = stdout.lastIndexOf("{", jsonStart - 1)) {
-    try {
-      return JSON.parse(stdout.slice(jsonStart, jsonEnd + 1)) as {
-        userProfile: {
-          id: string;
-          removed: boolean;
-          profilePath: string;
-          secretsRoot: string;
-        };
-        mappings: {
-          removedClerkUsernames: string[];
-        };
-      };
-    } catch {
-      continue;
-    }
-  }
-  throw new Error(`Delete user command did not return JSON output: ${JSON.stringify(stdout)}`);
+  const clerkPayload = parseJsonFromText<{
+    removedUserIds: string[];
+    skipped: boolean;
+  }>(clerkDelete.stdout);
+  return {
+    ...deleted,
+    clerk: {
+      removedUserIds: clerkPayload.removedUserIds,
+    },
+  };
 }

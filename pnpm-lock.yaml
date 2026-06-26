@@ -10,6 +10,9 @@ importers:
 
   apps/polaris:
     dependencies:
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       js-yaml:
         specifier: ^4.1.0
         version: 4.2.0
