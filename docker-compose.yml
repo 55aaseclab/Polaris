@@ -21,6 +21,8 @@ services:
         VITE_POLARIS_API_BASE: ${VITE_POLARIS_API_BASE:-/api}
         VITE_PASEO_APP_BASE_URL: ${VITE_PASEO_APP_BASE_URL:-http://localhost/paseo}
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+        VITE_CLERK_SIGN_IN_URL: ${VITE_CLERK_SIGN_IN_URL:-/sign-in}
+        VITE_CLERK_SIGN_UP_URL: ${VITE_CLERK_SIGN_UP_URL:-/sign-up}
     restart: unless-stopped
     ports:
       - "${POLARIS_WEBPORTAL_BIND_HOST:-127.0.0.1}:${POLARIS_WEBPORTAL_PORT:-8081}:80"
