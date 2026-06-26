@@ -252,10 +252,8 @@ function resolveDefaultCredentialBindings(userProfileId: string): {
     })
     .filter((entry) => entry.id);
 
-  const agentAuth = credentials.find((entry) => entry.purposes.includes("agent-auth"));
   const gitAuth = credentials.find((entry) => entry.purposes.includes("git-auth"));
   const bindings = [
-    ...(agentAuth ? [{ purpose: "agent-auth" as const, credentialId: agentAuth.id, required: true }] : []),
     ...(gitAuth ? [{ purpose: "git-auth" as const, credentialId: gitAuth.id, required: false }] : []),
   ];
   return {

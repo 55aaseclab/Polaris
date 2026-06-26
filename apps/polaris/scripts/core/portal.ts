@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import { loadWorkspace } from "../config/load.js";
+import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { buildStatusAssets } from "./status-assets.js";
 import { normalizePairingUrl } from "./pairing-url.js";
 import {
@@ -113,6 +113,35 @@ function workspaceBackendFile(target: PortalDriverTarget): string {
     return "kubevirt.agent.yaml";
   }
   return "docker.agent.yaml";
+}
+
+function workspaceConfigFilePath(
+  userId: string,
+  workspace: string,
+  target: PortalDriverTarget,
+): string {
+  return path.join(workspaceRoot(userId, workspace), workspaceBackendFile(target));
+}
+
+function loadPortalWorkspaceByTarget(
+  userId: string,
+  workspace: string,
+  target: PortalDriverTarget,
+) {
+  const configPath = workspaceConfigFilePath(userId, workspace, target);
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Workspace config '${path.relative(REPO_ROOT, configPath)}' was not found`);
+  }
+  return loadWorkspaceFromConfigPath(
+    configPath,
+    workspace,
+    target.backend,
+    target.profile,
+  );
+}
+
+function credentialRegistryPath(userId: string, credentialId: string): string {
+  return path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
 }
 
 function portalStateFile(userId: string, workspace: string): string {
@@ -408,6 +437,29 @@ function credentialMaterialStatus(userId: string, paths: string[], declaredStatu
   return declaredStatus;
 }
 
+function normalizeWorkspaceAssets(
+  assets: NonNullable<WorkspaceStatus["assets"]> | undefined,
+): NonNullable<WorkspaceStatus["assets"]> | undefined {
+  if (!assets) {
+    return assets;
+  }
+  return {
+    ...assets,
+    dockerfile: {
+      ...assets.dockerfile,
+      exists: fs.existsSync(path.resolve(REPO_ROOT, assets.dockerfile.path)),
+    },
+    specs: (assets.specs ?? []).map((item) => ({
+      ...item,
+      exists: fs.existsSync(path.resolve(REPO_ROOT, item.path)),
+    })),
+    generatedManifests: (assets.generatedManifests ?? []).map((item) => ({
+      ...item,
+      exists: fs.existsSync(path.resolve(REPO_ROOT, item.path)),
+    })),
+  };
+}
+
 export function readPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
   const trimmed = credentialPath.trim();
   if (!trimmed) {
@@ -499,14 +551,13 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     ].filter(Boolean) as PortalDriverTarget[];
     for (const target of preferredTargets) {
       try {
-        const loaded = loadWorkspace(workspaceRefFromTarget(workspace, target));
+        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
         const nextAssets = buildStatusAssets(loaded);
         status = {
           ...status,
           assets: {
-            ...nextAssets,
             ...(status.assets ?? {}),
-            evolutionFiles: nextAssets.evolutionFiles,
+            ...nextAssets,
           },
         };
         break;
@@ -524,7 +575,7 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     ].filter(Boolean) as PortalDriverTarget[];
     for (const target of preferredTargets) {
       try {
-        const loaded = loadWorkspace(workspaceRefFromTarget(workspace, target));
+        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
         status = {
           ...status,
           paseo: {
@@ -568,7 +619,7 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
   ].filter(Boolean) as PortalDriverTarget[];
   for (const target of preferredTargets) {
     try {
-      const loaded = loadWorkspace(workspaceRefFromTarget(workspace, target));
+      const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
       bindings = loaded.resolvedCredentialBindings.map((binding) => ({
         purpose: binding.purpose,
         credentialId: binding.credentialId,
@@ -585,4 +636,93 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
     availableDrivers: listWorkspaceDriverTargets(userId, workspace),
     credentialBindings: bindings,
   };
+}
+
+export function updatePortalWorkspaceAgentBinding(input: {
+  userId: string;
+  workspace: string;
+  target: PortalDriverTarget;
+  credentialId?: string;
+  enabled: boolean;
+}): {
+  configPath: string;
+  credentialBindings: Array<{
+    purpose: string;
+    credentialId: string;
+    required: boolean;
+  }>;
+} {
+  const configPath = workspaceConfigFilePath(input.userId, input.workspace, input.target);
+  const current = readYAML(configPath);
+  if (!current) {
+    throw new Error(`Workspace config '${path.relative(REPO_ROOT, configPath)}' was not found`);
+  }
+
+  const rawCredentials = typeof current.credentials === "object" && current.credentials
+    ? { ...(current.credentials as Record<string, unknown>) }
+    : {};
+  const rawBindings = Array.isArray(rawCredentials.bindings)
+    ? rawCredentials.bindings as Array<Record<string, unknown>>
+    : [];
+  const preservedBindings = rawBindings
+    .map((binding) => ({
+      purpose: String(binding.purpose ?? "").trim(),
+      credentialId: String(binding.credentialId ?? "").trim(),
+      required: binding.required !== false,
+    }))
+    .filter((binding) => binding.purpose && binding.credentialId && binding.purpose !== "agent-auth");
+
+  const credentialBindings = input.enabled
+    ? [
+        {
+          purpose: "agent-auth",
+          credentialId: requirePortalAgentCredential(input.userId, input.credentialId),
+          required: true,
+        },
+        ...preservedBindings,
+      ]
+    : preservedBindings;
+
+  const rawAgent = typeof current.agent === "object" && current.agent
+    ? { ...(current.agent as Record<string, unknown>) }
+    : {};
+
+  const next = {
+    ...current,
+    credentials: {
+      ...rawCredentials,
+      bindings: credentialBindings,
+    },
+    agent: {
+      ...rawAgent,
+      kind: input.enabled ? "multi" : "disabled",
+      label: input.enabled ? "Codex + Claude Code" : "Disabled by default",
+      args: [],
+      persist_state: input.enabled,
+    },
+  };
+  writeYAML(configPath, next);
+
+  return {
+    configPath,
+    credentialBindings,
+  };
+}
+
+function requirePortalAgentCredential(userId: string, credentialId?: string): string {
+  const trimmedCredentialId = String(credentialId ?? "").trim();
+  if (!trimmedCredentialId) {
+    throw new Error("credentialId is required");
+  }
+  const registry = readYAML(credentialRegistryPath(userId, trimmedCredentialId));
+  if (!registry) {
+    throw new Error(`Credential '${trimmedCredentialId}' was not found for user '${userId}'`);
+  }
+  const purposes = Array.isArray(registry.purposes)
+    ? registry.purposes.map((value) => String(value))
+    : [];
+  if (!purposes.includes("agent-auth")) {
+    throw new Error(`Credential '${trimmedCredentialId}' is not an agent-auth credential`);
+  }
+  return trimmedCredentialId;
 }
