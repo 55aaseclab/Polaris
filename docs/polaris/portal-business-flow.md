@@ -225,7 +225,87 @@ webportal 清理对应 Clerk 用户 -> 前端退出登录或返回列表页
 4. 后端停止对应运行时。
 5. 前端刷新详情，展示已停止或未启动状态。
 
-### 9. 用户删除工作空间
+### 9. 用户绑定工作空间 Paseo Credential
+
+绑定 Paseo := 前端在 `Paseo status` 选择一个 `agent-auth` credential ->
+后端更新当前驱动 spec -> 后端重渲染 manifest ->
+如有旧运行时则先停止 -> 后端重新启动工作空间 -> 前端刷新详情
+
+细化流程：
+
+1. 用户进入工作空间的 `Paseo status` 页。
+2. 前端加载当前用户的 credential 列表。
+3. 前端筛出 `purposes` 包含 `agent-auth` 的 credential 供选择。
+4. 用户选择一个 credential 并发起绑定。
+5. 前端调用
+   `POST /api/users/<userId>/workspaces/<workspaceName>/paseo/bind`。
+6. 请求体必须携带目标 `credentialId`，也可显式带 `driver`。
+7. 后端读取当前选中驱动；若请求给了 `driver`，则使用该驱动。
+8. 后端校验 credential 存在，且用途包含 `agent-auth`。
+9. 后端更新该驱动的 workspace spec：
+   - 将 `credentials.bindings` 里的 `agent-auth` 绑定改成所选 credential。
+   - 保留已有 `git-auth` 绑定。
+   - 将 `agent.kind` 改为启用状态。
+   - 将 `agent.persist_state` 改为 `true`。
+10. 后端重渲染该驱动的 manifest。
+11. 如果当前驱动已有运行中的旧实例，后端先停止旧实例。
+12. 后端按新 spec 启动工作空间。
+13. 后端返回新绑定结果、实际 driver 和是否发生了重启。
+14. 前端刷新详情页，新的 Paseo 状态开始按 agent-enabled 逻辑展示。
+
+关键约束：
+
+- 只允许绑定 `agent-auth` credential。
+- 绑定发生在当前驱动维度，不会批量改所有驱动。
+- 已运行的 disabled workspace 在绑定时必须重启，否则旧容器不会拿到新 agent 配置。
+
+异常分支：
+
+- 未选择 credential：后端返回 `400`。
+- credential 不存在：后端返回失败。
+- credential 不是 `agent-auth`：后端返回失败。
+- manifest 重渲染失败：后端返回失败。
+- 停止或启动失败：后端返回失败。
+
+### 10. 用户解除工作空间 Paseo Credential 绑定
+
+解除绑定 Paseo := 前端在 `Paseo status` 发起解绑 ->
+后端移除当前驱动 spec 中的 `agent-auth` 绑定 -> 后端重渲染 manifest ->
+如有旧运行时则先停止 -> 后端重新启动工作空间 -> 前端刷新详情
+
+细化流程：
+
+1. 用户进入工作空间的 `Paseo status` 页。
+2. 前端显示当前工作空间已绑定的 credential 用途。
+3. 用户发起解绑并确认。
+4. 前端调用
+   `POST /api/users/<userId>/workspaces/<workspaceName>/paseo/unbind`。
+5. 请求体可显式携带 `driver`；未提供时由后端使用当前选中驱动。
+6. 后端读取该驱动对应的 workspace spec。
+7. 后端从 `credentials.bindings` 中移除 `purpose=agent-auth` 的绑定。
+8. 后端保留已有 `git-auth` 等非 agent 绑定。
+9. 后端将 `agent.kind` 改回 `disabled`。
+10. 后端将 `agent.persist_state` 改回 `false`。
+11. 后端重渲染该驱动 manifest。
+12. 如果当前驱动已有运行中的 agent 实例，后端先停止旧实例。
+13. 后端按解除绑定后的 spec 重新启动工作空间。
+14. 后端返回解绑结果、实际 driver 和是否发生了重启。
+15. 前端刷新详情页，Paseo 状态重新回到 disabled workspace 的展示逻辑。
+
+关键约束：
+
+- 解绑只移除 `agent-auth`，不会碰 `git-auth`。
+- 解绑后不会删除用户级 credential 对象本身，只是解除工作空间绑定。
+- 已运行的 agent-enabled workspace 在解绑时必须重启，否则旧运行时仍会保留 agent 进程和挂载。
+
+异常分支：
+
+- 工作空间没有选中驱动：后端返回失败。
+- spec 不存在：后端返回失败。
+- manifest 重渲染失败：后端返回失败。
+- 停止或启动失败：后端返回失败。
+
+### 11. 用户删除工作空间
 
 删除工作空间 := 前端点击删除 -> 后端校验工作空间未运行 ->
 后端删除工作空间定义和状态 -> 前端返回列表页
@@ -244,7 +324,7 @@ webportal 清理对应 Clerk 用户 -> 前端退出登录或返回列表页
 
 - 运行中的工作空间不能直接删除。
 
-### 10. 用户新增 Credential
+### 12. 用户新增 Credential
 
 新增 Credential := 前端进入 Profile 页 -> 前端填写 codex credential 表单 ->
 后端调用 CLI 创建 credential -> 前端刷新 credential 列表
@@ -277,7 +357,7 @@ webportal 清理对应 Clerk 用户 -> 前端退出登录或返回列表页
 - CLI 创建失败：后端返回创建失败原因。
 - 文件写入失败：后端返回创建失败原因。
 
-### 11. 用户删除 Credential
+### 13. 用户删除 Credential
 
 删除 Credential := 前端在 Profile 页点击删除 -> 后端调用 CLI 删除
 credential -> 前端刷新 credential 列表
@@ -353,7 +433,6 @@ credential -> 前端刷新 credential 列表
 
 - 邀请成员加入工作空间。
 - 管理员跨用户查看和代运维。
-- 凭证绑定到工作空间的编辑流程。
 - 工作空间模板选择流程。
 - 工作空间创建后的首次启动流程。
 - 失败重试和恢复流程。
