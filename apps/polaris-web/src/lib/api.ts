@@ -254,12 +254,18 @@ export async function listCredentials(userId: string): Promise<PortalCredentialS
 export async function createWorkspace(
   userId: string,
   workspaceName: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+  },
 ): Promise<PortalProvisionProgress> {
   return apiFetch<PortalProvisionProgress>(
     `/api/users/${encodeURIComponent(userId)}/workspaces`,
     {
       method: "POST",
-      body: JSON.stringify({ workspaceName }),
+      body: JSON.stringify({
+        workspaceName,
+        defaultDockerOnly: options?.defaultDockerOnly ?? false,
+      }),
     },
   );
 }

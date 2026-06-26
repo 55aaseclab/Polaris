@@ -26,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  createWorkspace,
   createPortalUser,
   deletePortalUser,
   deleteWorkspace,
@@ -109,6 +110,8 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_workspace: "Select workspace",
     workspaces: "Workspaces",
     add_workspace: "Add workspace",
+    add_workspace_desc: "Create a new workspace for this user.",
+    docker_only_option: "Default docker only",
     loading_workspaces: "Loading workspaces...",
     no_workspaces: "No workspaces yet.",
     users: "Users",
@@ -183,7 +186,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ssh_mode: "SSH mode",
     tracked_workspaces: "Tracked workspaces",
     purposes: "Purposes",
-    workspace_example: "morpheus",
+    workspace_example: "my-workspace",
     select_driver: "Select driver",
     create_suffix: "create",
     no_backend_detail: "No backend detail.",
@@ -247,6 +250,8 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_workspace: "选择工作空间",
     workspaces: "工作空间",
     add_workspace: "新增工作空间",
+    add_workspace_desc: "为当前用户创建一个新的工作空间。",
+    docker_only_option: "仅默认 docker",
     loading_workspaces: "正在加载工作空间…",
     no_workspaces: "暂无工作空间。",
     users: "用户",
@@ -321,7 +326,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ssh_mode: "SSH 模式",
     tracked_workspaces: "已跟踪工作空间",
     purposes: "用途",
-    workspace_example: "morpheus",
+    workspace_example: "my-workspace",
     select_driver: "选择驱动",
     create_suffix: "创建",
     no_backend_detail: "暂无后端详情。",
@@ -855,6 +860,12 @@ function PortalShell(props: {
   const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
   const currentWorkspacePane = pathParts[4] ?? "";
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>([]);
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
+  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(12);
 
   function workspaceLink(workspaceName: string): string {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(workspaceName)}`;
@@ -866,6 +877,45 @@ function PortalShell(props: {
 
   function userWorkspaceIndexLink(): string {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces`;
+  }
+
+  useEffect(() => {
+    if (!creatingWorkspace) {
+      setCreateWorkspaceProgress(12);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setCreateWorkspaceProgress((current) => Math.min(current + 11, 88));
+    }, 350);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [creatingWorkspace]);
+
+  async function handleCreateWorkspace(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event?.preventDefault();
+    const trimmedName = newWorkspaceName.trim();
+    if (!activeUserId || !trimmedName || creatingWorkspace) {
+      return;
+    }
+    setCreatingWorkspace(true);
+    setCreateWorkspaceError(null);
+    try {
+      await createWorkspace(activeUserId, trimmedName, {
+        defaultDockerOnly,
+      });
+      setCreateWorkspaceProgress(100);
+      setCreateWorkspaceOpen(false);
+      setNewWorkspaceName("");
+      setDefaultDockerOnly(true);
+      window.location.assign(
+        `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
+      );
+    } catch (cause: unknown) {
+      setCreateWorkspaceError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCreatingWorkspace(false);
+    }
   }
 
   const activeUserInitial = (activeUser?.name || activeUser?.id || "?")
@@ -912,12 +962,76 @@ function PortalShell(props: {
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild>
-                      <Link to={`${userWorkspaceIndexLink()}#create-workspace`}>
-                        <PlusCircle />
-                        <span>{t("add_workspace")}</span>
-                      </Link>
-                    </SidebarMenuButton>
+                    <AlertDialog
+                      open={createWorkspaceOpen}
+                      onOpenChange={(open) => {
+                        setCreateWorkspaceOpen(open);
+                        if (!open) {
+                          setNewWorkspaceName("");
+                          setDefaultDockerOnly(true);
+                          setCreateWorkspaceError(null);
+                          setCreatingWorkspace(false);
+                        }
+                      }}
+                    >
+                      <AlertDialogTrigger asChild>
+                        <SidebarMenuButton>
+                          <PlusCircle />
+                          <span>{t("add_workspace")}</span>
+                        </SidebarMenuButton>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t("add_workspace")}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t("add_workspace_desc")}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <form className="grid gap-4" onSubmit={(event) => void handleCreateWorkspace(event)}>
+                          <div className="grid gap-2">
+                            <Label htmlFor="new-workspace-name">{t("workspace_name")}</Label>
+                            <Input
+                              id="new-workspace-name"
+                              value={newWorkspaceName}
+                              onChange={(event) => setNewWorkspaceName(event.target.value)}
+                              placeholder={t("workspace_example")}
+                              autoComplete="off"
+                              disabled={creatingWorkspace}
+                            />
+                          </div>
+                          <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-border"
+                              checked={defaultDockerOnly}
+                              onChange={(event) => setDefaultDockerOnly(event.target.checked)}
+                              disabled={creatingWorkspace}
+                            />
+                            <span>{t("docker_only_option")}</span>
+                          </label>
+                          {creatingWorkspace && (
+                            <div className="grid gap-2">
+                              <div className="flex justify-between text-sm text-muted-foreground">
+                                <span>{t("provisioning")}</span>
+                                <span>{createWorkspaceProgress}%</span>
+                              </div>
+                              <Progress value={createWorkspaceProgress} />
+                            </div>
+                          )}
+                          {createWorkspaceError && (
+                            <p className="text-sm text-destructive">{createWorkspaceError}</p>
+                          )}
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={creatingWorkspace}>
+                              {t("cancel")}
+                            </AlertDialogCancel>
+                            <Button type="submit" disabled={creatingWorkspace || !newWorkspaceName.trim()}>
+                              {creatingWorkspace ? t("provisioning") : t("create_workspace")}
+                            </Button>
+                          </AlertDialogFooter>
+                        </form>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </SidebarMenuItem>
                   {sidebarWorkspacesLoading && (
                     <div className="px-2 py-3 text-sm text-muted-foreground">
