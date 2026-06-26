@@ -101,8 +101,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-
-type Language = "en" | "zh";
+import { type Language, writeStoredLanguage } from "@/lib/language";
 
 function basenameForDisplay(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -453,25 +452,6 @@ const COPY: Record<Language, Record<string, string>> = {
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
-function useStoredLanguage(): [Language, (value: Language) => void] {
-  const [language, setLanguage] = useState<Language>(() => {
-    if (typeof window === "undefined") {
-      return "zh";
-    }
-    const stored = window.localStorage.getItem("polaris-language");
-    return stored === "en" ? "en" : "zh";
-  });
-
-  function updateLanguage(next: Language): void {
-    setLanguage(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("polaris-language", next);
-    }
-  }
-
-  return [language, updateLanguage];
-}
-
 function useLanguage(): LanguageContextValue {
   const context = useContext(LanguageContext);
   if (!context) {
@@ -586,6 +566,7 @@ function useCurrentUserMapping() {
 
 function SignInPage() {
   const { isLoaded, userId } = useAuth();
+  const { language } = useLanguage();
   useEffect(() => {
     setRegistrationIntent(false);
   }, []);
@@ -595,6 +576,7 @@ function SignInPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <SignIn
+        key={`sign-in-${language}`}
         path="/sign-in"
         routing="path"
         signUpUrl="/sign-up"
@@ -606,6 +588,7 @@ function SignInPage() {
 function SignUpPage() {
   const { isLoaded, userId } = useAuth();
   const navigate = useNavigate();
+  const { language } = useLanguage();
 
   useEffect(() => {
     setRegistrationIntent(true);
@@ -623,6 +606,7 @@ function SignUpPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <SignUp
+        key={`sign-up-${language}`}
         path="/sign-up"
         routing="path"
         signInUrl="/sign-in"
@@ -2595,12 +2579,17 @@ function credentialAssetSections(
   }));
 }
 
-export default function App() {
-  const [language, setLanguage] = useStoredLanguage();
+export default function App(props: {
+  language: Language;
+  setLanguage: (value: Language) => void;
+}) {
   const value: LanguageContextValue = {
-    language,
-    setLanguage,
-    t: (key: string): string => COPY[language][key] ?? key,
+    language: props.language,
+    setLanguage: (next) => {
+      writeStoredLanguage(next);
+      props.setLanguage(next);
+    },
+    t: (key: string): string => COPY[props.language][key] ?? key,
   };
 
   return (
