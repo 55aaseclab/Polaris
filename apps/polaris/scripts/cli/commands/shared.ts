@@ -1,5 +1,5 @@
 import { getBackendDriver } from "../../backends/index.js";
-import { loadWorkspace } from "../../config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../../config/load.js";
 import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
@@ -11,13 +11,23 @@ import {
 } from "../../evolution/runtime.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
 
+export function loadWorkspaceForProjectRef(projectRef: string): WorkspaceSpec {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
+
 export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleAction"], projectRef: string): {
   workspace: WorkspaceSpec;
   driver: ReturnType<typeof getBackendDriver>;
 } {
   logInfo("cli", "load-workspace", { command, projectRef });
   ensureWorkspaceConfig(projectRef);
-  const workspace = loadWorkspace(projectRef);
+  const workspace = loadWorkspaceForProjectRef(projectRef);
   const driver = getBackendDriver(workspace.backend.kind);
   logDebug("cli", "workspace-loaded", {
     command,
@@ -47,7 +57,7 @@ function sleep(ms: number): Promise<void> {
 
 export async function waitForWorkspaceReady(
   workspace: WorkspaceSpec,
-  timeoutMs = 45000,
+  timeoutMs = 120000,
   intervalMs = 1500,
 ): Promise<void> {
   const driver = getBackendDriver(workspace.backend.kind);
