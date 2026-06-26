@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   createPortalUser,
+  deletePortalUser,
   deleteWorkspace,
   getUserProfile,
   getWorkspaceDetail,
@@ -90,6 +91,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Language = "en" | "zh";
 
@@ -158,6 +160,13 @@ const COPY: Record<Language, Record<string, string>> = {
     administration_desc: "Switch users and manage portal-level actions.",
     settings_title: "Settings",
     settings_desc: "Choose the language used across the portal.",
+    danger_zone: "Danger zone",
+    danger_zone_desc: "Delete this Polaris user, local credentials, and Clerk mapping.",
+    danger_zone_tooltip: "This permanently deletes the Polaris user profile, user-scoped secrets, default credentials, and Clerk username mapping.",
+    delete_user: "Delete user",
+    delete_user_confirm_title: "Delete this user?",
+    delete_user_confirm_description: "This deletes the Polaris user profile, user-scoped secrets, and Clerk username mapping. This action cannot be undone.",
+    deleting_user: "Deleting user...",
     workspace_controls: "Controls",
     select_submenu: "Select a workspace submenu.",
     sidebar_tier: "Free",
@@ -289,6 +298,13 @@ const COPY: Record<Language, Record<string, string>> = {
     administration_desc: "切换用户并管理门户级操作。",
     settings_title: "设置",
     settings_desc: "选择整个门户使用的语言。",
+    danger_zone: "危险操作",
+    danger_zone_desc: "删除这个 Polaris 用户、本地凭据和 Clerk 映射。",
+    danger_zone_tooltip: "这会永久删除 Polaris 用户资料、用户级 secrets、默认凭据，以及 Clerk 用户名映射。",
+    delete_user: "删除用户",
+    delete_user_confirm_title: "删除这个用户？",
+    delete_user_confirm_description: "这会删除 Polaris 用户资料、用户级 secrets，以及 Clerk 用户名映射。此操作不可恢复。",
+    deleting_user: "正在删除用户…",
     workspace_controls: "控制",
     select_submenu: "请选择工作空间子页面。",
     sidebar_tier: "免费版",
@@ -1763,7 +1779,31 @@ function ProfilePage() {
 function SettingsPage() {
   const { language, setLanguage, t } = useLanguage();
   const { userId = "" } = useParams();
+  const navigate = useNavigate();
+  const clerk = useClerk();
+  const { mapping } = useCurrentUserMapping();
   const { data: users } = useAsyncValue(listUsers, []);
+  const [deletingUser, setDeletingUser] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const canDeleteSelf = mapping?.polarisUserId === userId;
+
+  async function handleDeleteUser(): Promise<void> {
+    if (!canDeleteSelf || deletingUser) {
+      return;
+    }
+    setDeletingUser(true);
+    setDeleteError(null);
+    try {
+      await deletePortalUser(userId);
+      await clerk.signOut({ redirectUrl: "/sign-in" });
+      navigate("/sign-in", { replace: true });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingUser(false);
+    }
+  }
 
   return (
     <PortalShell users={users ?? []}>
@@ -1790,6 +1830,62 @@ function SettingsPage() {
             </Select>
           </div>
         </div>
+        {canDeleteSelf && (
+          <>
+            <Separator />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                  <span>{t("danger_zone")}</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center text-[11px] leading-none text-destructive/80 transition hover:text-destructive"
+                        aria-label={t("danger_zone_tooltip")}
+                      >
+                        ?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs border bg-white text-sm text-foreground shadow-lg">
+                      {t("danger_zone_tooltip")}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {t("danger_zone_desc")}
+                </div>
+              </div>
+              {deleteError && (
+                <p className="w-full text-sm text-destructive">{deleteError}</p>
+              )}
+              <div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" disabled={deletingUser}>
+                      <Trash2 className="h-4 w-4" />
+                      {deletingUser ? t("deleting_user") : t("delete_user")}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t("delete_user_confirm_title")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t("delete_user_confirm_description")}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => void handleDeleteUser()}>
+                        {deletingUser ? t("deleting_user") : t("delete_user")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </PortalShell>
   );

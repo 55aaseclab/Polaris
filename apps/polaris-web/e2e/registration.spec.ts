@@ -134,19 +134,6 @@ async function createMappedPolarisUser(
   return response.json() as Promise<PolarisUserResponse>;
 }
 
-async function deletePolarisUser(
-  request: import("@playwright/test").APIRequestContext,
-  userProfileId: string,
-): Promise<void> {
-  const response = await request.delete(
-    `http://127.0.0.1:8787/api/users/${encodeURIComponent(userProfileId)}`,
-  );
-  if (response.status() === 404) {
-    return;
-  }
-  expect(response.ok()).toBeTruthy();
-}
-
 async function expectPolarisMapping(
   request: import("@playwright/test").APIRequestContext,
   clerkUsername: string,
@@ -164,6 +151,19 @@ async function expectPolarisMapping(
       return payload.mapping?.polarisUserId ?? null;
     })
     .toBe(expectedUserId);
+}
+
+async function deletePolarisUser(
+  request: import("@playwright/test").APIRequestContext,
+  userProfileId: string,
+): Promise<void> {
+  const response = await request.delete(
+    `http://127.0.0.1:8787/api/users/${encodeURIComponent(userProfileId)}`,
+  );
+  if (response.status() === 404) {
+    return;
+  }
+  expect(response.ok()).toBeTruthy();
 }
 
 async function signInAsUsername(
@@ -243,7 +243,7 @@ test("existing mapped Clerk user lands in the mapped Polaris workspace route on 
   }
 });
 
-test("deleting a Polaris user removes the profile, secrets root, and Clerk mapping", async ({ page }) => {
+test("deleting a Polaris user through the API removes the profile, secrets root, and Clerk mapping", async ({ page }) => {
   const username = uniqueUsername();
   const password = uniquePassword();
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${username}.yaml`);
@@ -262,6 +262,39 @@ test("deleting a Polaris user removes the profile, secrets root, and Clerk mappi
     await expectPolarisMapping(page.request, username, username);
 
     await deletePolarisUser(page.request, username);
+
+    expect(fs.existsSync(profilePath)).toBeFalsy();
+    expect(fs.existsSync(userRoot)).toBeFalsy();
+    await expectPolarisMapping(page.request, username, null);
+  } finally {
+    cleanupPolarisRegistration(username, username);
+    await deleteClerkUser(clerkUserId);
+  }
+});
+
+test("deleting a Polaris user from settings removes the profile, secrets root, and Clerk mapping", async ({ page }) => {
+  const username = uniqueUsername();
+  const password = uniquePassword();
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${username}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", username);
+  let clerkUserId: string | null = null;
+
+  cleanupPolarisRegistration(username, username);
+
+  try {
+    const created = await createClerkUser(username, password);
+    clerkUserId = created.id;
+    await createMappedPolarisUser(page.request, username, username);
+
+    expect(fs.existsSync(profilePath)).toBeTruthy();
+    expect(fs.existsSync(userRoot)).toBeTruthy();
+    await expectPolarisMapping(page.request, username, username);
+
+    await signInAsUsername(page, username, password);
+    await page.goto(`/users/${encodeURIComponent(username)}/settings`);
+    await page.getByRole("button", { name: /Delete user|删除用户/ }).click();
+    await page.getByRole("button", { name: /Delete user|删除用户/ }).last().click();
+    await expect(page).toHaveURL(/\/sign-in/);
 
     expect(fs.existsSync(profilePath)).toBeFalsy();
     expect(fs.existsSync(userRoot)).toBeFalsy();
