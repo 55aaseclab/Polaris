@@ -1,6 +1,6 @@
 import * as React from "react";
 import { SignIn, SignUp, useAuth, useClerk, useUser } from "@clerk/react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Link,
@@ -26,12 +26,13 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  createPortalUser,
   deleteWorkspace,
-  getDefaultUserId,
   getUserProfile,
   getWorkspaceDetail,
   listCredentials,
   listUsers,
+  resolvePortalUserMapping,
   listWorkspaces,
   stopWorkspace,
   switchWorkspaceDriver,
@@ -39,10 +40,10 @@ import {
   type PortalCredentialSummary,
   type PortalProfileDetail,
   type PortalProfileSummary,
+  type PortalUserMapping,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
-import { explicitUserMap } from "./user-map";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -225,6 +226,10 @@ const COPY: Record<Language, Record<string, string>> = {
     language: "Language",
     profile: "Profile",
     empty_pane: "Empty pane",
+    global_error_title: "Something went wrong",
+    global_error_description: "The page could not be loaded.",
+    global_error_unresolved_access: "Your access could not be verified.",
+    creating_account: "Creating account...",
   },
   zh: {
     app_name: "Polaris",
@@ -352,6 +357,10 @@ const COPY: Record<Language, Record<string, string>> = {
     language: "语言",
     profile: "资料",
     empty_pane: "空白页",
+    global_error_title: "出错了",
+    global_error_description: "页面无法加载。",
+    global_error_unresolved_access: "无法验证当前访问权限。",
+    creating_account: "正在创建账号…",
   },
 };
 
@@ -414,6 +423,46 @@ function portalSignInUrl(): string {
   return target.pathname + target.search;
 }
 
+const REGISTRATION_INTENT_KEY = "polaris-pending-registration";
+const REGISTRATION_QUERY_KEY = "registered";
+
+function setRegistrationIntent(active: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (active) {
+    window.sessionStorage.setItem(REGISTRATION_INTENT_KEY, "1");
+    return;
+  }
+  window.sessionStorage.removeItem(REGISTRATION_INTENT_KEY);
+}
+
+function hasRegistrationIntent(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.sessionStorage.getItem(REGISTRATION_INTENT_KEY) === "1";
+}
+
+function hasRegistrationQuery(search: string): boolean {
+  const params = new URLSearchParams(search);
+  return params.get(REGISTRATION_QUERY_KEY) === "1";
+}
+
+function clearRegistrationQuery(
+  navigate: ReturnType<typeof useNavigate>,
+  pathname: string,
+  search: string,
+): void {
+  const params = new URLSearchParams(search);
+  if (!params.has(REGISTRATION_QUERY_KEY)) {
+    return;
+  }
+  params.delete(REGISTRATION_QUERY_KEY);
+  const nextSearch = params.toString();
+  navigate(`${pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
+}
+
 function AuthGate(props: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
 
@@ -430,14 +479,6 @@ function AuthGate(props: { children: ReactNode }) {
   return <>{props.children}</>;
 }
 
-function redirectTarget(): string {
-  if (typeof window === "undefined") {
-    return "/";
-  }
-  const params = new URLSearchParams(window.location.search);
-  return params.get("redirect_url")?.trim() || "/";
-}
-
 function normalizeClerkUsername(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -449,62 +490,23 @@ function useCurrentUserMapping() {
       ?? user?.primaryEmailAddress?.emailAddress?.split("@")[0]
       ?? null,
   );
-  const mapping = clerkUsername ? explicitUserMap[clerkUsername] ?? null : null;
-  return { clerkUsername, mapping };
-}
-
-function ClerkDebug(props: { page: "sign-in" | "sign-up" }) {
-  const { isLoaded, userId } = useAuth();
-  const location = useLocation();
-
-  useEffect(() => {
-    const navEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
-    console.log("[clerk-debug] render", {
-      page: props.page,
-      href: window.location.href,
-      pathname: window.location.pathname,
-      search: window.location.search,
-      hash: window.location.hash,
-      redirectTarget: redirectTarget(),
-      isLoaded,
-      userId,
-      navigationType: navEntry?.type ?? "unknown",
-    });
-  }, [props.page, location.pathname, location.search, location.hash, isLoaded, userId]);
-
-  useEffect(() => {
-    const onBeforeUnload = () => {
-      console.log("[clerk-debug] beforeunload", {
-        page: props.page,
-        href: window.location.href,
-      });
-    };
-    const onPageShow = (event: PageTransitionEvent) => {
-      console.log("[clerk-debug] pageshow", {
-        page: props.page,
-        href: window.location.href,
-        persisted: event.persisted,
-      });
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [props.page]);
-
-  return null;
+  const { data, error, loading } = useAsyncValue<PortalUserMapping | null>(
+    () => clerkUsername ? resolvePortalUserMapping(clerkUsername) : Promise.resolve(null),
+    [clerkUsername],
+  );
+  return { clerkUsername, mapping: data, mappingError: error, mappingLoading: loading };
 }
 
 function SignInPage() {
   const { isLoaded, userId } = useAuth();
+  useEffect(() => {
+    setRegistrationIntent(false);
+  }, []);
   if (isLoaded && userId) {
     return <Navigate to="/" replace />;
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <ClerkDebug page="sign-in" />
       <SignIn
         path="/sign-in"
         routing="path"
@@ -516,45 +518,28 @@ function SignInPage() {
 
 function SignUpPage() {
   const { isLoaded, userId } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setRegistrationIntent(true);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded && userId) {
+      navigate("/?registered=1", { replace: true });
+    }
+  }, [isLoaded, navigate, userId]);
+
   if (isLoaded && userId) {
-    return <Navigate to="/" replace />;
+    return <div className="p-6 text-sm text-muted-foreground">Finishing registration...</div>;
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <ClerkDebug page="sign-up" />
       <SignUp
         path="/sign-up"
         routing="path"
         signInUrl="/sign-in"
       />
-    </div>
-  );
-}
-
-function AuthTestPage() {
-  const signInHref = (() => {
-    if (typeof window === "undefined") {
-      return "/sign-in";
-    }
-    const target = new URL("/sign-in", window.location.origin);
-    target.searchParams.set("redirect_url", `${window.location.origin}/`);
-    return `${target.pathname}${target.search}`;
-  })();
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <div className="grid gap-4 rounded-2xl border border-border bg-white p-6 shadow-sm">
-        <div className="text-lg font-semibold">Auth Test</div>
-        <div className="text-sm text-muted-foreground break-all">
-          Return target: <code>{typeof window === "undefined" ? "/" : `${window.location.origin}/`}</code>
-        </div>
-        <a
-          className="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm text-white"
-          href={signInHref}
-        >
-          Sign in with Clerk
-        </a>
-      </div>
     </div>
   );
 }
@@ -1106,57 +1091,113 @@ function PortalShell(props: {
   );
 }
 
+function GlobalErrorPage(props: {
+  title: string;
+  description: string;
+  detail?: string | null;
+}) {
+  return (
+    <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
+      <Card className="w-full max-w-lg">
+        <CardHeader>
+          <CardTitle>{props.title}</CardTitle>
+          <CardDescription>{props.description}</CardDescription>
+        </CardHeader>
+        {props.detail && (
+          <CardContent>
+            <p className="text-sm text-destructive">{props.detail}</p>
+          </CardContent>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function OverviewPage() {
   const { t } = useLanguage();
-  const { clerkUsername, mapping: explicitMapping } = useCurrentUserMapping();
-  const { data: users, error, loading } = useAsyncValue(listUsers, []);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user } = useUser();
+  const {
+    clerkUsername,
+    mapping,
+    mappingError,
+    mappingLoading,
+  } = useCurrentUserMapping();
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [registering, setRegistering] = useState(false);
+  const registrationStartedRef = useRef(false);
 
-  const explicitMappedUserId = explicitMapping?.polarisUserId ?? null;
+  const explicitMappedUserId = mapping?.polarisUserId ?? null;
+
+  useEffect(() => {
+    if (
+      (!hasRegistrationIntent() && !hasRegistrationQuery(location.search))
+      || !clerkUsername
+      || mappingLoading
+      || Boolean(mappingError)
+      || Boolean(explicitMappedUserId)
+      || registrationStartedRef.current
+    ) {
+      return;
+    }
+
+    registrationStartedRef.current = true;
+    setRegistering(true);
+    setRegistrationError(null);
+    void createPortalUser({
+      userProfileId: clerkUsername,
+      clerkUsername,
+      ...(user?.primaryEmailAddress?.emailAddress?.trim()
+        ? { email: user.primaryEmailAddress.emailAddress.trim() }
+        : {}),
+      name: user?.fullName?.trim() || user?.username?.trim() || clerkUsername,
+      role: "user",
+      plan: "free",
+    })
+      .then((created) => {
+        setRegistrationIntent(false);
+        clearRegistrationQuery(navigate, location.pathname, location.search);
+        navigate(`/users/${encodeURIComponent(created.id)}/workspaces`, { replace: true });
+      })
+      .catch((cause: unknown) => {
+        registrationStartedRef.current = false;
+        setRegistrationIntent(false);
+        clearRegistrationQuery(navigate, location.pathname, location.search);
+        setRegistrationError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        setRegistering(false);
+      });
+  }, [
+    clerkUsername,
+    explicitMappedUserId,
+    location.pathname,
+    location.search,
+    mappingError,
+    mappingLoading,
+    navigate,
+    user,
+  ]);
 
   if (explicitMappedUserId) {
     return <Navigate to={`/users/${encodeURIComponent(explicitMappedUserId)}/workspaces`} replace />;
   }
 
-  const matchedUserId = users?.find((entry) => {
-    const name = normalizeClerkUsername(entry.name);
-    const emailLocal = normalizeClerkUsername(entry.email.split("@")[0]);
-    return Boolean(clerkUsername) && (name === clerkUsername || emailLocal === clerkUsername);
-  })?.id ?? null;
-
-  if (matchedUserId) {
-    return <Navigate to={`/users/${encodeURIComponent(matchedUserId)}/workspaces`} replace />;
-  }
-
   return (
-    <PortalShell users={users ?? []}>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("users")}</CardTitle>
-          <CardDescription>
-            {t("select_user_route")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          {loading && <p className="text-sm text-muted-foreground">{t("loading_users")}</p>}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {!loading && !error && clerkUsername && !explicitMappedUserId && !matchedUserId && (
-            <p className="text-sm text-destructive">
-              No Polaris user mapping exists for Clerk username "{clerkUsername}".
-            </p>
-          )}
-          {users?.map((user) => (
-            <Link
-              key={user.id}
-              to={`/users/${encodeURIComponent(user.id)}/workspaces`}
-              className="rounded-2xl border border-border bg-white p-4 hover:bg-muted/40"
-            >
-              <div className="font-medium">{user.name || user.id}</div>
-              <div className="text-sm text-muted-foreground">{user.email}</div>
-            </Link>
-          ))}
-        </CardContent>
-      </Card>
-    </PortalShell>
+    <GlobalErrorPage
+      title={t("global_error_title")}
+      description={t("global_error_description")}
+      detail={
+        registering
+          ? t("creating_account")
+          : mappingError
+            || registrationError
+            || (!mappingLoading && !explicitMappedUserId
+              ? t("global_error_unresolved_access")
+              : null)
+      }
+    />
   );
 }
 
@@ -1800,7 +1841,6 @@ export default function App() {
         <Routes>
           <Route path="/sign-in/*" element={<SignInPage />} />
           <Route path="/sign-up/*" element={<SignUpPage />} />
-          <Route path="/auth-test" element={<AuthTestPage />} />
           <Route
             path="*"
             element={(

@@ -49,7 +49,8 @@ Current control-plane responsibilities:
 
 Current command surface:
 
-- `create-user`
+- `user create`
+- `user delete`
 - `create`
 - `render`
 - `apply`
@@ -126,7 +127,7 @@ experience is still closer to "operate a precise infrastructure tool" than
 
 For Polaris itself, the current UX strengths are:
 
-- one consistent CLI surface across create-user, create, render,
+- one consistent CLI surface across user create, user delete, create, render,
   apply, start, status, reconcile, logs, and switch
 - explicit generated files and state snapshots that are easy to inspect
 - explicit backend targeting through `<project>@<backend>`

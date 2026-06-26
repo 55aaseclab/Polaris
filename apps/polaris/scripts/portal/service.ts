@@ -25,6 +25,7 @@ import {
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createCommand } from "../cli/commands/create.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
+import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import { performWorkspaceSwitch } from "../cli/commands/switch.js";
 import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import { stopCommand } from "../cli/commands/stop.js";
@@ -311,4 +312,55 @@ export async function createPortalUser(input: {
     throw new Error(`User profile '${userProfileId}' could not be loaded after creation`);
   }
   return created;
+}
+
+export async function deletePortalUser(userProfileId: string): Promise<{
+  userProfile: {
+    id: string;
+    removed: boolean;
+    profilePath: string;
+    secretsRoot: string;
+  };
+  mappings: {
+    removedClerkUsernames: string[];
+  };
+}> {
+  const stdoutChunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+    callback?.();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    await deleteUserCommand([userProfileId]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const stdout = stdoutChunks.join("").trim();
+  const jsonEnd = stdout.lastIndexOf("}");
+  if (jsonEnd === -1) {
+    throw new Error(`Delete user command did not return JSON output: ${JSON.stringify(stdout)}`);
+  }
+  for (let jsonStart = stdout.lastIndexOf("{", jsonEnd); jsonStart !== -1; jsonStart = stdout.lastIndexOf("{", jsonStart - 1)) {
+    try {
+      return JSON.parse(stdout.slice(jsonStart, jsonEnd + 1)) as {
+        userProfile: {
+          id: string;
+          removed: boolean;
+          profilePath: string;
+          secretsRoot: string;
+        };
+        mappings: {
+          removedClerkUsernames: string[];
+        };
+      };
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`Delete user command did not return JSON output: ${JSON.stringify(stdout)}`);
 }

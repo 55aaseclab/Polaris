@@ -18,6 +18,7 @@ node_modules/
 .pnpm-store/
 dist/
 apps/polaris/.coverage/
+apps/polaris-web/test-results/
 .env.local
 apps/polaris-web/config/user-map.json
 
@@ -34,12 +35,10 @@ secrets/agentctl/**
 config/users/*
 !config/users/profiles/
 config/users/profiles/**
-!config/users/*/
-!config/users/*/projects/
-!config/users/*/projects/*/
 config/users/*/**
 !config/users/profiles/100000000000000001.yaml
 !config/users/100000000000000001/.gitignore
+!config/users/100000000000000001/
 !config/users/100000000000000001/credentials/
 !config/users/100000000000000001/credentials/**
 !config/users/100000000000000001/docker/

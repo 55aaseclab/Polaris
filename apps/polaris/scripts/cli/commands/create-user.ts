@@ -21,7 +21,7 @@ function parseCreateUserArgs(argv: string[]): {
   const roleFlagIndex = argv.findIndex((value) => value === "--role");
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
   if (!userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- create-user <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--role <admin|user>] [--plan <free|pro>]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--role <admin|user>] [--plan <free|pro>]");
   }
   return {
     userProfileId,

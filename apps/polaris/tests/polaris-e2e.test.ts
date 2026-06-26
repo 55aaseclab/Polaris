@@ -172,7 +172,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         GIT_AUTHOR_EMAIL: profileEmail,
       },
       async () => {
-        await runCli(["create-user", userProfileId, "--name", "E2E Create", "--email", profileEmail]);
+        await runCli(["user", "create", userProfileId, "--name", "E2E Create", "--email", profileEmail]);
         const output = await captureStdout(async () => {
           await runCli(["create", project, "--user", userProfileId]);
         });
@@ -239,7 +239,7 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
         GIT_AUTHOR_EMAIL: profileEmail,
       },
       async () => {
-        await runCli(["create-user", userProfileId, "--name", "E2E Create Pod", "--email", profileEmail]);
+        await runCli(["user", "create", userProfileId, "--name", "E2E Create Pod", "--email", profileEmail]);
         const output = await captureStdout(async () => {
           await runCli(["create", `${project}@pod:gvisor`, "--user", userProfileId]);
         });

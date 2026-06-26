@@ -208,6 +208,85 @@ test("runCli rejects empty argv and missing project", async () => {
   await assert.rejects(() => runCli(["status"]), /Usage:/);
 });
 
+test("runCli user create scaffolds a user profile and default credentials", async () => {
+  const userProfileId = uniqueProjectName("cli-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    const stdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "create",
+        userProfileId,
+        "--name",
+        "CLI User",
+        "--email",
+        `${userProfileId}@polaris.local`,
+      ]);
+    });
+    const parsed = parseJsonOutput<{
+      userProfile: { id: string; created: boolean };
+      credentials: { defaults: string[] };
+    }>(stdout);
+
+    assert.equal(parsed.userProfile.id, userProfileId);
+    assert.equal(parsed.userProfile.created, true);
+    assert.deepEqual(parsed.credentials.defaults, ["codex-default", "github-ssh"]);
+    assert.equal(fs.existsSync(profilePath), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex-default.yaml")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "github-ssh.yaml")), true);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("runCli user delete removes the user profile, secrets root, and Clerk mapping", async () => {
+  const userProfileId = uniqueProjectName("cli-user-delete");
+  const clerkUsername = `${userProfileId}-clerk`;
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const userMapPath = path.join(REPO_ROOT, "apps", "polaris-web", "config", "user-map.json");
+  const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI User Delete",
+      "--email",
+      `${userProfileId}@polaris.local`,
+      "--clerk",
+      clerkUsername,
+    ]);
+
+    const stdout = await captureStdout(async () => {
+      await runCli(["user", "delete", userProfileId]);
+    });
+    const parsed = parseJsonOutput<{
+      userProfile: { id: string; removed: boolean };
+      mappings: { removedClerkUsernames: string[] };
+    }>(stdout);
+
+    assert.equal(parsed.userProfile.id, userProfileId);
+    assert.equal(parsed.userProfile.removed, true);
+    assert.deepEqual(parsed.mappings.removedClerkUsernames, [clerkUsername]);
+    assert.equal(fs.existsSync(profilePath), false);
+    assert.equal(fs.existsSync(userRoot), false);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(userMapPath, { force: true });
+    } else {
+      fs.writeFileSync(userMapPath, originalUserMap, "utf8");
+    }
+  }
+});
+
 test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
@@ -249,12 +328,12 @@ test("driver selection persists a default backend control", () => {
 
 test("workspaceImageRef derives a neutral deterministic ttl.sh reference", () => {
   assert.equal(
-    workspaceImageRef("100000000000000002", "morpheus"),
-    "ttl.sh/user-002-morpheus:24h",
+    workspaceImageRef("100000000000000001", "example-project"),
+    "ttl.sh/user-001-example-project:24h",
   );
   assert.equal(
-    workspaceImageRef("local-cyrus@example.com", "Feature Preview"),
-    "ttl.sh/user-local-cyrus-example-com-feature-preview:24h",
+    workspaceImageRef("local-example-user@example.com", "Feature Preview"),
+    "ttl.sh/user-local-example-user-examp-feature-preview:24h",
   );
 });
 

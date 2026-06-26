@@ -24,7 +24,7 @@ export async function createCommand(argv: string[]): Promise<void> {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   assertProjectNameAvailable(project);
   if (!userProfileExists(userProfileId)) {
-    throw new Error(`User profile '${userProfileId}' was not found. Create it first with create-user.`);
+    throw new Error(`User profile '${userProfileId}' was not found. Create it first with user create.`);
   }
   if (!workspaceConfigExists(project)) {
     const scaffoldBackend = backendHint === "pod" || backendHint === "kubevirt-vm" ? backendHint : "docker";
