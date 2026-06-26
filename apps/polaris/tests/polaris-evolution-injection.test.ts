@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { renderDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { renderPodWorkspace } from "../scripts/backends/pod/render.js";
-import { loadWorkspace } from "../scripts/config/load.js";
+import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import {
   appendEvolutionEvent,
   controlPlaneEvolutionDbPath,
@@ -18,8 +18,18 @@ import {
 } from "../scripts/evolution/runtime.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
 
+function loadWorkspaceFromRefForTest(projectRef: string) {
+  const resolved = resolveWorkspaceConfigPath(projectRef);
+  return loadWorkspaceFromConfigPath(
+    resolved.configPath,
+    resolved.project,
+    resolved.backendHint,
+    resolved.profileHint,
+  );
+}
+
 test("prepareEvolutionMemorySnapshot writes control-plane memory files and snapshot", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   const userMemoryPath = controlPlaneUserMemoryPath(workspace);
   const snapshotPath = controlPlaneSessionSnapshotPath(workspace, "session-1");
@@ -71,7 +81,7 @@ test("prepareEvolutionMemorySnapshot writes control-plane memory files and snaps
 });
 
 test("prepareEvolutionMemorySnapshot imports existing markdown memory into the DB", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   const userMemoryPath = controlPlaneUserMemoryPath(workspace);
   const dbPath = controlPlaneEvolutionDbPath(workspace);
@@ -121,7 +131,7 @@ test("prepareEvolutionMemorySnapshot imports existing markdown memory into the D
 });
 
 test("finalizeEvolutionSession preserves the full mirrored event history", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   const eventsPath = path.join(path.dirname(workspaceMemoryPath), "execution-events.jsonl");
   try {
@@ -149,7 +159,7 @@ test("finalizeEvolutionSession preserves the full mirrored event history", async
 });
 
 test("finalizeEvolutionSession stages reviewed memory changes by default", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   const pendingPath = controlPlanePendingMemoryPath(workspace);
   const dbPath = controlPlaneEvolutionDbPath(workspace);
@@ -191,7 +201,7 @@ test("finalizeEvolutionSession stages reviewed memory changes by default", async
 });
 
 test("auto-applied memory updates do not rewrite an existing session snapshot", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   const snapshotPath = controlPlaneSessionSnapshotPath(workspace, "session-frozen");
   const dbPath = controlPlaneEvolutionDbPath(workspace);
@@ -239,7 +249,7 @@ test("auto-applied memory updates do not rewrite an existing session snapshot", 
 });
 
 test("renderers expose memory files and session snapshot paths to runtime consumers", async () => {
-  const workspace = loadWorkspace("demo@docker");
+  const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const workspaceMemoryPath = controlPlaneWorkspaceMemoryPath(workspace);
   try {
     fs.mkdirSync(path.dirname(workspaceMemoryPath), { recursive: true });
