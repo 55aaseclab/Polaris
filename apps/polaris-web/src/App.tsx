@@ -38,6 +38,7 @@ import {
   getWorkspaceDetail,
   listCredentials,
   listUsers,
+  refreshWorkspaceStatus,
   resolvePortalUserMapping,
   listWorkspaces,
   startWorkspace,
@@ -254,10 +255,12 @@ const COPY: Record<Language, Record<string, string>> = {
     no_service_detail: "No service detail.",
     no_profile_detail: "No profile detail.",
     workspace_overview: "Workspace overview",
+    paseo_info: "Paseo",
     paseo_status: "Paseo status",
     isolated_dev_env: "Isolated development environment",
     evolution_memory: "Evolution memory",
     daemon_address: "Daemon address",
+    paseo_server_id: "Paseo server ID",
     supported_harnesses: "Supported harnesses",
     credential_selection: "Credential selection",
     credential_selection_desc: "Daemon and harness status stay separate from credential choice.",
@@ -309,6 +312,8 @@ const COPY: Record<Language, Record<string, string>> = {
     global_error_description: "The page could not be loaded.",
     global_error_unresolved_access: "Your access could not be verified.",
     creating_account: "Creating account...",
+    refresh: "Refresh",
+    refreshing: "Refreshing...",
   },
   zh: {
     app_name: "Polaris",
@@ -440,10 +445,12 @@ const COPY: Record<Language, Record<string, string>> = {
     no_service_detail: "暂无服务详情。",
     no_profile_detail: "暂无用户配置详情。",
     workspace_overview: "工作空间概览",
+    paseo_info: "Paseo",
     paseo_status: "Paseo 状态",
     isolated_dev_env: "隔离开发环境",
     evolution_memory: "演进记忆",
     daemon_address: "守护进程地址",
+    paseo_server_id: "Paseo server ID",
     supported_harnesses: "支持的协作者",
     credential_selection: "凭证选择",
     credential_selection_desc: "daemon 与 harness 状态独立于凭证选择。",
@@ -495,6 +502,8 @@ const COPY: Record<Language, Record<string, string>> = {
     global_error_description: "页面无法加载。",
     global_error_unresolved_access: "无法验证当前访问权限。",
     creating_account: "正在创建账号…",
+    refresh: "刷新",
+    refreshing: "刷新中…",
   },
 };
 
@@ -906,6 +915,10 @@ function normalizePaseoPortalUrl(
     return applyPaseoScope(trimmed, effectiveScope);
   }
   return buildScopedPaseoPortalUrl(appBaseUrl, offer, effectiveScope);
+}
+
+function workspacePaseoScope(userId: string, workspaceName: string): string {
+  return `${userId.trim()}:${workspaceName.trim()}`;
 }
 
 function formatBackendValue(
@@ -1750,6 +1763,7 @@ function WorkspaceDetailPage() {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [bindingPaseo, setBindingPaseo] = useState(false);
   const [unbindingPaseo, setUnbindingPaseo] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1771,9 +1785,10 @@ function WorkspaceDetailPage() {
   const selectedCodexCredential = codexCredentialStatus?.credentialId
     ? agentCredentials.find((credential) => credential.id === codexCredentialStatus.credentialId) ?? null
     : null;
+  const paseoScope = workspacePaseoScope(userId, workspaceName);
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
-    userId,
+    paseoScope,
   );
   const developmentSections: AssetSection[] = assets
     ? [
@@ -1929,6 +1944,19 @@ function WorkspaceDetailPage() {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function handleRefreshStatus(): Promise<void> {
+    setActionError(null);
+    setRefreshing(true);
+    try {
+      await refreshWorkspaceStatus(userId, workspaceName);
+      setRefreshTick((current) => current + 1);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -2136,7 +2164,7 @@ function WorkspaceDetailPage() {
     if (currentPane === "paseo") {
       const liveTarget = normalizePaseoPortalUrl(
         data.liveTarget ?? data.status?.paseo?.liveTarget,
-        userId,
+        paseoScope,
       );
       const driverStatus = data.status?.driver;
       const runtimeRunning =
@@ -2144,16 +2172,74 @@ function WorkspaceDetailPage() {
         || data.status?.backend.instanceState === "running";
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
-          <div className="grid gap-1">
-            <div className="text-sm font-medium">
-              {t("paseo_status")}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {translatePaseoState(data.status?.daemon, t)}
-            </div>
-          </div>
-          <Separator />
           <div className="grid gap-6">
+            <div className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm font-medium">{t("paseo_info")}</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRefreshStatus()}
+                  disabled={loading || refreshing || switching || starting || stopping || deleting}
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                  {refreshing ? t("refreshing") : t("refresh")}
+                </Button>
+              </div>
+              <div className="grid gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("paseo_status")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    {translatePaseoState(data.status?.daemon, t)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("paseo_server_id")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    <span className="break-all">
+                      {data.status?.paseo?.serverId ?? t("unknown")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("daemon_address")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    <span className="break-all">
+                      {data.status?.paseo?.daemonAddress ?? t("unknown")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("supported_harnesses")}</div>
+                  </div>
+                  <div className="flex w-full flex-wrap justify-start gap-2 sm:w-[28rem] sm:justify-end">
+                    {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
+                      ? data.status?.paseo?.supportedHarnesses?.map((item) => (
+                          <Badge key={item} variant="secondary">{item}</Badge>
+                        ))
+                      : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("live_target")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    <span className="break-all">
+                      {liveTarget ?? t("unknown")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Separator />
             <div className="grid gap-4">
               <div className="text-sm font-medium">{t("driver_info")}</div>
               <div className="grid gap-4">
@@ -2222,32 +2308,6 @@ function WorkspaceDetailPage() {
             <Separator />
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-sm font-medium">{t("daemon_address")}</div>
-                <div className="text-sm text-muted-foreground">{t("paseo_status")}</div>
-              </div>
-              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                <span className="break-all">
-                  {data.status?.paseo?.daemonAddress ?? t("unknown")}
-                </span>
-              </div>
-            </div>
-            <Separator />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{t("supported_harnesses")}</div>
-                <div className="text-sm text-muted-foreground">{t("paseo_status")}</div>
-              </div>
-              <div className="flex w-full flex-wrap justify-start gap-2 sm:w-[28rem] sm:justify-end">
-                {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
-                  ? data.status?.paseo?.supportedHarnesses?.map((item) => (
-                      <Badge key={item} variant="secondary">{item}</Badge>
-                    ))
-                  : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
-              </div>
-            </div>
-            <Separator />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
                 <div className="text-sm font-medium">{t("credential_selection")}</div>
                 <div className="text-sm text-muted-foreground">
                   {t("credential_selection_desc")}
@@ -2265,20 +2325,6 @@ function WorkspaceDetailPage() {
                 <div>
                   {translateCredentialSource(codexCredentialStatus?.source, t)}
                 </div>
-              </div>
-            </div>
-            <Separator />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{t("live_target")}</div>
-                <div className="text-sm text-muted-foreground">
-                  {translatePairingState(data.status?.daemon?.pairing?.state, t)}
-                </div>
-              </div>
-              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                <span className="break-all">
-                  {liveTarget ?? t("unknown")}
-                </span>
               </div>
             </div>
           </div>

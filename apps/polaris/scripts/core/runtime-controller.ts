@@ -9,6 +9,22 @@ import type {
   WorkspaceStatus,
 } from "./workspace.js";
 import { normalizePairingUrl } from "./pairing-url.js";
+import { parseConnectionOfferServerId } from "./paseo.js";
+
+function parseDaemonServerId(detail?: string): string | undefined {
+  if (!detail) {
+    return undefined;
+  }
+  const okMatch = detail.match(/daemon status ok \(([^)]+)\)/);
+  if (okMatch?.[1]?.trim()) {
+    return okMatch[1].trim();
+  }
+  const mismatchMatch = detail.match(/daemon serverId ([^\s)]+)/);
+  if (mismatchMatch?.[1]?.trim()) {
+    return mismatchMatch[1].trim();
+  }
+  return undefined;
+}
 
 function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
   return workspace.runtime.authFiles.some((entry) => {
@@ -315,6 +331,9 @@ export function synthesizeWorkspaceStatus(
   lifecycleAction: WorkspaceStatus["lifecycleAction"],
 ): WorkspaceStatus {
   const liveTarget = normalizePairingUrl(observation.daemon.pairing?.url) ?? null;
+  const paseoServerId =
+    parseConnectionOfferServerId(liveTarget ?? "")
+    ?? parseDaemonServerId(observation.daemon.manager?.detail);
   const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
   const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
   const backendState = !observation.backend.exists
@@ -363,6 +382,7 @@ export function synthesizeWorkspaceStatus(
     },
     paseo: {
       daemonAddress: workspace.agent.runtime.daemonAddress,
+      ...(paseoServerId ? { serverId: paseoServerId } : {}),
       supportedHarnesses: workspace.agent.harnesses,
       liveTarget,
     },

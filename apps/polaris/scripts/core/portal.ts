@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { buildStatusAssets } from "./status-assets.js";
 import { normalizePairingUrl } from "./pairing-url.js";
+import { parseConnectionOfferServerId } from "./paseo.js";
 import {
   readWorkspaceDriverSelection,
   workspaceSelectionPath,
@@ -394,6 +395,10 @@ export function resolveLiveTarget(
   ) ?? null;
 }
 
+function workspacePaseoScope(userId: string, workspace: string): string {
+  return `${userId.trim()}:${workspace.trim()}`;
+}
+
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
   const credentialsRoot = path.join(USER_ROOT, userId, "credentials");
   if (!fs.existsSync(credentialsRoot)) {
@@ -557,7 +562,25 @@ export function readPortalWorkspaceAssetPreview(
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
   const selectedDriver = readWorkspaceSelection(userId, workspace);
+  const paseoScope = workspacePaseoScope(userId, workspace);
   let status = readWorkspaceStatus(userId, workspace);
+  if (status?.paseo && !status.paseo.serverId) {
+    const liveTarget = resolveLiveTarget(status, paseoScope);
+    const pairingServerId = parseConnectionOfferServerId(liveTarget ?? "");
+    const daemonDetail = status.daemon?.manager?.detail;
+    const daemonServerId = typeof daemonDetail === "string"
+      ? daemonDetail.match(/daemon status ok \(([^)]+)\)/)?.[1]?.trim()
+      : undefined;
+    status = {
+      ...status,
+      paseo: {
+        ...status.paseo,
+        ...(pairingServerId || daemonServerId
+          ? { serverId: pairingServerId ?? daemonServerId }
+          : {}),
+      },
+    };
+  }
   const assets = status?.assets as
     | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
     | undefined;
@@ -599,8 +622,9 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
           ...status,
           paseo: {
             daemonAddress: loaded.agent.runtime.daemonAddress,
+            serverId: parseConnectionOfferServerId(resolveLiveTarget(status, paseoScope) ?? ""),
             supportedHarnesses: loaded.agent.harnesses,
-            liveTarget: resolveLiveTarget(status, userId),
+            liveTarget: resolveLiveTarget(status, paseoScope),
           },
         };
         break;
@@ -621,7 +645,7 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     selectedDriver,
     status,
     progress: readWorkspaceProvisionProgress(userId, workspace),
-    liveTarget: resolveLiveTarget(status, userId),
+    liveTarget: resolveLiveTarget(status, paseoScope),
   };
 }
 

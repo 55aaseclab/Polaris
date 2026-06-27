@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
@@ -29,6 +30,13 @@ interface WorkspaceConfigMatch {
   project: string;
   backendKind: BackendKind;
   configPath: string;
+}
+
+interface WorkspaceImageBuildState {
+  imageRef: string;
+  dockerfileDigest: string;
+  dockerfilePath: string;
+  updatedAt: string;
 }
 
 function configMatches(project: string): WorkspaceConfigMatch[] {
@@ -273,6 +281,41 @@ function canPullImage(imageRef: string): boolean {
   }
 }
 
+function workspaceImageBuildStatePath(source: WorkspaceConfigMatch): string {
+  return path.join(path.dirname(source.configPath), "state", "image-build.json");
+}
+
+function digestFile(filePath: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(filePath))
+    .digest("hex");
+}
+
+function readWorkspaceImageBuildState(
+  source: WorkspaceConfigMatch,
+): WorkspaceImageBuildState | null {
+  const statePath = workspaceImageBuildStatePath(source);
+  if (!fs.existsSync(statePath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8")) as WorkspaceImageBuildState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspaceImageBuildState(
+  source: WorkspaceConfigMatch,
+  state: WorkspaceImageBuildState,
+): void {
+  const statePath = workspaceImageBuildStatePath(source);
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
 export function ensureCanonicalWorkspaceImage(projectRef: string): void {
   const { project } = parseWorkspaceReference(projectRef);
   const ensured = ensureWorkspaceConfig(projectRef);
@@ -283,6 +326,20 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
 
   const imageRef = workspaceImageRef(source.userProfileId, source.project);
   const dockerfileState = syncWorkspaceDockerfileTemplate(source.userProfileId);
+  const dockerfileDigest = digestFile(dockerfileState.path);
+  const recordedBuild = readWorkspaceImageBuildState(source);
+  const buildStateMatches =
+    recordedBuild?.imageRef === imageRef
+    && recordedBuild?.dockerfileDigest === dockerfileDigest
+    && recordedBuild?.dockerfilePath === path.relative(REPO_ROOT, dockerfileState.path);
+  const recordBuild = (): void => {
+    writeWorkspaceImageBuildState(source, {
+      imageRef,
+      dockerfileDigest,
+      dockerfilePath: path.relative(REPO_ROOT, dockerfileState.path),
+      updatedAt: new Date().toISOString(),
+    });
+  };
   if (dockerfileState.refreshed) {
     logInfo("provision", "workspace-image-build", {
       project: source.project,
@@ -292,10 +349,11 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
       reason: "dockerfile-template-refreshed",
     });
     runCommand("docker", ["build", "-f", dockerfileState.path, "-t", imageRef, "."]);
+    recordBuild();
     return;
   }
 
-  if (hasLocalImage(imageRef) || canPullImage(imageRef)) {
+  if (buildStateMatches && (hasLocalImage(imageRef) || canPullImage(imageRef))) {
     return;
   }
 
@@ -311,9 +369,14 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
     userProfileId: source.userProfileId,
     imageRef,
     dockerfile: path.relative(REPO_ROOT, dockerfile),
-    reason: dockerfileState.created ? "dockerfile-created" : "image-missing",
+    reason: dockerfileState.created
+      ? "dockerfile-created"
+      : !buildStateMatches
+        ? (recordedBuild ? "dockerfile-digest-changed" : "image-build-state-missing")
+        : "image-missing",
   });
   runCommand("docker", ["build", "-f", dockerfile, "-t", imageRef, "."]);
+  recordBuild();
 }
 
 export function ensureProvisionedWorkspace(projectRef: string): void {

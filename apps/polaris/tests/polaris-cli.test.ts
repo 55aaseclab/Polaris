@@ -502,14 +502,16 @@ exit 0
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
         assert.deepEqual(readCommandLog(), [
-          `image inspect ${imageRef}`,
-          `pull ${imageRef}`,
           `build -f ${path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")} -t ${imageRef} .`,
         ]);
       },
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "workspaces", project), {
+      recursive: true,
+      force: true,
+    });
   }
 });
 
@@ -604,6 +606,61 @@ exit 0
     fs.utimesSync(templateDockerfile, templateStat.atime, templateStat.mtime);
     fs.rmSync(dockerPath, { force: true });
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), { recursive: true, force: true });
+  }
+});
+
+test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without matching build state", async () => {
+  const userProfileId = uniqueProjectName("image-state-user");
+  const project = uniqueProjectName("image-state-project");
+  const imageRef = workspaceImageRef(userProfileId, project);
+  const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
+  const userDockerfile = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userProfileId,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
+
+  fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+  doc.project = project;
+  doc.user_profile = userProfileId;
+  doc.runtime.base_image = imageRef;
+  fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+  fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile"),
+    userDockerfile,
+  );
+
+  try {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$1 $2 $3" == "image inspect ${imageRef}" ]]; then
+  exit 0
+fi
+if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        assert.deepEqual(readCommandLog(), [
+          `build -f ${userDockerfile} -t ${imageRef} .`,
+        ]);
+      },
+    );
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), {
+      recursive: true,
+      force: true,
+    });
   }
 });
 

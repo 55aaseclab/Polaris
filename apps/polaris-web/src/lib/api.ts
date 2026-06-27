@@ -64,6 +64,7 @@ export interface PortalWorkspaceStatus {
   };
   paseo?: {
     daemonAddress: string;
+    serverId?: string;
     supportedHarnesses: string[];
     liveTarget: string | null;
   };
@@ -313,6 +314,19 @@ export async function getWorkspaceDetail(
 ): Promise<PortalWorkspaceDetail> {
   return apiFetch<PortalWorkspaceDetail>(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
+  );
+}
+
+export async function refreshWorkspaceStatus(
+  userId: string,
+  workspace: string,
+): Promise<{ refreshed: true }> {
+  return apiFetch<{ refreshed: true }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/refresh`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
   );
 }
 
