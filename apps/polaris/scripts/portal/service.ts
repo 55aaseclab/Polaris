@@ -1,119 +1,84 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
-import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
-import { workspaceConfigPath } from "../config/scaffold.js";
 import {
-  clearWorkspaceProvisionProgress,
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
-  listPortalProfiles,
   readPortalCredentialPreview,
   readPortalWorkspaceAssetPreview,
-  listWorkspaceDriverTargets,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
-  readWorkspaceProvisionProgress,
   type PortalCredentialSummary,
   type PortalCredentialPreview,
   type PortalWorkspaceAssetPreview,
   type PortalDriverTarget,
-  type PortalProvisionProgress,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
-  updatePortalWorkspaceAgentBinding,
-  workspaceRefFromTarget,
-  writeWorkspaceProvisionProgress,
 } from "../core/portal.js";
-import { loadWorkspaceFromConfigPath } from "../config/load.js";
-import { createCommand } from "../cli/commands/create.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
   createUserCredentialCommand,
   deleteUserCredentialCommand,
 } from "../cli/commands/user-credential.js";
-import { performWorkspaceSwitch } from "../cli/commands/switch.js";
-import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
-import { startCommand } from "../cli/commands/start.js";
-import { statusCommand } from "../cli/commands/status.js";
-import { stopCommand } from "../cli/commands/stop.js";
-import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
-import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
-import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
-import { getBackendDriver } from "../backends/index.js";
-import type { WorkspaceSpec } from "../core/workspace.js";
-import { logWarn } from "../utils/log.js";
+import {
+  bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
+  deletePortalWorkspace as deletePortalWorkspaceExecutor,
+  queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
+  refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
+  stopPortalWorkspace as stopPortalWorkspaceExecutor,
+  switchPortalWorkspace as switchPortalWorkspaceExecutor,
+  unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
+} from "../executor/client.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
+import { deleteClerkUsersByUsername } from "./clerk.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
-const PROVISION_TOTAL_STEPS = 7;
-const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
-const CLERK_DELETE_SCRIPT = path.join(REPO_ROOT, "apps", "polaris-web", "scripts", "delete-clerk-users.mjs");
 
 function parseJsonFromText<T>(value: string): T {
   const trimmed = value.trim();
   const jsonEnd = trimmed.lastIndexOf("}");
   if (jsonEnd === -1) {
-    throw new Error(`No JSON object found in output: ${JSON.stringify(trimmed)}`);
+    throw new Error(
+      `No JSON object found in output: ${JSON.stringify(trimmed)}`,
+    );
   }
-  for (let jsonStart = trimmed.lastIndexOf("{", jsonEnd); jsonStart !== -1; jsonStart = trimmed.lastIndexOf("{", jsonStart - 1)) {
+  for (
+    let jsonStart = trimmed.lastIndexOf("{", jsonEnd);
+    jsonStart !== -1;
+    jsonStart = trimmed.lastIndexOf("{", jsonStart - 1)
+  ) {
     try {
       return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as T;
     } catch {
       continue;
     }
   }
-  throw new Error(`No JSON object found in output: ${JSON.stringify(trimmed)}`);
+  throw new Error(
+    `No JSON object found in output: ${JSON.stringify(trimmed)}`,
+  );
 }
 
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
 }
 
-function portalRoot(userId: string, workspace: string): string {
-  return path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
-}
-
-function portalStateProgress(userId: string, workspace: string): PortalProvisionProgress | null {
-  return readWorkspaceProvisionProgress(userId, workspace);
-}
-
-function updateProgress(userId: string, workspace: string, patch: Partial<PortalProvisionProgress>): PortalProvisionProgress {
-  const current = portalStateProgress(userId, workspace) ?? {
-    userId,
-    workspace,
-    phase: "queued",
-    step: 0,
-    totalSteps: PROVISION_TOTAL_STEPS,
-    percent: 0,
-    message: "queued",
-    updatedAt: new Date().toISOString(),
-    done: false,
-  };
-  const next: PortalProvisionProgress = {
-    ...current,
-    ...patch,
-    userId,
-    workspace,
-    totalSteps: PROVISION_TOTAL_STEPS,
-    percent: patch.percent ?? Math.round(((patch.step ?? current.step) / PROVISION_TOTAL_STEPS) * 100),
-    updatedAt: new Date().toISOString(),
-    done: patch.done ?? current.done,
-  };
-  writeWorkspaceProvisionProgress(userId, workspace, next);
-  return next;
-}
-
-async function captureStdout<T>(fn: () => Promise<T>): Promise<{ result: T; stdout: string }> {
+async function captureStdout<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; stdout: string }> {
   const stdoutChunks: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+    stdoutChunks.push(
+      typeof chunk === "string"
+        ? chunk
+        : Buffer.from(chunk).toString("utf8"),
+    );
+    const callback = args.find(
+      (arg) => typeof arg === "function",
+    ) as (() => void) | undefined;
     callback?.();
     return true;
   }) as typeof process.stdout.write;
@@ -126,27 +91,18 @@ async function captureStdout<T>(fn: () => Promise<T>): Promise<{ result: T; stdo
   }
 }
 
-async function refreshPortalWorkspaceStatus(userId: string, workspace: string): Promise<void> {
+async function refreshPortalWorkspaceStatus(
+  userId: string,
+  workspace: string,
+): Promise<void> {
   const key = rootKey(userId, workspace);
   const existing = statusRefreshJobs.get(key);
   if (existing) {
     return existing;
   }
   const job = (async () => {
-    const summary = loadWorkspaceSummary(userId, workspace);
-    if (!summary.selectedDriver) {
-      return;
-    }
-    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
     try {
-      await captureStdout(() => statusCommand(ref));
-    } catch (error) {
-      logWarn("portal", "workspace-status-refresh-failed", {
-        userId,
-        workspace,
-        ref,
-        reason: error instanceof Error ? error.message : String(error),
-      });
+      await refreshPortalWorkspaceStatusExecutor({ userId, workspace });
     } finally {
       statusRefreshJobs.delete(key);
     }
@@ -155,233 +111,30 @@ async function refreshPortalWorkspaceStatus(userId: string, workspace: string): 
   return job;
 }
 
-function ensureImageRefAvailable(imageRef: string): void {
-  const inspect = spawnSync("docker", ["image", "inspect", imageRef], { encoding: "utf8" });
-  if (inspect.status === 0) {
-    return;
-  }
-  const pull = spawnSync("docker", ["pull", imageRef], { encoding: "utf8" });
-  if (pull.status === 0) {
-    return;
-  }
-  throw new Error(`Image '${imageRef}' is not available`);
-}
-
-function loadUserWorkspace(
-  userId: string,
-  workspace: string,
-  backend: "docker" | "pod" | "kubevirt-vm",
-  profileHint?: string,
-): WorkspaceSpec {
-  const projectRef = backend === "pod" && profileHint
-    ? `${workspace}@${backend}:${profileHint}`
-    : `${workspace}@${backend}`;
-  const ensuredConfig = ensureWorkspaceConfig(projectRef);
-  const configPath = ensuredConfig?.configPath ?? workspaceConfigPath(workspace, backend, userId);
-  return loadWorkspaceFromConfigPath(
-    configPath,
-    workspace,
-    backend,
-    profileHint,
+export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
+  return listOwnedWorkspaces(userId).map((workspace) =>
+    loadWorkspaceSummary(userId, workspace),
   );
 }
 
-function renderWorkspaceTargets(userId: string, workspace: string, defaultDockerOnly = false): void {
-  const dockerWorkspace = loadUserWorkspace(userId, workspace, "docker");
-  renderAndWriteDockerWorkspace(dockerWorkspace);
-  if (defaultDockerOnly) {
-    return;
-  }
-  const podWorkspace = loadUserWorkspace(userId, workspace, "pod", "gvisor");
-  renderAndWritePodWorkspace(podWorkspace);
-  const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
-  renderAndWriteKubevirtWorkspace(kubevirtWorkspace);
-}
-
-function renderWorkspaceTarget(
+export function getPortalWorkspaceDetail(
   userId: string,
   workspace: string,
-  target: PortalDriverTarget,
-): void {
-  if (target.backend === "docker") {
-    renderAndWriteDockerWorkspace(loadUserWorkspace(userId, workspace, "docker"));
-    return;
-  }
-  if (target.backend === "pod") {
-    renderAndWritePodWorkspace(loadUserWorkspace(userId, workspace, "pod", target.profile ?? "gvisor"));
-    return;
-  }
-  renderAndWriteKubevirtWorkspace(loadUserWorkspace(userId, workspace, "kubevirt-vm"));
-}
-
-async function shouldRecycleRunningWorkspace(
-  userId: string,
-  workspace: string,
-  target: PortalDriverTarget,
-): Promise<boolean> {
-  const loaded = loadUserWorkspace(userId, workspace, target.backend, target.profile);
-  const observation = await getBackendDriver(loaded.backend.kind).inspect(loaded);
-  return Boolean(observation.backend.exists && observation.backend.running);
-}
-
-function ensureWorkspaceImageTargets(userId: string, workspace: string, defaultDockerOnly = false): void {
-  ensureCanonicalWorkspaceImage(`${workspace}@docker`);
-  if (defaultDockerOnly) {
-    return;
-  }
-  ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`);
-  ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`);
-  const kubevirtWorkspace = loadUserWorkspace(userId, workspace, "kubevirt-vm");
-  ensureImageRefAvailable(kubevirtWorkspace.runtime.rootdiskImage ?? "quay.io/containerdisks/debian:13");
-}
-
-function ensureWorkspaceTargetSpecs(userId: string, workspace: string, defaultDockerOnly = false): void {
-  fs.mkdirSync(portalRoot(userId, workspace), { recursive: true });
-  ensureWorkspaceConfig(`${workspace}@docker`);
-  if (!defaultDockerOnly) {
-    ensureWorkspaceConfig(`${workspace}@pod:gvisor`);
-    ensureWorkspaceConfig(`${workspace}@kubevirt-vm`);
-  }
-  const selectionPath = path.join(portalRoot(userId, workspace), "state", "selection.json");
-  if (!fs.existsSync(selectionPath)) {
-    fs.mkdirSync(path.dirname(selectionPath), { recursive: true });
-    fs.writeFileSync(selectionPath, `${JSON.stringify({ backend: "docker" }, null, 2)}\n`, "utf8");
-  }
-}
-
-async function provisionWorkspaceInternal(
-  userId: string,
-  workspace: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-  },
-): Promise<void> {
-  const defaultDockerOnly = options?.defaultDockerOnly ?? false;
-  const startAfterCreate = options?.startAfterCreate ?? false;
-  if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
-    await createCommand([workspace, "--user", userId]);
-  }
-
-  updateProgress(userId, workspace, { phase: "starting", step: 0, message: "starting workspace provisioning" });
-
-  updateProgress(userId, workspace, { phase: "specs", step: 1, message: "ensuring driver specs" });
-  ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
-
-  updateProgress(userId, workspace, { phase: "images", step: 2, message: "ensuring workspace images" });
-  ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
-
-  updateProgress(userId, workspace, { phase: "manifests", step: 3, message: "rendering backend manifests" });
-  renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
-
-  updateProgress(userId, workspace, { phase: "status", step: 4, message: "collecting workspace status" });
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (summary.selectedDriver === null) {
-    updateProgress(userId, workspace, { phase: "selection", step: 5, message: "defaulting driver selection" });
-  }
-
-  if (startAfterCreate) {
-    updateProgress(userId, workspace, { phase: "start", step: 6, message: "starting workspace" });
-    await startCommand(`${workspace}@docker`);
-  }
-
-  updateProgress(userId, workspace, {
-    phase: "done",
-    step: PROVISION_TOTAL_STEPS,
-    message: "workspace provisioning complete",
-    done: true,
-    percent: 100,
-  });
-}
-
-export function startProvisionWorkspace(
-  userId: string,
-  workspace: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-  },
-): Promise<void> {
-  const key = rootKey(userId, workspace);
-  const existing = provisionJobs.get(key);
-  if (existing) {
-    return existing;
-  }
-  const job = (async () => {
-    try {
-      await provisionWorkspaceInternal(userId, workspace, options);
-    } catch (error) {
-      updateProgress(userId, workspace, {
-        phase: "error",
-        message: error instanceof Error ? error.message : String(error),
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    } finally {
-      provisionJobs.delete(key);
-    }
-  })();
-  provisionJobs.set(key, job);
-  return job;
-}
-
-export async function provisionWorkspace(
-  userId: string,
-  workspace: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-  },
-): Promise<PortalProvisionProgress> {
-  await startProvisionWorkspace(userId, workspace, options);
-  return readWorkspaceProvisionProgress(userId, workspace) ?? updateProgress(userId, workspace, {
-    phase: "done",
-    step: PROVISION_TOTAL_STEPS,
-    percent: 100,
-    done: true,
-    message: "workspace provisioning complete",
-  });
-}
-
-export function queueProvisionWorkspace(
-  userId: string,
-  workspace: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-  },
-): PortalProvisionProgress {
-  const progress = readWorkspaceProvisionProgress(userId, workspace) ?? updateProgress(userId, workspace, {
-    phase: "queued",
-    step: 0,
-    percent: 0,
-    done: false,
-    message: "workspace provisioning queued",
-  });
-  void startProvisionWorkspace(userId, workspace, options).catch((error) => {
-    logWarn("portal", "workspace-provision-background-failed", {
-      userId,
-      workspace,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-  });
-  return progress;
-}
-
-export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
-  return listOwnedWorkspaces(userId).map((workspace) => loadWorkspaceSummary(userId, workspace));
-}
-
-export function getPortalWorkspaceDetail(userId: string, workspace: string): PortalWorkspaceDetail {
+): PortalWorkspaceDetail {
   void refreshPortalWorkspaceStatus(userId, workspace);
   return loadWorkspaceDetail(userId, workspace);
 }
 
-export function listUserPortalCredentials(userId: string): PortalCredentialSummary[] {
+export function listUserPortalCredentials(
+  userId: string,
+): PortalCredentialSummary[] {
   return listPortalCredentials(userId);
 }
 
-export function readUserPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
+export function readUserPortalCredentialPreview(
+  userId: string,
+  credentialPath: string,
+): PortalCredentialPreview {
   return readPortalCredentialPreview(userId, credentialPath);
 }
 
@@ -406,9 +159,13 @@ export async function createPortalCodexCredential(input: {
       input.userId,
       "--harness",
       "codex",
-      ...(input.credentialId?.trim() ? ["--credential-id", input.credentialId.trim()] : []),
+      ...(input.credentialId?.trim()
+        ? ["--credential-id", input.credentialId.trim()]
+        : []),
       ...(input.label?.trim() ? ["--label", input.label.trim()] : []),
-      ...(input.providerName?.trim() ? ["--provider-name", input.providerName.trim()] : []),
+      ...(input.providerName?.trim()
+        ? ["--provider-name", input.providerName.trim()]
+        : []),
       ...(input.baseUrl?.trim() ? ["--base-url", input.baseUrl.trim()] : []),
       ...(input.apiKey !== undefined ? ["--api-key", input.apiKey] : []),
     ]);
@@ -418,14 +175,21 @@ export async function createPortalCodexCredential(input: {
       id: string;
     };
   }>(stdout);
-  const summary = listPortalCredentials(input.userId).find((credential) => credential.id === created.credential.id);
+  const summary = listPortalCredentials(input.userId).find(
+    (credential) => credential.id === created.credential.id,
+  );
   if (!summary) {
-    throw new Error(`Credential '${created.credential.id}' could not be loaded after creation`);
+    throw new Error(
+      `Credential '${created.credential.id}' could not be loaded after creation`,
+    );
   }
   return summary;
 }
 
-export async function deletePortalCredential(userId: string, credentialId: string): Promise<{
+export async function deletePortalCredential(
+  userId: string,
+  credentialId: string,
+): Promise<{
   credential: {
     id: string;
     userId: string;
@@ -449,23 +213,38 @@ export async function deletePortalCredential(userId: string, credentialId: strin
   }>(stdout);
 }
 
-export function upsertPortalCredential(userId: string, credential: {
-  id: string;
-  kind: PortalCredentialSummary["kind"];
-  label: string;
-  purposes: string[];
-  status?: string;
-  files: Array<{
-    key: string;
-    sourcePath: string;
-    content: string;
-    mountPath?: string;
-  }>;
-}): PortalCredentialSummary {
-  const credentialsRoot = path.join(REPO_ROOT, "config", "users", userId, "credentials");
+export function upsertPortalCredential(
+  userId: string,
+  credential: {
+    id: string;
+    kind: PortalCredentialSummary["kind"];
+    label: string;
+    purposes: string[];
+    status?: string;
+    files: Array<{
+      key: string;
+      sourcePath: string;
+      content: string;
+      mountPath?: string;
+    }>;
+  },
+): PortalCredentialSummary {
+  const credentialsRoot = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userId,
+    "credentials",
+  );
   fs.mkdirSync(credentialsRoot, { recursive: true });
   for (const file of credential.files) {
-    const absolute = path.join(REPO_ROOT, "config", "users", userId, file.sourcePath);
+    const absolute = path.join(
+      REPO_ROOT,
+      "config",
+      "users",
+      userId,
+      file.sourcePath,
+    );
     fs.mkdirSync(path.dirname(absolute), { recursive: true });
     fs.writeFileSync(absolute, file.content, "utf8");
   }
@@ -490,7 +269,11 @@ export function upsertPortalCredential(userId: string, credential: {
     status: credential.status ?? "ready",
   };
   const outputPath = path.join(credentialsRoot, `${credential.id}.yaml`);
-  fs.writeFileSync(outputPath, `${yaml.dump(document, { lineWidth: 120, noRefs: true })}`, "utf8");
+  fs.writeFileSync(
+    outputPath,
+    `${yaml.dump(document, { lineWidth: 120, noRefs: true })}`,
+    "utf8",
+  );
   return {
     id: credential.id,
     kind: credential.kind,
@@ -501,23 +284,42 @@ export function upsertPortalCredential(userId: string, credential: {
   };
 }
 
-export async function switchPortalWorkspace(userId: string, workspace: string, target: PortalDriverTarget): Promise<ReturnType<typeof performWorkspaceSwitch>> {
-  const ref = workspaceRefFromTarget(workspace, target);
-  return performWorkspaceSwitch(ref);
+export async function queueProvisionWorkspace(
+  userId: string,
+  workspace: string,
+  options?: {
+    defaultDockerOnly?: boolean;
+    startAfterCreate?: boolean;
+  },
+) {
+  return queueProvisionWorkspaceExecutor({
+    userId,
+    workspace,
+    defaultDockerOnly: options?.defaultDockerOnly,
+    startAfterCreate: options?.startAfterCreate,
+  });
 }
 
-export async function deletePortalWorkspace(userId: string, workspace: string): Promise<{ removed: true }> {
-  await deleteWorkspaceOwnedByUser(userId, workspace);
-  return { removed: true };
+export async function switchPortalWorkspace(
+  userId: string,
+  workspace: string,
+  target: PortalDriverTarget,
+) {
+  return switchPortalWorkspaceExecutor({ userId, workspace, target });
 }
 
-export async function stopPortalWorkspace(userId: string, workspace: string): Promise<{ stopped: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
-  }
-  await stopCommand(workspaceRefFromTarget(workspace, summary.selectedDriver));
-  return { stopped: true };
+export async function deletePortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ removed: true }> {
+  return deletePortalWorkspaceExecutor({ userId, workspace });
+}
+
+export async function stopPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ stopped: true }> {
+  return stopPortalWorkspaceExecutor({ userId, workspace });
 }
 
 export async function bindPortalWorkspaceAgent(input: {
@@ -531,31 +333,7 @@ export async function bindPortalWorkspaceAgent(input: {
   credentialBindings: PortalWorkspaceDetail["credentialBindings"];
   restarted: boolean;
 }> {
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const target = input.driver ?? summary.selectedDriver;
-  if (!target) {
-    throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
-  }
-  const ref = workspaceRefFromTarget(input.workspace, target);
-  const restarted = await shouldRecycleRunningWorkspace(input.userId, input.workspace, target);
-  if (restarted) {
-    await stopCommand(ref);
-  }
-  const updated = updatePortalWorkspaceAgentBinding({
-    userId: input.userId,
-    workspace: input.workspace,
-    target,
-    credentialId: input.credentialId,
-    enabled: true,
-  });
-  renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startCommand(ref);
-  return {
-    enabled: true,
-    driver: ref,
-    credentialBindings: updated.credentialBindings,
-    restarted,
-  };
+  return bindPortalWorkspaceAgentExecutor(input);
 }
 
 export async function unbindPortalWorkspaceAgent(input: {
@@ -568,30 +346,7 @@ export async function unbindPortalWorkspaceAgent(input: {
   credentialBindings: PortalWorkspaceDetail["credentialBindings"];
   restarted: boolean;
 }> {
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const target = input.driver ?? summary.selectedDriver;
-  if (!target) {
-    throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
-  }
-  const ref = workspaceRefFromTarget(input.workspace, target);
-  const restarted = await shouldRecycleRunningWorkspace(input.userId, input.workspace, target);
-  if (restarted) {
-    await stopCommand(ref);
-  }
-  const updated = updatePortalWorkspaceAgentBinding({
-    userId: input.userId,
-    workspace: input.workspace,
-    target,
-    enabled: false,
-  });
-  renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startCommand(ref);
-  return {
-    enabled: false,
-    driver: ref,
-    credentialBindings: updated.credentialBindings,
-    restarted,
-  };
+  return unbindPortalWorkspaceAgentExecutor(input);
 }
 
 export async function createPortalUser(input: {
@@ -602,7 +357,8 @@ export async function createPortalUser(input: {
   role?: "admin" | "user";
   plan?: "free" | "pro";
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
-  const userProfileId = input.userProfileId?.trim() || input.clerkUsername.trim();
+  const userProfileId =
+    input.userProfileId?.trim() || input.clerkUsername.trim();
   const email = input.email?.trim() || `${userProfileId}@polaris.local`;
   await createUserCommand([
     userProfileId,
@@ -618,7 +374,9 @@ export async function createPortalUser(input: {
   ]);
   const created = readPortalProfile(userProfileId);
   if (!created) {
-    throw new Error(`User profile '${userProfileId}' could not be loaded after creation`);
+    throw new Error(
+      `User profile '${userProfileId}' could not be loaded after creation`,
+    );
   }
   return created;
 }
@@ -651,21 +409,9 @@ export async function deletePortalUser(userProfileId: string): Promise<{
       removedClerkUsernames: string[];
     };
   }>(stdout);
-  const clerkDelete = spawnSync(
-    "node",
-    [CLERK_DELETE_SCRIPT, ...deleted.mappings.removedClerkUsernames],
-    {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    },
+  const clerkPayload = await deleteClerkUsersByUsername(
+    deleted.mappings.removedClerkUsernames,
   );
-  if (clerkDelete.status !== 0) {
-    throw new Error(clerkDelete.stderr.trim() || clerkDelete.stdout.trim() || "Clerk delete helper failed");
-  }
-  const clerkPayload = parseJsonFromText<{
-    removedUserIds: string[];
-    skipped: boolean;
-  }>(clerkDelete.stdout);
   return {
     ...deleted,
     clerk: {

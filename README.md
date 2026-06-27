@@ -23,17 +23,36 @@ while controlling the experience from your phone or a web portal.
 
 ## Quickstart
 
-Run the local stack through Docker Compose:
+Run the local stack:
 
 ```bash
-docker compose --env-file .env.dev up -d --build
+bash ./scripts/deploy-polaris-host.sh .env.dev
 ```
 
-Access it through nginx on the mapped host port.
+This starts `polaris-executor` on the host.
 
-Only nginx is exposed to the host.
+It starts `polaris-server`, `polaris-webportal`, `paseo-app`, and `nginx`
+through Docker Compose.
+
+The default local ports are:
+
+- nginx: `18080`
+- polaris-server: `18787`
+- polaris-webportal: `18081`
+- paseo-app: `18082`
+- polaris-executor: `18788`
 
 Use `.env.dev` for real local values.
+
+For local testing from another network, set the public IP-based URLs in
+`.env.dev`.
+
+The main ones are:
+
+- `VITE_PASEO_APP_BASE_URL`
+- `POLARIS_PASEO_APP_BASE_URL`
+- `NEXT_PUBLIC_CLERK_SIGN_IN_URL`
+- `NEXT_PUBLIC_CLERK_SIGN_UP_URL`
 
 Use `.env.dev.example` and `.env.deploy.example` as templates.
 
@@ -46,13 +65,20 @@ It no longer serves local `/sign-in` or `/sign-up` Clerk UI pages.
 Deploy the stack:
 
 ```bash
-docker compose --env-file .env.deploy up -d --build
+bash ./scripts/deploy-polaris-host.sh .env.deploy
 ```
 
-Access it through nginx:
+Access it through nginx on the public hostname.
 
-- `http://polaris.jianxiaoyitech.com/`
-- `http://paseo.polaris.jianxiaoyitech.com/`
+The host executor stays local-only.
+
+The default deploy ports are:
+
+- nginx: `80`
+- polaris-server: `8787`
+- polaris-webportal: `8081`
+- paseo-app: `8082`
+- polaris-executor: `8788`
 
 Keep real values in `.env.deploy`.
 
@@ -75,7 +101,7 @@ Validate changes with:
 
 ```bash
 pnpm run check
-pnpm run test
+pnpm run test:polaris
 ```
 
 If you change command flow, backend behavior, or onboarding, update the

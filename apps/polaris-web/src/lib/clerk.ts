@@ -17,6 +17,18 @@ function requiredAbsoluteUrl(name: string): string {
   }
 }
 
+function optionalAbsoluteUrl(name: string): string | undefined {
+  const value = trimValue(env?.[name]);
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new Error(`${name} must be an absolute URL`);
+  }
+}
+
 export function clerkPublishableKey(): string {
   const value = trimValue(env?.VITE_CLERK_PUBLISHABLE_KEY);
   if (!value) {
@@ -31,6 +43,14 @@ export function clerkSignInUrl(): string {
 
 export function clerkSignUpUrl(): string {
   return requiredAbsoluteUrl("VITE_CLERK_SIGN_UP_URL");
+}
+
+export function clerkDomain(): string | undefined {
+  return trimValue(env?.VITE_CLERK_DOMAIN) ?? undefined;
+}
+
+export function clerkProxyUrl(): string | undefined {
+  return optionalAbsoluteUrl("VITE_CLERK_PROXY_URL");
 }
 
 function defaultAfterAuthUrl(): string {

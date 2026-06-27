@@ -694,7 +694,11 @@ export function updatePortalWorkspaceAgentBinding(input: {
       ...rawCredentials,
       bindings: credentialBindings,
     },
-    agent: rawAgent,
+    agent: {
+      ...rawAgent,
+      kind: input.enabled ? "multi" : "disabled",
+      persist_state: input.enabled,
+    },
   };
   writeYAML(configPath, next);
 

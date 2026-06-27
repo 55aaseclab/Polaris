@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "polaris": "sh -lc 'if [ \"$1\" = \"--\" ]; then shift; fi; exec ./node_modules/.bin/tsx scripts/polaris.ts \"$@\"' --",
+    "server": "pnpm run polaris -- server",
+    "executor": "pnpm run polaris -- executor",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts",

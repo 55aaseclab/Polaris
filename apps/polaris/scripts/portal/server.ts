@@ -198,7 +198,7 @@ async function handleWorkspaceProvision(
   workspace: string,
 ): Promise<void> {
   const body = await readBody(req);
-  const progress = queueProvisionWorkspace(userId, workspace, {
+  const progress = await queueProvisionWorkspace(userId, workspace, {
     defaultDockerOnly: body.defaultDockerOnly === "true",
     startAfterCreate: body.startAfterCreate === "true",
   });
@@ -588,7 +588,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             badRequest(res, "workspaceName is required");
             return;
           }
-          const provision = queueProvisionWorkspace(routeUserId, workspaceName, {
+          const provision = await queueProvisionWorkspace(routeUserId, workspaceName, {
             defaultDockerOnly: body.defaultDockerOnly === "true",
             startAfterCreate: body.startAfterCreate === "true",
           });

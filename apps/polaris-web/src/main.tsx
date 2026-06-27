@@ -4,11 +4,19 @@ import { ClerkProvider } from "@clerk/react";
 import { enUS, zhCN } from "@clerk/localizations";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import { clerkPublishableKey, clerkSignInUrl, clerkSignUpUrl } from "./lib/clerk";
+import {
+  clerkDomain,
+  clerkProxyUrl,
+  clerkPublishableKey,
+  clerkSignInUrl,
+  clerkSignUpUrl,
+} from "./lib/clerk";
 import { type Language, readStoredLanguage } from "./lib/language";
 import "./index.css";
 
 const publishableKey = clerkPublishableKey();
+const domain = clerkDomain();
+const proxyUrl = clerkProxyUrl();
 
 function resolveClerkLocalization(language: Language) {
   return language === "zh" ? zhCN : enUS;
@@ -21,6 +29,8 @@ function Root() {
     <ClerkProvider
       publishableKey={publishableKey}
       localization={resolveClerkLocalization(language)}
+      {...(domain ? { domain } : {})}
+      {...(proxyUrl ? { proxyUrl } : {})}
       signInUrl={clerkSignInUrl()}
       signUpUrl={clerkSignUpUrl()}
       signInFallbackRedirectUrl="/"
