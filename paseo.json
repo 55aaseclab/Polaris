@@ -9,7 +9,7 @@
       "command": "bash ./scripts/deploy-polaris-host.sh .env.deploy"
     },
     "publish": {
-      "command": "cpolar http -hostname=polaris.jianxiaoyitech.com -crt=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_cert_chain.crt -key=/home/debian/Projects/geek-env/.cert/Nginx/polaris.jianxiaoyitech.com_key.key 80"
+      "command": "bash ./scripts/publish-polaris.sh .env.deploy"
     }
   }
 }

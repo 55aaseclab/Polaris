@@ -7,5 +7,5 @@ export async function portalCommand(portArg?: string, hostArg?: string): Promise
   }
   const host = hostArg?.trim() || "127.0.0.1";
   createPortalServer(port, host);
-  process.stdout.write(`Polaris portal listening on http://${host}:${port}\n`);
+  process.stdout.write(`Polaris server listening on http://${host}:${port}\n`);
 }
