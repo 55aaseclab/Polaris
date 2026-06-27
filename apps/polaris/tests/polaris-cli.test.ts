@@ -1715,6 +1715,13 @@ exit 0
         lifecycleAction: string;
         state: string;
         backend: { kind: string; instanceState: string };
+        driver?: {
+          target: string;
+          baseImage: string;
+          runtimeKind: string;
+          runtimeRef: string;
+          runtimeState: string;
+        };
         health: { backendLiveness: string; workspaceReadiness: string; daemonReadiness: string };
         paseo?: { daemonAddress: string; supportedHarnesses: string[]; liveTarget: string | null };
         evolution?: { artifactCount: number };
@@ -1725,6 +1732,11 @@ exit 0
       assert.equal(parsed.state, "ready");
       assert.equal(parsed.backend.kind, "pod");
       assert.equal(parsed.backend.instanceState, "running");
+      assert.equal(parsed.driver?.target, "pod:gvisor");
+      assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
+      assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
+      assert.equal(parsed.driver?.runtimeState, "running");
+      assert.equal(parsed.driver?.baseImage, "ttl.sh/polaris-demo-debian13-1782126452:24h");
       assert.equal(parsed.health.backendLiveness, "running");
       assert.equal(parsed.health.workspaceReadiness, "ready");
       assert.equal(parsed.health.daemonReadiness, "ready");
@@ -1862,6 +1874,18 @@ if [[ "$*" == *"inspect abc123"* ]]; then
   exit 0
 fi
 if [[ "$1" == "exec" ]]; then
+  if [[ "$*" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_docker","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$*" == *"cat /workspace/state/paseo/server-id"* ]]; then
+    printf 'srv_docker'
+    exit 0
+  fi
+  if [[ "$*" == *"paseo daemon pair --json"* ]]; then
+    printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kb2NrZXIifQ"}'
+    exit 0
+  fi
   exit 0
 fi
 exit 0
@@ -2552,6 +2576,13 @@ exit 0
 
         const parsed = parseJsonOutput<{
           backend: { kind: string; instanceState: string };
+          driver?: {
+            target: string;
+            baseImage: string;
+            runtimeKind: string;
+            runtimeRef: string;
+            runtimeState: string;
+          };
           state: string;
           health: { daemonReadiness: string };
           assets: {
@@ -2565,8 +2596,11 @@ exit 0
 
         assert.equal(parsed.backend.kind, "docker");
         assert.equal(parsed.backend.instanceState, "running");
-        assert.equal(parsed.state, "ready");
-        assert.equal(parsed.health.daemonReadiness, "ready");
+        assert.equal(parsed.driver?.target, "docker");
+        assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
+        assert.equal(parsed.driver?.runtimeKind, "docker-container");
+        assert.equal(parsed.driver?.runtimeRef, `container/${project}-docker`);
+        assert.equal(parsed.driver?.runtimeState, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
         assert.equal(parsed.assets.dockerfile.path, `config/users/${DEMO_USER_PROFILE_ID}/docker/workspace-prebuilt.Dockerfile`);
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
@@ -2643,12 +2677,24 @@ exit 1
         });
         const parsed = parseJsonOutput<{
           backend: { kind: string; instanceState: string };
+          driver?: {
+            target: string;
+            baseImage: string;
+            runtimeKind: string;
+            runtimeRef: string;
+            runtimeState: string;
+            rootdiskImage?: string;
+          };
           state: string;
           health: { daemonReadiness: string };
         }>(stdout);
 
         assert.equal(parsed.backend.kind, "kubevirt-vm");
         assert.equal(parsed.backend.instanceState, "running");
+        assert.equal(parsed.driver?.target, "kubevirt-vm");
+        assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
+        assert.equal(parsed.driver?.runtimeRef, `vm/${project}-vm`);
+        assert.equal(parsed.driver?.runtimeState, "running");
         assert.equal(parsed.state, "ready");
         assert.equal(parsed.health.daemonReadiness, "ready");
 

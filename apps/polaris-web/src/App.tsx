@@ -40,6 +40,7 @@ import {
   listUsers,
   resolvePortalUserMapping,
   listWorkspaces,
+  startWorkspace,
   stopWorkspace,
   switchWorkspaceDriver,
   type PortalCredentialSummary,
@@ -148,15 +149,30 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver: "Switch driver",
     switch_driver_desc: "Reuse the existing Polaris switch workflow.",
     switching: "Switching...",
-    switch_workspace_action: "Switch workspace",
+    switch_workspace_action: "Switch driver",
+    start_workspace: "Start workspace",
     stop_workspace: "Stop workspace",
     remove_workspace: "Delete workspace",
     remove_workspace_confirm_title: "Delete workspace?",
     remove_workspace_confirm_description: "This removes the workspace definition and its saved runtime data. Running workspaces must be stopped before deletion.",
     deleting: "Deleting...",
+    starting: "Starting...",
     stopping: "Stopping...",
     cancel: "Cancel",
     current_driver: "Current driver",
+    driver_info: "Driver",
+    base_image: "Base image",
+    rootdisk_image: "Rootdisk image",
+    driver_runtime: "Runtime",
+    driver_runtime_docker: "Docker container",
+    driver_runtime_pod: "Kubernetes pod",
+    driver_runtime_vm: "KubeVirt VM",
+    instance_missing: "missing",
+    instance_created: "created",
+    instance_running: "running",
+    instance_stopped: "stopped",
+    instance_degraded: "degraded",
+    instance_unsupported: "unsupported",
     loading_workspace: "Loading workspace...",
     workspace_state: "Workspace state",
     daemon_pairing: "Daemon pairing",
@@ -319,15 +335,30 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver: "切换驱动",
     switch_driver_desc: "复用现有的 Polaris 切换流程。",
     switching: "切换中…",
-    switch_workspace_action: "切换工作空间",
+    switch_workspace_action: "切换驱动",
+    start_workspace: "启动工作空间",
     stop_workspace: "停止工作空间",
     remove_workspace: "删除工作空间",
     remove_workspace_confirm_title: "删除这个工作空间？",
     remove_workspace_confirm_description: "这会删除工作空间定义及其已保存的运行时数据。运行中的工作空间必须先停止，才能删除。",
     deleting: "删除中…",
+    starting: "启动中…",
     stopping: "停止中…",
     cancel: "取消",
     current_driver: "当前驱动",
+    driver_info: "驱动",
+    base_image: "基础镜像",
+    rootdisk_image: "根磁盘镜像",
+    driver_runtime: "运行时",
+    driver_runtime_docker: "Docker 容器",
+    driver_runtime_pod: "Kubernetes Pod",
+    driver_runtime_vm: "KubeVirt 虚拟机",
+    instance_missing: "未创建",
+    instance_created: "已创建",
+    instance_running: "运行中",
+    instance_stopped: "已停止",
+    instance_degraded: "异常",
+    instance_unsupported: "不支持",
     loading_workspace: "正在加载工作空间…",
     workspace_state: "工作空间状态",
     daemon_pairing: "配对状态",
@@ -619,6 +650,44 @@ function driverLabel(driver: { backend: string; profile?: string } | null): stri
   return driver.backend === "pod" && driver.profile
     ? `pod:${driver.profile}`
     : driver.backend;
+}
+
+function translateInstanceState(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "missing":
+      return t("instance_missing");
+    case "created":
+      return t("instance_created");
+    case "running":
+      return t("instance_running");
+    case "stopped":
+      return t("instance_stopped");
+    case "degraded":
+      return t("instance_degraded");
+    case "unsupported":
+      return t("instance_unsupported");
+    default:
+      return value || t("unknown");
+  }
+}
+
+function translateDriverRuntimeKind(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "docker-container":
+      return t("driver_runtime_docker");
+    case "kubernetes-pod":
+      return t("driver_runtime_pod");
+    case "kubevirt-vm":
+      return t("driver_runtime_vm");
+    default:
+      return value || t("unknown");
+  }
 }
 
 function translateState(
@@ -1678,6 +1747,7 @@ function WorkspaceDetailPage() {
   const [driver, setDriver] = useState("");
   const [paseoCredentialId, setPaseoCredentialId] = useState("");
   const [switching, setSwitching] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [bindingPaseo, setBindingPaseo] = useState(false);
@@ -1849,6 +1919,19 @@ function WorkspaceDetailPage() {
     }
   }
 
+  async function handleStart(): Promise<void> {
+    setActionError(null);
+    setStarting(true);
+    try {
+      await startWorkspace(userId, workspaceName);
+      window.location.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function handleBindPaseo(): Promise<void> {
     if (!paseoCredentialId || !driver) {
       return;
@@ -1884,39 +1967,37 @@ function WorkspaceDetailPage() {
     }
   }
 
+  function renderDriverSwitchControls(): ReactNode {
+    return (
+      <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
+        <div className="w-full min-w-0 sm:w-[18rem]">
+          <Select value={driver} onValueChange={setDriver}>
+            <SelectTrigger>
+              <SelectValue placeholder={t("select_driver")} />
+            </SelectTrigger>
+            <SelectContent>
+              {(data?.availableDrivers ?? []).map((item) => {
+                const label = driverLabel(item);
+                return (
+                  <SelectItem key={label} value={label}>
+                    {item.available ? label : `${label} (${t("create_suffix")})`}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
+          <RefreshCw className="h-4 w-4" />
+          {switching ? t("switching") : t("switch_workspace_action")}
+        </Button>
+      </div>
+    );
+  }
+
   function renderControlsCard(): ReactNode {
     return (
       <div className="grid gap-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t("switch_driver")}</div>
-            <div className="text-sm text-muted-foreground">{t("switch_driver_desc")}</div>
-          </div>
-          <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
-            <div className="w-full min-w-0 sm:w-[18rem]">
-              <Select value={driver} onValueChange={setDriver}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("select_driver")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(data?.availableDrivers ?? []).map((item) => {
-                    const label = driverLabel(item);
-                    return (
-                      <SelectItem key={label} value={label}>
-                        {item.available ? label : `${label} (${t("create_suffix")})`}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
-              <RefreshCw className="h-4 w-4" />
-              {switching ? t("switching") : t("switch_workspace_action")}
-            </Button>
-          </div>
-        </div>
-        <Separator />
         <div className="grid gap-3">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
@@ -1982,21 +2063,6 @@ function WorkspaceDetailPage() {
             <div className="text-sm text-muted-foreground">
               {t("workspace_danger_zone_desc")}
             </div>
-          </div>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t("stop_workspace")}</div>
-              <div className="text-sm text-muted-foreground">
-                {translateWorkspaceRuntimeState(data?.status?.state, t)}
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              onClick={() => void handleStop()}
-              disabled={loading || stopping || deleting}
-            >
-              {stopping ? t("stopping") : t("stop_workspace")}
-            </Button>
           </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
@@ -2072,6 +2138,10 @@ function WorkspaceDetailPage() {
         data.liveTarget ?? data.status?.paseo?.liveTarget,
         userId,
       );
+      const driverStatus = data.status?.driver;
+      const runtimeRunning =
+        driverStatus?.runtimeState === "running"
+        || data.status?.backend.instanceState === "running";
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
           <div className="grid gap-1">
@@ -2084,6 +2154,72 @@ function WorkspaceDetailPage() {
           </div>
           <Separator />
           <div className="grid gap-6">
+            <div className="grid gap-4">
+              <div className="text-sm font-medium">{t("driver_info")}</div>
+              <div className="grid gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("current_driver")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    {driverStatus?.target ?? driverLabel(data.selectedDriver)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("base_image")}</div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    <span className="break-all">
+                      {driverStatus?.baseImage ?? t("unknown")}
+                    </span>
+                  </div>
+                </div>
+                {driverStatus?.rootdiskImage ? (
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{t("rootdisk_image")}</div>
+                      <div className="text-sm text-muted-foreground">{t("driver_info")}</div>
+                    </div>
+                    <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                      <span className="break-all">
+                        {driverStatus.rootdiskImage}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("driver_runtime")}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {translateInstanceState(driverStatus?.runtimeState, t)}
+                    </div>
+                  </div>
+                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                    <div>{translateDriverRuntimeKind(driverStatus?.runtimeKind, t)}</div>
+                    <div className="break-all">{driverStatus?.runtimeRef ?? t("unknown")}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t("switch_driver")}</div>
+                  </div>
+                  {renderDriverSwitchControls()}
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={() => void (runtimeRunning ? handleStop() : handleStart())}
+                    disabled={loading || starting || stopping || deleting}
+                  >
+                    {runtimeRunning
+                      ? (stopping ? t("stopping") : t("stop_workspace"))
+                      : (starting ? t("starting") : t("start_workspace"))}
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <Separator />
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm font-medium">{t("daemon_address")}</div>

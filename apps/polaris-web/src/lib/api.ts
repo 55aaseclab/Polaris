@@ -40,6 +40,27 @@ export interface PortalWorkspaceStatus {
   backend: {
     kind?: string;
     profile?: string;
+    instanceState?:
+      | "missing"
+      | "created"
+      | "running"
+      | "stopped"
+      | "degraded"
+      | "unsupported";
+  };
+  driver?: {
+    target: string;
+    baseImage: string;
+    runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
+    runtimeRef: string;
+    runtimeState:
+      | "missing"
+      | "created"
+      | "running"
+      | "stopped"
+      | "degraded"
+      | "unsupported";
+    rootdiskImage?: string;
   };
   paseo?: {
     daemonAddress: string;
@@ -428,6 +449,18 @@ export async function stopWorkspace(
 ): Promise<{ stopped: true }> {
   return apiFetch<{ stopped: true }>(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function startWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ started: true }> {
+  return apiFetch<{ started: true }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/start`,
     {
       method: "POST",
     },

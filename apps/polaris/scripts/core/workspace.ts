@@ -312,6 +312,14 @@ export interface WorkspaceStatus {
     profile: string;
     instanceState?: "missing" | "created" | "running" | "stopped" | "degraded" | "unsupported";
   };
+  driver?: {
+    target: string;
+    baseImage: string;
+    runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
+    runtimeRef: string;
+    runtimeState: "missing" | "created" | "running" | "stopped" | "degraded" | "unsupported";
+    rootdiskImage?: string;
+  };
   lifecycleAction: LifecycleAction;
   state: "saved" | "not-applied" | "degraded" | "ready" | "unsupported";
   health: {

@@ -10,6 +10,7 @@ import {
   deletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
+  startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   unbindPortalWorkspaceAgent,
@@ -166,6 +167,16 @@ export function createExecutorServer(
       if (req.method === "POST" && url.pathname === "/workspaces/stop") {
         const body = await readBody(req);
         const result = await stopPortalWorkspace(
+          readRequiredString(body, "userId"),
+          readRequiredString(body, "workspace"),
+        );
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/start") {
+        const body = await readBody(req);
+        const result = await startPortalWorkspace(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
         );

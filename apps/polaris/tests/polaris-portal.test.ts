@@ -988,9 +988,25 @@ test("portal API stops the selected workspace driver", async () => {
 
     await withFakePath(
       {
-        docker: "#!/bin/sh\nexit 0\n",
+        docker: `
+if [[ "$1" == "compose" && "$4" == "stop" ]]; then
+  exit 0
+fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then
+  printf 'portal-stop-id'
+  exit 0
+fi
+if [[ "$1" == "inspect" && "$2" == "portal-stop-id" ]]; then
+  printf '[{"State":{"Running":false}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
       },
-      async () => {
+      async ({ readCommandLog }) => {
         await withPortalServer(async (baseUrl) => {
           const response = await fetch(
             `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
@@ -1001,6 +1017,10 @@ test("portal API stops the selected workspace driver", async () => {
           const payload = JSON.parse(bodyText) as { stopped: boolean };
           assert.equal(payload.stopped, true);
         });
+        const commandLog = readCommandLog();
+        assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("stop")));
+        assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("ps")));
+        assert.ok(commandLog.some((entry) => entry.includes("inspect portal-stop-id")));
       },
     );
   } finally {
@@ -1081,6 +1101,93 @@ exit 0
     clearWorkspaceProvisionProgress(userId, workspace);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API starts the selected workspace driver", async () => {
+  const userId = uniqueName("portal-explicit-start-user");
+  const workspace = uniqueName("portal-explicit-start");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
+  const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
+  const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
+  const privateKey = path.join(userRoot, "credentials", "ssh", "id_ed25519");
+  const publicKey = path.join(userRoot, "credentials", "ssh", "id_ed25519.pub");
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Explicit Start User", "--email", `${userId}@polaris.local`]);
+    await createCommand([workspace, "--user", userId]);
+    fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+    fs.mkdirSync(path.dirname(privateKey), { recursive: true });
+    fs.writeFileSync(codexAuth, "{}\n", "utf8");
+    fs.writeFileSync(codexConfig, "model = 'gpt-5'\n", "utf8");
+    fs.writeFileSync(claudeSettings, "{}\n", "utf8");
+    fs.writeFileSync(privateKey, "dummy-private-key\n", "utf8");
+    fs.writeFileSync(
+      publicKey,
+      `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
+      "utf8",
+    );
+    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "compose" && "$4" == "up" ]]; then
+  exit 0
+fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then
+  printf 'portal-start-id'
+  exit 0
+fi
+if [[ "$1" == "inspect" && "$2" == "portal-start-id" ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$5" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_portal_explicit_start","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$5" == *"paseo daemon pair --json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9wb3J0YWxfZXhwbGljaXRfc3RhcnQifQ"}'
+    exit 0
+  fi
+  if [[ "$5" == *"/server-id"* ]]; then
+    printf 'srv_portal_explicit_start'
+    exit 0
+  fi
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        await withPortalServer(async (baseUrl) => {
+          const response = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/start`,
+            { method: "POST" },
+          );
+          const bodyText = await response.text();
+          assert.equal(response.status, 200, bodyText);
+          const payload = JSON.parse(bodyText) as { started: boolean };
+          assert.equal(payload.started, true);
+        });
+        const commandLog = readCommandLog();
+        assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")));
+        assert.ok(commandLog.some((entry) => entry.includes("paseo daemon status --json")));
+        assert.ok(commandLog.some((entry) => entry.includes("paseo daemon pair --json")));
+      },
+    );
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    fs.rmSync(privateKey, { force: true });
+    fs.rmSync(publicKey, { force: true });
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
 

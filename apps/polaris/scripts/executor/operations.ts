@@ -460,8 +460,24 @@ export async function stopPortalWorkspace(
   if (!summary.selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
-  await stopCommand(workspaceRefFromTarget(workspace, summary.selectedDriver));
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  await stopCommand(ref);
+  await captureStdout(() => statusCommand(ref));
   return { stopped: true };
+}
+
+export async function startPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ started: true }> {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  await startCommand(ref);
+  await captureStdout(() => statusCommand(ref));
+  return { started: true };
 }
 
 export async function bindPortalWorkspaceAgent(input: {
