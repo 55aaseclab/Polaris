@@ -5,6 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { URL } from "node:url";
+import type { ManagedHarness } from "../config/credential-catalog.js";
 import {
   bindPortalWorkspaceAgent,
   deletePortalWorkspace,
@@ -13,6 +14,7 @@ import {
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
+  switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
 } from "./operations.js";
 import { parsePortalDriverTarget } from "../core/portal.js";
@@ -180,6 +182,21 @@ export function createExecutorServer(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
         );
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (
+        req.method === "POST" &&
+        url.pathname === "/workspaces/credentials/live/switch"
+      ) {
+        const body = await readBody(req);
+        const result = await switchPortalWorkspaceLiveCredential({
+          userId: readRequiredString(body, "userId"),
+          workspace: readRequiredString(body, "workspace"),
+          harness: readRequiredString(body, "harness") as ManagedHarness,
+          credentialId: readRequiredString(body, "credentialId"),
+        });
         sendJson(res, 200, result);
         return;
       }

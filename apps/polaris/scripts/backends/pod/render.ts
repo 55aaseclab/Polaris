@@ -8,6 +8,10 @@ import {
   workspaceToolCatalog,
   workspaceToolPackageSpecs,
 } from "../../core/harness-catalog.js";
+import {
+  stateStoragePathForMountPath,
+  userIdentityBootstrapDirs,
+} from "../../core/identity-layout.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
@@ -19,28 +23,16 @@ function timestamp(): string {
   return new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
 }
 
-function relativeRuntimePath(filePath: string, home: string): string {
-  if (filePath.startsWith(`${home}/.codex/`)) {
-    return `codex/${filePath.slice(`${home}/.codex/`.length)}`;
-  }
-  if (filePath.startsWith(`${home}/.claude/`)) {
-    return `claude/${filePath.slice(`${home}/.claude/`.length)}`;
-  }
-  if (filePath.startsWith(`${home}/.ssh/`)) {
-    return filePath.slice(`${home}/.ssh/`.length);
-  }
-  return filePath.replace(/^\/+/, "");
-}
-
 function authFileStorageTarget(file: AuthFile, workspace: WorkspaceSpec): string {
-  const home = workspace.runtime.home;
-  if (file.mountPath.startsWith(`${home}/.codex/`) || file.mountPath.startsWith(`${home}/.claude/`)) {
-    return `${workspace.attachments.userIdentityState.mountRoot}/${relativeRuntimePath(file.mountPath, home)}`;
-  }
-  if (file.mountPath.startsWith(`${home}/.ssh/`)) {
-    return `${workspace.attachments.userSshState.mountRoot}/${relativeRuntimePath(file.mountPath, home)}`;
-  }
-  return file.mountPath;
+  return (
+    stateStoragePathForMountPath({
+      mountPath: file.mountPath,
+      runtimeHome: workspace.runtime.home,
+      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      sshRoot: workspace.attachments.userSshState.mountRoot,
+    })
+    ?? file.mountPath
+  );
 }
 
 function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
@@ -54,12 +46,17 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
   const codexXdgRoot = `${identityRoot}/codex-xdg`;
   const sshRoot = workspace.attachments.userSshState.mountRoot;
   const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
+  const identityDirs = userIdentityBootstrapDirs(identityRoot);
   return [
-    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityRoot}/codex ${identityRoot}/claude ${codexXdgRoot}/config ${codexXdgRoot}/data ${codexXdgRoot}/state ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.local /tmp/npm-cache && \\`,
+    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
     `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
-    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace && \\`,
+    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
+    `          ln -sfn ${identityRoot}/copilot ${home}/.copilot && \\`,
+    `          ln -sfn ${identityRoot}/pi ${home}/.pi && \\`,
+    `          ln -sfn ${identityRoot}/opencode/config ${home}/.config/opencode && \\`,
+    `          ln -sfn ${identityRoot}/opencode/data ${home}/.local/share/opencode && \\`,
     `          ln -sfn ${paseoRoot} ${home}/.paseo && \\`,
     `          ln -sfn ${sshRoot} ${home}/.ssh && \\`,
     `          if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${home}/.local/polaris/bin/paseo ] && [ ! -L ${home}/.local/polaris ]; then cp -a ${home}/.local/polaris/. ${toolRoot}/; fi && \\`,

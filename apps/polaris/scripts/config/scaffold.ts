@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
+import { userIdentityDurablePaths } from "../core/identity-layout.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 
@@ -532,13 +533,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
         scope: "user",
         sharing: "cross-workspace",
         mount_root: "/identity",
-        durable_paths: [
-          "/identity/codex",
-          "/identity/claude",
-          "/identity/codex-xdg/config",
-          "/identity/codex-xdg/data",
-          "/identity/codex-xdg/state",
-        ],
+        durable_paths: userIdentityDurablePaths("/identity"),
         source: {
           kind: "secret-material",
           description: "user identity material sourced from spec auth files",

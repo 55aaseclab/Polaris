@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
+import type { ManagedHarness } from "../config/credential-catalog.js";
 import {
   listPortalProfiles,
   parsePortalDriverTarget,
@@ -11,7 +12,8 @@ import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
-  createPortalCodexCredential,
+  createPortalCredential,
+  getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalWorkspace,
   deletePortalUser,
@@ -25,6 +27,7 @@ import {
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
+  switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
   upsertPortalCredential,
   createPortalUser,
@@ -348,17 +351,28 @@ async function handleCredentialCreate(
 ): Promise<void> {
   const body = await readBody(req);
   const harness = body.harness?.trim() || "codex";
-  if (harness !== "codex") {
+  if (
+    harness !== "ssh" &&
+    harness !== "codex" &&
+    harness !== "claude" &&
+    harness !== "copilot" &&
+    harness !== "opencode" &&
+    harness !== "pi"
+  ) {
     badRequest(res, `Unsupported harness '${harness}'`);
     return;
   }
-  const saved = await createPortalCodexCredential({
+  const saved = await createPortalCredential({
     userId,
+    harness,
     ...(body.credentialId?.trim() ? { credentialId: body.credentialId.trim() } : {}),
     ...(body.label?.trim() ? { label: body.label.trim() } : {}),
     ...(body.providerName?.trim() ? { providerName: body.providerName.trim() } : {}),
     ...(body.baseUrl?.trim() ? { baseUrl: body.baseUrl.trim() } : {}),
     ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
+    ...(body.presetId?.trim() ? { presetId: body.presetId.trim() } : {}),
+    ...(body.model?.trim() ? { model: body.model.trim() } : {}),
+    ...(body.activate === "true" ? { activate: true } : {}),
   });
   sendJson(res, 201, saved);
 }
@@ -379,6 +393,28 @@ async function handleCredentialActivate(
 ): Promise<void> {
   const activated = await activatePortalCredential(userId, credentialId);
   sendJson(res, 200, activated);
+}
+
+async function handleWorkspaceLiveCredentialSwitch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const harness = body.harness?.trim() || "";
+  const credentialId = body.credentialId?.trim() || "";
+  if (!harness || !credentialId) {
+    badRequest(res, "harness and credentialId are required");
+    return;
+  }
+  const switched = await switchPortalWorkspaceLiveCredential({
+    userId,
+    workspace,
+    harness: harness as ManagedHarness,
+    credentialId,
+  });
+  sendJson(res, 200, switched);
 }
 
 async function handleProfileUpdate(
@@ -562,6 +598,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           });
           return;
         }
+        if (segments[3] === "credentials" && segments.length === 5 && segments[4] === "catalog" && req.method === "GET") {
+          sendJson(res, 200, getPortalCredentialCatalog());
+          return;
+        }
         if (segments[3] === "credentials" && segments.length === 5 && req.method === "DELETE") {
           const credentialId = decodeURIComponent(segments[4]);
           await handleCredentialDelete(res, routeUserId, credentialId);
@@ -624,6 +664,17 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "unbind" && req.method === "POST") {
           await handleWorkspacePaseoUnbind(req, res, routeUserId, workspace);
+          return;
+        }
+        if (
+          segments[3] === "workspaces" &&
+          segments.length === 8 &&
+          segments[5] === "paseo" &&
+          segments[6] === "credentials" &&
+          segments[7] === "switch" &&
+          req.method === "POST"
+        ) {
+          await handleWorkspaceLiveCredentialSwitch(req, res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {

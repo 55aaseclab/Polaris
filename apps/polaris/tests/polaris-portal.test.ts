@@ -350,7 +350,7 @@ test("portal API creates and deletes a codex credential for an existing user", a
 
       const configToml = fs.readFileSync(createdConfigPath, "utf8");
       assert.match(configToml, /model_provider = "rightcode"/);
-      assert.match(configToml, /model = "gpt-5\.4"/);
+      assert.match(configToml, /model = "gpt-5\.5"/);
       assert.match(configToml, /\[model_providers\.rightcode\]/);
       assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
 
@@ -459,7 +459,7 @@ test("portal API creates and deletes a codex credential for demo user 001", asyn
 
       const configToml = fs.readFileSync(configPath, "utf8");
       assert.match(configToml, /model_provider = "rightcode"/);
-      assert.match(configToml, /model = "gpt-5\.4"/);
+      assert.match(configToml, /model = "gpt-5\.5"/);
       assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
 
       const deleteResponse = await fetch(
@@ -491,6 +491,127 @@ test("portal API creates and deletes a codex credential for demo user 001", asyn
     fs.rmSync(authPath, { force: true });
     fs.rmSync(configPath, { force: true });
     fs.rmSync(path.dirname(authPath), { recursive: true, force: true });
+  }
+});
+
+test("portal API exposes the credential catalog and creates a claude inventory credential", async () => {
+  const userId = uniqueName("portal-claude-user");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userId}.yaml`,
+  );
+
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Portal Claude User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+
+    await withPortalServer(async (baseUrl) => {
+      const catalogResponse = await fetch(
+        `${baseUrl}/api/users/${userId}/credentials/catalog`,
+      );
+      const catalogBody = await catalogResponse.text();
+      assert.equal(catalogResponse.status, 200, catalogBody);
+      const catalog = JSON.parse(catalogBody) as {
+        harnesses: Array<{ id: string; supportsCreate: boolean }>;
+        presetsByHarness: Record<string, Array<{ id: string }>>;
+      };
+      assert.ok(catalog.harnesses.some((item) => item.id === "claude"));
+      assert.ok(catalog.presetsByHarness.codex?.some((item) => item.id === "rightcode"));
+      assert.ok(catalog.presetsByHarness.claude?.some((item) => item.id === "anthropic"));
+      assert.ok(
+        catalog.presetsByHarness.copilot?.some(
+          (item) => item.id === "github-copilot",
+        ),
+      );
+      assert.ok(
+        catalog.presetsByHarness.opencode?.some(
+          (item) => item.id === "openrouter",
+        ),
+      );
+      assert.ok(
+        catalog.presetsByHarness.pi?.some(
+          (item) => item.id === "openai-compatible",
+        ),
+      );
+
+      const createResponse = await fetch(
+        `${baseUrl}/api/users/${userId}/credentials`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            harness: "claude",
+            credentialId: "claude-default",
+            presetId: "anthropic",
+            apiKey: "claude-secret",
+          }),
+        },
+      );
+      const createBody = await createResponse.text();
+      assert.equal(createResponse.status, 201, createBody);
+      const created = JSON.parse(createBody) as {
+        id: string;
+        harness: string;
+        kind: string;
+        paths: string[];
+        liveSwitchSupported: boolean;
+      };
+      assert.equal(created.id, "claude-default");
+      assert.equal(created.harness, "claude");
+      assert.equal(created.kind, "api-key");
+      assert.equal(created.liveSwitchSupported, false);
+      assert.deepEqual(created.paths, [
+        "credentials/claude/claude-default/credential.json",
+      ]);
+
+      const materialPath = path.join(
+        userRoot,
+        "credentials",
+        "claude",
+        "claude-default",
+        "credential.json",
+      );
+      assert.equal(fs.existsSync(materialPath), true);
+      const material = JSON.parse(fs.readFileSync(materialPath, "utf8")) as {
+        harness?: string;
+        providerName?: string;
+        baseUrl?: string;
+        presetId?: string;
+        apiKey?: string;
+      };
+      assert.equal(material.harness, "claude");
+      assert.equal(material.providerName, "anthropic");
+      assert.equal(material.baseUrl, "https://api.anthropic.com");
+      assert.equal(material.presetId, "anthropic");
+      assert.equal(material.apiKey, "claude-secret");
+
+      const activateResponse = await fetch(
+        `${baseUrl}/api/users/${userId}/credentials/claude-default/activate`,
+        { method: "POST" },
+      );
+      const activateBody = await activateResponse.text();
+      assert.equal(activateResponse.status, 200, activateBody);
+      const activated = JSON.parse(activateBody) as {
+        id: string;
+        harness: string;
+        active: boolean;
+      };
+      assert.equal(activated.id, "claude-default");
+      assert.equal(activated.harness, "claude");
+      assert.equal(activated.active, true);
+    });
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
@@ -1356,6 +1477,143 @@ exit 0
     clearWorkspaceProvisionProgress(userId, workspace);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API switches the live codex credential without mutating workspace bindings", async () => {
+  const userId = uniqueName("portal-live-switch-user");
+  const workspace = uniqueName("portal-live-switch");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const profileFile = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userId}.yaml`,
+  );
+  const liveStatePath = path.join(workspaceRoot, "state", "live-credentials.json");
+
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Portal Live Switch User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then exit 0; fi
+if [[ "$1" == "pull" ]]; then exit 0; fi
+if [[ "$1" == "volume" && "$2" == "inspect" ]]; then exit 1; fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then printf 'docker-live-switch'; exit 0; fi
+if [[ "$1" == "inspect" && "$2" == "docker-live-switch" ]]; then printf '[{"State":{"Running":true}}]'; exit 0; fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$3" == "sh" && "$4" == "-lc" ]]; then
+    printf '%s\n' "$5" >> ${JSON.stringify(path.join(os.tmpdir(), "portal-live-switch-script.log"))}
+    if [[ "$5" == *"paseo daemon status --json"* ]]; then
+      printf '{"serverId":"srv_test","localDaemon":"running","connectedDaemon":"reachable"}'
+      exit 0
+    fi
+    if [[ "$5" == *"paseo daemon pair --json"* ]]; then
+      printf '{"url":"https://app.paseo.test/#offer=eyJzZXJ2ZXJJZCI6InNydl90ZXN0In0"}'
+      exit 0
+    fi
+    if [[ "$5" == *"/server-id"* ]]; then
+      printf 'srv_test'
+      exit 0
+    fi
+    exit 0
+  fi
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        const scriptLogPath = path.join(os.tmpdir(), "portal-live-switch-script.log");
+        fs.rmSync(scriptLogPath, { force: true });
+
+        await withPortalServer(async (baseUrl) => {
+          const createWorkspaceResponse = await fetch(
+            `${baseUrl}/api/users/${userId}/workspaces`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                workspaceName: workspace,
+                defaultDockerOnly: true,
+                startAfterCreate: true,
+              }),
+            },
+          );
+          assert.equal(createWorkspaceResponse.status, 202);
+          await waitForProvisionDone(userId, workspace);
+
+          const createCredentialResponse = await fetch(
+            `${baseUrl}/api/users/${userId}/credentials`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                harness: "codex",
+                credentialId: "codex-live",
+                label: "Live Switch",
+                providerName: "rightcode",
+                baseUrl: "https://right.codes/codex/v1",
+                apiKey: "test-api-key",
+              }),
+            },
+          );
+          assert.equal(createCredentialResponse.status, 201);
+
+          const switchResponse = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                harness: "codex",
+                credentialId: "codex-live",
+              }),
+            },
+          );
+          const switchBody = await switchResponse.text();
+          assert.equal(switchResponse.status, 200, switchBody);
+          const payload = JSON.parse(switchBody) as {
+            switched: boolean;
+            harness: string;
+            credential: { id: string };
+          };
+          assert.equal(payload.switched, true);
+          assert.equal(payload.harness, "codex");
+          assert.equal(payload.credential.id, "codex-live");
+        });
+
+        const liveState = JSON.parse(fs.readFileSync(liveStatePath, "utf8")) as {
+          codex?: { credentialId?: string };
+        };
+        assert.equal(liveState.codex?.credentialId, "codex-live");
+        assert.equal(
+          fs.readFileSync(path.join(workspaceRoot, "docker.agent.yaml"), "utf8").includes("codex-live"),
+          false,
+        );
+        const commandLog = readCommandLog();
+        assert.ok(
+          commandLog.some((line) => line.includes("exec docker-live-switch sh -lc")),
+        );
+        assert.match(
+          fs.readFileSync(scriptLogPath, "utf8"),
+          /\/identity\/codex\/auth\.json/,
+        );
+      },
+    );
+  } finally {
+    fs.rmSync(profileFile, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    clearWorkspaceProvisionProgress(userId, workspace);
   }
 });
 

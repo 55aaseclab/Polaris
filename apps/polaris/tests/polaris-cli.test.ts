@@ -390,6 +390,190 @@ test("runCli user credential add, list, and activate manage codex credentials ex
   }
 });
 
+test("runCli user credential add supports non-codex harness inventory entries", async () => {
+  const userProfileId = uniqueProjectName("cli-user-credential-claude");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userProfileId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Claude User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    const addStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "add",
+        userProfileId,
+        "--harness",
+        "claude",
+        "--credential-id",
+        "claude-team",
+        "--label",
+        "Claude Team",
+        "--provider-name",
+        "anthropic",
+        "--api-key",
+        "claude-secret",
+      ]);
+    });
+    const added = parseJsonOutput<{
+      credential: {
+        id: string;
+        harness: string;
+        active: boolean;
+        paths: string[];
+      };
+    }>(addStdout);
+    assert.equal(added.credential.id, "claude-team");
+    assert.equal(added.credential.harness, "claude");
+    assert.equal(added.credential.active, false);
+    assert.deepEqual(added.credential.paths, [
+      "credentials/claude/claude-team/credential.json",
+    ]);
+
+    const listStdout = await captureStdout(async () => {
+      await runCli(["user", "credential", "list", userProfileId]);
+    });
+    const listed = parseJsonOutput<{
+      credentials: Array<{ id: string; harness: string }>;
+    }>(listStdout);
+    assert.ok(
+      listed.credentials.some((credential) =>
+        credential.id === "claude-team" && credential.harness === "claude"
+      ),
+    );
+
+    const material = JSON.parse(
+      fs.readFileSync(
+        path.join(userRoot, "credentials", "claude", "claude-team", "credential.json"),
+        "utf8",
+      ),
+    ) as { harness?: string; providerName?: string; apiKey?: string };
+    assert.equal(material.harness, "claude");
+    assert.equal(material.providerName, "anthropic");
+    assert.equal(material.apiKey, "claude-secret");
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("runCli user credential live-switch stages non-codex material into user identity state", async () => {
+  const project = uniqueProjectName("cli-live-switch");
+  const scriptLogPath = path.join(os.tmpdir(), `${project}-live-switch-script.log`);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    try {
+      await runCli([
+        "user",
+        "credential",
+        "add",
+        DEMO_USER_PROFILE_ID,
+        "--harness",
+        "claude",
+        "--credential-id",
+        "claude-live",
+        "--label",
+        "Claude Live",
+        "--provider-name",
+        "anthropic",
+        "--api-key",
+        "claude-live-secret",
+      ]);
+
+      await withFakeCommands(
+        {
+          docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+  printf '${project}-docker-id'
+  exit 0
+fi
+if [[ "$*" == *"inspect ${project}-docker-id"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  printf '%s\n' "$5" >> ${JSON.stringify(scriptLogPath)}
+  exit 0
+fi
+exit 0
+`,
+        },
+        async ({ readCommandLog }) => {
+          const stdout = await captureStdout(async () => {
+            await runCli([
+              "user",
+              "credential",
+              "live-switch",
+              DEMO_USER_PROFILE_ID,
+              `${project}@docker`,
+              "claude-live",
+              "--harness",
+              "claude",
+            ]);
+          });
+          const payload = parseJsonOutput<{
+            switched: boolean;
+            workspace: string;
+            harness: string;
+            credentialId: string;
+          }>(stdout);
+          assert.equal(payload.switched, true);
+          assert.equal(payload.workspace, project);
+          assert.equal(payload.harness, "claude");
+          assert.equal(payload.credentialId, "claude-live");
+          assert.ok(
+            readCommandLog().some((entry) =>
+              entry.includes(`exec ${project}-docker sh -lc`),
+            ),
+          );
+          assert.match(
+            fs.readFileSync(scriptLogPath, "utf8"),
+            /\/identity\/claude\/credential\.json/,
+          );
+        },
+      );
+    } finally {
+      fs.rmSync(scriptLogPath, { force: true });
+      fs.rmSync(
+        path.join(
+          REPO_ROOT,
+          "config",
+          "users",
+          DEMO_USER_PROFILE_ID,
+          "workspaces",
+          project,
+          "state",
+          "live-credentials.json",
+        ),
+        { force: true },
+      );
+      fs.rmSync(
+        path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "credentials", "claude", "claude-live"),
+        { recursive: true, force: true },
+      );
+      fs.rmSync(
+        path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "credentials", "claude-live.yaml"),
+        { force: true },
+      );
+    }
+  });
+});
+
 test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
@@ -881,6 +1065,9 @@ test("pod render writes a TypeScript-generated manifest", () => {
   assert.match(rendered, /mountPath: \/identity/);
   assert.match(rendered, /mountPath: \/ssh/);
   assert.match(rendered, /ln -sfn \/identity\/codex \/root\/\.codex/);
+  assert.match(rendered, /ln -sfn \/identity\/copilot \/root\/\.copilot/);
+  assert.match(rendered, /ln -sfn \/identity\/pi \/root\/\.pi/);
+  assert.match(rendered, /ln -sfn \/identity\/opencode\/config \/root\/\.config\/opencode/);
   assert.match(rendered, /ln -sfn \/workspace\/state\/paseo \/root\/\.paseo/);
 });
 
@@ -917,6 +1104,10 @@ test("direct attachment config is present in migrated saved specs", () => {
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
   assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/copilot"));
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/config"));
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/data"));
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/pi/agent"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/config"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/data"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/state"));

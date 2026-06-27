@@ -5,6 +5,7 @@ import {
   addUserCredentialCommand,
   createUserCredentialCommand,
   deleteUserCredentialCommand,
+  liveSwitchUserCredentialCommand,
   listUserCredentialCommand,
 } from "./user-credential.js";
 
@@ -44,6 +45,10 @@ export async function userCommand(argv: string[]): Promise<void> {
     }
     if (credentialAction === "activate") {
       await activateUserCredentialCommand(credentialRest);
+      return;
+    }
+    if (credentialAction === "live-switch") {
+      await liveSwitchUserCredentialCommand(credentialRest);
       return;
     }
   }

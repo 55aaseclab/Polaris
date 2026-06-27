@@ -3,10 +3,15 @@ import path from "node:path";
 import yaml from "js-yaml";
 import {
   activateManagedCredential,
-  createManagedCodexCredential,
+  createManagedHarnessCredential,
   deleteManagedCredential,
 } from "../config/credentials.js";
 import {
+  isManagedHarness,
+  type ManagedHarness,
+} from "../config/credential-catalog.js";
+import {
+  credentialCatalog,
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
@@ -16,6 +21,7 @@ import {
   loadWorkspaceSummary,
   type PortalCredentialSummary,
   type PortalCredentialPreview,
+  type PortalCredentialCatalog,
   type PortalWorkspaceAssetPreview,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
@@ -31,6 +37,7 @@ import {
   startPortalWorkspace as startPortalWorkspaceExecutor,
   stopPortalWorkspace as stopPortalWorkspaceExecutor,
   switchPortalWorkspace as switchPortalWorkspaceExecutor,
+  switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
@@ -133,6 +140,10 @@ export function listUserPortalCredentials(
   return listPortalCredentials(userId);
 }
 
+export function getPortalCredentialCatalog(): PortalCredentialCatalog {
+  return credentialCatalog();
+}
+
 export function readUserPortalCredentialPreview(
   userId: string,
   credentialPath: string,
@@ -148,21 +159,29 @@ export function readUserPortalWorkspaceAssetPreview(
   return readPortalWorkspaceAssetPreview(userId, workspace, assetPath);
 }
 
-export async function createPortalCodexCredential(input: {
+export async function createPortalCredential(input: {
   userId: string;
+  harness: ManagedHarness;
   label?: string;
   providerName?: string;
   baseUrl?: string;
   apiKey?: string;
   credentialId?: string;
+  presetId?: string;
+  model?: string;
+  activate?: boolean;
 }): Promise<PortalCredentialSummary> {
-  const created = createManagedCodexCredential({
+  const created = createManagedHarnessCredential({
     userProfileId: input.userId,
+    harness: input.harness,
     ...(input.credentialId?.trim() ? { credentialId: input.credentialId.trim() } : {}),
-    label: input.label?.trim() || "RightCode Codex",
-    providerName: input.providerName?.trim() || "rightcode",
-    baseUrl: input.baseUrl?.trim() || "https://right.codes/codex/v1",
-    apiKey: input.apiKey ?? "",
+    ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+    ...(input.providerName?.trim() ? { providerName: input.providerName.trim() } : {}),
+    ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
+    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+    ...(input.presetId?.trim() ? { presetId: input.presetId.trim() } : {}),
+    ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+    ...(input.activate ? { activate: true } : {}),
   });
   const summary = listPortalCredentials(input.userId).find(
     (credential) => credential.id === created.id,
@@ -279,6 +298,7 @@ export function upsertPortalCredential(
     status: credential.status ?? "ready",
     paths: credential.files.map((file) => file.sourcePath),
     active: false,
+    liveSwitchSupported: false,
   };
 }
 
@@ -333,6 +353,35 @@ export async function refreshPortalWorkspace(
 ): Promise<{ refreshed: true }> {
   await refreshPortalWorkspaceStatus(userId, workspace);
   return { refreshed: true };
+}
+
+export async function switchPortalWorkspaceLiveCredential(input: {
+  userId: string;
+  workspace: string;
+  harness: ManagedHarness;
+  credentialId: string;
+}): Promise<{
+  switched: true;
+  harness: ManagedHarness;
+  credential: PortalCredentialSummary;
+}> {
+  const summary = listPortalCredentials(input.userId).find(
+    (credential) => credential.id === input.credentialId,
+  );
+  if (!summary) {
+    throw new Error(
+      `Credential '${input.credentialId}' was not found for user '${input.userId}'`,
+    );
+  }
+  if (!isManagedHarness(input.harness)) {
+    throw new Error(`Unsupported harness '${input.harness}'`);
+  }
+  await switchPortalWorkspaceLiveCredentialExecutor(input);
+  return {
+    switched: true,
+    harness: input.harness,
+    credential: summary,
+  };
 }
 
 export async function bindPortalWorkspaceAgent(input: {

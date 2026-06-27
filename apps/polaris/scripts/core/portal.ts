@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
+import {
+  MANAGED_HARNESSES,
+  PRESET_SOURCE_COMMIT,
+  providerPresetsForHarness,
+  type HarnessProviderPresetSummary,
+} from "../config/credential-catalog.js";
 import { buildStatusAssets } from "./status-assets.js";
 import { normalizePairingUrl } from "./pairing-url.js";
 import { parseConnectionOfferServerId } from "./paseo.js";
@@ -50,6 +56,18 @@ export interface PortalCredentialSummary {
   providerName?: string;
   baseUrl?: string;
   active: boolean;
+  liveSwitchSupported: boolean;
+  presetId?: string;
+}
+
+export interface PortalCredentialCatalog {
+  harnesses: Array<{
+    id: string;
+    supportsCreate: boolean;
+    supportsLiveSwitch: boolean;
+  }>;
+  presetsByHarness: Record<string, HarnessProviderPresetSummary[]>;
+  presetSourceCommit: string;
 }
 
 export interface PortalCredentialPreview {
@@ -133,7 +151,7 @@ function workspaceConfigFilePath(
   return path.join(workspaceRoot(userId, workspace), workspaceBackendFile(target));
 }
 
-function loadPortalWorkspaceByTarget(
+export function loadPortalWorkspaceByTarget(
   userId: string,
   workspace: string,
   target: PortalDriverTarget,
@@ -399,6 +417,23 @@ function workspacePaseoScope(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
 }
 
+function inferPortalCredentialHarness(
+  kind: Credential["kind"],
+  metadata: Record<string, unknown>,
+): string | undefined {
+  const explicitHarness = String(metadata.harness ?? "").trim();
+  if (MANAGED_HARNESSES.includes(explicitHarness as typeof MANAGED_HARNESSES[number])) {
+    return explicitHarness;
+  }
+  if (kind === "ssh-key") {
+    return "ssh";
+  }
+  if (kind === "codex-auth") {
+    return "codex";
+  }
+  return undefined;
+}
+
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
   const credentialsRoot = path.join(USER_ROOT, userId, "credentials");
   if (!fs.existsSync(credentialsRoot)) {
@@ -418,22 +453,41 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
         : [];
       const paths = files.map((file) => String(file.source_path ?? file.sourcePath ?? file.key ?? "" )).filter(Boolean);
       const status = credentialMaterialStatus(userId, paths, String(data.status ?? "unknown"));
+      const kind = String(data.kind ?? "unknown") as Credential["kind"];
+      const harness = inferPortalCredentialHarness(kind, metadata);
       return {
         id: String(data.id ?? entry.name.replace(/\.ya?ml$/, "")),
-        kind: String(data.kind ?? "unknown") as Credential["kind"],
+        kind,
         label: String(data.label ?? entry.name),
         purposes: Array.isArray(data.purposes)
           ? data.purposes.map((value) => String(value)).filter(Boolean)
           : [],
         status,
         paths,
-        harness: typeof metadata.harness === "string" ? metadata.harness : undefined,
+        harness,
         providerName: typeof metadata.providerName === "string" ? metadata.providerName : undefined,
         baseUrl: typeof metadata.baseUrl === "string" ? metadata.baseUrl : undefined,
         active: metadata.active === true,
+        liveSwitchSupported: metadata.liveSwitchSupported === true
+          || harness === "codex",
+        presetId: typeof metadata.presetId === "string" ? metadata.presetId : undefined,
       };
     })
     .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+export function credentialCatalog(): PortalCredentialCatalog {
+  return {
+    harnesses: MANAGED_HARNESSES.map((id) => ({
+      id,
+      supportsCreate: id !== "ssh",
+      supportsLiveSwitch: id === "codex",
+    })),
+    presetsByHarness: Object.fromEntries(
+      MANAGED_HARNESSES.map((id) => [id, providerPresetsForHarness(id)]),
+    ),
+    presetSourceCommit: PRESET_SOURCE_COMMIT,
+  };
 }
 
 function credentialMaterialStatus(userId: string, paths: string[], declaredStatus: string): string {

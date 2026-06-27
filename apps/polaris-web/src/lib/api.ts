@@ -22,6 +22,14 @@ export interface PortalDriverTarget {
   profile?: string;
 }
 
+export type ManagedHarness =
+  | "ssh"
+  | "codex"
+  | "claude"
+  | "copilot"
+  | "opencode"
+  | "pi";
+
 export interface PortalProvisionProgress {
   workspace: string;
   userId: string;
@@ -74,6 +82,14 @@ export interface PortalWorkspaceStatus {
       credentialId?: string;
       label?: string;
       source?: "workspace-binding" | "user-active" | "compatibility";
+    };
+    live?: {
+      supportedHarnesses: string[];
+      switchableHarnesses: string[];
+      selectedHarness?: string;
+      selectedCredentialId?: string;
+      selectedCredentialLabel?: string;
+      source?: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
     };
   };
   daemon?: {
@@ -182,6 +198,27 @@ export interface PortalCredentialSummary {
   providerName?: string;
   baseUrl?: string;
   active: boolean;
+  liveSwitchSupported: boolean;
+  presetId?: string;
+}
+
+export interface PortalCredentialCatalog {
+  harnesses: Array<{
+    id: ManagedHarness;
+    supportsCreate: boolean;
+    supportsLiveSwitch: boolean;
+  }>;
+  presetsByHarness: Record<
+    ManagedHarness,
+    Array<{
+      id: string;
+      label: string;
+      providerName: string;
+      baseUrl: string;
+      model?: string;
+    }>
+  >;
+  presetSourceCommit: string;
 }
 
 export interface PortalCredentialPreview {
@@ -337,6 +374,14 @@ export async function listCredentials(userId: string): Promise<PortalCredentialS
   return payload.credentials;
 }
 
+export async function getCredentialCatalog(
+  userId: string,
+): Promise<PortalCredentialCatalog> {
+  return apiFetch<PortalCredentialCatalog>(
+    `/users/${encodeURIComponent(userId)}/credentials/catalog`,
+  );
+}
+
 export async function getCredentialPreview(
   userId: string,
   credentialPath: string,
@@ -356,24 +401,25 @@ export async function getWorkspaceAssetPreview(
   );
 }
 
-export async function createCodexCredential(
+export async function createCredential(
   userId: string,
   input: {
+    harness: ManagedHarness;
     credentialId?: string;
     label?: string;
-    providerName: string;
-    baseUrl: string;
-    apiKey: string;
+    providerName?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    presetId?: string;
+    model?: string;
+    activate?: boolean;
   },
 ): Promise<PortalCredentialSummary> {
   return apiFetch<PortalCredentialSummary>(
     `/users/${encodeURIComponent(userId)}/credentials`,
     {
       method: "POST",
-      body: JSON.stringify({
-        harness: "codex",
-        ...input,
-      }),
+      body: JSON.stringify(input),
     },
   );
 }
@@ -406,6 +452,27 @@ export async function activateCredential(
     `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}/activate`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function switchWorkspaceLiveCredential(
+  userId: string,
+  workspace: string,
+  input: {
+    harness: ManagedHarness;
+    credentialId: string;
+  },
+): Promise<{
+  switched: true;
+  harness: ManagedHarness;
+  credential: PortalCredentialSummary;
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
     },
   );
 }
