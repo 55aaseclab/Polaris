@@ -9,7 +9,11 @@ import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
 import { renderKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
-import { extractOfferFragment, normalizePairingUrl } from "../scripts/core/pairing-url.js";
+import {
+  applyPairingUrlScope,
+  extractOfferFragment,
+  normalizePairingUrl,
+} from "../scripts/core/pairing-url.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
@@ -58,6 +62,27 @@ test("normalizePairingUrl rewrites the offer onto the configured Paseo app base 
       POLARIS_PASEO_APP_BASE_URL: "http://portal.example.test:8082/",
     }),
     "http://portal.example.test:8082/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0",
+  );
+});
+
+test("normalizePairingUrl preserves a user scope on the rewritten Paseo URL", () => {
+  const raw = "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zY29wZWQifQ";
+  assert.equal(
+    normalizePairingUrl(
+      raw,
+      {
+        POLARIS_PASEO_APP_BASE_URL: "https://portal.example.test/paseo/",
+      },
+      DEMO_USER_PROFILE_ID,
+    ),
+    `https://portal.example.test/paseo?scope=${DEMO_USER_PROFILE_ID}#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zY29wZWQifQ`,
+  );
+});
+
+test("applyPairingUrlScope appends scope when the pairing URL is already normalized", () => {
+  assert.equal(
+    applyPairingUrlScope("https://portal.example.test/paseo/#offer=demo", DEMO_USER_PROFILE_ID),
+    `https://portal.example.test/paseo/?scope=${DEMO_USER_PROFILE_ID}#offer=demo`,
   );
 });
 

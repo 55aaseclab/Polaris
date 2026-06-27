@@ -389,8 +389,15 @@ export function clearWorkspaceProvisionProgress(userId: string, workspace: strin
   fs.rmSync(legacyPortalStateFile(userId, workspace), { force: true });
 }
 
-export function resolveLiveTarget(status: WorkspaceStatus | null): string | null {
-  return normalizePairingUrl(status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url) ?? null;
+export function resolveLiveTarget(
+  status: WorkspaceStatus | null,
+  scope?: string,
+): string | null {
+  return normalizePairingUrl(
+    status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url,
+    process.env,
+    scope,
+  ) ?? null;
 }
 
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
@@ -592,7 +599,7 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
           paseo: {
             daemonAddress: loaded.agent.runtime.daemonAddress,
             supportedHarnesses: loaded.agent.harnesses,
-            liveTarget: resolveLiveTarget(status),
+            liveTarget: resolveLiveTarget(status, userId),
           },
         };
         break;
@@ -613,7 +620,7 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     selectedDriver,
     status,
     progress: readWorkspaceProvisionProgress(userId, workspace),
-    liveTarget: resolveLiveTarget(status),
+    liveTarget: resolveLiveTarget(status, userId),
   };
 }
 

@@ -714,6 +714,56 @@ function extractOfferFragment(input: string): string | null {
   return encoded || null;
 }
 
+function normalizePaseoScope(input: string | null | undefined): string | null {
+  const trimmed = String(input ?? "").trim();
+  return trimmed || null;
+}
+
+function extractPaseoScope(input: string): string | null {
+  try {
+    const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+    const url = new URL(input, baseUrl);
+    const scope = url.searchParams.get("scope")?.trim();
+    return scope || null;
+  } catch {
+    return null;
+  }
+}
+
+function applyPaseoScope(input: string, scope: string | null | undefined): string {
+  const normalizedScope = normalizePaseoScope(scope);
+  if (!normalizedScope) {
+    return input;
+  }
+  try {
+    const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+    const url = new URL(input, baseUrl);
+    url.searchParams.set("scope", normalizedScope);
+    return url.toString();
+  } catch {
+    return input;
+  }
+}
+
+function buildScopedPaseoPortalUrl(
+  appBaseUrl: string,
+  offer: string,
+  scope: string | null | undefined,
+): string {
+  try {
+    const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+    const url = new URL(appBaseUrl, baseUrl);
+    const normalizedScope = normalizePaseoScope(scope);
+    if (normalizedScope) {
+      url.searchParams.set("scope", normalizedScope);
+    }
+    url.hash = `offer=${offer}`;
+    return url.toString();
+  } catch {
+    return applyPaseoScope(`${appBaseUrl.replace(/\/$/, "")}/#offer=${offer}`, scope);
+  }
+}
+
 function configuredPaseoAppBaseUrl(): string | null {
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
   const configured = env?.VITE_PASEO_APP_BASE_URL?.trim();
@@ -738,20 +788,24 @@ function configuredPaseoAppBaseUrl(): string | null {
   return url.toString().replace(/\/$/, "");
 }
 
-function normalizePaseoPortalUrl(input: string | null | undefined): string | null {
+function normalizePaseoPortalUrl(
+  input: string | null | undefined,
+  scope?: string | null,
+): string | null {
   const trimmed = String(input ?? "").trim();
   if (!trimmed) {
     return null;
   }
+  const effectiveScope = extractPaseoScope(trimmed) ?? normalizePaseoScope(scope);
   const offer = extractOfferFragment(trimmed);
   if (!offer) {
-    return trimmed;
+    return applyPaseoScope(trimmed, effectiveScope);
   }
   const appBaseUrl = configuredPaseoAppBaseUrl();
   if (!appBaseUrl) {
-    return trimmed;
+    return applyPaseoScope(trimmed, effectiveScope);
   }
-  return `${appBaseUrl}/#offer=${offer}`;
+  return buildScopedPaseoPortalUrl(appBaseUrl, offer, effectiveScope);
 }
 
 function formatBackendValue(
@@ -1614,6 +1668,7 @@ function WorkspaceDetailPage() {
     : "";
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
+    userId,
   );
   const developmentSections: AssetSection[] = assets
     ? [
@@ -1982,6 +2037,7 @@ function WorkspaceDetailPage() {
     if (currentPane === "paseo") {
       const liveTarget = normalizePaseoPortalUrl(
         data.liveTarget ?? data.status?.paseo?.liveTarget,
+        userId,
       );
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">

@@ -1,0 +1,93 @@
+diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
+index 672642f..3a296ae 100644
+--- a/packages/app/src/runtime/host-runtime.ts
++++ b/packages/app/src/runtime/host-runtime.ts
+@@ -1270,10 +1270,66 @@ export class HostRuntimeController {
+ }
+ 
+ const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
++const WEB_REGISTRY_SCOPE_PARAM = "scope";
++const ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY = "@paseo:active-web-registry-scope";
+ const LOCALHOST_FALLBACK_ENDPOINT = "localhost:6767";
+ const DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS = 2500;
+ const E2E_STORAGE_KEY = "@paseo:e2e";
+ 
++function readWebRegistryScopeFromLocation(): string | null {
++  if (typeof window === "undefined") {
++    return null;
++  }
++  try {
++    const scope = new URL(window.location.href).searchParams.get(WEB_REGISTRY_SCOPE_PARAM)?.trim();
++    return scope && scope.length > 0 ? scope : null;
++  } catch {
++    return null;
++  }
++}
++
++function persistActiveWebRegistryScope(scope: string | null): void {
++  if (typeof window === "undefined") {
++    return;
++  }
++  try {
++    if (scope) {
++      window.sessionStorage.setItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY, scope);
++      return;
++    }
++    window.sessionStorage.removeItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY);
++  } catch {
++    // Ignore browsers that disable session storage for embedded contexts.
++  }
++}
++
++function readPersistedWebRegistryScope(): string | null {
++  if (typeof window === "undefined") {
++    return null;
++  }
++  try {
++    const scope = window.sessionStorage.getItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY)?.trim();
++    return scope && scope.length > 0 ? scope : null;
++  } catch {
++    return null;
++  }
++}
++
++function resolveRegistryStorageKey(): string {
++  if (typeof window === "undefined") {
++    return REGISTRY_STORAGE_KEY;
++  }
++  const scope = readWebRegistryScopeFromLocation();
++  if (scope) {
++    persistActiveWebRegistryScope(scope);
++    return `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(scope)}`;
++  }
++  const persistedScope = readPersistedWebRegistryScope();
++  return persistedScope
++    ? `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(persistedScope)}`
++    : REGISTRY_STORAGE_KEY;
++}
++
+ function readConfiguredLocalDaemonOverride(): string | null {
+   const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
+   return value && value.length > 0 ? value : null;
+@@ -1375,8 +1431,9 @@ export class HostRuntimeStore {
+ 
+   private async loadFromStorage(): Promise<void> {
+     let shouldPersistHosts = false;
++    const storageKey = resolveRegistryStorageKey();
+     try {
+-      const stored = await AsyncStorage.getItem(REGISTRY_STORAGE_KEY);
++      const stored = await AsyncStorage.getItem(storageKey);
+       if (!stored) {
+         return;
+       }
+@@ -1745,8 +1802,9 @@ export class HostRuntimeStore {
+   }
+ 
+   private async persistHosts(): Promise<void> {
++    const storageKey = resolveRegistryStorageKey();
+     try {
+-      await AsyncStorage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify(this.hosts));
++      await AsyncStorage.setItem(storageKey, JSON.stringify(this.hosts));
+     } catch (error) {
+       console.error("[HostRuntime] Failed to persist host registry", error);
+     }
