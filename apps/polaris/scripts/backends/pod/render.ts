@@ -4,6 +4,10 @@ import {
   netfsResolvedPath,
   requireNetfsField,
 } from "../../core/netfs.js";
+import {
+  workspaceToolCatalog,
+  workspaceToolPackageSpecs,
+} from "../../core/harness-catalog.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
@@ -69,14 +73,25 @@ function buildRootProfileFixLine(workspace: WorkspaceSpec): string[] {
   const home = workspace.runtime.home;
   const toolRoot = `${home}/.local/polaris`;
   const codexXdgRoot = `${workspace.attachments.userIdentityState.mountRoot}/codex-xdg`;
+  const toolBinaries = workspaceToolCatalog()
+    .filter((tool) => !["codex", "claude"].includes(tool.id))
+    .map((tool) => tool.binName);
   return [
     "          profile_fix_needed=0 && \\",
     `          [ -f ${home}/.profile ] || profile_fix_needed=1 && \\`,
     `          for rc in ${home}/.profile ${home}/.bashrc ${home}/.zshrc; do [ -f "$rc" ] || continue; grep -Eq "/root/root/\\\\.cargo/env|\\\\$HOME/root/\\\\.cargo/env|^\\. \\"\\\\$HOME/\\\\.cargo/env\\"$|^source \\"\\\\$HOME/\\\\.cargo/env\\"$" "$rc" && profile_fix_needed=1 && break; done && \\`,
     `          if [ "$profile_fix_needed" = 1 ]; then touch ${home}/.profile && for rc in ${home}/.profile ${home}/.bashrc ${home}/.zshrc; do [ -f "$rc" ] || continue; awk 'BEGIN{seen=0} { if ($0 ~ /\\/root\\/root\\/\\.cargo\\/env/ || $0 ~ /\\$HOME\\/root\\/\\.cargo\\/env/) { if (!seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\""; seen=1; next } if ($0 == ". \\"$HOME/.cargo/env\\"" || $0 == "source \\"$HOME/.cargo/env\\"" || $0 == "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\"") { if (!seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\""; seen=1; next } print } END{ if (ARGV[1] ~ /\\.profile$/ && !seen) print "[ -f \\"$HOME/.cargo/env\\" ] && . \\"$HOME/.cargo/env\\"" }' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"; done; fi && \\`,
+    ...toolBinaries.map((binary) => `          if [ ! -L /usr/local/bin/${binary} ] || [ "$(readlink /usr/local/bin/${binary} 2>/dev/null)" != "${toolRoot}/bin/${binary}" ]; then ln -sf ${toolRoot}/bin/${binary} /usr/local/bin/${binary}; fi && \\`),
     `          printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${codexXdgRoot}/config' 'export XDG_DATA_HOME=${codexXdgRoot}/data' 'export XDG_STATE_HOME=${codexXdgRoot}/state' 'mkdir -p ${home}/.codex ${codexXdgRoot}/config ${codexXdgRoot}/data ${codexXdgRoot}/state /tmp/npm-cache' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex && chmod 755 /usr/local/bin/codex && \\`,
     `          printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude && chmod 755 /usr/local/bin/claude && \\`,
     `          if [ ! -L /usr/local/bin/pnpm ] || [ "$(readlink /usr/local/bin/pnpm 2>/dev/null)" != "${toolRoot}/bin/pnpm" ]; then ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm; fi && \\`,
+  ];
+}
+
+function buildToolInstallLines(workspace: WorkspaceSpec): string[] {
+  const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
+  return [
+    `          if [ ! -x ${toolRoot}/bin/paseo ] && command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceToolPackageSpecs().join(" ")}; fi && \\`,
   ];
 }
 
@@ -208,6 +223,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
       "          set -eux && \\",
       ...buildAgentDirsLine(user, home),
       ...buildAttachmentAssemblyLines(workspace),
+      ...buildToolInstallLines(workspace),
       ...(user === "root" ? buildRootProfileFixLine(workspace) : []),
       ...buildGitConfigLines(workspace),
       ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
@@ -221,6 +237,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
     "          set -eux && \\",
     ...buildAgentDirsLine(user, home),
     ...buildAttachmentAssemblyLines(workspace),
+    ...buildToolInstallLines(workspace),
     `          apt-get update && apt-get install -y openssh-client ${workspace.runtime.aptPackages.join(" ")} && \\`,
     ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
     ...buildEvolutionBootstrapLines(workspace),

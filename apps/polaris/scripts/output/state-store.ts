@@ -19,7 +19,7 @@ function projectRoot(project: string, userProfileId?: string): string | null {
       "config",
       "users",
       userProfileId.trim(),
-      "projects",
+      "workspaces",
       project,
     );
   }
@@ -33,7 +33,7 @@ function projectRoot(project: string, userProfileId?: string): string | null {
   const matches = fs
     .readdirSync(usersRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(usersRoot, entry.name, "projects", project))
+    .map((entry) => path.join(usersRoot, entry.name, "workspaces", project))
     .filter((candidate) => fs.existsSync(candidate))
     .sort();
 

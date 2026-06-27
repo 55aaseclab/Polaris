@@ -2,6 +2,7 @@ import type {
   BackendObservation,
   CheckStatus,
   DriftItem,
+  ResolvedWorkspaceCredentialBinding,
   ReconcilePlan,
   WorkspaceDrift,
   WorkspaceSpec,
@@ -94,9 +95,72 @@ function daemonCheck(observed: BackendObservation["daemon"][keyof BackendObserva
     : { state: "missing", detail: observed.detail, ...(normalizedUrl ? { url: normalizedUrl } : {}) };
 }
 
+function expectsHarnessCredentialAssembly(
+  workspace: WorkspaceSpec,
+  harnessDir: ".codex" | ".claude",
+): boolean {
+  return workspace.runtime.authFiles.some((entry) =>
+    entry.mountPath.startsWith(`${workspace.runtime.home}/${harnessDir}/`),
+  );
+}
+
+function activeCodexBinding(
+  workspace: WorkspaceSpec,
+): ResolvedWorkspaceCredentialBinding | null {
+  return workspace.resolvedCredentialBindings.find((binding) =>
+    binding.purpose === "agent-auth" && binding.credential.kind === "codex-auth"
+  ) ?? null;
+}
+
+function codexCredentialSource(
+  workspace: WorkspaceSpec,
+  binding: ResolvedWorkspaceCredentialBinding,
+): "workspace-binding" | "user-active" | "compatibility" {
+  if (
+    workspace.credentialBindings.some((configured) =>
+      configured.purpose === "agent-auth" && configured.credentialId === binding.credentialId,
+    )
+  ) {
+    return "workspace-binding";
+  }
+  if (binding.source === "compatibility") {
+    return "compatibility";
+  }
+  return "user-active";
+}
+
+function codexCredentialStatus(
+  workspace: WorkspaceSpec,
+): NonNullable<WorkspaceStatus["credentials"]>["codex"] {
+  const binding = activeCodexBinding(workspace);
+  if (!binding) {
+    return {
+      state: "not-selected",
+    };
+  }
+  return {
+    state: "selected",
+    credentialId: binding.credentialId,
+    label: binding.credential.label,
+    source: codexCredentialSource(workspace, binding),
+  };
+}
+
+function runtimeAssemblyCheck(
+  expected: boolean,
+  observed: BackendObservation["runtimeAssembly"][keyof BackendObservation["runtimeAssembly"]],
+): CheckStatus {
+  if (!expected) {
+    return { state: "unknown" };
+  }
+  return runtimeCheck(observed);
+}
+
 export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: BackendObservation): WorkspaceDrift {
   const items: DriftItem[] = [];
   const backendRunning = observation.backend.exists && observation.backend.running;
+  const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
+  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
 
   if (!observation.backend.exists) {
     items.push({
@@ -139,8 +203,6 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
       { key: "projectRoot", message: "workspace project root assembly missing" },
       { key: "managerState", message: "workspace manager assembly missing" },
       { key: "evolutionState", message: "workspace evolution assembly missing" },
-      { key: "codex", message: "user identity codex assembly missing" },
-      { key: "claude", message: "user identity claude assembly missing" },
       { key: "ssh", message: "user SSH assembly missing" },
     ] as const;
     for (const target of runtimeTargets) {
@@ -151,6 +213,30 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
           target: target.key,
           severity: "warning",
           message: observed?.detail || target.message,
+        });
+      }
+    }
+
+    if (expectsCodexAssembly) {
+      const observed = observation.runtimeAssembly.codex;
+      if (observed && !observed.observed) {
+        items.push({
+          kind: "runtime-assembly",
+          target: "codex",
+          severity: "warning",
+          message: observed.detail || "user identity codex assembly missing",
+        });
+      }
+    }
+
+    if (expectsClaudeAssembly) {
+      const observed = observation.runtimeAssembly.claude;
+      if (observed && !observed.observed) {
+        items.push({
+          kind: "runtime-assembly",
+          target: "claude",
+          severity: "warning",
+          message: observed.detail || "user identity claude assembly missing",
         });
       }
     }
@@ -196,6 +282,8 @@ export function synthesizeWorkspaceStatus(
   lifecycleAction: WorkspaceStatus["lifecycleAction"],
 ): WorkspaceStatus {
   const liveTarget = normalizePairingUrl(observation.daemon.pairing?.url) ?? null;
+  const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
+  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
   const backendState = !observation.backend.exists
     ? "missing"
     : observation.backend.running
@@ -235,6 +323,9 @@ export function synthesizeWorkspaceStatus(
       supportedHarnesses: workspace.agent.harnesses,
       liveTarget,
     },
+    credentials: {
+      codex: codexCredentialStatus(workspace),
+    },
     details: {
       backendDetail: observation.backend.detail,
       serviceDetail: observation.services.detail,
@@ -255,8 +346,8 @@ export function synthesizeWorkspaceStatus(
       projectRoot: runtimeCheck(observation.runtimeAssembly.projectRoot),
       managerState: runtimeCheck(observation.runtimeAssembly.managerState),
       evolutionState: runtimeCheck(observation.runtimeAssembly.evolutionState),
-      codex: runtimeCheck(observation.runtimeAssembly.codex),
-      claude: runtimeCheck(observation.runtimeAssembly.claude),
+      codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.runtimeAssembly.codex),
+      claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.runtimeAssembly.claude),
       ssh: runtimeCheck(observation.runtimeAssembly.ssh),
     },
     daemon: {

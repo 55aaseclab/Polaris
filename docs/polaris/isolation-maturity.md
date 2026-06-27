@@ -16,12 +16,12 @@ operator state, and runtime attachments separate.
 
 | Concern | Contents | Control-plane source of truth | Runtime / user-facing realization |
 |---|---|---|---|
-| Saved workspace intent | Project, backend, attachments, user profile, credentials, service settings | `config/users/<user>/projects/<project>/<backend>.agent.yaml` | none |
+| Saved workspace intent | Project, backend, attachments, user profile, credentials, service settings | `config/users/<user>/workspaces/<project>/<backend>.agent.yaml` | none |
 | User profile | User identity, Git identity, SSH policy, agent identity defaults, owned workspace list | `config/users/profiles/<user>.yaml` | selected by `user_profile` in workspace specs |
 | Credential registry | User-owned reusable auth declarations and material references | `config/users/<user>/credentials/*.yaml` | resolved into identity or SSH attachments |
-| Generated backend artifact | Rendered manifest consumed by the backend runtime | `config/users/<user>/projects/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or `kubectl` + KubeVirt objects |
-| Driver selection state | Preferred backend and optional pod profile for ambiguous project names | `config/users/<user>/projects/<project>/state/selection.json` | CLI default resolution for `<project>` |
-| Status snapshot | Synthesized backend, attachment, runtime-assembly, daemon, SSH, and drift status | `config/users/<user>/projects/<project>/state/status.json` | `polaris status <project>` output |
+| Generated backend artifact | Rendered manifest consumed by the backend runtime | `config/users/<user>/workspaces/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or `kubectl` + KubeVirt objects |
+| Driver selection state | Preferred backend and optional pod profile for ambiguous project names | `config/users/<user>/workspaces/<project>/state/selection.json` | CLI default resolution for `<project>` |
+| Status snapshot | Synthesized backend, attachment, runtime-assembly, daemon, SSH, and drift status | `config/users/<user>/workspaces/<project>/state/status.json` | `polaris status <project>` output |
 | Workspace data attachment | Project files and workspace-local durable content | Saved spec `attachments.workspace-data` | mounted at `/workspace/project` |
 | Workspace runtime-state attachment | Durable manager state, pairing state, and evolution state | Saved spec `attachments.workspace-runtime-state` | mounted at `/workspace/state` |
 | User identity attachment | Cross-workspace Codex and Claude identity state | Saved spec `attachments.user-identity-state` | mounted at `/identity`, assembled into `~/.codex` and `~/.claude` |
@@ -41,7 +41,7 @@ Current gaps versus a more mature platform:
 | Capability | Polaris Today | Coder Today |
 |---|---|---|
 | Isolation abstraction | 1. Model workspace intent separately from backend realization. 2. Preserve one logical contract across `docker`, `pod`, and `kubevirt-vm`. 3. Treat attachment classes as the persistence boundary. | 1. Strong workspace provisioning product. 2. Mature secure environment operations. 3. Isolation is not exposed as the same explicit multi-backend substrate model. |
-| Saved spec model | 1. Load per-user saved specs from `config/users/<user>/projects/<project>/`. 2. Normalize attachments, credentials, user profile, and runtime contract. 3. Validate the workspace object before backend use. | 1. Template- and deployment-centered product model. 2. Strong admin and governance controls. 3. Less emphasis on repo-visible attachment semantics. |
+| Saved spec model | 1. Load per-user saved specs from `config/users/<user>/workspaces/<project>/`. 2. Normalize attachments, credentials, user profile, and runtime contract. 3. Validate the workspace object before backend use. | 1. Template- and deployment-centered product model. 2. Strong admin and governance controls. 3. Less emphasis on repo-visible attachment semantics. |
 | Backend realization | 1. Dispatch through backend drivers for `docker`, `pod`, and `kubevirt-vm`. 2. Render generated artifacts per backend. 3. Start, stop, restart, render, apply, logs, inspect, and reconcile through the same CLI surface. | 1. More mature operational runtime stories. 2. Richer deployment and governance controls. 3. Less focus on backend switching inside one repo-native control plane. |
 | Attachment semantics | 1. Keep workspace data and workspace runtime state exclusive to one workspace. 2. Keep identity and SSH state cross-workspace at user scope. 3. Assemble runtime home as symlinks and mounts instead of using home directories as the persistence boundary. | 1. Durable home/workspace behavior is operationally mature. 2. Product semantics are less explicitly exposed as attachment classes. |
 | Runtime truth and drift | 1. Inspect live backend state. 2. Check attachment presence, runtime assembly, daemon readiness, and services. 3. Synthesize status and build a reconcile plan from drift. | 1. Stronger production operations and observability. 2. More mature platform-level health and governance. |
@@ -115,7 +115,7 @@ Current user-profile semantics:
 - the profile carries name, email, GitHub account, SSH mode, and agent
   identity defaults
 - the profile may also list owned workspaces through `workspaces`
-- scaffold flows update that workspace list when new projects are created
+- scaffold flows update that workspace list when new workspaces are created
 
 Current ownership boundaries:
 
@@ -206,7 +206,7 @@ backend-specific files.
 Polaris has moved beyond the older "future config/specs layout" document
 direction. The code today actually does the following:
 
-- loads saved specs from `config/users/<user>/projects/<project>/`
+- loads saved specs from `config/users/<user>/workspaces/<project>/`
 - writes generated backend artifacts under each project's `generated/`
   directory
 - writes status and backend-selection state under each project's `state/`

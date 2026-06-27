@@ -1,8 +1,11 @@
 import { createUserCommand } from "./create-user.js";
 import { deleteUserCommand } from "./delete-user.js";
 import {
+  activateUserCredentialCommand,
+  addUserCredentialCommand,
   createUserCredentialCommand,
   deleteUserCredentialCommand,
+  listUserCredentialCommand,
 } from "./user-credential.js";
 
 function usage(): never {
@@ -23,12 +26,24 @@ export async function userCommand(argv: string[]): Promise<void> {
   }
   if (subcommand === "credential") {
     const [credentialAction, ...credentialRest] = rest;
+    if (credentialAction === "add") {
+      await addUserCredentialCommand(credentialRest);
+      return;
+    }
     if (credentialAction === "create") {
       await createUserCredentialCommand(credentialRest);
       return;
     }
     if (credentialAction === "delete") {
       await deleteUserCredentialCommand(credentialRest);
+      return;
+    }
+    if (credentialAction === "list") {
+      await listUserCredentialCommand(credentialRest);
+      return;
+    }
+    if (credentialAction === "activate") {
+      await activateUserCredentialCommand(credentialRest);
       return;
     }
   }

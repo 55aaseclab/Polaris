@@ -26,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  activateCredential,
   bindWorkspacePaseoCredential,
   createCodexCredential,
   createWorkspace,
@@ -178,16 +179,17 @@ const COPY: Record<Language, Record<string, string>> = {
     loading_credentials: "Loading credentials...",
     no_credentials: "No credentials found.",
     add_credential: "Add credential",
-    add_credential_desc: "Create a harness credential for this user.",
-    credential_type: "Credential type",
+    add_credential_desc: "Create a RightCode Codex credential for this user.",
+    credential_template: "Credential template",
+    credential_template_rightcode: "RightCode Codex",
     credential_label: "Credential label",
-    credential_provider_name: "Provider name",
-    credential_base_url: "Base URL",
     credential_api_key: "API key",
-    credential_codex_option: "Codex",
     create_credential: "Create credential",
     creating_credential: "Creating credential...",
     delete_credential: "Delete credential",
+    activate_credential: "Use this credential",
+    activating_credential: "Switching...",
+    active_credential: "Active",
     delete_credential_confirm_title: "Delete credential?",
     delete_credential_confirm_description: "This removes the credential registry entry and its generated auth files.",
     deleting_credential: "Deleting credential...",
@@ -206,15 +208,15 @@ const COPY: Record<Language, Record<string, string>> = {
     delete_user_confirm_title: "Delete this user?",
     delete_user_confirm_description: "This deletes the Polaris user profile, user-scoped secrets, and Clerk username mapping. This action cannot be undone.",
     deleting_user: "Deleting user...",
-    paseo_credential: "Paseo credential",
-    paseo_credential_desc: "Bind an agent-auth credential to enable Paseo for this driver.",
+    paseo_credential: "Workspace credential override",
+    paseo_credential_desc: "Optionally apply a workspace-specific agent-auth credential for this driver.",
     loading_paseo_credentials: "Loading agent credentials...",
     no_paseo_credentials: "No agent-auth credential found.",
     current_paseo_credential: "Current Paseo credential",
-    bind_paseo: "Bind and start Paseo",
-    binding_paseo: "Binding Paseo...",
-    unbind_paseo: "Unbind Paseo",
-    unbinding_paseo: "Unbinding Paseo...",
+    bind_paseo: "Apply override",
+    binding_paseo: "Applying override...",
+    unbind_paseo: "Clear override",
+    unbinding_paseo: "Clearing override...",
     select_submenu: "Select a workspace submenu.",
     sidebar_tier: "Free",
     menu_account: "Account",
@@ -241,6 +243,12 @@ const COPY: Record<Language, Record<string, string>> = {
     evolution_memory: "Evolution memory",
     daemon_address: "Daemon address",
     supported_harnesses: "Supported harnesses",
+    credential_selection: "Credential selection",
+    credential_selection_desc: "Daemon and harness status stay separate from credential choice.",
+    credential_selection_none: "No active Codex credential selected.",
+    credential_selection_override: "Workspace override",
+    credential_selection_active: "User active default",
+    credential_selection_compat: "Compatibility fallback",
     status_ready: "Ready to pair",
     status_unknown: "Unknown",
     status_error: "Error",
@@ -342,16 +350,17 @@ const COPY: Record<Language, Record<string, string>> = {
     loading_credentials: "正在加载凭证…",
     no_credentials: "暂无凭证。",
     add_credential: "新增凭证",
-    add_credential_desc: "为当前用户创建 agent harness 凭证。",
-    credential_type: "凭证类型",
-    credential_label: "Credential label",
-    credential_provider_name: "提供方名称",
-    credential_base_url: "Base URL",
+    add_credential_desc: "为当前用户创建 RightCode Codex 凭证。",
+    credential_template: "凭证模板",
+    credential_template_rightcode: "RightCode Codex",
+    credential_label: "凭证名称",
     credential_api_key: "API Key",
-    credential_codex_option: "Codex",
     create_credential: "创建凭证",
     creating_credential: "正在创建凭证…",
     delete_credential: "删除凭证",
+    activate_credential: "切换到这个凭证",
+    activating_credential: "切换中…",
+    active_credential: "当前使用",
     delete_credential_confirm_title: "删除这个凭证？",
     delete_credential_confirm_description: "这会删除凭证注册文件以及生成出的鉴权文件。",
     deleting_credential: "正在删除凭证…",
@@ -370,15 +379,15 @@ const COPY: Record<Language, Record<string, string>> = {
     delete_user_confirm_title: "删除这个用户？",
     delete_user_confirm_description: "这会删除 Polaris 用户资料、用户级 secrets，以及 Clerk 用户名映射。此操作不可恢复。",
     deleting_user: "正在删除用户…",
-    paseo_credential: "Paseo 凭证",
-    paseo_credential_desc: "为当前 driver 绑定一个 agent-auth credential，并启用 Paseo。",
+    paseo_credential: "工作空间凭证覆盖",
+    paseo_credential_desc: "可选地为当前 driver 应用一个工作空间级 agent-auth 凭证。",
     loading_paseo_credentials: "正在加载 agent 凭证…",
     no_paseo_credentials: "没有可用的 agent-auth credential。",
     current_paseo_credential: "当前 Paseo 凭证",
-    bind_paseo: "绑定并启动 Paseo",
-    binding_paseo: "正在绑定 Paseo…",
-    unbind_paseo: "解除 Paseo 绑定",
-    unbinding_paseo: "正在解除 Paseo 绑定…",
+    bind_paseo: "应用覆盖",
+    binding_paseo: "正在应用覆盖…",
+    unbind_paseo: "清除覆盖",
+    unbinding_paseo: "正在清除覆盖…",
     select_submenu: "请选择工作空间子页面。",
     sidebar_tier: "免费版",
     menu_account: "账号",
@@ -405,6 +414,12 @@ const COPY: Record<Language, Record<string, string>> = {
     evolution_memory: "演进记忆",
     daemon_address: "守护进程地址",
     supported_harnesses: "支持的协作者",
+    credential_selection: "凭证选择",
+    credential_selection_desc: "daemon 与 harness 状态独立于凭证选择。",
+    credential_selection_none: "当前没有启用的 Codex 凭证。",
+    credential_selection_override: "工作空间覆盖",
+    credential_selection_active: "用户当前默认值",
+    credential_selection_compat: "兼容回退",
     status_ready: "可配对",
     status_unknown: "未知",
     status_error: "错误",
@@ -698,6 +713,22 @@ function translatePaseoState(
     return t("paseo_attention");
   }
   return t("paseo_unknown");
+}
+
+function translateCredentialSource(
+  value: "workspace-binding" | "user-active" | "compatibility" | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "workspace-binding":
+      return t("credential_selection_override");
+    case "user-active":
+      return t("credential_selection_active");
+    case "compatibility":
+      return t("credential_selection_compat");
+    default:
+      return t("credential_selection_none");
+  }
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1666,6 +1697,10 @@ function WorkspaceDetailPage() {
   )
     ? rawCurrentPaseoCredentialId
     : "";
+  const codexCredentialStatus = data?.status?.credentials?.codex;
+  const selectedCodexCredential = codexCredentialStatus?.credentialId
+    ? agentCredentials.find((credential) => credential.id === codexCredentialStatus.credentialId) ?? null
+    : null;
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
     userId,
@@ -2077,6 +2112,28 @@ function WorkspaceDetailPage() {
             <Separator />
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
+                <div className="text-sm font-medium">{t("credential_selection")}</div>
+                <div className="text-sm text-muted-foreground">
+                  {t("credential_selection_desc")}
+                </div>
+              </div>
+              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
+                <div className="break-all">
+                  {codexCredentialStatus?.state === "selected"
+                    ? (selectedCodexCredential?.label
+                        ?? codexCredentialStatus.label
+                        ?? codexCredentialStatus.credentialId
+                        ?? t("credential_selection_none"))
+                    : t("credential_selection_none")}
+                </div>
+                <div>
+                  {translateCredentialSource(codexCredentialStatus?.source, t)}
+                </div>
+              </div>
+            </div>
+            <Separator />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
                 <div className="text-sm font-medium">{t("live_target")}</div>
                 <div className="text-sm text-muted-foreground">
                   {translatePairingState(data.status?.daemon?.pairing?.state, t)}
@@ -2202,16 +2259,13 @@ function ProfilePage() {
     loading: credentialsLoading,
   } = useAsyncValue(() => listCredentials(userId), [userId, reloadKey]);
   const [credentialForm, setCredentialForm] = useState({
-    harness: "codex",
-    label: "rightcode",
-    providerName: "rightcode",
-    baseUrl: "https://right.codes/codex/v1",
+    label: "RightCode Codex",
     apiKey: "",
   });
-  const [credentialLabelTouched, setCredentialLabelTouched] = useState(false);
   const [credentialCreating, setCredentialCreating] = useState(false);
   const [credentialActionError, setCredentialActionError] = useState<string | null>(null);
   const [deletingCredentialId, setDeletingCredentialId] = useState<string | null>(null);
+  const [activatingCredentialId, setActivatingCredentialId] = useState<string | null>(null);
 
   async function handleCredentialCreate(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
@@ -2222,19 +2276,15 @@ function ProfilePage() {
     setCredentialActionError(null);
     try {
       await createCodexCredential(userId, {
-        label: credentialForm.label.trim() || credentialForm.providerName.trim() || "rightcode",
-        providerName: credentialForm.providerName.trim() || "rightcode",
-        baseUrl: credentialForm.baseUrl.trim() || "https://right.codes/codex/v1",
+        label: credentialForm.label.trim() || "RightCode Codex",
+        providerName: "rightcode",
+        baseUrl: "https://right.codes/codex/v1",
         apiKey: credentialForm.apiKey,
       });
       setCredentialForm({
-        harness: "codex",
-        label: "rightcode",
-        providerName: "rightcode",
-        baseUrl: "https://right.codes/codex/v1",
+        label: "RightCode Codex",
         apiKey: "",
       });
-      setCredentialLabelTouched(false);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setCredentialActionError(error instanceof Error ? error.message : String(error));
@@ -2259,6 +2309,22 @@ function ProfilePage() {
     }
   }
 
+  async function handleCredentialActivate(credentialId: string): Promise<void> {
+    if (activatingCredentialId) {
+      return;
+    }
+    setActivatingCredentialId(credentialId);
+    setCredentialActionError(null);
+    try {
+      await activateCredential(userId, credentialId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActivatingCredentialId(null);
+    }
+  }
+
   return (
     <PortalShell users={users ?? []}>
       <div className="grid w-full gap-6">
@@ -2272,18 +2338,12 @@ function ProfilePage() {
           <form className="grid gap-4 rounded-[1.25rem] border border-border bg-background p-5 shadow-sm" onSubmit={(event) => void handleCredentialCreate(event)}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="credential-type">{t("credential_type")}</Label>
-                <Select
-                  value={credentialForm.harness}
-                  onValueChange={(value) => setCredentialForm((current) => ({ ...current, harness: value }))}
-                >
-                  <SelectTrigger id="credential-type" type="button">
-                    <SelectValue placeholder={t("credential_type")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="codex">{t("credential_codex_option")}</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="credential-template">{t("credential_template")}</Label>
+                <Input
+                  id="credential-template"
+                  value={t("credential_template_rightcode")}
+                  disabled
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="credential-label">{t("credential_label")}</Label>
@@ -2291,34 +2351,8 @@ function ProfilePage() {
                   id="credential-label"
                   value={credentialForm.label}
                   onChange={(event) => {
-                    setCredentialLabelTouched(true);
                     setCredentialForm((current) => ({ ...current, label: event.target.value }));
                   }}
-                  disabled={credentialCreating}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="credential-provider-name">{t("credential_provider_name")}</Label>
-                <Input
-                  id="credential-provider-name"
-                  value={credentialForm.providerName}
-                  onChange={(event) => {
-                    const nextProviderName = event.target.value;
-                    setCredentialForm((current) => ({
-                      ...current,
-                      providerName: nextProviderName,
-                      label: credentialLabelTouched ? current.label : nextProviderName,
-                    }));
-                  }}
-                  disabled={credentialCreating}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="credential-base-url">{t("credential_base_url")}</Label>
-                <Input
-                  id="credential-base-url"
-                  value={credentialForm.baseUrl}
-                  onChange={(event) => setCredentialForm((current) => ({ ...current, baseUrl: event.target.value }))}
                   disabled={credentialCreating}
                 />
               </div>
@@ -2352,7 +2386,9 @@ function ProfilePage() {
             t={t}
             sections={credentialAssetSections(credentials ?? [], t, {
               deletingCredentialId,
+              activatingCredentialId,
               onDelete: (credentialId) => void handleCredentialDelete(credentialId),
+              onActivate: (credentialId) => void handleCredentialActivate(credentialId),
             })}
             emptyLabel={t("no_credentials")}
             userId={userId}
@@ -2503,46 +2539,73 @@ function credentialAssetSections(
   t: (key: string) => string,
   options?: {
     deletingCredentialId?: string | null;
+    activatingCredentialId?: string | null;
     onDelete?: (credentialId: string) => void;
+    onActivate?: (credentialId: string) => void;
   },
 ): AssetSection[] {
   return credentials.map((credential) => ({
     label: credential.label,
+    labelLines: [
+      [
+        credential.harness ?? credential.kind,
+        credential.providerName ? `provider: ${credential.providerName}` : null,
+        credential.active ? t("active_credential") : null,
+      ].filter(Boolean).join(" · "),
+    ],
     rows: (credential.paths.length > 0 ? credential.paths : [t("none")]).map((item) => ({
       name: item === t("none") ? credential.kind : basenameForDisplay(item),
       path: item,
       status: translateState(credential.status, t),
       previewPath: item !== t("none") ? item : undefined,
     })),
-    action: options?.onDelete ? (
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
+    action: options?.onDelete || options?.onActivate ? (
+      <div className="flex flex-wrap justify-end gap-2">
+        {options.onActivate && credential.kind === "codex-auth" ? (
           <Button
-            variant="destructive"
+            variant={credential.active ? "secondary" : "outline"}
             size="sm"
-            disabled={options.deletingCredentialId === credential.id}
-            aria-label={t("delete_credential")}
+            disabled={credential.active || options.activatingCredentialId === credential.id}
+            onClick={() => options.onActivate?.(credential.id)}
           >
-            <Trash2 className="h-4 w-4" />
+            {options.activatingCredentialId === credential.id
+              ? t("activating_credential")
+              : credential.active
+                ? t("active_credential")
+                : t("activate_credential")}
           </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("delete_credential_confirm_title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("delete_credential_confirm_description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => options.onDelete?.(credential.id)}>
-              {options.deletingCredentialId === credential.id
-                ? t("deleting_credential")
-                : t("delete_credential")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        ) : null}
+        {options.onDelete ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={options.deletingCredentialId === credential.id}
+                aria-label={t("delete_credential")}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("delete_credential_confirm_title")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("delete_credential_confirm_description")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={() => options.onDelete?.(credential.id)}>
+                  {options.deletingCredentialId === credential.id
+                    ? t("deleting_credential")
+                    : t("delete_credential")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
+      </div>
     ) : undefined,
   }));
 }

@@ -438,7 +438,7 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
     "config",
     "users",
     USER001_POLARIS_ID,
-    "projects",
+    "workspaces",
     workspaceName,
   );
   const userDockerfilePath = path.join(

@@ -23,8 +23,8 @@ Source of truth and flow:
 
 ```text
 apps/polaris/scripts/polaris.ts
--> config/users/<user>/projects/<project>/docker.agent.yaml
--> config/users/<user>/projects/<project>/generated/docker.yaml
+-> config/users/<user>/workspaces/<project>/docker.agent.yaml
+-> config/users/<user>/workspaces/<project>/generated/docker.yaml
 -> docker compose runtime
 ```
 
@@ -60,16 +60,27 @@ pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
 If the user profile does not already exist, `user create` scaffolds:
 
 - `config/users/profiles/<user>.yaml`
-- `config/users/<user>/credentials/*.yaml` for default Codex and SSH credentials
+- `config/users/<user>/credentials/*.yaml` for profile-required managed
+  credentials
+
+Today that means:
+
+- a managed SSH credential such as `github-ssh`
+- no implicit Codex provider credential
 
 If the project does not already exist, `create` scaffolds:
 
-- `config/users/<user>/projects/<project>/docker.agent.yaml`
+- `config/users/<user>/workspaces/<project>/docker.agent.yaml`
 
-The scaffolded spec references that local user profile and default bindings:
+The scaffolded spec references that local user profile:
 
 - `user_profile: <userProfileId>`
-- `credentials.bindings[].credentialId: codex-default`
+
+Workspace scaffolding does not create a default Codex credential anymore.
+User-level Codex credentials must be added explicitly and can then be:
+
+- activated at user scope
+- optionally bound as a workspace-specific `agent-auth` override
 
 Then stage bootstrap secrets and render/start the workspace:
 
@@ -103,7 +114,8 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 
 `user create`
 
-- Creates a user profile plus default credential registry.
+- Creates a user profile plus profile-required managed credentials.
+- Today this auto-creates only the managed SSH credential.
 
 `user delete`
 
@@ -119,21 +131,21 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 `render`
 
 - Loads the saved spec and writes generated output to:
-  `config/users/<user>/projects/<project>/generated/docker.yaml`
+  `config/users/<user>/workspaces/<project>/generated/docker.yaml`
   for Docker workspaces.
 - Does not start the runtime by itself.
 
 `start`
 
 - Renders first, then runs
-  `docker compose -f config/users/<user>/projects/<project>/generated/docker.yaml up -d`.
+  `docker compose -f config/users/<user>/workspaces/<project>/generated/docker.yaml up -d`.
 - This is the normal way to launch a Docker workspace.
 
 `status`
 
 - Inspects the live backend and synthesizes a control-plane status view.
 - Writes a status snapshot to
-  `config/users/<user>/projects/<project>/state/status.json`.
+  `config/users/<user>/workspaces/<project>/state/status.json`.
 - Reports backend liveness, workspace readiness, daemon readiness, attachment
   checks, runtime assembly checks, and drift.
 
@@ -157,25 +169,28 @@ credential root reported by `user create`, for example:
 ```text
 config/users/local-<identity>/
   credentials/
-    codex/auth.json
-    codex/config.toml
-    claude/settings.json
+    codex/<credential-id>/auth.json
+    codex/<credential-id>/config.toml
     ssh/id_ed25519
     ssh/id_ed25519.pub
 ```
 
-Workspace specs bind those credentials by purpose:
+Workspace specs may bind credentials by purpose when an override is needed:
 
 ```yaml
 credentials:
   bindings:
     - purpose: agent-auth
-      credentialId: codex-default
+      credentialId: <workspace-specific-codex-credential>
       required: true
     - purpose: git-auth
       credentialId: github-ssh
       required: false
 ```
+
+If no explicit `agent-auth` binding exists, Polaris resolves the active
+user-level Codex credential by default. If no active Codex credential exists,
+runtime tooling still remains available and the workspace can still start.
 
 At runtime, Polaris resolves auth material from explicit credential bindings
 first. Legacy `user_profile.auth.files` remains compatibility-only.

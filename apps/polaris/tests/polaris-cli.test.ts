@@ -8,7 +8,7 @@ import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scri
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
 import { assertNoProjectNameCollision } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
-import { workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
+import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
@@ -298,6 +298,98 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   }
 });
 
+test("runCli user credential add, list, and activate manage codex credentials explicitly", async () => {
+  const userProfileId = uniqueProjectName("cli-user-credential");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Credential User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    const addStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "add",
+        userProfileId,
+        "--harness",
+        "codex",
+        "--credential-id",
+        "codex-rightcode",
+        "--label",
+        "RightCode",
+        "--provider-name",
+        "rightcode",
+        "--base-url",
+        "https://right.codes/codex/v1",
+        "--api-key",
+        "test-api-key",
+      ]);
+    });
+    const added = parseJsonOutput<{
+      credential: { id: string; active: boolean; paths: string[] };
+    }>(addStdout);
+    assert.equal(added.credential.id, "codex-rightcode");
+    assert.equal(added.credential.active, false);
+    assert.deepEqual(added.credential.paths, [
+      "credentials/codex/codex-rightcode/auth.json",
+      "credentials/codex/codex-rightcode/config.toml",
+    ]);
+
+    const activateStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "activate",
+        userProfileId,
+        "codex-rightcode",
+      ]);
+    });
+    const activated = parseJsonOutput<{
+      credential: { id: string; active: boolean };
+    }>(activateStdout);
+    assert.equal(activated.credential.id, "codex-rightcode");
+    assert.equal(activated.credential.active, true);
+
+    const listStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "list",
+        userProfileId,
+      ]);
+    });
+    const listed = parseJsonOutput<{
+      credentials: Array<{ id: string; active: boolean; harness: string }>;
+    }>(listStdout);
+    assert.ok(listed.credentials.some((credential) =>
+      credential.id === "github-ssh" && credential.harness === "ssh"
+    ));
+    assert.ok(listed.credentials.some((credential) =>
+      credential.id === "codex-rightcode" && credential.active === true && credential.harness === "codex"
+    ));
+
+    const codexRegistry = (yaml.load(
+      fs.readFileSync(path.join(userRoot, "credentials", "codex-rightcode.yaml"), "utf8"),
+    ) ?? {}) as {
+      metadata?: { active?: boolean; harness?: string };
+    };
+    assert.equal(codexRegistry.metadata?.active, true);
+    assert.equal(codexRegistry.metadata?.harness, "codex");
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
@@ -418,6 +510,100 @@ exit 0
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
+  }
+});
+
+test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the demo template", () => {
+  const userProfileId = uniqueProjectName("dockerfile-sync");
+  const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const templateDockerfile = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    DEMO_USER_PROFILE_ID,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
+  const templateStat = fs.statSync(templateDockerfile);
+  fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
+  fs.writeFileSync(userDockerfile, "FROM scratch\n", "utf8");
+  const older = new Date(templateStat.mtimeMs - 60_000);
+  const newer = new Date(Date.now() + 60_000);
+  fs.utimesSync(userDockerfile, older, older);
+  fs.utimesSync(templateDockerfile, newer, newer);
+
+  try {
+    const result = syncWorkspaceDockerfileTemplate(userProfileId);
+    assert.equal(result.created, false);
+    assert.equal(result.refreshed, true);
+    assert.equal(result.path, userDockerfile);
+    assert.equal(
+      fs.readFileSync(userDockerfile, "utf8"),
+      fs.readFileSync(templateDockerfile, "utf8"),
+    );
+  } finally {
+    fs.utimesSync(templateDockerfile, templateStat.atime, templateStat.mtime);
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), { recursive: true, force: true });
+  }
+});
+
+test("ensureCanonicalWorkspaceImage rebuilds when the user Dockerfile is refreshed from the template", async () => {
+  const userProfileId = uniqueProjectName("dockerfile-rebuild");
+  const project = uniqueProjectName("image-refresh");
+  const imageRef = workspaceImageRef(userProfileId, project);
+  const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
+  const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const templateDockerfile = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    DEMO_USER_PROFILE_ID,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
+  const templateStat = fs.statSync(templateDockerfile);
+  fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+  doc.project = project;
+  doc.user_profile = userProfileId;
+  doc.runtime.base_image = imageRef;
+  fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+  fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
+  fs.writeFileSync(userDockerfile, "FROM scratch\n", "utf8");
+  const older = new Date(templateStat.mtimeMs - 60_000);
+  const newer = new Date(Date.now() + 60_000);
+  fs.utimesSync(userDockerfile, older, older);
+  fs.utimesSync(templateDockerfile, newer, newer);
+
+  try {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$1 $2 $3" == "image inspect ${imageRef}" ]]; then
+  exit 0
+fi
+if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        assert.deepEqual(readCommandLog(), [
+          `build -f ${userDockerfile} -t ${imageRef} .`,
+        ]);
+        assert.equal(
+          fs.readFileSync(userDockerfile, "utf8"),
+          fs.readFileSync(templateDockerfile, "utf8"),
+        );
+      },
+    );
+  } finally {
+    fs.utimesSync(templateDockerfile, templateStat.atime, templateStat.mtime);
+    fs.rmSync(dockerPath, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), { recursive: true, force: true });
   }
 });
 
@@ -1262,6 +1448,10 @@ if [[ "$*" == *"paseo daemon status --json"* ]]; then
   printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
   exit 0
 fi
+if [[ "$*" == *"paseo daemon pair --json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
+  exit 0
+fi
 if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
   printf 'srv_demo'
   exit 0
@@ -1361,6 +1551,10 @@ if [[ "$*" == *"paseo daemon status --json"* ]]; then
   printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
   exit 0
 fi
+if [[ "$*" == *"paseo daemon pair --json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
+  exit 0
+fi
 if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
   printf 'srv_demo'
   exit 0
@@ -1390,7 +1584,7 @@ exit 0
       assert.equal(parsed.daemon?.pairing?.state, "ok");
       assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
       assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
       assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
     },
   );
@@ -1451,7 +1645,7 @@ exit 1
         assert.equal(parsed.daemon?.pairing?.state, "ok");
         assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
         assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-        assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+        assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
         assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
       },
     );
@@ -1486,6 +1680,10 @@ if [[ "$*" == *"get pod -l app=demo"* ]]; then
 fi
 if [[ "$*" == *"paseo daemon status --json"* ]]; then
   printf '{"serverId":"srv_demo","localDaemon":"running","connectedDaemon":"reachable"}'
+  exit 0
+fi
+if [[ "$*" == *"paseo daemon pair --json"* ]]; then
+  printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0"}'
   exit 0
 fi
 if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
@@ -1531,7 +1729,7 @@ exit 0
       assert.equal(parsed.health.workspaceReadiness, "ready");
       assert.equal(parsed.health.daemonReadiness, "ready");
       assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude"]);
+      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
       assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
       assert.ok(parsed.evolution);
     },
@@ -1539,6 +1737,67 @@ exit 0
 
   cleanupStatusFile("demo");
   cleanupSelectionFile("demo");
+});
+
+test("status stays ready when no active codex credential is selected", () => {
+  const base = loadDefaultDemoWorkspace();
+  const workspace = {
+    ...base,
+    credentialBindings: base.credentialBindings.filter((binding) => binding.purpose !== "agent-auth"),
+    resolvedCredentialBindings: base.resolvedCredentialBindings.filter((binding) => binding.purpose !== "agent-auth"),
+    runtime: {
+      ...base.runtime,
+      authFiles: base.runtime.authFiles.filter((entry) =>
+        !entry.mountPath.startsWith(`${base.runtime.home}/.codex/`)
+        && !entry.mountPath.startsWith(`${base.runtime.home}/.claude/`)
+      ),
+    },
+  };
+  const observation = {
+    backend: {
+      kind: workspace.backend.kind,
+      exists: true,
+      running: true,
+      detail: "pod/pod-1",
+    },
+    attachments: {
+      workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
+      workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
+      userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+      userSshState: { observed: true, detail: workspace.attachments.userSshState.mountRoot },
+    },
+    runtimeAssembly: {
+      home: { observed: true, detail: workspace.runtime.home },
+      projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
+      managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
+      evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
+      codex: { observed: false, detail: `${workspace.runtime.home}/.codex` },
+      claude: { observed: false, detail: `${workspace.runtime.home}/.claude` },
+      ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+    },
+    daemon: {
+      manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+      pairing: {
+        observed: true,
+        detail: "paseo daemon pair",
+        url: "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0",
+      },
+    },
+    services: {
+      declared: 1,
+      observed: 1,
+      detail: "observed 1 service objects",
+    },
+  };
+
+  const drift = computeWorkspaceDrift(workspace, observation);
+  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+
+  assert.equal(drift.hasWarnings, false);
+  assert.equal(status.state, "ready");
+  assert.equal(status.health.daemonReadiness, "ready");
+  assert.equal(status.credentials?.codex?.state, "not-selected");
+  assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
 });
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
@@ -1620,10 +1879,10 @@ exit 0
         });
 
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("up -d")));
-        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("stop")));
-        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("restart")));
-        assert.ok(commands.some((entry) => entry.includes(`/projects/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
+        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d")));
+        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("stop")));
+        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("restart")));
+        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
 
         const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
         assert.ok(Array.isArray(parsed.reconcilePlan.actions));
@@ -1976,7 +2235,7 @@ exit 1
               : false,
           );
           const generatedApplyIndex = commands.findIndex((entry) =>
-            entry.includes(`/projects/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
+            entry.includes(`/workspaces/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
           );
           assert.equal(
             commands.some((entry) => entry.includes(`patch vm ${project}-vm`) && entry.includes(`"runStrategy":"Halted"`)),

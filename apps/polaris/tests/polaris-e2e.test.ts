@@ -206,7 +206,9 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.match(rendered, /backend:\n  kind: docker/);
         assert.match(rendered, /profile: morpheus/);
         assert.match(rendered, new RegExp(`user_profile: '?${userProfileId}'?`));
-        assert.match(rendered, /agent:\n  kind: disabled/);
+        assert.match(rendered, /agent:\n  kind: multi/);
+        assert.match(rendered, /credentialId: github-ssh/);
+        assert.doesNotMatch(rendered, /purpose: agent-auth/);
         assert.equal(parsed.created, "saved-spec");
         assert.equal(parsed.project, project);
         assert.equal(parsed.userProfile.id, userProfileId);
@@ -282,7 +284,6 @@ test("create adapts workspace credential bindings to the user's available regist
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
-  const legacyAgentCredential = path.join(credentialRoot, "codex-default.yaml");
   const legacyGitCredential = path.join(credentialRoot, "github-ssh.yaml");
   const adaptiveAgentCredential = path.join(credentialRoot, "demo-codex.yaml");
   const adaptiveGitCredential = path.join(credentialRoot, "demo-ssh.yaml");
@@ -295,7 +296,6 @@ test("create adapts workspace credential bindings to the user's available regist
       },
       async () => {
         await runCli(["user", "create", userProfileId, "--name", "E2E Create Adaptive", "--email", profileEmail]);
-        fs.rmSync(legacyAgentCredential, { force: true });
         fs.rmSync(legacyGitCredential, { force: true });
         fs.writeFileSync(
           adaptiveAgentCredential,
@@ -353,11 +353,12 @@ test("create adapts workspace credential bindings to the user's available regist
 
         assert.equal(fs.existsSync(configPath), true);
         const rendered = fs.readFileSync(configPath, "utf8");
-        assert.match(rendered, /agent:\n  kind: disabled/);
-        assert.match(rendered, /credentialId: demo-codex/);
+        assert.match(rendered, /agent:\n  kind: multi/);
         assert.match(rendered, /credentialId: demo-ssh/);
+        assert.doesNotMatch(rendered, /credentialId: demo-codex/);
         assert.doesNotMatch(rendered, /credentialId: codex-default/);
-        assert.deepEqual(parsed.credentials.defaults, ["demo-codex", "demo-ssh"]);
+        assert.doesNotMatch(rendered, /purpose: agent-auth/);
+        assert.deepEqual(parsed.credentials.defaults, ["demo-ssh"]);
       },
     );
   } finally {
@@ -1012,7 +1013,7 @@ exit 0
 
     const trace = fs.readFileSync(traceFile, "utf8");
     assert.match(trace, new RegExp(`logs ${podProject}-pod --tail=200`));
-    assert.match(trace, new RegExp(`compose -f .*/projects/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${dockerProject}`));
+    assert.match(trace, new RegExp(`compose -f .*/workspaces/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${dockerProject}`));
     assert.match(trace, new RegExp(`logs ${vmProject}-launcher --tail=200`));
   } finally {
     removeIfExists(podSpec);

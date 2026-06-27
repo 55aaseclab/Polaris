@@ -46,6 +46,14 @@ export interface PortalWorkspaceStatus {
     supportedHarnesses: string[];
     liveTarget: string | null;
   };
+  credentials?: {
+    codex?: {
+      state?: "selected" | "not-selected";
+      credentialId?: string;
+      label?: string;
+      source?: "workspace-binding" | "user-active" | "compatibility";
+    };
+  };
   daemon?: {
     manager?: { state?: string };
     pairing?: { state?: string; url?: string };
@@ -148,6 +156,10 @@ export interface PortalCredentialSummary {
   purposes: string[];
   status: string;
   paths: string[];
+  harness?: string;
+  providerName?: string;
+  baseUrl?: string;
+  active: boolean;
 }
 
 export interface PortalCredentialPreview {
@@ -347,6 +359,18 @@ export async function deleteCredential(
     `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export async function activateCredential(
+  userId: string,
+  credentialId: string,
+): Promise<PortalCredentialSummary> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}/activate`,
+    {
+      method: "POST",
     },
   );
 }

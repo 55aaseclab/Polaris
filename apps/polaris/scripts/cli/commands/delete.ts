@@ -28,7 +28,19 @@ const BACKEND_TARGETS: BackendTarget[] = [
 ];
 
 function workspaceRoot(userId: string, workspace: string): string {
-  return path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  return path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+}
+
+function portalWorkspaceStateRoot(userId: string, workspace: string): string {
+  return path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userId,
+    ".portal",
+    "workspaces",
+    workspace,
+  );
 }
 
 function profilePath(userId: string): string {
@@ -129,6 +141,10 @@ export async function deleteWorkspaceOwnedByUser(userId: string, workspace: stri
     teardownBackend(entry);
   }
   fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(portalWorkspaceStateRoot(userId, workspace), {
+    recursive: true,
+    force: true,
+  });
   removeWorkspaceFromProfile(userId, workspace);
   logInfo("cli", "workspace-deleted", { userId, workspace });
 }

@@ -17,7 +17,7 @@ export function generatedOutputPath(workspace: WorkspaceSpec): string {
     "config",
     "users",
     workspace.userProfile.id,
-    "projects",
+    "workspaces",
     workspace.identity.projectName,
     "generated",
     backendFile,

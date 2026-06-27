@@ -45,6 +45,10 @@ export interface PortalCredentialSummary {
   purposes: string[];
   status: string;
   paths: string[];
+  harness?: string;
+  providerName?: string;
+  baseUrl?: string;
+  active: boolean;
 }
 
 export interface PortalCredentialPreview {
@@ -98,12 +102,16 @@ export const PORTAL_DRIVER_TARGETS: PortalDriverTarget[] = [
   { backend: "kubevirt-vm" },
 ];
 
-function userProjectsRoot(userId: string): string {
-  return path.join(USER_ROOT, userId, "projects");
+function userWorkspacesRoot(userId: string): string {
+  return path.join(USER_ROOT, userId, "workspaces");
 }
 
 function workspaceRoot(userId: string, workspace: string): string {
-  return path.join(userProjectsRoot(userId), workspace);
+  return path.join(userWorkspacesRoot(userId), workspace);
+}
+
+function credentialRegistryPath(userId: string, credentialId: string): string {
+  return path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
 }
 
 function workspaceBackendFile(target: PortalDriverTarget): string {
@@ -141,20 +149,8 @@ function loadPortalWorkspaceByTarget(
   );
 }
 
-function credentialRegistryPath(userId: string, credentialId: string): string {
-  return path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
-}
-
-function portalStateRoot(userId: string, workspace: string): string {
-  return path.join(USER_ROOT, userId, ".portal", "workspaces", workspace);
-}
-
-function legacyPortalStateFile(userId: string, workspace: string): string {
-  return path.join(workspaceStateDir(workspace, userId), "portal.json");
-}
-
-function portalStateFile(userId: string, workspace: string): string {
-  return path.join(portalStateRoot(userId, workspace), "provision.json");
+function workspaceProvisionStateFile(userId: string, workspace: string): string {
+  return path.join(workspaceStateDir(workspace, userId), "provision.json");
 }
 
 function readJson<T>(filePath: string): T | null {
@@ -338,7 +334,7 @@ export function resolvePolarisUserIdFromIdentity(params: {
 }
 
 export function listOwnedWorkspaces(userId: string): string[] {
-  const root = userProjectsRoot(userId);
+  const root = userWorkspacesRoot(userId);
   if (!fs.existsSync(root)) {
     return [];
   }
@@ -370,8 +366,7 @@ export function readWorkspaceStatus(userId: string, workspace: string): Workspac
 }
 
 export function readWorkspaceProvisionProgress(userId: string, workspace: string): PortalProvisionProgress | null {
-  return readJson<PortalProvisionProgress>(portalStateFile(userId, workspace))
-    ?? readJson<PortalProvisionProgress>(legacyPortalStateFile(userId, workspace));
+  return readJson<PortalProvisionProgress>(workspaceProvisionStateFile(userId, workspace));
 }
 
 export function writeWorkspaceProvisionProgress(
@@ -379,14 +374,13 @@ export function writeWorkspaceProvisionProgress(
   workspace: string,
   progress: PortalProvisionProgress,
 ): string {
-  const filePath = portalStateFile(userId, workspace);
+  const filePath = workspaceProvisionStateFile(userId, workspace);
   writeJson(filePath, progress);
   return filePath;
 }
 
 export function clearWorkspaceProvisionProgress(userId: string, workspace: string): void {
-  fs.rmSync(portalStateFile(userId, workspace), { force: true });
-  fs.rmSync(legacyPortalStateFile(userId, workspace), { force: true });
+  fs.rmSync(workspaceProvisionStateFile(userId, workspace), { force: true });
 }
 
 export function resolveLiveTarget(
@@ -411,6 +405,9 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
     .map((entry) => {
       const data = readYAML(path.join(credentialsRoot, entry.name)) ?? {};
       const material = data.materialRef as Record<string, unknown> | undefined;
+      const metadata = typeof data.metadata === "object" && data.metadata
+        ? data.metadata as Record<string, unknown>
+        : {};
       const files = Array.isArray(material?.files)
         ? material?.files as Array<Record<string, unknown>>
         : [];
@@ -425,6 +422,10 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
           : [],
         status,
         paths,
+        harness: typeof metadata.harness === "string" ? metadata.harness : undefined,
+        providerName: typeof metadata.providerName === "string" ? metadata.providerName : undefined,
+        baseUrl: typeof metadata.baseUrl === "string" ? metadata.baseUrl : undefined,
+        active: metadata.active === true,
       };
     })
     .sort((left, right) => left.label.localeCompare(right.label));
@@ -701,20 +702,11 @@ export function updatePortalWorkspaceAgentBinding(input: {
       ]
     : preservedBindings;
 
-  const rawAgent = typeof current.agent === "object" && current.agent
-    ? { ...(current.agent as Record<string, unknown>) }
-    : {};
-
   const next = {
     ...current,
     credentials: {
       ...rawCredentials,
       bindings: credentialBindings,
-    },
-    agent: {
-      ...rawAgent,
-      kind: input.enabled ? "multi" : "disabled",
-      persist_state: input.enabled,
     },
   };
   writeYAML(configPath, next);

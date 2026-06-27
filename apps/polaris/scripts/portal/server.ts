@@ -9,6 +9,7 @@ import {
 } from "../core/portal.js";
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
+  activatePortalCredential,
   bindPortalWorkspaceAgent,
   createPortalCodexCredential,
   deletePortalCredential,
@@ -351,6 +352,15 @@ async function handleCredentialDelete(
   sendJson(res, 200, deleted);
 }
 
+async function handleCredentialActivate(
+  res: ServerResponse,
+  userId: string,
+  credentialId: string,
+): Promise<void> {
+  const activated = await activatePortalCredential(userId, credentialId);
+  sendJson(res, 200, activated);
+}
+
 async function handleProfileUpdate(
   req: IncomingMessage,
   res: ServerResponse,
@@ -535,6 +545,11 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         if (segments[3] === "credentials" && segments.length === 5 && req.method === "DELETE") {
           const credentialId = decodeURIComponent(segments[4]);
           await handleCredentialDelete(res, routeUserId, credentialId);
+          return;
+        }
+        if (segments[3] === "credentials" && segments.length === 6 && segments[5] === "activate" && req.method === "POST") {
+          const credentialId = decodeURIComponent(segments[4]);
+          await handleCredentialActivate(res, routeUserId, credentialId);
           return;
         }
         if (segments[3] === "credentials" && segments[4] === "preview" && req.method === "GET") {

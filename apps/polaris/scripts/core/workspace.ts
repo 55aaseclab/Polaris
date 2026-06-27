@@ -240,7 +240,7 @@ export interface WorkspaceAgentContract {
     requiresDaemon: boolean;
     supportsPairing: boolean;
   };
-  harnesses: Array<"codex" | "claude">;
+  harnesses: Array<"codex" | "claude" | "copilot" | "opencode" | "pi">;
   runtime: {
     stateRoot: string;
     evolutionRoot: string;
@@ -324,6 +324,14 @@ export interface WorkspaceStatus {
     daemonAddress: string;
     supportedHarnesses: string[];
     liveTarget: string | null;
+  };
+  credentials?: {
+    codex?: {
+      state: "selected" | "not-selected";
+      credentialId?: string;
+      label?: string;
+      source?: "workspace-binding" | "user-active" | "compatibility";
+    };
   };
   details: Record<string, string | undefined>;
   evolution?: {

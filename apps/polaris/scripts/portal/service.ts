@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import {
+  activateManagedCredential,
+  createManagedCodexCredential,
+  deleteManagedCredential,
+} from "../config/credentials.js";
+import {
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
@@ -18,10 +23,6 @@ import {
 } from "../core/portal.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
-import {
-  createUserCredentialCommand,
-  deleteUserCredentialCommand,
-} from "../cli/commands/user-credential.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
@@ -154,33 +155,20 @@ export async function createPortalCodexCredential(input: {
   apiKey?: string;
   credentialId?: string;
 }): Promise<PortalCredentialSummary> {
-  const { stdout } = await captureStdout(async () => {
-    await createUserCredentialCommand([
-      input.userId,
-      "--harness",
-      "codex",
-      ...(input.credentialId?.trim()
-        ? ["--credential-id", input.credentialId.trim()]
-        : []),
-      ...(input.label?.trim() ? ["--label", input.label.trim()] : []),
-      ...(input.providerName?.trim()
-        ? ["--provider-name", input.providerName.trim()]
-        : []),
-      ...(input.baseUrl?.trim() ? ["--base-url", input.baseUrl.trim()] : []),
-      ...(input.apiKey !== undefined ? ["--api-key", input.apiKey] : []),
-    ]);
+  const created = createManagedCodexCredential({
+    userProfileId: input.userId,
+    ...(input.credentialId?.trim() ? { credentialId: input.credentialId.trim() } : {}),
+    label: input.label?.trim() || "RightCode Codex",
+    providerName: input.providerName?.trim() || "rightcode",
+    baseUrl: input.baseUrl?.trim() || "https://right.codes/codex/v1",
+    apiKey: input.apiKey ?? "",
   });
-  const created = parseJsonFromText<{
-    credential: {
-      id: string;
-    };
-  }>(stdout);
   const summary = listPortalCredentials(input.userId).find(
-    (credential) => credential.id === created.credential.id,
+    (credential) => credential.id === created.id,
   );
   if (!summary) {
     throw new Error(
-      `Credential '${created.credential.id}' could not be loaded after creation`,
+      `Credential '${created.id}' could not be loaded after creation`,
     );
   }
   return summary;
@@ -194,23 +182,31 @@ export async function deletePortalCredential(
     id: string;
     userId: string;
     removed: boolean;
-    registryPath: string;
-    removedPaths: string[];
-  };
-}> {
-  const { stdout } = await captureStdout(async () => {
-    await deleteUserCredentialCommand([userId, credentialId]);
-  });
-
-  return parseJsonFromText<{
-    credential: {
-      id: string;
-      userId: string;
-      removed: boolean;
       registryPath: string;
       removedPaths: string[];
     };
-  }>(stdout);
+  }> {
+  return {
+    credential: deleteManagedCredential({
+      userProfileId: userId,
+      credentialId,
+    }),
+  };
+}
+
+export async function activatePortalCredential(
+  userId: string,
+  credentialId: string,
+): Promise<PortalCredentialSummary> {
+  const activated = activateManagedCredential({
+    userProfileId: userId,
+    credentialId,
+  });
+  const summary = listPortalCredentials(userId).find((credential) => credential.id === activated.id);
+  if (!summary) {
+    throw new Error(`Credential '${activated.id}' could not be loaded after activation`);
+  }
+  return summary;
 }
 
 export function upsertPortalCredential(
@@ -281,6 +277,7 @@ export function upsertPortalCredential(
     purposes: credential.purposes,
     status: credential.status ?? "ready",
     paths: credential.files.map((file) => file.sourcePath),
+    active: false,
   };
 }
 

@@ -4,6 +4,14 @@ import { resolveRepoRoot } from "../utils/repo-root.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
+function hasWorkspaceSavedSpec(workspaceRoot: string): boolean {
+  return [
+    "docker.agent.yaml",
+    "pod.agent.yaml",
+    "kubevirt.agent.yaml",
+  ].some((fileName) => fs.existsSync(path.join(workspaceRoot, fileName)));
+}
+
 export function projectOwners(project: string): string[] {
   const usersRoot = path.join(REPO_ROOT, "config", "users");
   if (!fs.existsSync(usersRoot)) {
@@ -14,8 +22,8 @@ export function projectOwners(project: string): string[] {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .filter((userProfileId) => {
-      const projectRoot = path.join(usersRoot, userProfileId, "projects", project);
-      return fs.existsSync(projectRoot);
+      const projectRoot = path.join(usersRoot, userProfileId, "workspaces", project);
+      return hasWorkspaceSavedSpec(projectRoot);
     })
     .sort();
 }

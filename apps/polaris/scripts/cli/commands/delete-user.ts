@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { deleteAllManagedCredentialsForUser } from "../../config/credentials.js";
 import { deleteUserMapEntriesForPolarisUserId } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
@@ -30,6 +31,9 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const userRoot = userRootFor(userProfileId);
   const removedProfile = fs.existsSync(profilePath);
   const removedUserRoot = fs.existsSync(userRoot);
+  if (removedUserRoot) {
+    deleteAllManagedCredentialsForUser(userProfileId);
+  }
   const removedMappings = deleteUserMapEntriesForPolarisUserId(userProfileId);
 
   fs.rmSync(profilePath, { force: true });

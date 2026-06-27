@@ -1,21 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
-import yaml from "js-yaml";
 import {
-  credentialsRootFor,
+  activateManagedCredential,
+  createManagedCodexCredential,
+  createManagedSshCredential,
+  deleteManagedCredential,
   ensureUniqueCredentialId,
   ensureUserProfileExists,
+  listManagedCredentials,
   sanitizeCredentialId,
-  writeCodexCredential,
 } from "../../config/credentials.js";
 import { logInfo } from "../../utils/log.js";
-import { resolveRepoRoot } from "../../utils/repo-root.js";
-
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
-
-function userRootFor(userProfileId: string): string {
-  return path.join(REPO_ROOT, "config", "users", userProfileId);
-}
 
 function parseFlag(argv: string[], flag: string): string | undefined {
   const index = argv.findIndex((value) => value === flag);
@@ -23,53 +16,41 @@ function parseFlag(argv: string[], flag: string): string | undefined {
   return value ? value : undefined;
 }
 
-function removeEmptyParentDirs(start: string, stopAt: string): void {
-  let current = path.dirname(start);
-  while (current.startsWith(stopAt) && current !== stopAt) {
-    if (!fs.existsSync(current)) {
-      current = path.dirname(current);
-      continue;
-    }
-    if (fs.readdirSync(current).length > 0) {
-      return;
-    }
-    fs.rmdirSync(current);
-    current = path.dirname(current);
-  }
-}
-
-function parseCreateCredentialArgs(argv: string[]): {
+function parseAddCredentialArgs(argv: string[]): {
   userProfileId: string;
-  harness: "codex";
+  harness: "codex" | "ssh";
   credentialId?: string;
-  label: string;
-  providerName: string;
-  baseUrl: string;
-  apiKey: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  activate: boolean;
 } {
   const userProfileId = argv[0]?.trim();
-  const harness = parseFlag(argv, "--harness") ?? "codex";
-  const providerName = parseFlag(argv, "--provider-name") ?? "rightcode";
-  const baseUrl = parseFlag(argv, "--base-url") ?? "https://right.codes/codex/v1";
-  const label = parseFlag(argv, "--label") ?? `Codex ${providerName}`;
-  const apiKey = parseFlag(argv, "--api-key") ?? "";
+  const harness = (parseFlag(argv, "--harness") ?? "codex").trim().toLowerCase();
   const credentialId = parseFlag(argv, "--credential-id");
+  const label = parseFlag(argv, "--label");
+  const providerName = parseFlag(argv, "--provider-name");
+  const baseUrl = parseFlag(argv, "--base-url");
+  const apiKey = parseFlag(argv, "--api-key");
+  const activate = argv.includes("--activate");
   if (!userProfileId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- user credential create <userProfileId> --harness codex [--credential-id <id>] [--label <label>] [--provider-name <name>] [--base-url <url>] [--api-key <key>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> --harness <codex|ssh> [--credential-id <id>] [--label <label>] [--provider-name <name>] [--base-url <url>] [--api-key <key>] [--activate]",
     );
   }
-  if (harness !== "codex") {
-    throw new Error(`Unsupported harness '${harness}'. Only 'codex' is supported`);
+  if (harness !== "codex" && harness !== "ssh") {
+    throw new Error(`Unsupported harness '${harness}'`);
   }
   return {
     userProfileId,
-    harness: "codex",
+    harness,
     ...(credentialId ? { credentialId } : {}),
-    label,
-    providerName,
-    baseUrl,
-    apiKey,
+    ...(label ? { label } : {}),
+    ...(providerName ? { providerName } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey !== undefined ? { apiKey } : {}),
+    activate,
   };
 }
 
@@ -87,103 +68,100 @@ function parseDeleteCredentialArgs(argv: string[]): {
   return { userProfileId, credentialId };
 }
 
-export async function createUserCredentialCommand(argv: string[]): Promise<void> {
+function parseListCredentialArgs(argv: string[]): { userProfileId: string } {
+  const userProfileId = argv[0]?.trim();
+  if (!userProfileId) {
+    throw new Error(
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential list <userProfileId>",
+    );
+  }
+  return { userProfileId };
+}
+
+function parseActivateCredentialArgs(argv: string[]): {
+  userProfileId: string;
+  credentialId: string;
+} {
+  const userProfileId = argv[0]?.trim();
+  const credentialId = argv[1]?.trim();
+  if (!userProfileId || !credentialId) {
+    throw new Error(
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential activate <userProfileId> <credentialId>",
+    );
+  }
+  return { userProfileId, credentialId };
+}
+
+export async function addUserCredentialCommand(argv: string[]): Promise<void> {
   const {
     userProfileId,
+    harness,
     credentialId,
     label,
     providerName,
     baseUrl,
     apiKey,
-  } = parseCreateCredentialArgs(argv);
+    activate,
+  } = parseAddCredentialArgs(argv);
   ensureUserProfileExists(userProfileId);
-  const seedId = sanitizeCredentialId(credentialId ?? `codex-${providerName}`) || "codex";
-  const finalCredentialId = credentialId
-    ? seedId
-    : ensureUniqueCredentialId(userProfileId, seedId);
-  const created = writeCodexCredential({
-    userProfileId,
-    credentialId: finalCredentialId,
-    label,
-    providerName,
-    baseUrl,
-    apiKey,
-  });
+
+  const credential = harness === "ssh"
+    ? createManagedSshCredential({
+        userProfileId,
+        ...(credentialId ? { credentialId } : {}),
+        ...(label ? { label } : {}),
+      })
+    : createManagedCodexCredential({
+        userProfileId,
+        credentialId: credentialId
+          ? sanitizeCredentialId(credentialId)
+          : ensureUniqueCredentialId(
+              userProfileId,
+              sanitizeCredentialId(`codex-${providerName ?? "rightcode"}`) || "codex",
+            ),
+        label: label ?? "RightCode Codex",
+        providerName: providerName ?? "rightcode",
+        baseUrl: baseUrl ?? "https://right.codes/codex/v1",
+        apiKey: apiKey ?? "",
+        activate,
+      });
 
   logInfo("cli", "user-credential-created", {
     userProfileId,
-    credentialId: finalCredentialId,
-    harness: "codex",
+    credentialId: credential.id,
+    harness,
   });
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        credential: {
-          id: finalCredentialId,
-          userId: userProfileId,
-          kind: "codex-auth",
-          label,
-          purposes: ["agent-auth"],
-          status: "ready",
-          registryPath: `config/users/${userProfileId}/credentials/${created.credentialId}.yaml`,
-          paths: created.paths,
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
+}
+
+export async function createUserCredentialCommand(argv: string[]): Promise<void> {
+  await addUserCredentialCommand(argv);
 }
 
 export async function deleteUserCredentialCommand(argv: string[]): Promise<void> {
   const { userProfileId, credentialId } = parseDeleteCredentialArgs(argv);
-  ensureUserProfileExists(userProfileId);
-  const registryPath = path.join(credentialsRootFor(userProfileId), `${credentialId}.yaml`);
-  const document = fs.existsSync(registryPath)
-    ? (yaml.load(fs.readFileSync(registryPath, "utf8")) ?? {}) as Record<string, unknown>
-    : null;
-  const materialRef = document?.materialRef as Record<string, unknown> | undefined;
-  const files = Array.isArray(materialRef?.files)
-    ? materialRef.files as Array<Record<string, unknown>>
-    : [];
-  const userRoot = userRootFor(userProfileId);
-  const removedPaths: string[] = [];
-
-  for (const entry of files) {
-    const sourcePath = String(entry.source_path ?? "").trim();
-    if (!sourcePath) {
-      continue;
-    }
-    const absolute = path.resolve(userRoot, sourcePath);
-    if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
-      continue;
-    }
-    fs.rmSync(absolute, { force: true });
-    removeEmptyParentDirs(absolute, userRoot);
-    removedPaths.push(sourcePath);
-  }
-
-  const removed = fs.existsSync(registryPath) || removedPaths.length > 0;
-  fs.rmSync(registryPath, { force: true });
-
+  const credential = deleteManagedCredential({ userProfileId, credentialId });
   logInfo("cli", "user-credential-deleted", {
     userProfileId,
     credentialId,
-    removed,
+    removed: credential.removed,
   });
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        credential: {
-          id: credentialId,
-          userId: userProfileId,
-          removed,
-          registryPath: `config/users/${userProfileId}/credentials/${credentialId}.yaml`,
-          removedPaths,
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
+}
+
+export async function listUserCredentialCommand(argv: string[]): Promise<void> {
+  const { userProfileId } = parseListCredentialArgs(argv);
+  ensureUserProfileExists(userProfileId);
+  const credentials = listManagedCredentials(userProfileId);
+  process.stdout.write(`${JSON.stringify({ credentials }, null, 2)}\n`);
+}
+
+export async function activateUserCredentialCommand(argv: string[]): Promise<void> {
+  const { userProfileId, credentialId } = parseActivateCredentialArgs(argv);
+  const credential = activateManagedCredential({ userProfileId, credentialId });
+  logInfo("cli", "user-credential-activated", {
+    userProfileId,
+    credentialId,
+  });
+  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
 }

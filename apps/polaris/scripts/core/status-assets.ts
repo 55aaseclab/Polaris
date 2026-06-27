@@ -31,7 +31,7 @@ function workspaceSpecPath(
     "config",
     "users",
     userProfileId,
-    "projects",
+    "workspaces",
     workspace,
     fileName,
   );
@@ -43,7 +43,7 @@ function evolutionAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus[
     "config",
     "users",
     workspace.userProfile.id,
-    "projects",
+    "workspaces",
     workspace.identity.projectName,
   );
   const userPolarisRoot = path.join(
@@ -149,20 +149,20 @@ export function buildStatusAssets(workspace: WorkspaceSpec): NonNullable<Workspa
       {
         driver: "docker",
         file: "docker.yaml",
-        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "docker.yaml")),
-        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "docker.yaml")),
+        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "docker.yaml")),
+        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "docker.yaml")),
       },
       {
         driver: "pod",
         file: "pod.yaml",
-        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "pod.yaml")),
-        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "pod.yaml")),
+        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "pod.yaml")),
+        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "pod.yaml")),
       },
       {
         driver: "kubevirt-vm",
         file: "kubevirt.yaml",
-        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "kubevirt.yaml")),
-        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "projects", workspace.identity.projectName, "generated", "kubevirt.yaml")),
+        path: repoRelative(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "kubevirt.yaml")),
+        exists: fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "kubevirt.yaml")),
       },
     ],
     imageTags: [
