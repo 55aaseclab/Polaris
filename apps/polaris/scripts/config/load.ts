@@ -21,6 +21,10 @@ import type {
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
 import { workspaceHarnessIds } from "../core/harness-catalog.js";
+import {
+  defaultMountPathForCredentialFile,
+  userIdentityDurablePaths,
+} from "../core/identity-layout.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
@@ -235,19 +239,7 @@ function mountPathForCredentialFile(
   runtimeHome: string,
   key: string,
 ): string {
-  if (kind === "ssh-key") {
-    return `${runtimeHome}/.ssh/${path.posix.basename(key)}`;
-  }
-  if (key === "codex-auth.json") {
-    return `${runtimeHome}/.codex/auth.json`;
-  }
-  if (key === "codex-config.toml") {
-    return `${runtimeHome}/.codex/config.toml`;
-  }
-  if (key === "claude-settings.json") {
-    return `${runtimeHome}/.claude/settings.json`;
-  }
-  return `${runtimeHome}/.config/credentials/${path.posix.basename(key)}`;
+  return defaultMountPathForCredentialFile(kind, runtimeHome, key);
 }
 
 function normalizeCredentialMaterialFiles(args: {
@@ -675,11 +667,9 @@ function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig |
 }
 
 function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfig): WorkspaceAttachments {
-  const userIdentityDurablePaths = Array.from(new Set([
+  const identityDurablePaths = Array.from(new Set([
     ...config["user-identity-state"].durablePaths,
-    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/config`,
-    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/data`,
-    `${config["user-identity-state"].mountRoot.replace(/\/+$/, "")}/codex-xdg/state`,
+    ...userIdentityDurablePaths(config["user-identity-state"].mountRoot),
   ]));
   const runtimeDurablePaths = Array.from(new Set([
     ...config["workspace-runtime-state"].durablePaths,
@@ -707,7 +697,7 @@ function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfi
       config["user-identity-state"].scope,
       config["user-identity-state"].sharing,
       config["user-identity-state"].mountRoot,
-      userIdentityDurablePaths,
+      identityDurablePaths,
       config["user-identity-state"].source,
     ),
     userSshState: buildAttachment(
@@ -773,13 +763,7 @@ function translateLegacyAttachments(args: {
       "user",
       "cross-workspace",
       "/identity",
-      [
-        "/identity/codex",
-        "/identity/claude",
-        "/identity/codex-xdg/config",
-        "/identity/codex-xdg/data",
-        "/identity/codex-xdg/state",
-      ],
+      userIdentityDurablePaths("/identity"),
       {
         kind: "secret-material",
         description: identityFiles.length
@@ -1058,7 +1042,7 @@ export function loadWorkspaceFromConfigPath(
         `runtime home SHALL resolve to ${home}`,
         `${agentContract.runtime.stateRoot} SHALL assemble from workspace-runtime-state`,
         `${agentContract.runtime.evolutionRoot} SHALL assemble from workspace-runtime-state`,
-        `${home}/.codex and ${home}/.claude SHALL assemble from user-identity-state`,
+        `${home}/.codex, ${home}/.claude, ${home}/.copilot, ${home}/.pi, and OpenCode runtime state SHALL assemble from user-identity-state`,
         `Codex XDG config/data/state SHALL assemble from user-identity-state`,
         `${home}/.ssh SHALL assemble from user-ssh-state with strict key permissions`,
       ],

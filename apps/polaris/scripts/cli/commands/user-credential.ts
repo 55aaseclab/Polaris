@@ -1,13 +1,16 @@
 import {
   activateManagedCredential,
-  createManagedCodexCredential,
-  createManagedSshCredential,
+  createManagedHarnessCredential,
   deleteManagedCredential,
   ensureUniqueCredentialId,
   ensureUserProfileExists,
   listManagedCredentials,
   sanitizeCredentialId,
 } from "../../config/credentials.js";
+import { isManagedHarness, type ManagedHarness } from "../../config/credential-catalog.js";
+import { loadExecutableWorkspaceForCommand } from "./shared.js";
+import { statusCommand } from "./status.js";
+import { switchWorkspaceLiveCredentialMaterial } from "../../executor/operations.js";
 import { logInfo } from "../../utils/log.js";
 
 function parseFlag(argv: string[], flag: string): string | undefined {
@@ -18,12 +21,14 @@ function parseFlag(argv: string[], flag: string): string | undefined {
 
 function parseAddCredentialArgs(argv: string[]): {
   userProfileId: string;
-  harness: "codex" | "ssh";
+  harness: ManagedHarness;
   credentialId?: string;
   label?: string;
   providerName?: string;
   baseUrl?: string;
   apiKey?: string;
+  presetId?: string;
+  model?: string;
   activate: boolean;
 } {
   const userProfileId = argv[0]?.trim();
@@ -33,13 +38,15 @@ function parseAddCredentialArgs(argv: string[]): {
   const providerName = parseFlag(argv, "--provider-name");
   const baseUrl = parseFlag(argv, "--base-url");
   const apiKey = parseFlag(argv, "--api-key");
+  const presetId = parseFlag(argv, "--preset-id");
+  const model = parseFlag(argv, "--model");
   const activate = argv.includes("--activate");
   if (!userProfileId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> --harness <codex|ssh> [--credential-id <id>] [--label <label>] [--provider-name <name>] [--base-url <url>] [--api-key <key>] [--activate]",
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> --harness <ssh|codex|claude|copilot|opencode|pi> [--credential-id <id>] [--label <label>] [--provider-name <name>] [--base-url <url>] [--api-key <key>] [--preset-id <id>] [--model <name>] [--activate]",
     );
   }
-  if (harness !== "codex" && harness !== "ssh") {
+  if (!isManagedHarness(harness)) {
     throw new Error(`Unsupported harness '${harness}'`);
   }
   return {
@@ -50,6 +57,8 @@ function parseAddCredentialArgs(argv: string[]): {
     ...(providerName ? { providerName } : {}),
     ...(baseUrl ? { baseUrl } : {}),
     ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(presetId ? { presetId } : {}),
+    ...(model ? { model } : {}),
     activate,
   };
 }
@@ -92,6 +101,59 @@ function parseActivateCredentialArgs(argv: string[]): {
   return { userProfileId, credentialId };
 }
 
+function parseLiveSwitchCredentialArgs(argv: string[]): {
+  userProfileId: string;
+  workspaceRef: string;
+  credentialId: string;
+  harness?: ManagedHarness;
+} {
+  const userProfileId = argv[0]?.trim();
+  const workspaceRef = argv[1]?.trim();
+  const credentialId = argv[2]?.trim();
+  const harnessValue = parseFlag(argv, "--harness")?.trim().toLowerCase();
+  if (!userProfileId || !workspaceRef || !credentialId) {
+    throw new Error(
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential live-switch <userProfileId> <workspaceRef> <credentialId> [--harness <codex|claude|copilot|opencode|pi>]",
+    );
+  }
+  if (harnessValue && !isManagedHarness(harnessValue)) {
+    throw new Error(`Unsupported harness '${harnessValue}'`);
+  }
+  const harness = harnessValue as ManagedHarness | undefined;
+  return {
+    userProfileId,
+    workspaceRef,
+    credentialId,
+    ...(harness ? { harness } : {}),
+  };
+}
+
+async function captureStdout<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; stdout: string }> {
+  const stdoutChunks: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    stdoutChunks.push(
+      typeof chunk === "string"
+        ? chunk
+        : Buffer.from(chunk).toString("utf8"),
+    );
+    const callback = args.find(
+      (arg) => typeof arg === "function",
+    ) as (() => void) | undefined;
+    callback?.();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    const result = await fn();
+    return { result, stdout: stdoutChunks.join("").trim() };
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+}
+
 export async function addUserCredentialCommand(argv: string[]): Promise<void> {
   const {
     userProfileId,
@@ -101,30 +163,31 @@ export async function addUserCredentialCommand(argv: string[]): Promise<void> {
     providerName,
     baseUrl,
     apiKey,
+    presetId,
+    model,
     activate,
   } = parseAddCredentialArgs(argv);
   ensureUserProfileExists(userProfileId);
 
-  const credential = harness === "ssh"
-    ? createManagedSshCredential({
-        userProfileId,
-        ...(credentialId ? { credentialId } : {}),
-        ...(label ? { label } : {}),
-      })
-    : createManagedCodexCredential({
-        userProfileId,
-        credentialId: credentialId
-          ? sanitizeCredentialId(credentialId)
-          : ensureUniqueCredentialId(
-              userProfileId,
-              sanitizeCredentialId(`codex-${providerName ?? "rightcode"}`) || "codex",
-            ),
-        label: label ?? "RightCode Codex",
-        providerName: providerName ?? "rightcode",
-        baseUrl: baseUrl ?? "https://right.codes/codex/v1",
-        apiKey: apiKey ?? "",
-        activate,
-      });
+  const defaultBaseId = harness === "ssh"
+    ? "github-ssh"
+    : harness === "codex"
+      ? sanitizeCredentialId(`codex-${providerName ?? presetId ?? "rightcode"}`) || "codex"
+      : sanitizeCredentialId(`${harness}-${providerName ?? presetId ?? harness}`) || harness;
+  const credential = createManagedHarnessCredential({
+    userProfileId,
+    harness,
+    credentialId: credentialId
+      ? sanitizeCredentialId(credentialId)
+      : ensureUniqueCredentialId(userProfileId, defaultBaseId),
+    ...(label ? { label } : {}),
+    ...(providerName ? { providerName } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(presetId ? { presetId } : {}),
+    ...(model ? { model } : {}),
+    activate,
+  });
 
   logInfo("cli", "user-credential-created", {
     userProfileId,
@@ -164,4 +227,47 @@ export async function activateUserCredentialCommand(argv: string[]): Promise<voi
     credentialId,
   });
   process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
+}
+
+export async function liveSwitchUserCredentialCommand(
+  argv: string[],
+): Promise<void> {
+  const { userProfileId, workspaceRef, credentialId, harness } =
+    parseLiveSwitchCredentialArgs(argv);
+  ensureUserProfileExists(userProfileId);
+  const { workspace } = await loadExecutableWorkspaceForCommand(
+    "status",
+    workspaceRef,
+  );
+  if (workspace.userProfile.id !== userProfileId) {
+    throw new Error(
+      `Workspace '${workspace.identity.projectName}' belongs to user '${workspace.userProfile.id}', not '${userProfileId}'`,
+    );
+  }
+  const switched = switchWorkspaceLiveCredentialMaterial({
+    workspace,
+    userId: userProfileId,
+    credentialId,
+    harness,
+    requireSupported: false,
+  });
+  await captureStdout(() => statusCommand(workspaceRef));
+  logInfo("cli", "user-credential-live-switched", {
+    userProfileId,
+    workspace: workspace.identity.projectName,
+    harness: switched.harness,
+    credentialId,
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        switched: true,
+        workspace: workspace.identity.projectName,
+        harness: switched.harness,
+        credentialId,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }

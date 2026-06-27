@@ -341,6 +341,14 @@ export interface WorkspaceStatus {
       label?: string;
       source?: "workspace-binding" | "user-active" | "compatibility";
     };
+    live?: {
+      supportedHarnesses: string[];
+      switchableHarnesses: string[];
+      selectedHarness?: string;
+      selectedCredentialId?: string;
+      selectedCredentialLabel?: string;
+      source?: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+    };
   };
   details: Record<string, string | undefined>;
   evolution?: {

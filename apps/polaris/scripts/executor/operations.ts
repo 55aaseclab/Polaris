@@ -3,8 +3,19 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
 import { workspaceConfigPath } from "../config/scaffold.js";
+import { readManagedCredentialRecord } from "../config/credentials.js";
+import {
+  isAgentHarness,
+  supportsLiveCredentialSwitch,
+  type ManagedHarness,
+} from "../config/credential-catalog.js";
+import {
+  defaultMountPathForCredentialFile,
+  stateStoragePathForMountPath,
+} from "../core/identity-layout.js";
 import {
   loadWorkspaceDetail,
+  loadPortalWorkspaceByTarget,
   loadWorkspaceSummary,
   readWorkspaceProvisionProgress,
   type PortalDriverTarget,
@@ -27,6 +38,7 @@ import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
 import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec } from "../core/workspace.js";
+import { writeWorkspaceLiveCredentialSelection } from "../output/state-store.js";
 import { logWarn } from "../utils/log.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 
@@ -82,6 +94,31 @@ function updateProgress(
   };
   writeWorkspaceProvisionProgress(userId, workspace, next);
   return next;
+}
+
+function runChecked(
+  command: string,
+  args: string[],
+): { stdout: string; stderr: string } {
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  if (result.error) {
+    throw new Error(
+      `Failed to execute '${command} ${args.join(" ")}': ${result.error.message}`,
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      (result.stderr || result.stdout || "")
+        .trim() || `Command failed (${result.status ?? 1}): ${command} ${args.join(" ")}`,
+    );
+  }
+  return {
+    stdout: String(result.stdout || ""),
+    stderr: String(result.stderr || ""),
+  };
 }
 
 async function captureStdout<T>(
@@ -143,6 +180,188 @@ function loadUserWorkspace(
     backend,
     profileHint,
   );
+}
+
+function liveRuntimeCredentialFiles(
+  workspace: WorkspaceSpec,
+  userId: string,
+  credentialId: string,
+  requestedHarness?: ManagedHarness,
+  requireSupported = false,
+): {
+  harness: Exclude<ManagedHarness, "ssh">;
+  files: Array<{ path: string; content: string }>;
+} {
+  const record = readManagedCredentialRecord({
+    userProfileId: userId,
+    credentialId,
+  });
+  if (requestedHarness && record.summary.harness !== requestedHarness) {
+    throw new Error(
+      `Credential '${credentialId}' belongs to harness '${record.summary.harness}', not '${requestedHarness}'`,
+    );
+  }
+  if (!isAgentHarness(record.summary.harness)) {
+    throw new Error(
+      `Credential '${credentialId}' does not support live runtime switching`,
+    );
+  }
+  if (
+    requireSupported
+    && !supportsLiveCredentialSwitch(record.summary.harness)
+  ) {
+    throw new Error(
+      `Credential '${credentialId}' does not support live runtime switching`,
+    );
+  }
+  const files = record.files.map((file) => {
+    const mountPath =
+      file.mountPath?.trim()
+      || defaultMountPathForCredentialFile(
+        record.summary.kind,
+        workspace.runtime.home,
+        file.key,
+      );
+    const targetPath = stateStoragePathForMountPath({
+      mountPath,
+      runtimeHome: workspace.runtime.home,
+      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      sshRoot: workspace.attachments.userSshState.mountRoot,
+    });
+    if (
+      !targetPath
+      || !targetPath.startsWith(
+        `${workspace.attachments.userIdentityState.mountRoot}/`,
+      )
+    ) {
+      throw new Error(
+        `Credential '${credentialId}' file '${file.key}' does not map into workspace identity state`,
+      );
+    }
+    return {
+      path: targetPath,
+      content: file.content,
+    };
+  });
+  if (files.length === 0) {
+    throw new Error(
+      `Credential '${credentialId}' does not contain live runtime material files`,
+    );
+  }
+  return {
+    harness: record.summary.harness,
+    files,
+  };
+}
+
+function runtimeWriteScript(
+  files: Array<{ path: string; content: string }>,
+): string {
+  const payload = JSON.stringify(
+    files.map((file) => ({
+      path: file.path,
+      content: Buffer.from(file.content, "utf8").toString("base64"),
+    })),
+  );
+  return [
+    "python3 -c",
+    JSON.stringify([
+      "import base64, json, pathlib, stat",
+      `files = json.loads(${JSON.stringify(payload)})`,
+      "for entry in files:",
+      "    path = pathlib.Path(entry['path'])",
+      "    path.parent.mkdir(parents=True, exist_ok=True)",
+      "    path.write_bytes(base64.b64decode(entry['content']))",
+      "    path.chmod(stat.S_IRUSR | stat.S_IWUSR)",
+    ].join("\n")),
+  ].join(" ");
+}
+
+function dockerContainerName(workspace: WorkspaceSpec): string {
+  return `${workspace.identity.projectName}-docker`;
+}
+
+function runningPodName(workspace: WorkspaceSpec): string {
+  return runChecked(
+    "kubectl",
+    [
+      "-n",
+      workspace.identity.projectName,
+      "get",
+      "pod",
+      "-l",
+      `app=${workspace.identity.projectName}`,
+      "-o",
+      "jsonpath={.items[0].metadata.name}",
+    ],
+  ).stdout.trim();
+}
+
+function applyLiveRuntimeFiles(
+  workspace: WorkspaceSpec,
+  files: Array<{ path: string; content: string }>,
+): void {
+  const script = runtimeWriteScript(files);
+  if (workspace.backend.kind === "docker") {
+    const containerName = dockerContainerName(workspace);
+    runChecked("docker", ["exec", containerName, "sh", "-lc", script]);
+    return;
+  }
+  if (workspace.backend.kind === "pod") {
+    const podName = runningPodName(workspace);
+    if (!podName) {
+      throw new Error(
+        `Workspace '${workspace.identity.projectName}' does not have a running pod`,
+      );
+    }
+    runChecked(
+      "kubectl",
+      [
+        "-n",
+        workspace.identity.projectName,
+        "exec",
+        podName,
+        "--",
+        "sh",
+        "-lc",
+        script,
+      ],
+    );
+    return;
+  }
+  throw new Error(
+    `Live credential switching is not supported for backend '${workspace.backend.kind}'`,
+  );
+}
+
+export function switchWorkspaceLiveCredentialMaterial(input: {
+  workspace: WorkspaceSpec;
+  userId: string;
+  credentialId: string;
+  harness?: ManagedHarness;
+  requireSupported?: boolean;
+}): {
+  harness: Exclude<ManagedHarness, "ssh">;
+  credentialId: string;
+} {
+  const resolved = liveRuntimeCredentialFiles(
+    input.workspace,
+    input.userId,
+    input.credentialId,
+    input.harness,
+    input.requireSupported ?? false,
+  );
+  applyLiveRuntimeFiles(input.workspace, resolved.files);
+  writeWorkspaceLiveCredentialSelection(
+    input.workspace.identity.projectName,
+    resolved.harness,
+    input.credentialId,
+    input.userId,
+  );
+  return {
+    harness: resolved.harness,
+    credentialId: input.credentialId,
+  };
 }
 
 function renderWorkspaceTargets(
@@ -478,6 +697,65 @@ export async function startPortalWorkspace(
   await startCommand(ref);
   await captureStdout(() => statusCommand(ref));
   return { started: true };
+}
+
+export async function switchPortalWorkspaceLiveCredential(input: {
+  userId: string;
+  workspace: string;
+  harness: ManagedHarness;
+  credentialId: string;
+}): Promise<{
+  switched: true;
+  driver: string;
+  credentialId: string;
+}> {
+  if (!supportsLiveCredentialSwitch(input.harness)) {
+    throw new Error(
+      `Live credential switching is not supported for harness '${input.harness}'`,
+    );
+  }
+  const summary = loadWorkspaceSummary(input.userId, input.workspace);
+  const target = summary.selectedDriver;
+  if (!target) {
+    throw new Error(
+      `Workspace '${input.workspace}' does not have a selected driver`,
+    );
+  }
+  const workspaceSpec = loadPortalWorkspaceByTarget(
+    input.userId,
+    input.workspace,
+    target,
+  );
+  if (
+    workspaceSpec.backend.kind !== "docker" &&
+    workspaceSpec.backend.kind !== "pod"
+  ) {
+    throw new Error(
+      `Live credential switching is not supported for backend '${workspaceSpec.backend.kind}'`,
+    );
+  }
+  const observation = await getBackendDriver(workspaceSpec.backend.kind).inspect(
+    workspaceSpec,
+  );
+  if (!observation.backend.exists || !observation.backend.running) {
+    throw new Error(
+      `Workspace '${input.workspace}' is not running on ${workspaceSpec.backend.kind}`,
+    );
+  }
+  switchWorkspaceLiveCredentialMaterial({
+    workspace: workspaceSpec,
+    userId: input.userId,
+    credentialId: input.credentialId,
+    harness: input.harness,
+    requireSupported: true,
+  });
+  const ref = workspaceRefFromTarget(input.workspace, target);
+  await captureStdout(() => statusCommand(ref));
+  return {
+    switched: true,
+    driver: ref,
+    credentialId: input.credentialId,
+  };
 }
 
 export async function bindPortalWorkspaceAgent(input: {

@@ -8,6 +8,7 @@ import type {
   WorkspaceSpec,
   WorkspaceStatus,
 } from "./workspace.js";
+import { readWorkspaceLiveCredentialSelections } from "../output/state-store.js";
 import { normalizePairingUrl } from "./pairing-url.js";
 import { parseConnectionOfferServerId } from "./paseo.js";
 
@@ -159,6 +160,48 @@ function codexCredentialStatus(
     credentialId: binding.credentialId,
     label: binding.credential.label,
     source: codexCredentialSource(workspace, binding),
+  };
+}
+
+function liveCredentialSelectionStatus(
+  workspace: WorkspaceSpec,
+): NonNullable<WorkspaceStatus["credentials"]>["live"] {
+  const persistedSelections = readWorkspaceLiveCredentialSelections(
+    workspace.identity.projectName,
+    workspace.userProfile.id,
+  );
+  const persistedCodex = persistedSelections.codex;
+  if (persistedCodex?.credentialId) {
+    const selected = workspace.credentials.find(
+      (credential) => credential.id === persistedCodex.credentialId,
+    );
+    if (selected) {
+      return {
+        selectedHarness: "codex",
+        switchableHarnesses: ["codex"],
+        supportedHarnesses: workspace.agent.harnesses,
+        selectedCredentialId: selected.id,
+        selectedCredentialLabel: selected.label,
+        source: "runtime-state",
+      };
+    }
+  }
+
+  const codex = codexCredentialStatus(workspace);
+  if (codex?.state === "selected") {
+    return {
+      selectedHarness: "codex",
+      switchableHarnesses: ["codex"],
+      supportedHarnesses: workspace.agent.harnesses,
+      selectedCredentialId: codex.credentialId,
+      selectedCredentialLabel: codex.label,
+      source: codex.source,
+    };
+  }
+
+  return {
+    switchableHarnesses: ["codex"],
+    supportedHarnesses: workspace.agent.harnesses,
   };
 }
 
@@ -388,6 +431,7 @@ export function synthesizeWorkspaceStatus(
     },
     credentials: {
       codex: codexCredentialStatus(workspace),
+      live: liveCredentialSelectionStatus(workspace),
     },
     details: {
       backendDetail: observation.backend.detail,

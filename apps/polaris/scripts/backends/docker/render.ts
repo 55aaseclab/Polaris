@@ -13,6 +13,10 @@ import {
   workspaceToolCatalog,
   workspaceToolPackageSpecs,
 } from "../../core/harness-catalog.js";
+import {
+  stateStoragePathForMountPath,
+  userIdentityBootstrapDirs,
+} from "../../core/identity-layout.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
@@ -250,40 +254,31 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const toolRoot = persistentPolarisToolRoot(workspace);
   const xdg = codexXdgRoots(workspace);
   const imageToolRoot = `${home}/.local/polaris`;
+  const identityDirs = userIdentityBootstrapDirs(
+    workspace.attachments.userIdentityState.mountRoot,
+  );
   const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
-    if (file.mountPath.includes("/.codex/")) {
-      const name = file.mountPath.split("/").pop();
-      return name
-        ? [
-            `if [ ! -f /identity/codex/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/codex/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
-            ...(workspace.runtime.user === "root" ? [`chown root:root /identity/codex/${name} || true`] : []),
-            `chmod 600 /identity/codex/${name}`,
-          ]
-        : [];
+    const target = stateStoragePathForMountPath({
+      mountPath: file.mountPath,
+      runtimeHome: home,
+      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      sshRoot: workspace.attachments.userSshState.mountRoot,
+    });
+    if (!target) {
+      return [];
     }
-    if (file.mountPath.includes("/.claude/")) {
-      const name = file.mountPath.split("/").pop();
-      return name
-        ? [
-            `if [ ! -f /identity/claude/${name} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/identity/claude/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`,
-            ...(workspace.runtime.user === "root" ? [`chown root:root /identity/claude/${name} || true`] : []),
-            `chmod 600 /identity/claude/${name}`,
-          ]
-        : [];
-    }
-    if (file.mountPath.includes("/.ssh/")) {
-      const name = file.mountPath.split("/").pop();
-      return name
-        ? [
-            `${workspace.userProfile.ssh.mode === "provided-key" ? "" : `if [ ! -f /ssh/${name} ]; then `}python3 -c ${q(`import base64, pathlib; path = pathlib.Path("/ssh/${name}"); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)};${workspace.userProfile.ssh.mode === "provided-key" ? "" : " fi"}`,
-            ...(workspace.runtime.user === "root" ? [`chown root:root /ssh/${name} || true`] : []),
-            `chmod 600 /ssh/${name} || true`,
-          ]
-        : [];
-    }
-    return [];
+    const guardedWrite =
+      target.startsWith(`${workspace.attachments.userSshState.mountRoot}/`)
+        && workspace.userProfile.ssh.mode === "provided-key"
+        ? `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`
+        : `if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`;
+    return [
+      guardedWrite,
+      ...(workspace.runtime.user === "root" ? [`chown root:root ${target} || true`] : []),
+      `chmod 600 ${target} || true`,
+    ];
   });
   const bootstrap = [
     "set -eux",
@@ -298,14 +293,18 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
             : []),
           ...buildAgentCliInstallLines(workspace),
         ]),
-    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${workspace.attachments.userIdentityState.mountRoot}/codex ${workspace.attachments.userIdentityState.mountRoot}/claude ${xdg.config} ${xdg.data} ${xdg.state} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.local /tmp/npm-cache`,
+    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${xdg.config} ${xdg.data} ${xdg.state} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
     ...(workspace.runtime.user === "root"
       ? [`chown -R root:root ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
       : []),
     `if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
-    `rm -rf ${home}/.codex ${home}/.claude ${home}/.paseo ${home}/.ssh ${home}/workspace`,
+    `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/copilot ${home}/.copilot`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/pi ${home}/.pi`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
+    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
     `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
     `ln -sfn ${workspace.attachments.userSshState.mountRoot} ${home}/.ssh`,
     `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,

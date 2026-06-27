@@ -1,4 +1,5 @@
 import type { SwitchResult } from "../cli/commands/switch.js";
+import type { ManagedHarness } from "../config/credential-catalog.js";
 import type {
   PortalDriverTarget,
   PortalProvisionProgress,
@@ -12,6 +13,7 @@ import {
   startPortalWorkspace as startPortalWorkspaceLocal,
   stopPortalWorkspace as stopPortalWorkspaceLocal,
   switchPortalWorkspace as switchPortalWorkspaceLocal,
+  switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialLocal,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentLocal,
 } from "./operations.js";
 
@@ -159,6 +161,26 @@ export async function startPortalWorkspace(input: {
       body: JSON.stringify(input),
     },
     () => startPortalWorkspaceLocal(input.userId, input.workspace),
+  );
+}
+
+export async function switchPortalWorkspaceLiveCredential(input: {
+  userId: string;
+  workspace: string;
+  harness: ManagedHarness;
+  credentialId: string;
+}): Promise<{
+  switched: true;
+  driver: string;
+  credentialId: string;
+}> {
+  return executorRequest(
+    "/workspaces/credentials/live/switch",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    () => switchPortalWorkspaceLiveCredentialLocal(input),
   );
 }
 

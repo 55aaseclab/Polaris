@@ -12,6 +12,12 @@ export interface WorkspaceDriverSelection {
   profile?: string;
 }
 
+export interface WorkspaceLiveCredentialSelectionState {
+  harness: string;
+  credentialId: string;
+  updatedAt: string;
+}
+
 function projectRoot(project: string, userProfileId?: string): string | null {
   if (userProfileId?.trim()) {
     return path.join(
@@ -61,12 +67,27 @@ export function workspaceSelectionPath(project: string, userProfileId?: string):
   return path.join(stateDir, "selection.json");
 }
 
+export function workspaceLiveCredentialsPath(
+  project: string,
+  userProfileId?: string,
+): string {
+  const stateDir = workspaceStateDir(project, userProfileId);
+  if (stateDir === LEGACY_STATE_DIR) {
+    return path.join(stateDir, `${project}.live-credentials.json`);
+  }
+  return path.join(stateDir, "live-credentials.json");
+}
+
 function legacyWorkspaceStatusPath(project: string): string {
   return path.join(LEGACY_STATE_DIR, `${project}.status.json`);
 }
 
 function legacyWorkspaceSelectionPath(project: string): string {
   return path.join(LEGACY_STATE_DIR, `${project}.selection.json`);
+}
+
+function legacyWorkspaceLiveCredentialsPath(project: string): string {
+  return path.join(LEGACY_STATE_DIR, `${project}.live-credentials.json`);
 }
 
 export function workspaceEvolutionStateDir(project: string, userProfileId?: string): string {
@@ -117,4 +138,78 @@ export function writeWorkspaceDriverSelection(
     fs.rmSync(legacyWorkspaceSelectionPath(project), { force: true });
   }
   return outputPath;
+}
+
+export function readWorkspaceLiveCredentialSelections(
+  project: string,
+  userProfileId?: string,
+): Record<string, WorkspaceLiveCredentialSelectionState> {
+  const candidates = [
+    workspaceLiveCredentialsPath(project, userProfileId),
+    legacyWorkspaceLiveCredentialsPath(project),
+  ].filter((candidate, index, entries) => entries.indexOf(candidate) === index);
+
+  for (const filePath of candidates) {
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(
+        fs.readFileSync(filePath, "utf8"),
+      ) as Record<string, WorkspaceLiveCredentialSelectionState>;
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, value]) => {
+          return Boolean(
+            value &&
+            typeof value.harness === "string" &&
+            typeof value.credentialId === "string" &&
+            typeof value.updatedAt === "string",
+          );
+        }),
+      );
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export function writeWorkspaceLiveCredentialSelection(
+  project: string,
+  harness: string,
+  credentialId: string,
+  userProfileId?: string,
+): string {
+  const outputPath = workspaceLiveCredentialsPath(project, userProfileId);
+  const current = readWorkspaceLiveCredentialSelections(project, userProfileId);
+  current[harness] = {
+    harness,
+    credentialId,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+  if (outputPath !== legacyWorkspaceLiveCredentialsPath(project)) {
+    fs.rmSync(legacyWorkspaceLiveCredentialsPath(project), { force: true });
+  }
+  return outputPath;
+}
+
+export function clearWorkspaceLiveCredentialSelection(
+  project: string,
+  harness: string,
+  userProfileId?: string,
+): void {
+  const outputPath = workspaceLiveCredentialsPath(project, userProfileId);
+  const current = readWorkspaceLiveCredentialSelections(project, userProfileId);
+  delete current[harness];
+  if (Object.keys(current).length === 0) {
+    fs.rmSync(outputPath, { force: true });
+    if (outputPath !== legacyWorkspaceLiveCredentialsPath(project)) {
+      fs.rmSync(legacyWorkspaceLiveCredentialsPath(project), { force: true });
+    }
+    return;
+  }
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }

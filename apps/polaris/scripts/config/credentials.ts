@@ -3,13 +3,21 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
 import type { Credential } from "../core/workspace.js";
+import {
+  defaultCredentialLabel,
+  defaultCredentialProviderName,
+  findHarnessProviderPreset,
+  isAgentHarness,
+  isManagedHarness,
+  supportsLiveCredentialSwitch,
+  type AgentHarness,
+  type ManagedHarness,
+} from "./credential-catalog.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const USER_ROOT = path.join(REPO_ROOT, "config", "users");
 const USER_PROFILES_ROOT = path.join(USER_ROOT, "profiles");
-
-type ManagedHarness = "codex" | "ssh";
 
 export interface ManagedCredentialSummary {
   id: string;
@@ -22,6 +30,9 @@ export interface ManagedCredentialSummary {
   paths: string[];
   harness: ManagedHarness;
   active: boolean;
+  providerName?: string;
+  baseUrl?: string;
+  liveSwitchSupported: boolean;
 }
 
 export interface DeletedCredentialSummary {
@@ -30,6 +41,19 @@ export interface DeletedCredentialSummary {
   removed: boolean;
   registryPath: string;
   removedPaths: string[];
+}
+
+export interface ManagedCredentialMaterialFile {
+  key: string;
+  sourcePath: string;
+  mountPath?: string;
+  content: string;
+}
+
+export interface ManagedCredentialRecord {
+  summary: ManagedCredentialSummary;
+  document: Record<string, unknown>;
+  files: ManagedCredentialMaterialFile[];
 }
 
 interface UserProfileRecord {
@@ -58,6 +82,22 @@ function readYamlRecord(filePath: string): Record<string, unknown> | null {
     return null;
   }
   return (yaml.load(fs.readFileSync(filePath, "utf8")) ?? {}) as Record<string, unknown>;
+}
+
+function metadataRecord(
+  metadata: unknown,
+): Record<string, unknown> {
+  return typeof metadata === "object" && metadata
+    ? { ...(metadata as Record<string, unknown>) }
+    : {};
+}
+
+function materialRefRecord(
+  materialRef: unknown,
+): Record<string, unknown> | undefined {
+  return typeof materialRef === "object" && materialRef
+    ? { ...(materialRef as Record<string, unknown>) }
+    : undefined;
 }
 
 function writeYamlRecord(filePath: string, value: Record<string, unknown>): void {
@@ -102,10 +142,13 @@ function readUserProfileRecord(userProfileId: string): UserProfileRecord {
   };
 }
 
-function credentialHarnessFor(kind: Credential["kind"], metadata?: Record<string, unknown>): ManagedHarness {
+function credentialHarnessFor(
+  kind: Credential["kind"],
+  metadata?: Record<string, unknown>,
+): ManagedHarness {
   const configured = String(metadata?.harness ?? "").trim().toLowerCase();
-  if (configured === "codex") {
-    return "codex";
+  if (isManagedHarness(configured)) {
+    return configured;
   }
   if (kind === "ssh-key") {
     return "ssh";
@@ -120,14 +163,49 @@ function credentialPathsFromMaterial(materialRef: Record<string, unknown> | unde
   return files.map((entry) => String(entry.source_path ?? entry.sourcePath ?? "").trim()).filter(Boolean);
 }
 
+function materialFilesFromDocument(
+  userProfileId: string,
+  document: Record<string, unknown>,
+): ManagedCredentialMaterialFile[] {
+  const materialRef = materialRefRecord(document.materialRef);
+  const files = Array.isArray(materialRef?.files)
+    ? (materialRef.files as Array<Record<string, unknown>>)
+    : [];
+  const userRoot = userRootFor(userProfileId);
+  const output: ManagedCredentialMaterialFile[] = [];
+  for (const entry of files) {
+      const key = String(entry.key ?? "").trim();
+      const relativePath = String(
+        entry.source_path ?? entry.sourcePath ?? "",
+      ).trim();
+      if (!key || !relativePath) {
+        continue;
+      }
+      const absolutePath = path.resolve(userRoot, relativePath);
+      if (
+        absolutePath !== userRoot &&
+        !absolutePath.startsWith(`${userRoot}${path.sep}`)
+      ) {
+        continue;
+      }
+      output.push({
+        key,
+        sourcePath: relativePath,
+        mountPath: String(entry.mount_path ?? entry.mountPath ?? "").trim() || undefined,
+        content: fs.existsSync(absolutePath)
+          ? fs.readFileSync(absolutePath, "utf8")
+          : "",
+      });
+    }
+  return output;
+}
+
 function summarizeCredentialDocument(
   userProfileId: string,
   document: Record<string, unknown>,
   fallbackId: string,
 ): ManagedCredentialSummary {
-  const metadata = typeof document.metadata === "object" && document.metadata
-    ? document.metadata as Record<string, unknown>
-    : {};
+  const metadata = metadataRecord(document.metadata);
   const kind = String(document.kind ?? "codex-auth") as Credential["kind"];
   const id = String(document.id ?? fallbackId).trim() || fallbackId;
   const harness = credentialHarnessFor(kind, metadata);
@@ -142,13 +220,25 @@ function summarizeCredentialDocument(
     status: String(document.status ?? "unknown"),
     registryPath: path.join("config", "users", userProfileId, "credentials", `${id}.yaml`),
     paths: credentialPathsFromMaterial(
-      typeof document.materialRef === "object" && document.materialRef
-        ? document.materialRef as Record<string, unknown>
-        : undefined,
+      materialRefRecord(document.materialRef),
     ),
     harness,
     active: metadata.active === true,
+    providerName: typeof metadata.providerName === "string"
+      ? metadata.providerName
+      : undefined,
+    baseUrl: typeof metadata.baseUrl === "string"
+      ? metadata.baseUrl
+      : undefined,
+    liveSwitchSupported: supportsLiveCredentialSwitch(harness),
   };
+}
+
+function readCredentialDocument(
+  userProfileId: string,
+  credentialId: string,
+): Record<string, unknown> | null {
+  return readYamlRecord(credentialRegistryPathFor(userProfileId, credentialId));
 }
 
 function writeCredentialRegistry(
@@ -239,10 +329,11 @@ export function ensureUniqueCredentialId(userProfileId: string, baseId: string):
 export function createCodexConfigToml(args: {
   providerName: string;
   baseUrl: string;
+  model?: string;
 }): string {
   return [
     `model_provider = ${JSON.stringify(args.providerName)}`,
-    'model = "gpt-5.4"',
+    `model = ${JSON.stringify(args.model?.trim() || "gpt-5.5")}`,
     'model_reasoning_effort = "medium"',
     'network_access = "enabled"',
     "disable_response_storage = true",
@@ -276,6 +367,123 @@ export function listManagedCredentials(userProfileId: string): ManagedCredential
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function managedAgentCredentialMaterialDir(
+  userProfileId: string,
+  harness: AgentHarness,
+  credentialId: string,
+): string {
+  return path.join(credentialsRootFor(userProfileId), harness, credentialId);
+}
+
+function writeManagedCredentialFile(
+  filePath: string,
+  content: string,
+): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, "utf8");
+}
+
+function createManagedGenericAgentCredential(args: {
+  userProfileId: string;
+  harness: Exclude<AgentHarness, "codex">;
+  credentialId?: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  presetId?: string;
+  activate?: boolean;
+  ensureIfMissing?: boolean;
+}): ManagedCredentialSummary & { created: boolean } {
+  ensureUserProfileExists(args.userProfileId);
+  ensureUserSecretsLayout(args.userProfileId);
+
+  const preset = findHarnessProviderPreset(args.harness, args.presetId);
+  const providerName =
+    args.providerName?.trim()
+    || preset?.providerName
+    || defaultCredentialProviderName(args.harness);
+  const baseUrl = args.baseUrl?.trim() || preset?.baseUrl || "";
+  const label = args.label?.trim() || preset?.label || defaultCredentialLabel(args.harness);
+  const seedId = sanitizeCredentialId(
+    args.credentialId ?? `${args.harness}-${providerName}`,
+  ) || args.harness;
+  const finalCredentialId = args.credentialId
+    ? seedId
+    : ensureUniqueCredentialId(args.userProfileId, seedId);
+  const registryPath = credentialRegistryPathFor(args.userProfileId, finalCredentialId);
+  if (args.ensureIfMissing && fs.existsSync(registryPath)) {
+    return {
+      ...summarizeCredentialDocument(
+        args.userProfileId,
+        readCredentialDocument(args.userProfileId, finalCredentialId) ?? {},
+        finalCredentialId,
+      ),
+      created: false,
+    };
+  }
+
+  const materialDir = managedAgentCredentialMaterialDir(
+    args.userProfileId,
+    args.harness,
+    finalCredentialId,
+  );
+  writeManagedCredentialFile(
+    path.join(materialDir, "credential.json"),
+    `${JSON.stringify({
+      harness: args.harness,
+      providerName,
+      baseUrl,
+      apiKey: args.apiKey ?? "",
+      presetId: args.presetId?.trim() || preset?.id || "",
+    }, null, 2)}\n`,
+  );
+
+  const summary = writeCredentialRegistry(args.userProfileId, finalCredentialId, {
+    id: finalCredentialId,
+    userId: args.userProfileId,
+    kind: "api-key",
+    label,
+    purposes: ["agent-auth"],
+    materialRef: {
+      type: "file",
+      key: finalCredentialId,
+      files: [
+        {
+          key: `${args.harness}-credential.json`,
+          source_path: `credentials/${args.harness}/${finalCredentialId}/credential.json`,
+        },
+      ],
+    },
+    metadata: {
+      harness: args.harness,
+      providerName,
+      baseUrl,
+      presetId: args.presetId?.trim() || preset?.id || undefined,
+      source: "portal",
+      active: false,
+      liveSwitchSupported: false,
+    },
+    status: "ready",
+  });
+
+  if (args.activate) {
+    const activated = activateManagedCredential({
+      userProfileId: args.userProfileId,
+      credentialId: finalCredentialId,
+    });
+    return {
+      ...activated,
+      created: true,
+    };
+  }
+
+  return {
+    ...summary,
+    created: true,
+  };
+}
+
 export function createManagedSshCredential(args: {
   userProfileId: string;
   credentialId?: string;
@@ -306,7 +514,7 @@ export function createManagedSshCredential(args: {
     id: credentialId,
     userId: args.userProfileId,
     kind: "ssh-key",
-    label: args.label?.trim() || "Default SSH key",
+    label: args.label?.trim() || defaultCredentialLabel("ssh"),
     purposes: ["git-auth", "ssh-auth"],
     materialRef: {
       type: "file",
@@ -337,19 +545,26 @@ export function createManagedSshCredential(args: {
 export function createManagedCodexCredential(args: {
   userProfileId: string;
   credentialId?: string;
-  label: string;
-  providerName: string;
-  baseUrl: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
   apiKey: string;
   ensureIfMissing?: boolean;
   activate?: boolean;
+  presetId?: string;
+  model?: string;
 }): ManagedCredentialSummary & { created: boolean } {
   ensureUserProfileExists(args.userProfileId);
   ensureUserSecretsLayout(args.userProfileId);
 
+  const preset = findHarnessProviderPreset("codex", args.presetId)
+    ?? findHarnessProviderPreset("codex", "rightcode");
+  const providerName = args.providerName?.trim() || preset?.providerName || "rightcode";
+  const baseUrl = args.baseUrl?.trim() || preset?.baseUrl || "https://right.codes/codex/v1";
+  const label = args.label?.trim() || preset?.label || defaultCredentialLabel("codex");
   const registryRoot = credentialsRootFor(args.userProfileId);
   fs.mkdirSync(registryRoot, { recursive: true });
-  const seedId = sanitizeCredentialId(args.credentialId ?? `codex-${args.providerName}`) || "codex";
+  const seedId = sanitizeCredentialId(args.credentialId ?? `codex-${providerName}`) || "codex";
   const finalCredentialId = args.credentialId
     ? seedId
     : ensureUniqueCredentialId(args.userProfileId, seedId);
@@ -377,8 +592,9 @@ export function createManagedCodexCredential(args: {
   fs.writeFileSync(
     path.join(materialDir, "config.toml"),
     createCodexConfigToml({
-      providerName: args.providerName,
-      baseUrl: args.baseUrl,
+      providerName,
+      baseUrl,
+      model: args.model ?? preset?.model,
     }),
     "utf8",
   );
@@ -387,7 +603,7 @@ export function createManagedCodexCredential(args: {
     id: finalCredentialId,
     userId: args.userProfileId,
     kind: "codex-auth",
-    label: args.label,
+    label,
     purposes: ["agent-auth"],
     materialRef: {
       type: "file",
@@ -405,10 +621,12 @@ export function createManagedCodexCredential(args: {
     },
     metadata: {
       harness: "codex",
-      providerName: args.providerName,
-      baseUrl: args.baseUrl,
+      providerName,
+      baseUrl,
+      presetId: args.presetId?.trim() || preset?.id || "rightcode",
       source: "portal",
       active: false,
+      liveSwitchSupported: true,
     },
     status: "ready",
   });
@@ -433,11 +651,13 @@ export function createManagedCodexCredential(args: {
 export function writeCodexCredential(args: {
   userProfileId: string;
   credentialId?: string;
-  label: string;
-  providerName: string;
-  baseUrl: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
   apiKey: string;
   ensureIfMissing?: boolean;
+  presetId?: string;
+  model?: string;
 }): {
   credentialId: string;
   created: boolean;
@@ -450,6 +670,79 @@ export function writeCodexCredential(args: {
     created: created.created,
     registryPath: created.registryPath,
     paths: created.paths,
+  };
+}
+
+export function createManagedHarnessCredential(args: {
+  userProfileId: string;
+  harness: ManagedHarness;
+  credentialId?: string;
+  label?: string;
+  providerName?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  ensureIfMissing?: boolean;
+  activate?: boolean;
+  presetId?: string;
+  model?: string;
+}): ManagedCredentialSummary & { created: boolean } {
+  if (args.harness === "ssh") {
+    return createManagedSshCredential({
+      userProfileId: args.userProfileId,
+      credentialId: args.credentialId,
+      label: args.label,
+      ensureIfMissing: args.ensureIfMissing,
+    });
+  }
+  if (args.harness === "codex") {
+    return createManagedCodexCredential({
+      userProfileId: args.userProfileId,
+      credentialId: args.credentialId,
+      label: args.label,
+      providerName: args.providerName,
+      baseUrl: args.baseUrl,
+      apiKey: args.apiKey ?? "",
+      ensureIfMissing: args.ensureIfMissing,
+      activate: args.activate,
+      presetId: args.presetId,
+      model: args.model,
+    });
+  }
+  if (!isAgentHarness(args.harness)) {
+    throw new Error(`Unsupported harness '${args.harness}'`);
+  }
+  return createManagedGenericAgentCredential({
+    userProfileId: args.userProfileId,
+    harness: args.harness,
+    credentialId: args.credentialId,
+    label: args.label,
+    providerName: args.providerName,
+    baseUrl: args.baseUrl,
+    apiKey: args.apiKey,
+    presetId: args.presetId,
+    activate: args.activate,
+    ensureIfMissing: args.ensureIfMissing,
+  });
+}
+
+export function readManagedCredentialRecord(args: {
+  userProfileId: string;
+  credentialId: string;
+}): ManagedCredentialRecord {
+  const document = readCredentialDocument(args.userProfileId, args.credentialId);
+  if (!document) {
+    throw new Error(
+      `Credential '${args.credentialId}' was not found for user '${args.userProfileId}'`,
+    );
+  }
+  return {
+    summary: summarizeCredentialDocument(
+      args.userProfileId,
+      document,
+      args.credentialId,
+    ),
+    document,
+    files: materialFilesFromDocument(args.userProfileId, document),
   };
 }
 
@@ -500,7 +793,7 @@ export function activateManagedCredential(args: {
   if (!target) {
     throw new Error(`Credential '${args.credentialId}' was not found for user '${args.userProfileId}'`);
   }
-  if (target.harness !== "codex") {
+  if (target.harness === "ssh") {
     throw new Error(`Credential '${args.credentialId}' does not support activation`);
   }
 
