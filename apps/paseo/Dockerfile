@@ -17,7 +17,7 @@ COPY patches /tmp/paseo-patches
 RUN git clone "${PASEO_GIT_URL}" paseo \
   && cd paseo \
   && git checkout "${PASEO_GIT_REF}" \
-  && git apply /tmp/paseo-patches/paseo-web-base-url.patch
+  && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch
 
 WORKDIR /opt/paseo
 
