@@ -2016,15 +2016,13 @@ function WorkspaceDetailPage() {
 
     if (currentPane === "") {
       return embeddedPortalUrl ? (
-        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-[1.25rem] border border-border bg-background shadow-sm">
-            <iframe
-              key={embeddedPortalUrl}
-              title={`${workspaceName} paseo`}
-              src={embeddedPortalUrl}
-              className="h-full min-h-[70dvh] w-full border-0"
-            />
-          </div>
+        <div className="-mx-4 -my-4 flex min-h-0 flex-1 overflow-hidden sm:-mx-6 sm:-my-6">
+          <iframe
+            key={embeddedPortalUrl}
+            title={`${workspaceName} paseo`}
+            src={embeddedPortalUrl}
+            className="h-full min-h-0 w-full border-0"
+          />
         </div>
       ) : (
         <EmptyPane
@@ -2148,7 +2146,7 @@ function WorkspaceDetailPage() {
 
   return (
     <PortalShell users={users ?? []}>
-      <div className="grid w-full min-w-0 gap-6">
+      <div className={currentPane === "" ? "flex min-h-0 w-full min-w-0 flex-1 flex-col" : "grid w-full min-w-0 gap-6"}>
         {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {actionError && <p className="text-sm text-destructive">{actionError}</p>}
