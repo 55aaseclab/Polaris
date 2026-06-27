@@ -351,22 +351,29 @@ export async function unbindPortalWorkspaceAgent(input: {
 
 export async function createPortalUser(input: {
   userProfileId?: string;
-  clerkUsername: string;
+  clerkUsername?: string;
+  clerkUserId?: string;
   email?: string;
   name?: string;
   role?: "admin" | "user";
   plan?: "free" | "pro";
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
   const userProfileId =
-    input.userProfileId?.trim() || input.clerkUsername.trim();
+    input.userProfileId?.trim()
+    || input.clerkUsername?.trim()
+    || input.clerkUserId?.trim()
+    || "";
+  if (!userProfileId) {
+    throw new Error("userProfileId is required");
+  }
   const email = input.email?.trim() || `${userProfileId}@polaris.local`;
   await createUserCommand([
     userProfileId,
     ...(input.name ? ["--name", input.name] : []),
     "--email",
     email,
-    "--clerk",
-    input.clerkUsername,
+    ...(input.clerkUsername?.trim() ? ["--clerk", input.clerkUsername.trim()] : []),
+    ...(input.clerkUserId?.trim() ? ["--clerk-user-id", input.clerkUserId.trim()] : []),
     "--role",
     input.role ?? "user",
     "--plan",

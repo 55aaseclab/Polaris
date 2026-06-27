@@ -18,13 +18,11 @@ import {
   EyeOff,
   FolderKanban,
   Info,
-  CreditCard,
   PlusCircle,
   RefreshCw,
   Link2,
   LogOut,
   Settings2,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import {
@@ -33,7 +31,6 @@ import {
   createWorkspace,
   createPortalUser,
   deleteCredential,
-  deletePortalUser,
   deleteWorkspace,
   getCredentialPreview,
   getWorkspaceAssetPreview,
@@ -217,7 +214,6 @@ const COPY: Record<Language, Record<string, string>> = {
     unbinding_paseo: "Unbinding Paseo...",
     select_submenu: "Select a workspace submenu.",
     sidebar_tier: "Free",
-    menu_upgrade: "Upgrade to Pro",
     menu_account: "Account",
     menu_billing: "Billing",
     menu_logout: "Log out",
@@ -383,7 +379,6 @@ const COPY: Record<Language, Record<string, string>> = {
     unbinding_paseo: "正在解除 Paseo 绑定…",
     select_submenu: "请选择工作空间子页面。",
     sidebar_tier: "免费版",
-    menu_upgrade: "升级到 Pro",
     menu_account: "账号",
     menu_billing: "账单",
     menu_logout: "退出登录",
@@ -503,52 +498,12 @@ function portalSignUpUrl(): string {
   }
   return buildClerkUrl(
     clerkSignUpUrl(),
-    new URL("/?registered=1", window.location.origin).toString(),
+    new URL("/", window.location.origin).toString(),
   );
 }
 
 function normalizePath(pathname: string): string {
   return pathname.replace(/\/+$/, "") || "/";
-}
-
-const REGISTRATION_INTENT_KEY = "polaris-pending-registration";
-const REGISTRATION_QUERY_KEY = "registered";
-
-function setRegistrationIntent(active: boolean): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  if (active) {
-    window.sessionStorage.setItem(REGISTRATION_INTENT_KEY, "1");
-    return;
-  }
-  window.sessionStorage.removeItem(REGISTRATION_INTENT_KEY);
-}
-
-function hasRegistrationIntent(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return window.sessionStorage.getItem(REGISTRATION_INTENT_KEY) === "1";
-}
-
-function hasRegistrationQuery(search: string): boolean {
-  const params = new URLSearchParams(search);
-  return params.get(REGISTRATION_QUERY_KEY) === "1";
-}
-
-function clearRegistrationQuery(
-  navigate: ReturnType<typeof useNavigate>,
-  pathname: string,
-  search: string,
-): void {
-  const params = new URLSearchParams(search);
-  if (!params.has(REGISTRATION_QUERY_KEY)) {
-    return;
-  }
-  params.delete(REGISTRATION_QUERY_KEY);
-  const nextSearch = params.toString();
-  navigate(`${pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
 }
 
 function AuthGate(props: { children: ReactNode }) {
@@ -571,25 +526,48 @@ function normalizeClerkUsername(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function useCurrentUserMapping() {
-  const { user } = useUser();
-  const clerkUsername = normalizeClerkUsername(
+function resolveClerkIdentityKey(user: {
+  id?: string | null;
+  username?: string | null;
+  primaryEmailAddress?: {
+    emailAddress?: string | null;
+  } | null;
+} | null | undefined): string {
+  return normalizeClerkUsername(
     user?.username
       ?? user?.primaryEmailAddress?.emailAddress?.split("@")[0]
+      ?? user?.id
       ?? null,
   );
+}
+
+function resolvePolarisProfileIdCandidate(user: {
+  id?: string | null;
+  username?: string | null;
+} | null | undefined): string {
+  const username = normalizeClerkUsername(user?.username);
+  if (username) {
+    return username;
+  }
+  const clerkUserId = String(user?.id ?? "").trim();
+  return clerkUserId || "";
+}
+
+function useCurrentUserMapping() {
+  const { user } = useUser();
+  const clerkUsername = resolveClerkIdentityKey(user);
+  const clerkUserId = String(user?.id ?? "").trim();
   const { data, error, loading } = useAsyncValue<PortalUserMapping | null>(
-    () => clerkUsername ? resolvePortalUserMapping(clerkUsername) : Promise.resolve(null),
-    [clerkUsername],
+    () => clerkUsername || clerkUserId
+      ? resolvePortalUserMapping({ clerkUsername, clerkUserId })
+      : Promise.resolve(null),
+    [clerkUserId, clerkUsername],
   );
-  return { clerkUsername, mapping: data, mappingError: error, mappingLoading: loading };
+  return { clerkUsername, clerkUserId, mapping: data, mappingError: error, mappingLoading: loading };
 }
 
 function SignInPage() {
   const { isLoaded, userId } = useAuth();
-  useEffect(() => {
-    setRegistrationIntent(false);
-  }, []);
   useEffect(() => {
     if (isLoaded && userId) {
       return;
@@ -604,17 +582,6 @@ function SignInPage() {
 
 function SignUpPage() {
   const { isLoaded, userId } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    setRegistrationIntent(true);
-  }, []);
-
-  useEffect(() => {
-    if (isLoaded && userId) {
-      navigate("/?registered=1", { replace: true });
-    }
-  }, [isLoaded, navigate, userId]);
   useEffect(() => {
     if (isLoaded && userId) {
       return;
@@ -623,7 +590,7 @@ function SignUpPage() {
   }, [isLoaded, userId]);
 
   if (isLoaded && userId) {
-    return <div className="p-6 text-sm text-muted-foreground">Finishing registration...</div>;
+    return <Navigate to="/" replace />;
   }
   return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign up...</div>;
 }
@@ -1351,19 +1318,19 @@ function PortalShellLayout(props: {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      {t("menu_upgrade")}
-                    </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/profile`}>
-                        <CircleUser className="mr-2 h-4 w-4" />
-                        {t("menu_account")}
+                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/credentials`}>
+                        <Link2 className="mr-2 h-4 w-4" />
+                        {t("credentials")}
                       </Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem disabled>
-                      <CreditCard className="mr-2 h-4 w-4" />
-                      {t("menu_billing")}
+                    <DropdownMenuItem
+                      onClick={() => {
+                        clerk.openUserProfile();
+                      }}
+                    >
+                      <CircleUser className="mr-2 h-4 w-4" />
+                      {t("menu_account")}
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to={`/users/${encodeURIComponent(activeUser.id)}/settings`}>
@@ -1426,11 +1393,11 @@ function GlobalErrorPage(props: {
 
 function OverviewPage() {
   const { t } = useLanguage();
-  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useUser();
   const {
     clerkUsername,
+    clerkUserId,
     mapping,
     mappingError,
     mappingLoading,
@@ -1440,11 +1407,12 @@ function OverviewPage() {
   const registrationStartedRef = useRef(false);
 
   const explicitMappedUserId = mapping?.polarisUserId ?? null;
+  const nextPolarisUserId = resolvePolarisProfileIdCandidate(user);
 
   useEffect(() => {
     if (
-      (!hasRegistrationIntent() && !hasRegistrationQuery(location.search))
-      || !clerkUsername
+      !clerkUsername
+      || !nextPolarisUserId
       || mappingLoading
       || Boolean(mappingError)
       || Boolean(explicitMappedUserId)
@@ -1457,8 +1425,9 @@ function OverviewPage() {
     setRegistering(true);
     setRegistrationError(null);
     void createPortalUser({
-      userProfileId: clerkUsername,
-      clerkUsername,
+      userProfileId: nextPolarisUserId,
+      ...(clerkUsername ? { clerkUsername } : {}),
+      ...(clerkUserId ? { clerkUserId } : {}),
       ...(user?.primaryEmailAddress?.emailAddress?.trim()
         ? { email: user.primaryEmailAddress.emailAddress.trim() }
         : {}),
@@ -1467,14 +1436,10 @@ function OverviewPage() {
       plan: "free",
     })
       .then((created) => {
-        setRegistrationIntent(false);
-        clearRegistrationQuery(navigate, location.pathname, location.search);
         navigate(`/users/${encodeURIComponent(created.id)}/workspaces`, { replace: true });
       })
       .catch((cause: unknown) => {
         registrationStartedRef.current = false;
-        setRegistrationIntent(false);
-        clearRegistrationQuery(navigate, location.pathname, location.search);
         setRegistrationError(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => {
@@ -1482,12 +1447,12 @@ function OverviewPage() {
       });
   }, [
     clerkUsername,
+    clerkUserId,
     explicitMappedUserId,
-    location.pathname,
-    location.search,
     mappingError,
     mappingLoading,
     navigate,
+    nextPolarisUserId,
     user,
   ]);
 
@@ -2329,31 +2294,7 @@ function ProfilePage() {
 
 function SettingsPage() {
   const { language, setLanguage, t } = useLanguage();
-  const { userId = "" } = useParams();
-  const navigate = useNavigate();
-  const clerk = useClerk();
-  const { mapping } = useCurrentUserMapping();
   const { data: users } = useAsyncValue(listUsers, []);
-  const [deletingUser, setDeletingUser] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const canDeleteSelf = mapping?.polarisUserId === userId;
-
-  async function handleDeleteUser(): Promise<void> {
-    if (!canDeleteSelf || deletingUser) {
-      return;
-    }
-    setDeletingUser(true);
-    setDeleteError(null);
-    try {
-      await deletePortalUser(userId);
-      await clerk.signOut({ redirectUrl: clerkSignInUrl() });
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeletingUser(false);
-    }
-  }
 
   return (
     <PortalShell users={users ?? []}>
@@ -2380,62 +2321,6 @@ function SettingsPage() {
             </Select>
           </div>
         </div>
-        {canDeleteSelf && (
-          <>
-            <Separator />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <span>{t("danger_zone")}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="inline-flex items-center justify-center text-[11px] leading-none text-destructive/80 transition hover:text-destructive"
-                        aria-label={t("danger_zone_tooltip")}
-                      >
-                        ?
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs border bg-white text-sm text-foreground shadow-lg">
-                      {t("danger_zone_tooltip")}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {t("danger_zone_desc")}
-                </div>
-              </div>
-              {deleteError && (
-                <p className="w-full text-sm text-destructive">{deleteError}</p>
-              )}
-              <div>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" disabled={deletingUser}>
-                      <Trash2 className="h-4 w-4" />
-                      {deletingUser ? t("deleting_user") : t("delete_user")}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("delete_user_confirm_title")}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t("delete_user_confirm_description")}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => void handleDeleteUser()}>
-                        {deletingUser ? t("deleting_user") : t("delete_user")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
-          </>
-        )}
       </div>
     </PortalShell>
   );
