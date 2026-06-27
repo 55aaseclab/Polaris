@@ -30,6 +30,7 @@ ENV NODE_ENV=production
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /workspace/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
+COPY --from=build /workspace/apps/polaris/node_modules ./apps/polaris/node_modules
 COPY --from=build /workspace/apps/polaris/dist ./apps/polaris/dist
 
 EXPOSE 8787
