@@ -97,7 +97,7 @@ export function createExecutorServer(
 
       if (req.method === "POST" && url.pathname === "/workspaces/provision") {
         const body = await readBody(req);
-        const result = queueProvisionWorkspace(
+        const result = await queueProvisionWorkspace(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
           {

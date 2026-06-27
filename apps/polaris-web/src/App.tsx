@@ -111,6 +111,10 @@ function basenameForDisplay(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 type LanguageContextValue = {
   language: Language;
   setLanguage: (value: Language) => void;
@@ -157,7 +161,6 @@ const COPY: Record<Language, Record<string, string>> = {
     daemon_pairing: "Daemon pairing",
     backend: "Backend",
     live_target: "Live target",
-    provisioning_title: "Provisioning",
     base_dockerfile: "Base Dockerfile",
     workspace_specs: "Workspace specs",
     generated_manifests: "Generated manifests",
@@ -322,7 +325,6 @@ const COPY: Record<Language, Record<string, string>> = {
     daemon_pairing: "配对状态",
     backend: "后端",
     live_target: "访问入口",
-    provisioning_title: "准备进度",
     base_dockerfile: "基础 Dockerfile",
     workspace_specs: "工作空间规格",
     generated_manifests: "生成的清单",
@@ -994,7 +996,7 @@ function PortalShellLayout(props: {
   const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
-  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(12);
+  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
 
   function closeMobileSidebar(): void {
     if (isMobile) {
@@ -1018,19 +1020,6 @@ function PortalShellLayout(props: {
     return `/users/${encodeURIComponent(activeUserId)}/workspaces`;
   }
 
-  useEffect(() => {
-    if (!creatingWorkspace) {
-      setCreateWorkspaceProgress(12);
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setCreateWorkspaceProgress((current) => Math.min(current + 11, 88));
-    }, 350);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [creatingWorkspace]);
-
   async function handleCreateWorkspace(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
     const trimmedName = newWorkspaceName.trim();
@@ -1040,10 +1029,39 @@ function PortalShellLayout(props: {
     setCreatingWorkspace(true);
     setCreateWorkspaceError(null);
     try {
-      await createWorkspace(activeUserId, trimmedName, {
+      const queued = await createWorkspace(activeUserId, trimmedName, {
         defaultDockerOnly,
         startAfterCreate,
       });
+      setCreateWorkspaceProgress(queued.percent);
+      for (;;) {
+        const detail = await getWorkspaceDetail(activeUserId, trimmedName);
+        const progress = detail.progress;
+        if (!progress) {
+          await sleep(1000);
+          continue;
+        }
+        if (progress.phase === "error" || progress.error) {
+          throw new Error(progress.error ?? progress.message);
+        }
+        setCreateWorkspaceProgress((current) => {
+          if (progress.done) {
+            return progress.percent;
+          }
+          if (progress.phase === "start") {
+            const floor = progress.percent;
+            if (current < floor) {
+              return floor;
+            }
+            return Math.min(current + 1, 99);
+          }
+          return progress.percent;
+        });
+        if (progress.done && progress.percent >= 100) {
+          break;
+        }
+        await sleep(1000);
+      }
       setCreateWorkspaceProgress(100);
       setCreateWorkspaceOpen(false);
       setNewWorkspaceName("");
@@ -1104,6 +1122,9 @@ function PortalShellLayout(props: {
                     <AlertDialog
                       open={createWorkspaceOpen}
                       onOpenChange={(open) => {
+                        if (creatingWorkspace && !open) {
+                          return;
+                        }
                         setCreateWorkspaceOpen(open);
                         if (!open) {
                           setNewWorkspaceName("");
@@ -1111,6 +1132,7 @@ function PortalShellLayout(props: {
                           setDefaultDockerOnly(true);
                           setCreateWorkspaceError(null);
                           setCreatingWorkspace(false);
+                          setCreateWorkspaceProgress(0);
                         }
                       }}
                     >
@@ -1555,9 +1577,10 @@ function WorkspaceDetailPage() {
   const { userId = "", workspaceName = "" } = useParams();
   const location = useLocation();
   const { data: users } = useAsyncValue(listUsers, []);
+  const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
-    [userId, workspaceName],
+    [refreshTick, userId, workspaceName],
   );
   const {
     data: credentials,
@@ -1684,6 +1707,18 @@ function WorkspaceDetailPage() {
     }
   }, [agentCredentials, currentPaseoCredentialId, paseoCredentialId]);
 
+  useEffect(() => {
+    if (!data?.progress || data.progress.done) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setRefreshTick((current) => current + 1);
+    }, 2000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [data?.progress?.done, data?.progress?.phase, workspaceName, userId]);
+
   async function handleSwitch(): Promise<void> {
     if (!driver) {
       return;
@@ -1762,24 +1797,6 @@ function WorkspaceDetailPage() {
   function renderControlsCard(): ReactNode {
     return (
       <div className="grid gap-6">
-        {data?.progress && (
-          <>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{t("provisioning_title")}</div>
-                <div className="text-sm text-muted-foreground">{data.progress.phase}</div>
-              </div>
-              <div className="w-full min-w-0 sm:w-[18rem]">
-                <div className="mb-2 flex justify-between text-sm text-muted-foreground">
-                  <span>{t("provisioning")}</span>
-                  <span>{data.progress.percent}%</span>
-                </div>
-                <Progress value={data.progress.percent} />
-              </div>
-            </div>
-            <Separator />
-          </>
-        )}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium">{t("switch_driver")}</div>
