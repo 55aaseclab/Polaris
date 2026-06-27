@@ -122,7 +122,7 @@ async function withSyntheticMemberUser(
   const userId = uniqueName("portal-member");
   const workspace = uniqueName("portal-member-workspace");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
   fs.mkdirSync(path.dirname(profilePath), { recursive: true });
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.writeFileSync(
@@ -156,7 +156,7 @@ async function withSyntheticMemberUser(
 test("workspace ownership is derived from the project directory", () => {
   const userId = "100000000000000001";
   const workspace = uniqueName("portal-owned");
-  const root = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const root = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
   fs.mkdirSync(root, { recursive: true });
   try {
     assert.ok(listOwnedWorkspaces(userId).includes(workspace));
@@ -301,9 +301,11 @@ test("portal API creates and deletes a codex credential for an existing user", a
         id: string;
         kind: string;
         paths: string[];
+        active: boolean;
       };
       createdCredentialId = created.id;
       assert.equal(created.kind, "codex-auth");
+      assert.equal(created.active, false);
       assert.deepEqual(created.paths, [
         `credentials/codex/${created.id}/auth.json`,
         `credentials/codex/${created.id}/config.toml`,
@@ -329,6 +331,7 @@ test("portal API creates and deletes a codex credential for an existing user", a
       assert.equal(registry.kind, "codex-auth");
       assert.equal(registry.label, "RightCode Codex");
       assert.deepEqual(registry.purposes, ["agent-auth"]);
+      assert.equal((registry as { metadata?: { active?: boolean } }).metadata?.active, false);
       assert.deepEqual(registry.materialRef?.files, [
         {
           key: "codex-auth.json",
@@ -350,6 +353,23 @@ test("portal API creates and deletes a codex credential for an existing user", a
       assert.match(configToml, /model = "gpt-5\.4"/);
       assert.match(configToml, /\[model_providers\.rightcode\]/);
       assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
+
+      const activateResponse = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(createdCredentialId)}/activate`,
+        { method: "POST" },
+      );
+      const activateBody = await activateResponse.text();
+      assert.equal(activateResponse.status, 200, activateBody);
+      const activated = JSON.parse(activateBody) as {
+        id: string;
+        active: boolean;
+      };
+      assert.equal(activated.id, createdCredentialId);
+      assert.equal(activated.active, true);
+      const activatedRegistry = (yaml.load(fs.readFileSync(createdRegistryPath, "utf8")) ?? {}) as {
+        metadata?: { active?: boolean };
+      };
+      assert.equal(activatedRegistry.metadata?.active, true);
 
       const deleteResponse = await fetch(
         `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(createdCredentialId)}`,
@@ -538,8 +558,8 @@ test("portal API workspace detail does not leak bindings from another user with 
     await createUserCommand([secondUserId, "--name", "Scope B", "--email", `${secondUserId}@polaris.local`]);
     await createCommand([workspace, "--user", firstUserId]);
 
-    const firstSpecPath = path.join(firstUserRoot, "projects", workspace, "docker.agent.yaml");
-    const secondWorkspaceRoot = path.join(secondUserRoot, "projects", workspace);
+    const firstSpecPath = path.join(firstUserRoot, "workspaces", workspace, "docker.agent.yaml");
+    const secondWorkspaceRoot = path.join(secondUserRoot, "workspaces", workspace);
     const secondSpecPath = path.join(secondWorkspaceRoot, "docker.agent.yaml");
     const firstSpec = (yaml.load(fs.readFileSync(firstSpecPath, "utf8")) ?? {}) as Record<string, unknown>;
     const firstCredentials = typeof firstSpec.credentials === "object" && firstSpec.credentials
@@ -598,7 +618,7 @@ test("portal API workspace detail does not leak bindings from another user with 
 test("portal API previews workspace asset content", async () => {
   await withPortalServer(async (baseUrl) => {
     const response = await fetch(
-      `${baseUrl}/api/users/${DEMO_USER_ID}/workspaces/demo/preview?path=${encodeURIComponent("config/users/100000000000000001/projects/demo/docker.agent.yaml")}`,
+      `${baseUrl}/api/users/${DEMO_USER_ID}/workspaces/demo/preview?path=${encodeURIComponent("config/users/100000000000000001/workspaces/demo/docker.agent.yaml")}`,
     );
     assert.equal(response.status, 200);
     const payload = await response.json() as {
@@ -606,7 +626,7 @@ test("portal API previews workspace asset content", async () => {
       content: string;
       truncated: boolean;
     };
-    assert.equal(payload.path, "config/users/100000000000000001/projects/demo/docker.agent.yaml");
+    assert.equal(payload.path, "config/users/100000000000000001/workspaces/demo/docker.agent.yaml");
     assert.match(payload.content, /backend:/);
     assert.equal(payload.truncated, false);
   });
@@ -851,7 +871,7 @@ test("portal API rejects conflicting Clerk username registrations", async () => 
 test("portal API provisions a new workspace through the CLI-backed scaffold flow", async () => {
   const userId = uniqueName("portal-workspace-user");
   const workspace = uniqueName("portal-create");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
   const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
@@ -873,6 +893,18 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
       `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
       "utf8",
     );
+    writeWorkspaceProvisionProgress(userId, workspace, {
+      userId,
+      workspace,
+      phase: "error",
+      step: 6,
+      totalSteps: 7,
+      percent: 86,
+      message: "stale failure",
+      updatedAt: new Date().toISOString(),
+      done: true,
+      error: "stale failure",
+    });
 
     await withFakePath(
       {
@@ -891,10 +923,14 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
             workspace: string;
             phase: string;
             done: boolean;
+            error?: string;
+            percent: number;
           };
           assert.equal(payload.workspace, workspace);
           assert.equal(payload.phase, "queued");
           assert.equal(payload.done, false);
+          assert.equal(payload.error, undefined);
+          assert.equal(payload.percent, 0);
         });
         const finalProgress = await waitForProvisionDone(userId, workspace);
         assert.equal(finalProgress.phase, "done", finalProgress.message);
@@ -925,7 +961,7 @@ test("portal API stops the selected workspace driver", async () => {
   const userId = uniqueName("portal-stop-user");
   const workspace = uniqueName("portal-stop");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
-  const workspaceRoot = path.join(userRoot, "projects", workspace);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
@@ -978,7 +1014,7 @@ test("portal API stops the selected workspace driver", async () => {
 test("portal API can create and start a new workspace in one flow", async () => {
   const userId = uniqueName("portal-start-user");
   const workspace = uniqueName("portal-start");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
   const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
 
@@ -1052,7 +1088,7 @@ test("portal API binds and unbinds paseo agent credentials on the selected works
   const userId = uniqueName("portal-paseo-bind-user");
   const workspace = uniqueName("portal-paseo-bind");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
-  const workspaceRoot = path.join(userRoot, "projects", workspace);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
   const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const dockerSpecPath = path.join(workspaceRoot, "docker.agent.yaml");
   const credentialId = uniqueName("portal-codex");
@@ -1152,8 +1188,6 @@ exit 0
             agent?: { kind?: string; persist_state?: boolean };
             credentials?: { bindings?: Array<{ purpose?: string; credentialId?: string; required?: boolean }> };
           };
-          assert.equal(boundSpec.agent?.kind, "multi");
-          assert.equal(boundSpec.agent?.persist_state, true);
           assert.deepEqual(boundSpec.credentials?.bindings, [
             { purpose: "agent-auth", credentialId, required: true },
             { purpose: "git-auth", credentialId: "github-ssh", required: false },
@@ -1186,8 +1220,6 @@ exit 0
             agent?: { kind?: string; persist_state?: boolean };
             credentials?: { bindings?: Array<{ purpose?: string; credentialId?: string; required?: boolean }> };
           };
-          assert.equal(unboundSpec.agent?.kind, "disabled");
-          assert.equal(unboundSpec.agent?.persist_state, false);
           assert.deepEqual(unboundSpec.credentials?.bindings, [
             { purpose: "git-auth", credentialId: "github-ssh", required: false },
           ]);
@@ -1205,7 +1237,16 @@ exit 0
 test("portal API deletes a stopped workspace and removes it from the profile index", async () => {
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const portalStateRoot = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userId,
+    ".portal",
+    "workspaces",
+    workspace,
+  );
   const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const originalProfile = fs.readFileSync(profileFile, "utf8");
   const profileData = (yaml.load(originalProfile) ?? {}) as Record<string, unknown>;
@@ -1214,6 +1255,23 @@ test("portal API deletes a stopped workspace and removes it from the profile ind
     : [];
 
   fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(portalStateRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(portalStateRoot, "provision.json"),
+    JSON.stringify({
+      userId,
+      workspace,
+      phase: "error",
+      step: 6,
+      totalSteps: 7,
+      percent: 86,
+      message: "stale failure",
+      updatedAt: new Date().toISOString(),
+      done: true,
+      error: "stale failure",
+    }, null, 2) + "\n",
+    "utf8",
+  );
   profileData.workspaces = [...workspaces, workspace].sort();
   fs.writeFileSync(profileFile, yaml.dump(profileData, { lineWidth: 120, noRefs: true }), "utf8");
 
@@ -1229,6 +1287,7 @@ test("portal API deletes a stopped workspace and removes it from the profile ind
     });
 
     assert.equal(fs.existsSync(workspaceRoot), false);
+    assert.equal(fs.existsSync(portalStateRoot), false);
     const profileAfter = (yaml.load(fs.readFileSync(profileFile, "utf8")) ?? {}) as Record<string, unknown>;
     const remaining = Array.isArray(profileAfter.workspaces)
       ? profileAfter.workspaces.map((value) => String(value))

@@ -1,438 +1,258 @@
 # Polaris 门户业务流程
 
-本文档描述 Polaris 门户的主要业务链路。
+本文档描述 Polaris 门户当前采用的业务模型。
 
-目标是统一前端、后端、认证和工作空间编排的职责边界。
+重点是把三件事拆开：
+
+- Paseo daemon 生命周期
+- workspace 内可用的 harness / CLI
+- 用户选择的凭证
+
+这三者相关，但不是同一个开关。
 
 ## 一句话原则
 
 - Clerk 负责认证。
 - Polaris 负责用户资料、凭证、工作空间和运行时状态。
-- 前端负责发起动作、展示进度、展示结果。
-- 后端负责校验权限、落盘状态、执行编排。
+- Paseo daemon 与 harness 可用性属于基础设施。
+- 凭证选择属于用户级配置，不负责开启或关闭基础设施。
 
 ## 核心对象
 
-- 用户：门户中的业务主体，使用 `userId` 作为 Polaris 内部标识。
-- Clerk 用户：认证主体，提供登录态和基础身份信息。
+- Polaris 用户：业务主体，主键是 `userId`。
+- Clerk 用户：登录主体，提供登录态和基础身份。
 - 工作空间：用户拥有的开发运行环境。
-- 凭证：用户级对象，供工作空间按用途绑定。
-- 驱动：工作空间运行目标，当前包括 `docker`、`pod:gvisor`、
-  `pod:data-container`、`kubevirt-vm`。
+- 用户凭证：用户级对象，当前重点是 `ssh-key` 和 `codex-auth`。
+- 工作空间凭证绑定：兼容路径，只在当前驱动上覆盖某个用途。
 
-## 权责分工
+## 文件落点
 
-### 认证与授权
+- 用户资料：`config/users/profiles/<userId>.yaml`
+- 用户凭证：`config/users/<userId>/credentials/*.yaml`
+- 工作空间定义：
+  `config/users/<userId>/workspaces/<workspace>/`
+- 工作空间状态：
+  `config/users/<userId>/workspaces/<workspace>/state/status.json`
 
-- 前端通过 Clerk 完成登录、登出、注册。
-- 后端不直接管理密码。
-- 后端根据登录后的用户身份，将 Clerk 用户映射到 Polaris 用户。
-- 普通用户只能访问自己的
-  `/users/<userId>/workspaces/...` 路由。
-- 管理员可以访问其他用户路由。
+## 当前模型
 
-### 数据与状态
+### 用户创建
 
-- 用户归属以 `config/users/<userId>/projects/<workspace>/` 为准。
-- 用户资料以 `config/users/profiles/<userId>.yaml` 为准。
-- 用户凭证以 `config/users/<userId>/credentials/*.yaml` 为准。
-- 工作空间状态、驱动选择、编排进度由 Polaris 写入并维护。
+用户创建时只创建用户资料和用户画像要求的必需凭证。
 
-## 主业务流程
+当前用户画像只要求 SSH，因此：
 
-### 1. 前端登录
+- 会创建 `github-ssh` 这类托管 SSH 凭证
+- 会生成 SSH key material
+- 不会隐式创建默认 Codex 凭证
 
-前端登录 := Clerk 登录 -> 前端拿到会话 -> 前端解析当前用户映射 ->
-前端跳转到该用户工作空间首页
+### 用户级 Codex 凭证
 
-细化流程：
+Codex 凭证现在是用户级对象。
 
-1. 用户进入登录页。
-2. 前端调用 Clerk 登录。
-3. Clerk 返回已认证会话。
-4. 前端根据 Clerk 用户名或映射表识别 Polaris `userId`。
-5. 前端跳转到 `/users/<userId>/workspaces`。
-6. 前端请求用户工作空间列表。
-7. 后端校验访问范围并返回工作空间摘要。
-8. 前端展示工作空间首页。
+当前第一阶段只提供一个模板：
 
-异常分支：
+- `RightCode Codex`
 
-- 没有 Polaris 用户映射：前端提示未完成用户绑定。
-- 用户访问了其他普通用户的路由：后端返回 `403`。
-- 用户资料不存在：后端返回 `404`。
+用户可以：
 
-### 2. 前端注册
+- 新增 Codex 凭证
+- 删除 Codex 凭证
+- 激活一个 Codex 凭证为当前默认值
 
-前端注册 := Clerk 注册 -> 后端创建 Polaris 用户 -> 前端自动登录 ->
-前端进入工作空间首页
+同一时间，一个用户只有一个激活中的 Codex 凭证。
 
-细化流程：
+### 工作空间运行时
 
-1. 用户在前端完成 Clerk 注册。
-2. 前端拿到 Clerk 用户名、邮箱和基础资料。
-3. 前端调用后端创建 Polaris 用户。
-4. 后端创建用户资料和默认凭证目录。
-5. 后端返回新建用户资料。
-6. 前端使用 Clerk 会话进入已登录状态。
-7. 前端跳转到 `/users/<userId>/workspaces`。
-8. 前端显示空工作空间页或已有工作空间页。
+工作空间启动时：
 
-后端创建内容：
+- 仍会准备 Paseo daemon
+- 仍会安装 harness tooling
+- 会尝试挂载当前用户激活中的 Codex 凭证
+- 如果没有激活中的 Codex 凭证，工作空间仍然可以启动
 
-- 用户资料。
-- 默认凭证注册目录。
-- 用户角色和套餐信息。
-- Clerk 用户名到 Polaris 用户的稳定映射关系。
+没有激活 Codex 凭证时，状态应该表达为：
 
-异常分支：
+- 基础设施已就绪
+- 凭证未选中
 
-- Clerk 注册成功但 Polaris 用户创建失败：前端提示注册未完成。
-- 用户名冲突：后端拒绝创建并返回错误原因。
+而不是：
+
+- agent 被禁用
+- daemon 未开启
+
+## 主流程
+
+### 1. 登录
+
+1. 用户通过 Clerk 登录。
+2. 前端读取 Clerk 用户信息。
+3. 前端查询 Clerk 到 Polaris 用户的映射。
+4. 前端跳转到 `/users/<userId>/workspaces`。
+5. 后端按用户作用域返回工作空间列表。
+
+异常：
+
+- 没有映射：提示用户未完成 Polaris 侧绑定。
+- 普通用户访问他人作用域：返回 `403`。
+
+### 2. 注册
+
+1. 用户通过 Clerk 完成注册。
+2. 前端拿到 Clerk 用户名、用户 ID、邮箱和显示名。
+3. 前端调用 Polaris 用户创建接口。
+4. 后端创建用户资料。
+5. 后端按用户画像创建必需凭证。
+6. 后端写入 Clerk 到 Polaris 的稳定映射。
+7. 前端进入该用户的工作空间首页。
+
+当前注册后自动创建的仅有：
+
+- 用户资料
+- 默认托管 SSH 凭证
+- Clerk 映射
+
+不会自动创建：
+
+- Codex provider 凭证
 
 ### 3. 删除用户
 
-删除用户 := 前端发起删除用户 -> 后端执行本地 Polaris 删除 ->
-webportal 清理对应 Clerk 用户 -> 前端退出登录或返回列表页
+1. 前端请求删除 Polaris 用户。
+2. 后端删除用户资料。
+3. 后端通过共享 credential service 删除该用户的托管凭证与物料。
+4. 后端删除用户工作空间目录和映射。
+5. 门户侧按映射结果删除 Clerk 用户。
 
-细化流程：
+### 4. 创建工作空间
 
-1. 用户进入 `Settings` 页，或管理员进入用户管理页。
-2. 前端发起删除用户动作并要求二次确认。
-3. 前端调用后端删除用户接口。
-4. 后端校验目标用户是否存在。
-5. 后端先执行本地 `user delete`。
-6. 本地删除会移除用户资料、用户目录和 Clerk 到 Polaris 的映射。
-7. 本地删除返回被移除的 `removedClerkUsernames`。
-8. webportal 使用这些用户名调用 Clerk Backend API 删除 Clerk 用户。
-9. 删除成功后，前端对“删自己”执行登出并回到登录页。
-10. 管理员删除其他用户时，前端返回用户列表或管理页。
+1. 前端提交工作空间名称。
+2. 后端创建工作空间目录和 driver spec。
+3. 后端渲染 manifest。
+4. 后端写入驱动选择和状态文件。
+5. 如请求要求启动，则继续启动默认 driver。
 
-删除范围：
+工作空间脚手架：
 
-- 用户资料。
-- 用户工作空间目录。
-- 用户凭证目录。
-- 用户状态目录。
-- 用户映射关系。
-- 对应的 Clerk 用户记录。
+- 不会隐式创建默认 Codex 凭证
+- 不会把凭证创建当成工作空间创建副作用
 
-异常分支：
+### 5. 查看工作空间
 
-- 用户不存在：后端返回 `404`。
-- 本地 Polaris 删除失败：后端返回删除失败。
-- 本地删除成功但 Clerk 删除失败：后端返回错误，前端提示 Clerk 清理失败。
+工作空间详情页同时展示三类信息：
 
-### 4. 用户进入工作空间首页
+- 基础设施状态
+  - backend
+  - daemon
+  - supported harnesses
+- 凭证状态
+  - 当前用户是否已选中 Codex 凭证
+  - 当前 driver 是否有工作空间级 override
+- 资产和控制项
 
-进入首页 := 前端请求工作空间列表 -> 后端返回用户拥有的工作空间 ->
-前端展示列表、状态和入口
+要求：
 
-细化流程：
+- daemon 状态和凭证状态必须分开展示
+- 没有 Codex 凭证时，不能把 daemon 状态展示成被关闭
 
-1. 前端请求 `/api/users/<userId>/workspaces`。
-2. 后端读取该用户名下的工作空间目录。
-3. 后端汇总每个工作空间的驱动、状态、进度和 live target。
-4. 前端展示工作空间卡片或侧边栏列表。
-
-首页展示重点：
-
-- 工作空间名称。
-- 已配置驱动。
-- 当前选中驱动。
-- 当前状态。
-- 编排进度。
-- 进入运行时的链接。
-
-### 5. 用户创建工作空间
-
-用户创建工作空间 := 前端点击创建工作空间 -> 后端阻塞式创建并编排
-工作空间 -> 前端显示工作空间
-
-细化流程：
-
-1. 用户输入工作空间名称。
-2. 前端调用 `POST /api/users/<userId>/workspaces`。
-3. 后端校验用户和工作空间名称。
-4. 后端在用户目录下创建工作空间目录。
-5. 后端确保驱动规格存在。
-6. 后端确保工作空间镜像存在。
-7. 后端渲染各驱动的后端清单。
-8. 后端收集状态并写入默认驱动选择。
-9. 后端返回编排进度结果。
-10. 前端刷新列表并打开该工作空间详情。
-
-当前创建完成标准：
-
-- 工作空间目录已创建。
-- `docker`、`pod:gvisor`、`kubevirt-vm` 规格已就绪。
-- 对应 manifest 已生成。
-- 默认驱动选择已写入状态。
-- 进度状态已标记完成。
-
-异常分支：
-
-- 镜像不可用：后端返回创建失败。
-- manifest 渲染失败：后端返回创建失败。
-- 编排中断：后端写入 `error` 进度，前端展示失败状态。
-
-### 6. 用户查看工作空间详情
-
-查看工作空间 := 前端打开工作空间 -> 后端返回工作空间详情 ->
-前端展示运行时、资产、凭证绑定和控制项
-
-细化流程：
-
-1. 前端请求
-   `/api/users/<userId>/workspaces/<workspaceName>`。
-2. 后端返回工作空间详情。
-3. 前端展示概览页或默认嵌入的 Paseo 页面。
-4. 前端展示驱动状态、daemon 状态、live target。
-5. 前端展示规格文件、生成物、镜像标签、持久卷和 memory 资产。
-6. 前端展示该工作空间绑定的凭证用途。
-
-### 7. 用户切换工作空间驱动
-
-切换驱动 := 前端选择目标驱动 -> 后端切换工作空间驱动 ->
-前端刷新详情页
-
-细化流程：
-
-1. 用户在控制区选择目标驱动。
-2. 前端调用
-   `POST /api/users/<userId>/workspaces/<workspaceName>/switch`。
-3. 后端校验目标驱动是否合法且可用。
-4. 后端执行驱动切换。
-5. 后端更新工作空间选中驱动状态。
-6. 前端刷新页面并展示新驱动状态。
-
-异常分支：
-
-- 目标驱动未准备好：后端拒绝切换。
-- 切换过程失败：前端保留原状态并提示失败。
-
-### 8. 用户停止工作空间
-
-停止工作空间 := 前端点击停止 -> 后端停止当前选中驱动 ->
-前端刷新状态
-
-细化流程：
-
-1. 用户点击停止工作空间。
-2. 前端调用
-   `POST /api/users/<userId>/workspaces/<workspaceName>/stop`。
-3. 后端读取当前选中驱动。
-4. 后端停止对应运行时。
-5. 前端刷新详情，展示已停止或未启动状态。
-
-### 9. 用户绑定工作空间 Paseo Credential
-
-绑定 Paseo := 前端在 `Paseo status` 选择一个 `agent-auth` credential ->
-后端更新当前驱动 spec -> 后端重渲染 manifest ->
-如有旧运行时则先停止 -> 后端重新启动工作空间 -> 前端刷新详情
-
-细化流程：
-
-1. 用户进入工作空间的 `Paseo status` 页。
-2. 前端加载当前用户的 credential 列表。
-3. 前端筛出 `purposes` 包含 `agent-auth` 的 credential 供选择。
-4. 用户选择一个 credential 并发起绑定。
-5. 前端调用
-   `POST /api/users/<userId>/workspaces/<workspaceName>/paseo/bind`。
-6. 请求体必须携带目标 `credentialId`，也可显式带 `driver`。
-7. 后端读取当前选中驱动；若请求给了 `driver`，则使用该驱动。
-8. 后端校验 credential 存在，且用途包含 `agent-auth`。
-9. 后端更新该驱动的 workspace spec：
-   - 将 `credentials.bindings` 里的 `agent-auth` 绑定改成所选 credential。
-   - 保留已有 `git-auth` 绑定。
-   - 将 `agent.kind` 改为启用状态。
-   - 将 `agent.persist_state` 改为 `true`。
-10. 后端重渲染该驱动的 manifest。
-11. 如果当前驱动已有运行中的旧实例，后端先停止旧实例。
-12. 后端按新 spec 启动工作空间。
-13. 后端返回新绑定结果、实际 driver 和是否发生了重启。
-14. 前端刷新详情页，新的 Paseo 状态开始按 agent-enabled 逻辑展示。
-
-关键约束：
-
-- 只允许绑定 `agent-auth` credential。
-- 绑定发生在当前驱动维度，不会批量改所有驱动。
-- 已运行的 disabled workspace 在绑定时必须重启，否则旧容器不会拿到新 agent 配置。
-
-异常分支：
-
-- 未选择 credential：后端返回 `400`。
-- credential 不存在：后端返回失败。
-- credential 不是 `agent-auth`：后端返回失败。
-- manifest 重渲染失败：后端返回失败。
-- 停止或启动失败：后端返回失败。
-
-### 10. 用户解除工作空间 Paseo Credential 绑定
-
-解除绑定 Paseo := 前端在 `Paseo status` 发起解绑 ->
-后端移除当前驱动 spec 中的 `agent-auth` 绑定 -> 后端重渲染 manifest ->
-如有旧运行时则先停止 -> 后端重新启动工作空间 -> 前端刷新详情
-
-细化流程：
-
-1. 用户进入工作空间的 `Paseo status` 页。
-2. 前端显示当前工作空间已绑定的 credential 用途。
-3. 用户发起解绑并确认。
-4. 前端调用
-   `POST /api/users/<userId>/workspaces/<workspaceName>/paseo/unbind`。
-5. 请求体可显式携带 `driver`；未提供时由后端使用当前选中驱动。
-6. 后端读取该驱动对应的 workspace spec。
-7. 后端从 `credentials.bindings` 中移除 `purpose=agent-auth` 的绑定。
-8. 后端保留已有 `git-auth` 等非 agent 绑定。
-9. 后端将 `agent.kind` 改回 `disabled`。
-10. 后端将 `agent.persist_state` 改回 `false`。
-11. 后端重渲染该驱动 manifest。
-12. 如果当前驱动已有运行中的 agent 实例，后端先停止旧实例。
-13. 后端按解除绑定后的 spec 重新启动工作空间。
-14. 后端返回解绑结果、实际 driver 和是否发生了重启。
-15. 前端刷新详情页，Paseo 状态重新回到 disabled workspace 的展示逻辑。
-
-关键约束：
-
-- 解绑只移除 `agent-auth`，不会碰 `git-auth`。
-- 解绑后不会删除用户级 credential 对象本身，只是解除工作空间绑定。
-- 已运行的 agent-enabled workspace 在解绑时必须重启，否则旧运行时仍会保留 agent 进程和挂载。
-
-异常分支：
-
-- 工作空间没有选中驱动：后端返回失败。
-- spec 不存在：后端返回失败。
-- manifest 重渲染失败：后端返回失败。
-- 停止或启动失败：后端返回失败。
-
-### 11. 用户删除工作空间
-
-删除工作空间 := 前端点击删除 -> 后端校验工作空间未运行 ->
-后端删除工作空间定义和状态 -> 前端返回列表页
-
-细化流程：
-
-1. 用户点击删除并二次确认。
-2. 前端调用
-   `DELETE /api/users/<userId>/workspaces/<workspaceName>`。
-3. 后端校验工作空间当前未运行。
-4. 后端删除工作空间目录和关联状态。
-5. 后端更新用户派生索引。
-6. 前端跳转回工作空间列表。
-
-约束：
-
-- 运行中的工作空间不能直接删除。
-
-### 12. 用户新增 Credential
-
-新增 Credential := 前端进入 Profile 页 -> 前端填写 codex credential 表单 ->
-后端调用 CLI 创建 credential -> 前端刷新 credential 列表
-
-细化流程：
+### 6. 新增 Codex 凭证
 
 1. 用户进入 `Profile` 页。
-2. 前端展示当前用户的 credential 列表和新增表单。
-3. 用户选择 `codex` 类型。
-4. 用户填写 label、provider name、base URL 和 API key。
-5. 前端调用 `POST /api/users/<userId>/credentials`。
-6. 后端校验目标用户存在且请求参数合法。
-7. 后端调用本地
-   `pnpm --dir apps/polaris run polaris -- user credential create ...`。
-8. CLI 按模板生成 registry YAML。
-9. CLI 同时生成 `auth.json` 和 `config.toml`。
-10. 后端重新读取该用户 credential 列表并返回新建结果。
-11. 前端刷新表格并展示新 credential。
+2. 前端展示 `RightCode Codex` 模板。
+3. 用户输入 label 和 API key。
+4. 前端调用 `POST /api/users/<userId>/credentials`。
+5. 后端通过共享 credential service 创建 `codex-auth` 凭证。
+6. 后端写入 registry YAML、`auth.json` 和 `config.toml`。
+7. 前端刷新凭证列表。
 
-当前 codex 模板输出：
+产物：
 
 - `config/users/<userId>/credentials/<credentialId>.yaml`
 - `config/users/<userId>/credentials/codex/<credentialId>/auth.json`
 - `config/users/<userId>/credentials/codex/<credentialId>/config.toml`
 
-异常分支：
+### 7. 激活 Codex 凭证
 
-- 用户不存在：后端返回 `404` 或创建失败。
-- 参数缺失：后端返回 `400`。
-- CLI 创建失败：后端返回创建失败原因。
-- 文件写入失败：后端返回创建失败原因。
+1. 用户在 `Profile` 页选择一个 Codex 凭证。
+2. 前端调用
+   `POST /api/users/<userId>/credentials/<credentialId>/activate`。
+3. 后端更新该用户凭证 registry 中的激活标记。
+4. 后续工作空间运行时默认挂载该用户当前激活的 Codex 凭证。
 
-### 13. 用户删除 Credential
+激活行为是用户级选择，不是工作空间基础设施开关。
 
-删除 Credential := 前端在 Profile 页点击删除 -> 后端调用 CLI 删除
-credential -> 前端刷新 credential 列表
+### 8. 删除 Codex 凭证
 
-细化流程：
-
-1. 用户在 `Profile` 页查看 credential 列表。
-2. 用户对某个 credential 点击删除并二次确认。
-3. 前端调用
+1. 用户在 `Profile` 页删除一个 Codex 凭证。
+2. 前端调用
    `DELETE /api/users/<userId>/credentials/<credentialId>`。
-4. 后端校验目标用户和 credential 是否存在。
-5. 后端调用本地
-   `pnpm --dir apps/polaris run polaris -- user credential delete ...`。
-6. CLI 删除 credential registry YAML。
-7. CLI 删除该 credential 对应的 `auth.json` 和 `config.toml`。
-8. 后端返回删除结果和已删除文件路径。
-9. 前端刷新表格并移除该 credential。
+3. 后端通过共享 credential service 删除 registry 与生成物料。
+4. 前端刷新列表。
 
-删除范围：
+### 9. 工作空间级绑定与解绑
 
-- credential registry 文件。
-- credential 生成出的 `codex` 配置文件。
+当前 `/paseo/bind` 和 `/paseo/unbind` 仍然保留，但它们只是兼容路径。
 
-异常分支：
+绑定时：
 
-- credential 不存在：后端返回删除失败或空删除结果。
-- 文件部分缺失：后端尽力删除剩余文件并返回结果。
-- CLI 删除失败：后端返回删除失败原因。
+1. 前端选择一个 `agent-auth` 凭证。
+2. 后端只更新当前 driver spec 的
+   `credentials.bindings[purpose=agent-auth]`。
+3. 后端保留其他绑定，如 `git-auth`。
+4. 后端重渲染并重启当前 driver。
 
-## 页面级业务视图
+解绑时：
 
-### 登录页
+1. 后端只移除当前 driver spec 里的 `agent-auth` 绑定。
+2. 用户级激活凭证仍然存在。
+3. 后端重渲染并重启当前 driver。
 
-- 目标是建立会话。
-- 成功后进入用户首页。
+关键约束：
 
-### 注册页
+- 绑定和解绑不再改写 `agent.kind`
+- 绑定和解绑不再改写 `agent.persist_state`
+- 绑定和解绑不负责开启或关闭 daemon / harness
 
-- 目标是创建 Clerk 身份和 Polaris 用户。
-- 成功后直接登录。
+## 状态语义
 
-### 工作空间列表页
+工作空间状态至少要分开表达：
 
-- 目标是查看全部工作空间和创建入口。
-- 重点展示状态、进度和入口。
+- backend 是否存在、是否运行
+- daemon 是否 ready、是否可配对
+- harness tooling 是否可用
+- Codex 凭证是否已选中
 
-### 工作空间详情页
+因此：
 
-- 目标是查看单个工作空间运行情况。
-- 重点展示 Paseo、开发环境资产、memory 资产和控制动作。
+- 没有激活 Codex 凭证，可以是 `workspace ready`
+- 该情况下凭证状态应是 `not-selected`
 
-## 状态定义建议
+## 页面职责
 
-- `queued`：已进入队列，尚未开始。
-- `starting`：开始创建工作空间。
-- `specs`：正在准备驱动规格。
-- `images`：正在准备镜像。
-- `manifests`：正在生成 manifest。
-- `status`：正在汇总状态。
-- `selection`：正在确认默认驱动。
-- `done`：创建完成。
-- `error`：创建失败。
+### 登录 / 注册页
 
-## 业务边界
+- 负责 Clerk 会话建立
+- 负责触发 Polaris 用户创建或查找映射
 
-- Clerk 不是工作空间系统。
-- Polaris 不负责用户密码管理。
-- 前端不直接判断工作空间归属。
-- 工作空间归属和可见性由后端判定。
-- 用户资料、凭证、工作空间是三个独立对象。
+### Workspaces 页
 
-## 后续可继续补充的流程
+- 负责列出工作空间
+- 负责展示状态和编排进度
 
-- 邀请成员加入工作空间。
-- 管理员跨用户查看和代运维。
-- 工作空间模板选择流程。
-- 工作空间创建后的首次启动流程。
-- 失败重试和恢复流程。
+### Workspace Detail 页
+
+- 负责展示基础设施状态
+- 负责展示凭证状态
+- 负责执行 driver 切换、停止、删除和兼容 override
+
+### Profile 页
+
+- 负责管理用户级凭证
+- 负责新增、删除、激活 Codex 凭证
+
+## 边界
+
+- Clerk 不管理 Polaris 工作空间。
+- Polaris 不管理用户密码。
+- 用户级凭证不应再通过工作空间脚手架隐式创建。
+- 工作空间级绑定只是覆盖路径，不是主要凭证管理入口。

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
-import { workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
+import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
 import { logInfo } from "../utils/log.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 import { runCommand } from "../utils/shell.js";
@@ -255,10 +255,6 @@ export function ensureWorkspaceConfig(projectRef: string): WorkspaceConfigMatch 
   };
 }
 
-function userDockerfilePath(userProfileId: string): string {
-  return path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
-}
-
 function hasLocalImage(imageRef: string): boolean {
   try {
     runCommand("docker", ["image", "inspect", imageRef]);
@@ -286,11 +282,24 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
   }
 
   const imageRef = workspaceImageRef(source.userProfileId, source.project);
+  const dockerfileState = syncWorkspaceDockerfileTemplate(source.userProfileId);
+  if (dockerfileState.refreshed) {
+    logInfo("provision", "workspace-image-build", {
+      project: source.project,
+      userProfileId: source.userProfileId,
+      imageRef,
+      dockerfile: path.relative(REPO_ROOT, dockerfileState.path),
+      reason: "dockerfile-template-refreshed",
+    });
+    runCommand("docker", ["build", "-f", dockerfileState.path, "-t", imageRef, "."]);
+    return;
+  }
+
   if (hasLocalImage(imageRef) || canPullImage(imageRef)) {
     return;
   }
 
-  const dockerfile = userDockerfilePath(source.userProfileId);
+  const dockerfile = dockerfileState.path;
   if (!fs.existsSync(dockerfile)) {
     throw new Error(
       `Canonical workspace image '${imageRef}' is missing and no Dockerfile was found at ${path.relative(REPO_ROOT, dockerfile)}`,
@@ -302,6 +311,7 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
     userProfileId: source.userProfileId,
     imageRef,
     dockerfile: path.relative(REPO_ROOT, dockerfile),
+    reason: dockerfileState.created ? "dockerfile-created" : "image-missing",
   });
   runCommand("docker", ["build", "-f", dockerfile, "-t", imageRef, "."]);
 }

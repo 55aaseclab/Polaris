@@ -32,11 +32,17 @@ RUN mkdir -p /root/.local/polaris \
     @getpaseo/cli@latest \
     @openai/codex \
     @anthropic-ai/claude-code \
+    @github/copilot \
+    opencode-ai \
+    @earendil-works/pi-coding-agent \
     @fission-ai/openspec@latest \
     pnpm
 
 RUN ln -sf /root/.local/polaris/bin/paseo /usr/local/bin/paseo \
   && ln -sf /root/.local/polaris/bin/pnpm /usr/local/bin/pnpm \
+  && ln -sf /root/.local/polaris/bin/copilot /usr/local/bin/copilot \
+  && ln -sf /root/.local/polaris/bin/opencode /usr/local/bin/opencode \
+  && ln -sf /root/.local/polaris/bin/pi /usr/local/bin/pi \
   && printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \

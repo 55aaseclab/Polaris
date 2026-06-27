@@ -9,6 +9,10 @@ import {
   requireNetfsField,
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
+import {
+  workspaceToolCatalog,
+  workspaceToolPackageSpecs,
+} from "../../core/harness-catalog.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
@@ -156,11 +160,13 @@ function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
   const xdg = codexXdgRoots(workspace);
+  const toolBinaries = workspaceToolCatalog()
+    .filter((tool) => !["codex", "claude"].includes(tool.id))
+    .map((tool) => tool.binName);
   return [
     `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local ${xdg.config} ${xdg.data} ${xdg.state}`,
-    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} @getpaseo/cli@latest @openai/codex @anthropic-ai/claude-code @fission-ai/openspec@latest pnpm`,
-    `ln -sf ${toolRoot}/bin/paseo /usr/local/bin/paseo`,
-    `ln -sf ${toolRoot}/bin/pnpm /usr/local/bin/pnpm`,
+    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceToolPackageSpecs().join(" ")}`,
+    ...toolBinaries.map((binary) => `ln -sf ${toolRoot}/bin/${binary} /usr/local/bin/${binary}`),
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,
@@ -172,7 +178,11 @@ function buildAgentCliWrapperLines(workspace: WorkspaceSpec): string[] {
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
   const xdg = codexXdgRoots(workspace);
+  const toolBinaries = workspaceToolCatalog()
+    .filter((tool) => !["codex", "claude"].includes(tool.id))
+    .map((tool) => tool.binName);
   return [
+    ...toolBinaries.map((binary) => `ln -sf ${toolRoot}/bin/${binary} /usr/local/bin/${binary}`),
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export PATH=${toolRoot}/bin:$PATH' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p /tmp/npm-cache' 'exec ${toolRoot}/bin/claude \"$@\"' > /usr/local/bin/claude`,

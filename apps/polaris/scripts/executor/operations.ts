@@ -40,7 +40,7 @@ function rootKey(userId: string, workspace: string): string {
 }
 
 function portalRoot(userId: string, workspace: string): string {
-  return path.join(REPO_ROOT, "config", "users", userId, "projects", workspace);
+  return path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
 }
 
 function portalStateProgress(
@@ -374,15 +374,30 @@ export async function queueProvisionWorkspace(
     startAfterCreate?: boolean;
   },
 ): Promise<PortalProvisionProgress> {
-  const queuedProgress =
-    readWorkspaceProvisionProgress(userId, workspace) ??
-    updateProgress(userId, workspace, {
-      phase: "queued",
-      step: 0,
-      percent: 0,
-      done: false,
-      message: "workspace provisioning queued",
-    });
+  const key = rootKey(userId, workspace);
+  const existing = provisionJobs.get(key);
+  if (existing) {
+    return (
+      readWorkspaceProvisionProgress(userId, workspace) ??
+      updateProgress(userId, workspace, {
+        phase: "queued",
+        step: 0,
+        percent: 0,
+        done: false,
+        error: undefined,
+        message: "workspace provisioning queued",
+      })
+    );
+  }
+
+  const queuedProgress = updateProgress(userId, workspace, {
+    phase: "queued",
+    step: 0,
+    percent: 0,
+    done: false,
+    error: undefined,
+    message: "workspace provisioning queued",
+  });
   void startProvisionWorkspace(userId, workspace, options);
   return queuedProgress;
 }

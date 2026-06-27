@@ -20,6 +20,7 @@ import type {
   ResolvedWorkspaceCredentialBinding,
 } from "../core/workspace.js";
 import { validateWorkspace } from "../core/capabilities.js";
+import { workspaceHarnessIds } from "../core/harness-catalog.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
@@ -112,7 +113,7 @@ function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"][
     return fs
       .readdirSync(usersRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(usersRoot, entry.name, "projects", project, backendFile));
+      .map((entry) => path.join(usersRoot, entry.name, "workspaces", project, backendFile));
   };
   const preferredBackend =
     backendHint === "kubevirt-vm"
@@ -459,34 +460,69 @@ function resolveCredentialBindings(args: {
   registryCredentials: Credential[];
   compatibilityCredentials: Credential[];
 }): ResolvedWorkspaceCredentialBinding[] {
-  const directBindings = args.directBindings;
-  if (directBindings.length > 0) {
-    const registryById = new Map(args.registryCredentials.map((credential) => [credential.id, credential]));
-    return directBindings.map((binding) => {
-      const credential = registryById.get(binding.credentialId);
-      if (!credential) {
-        throw new Error(
-          `Workspace binding '${binding.purpose}' references unknown credential '${binding.credentialId}'`,
-        );
-      }
-      if (!credential.purposes.includes(binding.purpose)) {
-        throw new Error(
-          `Credential '${credential.id}' does not support binding purpose '${binding.purpose}'`,
-        );
-      }
-      return {
-        ...binding,
-        source: "registry",
-        credential,
-        attachmentKind: credentialKindAttachmentKind(credential.kind),
-        authFiles: credentialFilesToAuthFiles(credential),
-      };
+  const registryById = new Map(args.registryCredentials.map((credential) => [credential.id, credential]));
+  const resolved: ResolvedWorkspaceCredentialBinding[] = [];
+
+  for (const binding of args.directBindings) {
+    const credential = registryById.get(binding.credentialId);
+    if (!credential) {
+      throw new Error(
+        `Workspace binding '${binding.purpose}' references unknown credential '${binding.credentialId}'`,
+      );
+    }
+    if (!credential.purposes.includes(binding.purpose)) {
+      throw new Error(
+        `Credential '${credential.id}' does not support binding purpose '${binding.purpose}'`,
+      );
+    }
+    resolved.push({
+      ...binding,
+      source: "registry",
+      credential,
+      attachmentKind: credentialKindAttachmentKind(credential.kind),
+      authFiles: credentialFilesToAuthFiles(credential),
     });
   }
 
-  return args.compatibilityCredentials.map((credential) => {
+  const hasPurpose = (purpose: string): boolean =>
+    resolved.some((binding) => binding.purpose === purpose);
+
+  const activeCodexCredential = args.registryCredentials.find((credential) => {
+    return credential.kind === "codex-auth" && credential.metadata?.harness === "codex" && credential.metadata?.active === true;
+  });
+  if (activeCodexCredential && !hasPurpose("agent-auth")) {
+    resolved.push({
+      purpose: "agent-auth",
+      credentialId: activeCodexCredential.id,
+      required: true,
+      source: "registry",
+      credential: activeCodexCredential,
+      attachmentKind: credentialKindAttachmentKind(activeCodexCredential.kind),
+      authFiles: credentialFilesToAuthFiles(activeCodexCredential),
+    });
+  }
+
+  const defaultGitCredential = args.registryCredentials.find((credential) =>
+    credential.purposes.includes("git-auth"),
+  );
+  if (defaultGitCredential && !hasPurpose("git-auth")) {
+    resolved.push({
+      purpose: "git-auth",
+      credentialId: defaultGitCredential.id,
+      required: false,
+      source: "registry",
+      credential: defaultGitCredential,
+      attachmentKind: credentialKindAttachmentKind(defaultGitCredential.kind),
+      authFiles: credentialFilesToAuthFiles(defaultGitCredential),
+    });
+  }
+
+  for (const credential of args.compatibilityCredentials) {
     const purpose = credential.kind === "ssh-key" ? "git-auth" : "agent-auth";
-    return {
+    if (hasPurpose(purpose)) {
+      continue;
+    }
+    resolved.push({
       purpose,
       credentialId: credential.id,
       required: true,
@@ -494,8 +530,10 @@ function resolveCredentialBindings(args: {
       credential,
       attachmentKind: credentialKindAttachmentKind(credential.kind),
       authFiles: credentialFilesToAuthFiles(credential),
-    };
-  });
+    });
+  }
+
+  return resolved;
 }
 
 function resolveAuthSourcePath(sourcePath: string, baseDir: string): string {
@@ -789,7 +827,7 @@ function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] 
 function normalizeAgentKind(rawKind: unknown): string {
   const kind = String(rawKind ?? "").trim().toLowerCase();
   if (!kind || kind === "none" || kind === "disabled") {
-    return "multi";
+    return "default";
   }
   return kind;
 }
@@ -812,7 +850,7 @@ function buildAgentContract(home: string, agentKind: string): WorkspaceAgentCont
       requiresDaemon: true,
       supportsPairing: true,
     },
-    harnesses: agentKind === "multi" ? ["codex", "claude"] : ["codex"],
+    harnesses: workspaceHarnessIds(),
     runtime: {
       stateRoot,
       evolutionRoot,

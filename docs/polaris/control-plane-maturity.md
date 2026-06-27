@@ -19,10 +19,10 @@ status, backend selection, and manager/evolution state separate.
 | Concern | Contents | Control-plane source of truth | Runtime / user-facing realization |
 |---|---|---|---|
 | CLI entrypoint | Operator command surface for lifecycle and switching | `apps/polaris/scripts/cli/main.ts` | `pnpm --dir apps/polaris run polaris -- ...` |
-| Saved workspace intent | Project, backend, attachments, user profile, credentials, runtime, service, and manager settings | `config/users/<user>/projects/<project>/<backend>.agent.yaml` | none |
-| Generated backend artifact | Rendered backend manifest | `config/users/<user>/projects/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or KubeVirt objects |
-| Driver selection state | Preferred backend and optional profile | `config/users/<user>/projects/<project>/state/selection.json` | default resolution for ambiguous `<project>` references |
-| Status snapshot | Synthesized backend, attachment, runtime, daemon, SSH, and drift state | `config/users/<user>/projects/<project>/state/status.json` | `polaris status <project>` output |
+| Saved workspace intent | Project, backend, attachments, user profile, credentials, runtime, service, and manager settings | `config/users/<user>/workspaces/<project>/<backend>.agent.yaml` | none |
+| Generated backend artifact | Rendered backend manifest | `config/users/<user>/workspaces/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or KubeVirt objects |
+| Driver selection state | Preferred backend and optional profile | `config/users/<user>/workspaces/<project>/state/selection.json` | default resolution for ambiguous `<project>` references |
+| Status snapshot | Synthesized backend, attachment, runtime, daemon, SSH, and drift state | `config/users/<user>/workspaces/<project>/state/status.json` | `polaris status <project>` output |
 | Backend registry | Control-plane mapping from backend kind to backend driver | `apps/polaris/scripts/backends/index.ts` | dispatch to `docker`, `pod`, or `kubevirt-vm` drivers |
 | Runtime controller | Drift and reconcile logic over normalized observations | `apps/polaris/scripts/core/runtime-controller.ts` | `status` and `reconcile` output |
 | User profile | User identity and ownership boundary used by workspace loading | `config/users/profiles/<user>.yaml` | selected by `user_profile` in workspace specs |

@@ -1,4 +1,5 @@
 import { scaffoldUserProfileById } from "../../config/scaffold.js";
+import { ensureRequiredProfileCredentials } from "../../config/credentials.js";
 import { logInfo } from "../../utils/log.js";
 import {
   type PolarisPlan,
@@ -48,6 +49,7 @@ export async function createUserCommand(argv: string[]): Promise<void> {
     ...(name ? { name } : {}),
     ...(email ? { email } : {}),
   });
+  const defaultCredentials = ensureRequiredProfileCredentials(created.id);
   if (clerkUsername) {
     upsertUserMapEntry(clerkUsername, {
       polarisUserId: created.id,
@@ -77,7 +79,7 @@ export async function createUserCommand(argv: string[]): Promise<void> {
     },
     credentials: {
       registryRoot: `config/users/${created.id}/credentials`,
-      defaults: ["github-ssh"],
+      defaults: defaultCredentials.map((credential) => credential.id),
     },
   }, null, 2)}\n`);
 }

@@ -2,7 +2,6 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
-import { ensureDefaultCodexCredential } from "./credentials.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
 
@@ -63,7 +62,7 @@ export function workspaceConfigPath(
     "config",
     "users",
     userProfileId.trim(),
-    "projects",
+    "workspaces",
     project,
     backendFile,
   );
@@ -158,15 +157,15 @@ function configuredWorkspaceServicePorts(): Set<number> {
     if (!userEntry.isDirectory()) {
       continue;
     }
-    const projectsRoot = path.join(usersRoot, userEntry.name, "projects");
-    if (!fs.existsSync(projectsRoot)) {
+    const workspacesRoot = path.join(usersRoot, userEntry.name, "workspaces");
+    if (!fs.existsSync(workspacesRoot)) {
       continue;
     }
-    for (const projectEntry of fs.readdirSync(projectsRoot, { withFileTypes: true })) {
+    for (const projectEntry of fs.readdirSync(workspacesRoot, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) {
         continue;
       }
-      const dockerSpecPath = path.join(projectsRoot, projectEntry.name, "docker.agent.yaml");
+      const dockerSpecPath = path.join(workspacesRoot, projectEntry.name, "docker.agent.yaml");
       if (!fs.existsSync(dockerSpecPath)) {
         continue;
       }
@@ -206,13 +205,21 @@ function userDockerfilePath(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
 }
 
+function defaultWorkspaceDockerfileTemplatePath(): string {
+  return userDockerfilePath(DEMO_USER_PROFILE_ID);
+}
+
+function filesHaveSameContents(leftPath: string, rightPath: string): boolean {
+  return fs.readFileSync(leftPath).equals(fs.readFileSync(rightPath));
+}
+
 export function ensureWorkspaceDockerfile(userProfileId: string): string {
   const target = userDockerfilePath(userProfileId);
   if (fs.existsSync(target)) {
     return target;
   }
 
-  const template = userDockerfilePath(DEMO_USER_PROFILE_ID);
+  const template = defaultWorkspaceDockerfileTemplatePath();
   if (!fs.existsSync(template)) {
     throw new Error(
       `Default workspace Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
@@ -224,9 +231,62 @@ export function ensureWorkspaceDockerfile(userProfileId: string): string {
   return target;
 }
 
+export function syncWorkspaceDockerfileTemplate(userProfileId: string): {
+  path: string;
+  created: boolean;
+  refreshed: boolean;
+} {
+  const target = userDockerfilePath(userProfileId);
+  const template = defaultWorkspaceDockerfileTemplatePath();
+  if (!fs.existsSync(template)) {
+    throw new Error(
+      `Default workspace Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
+    );
+  }
+  if (path.resolve(target) === path.resolve(template)) {
+    return {
+      path: target,
+      created: false,
+      refreshed: false,
+    };
+  }
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(template, target);
+    return {
+      path: target,
+      created: true,
+      refreshed: false,
+    };
+  }
+
+  const templateStat = fs.statSync(template);
+  const targetStat = fs.statSync(target);
+  if (targetStat.mtimeMs >= templateStat.mtimeMs) {
+    return {
+      path: target,
+      created: false,
+      refreshed: false,
+    };
+  }
+  if (filesHaveSameContents(template, target)) {
+    return {
+      path: target,
+      created: false,
+      refreshed: false,
+    };
+  }
+
+  fs.copyFileSync(template, target);
+  return {
+    path: target,
+    created: false,
+    refreshed: true,
+  };
+}
+
 function resolveDefaultCredentialBindings(
   userProfileId: string,
-  defaultAgentCredentialId?: string,
 ): {
   bindings: Array<{
     purpose: "agent-auth" | "git-auth";
@@ -258,11 +318,7 @@ function resolveDefaultCredentialBindings(
     .filter((entry) => entry.id);
 
   const gitAuth = credentials.find((entry) => entry.purposes.includes("git-auth"));
-  const agentAuth = defaultAgentCredentialId
-    ? credentials.find((entry) => entry.id === defaultAgentCredentialId && entry.purposes.includes("agent-auth"))
-    : credentials.find((entry) => entry.purposes.includes("agent-auth"));
   const bindings = [
-    ...(agentAuth ? [{ purpose: "agent-auth" as const, credentialId: agentAuth.id, required: true }] : []),
     ...(gitAuth ? [{ purpose: "git-auth" as const, credentialId: gitAuth.id, required: false }] : []),
   ];
   return {
@@ -310,36 +366,6 @@ function writeUserSecretsLayout(userProfileId: string): void {
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
 }
 
-function writeDefaultSshCredentialAssets(profile: {
-  id: string;
-  email: string;
-}): void {
-  const secretsRoot = path.join(USER_SECRETS_ROOT, profile.id);
-  const sshPrivateKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519");
-  const sshPublicKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub");
-
-  fs.mkdirSync(path.dirname(sshPrivateKeyPath), { recursive: true });
-
-  if (!fs.existsSync(sshPrivateKeyPath) || !fs.existsSync(sshPublicKeyPath)) {
-    fs.rmSync(sshPrivateKeyPath, { force: true });
-    fs.rmSync(sshPublicKeyPath, { force: true });
-    const generated = spawnSync(
-      "ssh-keygen",
-      ["-q", "-t", "ed25519", "-N", "", "-C", profile.email, "-f", sshPrivateKeyPath],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      },
-    );
-    if (generated.status !== 0) {
-      const stderr = typeof generated.stderr === "string" ? generated.stderr.trim() : "";
-      const stdout = typeof generated.stdout === "string" ? generated.stdout.trim() : "";
-      const spawnError = generated.error instanceof Error ? generated.error.message : "";
-      throw new Error(stderr || stdout || spawnError || "ssh-keygen failed");
-    }
-  }
-}
-
 export function createScaffoldUserProfile(profile: {
   id: string;
   name: string;
@@ -375,39 +401,9 @@ export function createScaffoldUserProfile(profile: {
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
-    fs.writeFileSync(
-      path.join(userCredentialRegistryDir(profile.id), "github-ssh.yaml"),
-      yaml.dump({
-        id: "github-ssh",
-        userId: profile.id,
-        kind: "ssh-key",
-        label: "Default SSH key",
-        purposes: ["git-auth", "ssh-auth"],
-        materialRef: {
-          type: "file",
-          key: "user-ssh-state/default",
-          files: [
-            {
-              key: "id_ed25519",
-              source_path: "credentials/ssh/id_ed25519",
-            },
-            {
-              key: "id_ed25519.pub",
-              source_path: "credentials/ssh/id_ed25519.pub",
-            },
-          ],
-        },
-        metadata: {
-          provider: "local",
-        },
-        status: "ready",
-      }, { lineWidth: 120, noRefs: true }),
-      "utf8",
-    );
   }
 
   writeUserSecretsLayout(profile.id);
-  writeDefaultSshCredentialAssets(profile);
 
   return {
     ...profile,
@@ -457,11 +453,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   ensureWorkspaceDockerfile(userProfileId);
   ensureWorkspaceListedInUserProfile(userProfileId, project);
-  const defaultAgentCredential = ensureDefaultCodexCredential(userProfileId);
-  const defaultCredentials = resolveDefaultCredentialBindings(
-    userProfileId,
-    defaultAgentCredential.credentialId,
-  );
+  const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const workspaceServicePort = allocateWorkspaceServicePort();
   const doc = {
