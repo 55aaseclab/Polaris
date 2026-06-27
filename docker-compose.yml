@@ -17,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: apps/polaris/Dockerfile
+    user: "${POLARIS_SERVER_UID:-1000}:${POLARIS_SERVER_GID:-1000}"
     environment:
       POLARIS_AUTH_SHARED_SECRET: ${POLARIS_AUTH_SHARED_SECRET:-}
       POLARIS_EXECUTOR_BASE_URL: ${POLARIS_EXECUTOR_BASE_URL:-http://host.docker.internal:8788}

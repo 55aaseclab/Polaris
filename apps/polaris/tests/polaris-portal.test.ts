@@ -24,6 +24,33 @@ function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
 }
 
+async function waitFor<T>(
+  read: () => T | null,
+  options?: {
+    timeoutMs?: number;
+    intervalMs?: number;
+  },
+): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? 15000;
+  const intervalMs = options?.intervalMs ?? 100;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = read();
+    if (value !== null) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms`);
+}
+
+async function waitForProvisionDone(userId: string, workspace: string) {
+  return waitFor(() => {
+    const progress = readWorkspaceProvisionProgress(userId, workspace);
+    return progress?.done ? progress : null;
+  });
+}
+
 async function withFakePath(
   commands: Record<string, string>,
   fn: (ctx: { readCommandLog: () => string[] }) => Promise<void> | void,
@@ -860,10 +887,18 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
           });
           const bodyText = await response.text();
           assert.equal(response.status, 202, bodyText);
-          const payload = JSON.parse(bodyText) as { workspace: string; done: boolean };
+          const payload = JSON.parse(bodyText) as {
+            workspace: string;
+            phase: string;
+            done: boolean;
+          };
           assert.equal(payload.workspace, workspace);
-          assert.equal(payload.done, true);
+          assert.equal(payload.phase, "queued");
+          assert.equal(payload.done, false);
         });
+        const finalProgress = await waitForProvisionDone(userId, workspace);
+        assert.equal(finalProgress.phase, "done", finalProgress.message);
+        assert.equal(finalProgress.done, true, finalProgress.message);
       },
     );
 
@@ -958,7 +993,21 @@ if [[ "$1" == "pull" ]]; then exit 0; fi
 if [[ "$1" == "volume" && "$2" == "inspect" ]]; then exit 1; fi
 if [[ "$1" == "compose" && "$4" == "ps" ]]; then printf 'docker-started-id'; exit 0; fi
 if [[ "$1" == "inspect" && "$2" == "docker-started-id" ]]; then printf '[{"State":{"Running":true}}]'; exit 0; fi
-if [[ "$1" == "exec" ]]; then exit 0; fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$5" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_portal_start","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$5" == *"paseo daemon pair --json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJzZXJ2ZXJJZCI6InNydl9wb3J0YWxfc3RhcnQifQ"}'
+    exit 0
+  fi
+  if [[ "$5" == *"/server-id"* ]]; then
+    printf 'srv_portal_start'
+    exit 0
+  fi
+  exit 0
+fi
 exit 0
 `,
       },
@@ -977,8 +1026,17 @@ exit 0
           assert.equal(response.status, 202, bodyText);
         });
 
+        const finalProgress = await waitForProvisionDone(userId, workspace);
+        assert.equal(finalProgress.phase, "done", finalProgress.message);
+        assert.equal(finalProgress.done, true, finalProgress.message);
         assert.ok(
           readCommandLog().some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")),
+        );
+        assert.ok(
+          readCommandLog().some((entry) => entry.includes("paseo daemon status --json")),
+        );
+        assert.ok(
+          readCommandLog().some((entry) => entry.includes("paseo daemon pair --json")),
         );
       },
     );
@@ -1015,6 +1073,10 @@ if [[ "$1" == "exec" ]]; then
     printf '{"serverId":"srv_test","localDaemon":"running","connectedDaemon":"reachable"}'
     exit 0
   fi
+  if [[ "$5" == *"paseo daemon pair --json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJzZXJ2ZXJJZCI6InNydl90ZXN0In0"}'
+    exit 0
+  fi
   if [[ "$5" == *"/server-id"* ]]; then
     printf 'srv_test'
     exit 0
@@ -1041,6 +1103,10 @@ exit 0
           });
           const createWorkspaceBody = await createWorkspaceResponse.text();
           assert.equal(createWorkspaceResponse.status, 202, createWorkspaceBody);
+
+          const finalProgress = await waitForProvisionDone(userId, workspace);
+          assert.equal(finalProgress.phase, "done", finalProgress.message);
+          assert.equal(finalProgress.done, true, finalProgress.message);
 
           const createCredentialResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
             method: "POST",

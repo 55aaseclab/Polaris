@@ -145,8 +145,16 @@ function credentialRegistryPath(userId: string, credentialId: string): string {
   return path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
 }
 
-function portalStateFile(userId: string, workspace: string): string {
+function portalStateRoot(userId: string, workspace: string): string {
+  return path.join(USER_ROOT, userId, ".portal", "workspaces", workspace);
+}
+
+function legacyPortalStateFile(userId: string, workspace: string): string {
   return path.join(workspaceStateDir(workspace, userId), "portal.json");
+}
+
+function portalStateFile(userId: string, workspace: string): string {
+  return path.join(portalStateRoot(userId, workspace), "provision.json");
 }
 
 function readJson<T>(filePath: string): T | null {
@@ -362,7 +370,8 @@ export function readWorkspaceStatus(userId: string, workspace: string): Workspac
 }
 
 export function readWorkspaceProvisionProgress(userId: string, workspace: string): PortalProvisionProgress | null {
-  return readJson<PortalProvisionProgress>(portalStateFile(userId, workspace));
+  return readJson<PortalProvisionProgress>(portalStateFile(userId, workspace))
+    ?? readJson<PortalProvisionProgress>(legacyPortalStateFile(userId, workspace));
 }
 
 export function writeWorkspaceProvisionProgress(
@@ -377,6 +386,7 @@ export function writeWorkspaceProvisionProgress(
 
 export function clearWorkspaceProvisionProgress(userId: string, workspace: string): void {
   fs.rmSync(portalStateFile(userId, workspace), { force: true });
+  fs.rmSync(legacyPortalStateFile(userId, workspace), { force: true });
 }
 
 export function resolveLiveTarget(status: WorkspaceStatus | null): string | null {

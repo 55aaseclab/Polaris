@@ -314,7 +314,7 @@ async function provisionWorkspaceInternal(
       step: 6,
       message: "starting workspace",
     });
-    await startWorkspaceWithoutWait(`${workspace}@docker`);
+    await startCommand(`${workspace}@docker`);
   }
 
   updateProgress(userId, workspace, {
@@ -374,17 +374,17 @@ export async function queueProvisionWorkspace(
     startAfterCreate?: boolean;
   },
 ): Promise<PortalProvisionProgress> {
-  await startProvisionWorkspace(userId, workspace, options);
-  return (
+  const queuedProgress =
     readWorkspaceProvisionProgress(userId, workspace) ??
     updateProgress(userId, workspace, {
-      phase: "done",
-      step: PROVISION_TOTAL_STEPS,
-      percent: 100,
-      done: true,
-      message: "workspace provisioning complete",
-    })
-  );
+      phase: "queued",
+      step: 0,
+      percent: 0,
+      done: false,
+      message: "workspace provisioning queued",
+    });
+  void startProvisionWorkspace(userId, workspace, options);
+  return queuedProgress;
 }
 
 export function startProvisionWorkspace(
@@ -406,6 +406,7 @@ export function startProvisionWorkspace(
     } catch (error) {
       updateProgress(userId, workspace, {
         phase: "error",
+        done: true,
         message: error instanceof Error ? error.message : String(error),
         error: error instanceof Error ? error.message : String(error),
       });
@@ -414,6 +415,7 @@ export function startProvisionWorkspace(
       provisionJobs.delete(key);
     }
   })();
+  job.catch(() => undefined);
   provisionJobs.set(key, job);
   return job;
 }

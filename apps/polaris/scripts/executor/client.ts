@@ -39,13 +39,25 @@ async function executorRequest<T>(
   if (!baseUrl) {
     return await fallback();
   }
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    ...init,
-    headers: {
-      ...executorHeaders(),
-      ...(init.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${pathname}`, {
+      ...init,
+      headers: {
+        ...executorHeaders(),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error
+      ? error.cause.message
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    throw new Error(
+      `Polaris executor request failed for ${baseUrl}${pathname}: ${cause}`,
+    );
+  }
   if (!response.ok) {
     throw new Error(
       `Polaris executor request failed (${response.status} ${response.statusText}) for ${pathname}: ${await response.text()}`,
