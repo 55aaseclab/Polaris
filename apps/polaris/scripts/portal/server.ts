@@ -373,18 +373,20 @@ async function handleUserCreate(
   const body = await readBody(req);
   const userProfileId = body.userProfileId?.trim() || "";
   const clerkUsername = body.clerkUsername?.trim() || "";
+  const clerkUserId = body.clerkUserId?.trim() || "";
   if (!userProfileId) {
     badRequest(res, "Missing userProfileId");
     return;
   }
-  if (!clerkUsername) {
-    badRequest(res, "Missing clerkUsername");
+  if (!clerkUsername && !clerkUserId) {
+    badRequest(res, "Missing Clerk identity");
     return;
   }
   try {
     const created = await createPortalUser({
       userProfileId,
-      clerkUsername,
+      ...(clerkUsername ? { clerkUsername } : {}),
+      ...(clerkUserId ? { clerkUserId } : {}),
       ...(body.email?.trim() ? { email: body.email.trim() } : {}),
       ...(body.name !== undefined ? { name: body.name.trim() } : {}),
       ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
@@ -468,9 +470,13 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments.length === 2 && segments[1] === "user-mapping" && req.method === "GET") {
           const clerkUsername = url.searchParams.get("clerkUsername")?.trim() || "";
+          const clerkUserId = url.searchParams.get("clerkUserId")?.trim() || "";
           sendJson(res, 200, {
             clerkUsername,
-            mapping: clerkUsername ? findUserMapEntry(clerkUsername) : null,
+            clerkUserId,
+            mapping: clerkUsername || clerkUserId
+              ? findUserMapEntry({ clerkUsername, clerkUserId })
+              : null,
           });
           return;
         }

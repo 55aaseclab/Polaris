@@ -187,7 +187,8 @@ export async function listUsers(): Promise<PortalProfileSummary[]> {
 
 export async function createPortalUser(input: {
   userProfileId: string;
-  clerkUsername: string;
+  clerkUsername?: string;
+  clerkUserId?: string;
   email?: string;
   name?: string;
   role?: "admin" | "user";
@@ -224,12 +225,23 @@ export async function deletePortalUser(
 }
 
 export async function resolvePortalUserMapping(
-  clerkUsername: string,
+  input: {
+    clerkUsername?: string;
+    clerkUserId?: string;
+  },
 ): Promise<PortalUserMapping | null> {
+  const params = new URLSearchParams();
+  if (input.clerkUsername?.trim()) {
+    params.set("clerkUsername", input.clerkUsername.trim());
+  }
+  if (input.clerkUserId?.trim()) {
+    params.set("clerkUserId", input.clerkUserId.trim());
+  }
   const payload = await apiFetch<{
     clerkUsername: string;
+    clerkUserId?: string;
     mapping: PortalUserMapping | null;
-  }>(`/user-mapping?clerkUsername=${encodeURIComponent(clerkUsername)}`);
+  }>(`/user-mapping?${params.toString()}`);
   return payload.mapping;
 }
 

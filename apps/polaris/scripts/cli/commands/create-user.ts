@@ -4,6 +4,7 @@ import {
   type PolarisPlan,
   type PolarisRole,
   upsertUserMapEntry,
+  upsertUserMapUserId,
 } from "../../portal/user-map.js";
 
 function parseCreateUserArgs(argv: string[]): {
@@ -11,6 +12,7 @@ function parseCreateUserArgs(argv: string[]): {
   name?: string;
   email?: string;
   clerkUsername?: string;
+  clerkUserId?: string;
   role?: PolarisRole;
   plan?: PolarisPlan;
 } {
@@ -18,16 +20,18 @@ function parseCreateUserArgs(argv: string[]): {
   const nameFlagIndex = argv.findIndex((value) => value === "--name");
   const emailFlagIndex = argv.findIndex((value) => value === "--email");
   const clerkFlagIndex = argv.findIndex((value) => value === "--clerk");
+  const clerkUserIdFlagIndex = argv.findIndex((value) => value === "--clerk-user-id");
   const roleFlagIndex = argv.findIndex((value) => value === "--role");
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
   if (!userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--role <admin|user>] [--plan <free|pro>]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--clerk-user-id <id>] [--role <admin|user>] [--plan <free|pro>]");
   }
   return {
     userProfileId,
     ...(nameFlagIndex >= 0 && argv[nameFlagIndex + 1]?.trim() ? { name: argv[nameFlagIndex + 1].trim() } : {}),
     ...(emailFlagIndex >= 0 && argv[emailFlagIndex + 1]?.trim() ? { email: argv[emailFlagIndex + 1].trim() } : {}),
     ...(clerkFlagIndex >= 0 && argv[clerkFlagIndex + 1]?.trim() ? { clerkUsername: argv[clerkFlagIndex + 1].trim().toLowerCase() } : {}),
+    ...(clerkUserIdFlagIndex >= 0 && argv[clerkUserIdFlagIndex + 1]?.trim() ? { clerkUserId: argv[clerkUserIdFlagIndex + 1].trim() } : {}),
     ...(roleFlagIndex >= 0 && (argv[roleFlagIndex + 1] === "admin" || argv[roleFlagIndex + 1] === "user")
       ? { role: argv[roleFlagIndex + 1] as PolarisRole }
       : {}),
@@ -38,7 +42,7 @@ function parseCreateUserArgs(argv: string[]): {
 }
 
 export async function createUserCommand(argv: string[]): Promise<void> {
-  const { userProfileId, name, email, clerkUsername, role, plan } = parseCreateUserArgs(argv);
+  const { userProfileId, name, email, clerkUsername, clerkUserId, role, plan } = parseCreateUserArgs(argv);
   const created = scaffoldUserProfileById({
     id: userProfileId,
     ...(name ? { name } : {}),
@@ -46,6 +50,13 @@ export async function createUserCommand(argv: string[]): Promise<void> {
   });
   if (clerkUsername) {
     upsertUserMapEntry(clerkUsername, {
+      polarisUserId: created.id,
+      role: role ?? "user",
+      plan: plan ?? "free",
+    });
+  }
+  if (clerkUserId) {
+    upsertUserMapUserId(clerkUserId, {
       polarisUserId: created.id,
       role: role ?? "user",
       plan: plan ?? "free",

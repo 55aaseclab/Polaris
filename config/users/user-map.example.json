@@ -5,5 +5,12 @@
       "role": "user",
       "plan": "free"
     }
+  },
+  "userIds": {
+    "user_example123": {
+      "polarisUserId": "example_polaris_user",
+      "role": "user",
+      "plan": "free"
+    }
   }
 }
