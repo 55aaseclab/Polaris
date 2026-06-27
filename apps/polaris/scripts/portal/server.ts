@@ -18,6 +18,7 @@ import {
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
+  refreshPortalWorkspace,
   readUserPortalCredentialPreview,
   readUserPortalWorkspaceAssetPreview,
   queueProvisionWorkspace,
@@ -231,6 +232,15 @@ async function handleWorkspaceStart(
   workspace: string,
 ): Promise<void> {
   const result = await startPortalWorkspace(userId, workspace);
+  sendJson(res, 200, result);
+}
+
+async function handleWorkspaceRefresh(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const result = await refreshPortalWorkspace(userId, workspace);
   sendJson(res, 200, result);
 }
 
@@ -602,6 +612,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "start" && req.method === "POST") {
           await handleWorkspaceStart(res, routeUserId, workspace);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "refresh" && req.method === "POST") {
+          await handleWorkspaceRefresh(res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "bind" && req.method === "POST") {

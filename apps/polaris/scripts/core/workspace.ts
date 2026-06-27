@@ -330,6 +330,7 @@ export interface WorkspaceStatus {
   };
   paseo?: {
     daemonAddress: string;
+    serverId?: string;
     supportedHarnesses: string[];
     liveTarget: string | null;
   };

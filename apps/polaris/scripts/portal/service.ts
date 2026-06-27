@@ -327,6 +327,14 @@ export async function startPortalWorkspace(
   return startPortalWorkspaceExecutor({ userId, workspace });
 }
 
+export async function refreshPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ refreshed: true }> {
+  await refreshPortalWorkspaceStatus(userId, workspace);
+  return { refreshed: true };
+}
+
 export async function bindPortalWorkspaceAgent(input: {
   userId: string;
   workspace: string;

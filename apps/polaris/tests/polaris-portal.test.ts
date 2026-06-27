@@ -1175,6 +1175,24 @@ exit 0
           assert.equal(response.status, 200, bodyText);
           const payload = JSON.parse(bodyText) as { started: boolean };
           assert.equal(payload.started, true);
+
+          const detailResponse = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
+          );
+          const detailText = await detailResponse.text();
+          assert.equal(detailResponse.status, 200, detailText);
+          const detailPayload = JSON.parse(detailText) as {
+            liveTarget?: string | null;
+            status?: { paseo?: { liveTarget?: string | null } };
+          };
+          const effectiveLiveTarget =
+            detailPayload.liveTarget
+            ?? detailPayload.status?.paseo?.liveTarget
+            ?? null;
+          assert.equal(
+            effectiveLiveTarget ? new URL(effectiveLiveTarget).searchParams.get("scope") : null,
+            `${userId}:${workspace}`,
+          );
         });
         const commandLog = readCommandLog();
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")));
