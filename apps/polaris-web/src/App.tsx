@@ -27,7 +27,6 @@ import {
 } from "lucide-react";
 import {
   activateCredential,
-  bindWorkspacePaseoCredential,
   createCodexCredential,
   createWorkspace,
   createPortalUser,
@@ -51,7 +50,6 @@ import {
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
-  unbindWorkspacePaseoCredential,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -263,11 +261,14 @@ const COPY: Record<Language, Record<string, string>> = {
     paseo_server_id: "Paseo server ID",
     supported_harnesses: "Supported harnesses",
     credential_selection: "Credential selection",
-    credential_selection_desc: "Daemon and harness status stay separate from credential choice.",
     credential_selection_none: "No active Codex credential selected.",
     credential_selection_override: "Workspace override",
     credential_selection_active: "User active default",
     credential_selection_compat: "Compatibility fallback",
+    agent_harness: "Agent harness",
+    select_harness: "Select harness",
+    select_credential: "Select credential",
+    switch_credential: "Switch credential",
     status_ready: "Ready to pair",
     status_unknown: "Unknown",
     status_error: "Error",
@@ -453,11 +454,14 @@ const COPY: Record<Language, Record<string, string>> = {
     paseo_server_id: "Paseo server ID",
     supported_harnesses: "支持的协作者",
     credential_selection: "凭证选择",
-    credential_selection_desc: "daemon 与 harness 状态独立于凭证选择。",
     credential_selection_none: "当前没有启用的 Codex 凭证。",
     credential_selection_override: "工作空间覆盖",
     credential_selection_active: "用户当前默认值",
     credential_selection_compat: "兼容回退",
+    agent_harness: "Agent harness",
+    select_harness: "选择 harness",
+    select_credential: "选择凭证",
+    switch_credential: "凭证切换",
     status_ready: "可配对",
     status_unknown: "未知",
     status_error: "错误",
@@ -791,22 +795,6 @@ function translatePaseoState(
     return t("paseo_attention");
   }
   return t("paseo_unknown");
-}
-
-function translateCredentialSource(
-  value: "workspace-binding" | "user-active" | "compatibility" | undefined,
-  t: (key: string) => string,
-): string {
-  switch (value) {
-    case "workspace-binding":
-      return t("credential_selection_override");
-    case "user-active":
-      return t("credential_selection_active");
-    case "compatibility":
-      return t("credential_selection_compat");
-    default:
-      return t("credential_selection_none");
-  }
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1764,8 +1752,7 @@ function WorkspaceDetailPage() {
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [bindingPaseo, setBindingPaseo] = useState(false);
-  const [unbindingPaseo, setUnbindingPaseo] = useState(false);
+  const [selectedHarness, setSelectedHarness] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentPane = pathParts[4] ?? "";
@@ -1781,10 +1768,19 @@ function WorkspaceDetailPage() {
   )
     ? rawCurrentPaseoCredentialId
     : "";
-  const codexCredentialStatus = data?.status?.credentials?.codex;
-  const selectedCodexCredential = codexCredentialStatus?.credentialId
-    ? agentCredentials.find((credential) => credential.id === codexCredentialStatus.credentialId) ?? null
-    : null;
+  const harnessOptions = Array.from(
+    new Set(
+      [
+        ...(data?.status?.paseo?.supportedHarnesses ?? []),
+        ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
+      ],
+    ),
+  );
+  const selectedHarnessCredentials = agentCredentials.filter((credential) =>
+    selectedHarness
+      ? credential.harness === selectedHarness
+      : true,
+  );
   const paseoScope = workspacePaseoScope(userId, workspaceName);
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
@@ -1873,14 +1869,31 @@ function WorkspaceDetailPage() {
   }, [data]);
 
   useEffect(() => {
-    if (currentPaseoCredentialId) {
+    if (selectedHarness && harnessOptions.includes(selectedHarness)) {
+      return;
+    }
+    const currentCredential = currentPaseoCredentialId
+      ? agentCredentials.find((credential) => credential.id === currentPaseoCredentialId) ?? null
+      : null;
+    const preferredHarness = currentCredential?.harness ?? harnessOptions[0] ?? "";
+    if (preferredHarness !== selectedHarness) {
+      setSelectedHarness(preferredHarness);
+    }
+  }, [agentCredentials, currentPaseoCredentialId, harnessOptions, selectedHarness]);
+
+  useEffect(() => {
+    const currentCredentialMatchesHarness = currentPaseoCredentialId
+      ? selectedHarnessCredentials.some((credential) => credential.id === currentPaseoCredentialId)
+      : false;
+    if (currentCredentialMatchesHarness) {
       setPaseoCredentialId(currentPaseoCredentialId);
       return;
     }
-    if (!paseoCredentialId && agentCredentials.length > 0) {
-      setPaseoCredentialId(agentCredentials[0]?.id ?? "");
+    const nextCredential = selectedHarnessCredentials[0]?.id ?? "";
+    if (paseoCredentialId !== nextCredential) {
+      setPaseoCredentialId(nextCredential);
     }
-  }, [agentCredentials, currentPaseoCredentialId, paseoCredentialId]);
+  }, [currentPaseoCredentialId, paseoCredentialId, selectedHarnessCredentials]);
 
   useEffect(() => {
     if (!data?.progress || data.progress.done) {
@@ -1960,41 +1973,6 @@ function WorkspaceDetailPage() {
     }
   }
 
-  async function handleBindPaseo(): Promise<void> {
-    if (!paseoCredentialId || !driver) {
-      return;
-    }
-    setActionError(null);
-    setBindingPaseo(true);
-    try {
-      await bindWorkspacePaseoCredential(userId, workspaceName, {
-        credentialId: paseoCredentialId,
-        driver,
-      });
-      window.location.reload();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBindingPaseo(false);
-    }
-  }
-
-  async function handleUnbindPaseo(): Promise<void> {
-    if (!driver) {
-      return;
-    }
-    setActionError(null);
-    setUnbindingPaseo(true);
-    try {
-      await unbindWorkspacePaseoCredential(userId, workspaceName, { driver });
-      window.location.reload();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUnbindingPaseo(false);
-    }
-  }
-
   function renderDriverSwitchControls(): ReactNode {
     return (
       <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
@@ -2026,71 +2004,9 @@ function WorkspaceDetailPage() {
   function renderControlsCard(): ReactNode {
     return (
       <div className="grid gap-6">
-        <div className="grid gap-3">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t("paseo_credential")}</div>
-              <div className="text-sm text-muted-foreground">{t("paseo_credential_desc")}</div>
-            </div>
-            <div className="w-full min-w-0 sm:w-[28rem]">
-              {credentialsLoading ? (
-                <p className="text-sm text-muted-foreground">{t("loading_paseo_credentials")}</p>
-              ) : credentialsError ? (
-                <p className="text-sm text-destructive">{credentialsError}</p>
-              ) : (
-                <div className="grid gap-3">
-                  <div className="flex flex-wrap items-end justify-end gap-3">
-                    <div className="min-w-[8rem] flex-1">
-                      <Select
-                        value={paseoCredentialId}
-                        onValueChange={setPaseoCredentialId}
-                        disabled={agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
-                      >
-                        <SelectTrigger id="paseo-credential">
-                          <SelectValue placeholder={t("paseo_credential")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {agentCredentials.map((credential) => (
-                            <SelectItem key={credential.id} value={credential.id}>
-                              {credential.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      className="shrink-0"
-                      onClick={() => void handleBindPaseo()}
-                      disabled={!paseoCredentialId || !driver || agentCredentials.length === 0 || bindingPaseo || unbindingPaseo}
-                    >
-                      {bindingPaseo ? t("binding_paseo") : t("bind_paseo")}
-                    </Button>
-                    <Button
-                      className="shrink-0"
-                      variant="outline"
-                      onClick={() => void handleUnbindPaseo()}
-                      disabled={!driver || !currentPaseoCredentialId || bindingPaseo || unbindingPaseo}
-                    >
-                      {unbindingPaseo ? t("unbinding_paseo") : t("unbind_paseo")}
-                    </Button>
-                  </div>
-                  {agentCredentials.length === 0 ? (
-                    <div className="text-right text-sm text-muted-foreground">
-                      {t("no_paseo_credentials")}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        <Separator />
         <div className="grid gap-6">
           <div className="min-w-0">
             <div className="text-sm font-medium text-destructive">{t("danger_zone")}</div>
-            <div className="text-sm text-muted-foreground">
-              {t("workspace_danger_zone_desc")}
-            </div>
           </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
@@ -2306,27 +2222,68 @@ function WorkspaceDetailPage() {
               </div>
             </div>
             <Separator />
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{t("credential_selection")}</div>
-                <div className="text-sm text-muted-foreground">
-                  {t("credential_selection_desc")}
-                </div>
-              </div>
-              <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                <div className="break-all">
-                  {codexCredentialStatus?.state === "selected"
-                    ? (selectedCodexCredential?.label
-                        ?? codexCredentialStatus.label
-                        ?? codexCredentialStatus.credentialId
-                        ?? t("credential_selection_none"))
-                    : t("credential_selection_none")}
-                </div>
-                <div>
-                  {translateCredentialSource(codexCredentialStatus?.source, t)}
+            <div className="grid gap-4">
+              <div className="text-sm font-medium">{t("credential_selection")}</div>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex w-full min-w-0 flex-wrap items-end justify-start gap-3 sm:w-auto sm:justify-end">
+                  {credentialsLoading ? (
+                    <p className="text-sm text-muted-foreground">{t("loading_paseo_credentials")}</p>
+                  ) : credentialsError ? (
+                    <p className="text-sm text-destructive">{credentialsError}</p>
+                  ) : (
+                    <>
+                      <div className="w-full min-w-0 sm:w-[12rem]">
+                        <Select
+                          value={selectedHarness}
+                          onValueChange={setSelectedHarness}
+                          disabled={harnessOptions.length === 0}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder={t("select_harness")} />
+                          </SelectTrigger>
+                          <SelectContent className="bg-white">
+                            {harnessOptions.map((harness) => (
+                              <SelectItem key={harness} value={harness}>
+                                {harness}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="w-full min-w-0 sm:w-[16rem]">
+                        <Select
+                          value={paseoCredentialId}
+                          onValueChange={setPaseoCredentialId}
+                          disabled={selectedHarnessCredentials.length === 0}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue
+                              placeholder={selectedHarnessCredentials.length === 0
+                                ? t("no_paseo_credentials")
+                                : t("select_credential")}
+                            />
+                          </SelectTrigger>
+                          <SelectContent className="bg-white">
+                            {selectedHarnessCredentials.map((credential) => (
+                              <SelectItem key={credential.id} value={credential.id}>
+                                {credential.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        variant="outline"
+                        disabled
+                      >
+                        {t("switch_credential")}
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
+            <Separator />
           </div>
           {renderControlsCard()}
         </div>
