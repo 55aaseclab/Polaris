@@ -28,6 +28,7 @@ import {
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
+  startPortalWorkspace as startPortalWorkspaceExecutor,
   stopPortalWorkspace as stopPortalWorkspaceExecutor,
   switchPortalWorkspace as switchPortalWorkspaceExecutor,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
@@ -317,6 +318,13 @@ export async function stopPortalWorkspace(
   workspace: string,
 ): Promise<{ stopped: true }> {
   return stopPortalWorkspaceExecutor({ userId, workspace });
+}
+
+export async function startPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ started: true }> {
+  return startPortalWorkspaceExecutor({ userId, workspace });
 }
 
 export async function bindPortalWorkspaceAgent(input: {

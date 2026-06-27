@@ -146,6 +146,39 @@ function codexCredentialStatus(
   };
 }
 
+function driverTarget(workspace: WorkspaceSpec): string {
+  return workspace.backend.kind === "pod" && workspace.backend.profile
+    ? `pod:${workspace.backend.profile}`
+    : workspace.backend.kind;
+}
+
+function driverRuntimeKind(
+  workspace: WorkspaceSpec,
+): NonNullable<WorkspaceStatus["driver"]>["runtimeKind"] {
+  if (workspace.backend.kind === "docker") {
+    return "docker-container";
+  }
+  if (workspace.backend.kind === "pod") {
+    return "kubernetes-pod";
+  }
+  return "kubevirt-vm";
+}
+
+function driverRuntimeRef(
+  workspace: WorkspaceSpec,
+  observation: BackendObservation,
+): string {
+  if (workspace.backend.kind === "docker") {
+    return `container/${workspace.identity.projectName}-docker`;
+  }
+  if (workspace.backend.kind === "pod") {
+    return observation.backend.detail?.startsWith("pod/")
+      ? observation.backend.detail
+      : `deployment/${workspace.identity.projectName}`;
+  }
+  return `vm/${workspace.identity.projectName}-vm`;
+}
+
 function runtimeAssemblyCheck(
   expected: boolean,
   observed: BackendObservation["runtimeAssembly"][keyof BackendObservation["runtimeAssembly"]],
@@ -305,6 +338,16 @@ export function synthesizeWorkspaceStatus(
       kind: workspace.backend.kind,
       profile: workspace.backend.profile,
       instanceState: backendState,
+    },
+    driver: {
+      target: driverTarget(workspace),
+      baseImage: workspace.runtime.baseImage,
+      runtimeKind: driverRuntimeKind(workspace),
+      runtimeRef: driverRuntimeRef(workspace, observation),
+      runtimeState: backendState,
+      ...(workspace.runtime.rootdiskImage
+        ? { rootdiskImage: workspace.runtime.rootdiskImage }
+        : {}),
     },
     lifecycleAction,
     state,

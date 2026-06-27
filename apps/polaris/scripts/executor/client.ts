@@ -9,6 +9,7 @@ import {
   deletePortalWorkspace as deletePortalWorkspaceLocal,
   queueProvisionWorkspace as queueProvisionWorkspaceLocal,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusLocal,
+  startPortalWorkspace as startPortalWorkspaceLocal,
   stopPortalWorkspace as stopPortalWorkspaceLocal,
   switchPortalWorkspace as switchPortalWorkspaceLocal,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentLocal,
@@ -144,6 +145,20 @@ export async function stopPortalWorkspace(input: {
       body: JSON.stringify(input),
     },
     () => stopPortalWorkspaceLocal(input.userId, input.workspace),
+  );
+}
+
+export async function startPortalWorkspace(input: {
+  userId: string;
+  workspace: string;
+}): Promise<{ started: true }> {
+  return executorRequest(
+    "/workspaces/start",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    () => startPortalWorkspaceLocal(input.userId, input.workspace),
   );
 }
 
