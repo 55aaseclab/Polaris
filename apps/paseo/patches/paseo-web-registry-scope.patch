@@ -1,8 +1,8 @@
 diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
-index 672642f..3a296ae 100644
+index 672642fd..a0aee303 100644
 --- a/packages/app/src/runtime/host-runtime.ts
 +++ b/packages/app/src/runtime/host-runtime.ts
-@@ -1270,10 +1270,66 @@ export class HostRuntimeController {
+@@ -1270,10 +1270,71 @@ export class HostRuntimeController {
  }
  
  const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
@@ -66,21 +66,45 @@ index 672642f..3a296ae 100644
 +    : REGISTRY_STORAGE_KEY;
 +}
 +
++function resolveRegistryStorageKeys(): string[] {
++  const primary = resolveRegistryStorageKey();
++  return primary === REGISTRY_STORAGE_KEY ? [REGISTRY_STORAGE_KEY] : [primary, REGISTRY_STORAGE_KEY];
++}
++
  function readConfiguredLocalDaemonOverride(): string | null {
    const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
    return value && value.length > 0 ? value : null;
-@@ -1375,8 +1431,9 @@ export class HostRuntimeStore {
+@@ -1375,8 +1436,19 @@ export class HostRuntimeStore {
  
    private async loadFromStorage(): Promise<void> {
      let shouldPersistHosts = false;
-+    const storageKey = resolveRegistryStorageKey();
++    const storageKeys = resolveRegistryStorageKeys();
      try {
 -      const stored = await AsyncStorage.getItem(REGISTRY_STORAGE_KEY);
-+      const stored = await AsyncStorage.getItem(storageKey);
++      let stored: string | null = null;
++      let resolvedStorageKey = storageKeys[0] ?? REGISTRY_STORAGE_KEY;
++      for (const storageKey of storageKeys) {
++        const candidate = await AsyncStorage.getItem(storageKey);
++        if (!candidate) {
++          continue;
++        }
++        stored = candidate;
++        resolvedStorageKey = storageKey;
++        break;
++      }
        if (!stored) {
          return;
        }
-@@ -1745,8 +1802,9 @@ export class HostRuntimeStore {
+@@ -1390,7 +1462,7 @@ export class HostRuntimeStore {
+       const profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
+       this.hosts = profiles;
+       this.syncHosts(profiles);
+-      if (profiles.length !== normalizedProfiles.length) {
++      if (profiles.length !== normalizedProfiles.length || resolvedStorageKey !== storageKeys[0]) {
+         shouldPersistHosts = true;
+       }
+     } catch (error) {
+@@ -1745,8 +1817,9 @@ export class HostRuntimeStore {
    }
  
    private async persistHosts(): Promise<void> {
