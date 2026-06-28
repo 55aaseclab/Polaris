@@ -29,7 +29,7 @@ Run the local stack:
 bash ./scripts/deploy-polaris-host.sh .env.dev
 ```
 
-This starts `polaris-executor` on the host.
+This starts `polaris-executor` on the host in the background.
 
 It starts `polaris-server`, `polaris-webportal`, `paseo-app`, and `nginx`
 through Docker Compose.
@@ -43,6 +43,16 @@ The default local ports are:
 - polaris-executor: `18788`
 
 Use `.env.dev` for real local values.
+
+Executor host controls:
+
+```bash
+bash ./scripts/manage-polaris-executor-host.sh .env.dev status
+bash ./scripts/manage-polaris-executor-host.sh .env.dev restart
+bash ./scripts/manage-polaris-executor-host.sh .env.dev stop
+```
+
+The managed executor log is written to `.runtime/polaris-executor/executor.log`.
 
 For local testing from another network, set the public IP-based URLs in
 `.env.dev`.
@@ -70,7 +80,8 @@ bash ./scripts/deploy-polaris-host.sh .env.deploy
 
 Access it through nginx on the public hostname.
 
-The host executor stays local-only.
+The host executor stays local-only and is restarted in the background by the
+deploy script.
 
 The default deploy ports are:
 
