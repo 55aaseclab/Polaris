@@ -40,13 +40,13 @@ ensure_base_packages() {
   case "$manager" in
     apt)
       sudo apt-get update || log "apt-get update had errors, continuing"
-      sudo apt-get install -y curl git tar gzip ca-certificates
+      sudo apt-get install -y curl git tar gzip ca-certificates rsync nodejs npm
       ;;
     dnf)
-      sudo dnf install -y curl git tar gzip ca-certificates
+      sudo dnf install -y curl git tar gzip ca-certificates rsync nodejs npm
       ;;
     brew)
-      brew install curl git
+      brew install curl git rsync node
       ;;
     none)
       ;;
@@ -66,6 +66,28 @@ ensure_required_commands() {
   if [[ "${#missing[@]}" -gt 0 ]]; then
     fail "missing required commands: ${missing[*]}"
   fi
+}
+
+ensure_pnpm() {
+  if command_exists pnpm; then
+    log "pnpm already installed"
+    return
+  fi
+
+  if command_exists corepack; then
+    log "Installing pnpm via corepack"
+    corepack enable
+    corepack prepare pnpm@latest --activate
+    return
+  fi
+
+  if command_exists npm; then
+    log "Installing pnpm via npm"
+    npm install -g pnpm
+    return
+  fi
+
+  fail "pnpm installation failed: neither corepack nor npm is available"
 }
 
 detect_os() {
@@ -189,13 +211,15 @@ verify_install() {
   kubectl version --client >/dev/null
   kubectl krew version >/dev/null
   kubectl virt help >/dev/null
-  log "Verified kubectl, krew, and kubectl virt"
+  pnpm --version >/dev/null
+  log "Verified kubectl, krew, kubectl virt, and pnpm"
 }
 
 main() {
   ensure_base_packages
   ensure_required_commands
   ensure_shell_path
+  ensure_pnpm
   ensure_kubectl
   ensure_krew
   ensure_virt_plugin
