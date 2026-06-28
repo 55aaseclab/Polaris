@@ -131,8 +131,9 @@ start_executor() {
   : > "${LOG_FILE}"
   printf '%s\n' "${ENV_FILE}" > "${ENV_MARKER_FILE}"
 
-  nohup node apps/polaris/dist/scripts/polaris.js executor "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
-    >> "${LOG_FILE}" 2>&1 &
+  # Detach into a new session so the executor survives the launcher shell exiting.
+  setsid node apps/polaris/dist/scripts/polaris.js executor "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
+    >> "${LOG_FILE}" 2>&1 < /dev/null &
   local pid=$!
   printf '%s\n' "${pid}" > "${PID_FILE}"
 

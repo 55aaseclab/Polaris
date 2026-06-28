@@ -1,3 +1,8 @@
+map $http_x_forwarded_proto $polaris_content_security_policy {
+  default "";
+  https "upgrade-insecure-requests";
+}
+
 upstream polaris_server {
   server ${POLARIS_SERVER_UPSTREAM};
 }
@@ -13,6 +18,12 @@ upstream paseo_app {
 server {
   listen ${NGINX_HTTP_PORT} default_server;
   server_name ${NGINX_SERVER_NAME} _;
+  absolute_redirect off;
+  add_header Content-Security-Policy $polaris_content_security_policy always;
+
+  location = /paseo {
+    return 301 /paseo/$is_args$args;
+  }
 
   location /api/ {
     proxy_pass http://polaris_server;

@@ -135,6 +135,7 @@ type PortalShellContextValue = {
   activeUserId: string;
   workspaces: PortalWorkspaceSummary[];
   workspacesLoading: boolean;
+  workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
 };
 
@@ -900,18 +901,35 @@ function extractPaseoScope(input: string): string | null {
   }
 }
 
+function upgradePaseoUrlForSecureOrigin(input: string): string {
+  if (typeof window === "undefined") {
+    return input;
+  }
+  try {
+    const current = new URL(window.location.href);
+    const url = new URL(input, current.href);
+    if (current.protocol === "https:" && url.protocol === "http:" && url.host === current.host) {
+      url.protocol = "https:";
+      return url.toString();
+    }
+  } catch {
+    return input;
+  }
+  return input;
+}
+
 function applyPaseoScope(input: string, scope: string | null | undefined): string {
   const normalizedScope = normalizePaseoScope(scope);
   if (!normalizedScope) {
-    return input;
+    return upgradePaseoUrlForSecureOrigin(input);
   }
   try {
     const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
     const url = new URL(input, baseUrl);
     url.searchParams.set("scope", normalizedScope);
-    return url.toString();
+    return upgradePaseoUrlForSecureOrigin(url.toString());
   } catch {
-    return input;
+    return upgradePaseoUrlForSecureOrigin(input);
   }
 }
 
@@ -928,9 +946,11 @@ function buildScopedPaseoPortalUrl(
       url.searchParams.set("scope", normalizedScope);
     }
     url.hash = `offer=${offer}`;
-    return url.toString();
+    return upgradePaseoUrlForSecureOrigin(url.toString());
   } catch {
-    return applyPaseoScope(`${appBaseUrl.replace(/\/$/, "")}/#offer=${offer}`, scope);
+    return upgradePaseoUrlForSecureOrigin(
+      applyPaseoScope(`${appBaseUrl.replace(/\/$/, "")}/#offer=${offer}`, scope),
+    );
   }
 }
 
@@ -946,7 +966,7 @@ function configuredPaseoAppBaseUrl(): string | null {
     if (current.protocol === "https:" && url.protocol === "http:" && url.host === current.host) {
       url.protocol = "https:";
     }
-    return url.toString().replace(/\/$/, "");
+    return upgradePaseoUrlForSecureOrigin(url.toString()).replace(/\/$/, "");
   }
   if (typeof window === "undefined") {
     return null;
@@ -955,7 +975,7 @@ function configuredPaseoAppBaseUrl(): string | null {
   url.pathname = "/paseo/";
   url.search = "";
   url.hash = "";
-  return url.toString().replace(/\/$/, "");
+  return upgradePaseoUrlForSecureOrigin(url.toString()).replace(/\/$/, "");
 }
 
 function normalizePaseoPortalUrl(
@@ -975,7 +995,9 @@ function normalizePaseoPortalUrl(
   if (!appBaseUrl) {
     return applyPaseoScope(trimmed, effectiveScope);
   }
-  return buildScopedPaseoPortalUrl(appBaseUrl, offer, effectiveScope);
+  return upgradePaseoUrlForSecureOrigin(
+    buildScopedPaseoPortalUrl(appBaseUrl, offer, effectiveScope),
+  );
 }
 
 function workspacePaseoScope(userId: string, workspaceName: string): string {
@@ -1199,17 +1221,17 @@ function PortalShellLayout(props: {
   const { t } = useLanguage();
   const clerk = useClerk();
   const { mapping } = useCurrentUserMapping();
+  const { userId: routeUserId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
   const isAdmin = mapping?.role === "admin";
-  const activeUser = props.users.find((user) =>
-    location.pathname.includes(`/users/${user.id}/`),
-  ) ?? null;
-  const activeUserId = activeUser?.id ?? "";
+  const activeUserId = String(routeUserId ?? "").trim();
+  const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
   const {
     data: sidebarWorkspaces,
     loading: sidebarWorkspacesLoading,
+    error: sidebarWorkspacesError,
   } = useAsyncValue(
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId],
@@ -1363,6 +1385,7 @@ function PortalShellLayout(props: {
     activeUserId,
     workspaces: sidebarWorkspaces ?? [],
     workspacesLoading: sidebarWorkspacesLoading,
+    workspacesError: sidebarWorkspacesError,
     openCreateWorkspaceDialog,
   };
 
@@ -1402,6 +1425,11 @@ function PortalShellLayout(props: {
                   {sidebarWorkspacesLoading && (
                     <div className="px-2 py-3 text-sm text-muted-foreground">
                       {t("loading_workspaces")}
+                    </div>
+                  )}
+                  {!sidebarWorkspacesLoading && sidebarWorkspacesError && (
+                    <div className="px-2 py-3 text-sm text-destructive">
+                      {sidebarWorkspacesError}
                     </div>
                   )}
                   {sidebarWorkspaces?.map((workspace) => {
@@ -1830,18 +1858,58 @@ function WorkspaceIndexPage() {
 
   return (
     <PortalShell users={users ?? []}>
-      <WorkspaceEmptyState
-        title={t("workspace_empty_title")}
-        descriptionLines={[
-          t("workspace_empty_description_line_1"),
-          t("workspace_empty_description_line_2"),
-          t("workspace_empty_description_line_3"),
-        ]}
+      <WorkspaceIndexContent
+        userId={userId}
         onOpenCredentials={() => {
           navigate(`/users/${encodeURIComponent(userId)}/credentials`);
         }}
       />
     </PortalShell>
+  );
+}
+
+function WorkspaceIndexContent(props: {
+  userId: string;
+  onOpenCredentials: () => void;
+}) {
+  const { t } = useLanguage();
+  const { workspaces, workspacesLoading, workspacesError } = usePortalShell();
+
+  if (workspacesLoading) {
+    return (
+      <div className="flex min-h-[40dvh] w-full items-center justify-center">
+        <div className="text-sm text-muted-foreground">{t("loading_first_workspace")}</div>
+      </div>
+    );
+  }
+
+  if (workspacesError) {
+    return (
+      <div className="flex min-h-[40dvh] w-full items-center justify-center">
+        <div className="text-sm text-destructive">{workspacesError}</div>
+      </div>
+    );
+  }
+
+  if (workspaces.length > 0) {
+    return (
+      <Navigate
+        to={`/users/${encodeURIComponent(props.userId)}/workspaces/${encodeURIComponent(workspaces[0].name)}`}
+        replace
+      />
+    );
+  }
+
+  return (
+    <WorkspaceEmptyState
+      title={t("workspace_empty_title")}
+      descriptionLines={[
+        t("workspace_empty_description_line_1"),
+        t("workspace_empty_description_line_2"),
+        t("workspace_empty_description_line_3"),
+      ]}
+      onOpenCredentials={props.onOpenCredentials}
+    />
   );
 }
 
@@ -1851,7 +1919,12 @@ function WorkspaceEmptyState(props: {
   onOpenCredentials: () => void;
 }) {
   const { t } = useLanguage();
-  const { workspaces, workspacesLoading, openCreateWorkspaceDialog } = usePortalShell();
+  const {
+    workspaces,
+    workspacesLoading,
+    workspacesError,
+    openCreateWorkspaceDialog,
+  } = usePortalShell();
 
   if (workspacesLoading) {
     return (
@@ -1863,6 +1936,14 @@ function WorkspaceEmptyState(props: {
 
   if (workspaces.length > 0) {
     return <div className="min-h-[40dvh]" />;
+  }
+
+  if (workspacesError) {
+    return (
+      <div className="flex min-h-[40dvh] w-full items-center justify-center">
+        <div className="text-sm text-destructive">{workspacesError}</div>
+      </div>
+    );
   }
 
   return (
