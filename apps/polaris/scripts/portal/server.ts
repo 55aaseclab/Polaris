@@ -16,7 +16,6 @@ import {
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalWorkspace,
-  deletePortalUser,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
@@ -468,14 +467,6 @@ async function handleUserCreate(
   }
 }
 
-async function handleUserDelete(
-  res: ServerResponse,
-  userProfileId: string,
-): Promise<void> {
-  const deleted = await deletePortalUser(userProfileId);
-  sendJson(res, 200, deleted);
-}
-
 function isApiPath(segments: string[]): boolean {
   return segments[0] === "api";
 }
@@ -551,15 +542,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             authEnabled: Boolean(process.env.POLARIS_AUTH_SHARED_SECRET?.trim()),
             session: trustedSession,
           });
-          return;
-        }
-        if (segments[1] === "users" && segments.length === 3 && req.method === "DELETE") {
-          const routeUserId = decodeURIComponent(segments[2]);
-          const profile = requireProfile(res, routeUserId, trustedSession);
-          if (!profile) {
-            return;
-          }
-          await handleUserDelete(res, routeUserId);
           return;
         }
         if (segments[1] !== "users" || segments.length < 4) {

@@ -28,7 +28,6 @@ import {
   type PortalWorkspaceSummary,
 } from "../core/portal.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
-import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
@@ -41,63 +40,12 @@ import {
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
 import { resolveRepoRoot } from "../utils/repo-root.js";
-import { deleteClerkUsersByUsername } from "./clerk.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
-function parseJsonFromText<T>(value: string): T {
-  const trimmed = value.trim();
-  const jsonEnd = trimmed.lastIndexOf("}");
-  if (jsonEnd === -1) {
-    throw new Error(
-      `No JSON object found in output: ${JSON.stringify(trimmed)}`,
-    );
-  }
-  for (
-    let jsonStart = trimmed.lastIndexOf("{", jsonEnd);
-    jsonStart !== -1;
-    jsonStart = trimmed.lastIndexOf("{", jsonStart - 1)
-  ) {
-    try {
-      return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)) as T;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error(
-    `No JSON object found in output: ${JSON.stringify(trimmed)}`,
-  );
-}
-
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
-}
-
-async function captureStdout<T>(
-  fn: () => Promise<T>,
-): Promise<{ result: T; stdout: string }> {
-  const stdoutChunks: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
-    stdoutChunks.push(
-      typeof chunk === "string"
-        ? chunk
-        : Buffer.from(chunk).toString("utf8"),
-    );
-    const callback = args.find(
-      (arg) => typeof arg === "function",
-    ) as (() => void) | undefined;
-    callback?.();
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
-    const result = await fn();
-    return { result, stdout: stdoutChunks.join("").trim() };
-  } finally {
-    process.stdout.write = originalWrite;
-  }
 }
 
 async function refreshPortalWorkspaceStatus(
@@ -447,43 +395,4 @@ export async function createPortalUser(input: {
     );
   }
   return created;
-}
-
-export async function deletePortalUser(userProfileId: string): Promise<{
-  userProfile: {
-    id: string;
-    removed: boolean;
-    profilePath: string;
-    secretsRoot: string;
-  };
-  mappings: {
-    removedClerkUsernames: string[];
-  };
-  clerk: {
-    removedUserIds: string[];
-  };
-}> {
-  const { stdout } = await captureStdout(async () => {
-    await deleteUserCommand([userProfileId]);
-  });
-  const deleted = parseJsonFromText<{
-    userProfile: {
-      id: string;
-      removed: boolean;
-      profilePath: string;
-      secretsRoot: string;
-    };
-    mappings: {
-      removedClerkUsernames: string[];
-    };
-  }>(stdout);
-  const clerkPayload = await deleteClerkUsersByUsername(
-    deleted.mappings.removedClerkUsernames,
-  );
-  return {
-    ...deleted,
-    clerk: {
-      removedUserIds: clerkPayload.removedUserIds,
-    },
-  };
 }
