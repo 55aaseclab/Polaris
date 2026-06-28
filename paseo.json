@@ -6,10 +6,10 @@
     },
     "deploy": {
       "type": "service",
-      "command": "bash ./scripts/deploy-polaris-host.sh .env.deploy"
+      "command": "bash ./scripts/deploy-polaris-host.sh .env.prod"
     },
     "publish": {
-      "command": "bash ./scripts/publish-polaris.sh .env.deploy"
+      "command": "bash ./scripts/publish-polaris.sh .env.prod"
     }
   }
 }

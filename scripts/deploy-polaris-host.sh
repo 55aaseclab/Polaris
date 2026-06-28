@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="${1:-.env.deploy}"
+ENV_FILE="${1:-.env.prod}"
 
 if [ ! -f "${ENV_FILE}" ]; then
   echo "Missing env file: ${ENV_FILE}" >&2
