@@ -91,6 +91,8 @@ Clerk 映射不内嵌在用户资料字段里。
 - 删除用户工作空间目录
 - 删除 Clerk 到 Polaris 的映射
 
+当前不会删除 Clerk 平台上的用户对象。
+
 ### 用户级凭证模型
 
 凭证现在是用户级对象。
@@ -188,11 +190,18 @@ Polaris 已经按用户维度建模凭证，而不是按工作空间维度建模
 
 ### 3. 删除用户
 
-1. 前端请求删除 Polaris 用户。
-2. 后端删除用户资料。
-3. 后端通过共享 credential service 删除该用户的托管凭证与物料。
-4. 后端删除用户工作空间目录和映射。
-5. 门户侧按映射结果删除 Clerk 用户。
+当前删除用户是控制面能力，不是当前门户主流程。
+
+当前门户没有提供删除用户按钮。
+
+当前删除行为如果执行，范围包括：
+
+1. 删除 Polaris 用户资料。
+2. 删除该用户的托管凭证与物料。
+3. 删除该用户的工作空间目录。
+4. 删除 Clerk 到 Polaris 的本地映射。
+
+当前不会删除 Clerk 平台上的用户对象。
 
 ### 4. 新增用户级凭证
 
@@ -251,3 +260,114 @@ Polaris 已经按用户维度建模凭证，而不是按工作空间维度建模
 - Polaris 不管理用户密码。
 - 用户级凭证不应再通过工作空间脚手架隐式创建。
 - 工作空间级绑定只是覆盖路径，不是主要凭证管理入口。
+
+## CLI 设计
+
+当前用户管理已经有明确的 CLI 命令面。
+
+根入口是：
+
+```bash
+pnpm --dir apps/polaris run polaris -- user ...
+```
+
+### 用户创建
+
+```bash
+pnpm --dir apps/polaris run polaris -- user create <userProfileId> \
+  [--name <name>] \
+  [--email <email>] \
+  [--clerk <username>] \
+  [--clerk-user-id <id>] \
+  [--role <admin|user>] \
+  [--plan <free|pro>]
+```
+
+当前语义是：
+
+- 创建用户资料
+- 创建画像要求的默认凭证
+- 可同时写入 `clerkUsername` 映射
+- 可同时写入 `clerkUserId` 映射
+- 可同时声明 `role` 和 `plan`
+
+### 用户删除
+
+```bash
+pnpm --dir apps/polaris run polaris -- user delete <userProfileId>
+```
+
+当前语义是：
+
+- 删除用户资料
+- 删除用户根目录
+- 删除该用户全部托管凭证
+- 删除该用户对应的 Clerk 映射
+- 不删除 Clerk 平台上的用户对象
+
+### 用户级凭证新增
+
+```bash
+pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> \
+  --harness <ssh|codex|claude|copilot|opencode|pi> \
+  [--credential-id <id>] \
+  [--label <label>] \
+  [--provider-name <name>] \
+  [--base-url <url>] \
+  [--api-key <key>] \
+  [--preset-id <id>] \
+  [--model <name>] \
+  [--activate]
+```
+
+当前也保留同义入口：
+
+```bash
+pnpm --dir apps/polaris run polaris -- user credential create ...
+```
+
+当前语义是：
+
+- 按 harness 创建用户级凭证
+- 支持 provider preset 和自定义 provider 参数
+- 可在创建时直接激活
+
+### 用户级凭证列表
+
+```bash
+pnpm --dir apps/polaris run polaris -- user credential list <userProfileId>
+```
+
+当前语义是：
+
+- 列出该用户全部托管凭证
+- 返回 registry 视图而不是工作空间绑定视图
+
+### 用户级凭证激活
+
+```bash
+pnpm --dir apps/polaris run polaris -- user credential activate <userProfileId> <credentialId>
+```
+
+当前语义是：
+
+- 在用户作用域激活目标凭证
+- 后续工作空间默认解析该用户当前激活的对应凭证
+
+### 用户级凭证删除
+
+```bash
+pnpm --dir apps/polaris run polaris -- user credential delete <userProfileId> <credentialId>
+```
+
+当前语义是：
+
+- 删除凭证 registry 条目
+- 删除该凭证生成物料
+
+### 设计约束
+
+- `user` 命令面负责用户资料和用户级凭证。
+- 工作空间级 override 不放在 `user credential activate` 内表达。
+- 运行时 live switch 属于工作空间命令面，不属于用户管理命令面。
+- Clerk 映射通过 `user create` 进入，不内嵌在用户资料 YAML 中。
