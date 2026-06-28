@@ -10,10 +10,9 @@ RUN apt-get update && apt-get install -y \
   curl \
   fd-find \
   git \
+  gnupg \
   jq \
   neovim \
-  nodejs \
-  npm \
   openssh-client \
   procps \
   python3 \
@@ -22,6 +21,13 @@ RUN apt-get update && apt-get install -y \
   wget \
   xdg-utils \
   zsh \
+  && mkdir -p /etc/apt/keyrings /etc/apt/sources.list.d \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor --batch --yes --no-tty -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update \
+  && apt-get install -y nodejs \
   && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
