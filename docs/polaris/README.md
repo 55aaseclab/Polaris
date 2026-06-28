@@ -31,18 +31,6 @@ apps/polaris/scripts/polaris.ts
 Polaris owns the saved spec and generated output. Treat generated manifests as
 rendered artifacts, not hand-maintained files.
 
-Polaris now treats workspace profile and user profile as separate concerns:
-
-- workspace profile: reusable workspace/runtime defaults
-- user profile: Git identity, SSH identity policy, and user-scoped external
-  agent identity defaults
-
-Polaris also treats `Credential` as a first-class user-owned entity:
-
-- one user can own multiple credentials
-- one workspace can bind multiple credentials by purpose
-- driver selection stays separate from credential selection
-
 ## Recommended Flow
 
 Create a user first:
@@ -56,31 +44,6 @@ Then create a workspace spec for that user:
 ```bash
 pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
 ```
-
-If the user profile does not already exist, `user create` scaffolds:
-
-- `config/users/profiles/<user>.yaml`
-- `config/users/<user>/credentials/*.yaml` for profile-required managed
-  credentials
-
-Today that means:
-
-- a managed SSH credential such as `github-ssh`
-- no implicit Codex provider credential
-
-If the project does not already exist, `create` scaffolds:
-
-- `config/users/<user>/workspaces/<project>/docker.agent.yaml`
-
-The scaffolded spec references that local user profile:
-
-- `user_profile: <userProfileId>`
-
-Workspace scaffolding does not create a default Codex credential anymore.
-User-level Codex credentials must be added explicitly and can then be:
-
-- activated at user scope
-- optionally bound as a workspace-specific `agent-auth` override
 
 Then stage bootstrap secrets and render/start the workspace:
 
@@ -112,47 +75,22 @@ pnpm --dir apps/polaris run polaris -- logs <project>@kubevirt-vm
 
 ## Command Model
 
-`user create`
+The main workspace lifecycle commands are:
 
-- Creates a user profile plus profile-required managed credentials.
-- Today this auto-creates only the managed SSH credential.
-
-`user delete`
-
-- Removes a user profile, its user-scoped secrets root, and any Clerk username
-  mappings that point at that Polaris user.
-
-`create`
-
-- Scaffolds a Docker saved spec when no workspace config exists yet.
-- Requires `--user <userProfileId>`.
-- Fails if that user profile does not already exist.
-
-`render`
-
-- Loads the saved spec and writes generated output to:
-  `config/users/<user>/workspaces/<project>/generated/docker.yaml`
-  for Docker workspaces.
-- Does not start the runtime by itself.
-
-`start`
-
-- Renders first, then runs
-  `docker compose -f config/users/<user>/workspaces/<project>/generated/docker.yaml up -d`.
-- This is the normal way to launch a Docker workspace.
-
-`status`
-
-- Inspects the live backend and synthesizes a control-plane status view.
-- Writes a status snapshot to
-  `config/users/<user>/workspaces/<project>/state/status.json`.
-- Reports backend liveness, workspace readiness, daemon readiness, attachment
-  checks, runtime assembly checks, and drift.
-
-`logs`
-
-- Tails the backend logs for the workspace runtime.
-- For Docker, this is `docker compose ... logs --tail 200 <project>`.
+- `user create`
+- `create`
+- `render`
+- `apply`
+- `start`
+- `stop`
+- `restart`
+- `rebuild`
+- `status`
+- `reconcile`
+- `logs`
+- `switch`
+- `live-switch`
+- `delete`
 
 ## Credentials And Bootstrap
 
@@ -162,63 +100,6 @@ Credential metadata lives in a pure file-backed registry:
 config/users/profiles/<user>.yaml
 config/users/<user>/credentials/*.yaml
 ```
-
-The default Docker scaffold expects secret material under the user-owned
-credential root reported by `user create`, for example:
-
-```text
-config/users/local-<identity>/
-  credentials/
-    codex/<credential-id>/auth.json
-    codex/<credential-id>/config.toml
-    ssh/id_ed25519
-    ssh/id_ed25519.pub
-```
-
-Workspace specs may bind credentials by purpose when an override is needed:
-
-```yaml
-credentials:
-  bindings:
-    - purpose: agent-auth
-      credentialId: <workspace-specific-codex-credential>
-      required: true
-    - purpose: git-auth
-      credentialId: github-ssh
-      required: false
-```
-
-If no explicit `agent-auth` binding exists, Polaris resolves the active
-user-level Codex credential by default. If no active Codex credential exists,
-runtime tooling still remains available and the workspace can still start.
-
-At runtime, Polaris resolves auth material from explicit credential bindings
-first. Legacy `user_profile.auth.files` remains compatibility-only.
-
-The Docker backend mounts:
-
-- `./config/users/<user-profile-id>` by default
-- or `$POLARIS_SECRETS_DIR` if that environment variable is set
-
-Those files are copied into the user-scoped identity attachments during
-bootstrap:
-
-- `/identity/codex`
-- `/identity/claude`
-
-Polaris also creates or assembles:
-
-- workspace data at `/workspace/project`
-- workspace manager state at `/workspace/state/paseo`
-- workspace evolution state at `/workspace/state/paseo/evolution`
-- SSH material at `/ssh`
-- ephemeral runtime state under `/run/workspace`
-
-User-scoped identity now belongs to the selected user profile, not only to the
-runtime UNIX user or the workspace profile.
-
-When restart issues come from runtime leftovers, clean stale runtime artifacts
-only. Do not treat durable state as disposable.
 
 ## External Agent Contract
 
@@ -233,14 +114,6 @@ The contract is:
   startup, evolution-state persistence, and status/drift reporting
 - Harness behavior is external to Polaris
 
-So the default Docker path is:
-
-- Polaris creates the spec
-- Polaris renders and starts the workspace
-- Paseo comes up inside the workspace
-- Polaris may persist learning artifacts under `/workspace/state/paseo/evolution`
-- Codex and Claude use the mounted identity/bootstrap material
-
 ## Validation
 
 ```bash
@@ -253,7 +126,6 @@ pnpm --dir apps/polaris run polaris -- status <project>
 ## More Docs
 
 - [portal-business-flow.md](./portal-business-flow.md)
-- [control-plane-maturity.md](./control-plane-maturity.md)
 - [isolation-maturity.md](./isolation-maturity.md)
 - [agent-swarm-maturity.md](./agent-swarm-maturity.md)
 - [evolution-maturity.md](./evolution-maturity.md)
