@@ -1,285 +1,465 @@
 # Isolation Maturity
 
-This document describes the current Polaris isolation model as a workspace
-control-plane boundary.
+本文档描述 Polaris 当前的 workspace 隔离模型。
 
-## Purpose
+重点是把四件事拆开：
 
-Polaris owns workspace intent, attachment semantics, runtime assembly checks,
-and drift/reconcile logic rather than treating isolation as a thin backend
-rendering detail.
+- workspace saved spec
+- attachment 边界
+- runtime assembly
+- backend realization
 
-## Scope And Files
+这四者相关，但不是同一个层次。
 
-Polaris now keeps saved workspace intent, generated backend artifacts,
-operator state, and runtime attachments separate.
+## 一句话原则
 
-| Concern | Contents | Control-plane source of truth | Runtime / user-facing realization |
-|---|---|---|---|
-| Saved workspace intent | Project, backend, attachments, user profile, credentials, service settings | `config/users/<user>/workspaces/<project>/<backend>.agent.yaml` | none |
-| User profile | User identity, Git identity, SSH policy, agent identity defaults, owned workspace list | `config/users/profiles/<user>.yaml` | selected by `user_profile` in workspace specs |
-| Credential registry | User-owned reusable auth declarations and material references | `config/users/<user>/credentials/*.yaml` | resolved into user identity durable state |
-| Generated backend artifact | Rendered manifest consumed by the backend runtime | `config/users/<user>/workspaces/<project>/generated/<backend>.yaml` | `docker compose`, `kubectl apply`, or `kubectl` + KubeVirt objects |
-| Driver selection state | Preferred backend and optional pod profile for ambiguous project names | `config/users/<user>/workspaces/<project>/state/selection.json` | CLI default resolution for `<project>` |
-| Status snapshot | Synthesized backend, attachment, runtime-assembly, daemon, SSH, and drift status | `config/users/<user>/workspaces/<project>/state/status.json` | `polaris status <project>` output |
-| Workspace data attachment | Project files and workspace-local durable content | Saved spec `attachments.workspace-data` | mounted at `/workspace/project` |
-| Workspace runtime-state attachment | Durable manager state, pairing state, and evolution state | Saved spec `attachments.workspace-runtime-state` | mounted at `/workspace/state` |
-| User identity attachment | Cross-workspace agent identity state and SSH material | Saved spec `attachments.user-identity-state` | mounted at `/identity`, assembled into agent homes and `~/.ssh` via `/identity/ssh` |
-| Ephemeral runtime state | PID files, sockets, temp state, and stale runtime artifacts | Saved spec `attachments.ephemeral-runtime` or compatibility defaults | mounted at `/run/workspace` |
+- Polaris 先定义 workspace，再映射到底层 backend。
+- workspace 的持久化边界由 attachment 决定，不由 home 目录决定。
+- runtime 内看到的路径是装配结果，不是持久化契约本身。
+- backend 负责承载 workspace，Polaris 负责校验 workspace 是否被正确装配。
 
-Current gaps versus a more mature platform:
+## 核心对象
 
-- backend parity is incomplete
-- KubeVirt inspection still depends on SSH and port-forward probing
-- install and bootstrap flows are still operator-heavy
-- backend capability matrices and preflight validation remain thin
-- reconcile repair behavior is still coarse and restart-heavy
+- workspace：隔离开发环境的最小控制面对象。
+- saved spec：workspace 的保存态定义。
+- attachment：workspace 的持久化和共享边界。
+- runtime assembly：workspace 在容器、Pod 或 VM 内的实际装配结果。
+- backend：承载该 workspace 的运行基座。
 
-## Polaris vs Coder
+## 文件落点
 
-| Capability | Polaris Today | Coder Today |
-|---|---|---|
-| Isolation abstraction | 1. Model workspace intent separately from backend realization. 2. Preserve one logical contract across `docker`, `pod`, and `kubevirt-vm`. 3. Treat attachment classes as the persistence boundary. | 1. Strong workspace provisioning product. 2. Mature secure environment operations. 3. Isolation is not exposed as the same explicit multi-backend substrate model. |
-| Saved spec model | 1. Load per-user saved specs from `config/users/<user>/workspaces/<project>/`. 2. Normalize attachments, credentials, user profile, and runtime contract. 3. Validate the workspace object before backend use. | 1. Template- and deployment-centered product model. 2. Strong admin and governance controls. 3. Less emphasis on repo-visible attachment semantics. |
-| Backend realization | 1. Dispatch through backend drivers for `docker`, `pod`, and `kubevirt-vm`. 2. Render generated artifacts per backend. 3. Start, stop, restart, render, apply, logs, inspect, and reconcile through the same CLI surface. | 1. More mature operational runtime stories. 2. Richer deployment and governance controls. 3. Less focus on backend switching inside one repo-native control plane. |
-| Attachment semantics | 1. Keep workspace data and workspace runtime state exclusive to one workspace. 2. Keep user identity state cross-workspace at user scope, including SSH material under `/identity/ssh`. 3. Assemble runtime home as symlinks and mounts instead of using home directories as the persistence boundary. | 1. Durable home/workspace behavior is operationally mature. 2. Product semantics are less explicitly exposed as attachment classes. |
-| Runtime truth and drift | 1. Inspect live backend state. 2. Check attachment presence, runtime assembly, daemon readiness, and services. 3. Synthesize status and build a reconcile plan from drift. | 1. Stronger production operations and observability. 2. More mature platform-level health and governance. |
-| Backend switching | 1. Allow `<project>@docker`, `<project>@pod`, and `<project>@kubevirt-vm`. 2. Persist default backend selection. 3. Synthesize missing backend specs from an existing source spec. | 1. Mature provisioning lifecycle. 2. Not centered on "same workspace, multiple isolation substrates" as a first-class repo-native operator flow. |
+- workspace 定义：
+  `config/users/<userId>/workspaces/<workspace>/<backend>.agent.yaml`
+- generated manifest：
+  `config/users/<userId>/workspaces/<workspace>/generated/<backend>.yaml`
+- backend 选择：
+  `config/users/<userId>/workspaces/<workspace>/state/selection.json`
+- workspace 状态：
+  `config/users/<userId>/workspaces/<workspace>/state/status.json`
 
-## Backend Surface
+## 当前模型
 
-Polaris currently supports three backend kinds:
+### workspace 先于 backend
+
+Polaris 当前先构造一个标准化 workspace 对象。
+
+当前至少包含：
+
+- workspace identity
+- backend kind 和可选 profile
+- attachment 定义
+- runtime contract
+- user identity 装配需求
+- credential 绑定结果
+- health / readiness 约束
+
+backend 只是这个 workspace 的一种实现方式。
+
+因此：
+
+- `docker`、`pod`、`kubevirt-vm` 是 realization
+- workspace 本身才是 source of truth
+
+### attachment 是隔离边界
+
+Polaris 当前用 attachment 表达持久化与共享语义。
+
+当前 attachment 包括：
+
+- `workspace-data`
+- `workspace-runtime-state`
+- `user-identity-state`
+- `ephemeral-runtime`
+
+当前语义是：
+
+- `workspace-data` 属于 workspace 自身
+- `workspace-runtime-state` 属于 workspace 自身
+- `user-identity-state` 属于用户，但会被装配进 workspace
+- `ephemeral-runtime` 属于非持久运行时垃圾区
+
+这意味着 workspace 的隔离不是靠“整块 home 目录持久化”实现的。
+
+而是靠 attachment 分类实现的。
+
+### runtime assembly 是装配结果
+
+workspace 在 runtime 内看到的是装配后的路径视图。
+
+当前关键路径包括：
+
+- `/workspace/project`
+- `/workspace/state`
+- `/identity`
+- `/run/workspace`
+- `~/.paseo`
+- `~/.codex`
+- `~/.claude`
+- `~/.ssh`
+
+这些路径当前语义是：
+
+- 有些直接对应 attachment mount root
+- 有些是 attachment 装配后的 symlink 或 runtime view
+
+因此：
+
+- runtime home 不是持久化契约
+- runtime path 缺失首先是 assembly 问题
+- assembly 修复不等于 durable state 迁移
+
+### backend 是承载面
+
+Polaris 当前支持三种 workspace backend：
 
 - `docker`
 - `pod`
 - `kubevirt-vm`
 
-Pod-specific isolation variants are modeled as pod profiles, not top-level
-backend kinds:
+其中 `pod` 还支持 profile 细分，例如：
 
 - `gvisor`
 - `kata-qemu`
 - `kata-clh`
 - `kata-qemu-tdx`
 
-The current code also supports profile aliases through saved driver selection
-and profile specs, such as `kata` or `kata-container`, which resolve to a pod
-backend profile during load or switch flows.
+当前 backend 语义是：
 
-## Attachment Model
+- 三种 backend 承载同一个 workspace 模型
+- generated manifest 是 workspace 到 backend 的派生产物
+- status / drift / reconcile 都基于标准化 workspace 对象执行
 
-Durable state is modeled as attachment classes, not as a persisted runtime
-home:
+## attachment 语义
 
-- `workspace-data`
-  - scope: `workspace`
-  - sharing: `exclusive`
-  - default mount: `/workspace/project`
-- `workspace-runtime-state`
-  - scope: `workspace`
-  - sharing: `exclusive`
-  - default mount: `/workspace/state`
-  - durable paths include `/workspace/state/paseo`
-  - durable paths include `/workspace/state/paseo/evolution`
-- `user-identity-state`
-  - scope: `user`
-  - sharing: `cross-workspace`
-  - default mount: `/identity`
-  - durable paths include `/identity/codex`, `/identity/claude`, and
-    `/identity/ssh`
-  - assembled into `~/.codex`, `~/.claude`, and `~/.ssh`
+### workspace-data
 
-Non-durable runtime state is modeled separately:
+`workspace-data` 表示 workspace 自己的数据面。
 
-- `ephemeral-runtime`
-  - default mount: `/run/workspace`
-  - paths include temp files, PID files, and sockets
-  - stale artifacts include `/run/workspace/pids/paseo.pid`
+当前语义是：
 
-Runtime home paths are assembled views of these attachments rather than the
-persistence boundary itself.
+- scope 是 `workspace`
+- sharing 是 `exclusive`
+- 默认 mount root 是 `/workspace/project`
 
-## User Management
+它承载：
 
-Polaris now treats the user profile as a first-class control-plane object
-rather than inferring durable identity only from the runtime UNIX user.
+- project 文件
+- workspace 本地输出
+- 该 workspace 独占的数据
 
-Current user-profile semantics:
+### workspace-runtime-state
 
-- the workspace spec selects a user through `user_profile`
-- the user profile lives in `config/users/profiles/<user>.yaml`
-- the profile carries name, email, GitHub account, SSH mode, and agent
-  identity defaults
-- the profile may also list owned workspaces through `workspaces`
-- scaffold flows update that workspace list when new workspaces are created
+`workspace-runtime-state` 表示 workspace 自己的运行时持久态。
 
-Current ownership boundaries:
+当前语义是：
 
-- one workspace spec belongs to one user profile
-- one user profile can own many workspaces
-- one project name cannot currently be owned by multiple users at the same
-  time
-- Polaris rejects cross-user project-name collisions until user-qualified
-  runtime naming exists
+- scope 是 `workspace`
+- sharing 是 `exclusive`
+- 默认 mount root 是 `/workspace/state`
 
-Compatibility still exists for older specs:
+当前重点路径包括：
 
-- if `user_profile` is absent, Polaris derives a compatibility user profile
-  from runtime user and inline Git identity
-- that path is explicitly a fallback, not the preferred long-term model
+- `/workspace/state/paseo`
+- `/workspace/state/paseo/evolution`
 
-## Credential Model
+它承载：
 
-Polaris now separates credential selection from backend selection.
+- manager state
+- pairing state
+- evolution state
+- workspace 自己的运行时持久物料
 
-Current credential semantics:
+### user-identity-state
 
-- credentials are user-owned registry objects
-- the active registry root is `config/users/<user>/credentials/`
-- a legacy fallback registry path still exists at
-  `config/users/credentials/<user>/`
-- each credential declares stable metadata, supported purposes, and a
-  `materialRef`
-- secret material must stay external to the registry entry and is referenced
-  through `materialRef.files[].source_path`
+`user-identity-state` 表示会被装配进 workspace 的用户身份物料。
 
-Workspace specs bind credentials by purpose:
+当前语义是：
 
-- `agent-auth`
-- `git-auth`
-- `ssh-auth`
+- scope 是 `user`
+- sharing 是 `cross-workspace`
+- 默认 mount root 是 `/identity`
 
-Current resolution rules:
+它承载：
 
-- if explicit `credentials.bindings` exist, Polaris resolves only those
-  registry credentials
-- the bound credential must be owned by the selected user profile
-- the bound credential must declare support for the requested purpose
-- registry-backed credentials override legacy inline auth for the same purpose
-- if no direct bindings exist, Polaris derives compatibility credentials from
-  inline auth material
+- `codex`
+- `claude`
+- `copilot`
+- `pi`
+- `opencode`
+- `ssh`
+- 以及 Polaris 用户级凭证物料
 
-Credential resolution also chooses the attachment boundary:
+它会被装配到 workspace runtime 中，例如：
 
-- `codex-auth` and similar non-SSH credentials resolve into
-  `user-identity-state`
-- `ssh-key` credentials also resolve into `user-identity-state`
-- SSH runtime material is staged under `/identity/ssh`
+- `~/.codex`
+- `~/.claude`
+- `~/.copilot`
+- `~/.pi`
+- `~/.config/opencode`
+- `~/.local/share/opencode`
+- `~/.ssh`
 
-This matters for isolation because Polaris treats credentials as control-plane
-bindings onto attachment classes, not as backend-local mount hacks.
+### ephemeral-runtime
 
-## Workspace Model
+`ephemeral-runtime` 表示不应被当成 durable state 的运行时区域。
 
-Polaris now treats the workspace as a first-class object that sits between user
-ownership and backend realization.
+当前语义是：
 
-Current workspace semantics:
+- 默认 mount root 是 `/run/workspace`
+- 包含 temp、pid、socket 等运行时物料
+- stale artifact 可被清理
 
-- the workspace identity is the project name
-- the workspace spec selects one backend kind and may select a pod profile
-- the workspace spec binds one user profile and zero or more credentials
-- the workspace spec declares attachment classes directly when using the newer
-  model
-- generated backend artifacts are derived from that workspace object
+当前典型 stale artifact 包括：
 
-Current lifecycle and ownership implications:
+- `/run/workspace/pids/paseo.pid`
 
-- `user create` scaffolds the user profile and default credentials
-- `create` creates a Docker-first saved spec for an existing user
-- the same logical workspace can later be targeted as `@docker`, `@pod`, or
-  `@kubevirt-vm`
-- missing backend specs can be synthesized from an existing workspace spec
-- backend preference can be persisted per workspace in `state/selection.json`
-- status, drift, and reconcile operate on the normalized workspace object, not
-  directly on hand-maintained manifests
+## workspace 状态语义
 
-The practical result is that user management, credential binding, and isolation
-policy are now centered on the workspace object rather than split across ad hoc
-backend-specific files.
+Polaris 当前不会只回答“backend 是否活着”。
 
-## Current Reality
+workspace 隔离状态至少分开表达：
 
-Polaris has moved beyond the older "future config/specs layout" document
-direction. The code today actually does the following:
+- backend existence
+- backend running
+- attachment 是否到位
+- runtime assembly 是否到位
+- daemon readiness 是否到位
+- service object 是否到位
 
-- loads saved specs from `config/users/<user>/workspaces/<project>/`
-- writes generated backend artifacts under each project's `generated/`
-  directory
-- writes status and backend-selection state under each project's `state/`
-  directory
-- validates attachment semantics in the TypeScript control plane before backend
-  execution
-- supports direct attachment declarations in repo-managed specs
-- keeps legacy path-centric persistence fields only as a compatibility path
-- separates user profile identity from workspace profile defaults
-- resolves credentials separately from backend selection
-- rejects project ownership collisions across multiple users
-- requires registry credentials to be owned by the selected user profile
-- treats generated manifests as derived artifacts, not the primary source of
-  truth
+因此：
 
-For backend realization today:
+- backend running 不等于 workspace ready
+- attachment 挂载成功不等于 runtime assembly 正确
+- runtime assembly 正确也不等于 daemon ready
 
-- `docker`
-  - is the default onboarding path
-  - renders a Docker Compose file
-  - bootstraps runtime assembly inside the container
-  - uses inspect checks based on `docker compose`, `docker inspect`, and
-    `docker exec`
-- `pod`
-  - has the deepest Kubernetes-native controller flow
-  - renders Deployment and related Kubernetes objects
-  - inspects runtime state with `kubectl get` and `kubectl exec`
-- `kubevirt-vm`
-  - has a real backend driver and render/inspect flow
-  - starts and stops through `kubectl virt` when available or VM patch fallback
-  - still probes guest state through service reachability, port-forward, and
-    SSH, which is less mature than the pod path
+## 主流程
 
-## Runtime Controller
+### 1. 加载 workspace
 
-Polaris now has an explicit runtime-controller pipeline:
+1. 读取 saved spec。
+2. 标准化 backend、attachment、runtime、credential 和 health 约束。
+3. 构造统一 workspace 对象。
 
-```text
-WorkspaceSpec
-  -> BackendObservation
-  -> WorkspaceDrift
-  -> WorkspaceStatus
-  -> ReconcilePlan
-  -> Backend action execution
+### 2. 生成 backend realization
+
+1. 根据 workspace 选择 backend driver。
+2. 渲染 generated manifest。
+3. 把 manifest 写入 `generated/`。
+
+### 3. 启动 runtime
+
+1. backend 启动 container、Pod 或 VM。
+2. Polaris 期望 attachment 被正确挂载。
+3. Polaris 期望 runtime home 被正确装配。
+4. Polaris 再检查 daemon readiness。
+
+### 4. 合成状态
+
+1. 读取 backend observation。
+2. 检查 attachment presence。
+3. 检查 runtime assembly。
+4. 检查 daemon 和 pairing。
+5. 合成 workspace status 和 drift。
+
+## backend 切换
+
+workspace 当前可以被指向不同 backend realization：
+
+- `<project>@docker`
+- `<project>@pod[:profile]`
+- `<project>@kubevirt-vm`
+
+当前语义是：
+
+- 切换的是 backend realization
+- 不变的是 workspace 语义边界
+- `selection.json` 记录当前默认 backend
+
+缺少某个 backend spec 时，Polaris 也可以从现有 workspace spec 合成目标
+backend spec。
+
+## 边界
+
+- Polaris 当前关注的是 workspace 隔离边界，不是整机虚拟化抽象本身。
+- runtime home 不是 source of truth。
+- generated manifest 不是 source of truth。
+- user identity 会进入 workspace，但不改变 workspace-data 和
+  workspace-runtime-state 的独占边界。
+- 三种 backend 已接入同一个 workspace 模型，但 operational depth 仍不完全
+  对齐。
+
+## CLI 设计
+
+当前 workspace 隔离模型已经有明确的 CLI 命令面。
+
+根入口是：
+
+```bash
+pnpm --dir apps/polaris run polaris -- ...
 ```
 
-This means live isolation truth is no longer just "backend says it is up."
-Polaris checks:
+### workspace 创建
 
-- backend existence and liveness
-- attachment presence
-- runtime assembly invariants
-- daemon readiness and pairing
-- service object presence
-- SSH self-check semantics for user profiles with GitHub identity
+```bash
+pnpm --dir apps/polaris run polaris -- create <workspace> --user <userProfileId>
+```
 
-## Backend Switching
+当前语义是：
 
-Polaris now has a concrete cross-backend switch path rather than only a design
-goal:
+- 创建 workspace saved spec
+- 绑定目标用户
+- 初始化默认 backend 路径
 
-- operators can target `<project>@docker`
-- operators can target `<project>@pod[:profile]`
-- operators can target `<project>@kubevirt-vm`
-- the selected backend can be persisted in `state/selection.json`
-- when a requested backend spec is missing, Polaris can synthesize it from an
-  existing source spec
+### render
 
-This is one of Polaris's strongest isolation-specific differentiators.
+```bash
+pnpm --dir apps/polaris run polaris -- render <workspaceRef>
+```
 
-## Current Boundaries
+当前语义是：
 
-The current implementation deliberately does **not**:
+- 加载标准化 workspace 对象
+- 生成目标 backend manifest
+- 写入 `generated/`
 
-- provide Coder-level production operations or governance maturity
-- provide equal operational depth across all three backends
-- hide KubeVirt guest probing complexity behind a richer guest agent model
-- expose a full backend capability matrix or strong preflight diagnostics yet
-- provide fine-grained repair actions for every backend-specific failure mode
+这一步只处理 realization，不直接启动 runtime。
+
+### apply
+
+```bash
+pnpm --dir apps/polaris run polaris -- apply <workspaceRef>
+```
+
+当前语义是：
+
+- 把 generated manifest 应用到底层 backend
+- 创建 container、Pod 或 VM 所需资源
+
+### start
+
+```bash
+pnpm --dir apps/polaris run polaris -- start <workspaceRef>
+```
+
+当前语义是：
+
+- 启动目标 backend runtime
+- 等待 backend 与 runtime assembly 进入可用状态
+
+### stop
+
+```bash
+pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
+```
+
+当前语义是：
+
+- 停止当前 workspace 的 backend runtime
+- 不直接删除 workspace saved spec
+
+### restart
+
+```bash
+pnpm --dir apps/polaris run polaris -- restart <workspaceRef>
+```
+
+当前语义是：
+
+- 对当前 workspace runtime 执行重启
+- 保留 workspace attachment 语义边界
+
+### rebuild
+
+```bash
+pnpm --dir apps/polaris run polaris -- rebuild <workspaceRef>
+```
+
+当前语义是：
+
+- 刷新 workspace realization 所依赖的镜像或生成物
+- 再进入 backend 生命周期流程
+
+### status
+
+```bash
+pnpm --dir apps/polaris run polaris -- status <workspaceRef>
+```
+
+当前语义是：
+
+- 检查 backend existence 和 running
+- 检查 attachment presence
+- 检查 runtime assembly
+- 检查 daemon / service readiness
+- 合成 `status.json`
+
+### reconcile
+
+```bash
+pnpm --dir apps/polaris run polaris -- reconcile <workspaceRef>
+```
+
+当前语义是：
+
+- 基于 workspace drift 生成修复动作
+- 执行允许的 repair / restart / re-render / re-apply 动作
+
+### logs
+
+```bash
+pnpm --dir apps/polaris run polaris -- logs <workspaceRef>
+```
+
+当前语义是：
+
+- 读取当前 workspace runtime 的后端日志
+- 用于辅助判断 runtime assembly 和 backend 问题
+
+### switch
+
+```bash
+pnpm --dir apps/polaris run polaris -- switch <workspaceRef>
+```
+
+当前语义是：
+
+- 切换 workspace 的 backend realization
+- 持久化新的 backend 选择
+- 在需要时迁移 workspace 相关 attachment 视图
+
+### delete
+
+```bash
+pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
+```
+
+当前语义是：
+
+- 删除 workspace saved spec
+- 删除该 workspace 的 backend realization
+- 删除该 workspace 自己的状态目录
+
+当前不会把 `user-identity-state` 当成 workspace 删除目标。
+
+### live-switch
+
+```bash
+pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> \
+  [--harness <ssh|codex|claude|copilot|opencode|pi>]
+```
+
+当前语义是：
+
+- 在运行中的 workspace 内切换某个 harness 的运行时凭证
+- 写入 workspace 对应的 live selection
+- 刷新当前 workspace 状态
+
+这属于 workspace 运行时装配命令面，不属于用户管理命令面。
+
+### 设计约束
+
+- CLI 先面向 workspace，再面向 backend 细节。
+- `<workspaceRef>` 可以显式指定 backend，例如 `demo@docker`。
+- `render` / `apply` / `start` / `status` 都围绕同一个 workspace 对象执行。
+- 切换 backend 不改变 workspace attachment 语义。
+- 删除 workspace 不删除用户级 identity attachment。
