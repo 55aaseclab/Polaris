@@ -77,12 +77,8 @@ import {
   SidebarFooter,
   SidebarInset,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
-  SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
@@ -133,6 +129,13 @@ type LanguageContextValue = {
   language: Language;
   setLanguage: (value: Language) => void;
   t: (key: string) => string;
+};
+
+type PortalShellContextValue = {
+  activeUserId: string;
+  workspaces: PortalWorkspaceSummary[];
+  workspacesLoading: boolean;
+  openCreateWorkspaceDialog: () => void;
 };
 
 const COPY: Record<Language, Record<string, string>> = {
@@ -343,6 +346,15 @@ const COPY: Record<Language, Record<string, string>> = {
     language: "Language",
     profile: "Profile",
     empty_pane: "Empty pane",
+    workspace_header_title: "Workspace",
+    workspace_header_empty: "No workspace selected yet.",
+    workspace_status_button: "Workspace status",
+    workspace_empty_title: "Create your first workspace",
+    workspace_empty_description_line_1: "You don't have any workspaces yet.",
+    workspace_empty_description_line_2: "After creation, you can start using it right away. The system will connect the default key first.",
+    workspace_empty_description_line_3: "If you want to use your own credentials, you can add them first.",
+    workspace_empty_create: "Create now",
+    workspace_empty_credentials: "Add credentials",
     global_error_title: "Something went wrong",
     global_error_description: "The page could not be loaded.",
     global_error_unresolved_access: "Your access could not be verified.",
@@ -557,6 +569,15 @@ const COPY: Record<Language, Record<string, string>> = {
     language: "语言",
     profile: "资料",
     empty_pane: "空白页",
+    workspace_header_title: "工作空间",
+    workspace_header_empty: "目前没有工作空间",
+    workspace_status_button: "工作空间状态",
+    workspace_empty_title: "开始创建你的第一个工作空间",
+    workspace_empty_description_line_1: "你还没有工作空间。",
+    workspace_empty_description_line_2: "创建后即可直接开始使用，系统会先为你接入默认密钥。",
+    workspace_empty_description_line_3: "如果你想使用自己的凭证，也可以先添加。",
+    workspace_empty_create: "立即创建",
+    workspace_empty_credentials: "添加凭证",
     global_error_title: "出错了",
     global_error_description: "页面无法加载。",
     global_error_unresolved_access: "无法验证当前访问权限。",
@@ -567,11 +588,20 @@ const COPY: Record<Language, Record<string, string>> = {
 };
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
+const PortalShellContext = createContext<PortalShellContextValue | null>(null);
 
 function useLanguage(): LanguageContextValue {
   const context = useContext(LanguageContext);
   if (!context) {
     throw new Error("Language context is not available");
+  }
+  return context;
+}
+
+function usePortalShell(): PortalShellContextValue {
+  const context = useContext(PortalShellContext);
+  if (!context) {
+    throw new Error("Portal shell context is not available");
   }
   return context;
 }
@@ -850,6 +880,19 @@ function translatePaseoState(
     return t("paseo_attention");
   }
   return t("paseo_unknown");
+}
+
+function workspaceSummaryStatusLabel(
+  workspace: PortalWorkspaceSummary | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (!workspace) {
+    return t("workspace_unknown");
+  }
+  if (workspace.progress && !workspace.progress.done) {
+    return `${t("status_provisioning")} ${workspace.progress.percent}%`;
+  }
+  return translateWorkspaceRuntimeState(workspace.status?.state, t);
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1199,7 +1242,6 @@ function PortalShellLayout(props: {
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
   const currentWorkspacePane = pathParts[4] ?? "";
-  const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>([]);
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [startAfterCreate, setStartAfterCreate] = useState(true);
@@ -1292,30 +1334,44 @@ function PortalShellLayout(props: {
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("switch_user");
+  const currentWorkspaceSummary = currentWorkspaceName
+    ? sidebarWorkspaces?.find((workspace) => workspace.name === currentWorkspaceName) ?? null
+    : null;
+  const workspaceStatusRoute = currentWorkspaceName
+    ? workspacePaneLink(currentWorkspaceName, "paseo")
+    : "";
+  const isWorkspaceSection = location.pathname.includes("/workspaces");
   const currentPaneTitle = location.pathname.includes("/admin")
     ? t("administration")
     : location.pathname.includes("/credentials")
       ? t("credentials")
     : location.pathname.includes("/settings")
       ? t("settings_title")
-    : currentWorkspacePane === "paseo"
-      || currentWorkspacePane === "dev-env"
-      || currentWorkspacePane === "memory"
-      ? t("workspace_state")
-      : location.pathname.includes("/workspaces/") && currentWorkspacePane === ""
-        ? currentWorkspaceName || t("empty_pane")
-        : location.pathname.includes("/workspaces/")
-          ? t("workspace_overview")
-          : t("app_name");
+      : isWorkspaceSection
+        ? t("workspace_header_title")
+        : t("app_name");
   const currentPaneSubtitle = location.pathname.includes("/credentials")
     ? t("credentials_header_desc")
+    : isWorkspaceSection
+      ? (currentWorkspaceName || t("workspace_header_empty"))
     : null;
+  const shellContextValue: PortalShellContextValue = {
+    activeUserId,
+    workspaces: sidebarWorkspaces ?? [],
+    workspacesLoading: sidebarWorkspacesLoading,
+    openCreateWorkspaceDialog: () => setCreateWorkspaceOpen(true),
+  };
 
   return (
-    <>
-      <Sidebar collapsible="offcanvas">
+    <PortalShellContext.Provider value={shellContextValue}>
+      <>
+        <Sidebar collapsible="offcanvas">
         <SidebarHeader className="p-4">
-          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+          <Link
+            to={activeUserId ? userWorkspaceIndexLink() : "/"}
+            onClick={handleSidebarNavigate}
+            className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2"
+          >
             <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
               P
             </div>
@@ -1323,7 +1379,7 @@ function PortalShellLayout(props: {
               <div className="truncate text-sm font-medium leading-none">{t("app_name")}</div>
               <div className="truncate text-xs text-muted-foreground">{t("sidebar_tier")}</div>
             </div>
-          </div>
+          </Link>
         </SidebarHeader>
         <SidebarContent className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -1429,7 +1485,6 @@ function PortalShellLayout(props: {
                     const active = location.pathname.includes(
                       `/workspaces/${encodeURIComponent(workspace.name)}`,
                     );
-                    const expanded = expandedWorkspaces.includes(workspace.name);
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
@@ -1440,32 +1495,6 @@ function PortalShellLayout(props: {
                             </span>
                           </Link>
                         </SidebarMenuButton>
-                        <SidebarMenuAction
-                          onClick={() => {
-                            setExpandedWorkspaces((current) =>
-                              current.includes(workspace.name)
-                                ? current.filter((value) => value !== workspace.name)
-                                : [...current, workspace.name],
-                            );
-                          }}
-                          aria-label={expanded ? `Collapse ${workspace.name}` : `Expand ${workspace.name}`}
-                        >
-                          <ChevronRight className={[
-                            "h-4 w-4 transition-transform",
-                            expanded ? "rotate-90" : "",
-                          ].join(" ")} />
-                        </SidebarMenuAction>
-                        {expanded && (
-                          <SidebarMenuSub>
-                            <SidebarMenuSubItem>
-                              <SidebarMenuSubButton asChild>
-                                <Link to={workspacePaneLink(workspace.name, "paseo")} onClick={handleSidebarNavigate}>
-                                  {t("workspace_state")}
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          </SidebarMenuSub>
-                        )}
                       </SidebarMenuItem>
                     );
                   })}
@@ -1576,26 +1605,42 @@ function PortalShellLayout(props: {
             </SidebarMenu>
           </SidebarFooter>
         )}
-      </Sidebar>
-      <SidebarInset className="overflow-hidden">
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b bg-background px-4 py-3">
-          <SidebarTrigger />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">
-              {currentPaneTitle}
-            </div>
-            {currentPaneSubtitle ? (
-              <div className="truncate text-xs text-muted-foreground">
-                {currentPaneSubtitle}
+        </Sidebar>
+        <SidebarInset className="overflow-hidden">
+          <header className="flex min-h-16 shrink-0 items-center gap-3 border-b bg-background px-4 py-3">
+            <SidebarTrigger />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">
+                {currentPaneTitle}
               </div>
+              {currentPaneSubtitle ? (
+                <div className="truncate text-xs text-muted-foreground">
+                  {currentPaneSubtitle}
+                </div>
+              ) : null}
+            </div>
+            {currentWorkspaceName ? (
+              <Button
+                asChild
+                variant={currentWorkspacePane === "paseo" ? "default" : "outline"}
+                size="sm"
+                className="shrink-0"
+              >
+                <Link to={workspaceStatusRoute}>
+                  <span>{t("workspace_status_button")}</span>
+                  <Badge variant="secondary" className="ml-2">
+                    {workspaceSummaryStatusLabel(currentWorkspaceSummary, t)}
+                  </Badge>
+                </Link>
+              </Button>
             ) : null}
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+            {props.children}
           </div>
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
-          {props.children}
-        </div>
-      </SidebarInset>
-    </>
+        </SidebarInset>
+      </>
+    </PortalShellContext.Provider>
   );
 }
 
@@ -1708,12 +1753,69 @@ function OverviewPage() {
 }
 
 function WorkspaceIndexPage() {
+  const { t } = useLanguage();
+  const navigate = useNavigate();
+  const { userId = "" } = useParams();
   const { data: users } = useAsyncValue(listUsers, []);
 
   return (
     <PortalShell users={users ?? []}>
-      <div className="min-h-[40dvh]" />
+      <WorkspaceEmptyState
+        title={t("workspace_empty_title")}
+        descriptionLines={[
+          t("workspace_empty_description_line_1"),
+          t("workspace_empty_description_line_2"),
+          t("workspace_empty_description_line_3"),
+        ]}
+        onOpenCredentials={() => {
+          navigate(`/users/${encodeURIComponent(userId)}/credentials`);
+        }}
+      />
     </PortalShell>
+  );
+}
+
+function WorkspaceEmptyState(props: {
+  title: string;
+  descriptionLines: string[];
+  onOpenCredentials: () => void;
+}) {
+  const { t } = useLanguage();
+  const { workspaces, workspacesLoading, openCreateWorkspaceDialog } = usePortalShell();
+
+  if (workspacesLoading) {
+    return (
+      <div className="flex min-h-[40dvh] w-full items-center justify-center">
+        <div className="text-sm text-muted-foreground">{t("loading_workspaces")}</div>
+      </div>
+    );
+  }
+
+  if (workspaces.length > 0) {
+    return <div className="min-h-[40dvh]" />;
+  }
+
+  return (
+    <div className="flex min-h-[60dvh] w-full items-center justify-center">
+      <div className="grid w-full max-w-2xl gap-6 rounded-[1.75rem] border border-border bg-card p-6 shadow-sm sm:p-8">
+        <div className="grid gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">{props.title}</h1>
+          <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+            {props.descriptionLines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={openCreateWorkspaceDialog}>
+            {t("workspace_empty_create")}
+          </Button>
+          <Button variant="outline" onClick={props.onOpenCredentials}>
+            {t("workspace_empty_credentials")}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
