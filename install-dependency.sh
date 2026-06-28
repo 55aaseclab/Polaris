@@ -7,6 +7,7 @@ LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
 KREW_ROOT_DIR="${KREW_ROOT:-$HOME/.krew}"
 KREW_BIN_DIR="${KREW_ROOT_DIR}/bin"
 KUBECTL_VERSION="${KUBECTL_VERSION:-}"
+NODE_MAJOR_VERSION="${NODE_MAJOR_VERSION:-22}"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"
@@ -40,13 +41,13 @@ ensure_base_packages() {
   case "$manager" in
     apt)
       sudo apt-get update || log "apt-get update had errors, continuing"
-      sudo apt-get install -y curl git tar gzip ca-certificates rsync nodejs npm
+      sudo apt-get install -y curl git tar gzip ca-certificates rsync
       ;;
     dnf)
-      sudo dnf install -y curl git tar gzip ca-certificates rsync nodejs npm
+      sudo dnf install -y curl git tar gzip ca-certificates rsync
       ;;
     brew)
-      brew install curl git rsync node
+      brew install curl git rsync
       ;;
     none)
       ;;
@@ -66,6 +67,53 @@ ensure_required_commands() {
   if [[ "${#missing[@]}" -gt 0 ]]; then
     fail "missing required commands: ${missing[*]}"
   fi
+}
+
+node_major_version() {
+  if ! command_exists node; then
+    return 1
+  fi
+
+  node -p 'process.versions.node.split(".")[0]' 2>/dev/null
+}
+
+ensure_node_runtime() {
+  local manager current_major
+  manager="$(detect_pkg_manager)"
+  current_major="$(node_major_version || true)"
+
+  if [[ -n "${current_major}" && "${current_major}" -ge "${NODE_MAJOR_VERSION}" ]]; then
+    log "node already satisfies major version >= ${NODE_MAJOR_VERSION}"
+    return
+  fi
+
+  case "$manager" in
+    apt)
+      log "Installing Node.js ${NODE_MAJOR_VERSION} via NodeSource"
+      sudo apt-get update || log "apt-get update had errors, continuing"
+      sudo apt-get install -y ca-certificates curl gnupg
+      sudo mkdir -p /etc/apt/keyrings
+      curl -fsSL "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+      printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "${NODE_MAJOR_VERSION}" \
+        | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+      sudo apt-get update
+      sudo apt-get install -y nodejs
+      ;;
+    dnf)
+      log "Installing Node.js ${NODE_MAJOR_VERSION} via NodeSource"
+      sudo dnf install -y ca-certificates curl
+      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR_VERSION}.x" | sudo bash -
+      sudo dnf install -y nodejs
+      ;;
+    brew)
+      log "Installing Node.js ${NODE_MAJOR_VERSION} via Homebrew"
+      brew install "node@${NODE_MAJOR_VERSION}"
+      ;;
+    none)
+      fail "unable to install Node.js automatically on this platform"
+      ;;
+  esac
 }
 
 ensure_pnpm() {
@@ -219,6 +267,7 @@ main() {
   ensure_base_packages
   ensure_required_commands
   ensure_shell_path
+  ensure_node_runtime
   ensure_pnpm
   ensure_kubectl
   ensure_krew
