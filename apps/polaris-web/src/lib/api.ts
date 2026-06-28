@@ -276,30 +276,6 @@ export async function createPortalUser(input: {
   });
 }
 
-export async function deletePortalUser(
-  userId: string,
-): Promise<{
-  userProfile: {
-    id: string;
-    removed: boolean;
-    profilePath: string;
-    secretsRoot: string;
-  };
-  mappings: {
-    removedClerkUsernames: string[];
-  };
-  clerk: {
-    removedUserIds: string[];
-  };
-}> {
-  return apiFetch(
-    `/users/${encodeURIComponent(userId)}`,
-    {
-      method: "DELETE",
-    },
-  );
-}
-
 export async function resolvePortalUserMapping(
   input: {
     clerkUsername?: string;

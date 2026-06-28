@@ -11,16 +11,17 @@ import { rebuildCommand } from "./commands/rebuild.js";
 import { statusCommand } from "./commands/status.js";
 import { reconcileCommand } from "./commands/reconcile.js";
 import { logsCommand } from "./commands/logs.js";
+import { liveSwitchCommand } from "./commands/live-switch.js";
 import { switchCommand } from "./commands/switch.js";
 import { portalCommand } from "./commands/portal.js";
 import { deleteCommand } from "./commands/delete.js";
 import { executorCommand } from "./commands/executor.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "switch", "delete", "portal", "server", "executor"]);
+const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|switch|delete|portal|server|executor> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor> ...");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -94,6 +95,10 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (command === "logs") {
     await logsCommand(project);
+    return;
+  }
+  if (command === "live-switch") {
+    await liveSwitchCommand(argv.slice(1));
     return;
   }
   if (command === "switch") {

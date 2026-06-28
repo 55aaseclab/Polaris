@@ -479,7 +479,7 @@ test("runCli user credential add supports non-codex harness inventory entries", 
   }
 });
 
-test("runCli user credential live-switch stages non-codex material into user identity state", async () => {
+test("runCli live-switch stages non-codex material into user identity state", async () => {
   const project = uniqueProjectName("cli-live-switch");
   const scriptLogPath = path.join(os.tmpdir(), `${project}-live-switch-script.log`);
 
@@ -523,10 +523,7 @@ exit 0
         async ({ readCommandLog }) => {
           const stdout = await captureStdout(async () => {
             await runCli([
-              "user",
-              "credential",
               "live-switch",
-              DEMO_USER_PROFILE_ID,
               `${project}@docker`,
               "claude-live",
               "--harness",
