@@ -48,13 +48,11 @@ paseo_dist_dir="$(paseo_local_prepare_dist)"
 
 POLARIS_WEB_PORT="${WEB_PORT}" \
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
-POLARIS_EXECUTOR_USE_SOURCE=1 \
 pnpm --filter polaris exec tsx watch scripts/polaris.ts server "${SERVER_PORT}" "${SERVER_HOST}" \
   > >(tee "${LOG_DIR}/stack.server.log") \
   2> >(tee "${LOG_DIR}/stack.server.err.log" >&2) &
 server_pid=$!
 
-POLARIS_EXECUTOR_USE_SOURCE=1 \
 pnpm --filter polaris exec tsx watch scripts/polaris.ts executor "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
   > >(tee "${LOG_DIR}/stack.executor.log") \
   2> >(tee "${LOG_DIR}/stack.executor.err.log" >&2) &

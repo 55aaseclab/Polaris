@@ -6,8 +6,8 @@ config/nvim/lazy-lock.json
 
 # OS/editor metadata
 .DS_Store
-.cert
-.tmp
+.cert/
+.tmp/
 .idea/
 .vscode/
 nohup.out
@@ -20,9 +20,13 @@ __pycache__/
 *.tsbuildinfo
 node_modules/
 .pnpm-store/
+coverage/
 dist/
-apps/polaris/.coverage/
+test-results/
+apps/polaris/.tmp/
+apps/polaris-web/dist/
 apps/polaris-web/test-results/
+apps/polaris/.coverage/
 .env.local
 .env.dev
 .env.prod
@@ -46,10 +50,13 @@ config/users/*/**
 !config/users/profiles/100000000000000001.yaml
 !config/users/100000000000000001/.gitignore
 !config/users/100000000000000001/
+config/users/100000000000000001/.portal/
+config/users/100000000000000001/polaris/
 !config/users/100000000000000001/credentials/
 !config/users/100000000000000001/credentials/**
 !config/users/100000000000000001/docker/
 !config/users/100000000000000001/docker/**
-!config/users/100000000000000001/projects/
-!config/users/100000000000000001/projects/demo/
-!config/users/100000000000000001/projects/demo/*.agent.yaml
+!config/users/100000000000000001/workspaces/
+config/users/100000000000000001/workspaces/**
+!config/users/100000000000000001/workspaces/demo/
+!config/users/100000000000000001/workspaces/demo/*.agent.yaml
