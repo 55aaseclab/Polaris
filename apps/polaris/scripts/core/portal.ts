@@ -19,10 +19,10 @@ import {
   workspaceStatusPath,
 } from "../output/state-store.js";
 import type { Credential, WorkspaceStatus } from "./workspace.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
-const USER_ROOT = path.join(REPO_ROOT, "config", "users");
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_PROFILES_DIR = path.join(USER_ROOT, "profiles");
 
 export type PortalBackendKind = "docker" | "pod" | "kubevirt-vm";

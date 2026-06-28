@@ -4,11 +4,11 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { userIdentityDurablePaths } from "../core/identity-layout.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
-const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
-const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
+const USER_PROFILES_DIR = path.join(USER_SECRETS_ROOT, "profiles");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
 const WORKSPACE_SERVICE_PORT_START = 32000;
 const WORKSPACE_SERVICE_PORT_END = 32999;
@@ -59,9 +59,7 @@ export function workspaceConfigPath(
       ? "kubevirt.agent.yaml"
       : `${backendKind}.agent.yaml`;
   return path.join(
-    REPO_ROOT,
-    "config",
-    "users",
+    USER_SECRETS_ROOT,
     userProfileId.trim(),
     "workspaces",
     project,
@@ -71,9 +69,8 @@ export function workspaceConfigPath(
 
 export function workspaceConfigExists(project: string): boolean {
   assertNoProjectNameCollision(project);
-  const userScopedRoot = path.join(REPO_ROOT, "config", "users");
-  const userScopedMatches = fs.existsSync(userScopedRoot)
-    ? fs.readdirSync(userScopedRoot, { withFileTypes: true })
+  const userScopedMatches = fs.existsSync(USER_SECRETS_ROOT)
+    ? fs.readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => [
         workspaceConfigPath(project, "docker", entry.name),
@@ -149,16 +146,15 @@ function userCredentialRegistryDir(userProfileId: string): string {
 
 function configuredWorkspaceServicePorts(): Set<number> {
   const configured = new Set<number>();
-  const usersRoot = path.join(REPO_ROOT, "config", "users");
-  if (!fs.existsSync(usersRoot)) {
+  if (!fs.existsSync(USER_SECRETS_ROOT)) {
     return configured;
   }
 
-  for (const userEntry of fs.readdirSync(usersRoot, { withFileTypes: true })) {
+  for (const userEntry of fs.readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })) {
     if (!userEntry.isDirectory()) {
       continue;
     }
-    const workspacesRoot = path.join(usersRoot, userEntry.name, "workspaces");
+    const workspacesRoot = path.join(USER_SECRETS_ROOT, userEntry.name, "workspaces");
     if (!fs.existsSync(workspacesRoot)) {
       continue;
     }

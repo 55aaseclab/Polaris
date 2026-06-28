@@ -3,16 +3,16 @@ import path from "node:path";
 import { deleteAllManagedCredentialsForUser } from "../../config/credentials.js";
 import { deleteUserMapEntriesForPolarisUserId } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
-import { resolveRepoRoot } from "../../utils/repo-root.js";
+import { polarisUsersRoot } from "../../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 function profilePathFor(userProfileId: string): string {
-  return path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  return path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
 }
 
 function userRootFor(userProfileId: string): string {
-  return path.join(REPO_ROOT, "config", "users", userProfileId);
+  return path.join(USER_ROOT, userProfileId);
 }
 
 function parseDeleteUserArgs(argv: string[]): { userProfileId: string } {
