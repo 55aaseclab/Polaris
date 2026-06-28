@@ -2,14 +2,7 @@
   "scripts": {
     "stack": {
       "type": "service",
-      "command": "bash ./scripts/deploy-polaris-host.sh .env.dev"
-    },
-    "deploy": {
-      "type": "service",
-      "command": "bash ./scripts/deploy-polaris-host.sh .env.prod"
-    },
-    "publish": {
-      "command": "bash ./scripts/publish-polaris.sh .env.prod"
+      "command": "bash -lc 'bash ./scripts/run-polaris-local-stack-service.sh .env.dev'"
     }
   }
 }
