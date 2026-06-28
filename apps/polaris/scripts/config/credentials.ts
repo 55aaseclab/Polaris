@@ -56,6 +56,22 @@ export interface ManagedCredentialRecord {
   files: ManagedCredentialMaterialFile[];
 }
 
+type DefaultCredentialPolicy =
+  | {
+      harness: "ssh";
+      credentialId: string;
+      activate: boolean;
+      ensureIfMissing: boolean;
+    }
+  | {
+      harness: "codex";
+      credentialId: string;
+      presetId: string;
+      apiKey: string;
+      activate: boolean;
+      ensureIfMissing: boolean;
+    };
+
 interface UserProfileRecord {
   id: string;
   email: string;
@@ -859,16 +875,60 @@ export function resolveActiveManagedCredential(args: {
   ) ?? null;
 }
 
+function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
+  const policies: DefaultCredentialPolicy[] = [
+    {
+      harness: "ssh",
+      credentialId: "github-ssh",
+      activate: true,
+      ensureIfMissing: true,
+    },
+  ];
+
+  const codexRightCodeApiKey = String(
+    process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY ?? "",
+  ).trim();
+  if (codexRightCodeApiKey) {
+    policies.push({
+      harness: "codex",
+      credentialId: "codex-rightcode",
+      presetId: "rightcode",
+      apiKey: codexRightCodeApiKey,
+      activate: true,
+      ensureIfMissing: true,
+    });
+  }
+
+  return policies;
+}
+
 export function ensureRequiredProfileCredentials(userProfileId: string): ManagedCredentialSummary[] {
   const profile = readUserProfileRecord(userProfileId);
   const created: ManagedCredentialSummary[] = [];
-  if (profile.ssh?.mode) {
+  const policies = resolveDefaultCredentialPolicies();
+  for (const policy of policies) {
+    if (policy.harness === "ssh") {
+      if (!profile.ssh?.mode) {
+        continue;
+      }
+      created.push(
+        createManagedSshCredential({
+          userProfileId,
+          credentialId: policy.credentialId,
+          activate: policy.activate,
+          ensureIfMissing: policy.ensureIfMissing,
+        }),
+      );
+      continue;
+    }
     created.push(
-      createManagedSshCredential({
+      createManagedCodexCredential({
         userProfileId,
-        credentialId: "github-ssh",
-        activate: true,
-        ensureIfMissing: true,
+        credentialId: policy.credentialId,
+        presetId: policy.presetId,
+        apiKey: policy.apiKey,
+        activate: policy.activate,
+        ensureIfMissing: policy.ensureIfMissing,
       }),
     );
   }

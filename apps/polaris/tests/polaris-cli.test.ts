@@ -260,6 +260,51 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
   }
 });
 
+test("runCli user create adds the default RightCode codex credential when configured", async () => {
+  const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
+  const userProfileId = uniqueProjectName("cli-user-codex-default");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    const stdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "create",
+        userProfileId,
+        "--name",
+        "CLI Default Codex User",
+        "--email",
+        `${userProfileId}@polaris.local`,
+      ]);
+    });
+    const parsed = parseJsonOutput<{
+      credentials: { defaults: string[] };
+    }>(stdout);
+
+    assert.deepEqual(parsed.credentials.defaults, ["github-ssh", "codex-rightcode"]);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex-rightcode.yaml")), true);
+
+    const codexRegistry = (yaml.load(
+      fs.readFileSync(path.join(userRoot, "credentials", "codex-rightcode.yaml"), "utf8"),
+    ) ?? {}) as {
+      metadata?: { active?: boolean; harness?: string; presetId?: string };
+    };
+    assert.equal(codexRegistry.metadata?.active, true);
+    assert.equal(codexRegistry.metadata?.harness, "codex");
+    assert.equal(codexRegistry.metadata?.presetId, "rightcode");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previous;
+    }
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("runCli user delete removes the user profile, secrets root, and Clerk mapping", async () => {
   const userProfileId = uniqueProjectName("cli-user-delete");
   const clerkUsername = `${userProfileId}-clerk`;

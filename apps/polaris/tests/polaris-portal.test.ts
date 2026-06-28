@@ -850,6 +850,51 @@ test("portal API creates a user profile without a Clerk email by using a synthet
   }
 });
 
+test("portal API creates the default RightCode codex credential when configured", async () => {
+  const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
+  const userProfileId = uniqueName("portal-codex-default");
+  const clerkUsername = uniqueName("clerk-codex-default");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+
+  try {
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/users`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userProfileId,
+          clerkUsername,
+          name: "Portal Codex Default User",
+          email: `${userProfileId}@polaris.local`,
+          role: "user",
+          plan: "free",
+        }),
+      });
+      assert.equal(response.status, 201);
+    });
+
+    assert.equal(fs.existsSync(profilePath), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "codex-rightcode.yaml")), true);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previous;
+    }
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
 
 test("portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
