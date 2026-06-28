@@ -20,6 +20,8 @@ PID_FILE="${RUNTIME_DIR}/executor.pid"
 LOG_FILE="${RUNTIME_DIR}/executor.log"
 ENV_MARKER_FILE="${RUNTIME_DIR}/env-file"
 COMMAND_PATTERN="apps/polaris/dist/scripts/polaris.js executor"
+SOURCE_COMMAND_PATTERN="pnpm --filter polaris run executor"
+USE_SOURCE_EXECUTOR="${POLARIS_EXECUTOR_USE_SOURCE:-}"
 
 resolve_docker_bridge_gateway() {
   docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null \
@@ -78,7 +80,10 @@ kill_pid_gracefully() {
 }
 
 find_matching_pids() {
-  pgrep -f "${COMMAND_PATTERN}" 2>/dev/null || true
+  {
+    pgrep -f "${COMMAND_PATTERN}" 2>/dev/null || true
+    pgrep -f "${SOURCE_COMMAND_PATTERN}" 2>/dev/null || true
+  } | awk '!seen[$0]++'
 }
 
 stop_matching_processes() {
@@ -132,8 +137,13 @@ start_executor() {
   printf '%s\n' "${ENV_FILE}" > "${ENV_MARKER_FILE}"
 
   # Detach into a new session so the executor survives the launcher shell exiting.
-  setsid node apps/polaris/dist/scripts/polaris.js executor "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
-    >> "${LOG_FILE}" 2>&1 < /dev/null &
+  if [ -z "${USE_SOURCE_EXECUTOR}" ] && [ -f "apps/polaris/dist/scripts/polaris.js" ]; then
+    setsid node apps/polaris/dist/scripts/polaris.js executor "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
+      >> "${LOG_FILE}" 2>&1 < /dev/null &
+  else
+    setsid pnpm --filter polaris run executor -- "${EXECUTOR_PORT}" "${EXECUTOR_HOST}" \
+      >> "${LOG_FILE}" 2>&1 < /dev/null &
+  fi
   local pid=$!
   printf '%s\n' "${pid}" > "${PID_FILE}"
 
