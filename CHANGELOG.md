@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-06-28
+
+Expanded the Polaris web portal, host executor flow, and live credential
+runtime switching for local and deployed workspaces.
+
+### Added
+
+- Added the Polaris web portal workspace create, delete, status, asset
+  preview, and credential management flow.
+- Added asynchronous workspace provisioning through the executor-backed portal
+  control plane.
+- Added per-harness live credential switching and runtime status reporting for
+  `ssh`, `codex`, `claude`, `copilot`, `opencode`, and `pi`.
+- Added user-scoped Paseo daemon visibility so portal users only see their own
+  workspace runtime pairings.
+
+### Changed
+
+- Refined Polaris deployment to run the CLI and executor on the host while the
+  web portal and API stack stay compose-managed.
+- Reworked workspace status UI around driver controls, embedded Paseo runtime
+  state, and credential-aware runtime inspection.
+- Simplified Polaris portal auth so Clerk-backed sign-in, sign-up, and user
+  bootstrap are decoupled from local Polaris user creation.
+- Updated workspace rendering, provisioning, and rebuild handling so Dockerfile
+  drift is detected and refreshed before runtime start.
+- Hardened live runtime credential material writes and executor status refresh
+  behavior for real workspace containers.
+
+### Removed
+
+- Removed older direct agent-toggle assumptions from workspace creation in
+  favor of runtime-ready defaults and credential-driven activation.
+
 ## [0.2.1] - 2026-06-24
 
 Stabilized Polaris backend switching across Docker and KubeVirt for shared
