@@ -136,7 +136,7 @@ function cleanupPolarisRegistration(clerkUsername: string, userId: string): void
 
 function ensureUser001GitAuthFixture(): () => void {
   const credentialRoot = path.join(REPO_ROOT, "config", "users", USER001_POLARIS_ID, "credentials");
-  const sshRoot = path.join(credentialRoot, "ssh");
+  const sshRoot = path.join(credentialRoot, "ssh", "github-ssh");
   const credentialPath = path.join(credentialRoot, "github-ssh.yaml");
   const privateKeyPath = path.join(sshRoot, "id_ed25519");
   const publicKeyPath = path.join(sshRoot, "id_ed25519.pub");
@@ -178,12 +178,12 @@ function ensureUser001GitAuthFixture(): () => void {
       "  - ssh-auth",
       "materialRef:",
       "  type: file",
-      "  key: user-ssh-state/default",
+      "  key: github-ssh",
       "  files:",
       "    - key: id_ed25519",
-      "      source_path: credentials/ssh/id_ed25519",
+      "      source_path: credentials/ssh/github-ssh/id_ed25519",
       "    - key: id_ed25519.pub",
-      "      source_path: credentials/ssh/id_ed25519.pub",
+      "      source_path: credentials/ssh/github-ssh/id_ed25519.pub",
       "status: ready",
       "",
     ].join("\n"),

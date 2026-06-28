@@ -1814,17 +1814,8 @@ function WorkspaceDetailPage() {
   const agentCredentials = (credentials ?? []).filter((credential) =>
     credential.purposes.includes("agent-auth")
   );
-  const fallbackCredentialId = data?.credentialBindings.find((binding) =>
-    binding.purpose === "agent-auth"
-  )?.credentialId ?? "";
   const liveStatus = data?.status?.credentials?.live;
-  const rawCurrentPaseoCredentialId =
-    liveStatus?.selectedCredentialId ?? fallbackCredentialId;
-  const currentPaseoCredentialId = agentCredentials.some((credential) =>
-    credential.id === rawCurrentPaseoCredentialId
-  )
-    ? rawCurrentPaseoCredentialId
-    : "";
+  const liveSelections = liveStatus?.selectedByHarness ?? {};
   const harnessOptions = Array.from(
     new Set(
       [
@@ -1836,7 +1827,7 @@ function WorkspaceDetailPage() {
   const paseoHarnesses = MANAGED_HARNESS_ORDER.filter(
     (harness) => harness !== "ssh" && harnessOptions.includes(harness),
   );
-  const switchableHarnesses = liveStatus?.switchableHarnesses ?? ["codex"];
+  const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
   const embeddedPortalUrl = normalizePaseoPortalUrl(
     data?.liveTarget ?? data?.status?.paseo?.liveTarget,
@@ -1881,12 +1872,12 @@ function WorkspaceDetailPage() {
         const harnessCredentials = agentCredentials.filter(
           (credential) => credential.harness === harness,
         );
-        const runtimeCredential =
-          liveStatus?.selectedHarness === harness && currentPaseoCredentialId
-            ? harnessCredentials.find(
-                (credential) => credential.id === currentPaseoCredentialId,
-              ) ?? null
-            : null;
+        const runtimeCredentialId = liveSelections[harness]?.credentialId ?? "";
+        const runtimeCredential = runtimeCredentialId
+          ? harnessCredentials.find(
+              (credential) => credential.id === runtimeCredentialId,
+            ) ?? null
+          : null;
         const activeCredential =
           harnessCredentials.find((credential) => credential.active) ?? null;
         const preferredCredentialId =
@@ -1918,8 +1909,7 @@ function WorkspaceDetailPage() {
     });
   }, [
     agentCredentials,
-    currentPaseoCredentialId,
-    liveStatus?.selectedHarness,
+    liveStatus?.selectedByHarness,
     paseoHarnesses,
   ]);
 
@@ -2095,28 +2085,13 @@ function WorkspaceDetailPage() {
           const harnessCredentials = agentCredentials.filter(
             (credential) => credential.harness === harness,
           );
-          const runtimeCredential =
-            liveStatus?.selectedHarness === harness && currentPaseoCredentialId
-              ? harnessCredentials.find(
-                  (credential) => credential.id === currentPaseoCredentialId,
-                ) ?? null
-              : null;
-          const workspaceBoundCredential = fallbackCredentialId
+          const runtimeCredentialSelection = liveSelections[harness];
+          const currentCredential = runtimeCredentialSelection?.credentialId
             ? harnessCredentials.find(
-                (credential) => credential.id === fallbackCredentialId,
+                (credential) => credential.id === runtimeCredentialSelection.credentialId,
               ) ?? null
             : null;
-          const activeCredential =
-            harnessCredentials.find((credential) => credential.active) ?? null;
-          const currentCredential =
-            runtimeCredential ?? workspaceBoundCredential ?? activeCredential;
-          const currentSource = runtimeCredential
-            ? liveStatus?.source
-            : workspaceBoundCredential
-              ? "workspace-binding"
-              : activeCredential
-                ? "user-active"
-                : undefined;
+          const currentSource = runtimeCredentialSelection?.source;
           const selectedCredentialId =
             paseoCredentialSelections[harness] ?? "";
           const canLiveSwitch = switchableHarnesses.includes(harness);

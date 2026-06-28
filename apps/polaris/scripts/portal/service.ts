@@ -290,16 +290,15 @@ export function upsertPortalCredential(
     `${yaml.dump(document, { lineWidth: 120, noRefs: true })}`,
     "utf8",
   );
-  return {
-    id: credential.id,
-    kind: credential.kind,
-    label: credential.label,
-    purposes: credential.purposes,
-    status: credential.status ?? "ready",
-    paths: credential.files.map((file) => file.sourcePath),
-    active: false,
-    liveSwitchSupported: false,
-  };
+  const summary = listPortalCredentials(userId).find(
+    (entry) => entry.id === credential.id,
+  );
+  if (!summary) {
+    throw new Error(
+      `Credential '${credential.id}' could not be reloaded after upsert`,
+    );
+  }
+  return summary;
 }
 
 export async function queueProvisionWorkspace(

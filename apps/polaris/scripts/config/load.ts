@@ -229,9 +229,9 @@ function normalizeCredentialMetadata(
 }
 
 function credentialKindAttachmentKind(
-  kind: CredentialKind,
+  _kind: CredentialKind,
 ): ResolvedWorkspaceCredentialBinding["attachmentKind"] {
-  return kind === "ssh-key" ? "user-ssh-state" : "user-identity-state";
+  return "user-identity-state";
 }
 
 function mountPathForCredentialFile(
@@ -494,9 +494,13 @@ function resolveCredentialBindings(args: {
     });
   }
 
-  const defaultGitCredential = args.registryCredentials.find((credential) =>
-    credential.purposes.includes("git-auth"),
+  const activeGitCredential = args.registryCredentials.find((credential) =>
+    credential.purposes.includes("git-auth") && credential.metadata?.active === true,
   );
+  const defaultGitCredential = activeGitCredential
+    ?? args.registryCredentials.find((credential) =>
+      credential.purposes.includes("git-auth"),
+    );
   if (defaultGitCredential && !hasPurpose("git-auth")) {
     resolved.push({
       purpose: "git-auth",
@@ -581,14 +585,6 @@ function canonicalHome(user: string, projectName: string): string {
   return user === "root" ? "/root" : `/home/${user || projectName}`;
 }
 
-function authFileKind(file: AuthFile, home: string): "identity" | "ssh" {
-  const normalizedHome = home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`^${normalizedHome}/\\.ssh/`).test(file.mountPath) || file.key.includes("ssh")) {
-    return "ssh";
-  }
-  return "identity";
-}
-
 function buildAttachment(
   kind: DurableAttachment["kind"],
   scope: DurableAttachment["scope"],
@@ -652,16 +648,14 @@ function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig |
   const workspaceData = normalizeDirectDurableAttachmentConfig(attachments["workspace-data"]);
   const workspaceRuntimeState = normalizeDirectDurableAttachmentConfig(attachments["workspace-runtime-state"]);
   const userIdentityState = normalizeDirectDurableAttachmentConfig(attachments["user-identity-state"]);
-  const userSshState = normalizeDirectDurableAttachmentConfig(attachments["user-ssh-state"]);
   const ephemeralRuntime = normalizeDirectEphemeralRuntimeConfig(attachments["ephemeral-runtime"]);
-  if (!workspaceData || !workspaceRuntimeState || !userIdentityState || !userSshState || !ephemeralRuntime) {
+  if (!workspaceData || !workspaceRuntimeState || !userIdentityState || !ephemeralRuntime) {
     return null;
   }
   return {
     "workspace-data": workspaceData,
     "workspace-runtime-state": workspaceRuntimeState,
     "user-identity-state": userIdentityState,
-    "user-ssh-state": userSshState,
     "ephemeral-runtime": ephemeralRuntime,
   };
 }
@@ -700,14 +694,6 @@ function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfi
       identityDurablePaths,
       config["user-identity-state"].source,
     ),
-    userSshState: buildAttachment(
-      "user-ssh-state",
-      config["user-ssh-state"].scope,
-      config["user-ssh-state"].sharing,
-      config["user-ssh-state"].mountRoot,
-      config["user-ssh-state"].durablePaths,
-      config["user-ssh-state"].source,
-    ),
     ephemeralRuntime: {
       mountRoot: config["ephemeral-runtime"].mountRoot,
       paths: config["ephemeral-runtime"].paths,
@@ -734,8 +720,7 @@ function translateLegacyAttachments(args: {
         kind: "generated-material" as const,
         description: `ephemeral workspace storage for ${args.projectName}`,
       };
-  const identityFiles = args.authFiles.filter((file) => authFileKind(file, args.home) === "identity");
-  const sshFiles = args.authFiles.filter((file) => authFileKind(file, args.home) === "ssh");
+  const identityFiles = args.authFiles;
 
   return {
     workspaceData: buildAttachment(
@@ -769,17 +754,6 @@ function translateLegacyAttachments(args: {
         description: identityFiles.length
           ? `user identity material sourced from ${identityFiles.map((file) => file.key).join(", ")}`
           : "user identity material",
-      },
-    ),
-    userSshState: buildAttachment(
-      "user-ssh-state",
-      "user",
-      "cross-workspace",
-      "/ssh",
-      ["/ssh"],
-      {
-        kind: sshFiles.length ? "secret-material" : "generated-material",
-        description: sshFiles.length ? `user SSH material sourced from ${sshFiles.map((file) => file.key).join(", ")}` : "user SSH material",
       },
     ),
     ephemeralRuntime: {
@@ -995,7 +969,6 @@ export function loadWorkspaceFromConfigPath(
         ...attachments.workspaceData.durablePaths,
         ...attachments.workspaceRuntimeState.durablePaths,
         ...attachments.userIdentityState.durablePaths,
-        ...attachments.userSshState.durablePaths,
       ]
     },
     attachments,
@@ -1044,7 +1017,7 @@ export function loadWorkspaceFromConfigPath(
         `${agentContract.runtime.evolutionRoot} SHALL assemble from workspace-runtime-state`,
         `${home}/.codex, ${home}/.claude, ${home}/.copilot, ${home}/.pi, and OpenCode runtime state SHALL assemble from user-identity-state`,
         `Codex XDG config/data/state SHALL assemble from user-identity-state`,
-        `${home}/.ssh SHALL assemble from user-ssh-state with strict key permissions`,
+        `${home}/.ssh SHALL assemble from user-identity-state with strict key permissions`,
       ],
       staleRuntimeArtifacts: [...agentContract.runtime.staleRuntimeArtifacts, ...attachments.ephemeralRuntime.staleArtifacts],
     },

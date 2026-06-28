@@ -265,10 +265,22 @@ function defaultSshCredentialComment(userProfile: UserProfileRecord): string {
   return explicit || userProfile.email || `${userProfile.id}@polaris.local`;
 }
 
-function generateManagedSshKeypair(userProfileId: string, comment: string): string[] {
+function managedSshCredentialMaterialDir(
+  userProfileId: string,
+  credentialId: string,
+): string {
+  return path.join(credentialsRootFor(userProfileId), "ssh", credentialId);
+}
+
+function generateManagedSshKeypair(
+  userProfileId: string,
+  credentialId: string,
+  comment: string,
+): string[] {
   const secretsRoot = userRootFor(userProfileId);
-  const sshPrivateKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519");
-  const sshPublicKeyPath = path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub");
+  const materialDir = managedSshCredentialMaterialDir(userProfileId, credentialId);
+  const sshPrivateKeyPath = path.join(materialDir, "id_ed25519");
+  const sshPublicKeyPath = path.join(materialDir, "id_ed25519.pub");
 
   fs.mkdirSync(path.dirname(sshPrivateKeyPath), { recursive: true });
   if (!fs.existsSync(sshPrivateKeyPath) || !fs.existsSync(sshPublicKeyPath)) {
@@ -291,8 +303,8 @@ function generateManagedSshKeypair(userProfileId: string, comment: string): stri
   }
 
   return [
-    "credentials/ssh/id_ed25519",
-    "credentials/ssh/id_ed25519.pub",
+    path.relative(secretsRoot, sshPrivateKeyPath).replace(/\\/g, "/"),
+    path.relative(secretsRoot, sshPublicKeyPath).replace(/\\/g, "/"),
   ];
 }
 
@@ -462,7 +474,7 @@ function createManagedGenericAgentCredential(args: {
       presetId: args.presetId?.trim() || preset?.id || undefined,
       source: "portal",
       active: false,
-      liveSwitchSupported: false,
+      liveSwitchSupported: supportsLiveCredentialSwitch(args.harness),
     },
     status: "ready",
   });
@@ -488,6 +500,7 @@ export function createManagedSshCredential(args: {
   userProfileId: string;
   credentialId?: string;
   label?: string;
+  activate?: boolean;
   ensureIfMissing?: boolean;
 }): ManagedCredentialSummary & { created: boolean } {
   const userProfile = readUserProfileRecord(args.userProfileId);
@@ -498,7 +511,7 @@ export function createManagedSshCredential(args: {
   const comment = defaultSshCredentialComment(userProfile);
 
   if (args.ensureIfMissing && fs.existsSync(registryPath)) {
-    generateManagedSshKeypair(args.userProfileId, comment);
+    generateManagedSshKeypair(args.userProfileId, credentialId, comment);
     return {
       ...summarizeCredentialDocument(
         args.userProfileId,
@@ -509,7 +522,11 @@ export function createManagedSshCredential(args: {
     };
   }
 
-  generateManagedSshKeypair(args.userProfileId, comment);
+  const [privateKeySourcePath, publicKeySourcePath] = generateManagedSshKeypair(
+    args.userProfileId,
+    credentialId,
+    comment,
+  );
   const summary = writeCredentialRegistry(args.userProfileId, credentialId, {
     id: credentialId,
     userId: args.userProfileId,
@@ -518,24 +535,43 @@ export function createManagedSshCredential(args: {
     purposes: ["git-auth", "ssh-auth"],
     materialRef: {
       type: "file",
-      key: "user-ssh-state/default",
+      key: credentialId,
       files: [
         {
           key: "id_ed25519",
-          source_path: "credentials/ssh/id_ed25519",
+          source_path: privateKeySourcePath,
         },
         {
           key: "id_ed25519.pub",
-          source_path: "credentials/ssh/id_ed25519.pub",
+          source_path: publicKeySourcePath,
         },
       ],
     },
     metadata: {
       provider: "local",
       harness: "ssh",
+      active: false,
+      liveSwitchSupported: true,
     },
     status: "ready",
   });
+
+  const shouldActivate =
+    args.activate === true
+    || resolveActiveManagedCredential({
+      userProfileId: args.userProfileId,
+      harness: "ssh",
+    }) === null;
+  if (shouldActivate) {
+    const activated = activateManagedCredential({
+      userProfileId: args.userProfileId,
+      credentialId,
+    });
+    return {
+      ...activated,
+      created: true,
+    };
+  }
   return {
     ...summary,
     created: true,
@@ -691,6 +727,7 @@ export function createManagedHarnessCredential(args: {
       userProfileId: args.userProfileId,
       credentialId: args.credentialId,
       label: args.label,
+      activate: args.activate,
       ensureIfMissing: args.ensureIfMissing,
     });
   }
@@ -793,9 +830,6 @@ export function activateManagedCredential(args: {
   if (!target) {
     throw new Error(`Credential '${args.credentialId}' was not found for user '${args.userProfileId}'`);
   }
-  if (target.harness === "ssh") {
-    throw new Error(`Credential '${args.credentialId}' does not support activation`);
-  }
 
   const registryRoot = credentialsRootFor(args.userProfileId);
   for (const credential of credentials.filter((entry) => entry.harness === target.harness)) {
@@ -833,6 +867,7 @@ export function ensureRequiredProfileCredentials(userProfileId: string): Managed
       createManagedSshCredential({
         userProfileId,
         credentialId: "github-ssh",
+        activate: true,
         ensureIfMissing: true,
       }),
     );

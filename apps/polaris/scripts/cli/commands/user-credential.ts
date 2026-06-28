@@ -113,7 +113,7 @@ function parseLiveSwitchCredentialArgs(argv: string[]): {
   const harnessValue = parseFlag(argv, "--harness")?.trim().toLowerCase();
   if (!userProfileId || !workspaceRef || !credentialId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- user credential live-switch <userProfileId> <workspaceRef> <credentialId> [--harness <codex|claude|copilot|opencode|pi>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential live-switch <userProfileId> <workspaceRef> <credentialId> [--harness <ssh|codex|claude|copilot|opencode|pi>]",
     );
   }
   if (harnessValue && !isManagedHarness(harnessValue)) {

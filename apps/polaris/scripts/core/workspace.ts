@@ -1,7 +1,7 @@
 export type BackendKind = "pod" | "kubevirt-vm" | "docker";
 export type PodProfile = "gvisor" | "kata-qemu" | "kata-clh" | "kata-qemu-tdx";
 export type LifecycleAction = "create" | "start" | "stop" | "restart" | "rebuild" | "status" | "reconcile" | "render" | "apply" | "logs";
-export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
+export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
 export type AttachmentScope = "workspace" | "user";
 export type AttachmentSharing = "exclusive" | "cross-workspace";
 export type AttachmentSourceKind =
@@ -10,7 +10,7 @@ export type AttachmentSourceKind =
   | "generated-material"
   | "legacy-backend"
   | "netfs";
-export type DirectAttachmentConfigKey = "workspace-data" | "workspace-runtime-state" | "user-identity-state" | "user-ssh-state";
+export type DirectAttachmentConfigKey = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
 
 export interface PlainEnvVar {
   name: string;
@@ -117,7 +117,7 @@ export interface ResolvedWorkspaceCredentialBinding
   extends WorkspaceCredentialBinding {
   source: "registry" | "compatibility";
   credential: Credential;
-  attachmentKind: "user-identity-state" | "user-ssh-state";
+  attachmentKind: "user-identity-state";
   authFiles: AuthFile[];
 }
 
@@ -179,7 +179,6 @@ export interface DirectAttachmentConfig {
   "workspace-data": DirectDurableAttachmentConfig;
   "workspace-runtime-state": DirectDurableAttachmentConfig;
   "user-identity-state": DirectDurableAttachmentConfig;
-  "user-ssh-state": DirectDurableAttachmentConfig;
   "ephemeral-runtime": DirectEphemeralRuntimeConfig;
 }
 
@@ -193,7 +192,6 @@ export interface WorkspaceAttachments {
   workspaceData: DurableAttachment;
   workspaceRuntimeState: DurableAttachment;
   userIdentityState: DurableAttachment;
-  userSshState: DurableAttachment;
   ephemeralRuntime: EphemeralRuntimeState;
 }
 
@@ -348,6 +346,11 @@ export interface WorkspaceStatus {
       selectedCredentialId?: string;
       selectedCredentialLabel?: string;
       source?: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+      selectedByHarness?: Record<string, {
+        credentialId: string;
+        label: string;
+        source: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+      }>;
     };
   };
   details: Record<string, string | undefined>;
@@ -442,7 +445,6 @@ export interface BackendObservation {
     workspaceData?: ObservationItem;
     workspaceRuntimeState?: ObservationItem;
     userIdentityState?: ObservationItem;
-    userSshState?: ObservationItem;
   };
   runtimeAssembly: {
     home?: ObservationItem;

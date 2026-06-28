@@ -6,6 +6,7 @@ import {
   MANAGED_HARNESSES,
   PRESET_SOURCE_COMMIT,
   providerPresetsForHarness,
+  supportsLiveCredentialSwitch,
   type HarnessProviderPresetSummary,
 } from "../config/credential-catalog.js";
 import { buildStatusAssets } from "./status-assets.js";
@@ -469,7 +470,7 @@ export function listPortalCredentials(userId: string): PortalCredentialSummary[]
         baseUrl: typeof metadata.baseUrl === "string" ? metadata.baseUrl : undefined,
         active: metadata.active === true,
         liveSwitchSupported: metadata.liveSwitchSupported === true
-          || harness === "codex",
+          || (typeof harness === "string" && supportsLiveCredentialSwitch(harness)),
         presetId: typeof metadata.presetId === "string" ? metadata.presetId : undefined,
       };
     })
@@ -481,7 +482,7 @@ export function credentialCatalog(): PortalCredentialCatalog {
     harnesses: MANAGED_HARNESSES.map((id) => ({
       id,
       supportsCreate: id !== "ssh",
-      supportsLiveSwitch: id === "codex",
+      supportsLiveSwitch: supportsLiveCredentialSwitch(id),
     })),
     presetsByHarness: Object.fromEntries(
       MANAGED_HARNESSES.map((id) => [id, providerPresetsForHarness(id)]),

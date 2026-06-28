@@ -13,9 +13,11 @@ import { EvolutionStore } from "../scripts/evolution/store.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceEvolutionStateDir,
+  workspaceLiveCredentialsPath,
   workspaceSelectionPath,
   workspaceStatusPath,
   writeWorkspaceDriverSelection,
+  writeWorkspaceLiveCredentialSelection,
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
@@ -139,6 +141,11 @@ function cleanupSelectionFile(project: string): void {
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`), { force: true });
 }
 
+function cleanupLiveCredentialsFile(project: string): void {
+  fs.rmSync(workspaceLiveCredentialsPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.live-credentials.json`), { force: true });
+}
+
 function loadDefaultDemoWorkspace() {
   cleanupSelectionFile("demo");
   return loadWorkspaceFromRefForTest("demo");
@@ -175,6 +182,7 @@ async function withTempWorkspaceSpec(
     fs.rmSync(outputPath, { force: true });
     fs.rmSync(generatedPath, { force: true });
     cleanupStatusFile(project);
+    cleanupLiveCredentialsFile(project);
   }
 }
 
@@ -193,9 +201,8 @@ test("loadWorkspace normalizes demo pod config through the TypeScript control pl
   assert.equal(workspace.attachments.workspaceData.scope, "workspace");
   assert.equal(workspace.attachments.workspaceRuntimeState.scope, "workspace");
   assert.equal(workspace.attachments.userIdentityState.scope, "user");
-  assert.equal(workspace.attachments.userSshState.scope, "user");
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
-  assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
   assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
   assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(workspace.attachments.workspaceData.source.server, "netfs.local");
@@ -245,8 +252,8 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
     assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
     assert.equal(fs.existsSync(profilePath), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "github-ssh.yaml")), true);
-    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "id_ed25519")), true);
-    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "id_ed25519.pub")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -1063,7 +1070,8 @@ test("pod render writes a TypeScript-generated manifest", () => {
   assert.match(rendered, /mountPath: \/workspace\/project/);
   assert.match(rendered, /mountPath: \/workspace\/state/);
   assert.match(rendered, /mountPath: \/identity/);
-  assert.match(rendered, /mountPath: \/ssh/);
+  assert.doesNotMatch(rendered, /mountPath: \/ssh/);
+  assert.match(rendered, /ln -sfn \/identity\/ssh \/root\/\.ssh/);
   assert.match(rendered, /ln -sfn \/identity\/codex \/root\/\.codex/);
   assert.match(rendered, /ln -sfn \/identity\/copilot \/root\/\.copilot/);
   assert.match(rendered, /ln -sfn \/identity\/pi \/root\/\.pi/);
@@ -1092,7 +1100,6 @@ test("attachment lifecycle semantics encode cross-workspace user state and exclu
   assert.equal(workspace.attachments.workspaceData.sharing, "exclusive");
   assert.equal(workspace.attachments.workspaceRuntimeState.sharing, "exclusive");
   assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
-  assert.equal(workspace.attachments.userSshState.sharing, "cross-workspace");
   assert.equal(workspace.attachments.workspaceData.scope, "workspace");
   assert.equal(workspace.attachments.userIdentityState.scope, "user");
 });
@@ -1103,7 +1110,7 @@ test("direct attachment config is present in migrated saved specs", () => {
   assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
   assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
-  assert.equal(workspace.attachments.userSshState.mountRoot, "/ssh");
+  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/copilot"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/config"));
   assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/data"));
@@ -1437,8 +1444,8 @@ test("provided-key user profile requires matching public-key comment", async () 
     const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
     const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
     const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
-    const privateKey = path.join(userRoot, "credentials", "ssh", "id_ed25519");
-    const publicKey = path.join(userRoot, "credentials", "ssh", "id_ed25519.pub");
+    const privateKey = path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519");
+    const publicKey = path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub");
 
     fs.mkdirSync(path.dirname(privateKey), { recursive: true });
     fs.mkdirSync(credentialRoot, { recursive: true });
@@ -1497,15 +1504,15 @@ test("provided-key user profile requires matching public-key comment", async () 
         purposes: ["git-auth", "ssh-auth"],
         materialRef: {
           type: "file",
-          key: "user-ssh-state/default",
+          key: "github-ssh",
           files: [
             {
               key: "id_ed25519",
-              source_path: "credentials/ssh/id_ed25519",
+              source_path: "credentials/ssh/github-ssh/id_ed25519",
             },
             {
               key: "id_ed25519.pub",
-              source_path: "credentials/ssh/id_ed25519.pub",
+              source_path: "credentials/ssh/github-ssh/id_ed25519.pub",
             },
           ],
         },
@@ -2024,7 +2031,6 @@ test("status stays ready when no active codex credential is selected", () => {
       workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
       workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
       userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
-      userSshState: { observed: true, detail: workspace.attachments.userSshState.mountRoot },
     },
     runtimeAssembly: {
       home: { observed: true, detail: workspace.runtime.home },
@@ -2058,6 +2064,102 @@ test("status stays ready when no active codex credential is selected", () => {
   assert.equal(status.health.daemonReadiness, "ready");
   assert.equal(status.credentials?.codex?.state, "not-selected");
   assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
+});
+
+test("status exposes live credential selections per harness", async () => {
+  const project = uniqueProjectName("status-live-selections");
+  const credentialRoot = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    DEMO_USER_PROFILE_ID,
+    "credentials",
+  );
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    try {
+      await runCli([
+        "user",
+        "credential",
+        "add",
+        DEMO_USER_PROFILE_ID,
+        "--harness",
+        "claude",
+        "--credential-id",
+        "claude-status-live",
+        "--label",
+        "Claude Status Live",
+        "--provider-name",
+        "anthropic",
+        "--api-key",
+        "claude-status-secret",
+      ]);
+      writeWorkspaceLiveCredentialSelection(
+        project,
+        "claude",
+        "claude-status-live",
+        DEMO_USER_PROFILE_ID,
+      );
+
+      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+      const observation = {
+        backend: {
+          kind: workspace.backend.kind,
+          exists: true,
+          running: true,
+          detail: "container/docker-status-live",
+        },
+        attachments: {
+          workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
+          workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
+          userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+        },
+        runtimeAssembly: {
+          home: { observed: true, detail: workspace.runtime.home },
+          projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
+          managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
+          evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
+          codex: { observed: true, detail: `${workspace.runtime.home}/.codex` },
+          claude: { observed: true, detail: `${workspace.runtime.home}/.claude` },
+          ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+        },
+        daemon: {
+          manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+          pairing: {
+            observed: true,
+            detail: "paseo daemon pair",
+            url: "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0",
+          },
+        },
+        services: {
+          declared: 1,
+          observed: 1,
+          detail: "observed 1 service objects",
+        },
+      };
+
+      const drift = computeWorkspaceDrift(workspace, observation);
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      const switchableHarnesses = new Set(status.credentials?.live?.switchableHarnesses ?? []);
+
+      assert.equal(status.credentials?.live?.selectedByHarness?.claude?.credentialId, "claude-status-live");
+      assert.equal(status.credentials?.live?.selectedByHarness?.claude?.source, "runtime-state");
+      assert.equal(status.credentials?.live?.selectedByHarness?.ssh?.credentialId, "github-ssh");
+      assert.ok(Boolean(status.credentials?.live?.selectedByHarness?.codex?.credentialId));
+      assert.equal(switchableHarnesses.has("ssh"), true);
+      assert.equal(switchableHarnesses.has("codex"), true);
+      assert.equal(switchableHarnesses.has("claude"), true);
+    } finally {
+      fs.rmSync(path.join(credentialRoot, "claude", "claude-status-live"), {
+        recursive: true,
+        force: true,
+      });
+      fs.rmSync(path.join(credentialRoot, "claude-status-live.yaml"), {
+        force: true,
+      });
+      cleanupLiveCredentialsFile(project);
+    }
+  });
 });
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
@@ -2258,7 +2360,7 @@ exit 0
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/ssh/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/ssh/.")));
           assert.equal(
             commands.some((entry) => entry.includes("/workspace/project/.")),
             false,
@@ -2377,7 +2479,7 @@ exit 0
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/ssh/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/ssh/.")));
         },
       );
     } finally {
