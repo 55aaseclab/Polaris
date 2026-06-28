@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceSpec } from "../core/workspace.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 export function generatedOutputPath(workspace: WorkspaceSpec): string {
   const backendFile =
@@ -13,9 +13,7 @@ export function generatedOutputPath(workspace: WorkspaceSpec): string {
         ? "kubevirt.yaml"
         : "docker.yaml";
   return path.join(
-    REPO_ROOT,
-    "config",
-    "users",
+    USER_ROOT,
     workspace.userProfile.id,
     "workspaces",
     workspace.identity.projectName,

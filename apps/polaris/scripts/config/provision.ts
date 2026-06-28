@@ -5,10 +5,11 @@ import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
 import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
 import { logInfo } from "../utils/log.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 import { runCommand } from "../utils/shell.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 type BackendKind = "docker" | "pod" | "kubevirt-vm";
 
@@ -40,13 +41,12 @@ interface WorkspaceImageBuildState {
 }
 
 function configMatches(project: string): WorkspaceConfigMatch[] {
-  const usersRoot = path.join(REPO_ROOT, "config", "users");
-  if (!fs.existsSync(usersRoot)) {
+  if (!fs.existsSync(USER_ROOT)) {
     return [];
   }
 
   return fs
-    .readdirSync(usersRoot, { withFileTypes: true })
+    .readdirSync(USER_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) =>
       (["docker", "pod", "kubevirt-vm"] as const)

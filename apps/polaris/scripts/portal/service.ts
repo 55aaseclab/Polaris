@@ -39,9 +39,9 @@ import {
   switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
 function rootKey(userId: string, workspace: string): string {
@@ -194,18 +194,14 @@ export function upsertPortalCredential(
   },
 ): PortalCredentialSummary {
   const credentialsRoot = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
+    USER_ROOT,
     userId,
     "credentials",
   );
   fs.mkdirSync(credentialsRoot, { recursive: true });
   for (const file of credential.files) {
     const absolute = path.join(
-      REPO_ROOT,
-      "config",
-      "users",
+      USER_ROOT,
       userId,
       file.sourcePath,
     );

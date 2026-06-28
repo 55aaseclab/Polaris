@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { WorkspaceStatus } from "../core/workspace.js";
 import { assertNoProjectNameCollision } from "../config/project-ownership.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisStateRoot, polarisUsersRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
-const LEGACY_STATE_DIR = path.join(REPO_ROOT, "config", "state");
+const LEGACY_STATE_DIR = polarisStateRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 export interface WorkspaceDriverSelection {
   backend: "docker" | "pod" | "kubevirt-vm";
@@ -21,25 +21,22 @@ export interface WorkspaceLiveCredentialSelectionState {
 function projectRoot(project: string, userProfileId?: string): string | null {
   if (userProfileId?.trim()) {
     return path.join(
-      REPO_ROOT,
-      "config",
-      "users",
+      USER_ROOT,
       userProfileId.trim(),
       "workspaces",
       project,
     );
   }
 
-  const usersRoot = path.join(REPO_ROOT, "config", "users");
-  if (!fs.existsSync(usersRoot)) {
+  if (!fs.existsSync(USER_ROOT)) {
     return null;
   }
   assertNoProjectNameCollision(project);
 
   const matches = fs
-    .readdirSync(usersRoot, { withFileTypes: true })
+    .readdirSync(USER_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(usersRoot, entry.name, "workspaces", project))
+    .map((entry) => path.join(USER_ROOT, entry.name, "workspaces", project))
     .filter((candidate) => fs.existsSync(candidate))
     .sort();
 

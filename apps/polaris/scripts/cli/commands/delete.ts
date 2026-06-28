@@ -10,10 +10,11 @@ import { parseWorkspaceReference } from "../../config/load.js";
 import { projectOwners } from "../../config/project-ownership.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { logInfo } from "../../utils/log.js";
-import { resolveRepoRoot } from "../../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../../utils/paths.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 type BackendTarget = {
   backend: WorkspaceSpec["backend"]["kind"];
@@ -28,14 +29,12 @@ const BACKEND_TARGETS: BackendTarget[] = [
 ];
 
 function workspaceRoot(userId: string, workspace: string): string {
-  return path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  return path.join(USER_ROOT, userId, "workspaces", workspace);
 }
 
 function portalWorkspaceStateRoot(userId: string, workspace: string): string {
   return path.join(
-    REPO_ROOT,
-    "config",
-    "users",
+    USER_ROOT,
     userId,
     ".portal",
     "workspaces",
@@ -44,7 +43,7 @@ function portalWorkspaceStateRoot(userId: string, workspace: string): string {
 }
 
 function profilePath(userId: string): string {
-  return path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  return path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 }
 
 function workspaceProjectRef(workspace: string, target: BackendTarget): string {

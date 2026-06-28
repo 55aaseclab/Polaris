@@ -27,9 +27,10 @@ import {
 } from "../core/identity-layout.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
 
 const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
   morpheus: {
@@ -49,8 +50,7 @@ const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
   },
 };
 
-const USER_PROFILES_DIR = path.join(REPO_ROOT, "config", "users", "profiles");
-const USER_SECRETS_ROOT = path.join(REPO_ROOT, "config", "users");
+const USER_PROFILES_DIR = path.join(USER_SECRETS_ROOT, "profiles");
 const POD_PROFILE_SPECS_DIR = path.join(REPO_ROOT, "config", "pod", "profiles");
 const SUPPORTED_CREDENTIAL_KINDS = new Set<CredentialKind>([
   "ssh-key",
@@ -110,14 +110,13 @@ function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"][
       backendKind === "kubevirt-vm" || backendKind === "kubevirt"
         ? "kubevirt.agent.yaml"
         : `${backendKind}.agent.yaml`;
-    const usersRoot = path.join(REPO_ROOT, "config", "users");
-    if (!fs.existsSync(usersRoot)) {
+    if (!fs.existsSync(USER_SECRETS_ROOT)) {
       return [];
     }
     return fs
-      .readdirSync(usersRoot, { withFileTypes: true })
+      .readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(usersRoot, entry.name, "workspaces", project, backendFile));
+      .map((entry) => path.join(USER_SECRETS_ROOT, entry.name, "workspaces", project, backendFile));
   };
   const preferredBackend =
     backendHint === "kubevirt-vm"
@@ -321,7 +320,7 @@ function loadUserCredentials(
   runtimeHome: string,
 ): Credential[] {
   const registryDir = userCredentialRegistryDir(userProfileId);
-  const legacyRegistryDir = path.join(REPO_ROOT, "config", "users", "credentials", userProfileId);
+  const legacyRegistryDir = path.join(USER_SECRETS_ROOT, "credentials", userProfileId);
   const activeRegistryDir = fs.existsSync(registryDir)
     ? registryDir
     : legacyRegistryDir;

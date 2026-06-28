@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 function hasWorkspaceSavedSpec(workspaceRoot: string): boolean {
   return [
@@ -13,16 +13,15 @@ function hasWorkspaceSavedSpec(workspaceRoot: string): boolean {
 }
 
 export function projectOwners(project: string): string[] {
-  const usersRoot = path.join(REPO_ROOT, "config", "users");
-  if (!fs.existsSync(usersRoot)) {
+  if (!fs.existsSync(USER_ROOT)) {
     return [];
   }
   return fs
-    .readdirSync(usersRoot, { withFileTypes: true })
+    .readdirSync(USER_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .filter((userProfileId) => {
-      const projectRoot = path.join(usersRoot, userProfileId, "workspaces", project);
+      const projectRoot = path.join(USER_ROOT, userProfileId, "workspaces", project);
       return hasWorkspaceSavedSpec(projectRoot);
     })
     .sort();

@@ -39,9 +39,10 @@ import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec } from "../core/workspace.js";
 import { writeWorkspaceLiveCredentialSelection } from "../output/state-store.js";
 import { logWarn } from "../utils/log.js";
-import { resolveRepoRoot } from "../utils/repo-root.js";
+import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
-const REPO_ROOT = resolveRepoRoot(import.meta.url);
+const REPO_ROOT = repoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const PROVISION_TOTAL_STEPS = 7;
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
@@ -51,7 +52,7 @@ function rootKey(userId: string, workspace: string): string {
 }
 
 function portalRoot(userId: string, workspace: string): string {
-  return path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  return path.join(USER_ROOT, userId, "workspaces", workspace);
 }
 
 function portalStateProgress(
