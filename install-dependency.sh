@@ -92,9 +92,9 @@ ensure_node_runtime() {
       log "Installing Node.js ${NODE_MAJOR_VERSION} via NodeSource"
       sudo apt-get update || log "apt-get update had errors, continuing"
       sudo apt-get install -y ca-certificates curl gnupg
-      sudo mkdir -p /etc/apt/keyrings
+      sudo mkdir -p /etc/apt/keyrings /etc/apt/sources.list.d
       curl -fsSL "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+        | sudo gpg --dearmor --batch --yes --no-tty -o /etc/apt/keyrings/nodesource.gpg
       printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_%s.x nodistro main\n' "${NODE_MAJOR_VERSION}" \
         | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
       sudo apt-get update
