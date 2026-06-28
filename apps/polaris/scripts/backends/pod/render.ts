@@ -29,7 +29,6 @@ function authFileStorageTarget(file: AuthFile, workspace: WorkspaceSpec): string
       mountPath: file.mountPath,
       runtimeHome: workspace.runtime.home,
       identityRoot: workspace.attachments.userIdentityState.mountRoot,
-      sshRoot: workspace.attachments.userSshState.mountRoot,
     })
     ?? file.mountPath
   );
@@ -43,13 +42,12 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
   const evolutionRoot = `${paseoRoot}/evolution`;
   const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
   const identityRoot = workspace.attachments.userIdentityState.mountRoot;
-  const codexXdgRoot = `${identityRoot}/codex-xdg`;
-  const sshRoot = workspace.attachments.userSshState.mountRoot;
+  const sshRoot = `${identityRoot}/ssh`;
   const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
   const identityDirs = userIdentityBootstrapDirs(identityRoot);
   return [
-    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${sshRoot} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
-    `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${sshRoot} ${runtimeRoot} && \\`,
+    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
+    `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${runtimeRoot} && \\`,
     `          rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
@@ -129,38 +127,23 @@ function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
   });
 }
 
-function buildSshKeygenLine(user: string, workspace: WorkspaceSpec): string[] {
-  const sshDir = workspace.attachments.userSshState.mountRoot;
-  const keyPath = `${sshDir}/id_ed25519`;
-  if (workspace.userProfile.ssh.mode === "provided-key") {
-    if (user === "root") {
-      return [
-        `          mkdir -p ${sshDir} && chown root:root ${sshDir} && chmod 700 ${sshDir} && \\`,
-        `          test -f ${keyPath} && \\`,
-        `          chown root:root ${keyPath} 2>/dev/null || true && chmod 400 ${keyPath} 2>/dev/null || true && \\`,
-        `          if [ -e ${keyPath}.pub ]; then chown root:root ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
-      ];
-    }
-    return [
-      `          mkdir -p ${sshDir} && chown ${user}:${user} ${sshDir} && chmod 700 ${sshDir} && \\`,
-      `          test -f ${keyPath} && \\`,
-      `          chown ${user}:${user} ${keyPath} 2>/dev/null || true && chmod 600 ${keyPath} 2>/dev/null || true && \\`,
-      `          if [ -e ${keyPath}.pub ]; then chown ${user}:${user} ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
-    ];
-  }
+function buildSshMaterialLines(user: string, workspace: WorkspaceSpec): string[] {
+  const sshDir = `${workspace.attachments.userIdentityState.mountRoot}/ssh`;
   if (user === "root") {
     return [
       `          mkdir -p ${sshDir} && chown root:root ${sshDir} && chmod 700 ${sshDir} && \\`,
-      `          if [ ! -f ${keyPath} ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f ${keyPath}; fi && \\`,
-      `          if [ -e ${keyPath} ] && { [ "$(stat -c %U:%G ${keyPath} 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a ${keyPath} 2>/dev/null || true)" != "400" ]; }; then chown root:root ${keyPath} 2>/dev/null || true; chmod 400 ${keyPath} 2>/dev/null || true; fi && \\`,
-      `          if [ -e ${keyPath}.pub ] && { [ "$(stat -c %U:%G ${keyPath}.pub 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a ${keyPath}.pub 2>/dev/null || true)" != "644" ]; }; then chown root:root ${keyPath}.pub 2>/dev/null || true; chmod 644 ${keyPath}.pub 2>/dev/null || true; fi && \\`,
+      `          find ${sshDir} -maxdepth 1 -type f -exec chown root:root {} + 2>/dev/null || true && \\`,
+      `          find ${sshDir} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod 400 {} + 2>/dev/null || true && \\`,
+      `          find ${sshDir} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true && \\`,
       `          for ssh_meta in ${sshDir}/authorized_keys ${sshDir}/known_hosts ${sshDir}/known_hosts.old; do if [ -e "$ssh_meta" ] && { [ "$(stat -c %U:%G "$ssh_meta" 2>/dev/null || true)" != "root:root" ] || [ "$(stat -c %a "$ssh_meta" 2>/dev/null || true)" != "600" ]; }; then chown root:root "$ssh_meta" 2>/dev/null || true; chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done && \\`,
     ];
   }
   return [
     `          mkdir -p ${sshDir} && chown ${user}:${user} ${sshDir} && chmod 700 ${sshDir} && \\`,
-    `          if [ ! -f ${keyPath} ]; then su - ${user} -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f ~/.ssh/id_ed25519"; fi && \\`,
-    `          chown ${user}:${user} ${keyPath} ${keyPath}.pub && chmod 600 ${keyPath} && chmod 644 ${keyPath}.pub && \\`,
+    `          find ${sshDir} -maxdepth 1 -type f -exec chown ${user}:${user} {} + 2>/dev/null || true && \\`,
+    `          find ${sshDir} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod 600 {} + 2>/dev/null || true && \\`,
+    `          find ${sshDir} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true && \\`,
+    `          for ssh_meta in ${sshDir}/authorized_keys ${sshDir}/known_hosts ${sshDir}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chown ${user}:${user} "$ssh_meta" 2>/dev/null || true; chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done && \\`,
   ];
 }
 
@@ -225,7 +208,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
       ...buildGitConfigLines(workspace),
       ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
       ...buildEvolutionBootstrapLines(workspace),
-      ...buildSshKeygenLine(user, workspace),
+      ...buildSshMaterialLines(user, workspace),
       ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
       "          touch /tmp/.ready && sleep infinity",
     ];
@@ -238,7 +221,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
     `          apt-get update && apt-get install -y openssh-client ${workspace.runtime.aptPackages.join(" ")} && \\`,
     ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
     ...buildEvolutionBootstrapLines(workspace),
-    ...buildSshKeygenLine(user, workspace),
+    ...buildSshMaterialLines(user, workspace),
     ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
     "          touch /tmp/.ready && sleep infinity",
   ];
@@ -283,8 +266,6 @@ function buildEnvLines(workspace: WorkspaceSpec): string[] {
   envLines.push(`          value: ${q(workspace.attachments.workspaceRuntimeState.mountRoot)}`);
   envLines.push("        - name: POLARIS_USER_IDENTITY_ROOT");
   envLines.push(`          value: ${q(workspace.attachments.userIdentityState.mountRoot)}`);
-  envLines.push("        - name: POLARIS_USER_SSH_ROOT");
-  envLines.push(`          value: ${q(workspace.attachments.userSshState.mountRoot)}`);
   envLines.push("        - name: POLARIS_EVOLUTION_ROOT");
   envLines.push(`          value: ${q(workspace.agent.runtime.evolutionRoot)}`);
   envLines.push("        - name: POLARIS_WORKSPACE_MEMORY_FILE");
@@ -309,7 +290,6 @@ function persistentVolumeClaims(workspace: WorkspaceSpec): Array<{
     workspace.attachments.workspaceData,
     workspace.attachments.workspaceRuntimeState,
     workspace.attachments.userIdentityState,
-    workspace.attachments.userSshState,
   ]) {
     if (attachment.source.kind !== "persistent-volume" || !attachment.source.volumeRef) {
       continue;
@@ -403,8 +383,6 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   deploymentLines.push(`          mountPath: ${workspace.attachments.workspaceRuntimeState.mountRoot}`);
   deploymentLines.push("        - name: user-identity-state");
   deploymentLines.push(`          mountPath: ${workspace.attachments.userIdentityState.mountRoot}`);
-  deploymentLines.push("        - name: user-ssh-state");
-  deploymentLines.push(`          mountPath: ${workspace.attachments.userSshState.mountRoot}`);
   deploymentLines.push("        - name: ephemeral-runtime");
   deploymentLines.push(`          mountPath: ${workspace.attachments.ephemeralRuntime.mountRoot}`);
   const envLines = buildEnvLines(workspace);
@@ -445,13 +423,6 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   if (workspace.attachments.userIdentityState.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
     deploymentLines.push(`          claimName: ${workspace.attachments.userIdentityState.source.volumeRef}`);
-  } else {
-    deploymentLines.push("        emptyDir: {}");
-  }
-  deploymentLines.push("      - name: user-ssh-state");
-  if (workspace.attachments.userSshState.source.kind === "persistent-volume") {
-    deploymentLines.push("        persistentVolumeClaim:");
-    deploymentLines.push(`          claimName: ${workspace.attachments.userSshState.source.volumeRef}`);
   } else {
     deploymentLines.push("        emptyDir: {}");
   }

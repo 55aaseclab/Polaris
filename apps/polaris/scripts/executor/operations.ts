@@ -5,7 +5,6 @@ import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/
 import { workspaceConfigPath } from "../config/scaffold.js";
 import { readManagedCredentialRecord } from "../config/credentials.js";
 import {
-  isAgentHarness,
   supportsLiveCredentialSwitch,
   type ManagedHarness,
 } from "../config/credential-catalog.js";
@@ -189,7 +188,7 @@ function liveRuntimeCredentialFiles(
   requestedHarness?: ManagedHarness,
   requireSupported = false,
 ): {
-  harness: Exclude<ManagedHarness, "ssh">;
+  harness: ManagedHarness;
   files: Array<{ path: string; content: string }>;
 } {
   const record = readManagedCredentialRecord({
@@ -199,11 +198,6 @@ function liveRuntimeCredentialFiles(
   if (requestedHarness && record.summary.harness !== requestedHarness) {
     throw new Error(
       `Credential '${credentialId}' belongs to harness '${record.summary.harness}', not '${requestedHarness}'`,
-    );
-  }
-  if (!isAgentHarness(record.summary.harness)) {
-    throw new Error(
-      `Credential '${credentialId}' does not support live runtime switching`,
     );
   }
   if (
@@ -226,7 +220,6 @@ function liveRuntimeCredentialFiles(
       mountPath,
       runtimeHome: workspace.runtime.home,
       identityRoot: workspace.attachments.userIdentityState.mountRoot,
-      sshRoot: workspace.attachments.userSshState.mountRoot,
     });
     if (
       !targetPath
@@ -255,6 +248,7 @@ function liveRuntimeCredentialFiles(
 }
 
 function runtimeWriteScript(
+  workspace: WorkspaceSpec,
   files: Array<{ path: string; content: string }>,
 ): string {
   const payload = JSON.stringify(
@@ -263,18 +257,49 @@ function runtimeWriteScript(
       content: Buffer.from(file.content, "utf8").toString("base64"),
     })),
   );
+  const runtimeUser = workspace.runtime.user.trim() || "root";
   return [
-    "python3 -c",
-    JSON.stringify([
-      "import base64, json, pathlib, stat",
-      `files = json.loads(${JSON.stringify(payload)})`,
-      "for entry in files:",
-      "    path = pathlib.Path(entry['path'])",
-      "    path.parent.mkdir(parents=True, exist_ok=True)",
-      "    path.write_bytes(base64.b64decode(entry['content']))",
-      "    path.chmod(stat.S_IRUSR | stat.S_IWUSR)",
-    ].join("\n")),
-  ].join(" ");
+    "python3 - <<'PY'",
+    "import base64, json, os, pathlib, pwd, stat",
+    `files = json.loads(${JSON.stringify(payload)})`,
+    `runtime_user = ${JSON.stringify(runtimeUser)}`,
+    "uid = gid = None",
+    "if runtime_user and runtime_user != 'root':",
+    "    try:",
+    "        account = pwd.getpwnam(runtime_user)",
+    "        uid = account.pw_uid",
+    "        gid = account.pw_gid",
+    "    except KeyError:",
+    "        uid = gid = None",
+    "",
+    "def is_ssh_path(path: pathlib.Path) -> bool:",
+    "    return 'ssh' in path.parts",
+    "",
+    "def desired_mode(path: pathlib.Path) -> int:",
+    "    name = path.name",
+    "    if name.endswith('.pub'):",
+    "        return stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH",
+    "    if name in {'authorized_keys', 'known_hosts', 'known_hosts.old'}:",
+    "        return stat.S_IRUSR | stat.S_IWUSR",
+    "    if is_ssh_path(path):",
+    "        return stat.S_IRUSR | stat.S_IWUSR",
+    "    return stat.S_IRUSR | stat.S_IWUSR",
+    "",
+    "for entry in files:",
+    "    path = pathlib.Path(entry['path'])",
+    "    path.parent.mkdir(parents=True, exist_ok=True)",
+    "    if is_ssh_path(path):",
+    "        path.parent.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)",
+    "    path.write_bytes(base64.b64decode(entry['content']))",
+    "    if uid is not None and gid is not None:",
+    "        try:",
+    "            os.chown(path.parent, uid, gid)",
+    "        except FileNotFoundError:",
+    "            pass",
+    "        os.chown(path, uid, gid)",
+    "    path.chmod(desired_mode(path))",
+    "PY",
+  ].join("\n");
 }
 
 function dockerContainerName(workspace: WorkspaceSpec): string {
@@ -301,7 +326,7 @@ function applyLiveRuntimeFiles(
   workspace: WorkspaceSpec,
   files: Array<{ path: string; content: string }>,
 ): void {
-  const script = runtimeWriteScript(files);
+  const script = runtimeWriteScript(workspace, files);
   if (workspace.backend.kind === "docker") {
     const containerName = dockerContainerName(workspace);
     runChecked("docker", ["exec", containerName, "sh", "-lc", script]);
@@ -341,7 +366,7 @@ export function switchWorkspaceLiveCredentialMaterial(input: {
   harness?: ManagedHarness;
   requireSupported?: boolean;
 }): {
-  harness: Exclude<ManagedHarness, "ssh">;
+  harness: ManagedHarness;
   credentialId: string;
 } {
   const resolved = liveRuntimeCredentialFiles(

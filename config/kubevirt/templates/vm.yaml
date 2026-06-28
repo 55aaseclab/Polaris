@@ -47,8 +47,6 @@ __INTERFACE_PORTS__
               virtiofs: {}
             - name: user-identity-state
               virtiofs: {}
-            - name: user-ssh-state
-              virtiofs: {}
           disks:
             - name: rootdisk
               disk:
@@ -69,9 +67,6 @@ __INTERFACE_PORTS__
         - name: user-identity-state
           persistentVolumeClaim:
             claimName: __USER_IDENTITY_STATE_VOLUME__
-        - name: user-ssh-state
-          persistentVolumeClaim:
-            claimName: __USER_SSH_STATE_VOLUME__
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:

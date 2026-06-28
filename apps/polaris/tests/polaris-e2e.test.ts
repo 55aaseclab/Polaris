@@ -329,11 +329,11 @@ test("create adapts workspace credential bindings to the user's available regist
             purposes: ["git-auth"],
             materialRef: {
               type: "file",
-              key: "user-ssh-state/default",
+              key: "demo-ssh",
               files: [
                 {
                   key: "id_ed25519",
-                  source_path: "credentials/ssh/id_ed25519",
+                  source_path: "credentials/ssh/github-ssh/id_ed25519",
                 },
               ],
             },

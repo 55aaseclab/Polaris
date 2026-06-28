@@ -57,9 +57,6 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.attachments.userIdentityState.mountRoot) {
     throw new Error("user-identity-state must declare a mount root");
   }
-  if (!workspace.attachments.userSshState.mountRoot) {
-    throw new Error("user-ssh-state must declare a mount root");
-  }
   if (!workspace.attachments.ephemeralRuntime.mountRoot) {
     throw new Error("ephemeral-runtime must declare a mount root");
   }
@@ -73,17 +70,11 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.attachments.userIdentityState.scope !== "user" || workspace.attachments.userIdentityState.sharing !== "cross-workspace") {
     throw new Error("user-identity-state must remain user-scoped and cross-workspace");
   }
-  if (workspace.attachments.userSshState.scope !== "user" || workspace.attachments.userSshState.sharing !== "cross-workspace") {
-    throw new Error("user-ssh-state must remain user-scoped and cross-workspace");
-  }
   if (workspace.attachments.workspaceRuntimeState.source.kind === "netfs") {
     throw new Error("workspace-runtime-state must not use a netfs source");
   }
   if (workspace.attachments.userIdentityState.source.kind === "netfs") {
     throw new Error("user-identity-state must not use a netfs source");
-  }
-  if (workspace.attachments.userSshState.source.kind === "netfs") {
-    throw new Error("user-ssh-state must not use a netfs source");
   }
   if (workspace.attachments.workspaceData.source.kind === "netfs") {
     if (!workspace.attachments.workspaceData.source.server?.trim()) {
@@ -110,8 +101,8 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/")) === false) {
     throw new Error("user-identity-state must expose identity attachment roots");
   }
-  if (workspace.attachments.userSshState.durablePaths.some((entry) => entry === "/ssh") === false) {
-    throw new Error("user-ssh-state must expose the shared SSH attachment root");
+  if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/ssh")) === false) {
+    throw new Error("user-identity-state must expose the shared SSH attachment root");
   }
   if (workspace.attachments.ephemeralRuntime.staleArtifacts.length === 0) {
     throw new Error("ephemeral-runtime must define stale artifact cleanup targets");

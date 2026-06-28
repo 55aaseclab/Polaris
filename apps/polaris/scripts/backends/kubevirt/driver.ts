@@ -374,7 +374,6 @@ interface KubevirtRuntimeSnapshot {
   workspaceDataObserved: boolean;
   workspaceRuntimeObserved: boolean;
   userIdentityObserved: boolean;
-  userSshObserved: boolean;
   homeObserved: boolean;
   projectRootObserved: boolean;
   managerStateObserved: boolean;
@@ -403,7 +402,6 @@ async function collectKubevirtRuntimeSnapshot(
     `test -d ${workspace.attachments.workspaceData.mountRoot} && echo workspaceDataObserved=1 || echo workspaceDataObserved=0`,
     `test -d ${workspace.attachments.workspaceRuntimeState.mountRoot} && echo workspaceRuntimeObserved=1 || echo workspaceRuntimeObserved=0`,
     `test -d ${workspace.attachments.userIdentityState.mountRoot} && echo userIdentityObserved=1 || echo userIdentityObserved=0`,
-    `test -d ${workspace.attachments.userSshState.mountRoot} && echo userSshObserved=1 || echo userSshObserved=0`,
     `test -d ${workspace.runtime.home} && echo homeObserved=1 || echo homeObserved=0`,
     `if test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}; then echo projectRootObserved=1; else echo projectRootObserved=0; fi`,
     `test -L ${workspace.runtime.home}/.paseo && echo managerStateObserved=1 || echo managerStateObserved=0`,
@@ -422,7 +420,6 @@ async function collectKubevirtRuntimeSnapshot(
       workspaceDataObserved: false,
       workspaceRuntimeObserved: false,
       userIdentityObserved: false,
-      userSshObserved: false,
       homeObserved: false,
       projectRootObserved: false,
       managerStateObserved: false,
@@ -464,7 +461,6 @@ async function collectKubevirtRuntimeSnapshot(
     workspaceDataObserved: flag("workspaceDataObserved"),
     workspaceRuntimeObserved: flag("workspaceRuntimeObserved"),
     userIdentityObserved: flag("userIdentityObserved"),
-    userSshObserved: flag("userSshObserved"),
     homeObserved: flag("homeObserved"),
     projectRootObserved: flag("projectRootObserved"),
     managerStateObserved: flag("managerStateObserved"),
@@ -638,8 +634,6 @@ export class KubevirtDriver implements BackendDriver {
       workspace.storage.claimName;
     const userIdentityStateVolume =
       workspace.attachments.userIdentityState.source.volumeRef ?? "missing";
-    const userSshStateVolume =
-      workspace.attachments.userSshState.source.volumeRef ?? "missing";
     const runtimeSnapshot =
       exists && running && serviceName.length > 0
         ? await collectKubevirtRuntimeSnapshot(workspace, serviceName)
@@ -695,9 +689,6 @@ export class KubevirtDriver implements BackendDriver {
           : undefined,
         userIdentityState: exists
           ? { observed: runtimeSnapshot?.userIdentityObserved ?? false, detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
-          : undefined,
-        userSshState: exists
-          ? { observed: runtimeSnapshot?.userSshObserved ?? false, detail: `pvc/${userSshStateVolume} -> ${workspace.attachments.userSshState.mountRoot}` }
           : undefined,
       },
       runtimeAssembly: exists && running

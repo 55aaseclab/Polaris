@@ -39,8 +39,7 @@ function requireAttachmentVolumeRef(
   attachment:
     | "workspaceData"
     | "workspaceRuntimeState"
-    | "userIdentityState"
-    | "userSshState",
+    | "userIdentityState",
 ): string {
   const source = workspace.attachments[attachment].source;
   if (attachment === "workspaceData" && isNetfsSource(source)) {
@@ -59,8 +58,7 @@ function attachmentVolumeSize(
   attachment:
     | "workspaceData"
     | "workspaceRuntimeState"
-    | "userIdentityState"
-    | "userSshState",
+    | "userIdentityState",
 ): string {
   const source = workspace.attachments[attachment].source;
   if (source.volumeSize?.trim()) {
@@ -73,8 +71,6 @@ function attachmentVolumeSize(
       return "20Gi";
     case "userIdentityState":
       return "5Gi";
-    case "userSshState":
-      return "1Gi";
   }
 }
 
@@ -161,7 +157,6 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
   for (const attachment of [
     "workspaceRuntimeState",
     "userIdentityState",
-    "userSshState",
   ] as const) {
     docs.push([
       "apiVersion: v1",
@@ -230,10 +225,6 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
     .replaceAll(
       "__USER_IDENTITY_STATE_VOLUME__",
       requireAttachmentVolumeRef(workspace, "userIdentityState"),
-    )
-    .replaceAll(
-      "__USER_SSH_STATE_VOLUME__",
-      requireAttachmentVolumeRef(workspace, "userSshState"),
     )
     .replaceAll("__ROOTDISK_IMAGE__", rootdiskImage)
     .replaceAll("__MEMORY_GUEST__", memoryGuest)

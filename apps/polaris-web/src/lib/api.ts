@@ -90,6 +90,11 @@ export interface PortalWorkspaceStatus {
       selectedCredentialId?: string;
       selectedCredentialLabel?: string;
       source?: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+      selectedByHarness?: Record<string, {
+        credentialId: string;
+        label: string;
+        source: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+      }>;
     };
   };
   daemon?: {

@@ -109,7 +109,6 @@ function synthesizeAttachments(
   const workspaceData = ((attachments["workspace-data"] ??= {}) as Record<string, any>);
   const workspaceRuntimeState = ((attachments["workspace-runtime-state"] ??= {}) as Record<string, any>);
   const userIdentityState = ((attachments["user-identity-state"] ??= {}) as Record<string, any>);
-  const userSshState = ((attachments["user-ssh-state"] ??= {}) as Record<string, any>);
 
   if (backendKind === "kubevirt-vm") {
     workspaceData.source = workspaceDataNetfsSource(project);
@@ -124,12 +123,6 @@ function synthesizeAttachments(
       volume_ref: `${project}-user-identity-state`,
       volume_size: "5Gi",
       description: `persistent user identity state for ${project}`,
-    };
-    userSshState.source = {
-      kind: "persistent-volume",
-      volume_ref: `${project}-user-ssh-state`,
-      volume_size: "1Gi",
-      description: `persistent user SSH state for ${project}`,
     };
     return;
   }
@@ -146,10 +139,6 @@ function synthesizeAttachments(
       kind: "secret-material",
       description: "user identity material sourced from spec auth files",
     };
-    userSshState.source ??= {
-      kind: "generated-material",
-      description: "user SSH material",
-    };
     return;
   }
 
@@ -163,10 +152,6 @@ function synthesizeAttachments(
   userIdentityState.source ??= {
     kind: "secret-material",
     description: "user identity material sourced from spec auth files",
-  };
-  userSshState.source ??= {
-    kind: "generated-material",
-    description: `reusable user SSH material for ${project}`,
   };
 }
 

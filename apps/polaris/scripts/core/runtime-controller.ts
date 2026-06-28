@@ -8,6 +8,7 @@ import type {
   WorkspaceSpec,
   WorkspaceStatus,
 } from "./workspace.js";
+import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
 import { readWorkspaceLiveCredentialSelections } from "../output/state-store.js";
 import { normalizePairingUrl } from "./pairing-url.js";
 import { parseConnectionOfferServerId } from "./paseo.js";
@@ -146,6 +147,32 @@ function codexCredentialSource(
   return "user-active";
 }
 
+function credentialBindingSource(
+  workspace: WorkspaceSpec,
+  binding: ResolvedWorkspaceCredentialBinding,
+): "workspace-binding" | "user-active" | "compatibility" {
+  if (
+    workspace.credentialBindings.some((configured) =>
+      configured.purpose === binding.purpose
+      && configured.credentialId === binding.credentialId,
+    )
+  ) {
+    return "workspace-binding";
+  }
+  if (binding.source === "compatibility") {
+    return "compatibility";
+  }
+  return "user-active";
+}
+
+function activeSshBinding(
+  workspace: WorkspaceSpec,
+): ResolvedWorkspaceCredentialBinding | null {
+  return workspace.resolvedCredentialBindings.find((binding) =>
+    binding.purpose === "git-auth" && binding.credential.kind === "ssh-key"
+  ) ?? null;
+}
+
 function codexCredentialStatus(
   workspace: WorkspaceSpec,
 ): NonNullable<WorkspaceStatus["credentials"]>["codex"] {
@@ -170,38 +197,77 @@ function liveCredentialSelectionStatus(
     workspace.identity.projectName,
     workspace.userProfile.id,
   );
-  const persistedCodex = persistedSelections.codex;
-  if (persistedCodex?.credentialId) {
-    const selected = workspace.credentials.find(
-      (credential) => credential.id === persistedCodex.credentialId,
-    );
-    if (selected) {
-      return {
-        selectedHarness: "codex",
-        switchableHarnesses: ["codex"],
-        supportedHarnesses: workspace.agent.harnesses,
-        selectedCredentialId: selected.id,
-        selectedCredentialLabel: selected.label,
-        source: "runtime-state",
-      };
-    }
-  }
+  const selectedByHarness: NonNullable<
+    NonNullable<WorkspaceStatus["credentials"]>["live"]
+  >["selectedByHarness"] = {};
 
-  const codex = codexCredentialStatus(workspace);
-  if (codex?.state === "selected") {
-    return {
-      selectedHarness: "codex",
-      switchableHarnesses: ["codex"],
-      supportedHarnesses: workspace.agent.harnesses,
-      selectedCredentialId: codex.credentialId,
-      selectedCredentialLabel: codex.label,
-      source: codex.source,
+  for (const [harness, persisted] of Object.entries(persistedSelections)) {
+    if (!supportsLiveCredentialSwitch(harness) || !persisted?.credentialId) {
+      continue;
+    }
+    const selected = workspace.credentials.find((credential) =>
+      credential.id === persisted.credentialId
+      && credential.metadata?.harness === harness,
+    );
+    if (!selected) {
+      continue;
+    }
+    selectedByHarness[harness] = {
+      credentialId: selected.id,
+      label: selected.label,
+      source: "runtime-state",
     };
   }
 
+  const codex = codexCredentialStatus(workspace);
+  if (
+    codex?.state === "selected"
+    && codex.credentialId
+    && codex.label
+    && !selectedByHarness.codex
+  ) {
+    selectedByHarness.codex = {
+      credentialId: codex.credentialId,
+      label: codex.label,
+      source: codex.source ?? "user-active",
+    };
+  }
+
+  const sshBinding = activeSshBinding(workspace);
+  if (sshBinding && !selectedByHarness.ssh) {
+    selectedByHarness.ssh = {
+      credentialId: sshBinding.credentialId,
+      label: sshBinding.credential.label,
+      source: credentialBindingSource(workspace, sshBinding),
+    };
+  }
+
+  const switchableHarnesses = Array.from(
+    new Set(
+      [
+        ...workspace.credentials
+          .map((credential) => String(credential.metadata?.harness ?? "").trim())
+          .filter((harness) => supportsLiveCredentialSwitch(harness)),
+        ...Object.keys(selectedByHarness).filter((harness) =>
+          supportsLiveCredentialSwitch(harness),
+        ),
+      ],
+    ),
+  );
+  const firstSelection = Object.entries(selectedByHarness)[0];
+
   return {
-    switchableHarnesses: ["codex"],
+    switchableHarnesses,
     supportedHarnesses: workspace.agent.harnesses,
+    ...(firstSelection
+      ? {
+          selectedHarness: firstSelection[0],
+          selectedCredentialId: firstSelection[1].credentialId,
+          selectedCredentialLabel: firstSelection[1].label,
+          source: firstSelection[1].source,
+          selectedByHarness,
+        }
+      : {}),
   };
 }
 
@@ -275,7 +341,6 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
       workspaceData: workspace.attachments.workspaceData,
       workspaceRuntimeState: workspace.attachments.workspaceRuntimeState,
       userIdentityState: workspace.attachments.userIdentityState,
-      userSshState: workspace.attachments.userSshState,
     } as const;
 
     for (const [key, attachment] of Object.entries(attachmentTargets)) {
@@ -446,7 +511,6 @@ export function synthesizeWorkspaceStatus(
       workspaceData: attachmentCheck(observation.attachments.workspaceData),
       workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),
       userIdentityState: attachmentCheck(observation.attachments.userIdentityState),
-      userSshState: attachmentCheck(observation.attachments.userSshState),
     },
     runtimeAssembly: {
       home: runtimeCheck(observation.runtimeAssembly.home),

@@ -539,16 +539,6 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
           description: "user identity material sourced from spec auth files",
         },
       },
-      "user-ssh-state": {
-        scope: "user",
-        sharing: "cross-workspace",
-        mount_root: "/ssh",
-        durable_paths: ["/ssh"],
-        source: {
-          kind: "generated-material",
-          description: "user SSH material",
-        },
-      },
       "ephemeral-runtime": {
         mount_root: "/run/workspace",
         paths: ["/run/workspace/tmp", "/run/workspace/pids", "/run/workspace/sockets"],

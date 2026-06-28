@@ -40,6 +40,7 @@ export function userIdentityDurablePaths(identityRoot: string): string[] {
     `${root}/opencode/config`,
     `${root}/opencode/data`,
     `${root}/pi/agent`,
+    `${root}/ssh`,
     `${root}/polaris/credentials`,
     `${root}/codex-xdg/config`,
     `${root}/codex-xdg/data`,
@@ -93,12 +94,10 @@ export function stateStoragePathForMountPath(args: {
   mountPath: string;
   runtimeHome: string;
   identityRoot: string;
-  sshRoot: string;
 }): string | null {
   const mountPath = args.mountPath.trim();
   const home = trimTrailingSlash(args.runtimeHome);
   const identityRoot = trimTrailingSlash(args.identityRoot);
-  const sshRoot = trimTrailingSlash(args.sshRoot);
 
   if (!mountPath) {
     return null;
@@ -125,7 +124,7 @@ export function stateStoragePathForMountPath(args: {
     return `${identityRoot}/polaris/credentials/${mountPath.slice(`${home}/.local/share/polaris/credentials/`.length)}`;
   }
   if (mountPath.startsWith(`${home}/.ssh/`)) {
-    return `${sshRoot}/${mountPath.slice(`${home}/.ssh/`.length)}`;
+    return `${identityRoot}/ssh/${mountPath.slice(`${home}/.ssh/`.length)}`;
   }
   return null;
 }

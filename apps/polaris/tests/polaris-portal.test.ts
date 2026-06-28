@@ -521,10 +521,16 @@ test("portal API exposes the credential catalog and creates a claude inventory c
       const catalogBody = await catalogResponse.text();
       assert.equal(catalogResponse.status, 200, catalogBody);
       const catalog = JSON.parse(catalogBody) as {
-        harnesses: Array<{ id: string; supportsCreate: boolean }>;
+        harnesses: Array<{ id: string; supportsCreate: boolean; supportsLiveSwitch: boolean }>;
         presetsByHarness: Record<string, Array<{ id: string }>>;
       };
       assert.ok(catalog.harnesses.some((item) => item.id === "claude"));
+      assert.ok(catalog.harnesses.some((item) => item.id === "ssh" && item.supportsLiveSwitch === true));
+      assert.ok(catalog.harnesses.some((item) => item.id === "codex" && item.supportsLiveSwitch === true));
+      assert.ok(catalog.harnesses.some((item) => item.id === "claude" && item.supportsLiveSwitch === true));
+      assert.ok(catalog.harnesses.some((item) => item.id === "copilot" && item.supportsLiveSwitch === true));
+      assert.ok(catalog.harnesses.some((item) => item.id === "opencode" && item.supportsLiveSwitch === true));
+      assert.ok(catalog.harnesses.some((item) => item.id === "pi" && item.supportsLiveSwitch === true));
       assert.ok(catalog.presetsByHarness.codex?.some((item) => item.id === "rightcode"));
       assert.ok(catalog.presetsByHarness.claude?.some((item) => item.id === "anthropic"));
       assert.ok(
@@ -568,7 +574,7 @@ test("portal API exposes the credential catalog and creates a claude inventory c
       assert.equal(created.id, "claude-default");
       assert.equal(created.harness, "claude");
       assert.equal(created.kind, "api-key");
-      assert.equal(created.liveSwitchSupported, false);
+      assert.equal(created.liveSwitchSupported, true);
       assert.deepEqual(created.paths, [
         "credentials/claude/claude-default/credential.json",
       ]);
@@ -783,8 +789,8 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
 
     assert.equal(fs.existsSync(profilePath), true);
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519")), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
 
     const userMap = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
       users?: Record<string, { polarisUserId: string; role: string; plan: string }>;
@@ -831,8 +837,8 @@ test("portal API creates a user profile without a Clerk email by using a synthet
 
     assert.equal(fs.existsSync(profilePath), true);
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519")), true);
-    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "id_ed25519.pub")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
+    assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
@@ -1569,6 +1575,22 @@ exit 0
           );
           assert.equal(createCredentialResponse.status, 201);
 
+          const createClaudeCredentialResponse = await fetch(
+            `${baseUrl}/api/users/${userId}/credentials`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                harness: "claude",
+                credentialId: "claude-live",
+                label: "Claude Live",
+                providerName: "anthropic",
+                apiKey: "claude-api-key",
+              }),
+            },
+          );
+          assert.equal(createClaudeCredentialResponse.status, 201);
+
           const switchResponse = await fetch(
             `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
             {
@@ -1590,12 +1612,36 @@ exit 0
           assert.equal(payload.switched, true);
           assert.equal(payload.harness, "codex");
           assert.equal(payload.credential.id, "codex-live");
+
+          const switchClaudeResponse = await fetch(
+            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                harness: "claude",
+                credentialId: "claude-live",
+              }),
+            },
+          );
+          const switchClaudeBody = await switchClaudeResponse.text();
+          assert.equal(switchClaudeResponse.status, 200, switchClaudeBody);
+          const claudePayload = JSON.parse(switchClaudeBody) as {
+            switched: boolean;
+            harness: string;
+            credential: { id: string };
+          };
+          assert.equal(claudePayload.switched, true);
+          assert.equal(claudePayload.harness, "claude");
+          assert.equal(claudePayload.credential.id, "claude-live");
         });
 
         const liveState = JSON.parse(fs.readFileSync(liveStatePath, "utf8")) as {
           codex?: { credentialId?: string };
+          claude?: { credentialId?: string };
         };
         assert.equal(liveState.codex?.credentialId, "codex-live");
+        assert.equal(liveState.claude?.credentialId, "claude-live");
         assert.equal(
           fs.readFileSync(path.join(workspaceRoot, "docker.agent.yaml"), "utf8").includes("codex-live"),
           false,
@@ -1607,6 +1653,10 @@ exit 0
         assert.match(
           fs.readFileSync(scriptLogPath, "utf8"),
           /\/identity\/codex\/auth\.json/,
+        );
+        assert.match(
+          fs.readFileSync(scriptLogPath, "utf8"),
+          /\/identity\/claude\/credential\.json/,
         );
       },
     );

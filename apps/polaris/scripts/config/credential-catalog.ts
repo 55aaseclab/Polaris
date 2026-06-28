@@ -10,7 +10,14 @@ export const MANAGED_HARNESSES = [
 export type ManagedHarness = typeof MANAGED_HARNESSES[number];
 export type AgentHarness = Exclude<ManagedHarness, "ssh">;
 
-export const LIVE_SWITCHABLE_HARNESSES = ["codex"] as const;
+export const LIVE_SWITCHABLE_HARNESSES = [
+  "ssh",
+  "codex",
+  "claude",
+  "copilot",
+  "opencode",
+  "pi",
+] as const;
 export type LiveSwitchableHarness = typeof LIVE_SWITCHABLE_HARNESSES[number];
 
 export interface HarnessProviderPresetSummary {

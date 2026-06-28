@@ -201,23 +201,20 @@ async function waitForKubevirtAttachmentRelease(
   throw new Error(`KubeVirt volumes for '${workspace.identity.projectName}' were not released within ${timeoutMs}ms`);
 }
 
-type MigratedAttachment = "workspaceRuntimeState" | "userIdentityState" | "userSshState";
+type MigratedAttachment = "workspaceRuntimeState" | "userIdentityState";
 
 const MIGRATED_ATTACHMENTS: MigratedAttachment[] = [
   "workspaceRuntimeState",
   "userIdentityState",
-  "userSshState",
 ];
 
 const PRE_RESTART_ATTACHMENTS: MigratedAttachment[] = [
   "workspaceRuntimeState",
   "userIdentityState",
-  "userSshState",
 ];
 
 const POST_RESTART_ATTACHMENTS: MigratedAttachment[] = [
   "userIdentityState",
-  "userSshState",
 ];
 
 function attachmentRootPath(workspace: WorkspaceSpec, attachment: MigratedAttachment): string {
@@ -226,8 +223,6 @@ function attachmentRootPath(workspace: WorkspaceSpec, attachment: MigratedAttach
       return workspace.attachments.workspaceRuntimeState.mountRoot;
     case "userIdentityState":
       return workspace.attachments.userIdentityState.mountRoot;
-    case "userSshState":
-      return workspace.attachments.userSshState.mountRoot;
   }
 }
 
@@ -241,8 +236,6 @@ function kubevirtAttachmentClaimName(
         return workspace.attachments.workspaceRuntimeState.source;
       case "userIdentityState":
         return workspace.attachments.userIdentityState.source;
-      case "userSshState":
-        return workspace.attachments.userSshState.source;
     }
   })();
   if (source.kind !== "persistent-volume" || !source.volumeRef?.trim()) {
@@ -259,8 +252,6 @@ function kubevirtAttachmentVolumeName(attachment: MigratedAttachment): string {
       return "workspace-runtime-state";
     case "userIdentityState":
       return "user-identity-state";
-    case "userSshState":
-      return "user-ssh-state";
   }
 }
 
@@ -289,8 +280,6 @@ function attachmentDurablePaths(
         return workspace.attachments.workspaceRuntimeState.durablePaths;
       case "userIdentityState":
         return workspace.attachments.userIdentityState.durablePaths;
-      case "userSshState":
-        return workspace.attachments.userSshState.durablePaths;
     }
   })();
   const sorted = [...durablePaths].sort((a, b) => a.length - b.length);
@@ -341,8 +330,6 @@ function resolveDockerAttachmentVolumeName(
         return workspace.attachments.workspaceRuntimeState.source;
       case "userIdentityState":
         return workspace.attachments.userIdentityState.source;
-      case "userSshState":
-        return workspace.attachments.userSshState.source;
     }
   })();
   const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
@@ -352,8 +339,6 @@ function resolveDockerAttachmentVolumeName(
         return `${workspace.identity.projectName}-workspace-runtime-state`;
       case "userIdentityState":
         return `polaris-${userScope}-identity`;
-      case "userSshState":
-        return `polaris-${userScope}-ssh`;
     }
   })();
   const baseName = source.volumeRef?.trim() || fallbackName;

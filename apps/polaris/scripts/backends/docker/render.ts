@@ -116,13 +116,15 @@ function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
   });
 }
 
-function buildGitHubKnownHostsLines(): string[] {
+function buildGitHubKnownHostsLines(sshRoot: string): string[] {
   return [
     "if command -v ssh-keyscan >/dev/null 2>&1; then",
-    "  touch /ssh/known_hosts",
-    "  chmod 600 /ssh/known_hosts || true",
-    "  if ! ssh-keygen -F github.com -f /ssh/known_hosts >/dev/null 2>&1; then",
-    "    ssh-keyscan -H github.com >> /ssh/known_hosts 2>/dev/null || true",
+    `  mkdir -p ${sshRoot}`,
+    `  chmod 700 ${sshRoot} || true`,
+    `  touch ${sshRoot}/known_hosts`,
+    `  chmod 600 ${sshRoot}/known_hosts || true`,
+    `  if ! ssh-keygen -F github.com -f ${sshRoot}/known_hosts >/dev/null 2>&1; then`,
+    `    ssh-keyscan -H github.com >> ${sshRoot}/known_hosts 2>/dev/null || true`,
     "  fi",
     "fi",
   ];
@@ -246,14 +248,11 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     fallbackName: `polaris-${userScope}-identity`,
     source: workspace.attachments.userIdentityState.source,
   });
-  const sshVolume = resolveDockerVolume({
-    fallbackName: `polaris-${userScope}-ssh`,
-    source: workspace.attachments.userSshState.source,
-  });
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
   const xdg = codexXdgRoots(workspace);
   const imageToolRoot = `${home}/.local/polaris`;
+  const sshRoot = `${workspace.attachments.userIdentityState.mountRoot}/ssh`;
   const identityDirs = userIdentityBootstrapDirs(
     workspace.attachments.userIdentityState.mountRoot,
   );
@@ -264,13 +263,12 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
       mountPath: file.mountPath,
       runtimeHome: home,
       identityRoot: workspace.attachments.userIdentityState.mountRoot,
-      sshRoot: workspace.attachments.userSshState.mountRoot,
     });
     if (!target) {
       return [];
     }
     const guardedWrite =
-      target.startsWith(`${workspace.attachments.userSshState.mountRoot}/`)
+      target.startsWith(`${sshRoot}/`)
         && workspace.userProfile.ssh.mode === "provided-key"
         ? `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`
         : `if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`;
@@ -293,9 +291,9 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
             : []),
           ...buildAgentCliInstallLines(workspace),
         ]),
-    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${xdg.config} ${xdg.data} ${xdg.state} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
+    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
     ...(workspace.runtime.user === "root"
-      ? [`chown -R root:root ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.userSshState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
+      ? [`chown -R root:root ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
       : []),
     `if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
     `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace`,
@@ -306,24 +304,22 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
     `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
-    `ln -sfn ${workspace.attachments.userSshState.mountRoot} ${home}/.ssh`,
+    `ln -sfn ${sshRoot} ${home}/.ssh`,
     `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
     `ln -sfn ${toolRoot} ${home}/.local/polaris`,
     ...buildAgentCliWrapperLines(workspace),
     ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
     ...authBootstrapLines,
-    ...(workspace.userProfile.ssh.mode === "managed-key"
-      ? [
-          `if [ ! -f /ssh/id_ed25519 ]; then ssh-keygen -q -t ed25519 -C ${workspace.userProfile.ssh.comment} -N '' -f /ssh/id_ed25519; fi`,
-          "chmod 400 /ssh/id_ed25519 || true",
-          "chmod 644 /ssh/id_ed25519.pub || true",
-        ]
-      : [
-          "test -f /ssh/id_ed25519",
-          "chmod 400 /ssh/id_ed25519 || true",
-          "if [ -f /ssh/id_ed25519.pub ]; then chmod 644 /ssh/id_ed25519.pub || true; fi",
-        ]),
-    ...buildGitHubKnownHostsLines(),
+    `mkdir -p ${sshRoot}`,
+    ...(workspace.runtime.user === "root" ? [`chown root:root ${sshRoot} || true`] : []),
+    `chmod 700 ${sshRoot} || true`,
+    ...(workspace.runtime.user === "root"
+      ? [`find ${sshRoot} -maxdepth 1 -type f -exec chown root:root {} + 2>/dev/null || true`]
+      : []),
+    `find ${sshRoot} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod ${workspace.runtime.user === "root" ? "400" : "600"} {} + 2>/dev/null || true`,
+    `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
+    `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
+    ...buildGitHubKnownHostsLines(sshRoot),
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildEvolutionBootstrapLines(workspace),
     ...buildPaseoBootstrapLines(workspace),
@@ -361,9 +357,6 @@ ${workspaceDataVolume.mountBlock.join("\n")}
       - type: volume
         source: ${identityVolume.key}
         target: /identity
-      - type: volume
-        source: ${sshVolume.key}
-        target: /ssh
     tmpfs:
       - /run/workspace
 
@@ -373,8 +366,6 @@ ${workspaceDataVolume.volumeBlock.join("\n")}
     name: ${workspaceRuntimeVolume.name}
   ${identityVolume.key}:
     name: ${identityVolume.name}
-  ${sshVolume.key}:
-    name: ${sshVolume.name}
 `;
 }
 
