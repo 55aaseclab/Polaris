@@ -24,7 +24,7 @@ apps/polaris/.coverage/
 apps/polaris-web/test-results/
 .env.local
 .env.dev
-.env.deploy
+.env.prod
 config/users/user-map.json
 
 # K3S kata configs

@@ -64,7 +64,7 @@ The main ones are:
 - `NEXT_PUBLIC_CLERK_SIGN_IN_URL`
 - `NEXT_PUBLIC_CLERK_SIGN_UP_URL`
 
-Use `.env.dev.example` and `.env.deploy.example` as templates.
+Use `.env.dev.example` and `.env.prod.example` as templates.
 
 Polaris expects shared Clerk auth URLs in the env file.
 
@@ -75,7 +75,7 @@ It no longer serves local `/sign-in` or `/sign-up` Clerk UI pages.
 Deploy the stack:
 
 ```bash
-bash ./scripts/deploy-polaris-host.sh .env.deploy
+bash ./scripts/deploy-polaris-host.sh .env.prod
 ```
 
 Access it through nginx on the public hostname.
@@ -91,7 +91,7 @@ The default deploy ports are:
 - paseo-app: `8082`
 - polaris-executor: `8788`
 
-Keep real values in `.env.deploy`.
+Keep real values in `.env.prod`.
 
 ## Documentation
 

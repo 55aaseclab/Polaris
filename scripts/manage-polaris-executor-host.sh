@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="${1:-.env.deploy}"
+ENV_FILE="${1:-.env.prod}"
 ACTION="${2:-status}"
 
 if [ ! -f "${ENV_FILE}" ]; then
