@@ -1,123 +1,80 @@
 # Polaris
 
-Self-hosted workspace control plane for isolated development environments and
-external AI coding agents.
+Self-hosted workspace control plane.
 
-[Quickstart](#quickstart) | [Documentation](./docs/README.md)
+## Overview
 
-![Platform](https://img.shields.io/badge/platform-self--hosted-blue)
-![Backends](https://img.shields.io/badge/backends-pod%20%7C%20docker%20%7C%20kubevirt-2563eb)
-![Manager](https://img.shields.io/badge/manager-Paseo-15803d)
-![License](https://img.shields.io/badge/license-MIT-black)
+`Polaris` manages isolated development environments and external AI coding
+agents across `docker`, `pod`, and `kubevirt-vm` backends.
 
-Polaris is a workspace control plane.
+## Local Development
 
-It manages development environments across `pod`, `docker`, and
-`kubevirt-vm` backends.
-
-It keeps the agent layer external and replaceable.
-
-Today that means you can run one machine or a fleet of them, create an
-isolated workspace from a spec, and use the full capacity of your own hardware
-while controlling the experience from your phone or a web portal.
-
-## Quickstart
-
-Run the local stack:
+Main CLI:
 
 ```bash
-bash ./scripts/deploy-polaris-host.sh .env.dev
+pnpm run polaris -- status <workspace>
 ```
 
-This starts `polaris-executor` on the host in the background.
-
-It starts `polaris-server`, `polaris-webportal`, `paseo-app`, and `nginx`
-through Docker Compose.
-
-The default local ports are:
-
-- nginx: `18080`
-- polaris-server: `18787`
-- polaris-webportal: `18081`
-- paseo-app: `18082`
-- polaris-executor: `18788`
-
-Use `.env.dev` for real local values.
-
-Executor host controls:
+Local stack service:
 
 ```bash
-bash ./scripts/manage-polaris-executor-host.sh .env.dev status
-bash ./scripts/manage-polaris-executor-host.sh .env.dev restart
-bash ./scripts/manage-polaris-executor-host.sh .env.dev stop
+bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
-The managed executor log is written to `.runtime/polaris-executor/executor.log`.
+You can also start it through the `stack` service in `paseo.json`.
 
-For local testing from another network, set the public IP-based URLs in
-`.env.dev`.
+Local development requires `.env.dev`.
 
-The main ones are:
-
-- `VITE_PASEO_APP_BASE_URL`
-- `POLARIS_PASEO_APP_BASE_URL`
-- `NEXT_PUBLIC_CLERK_SIGN_IN_URL`
-- `NEXT_PUBLIC_CLERK_SIGN_UP_URL`
-
-Use `.env.dev.example` and `.env.prod.example` as templates.
-
-Polaris expects shared Clerk auth URLs in the env file.
-
-It no longer serves local `/sign-in` or `/sign-up` Clerk UI pages.
-
-## Deploy
-
-Deploy the stack:
+The main values are:
 
 ```bash
-bash ./scripts/deploy-polaris-host.sh .env.prod
+POLARIS_DATA_ROOT=/path/to/polaris/data
+POLARIS_SERVER_PORT=8787
+POLARIS_WEBPORTAL_PORT=8081
+POLARIS_EXECUTOR_PORT=8788
+VITE_PASEO_APP_BASE_URL=http://HOST_IP:8082
+POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
+VITE_CLERK_SIGN_IN_URL=http://HOST_IP:8000/sign-in/
+VITE_CLERK_SIGN_UP_URL=http://HOST_IP:8000/sign-up/
 ```
 
-Access it through nginx on the public hostname.
-
-The host executor stays local-only and is restarted in the background by the
-deploy script.
-
-The default deploy ports are:
-
-- nginx: `80`
-- polaris-server: `8787`
-- polaris-webportal: `8081`
-- paseo-app: `8082`
-- polaris-executor: `8788`
-
-Keep real values in `.env.prod`.
-
-## Documentation
-
-- [docs/polaris/README.md](./docs/polaris/README.md)
-- [docs/polaris/control-plane-maturity.md](./docs/polaris/control-plane-maturity.md)
-- [docs/polaris/isolation-maturity.md](./docs/polaris/isolation-maturity.md)
-- [docs/polaris/agent-swarm-maturity.md](./docs/polaris/agent-swarm-maturity.md)
-- [docs/polaris/evolution-maturity.md](./docs/polaris/evolution-maturity.md)
-- [Support multiple machines with k3s](./docs/operations/setup-k3s-across-multiple-machines.md)
-
-## Contributing
-
-Keep generated artifacts in sync with the TypeScript control plane.
-
-Do not treat generated backend manifests as hand-maintained files.
-
-Validate changes with:
+## Local CI
 
 ```bash
-pnpm run check
-pnpm run test:polaris
+bash ./scripts/ci-local.sh
 ```
 
-If you change command flow, backend behavior, or onboarding, update the
-relevant docs under `docs/`.
+## Remote Provision
 
-## License
+```bash
+bash ./scripts/provision-remote.sh debian@your-server
+```
 
-[MIT](./LICENSE)
+Default remote paths:
+
+- app dir: `/srv/polaris/app`
+- data dir: `/srv/polaris/data`
+- env file: `/etc/polaris/polaris.env`
+- backup dir: `/home/debian/jianxiaoyi/data/polaris/backups`
+
+## Remote Deploy
+
+```bash
+bash ./scripts/cd-remote.sh debian@your-server
+```
+
+Production uses `.env.prod`.
+
+Production data lives under `POLARIS_DATA_ROOT` instead of the repo checkout.
+
+The current default is:
+
+```bash
+POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
+```
+
+## Remote Rollback
+
+```bash
+bash ./scripts/rollback-remote.sh debian@your-server
+```
