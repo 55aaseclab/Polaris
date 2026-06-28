@@ -249,13 +249,7 @@ const COPY: Record<Language, Record<string, string>> = {
     settings_title: "Settings",
     settings_desc: "Choose the language used across the portal.",
     danger_zone: "Danger zone",
-    danger_zone_desc: "Delete this Polaris user, local credentials, and Clerk mapping.",
     workspace_danger_zone_desc: "Stop or delete this workspace.",
-    danger_zone_tooltip: "This permanently deletes the Polaris user profile, user-scoped secrets, default credentials, and Clerk username mapping.",
-    delete_user: "Delete user",
-    delete_user_confirm_title: "Delete this user?",
-    delete_user_confirm_description: "This deletes the Polaris user profile, user-scoped secrets, and Clerk username mapping. This action cannot be undone.",
-    deleting_user: "Deleting user...",
     paseo_credential: "Workspace credential override",
     paseo_credential_desc: "Optionally apply a workspace-specific agent-auth credential for this driver.",
     loading_paseo_credentials: "Loading agent credentials...",
@@ -472,13 +466,7 @@ const COPY: Record<Language, Record<string, string>> = {
     settings_title: "设置",
     settings_desc: "选择整个门户使用的语言。",
     danger_zone: "危险操作",
-    danger_zone_desc: "删除这个 Polaris 用户、本地凭据和 Clerk 映射。",
     workspace_danger_zone_desc: "停止或删除这个工作空间。",
-    danger_zone_tooltip: "这会永久删除 Polaris 用户资料、用户级 secrets、默认凭据，以及 Clerk 用户名映射。",
-    delete_user: "删除用户",
-    delete_user_confirm_title: "删除这个用户？",
-    delete_user_confirm_description: "这会删除 Polaris 用户资料、用户级 secrets，以及 Clerk 用户名映射。此操作不可恢复。",
-    deleting_user: "正在删除用户…",
     paseo_credential: "工作空间凭证覆盖",
     paseo_credential_desc: "可选地为当前 driver 应用一个工作空间级 agent-auth 凭证。",
     loading_paseo_credentials: "正在加载 agent 凭证…",
@@ -882,19 +870,6 @@ function translatePaseoState(
   return t("paseo_unknown");
 }
 
-function workspaceSummaryStatusLabel(
-  workspace: PortalWorkspaceSummary | null | undefined,
-  t: (key: string) => string,
-): string {
-  if (!workspace) {
-    return t("workspace_unknown");
-  }
-  if (workspace.progress && !workspace.progress.done) {
-    return `${t("status_provisioning")} ${workspace.progress.percent}%`;
-  }
-  return translateWorkspaceRuntimeState(workspace.status?.state, t);
-}
-
 function extractOfferFragment(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -1226,7 +1201,7 @@ function PortalShellLayout(props: {
   const { mapping } = useCurrentUserMapping();
   const location = useLocation();
   const navigate = useNavigate();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
   const isAdmin = mapping?.role === "admin";
   const activeUser = props.users.find((user) =>
     location.pathname.includes(`/users/${user.id}/`),
@@ -1249,6 +1224,36 @@ function PortalShellLayout(props: {
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
+
+  function resetCreateWorkspaceForm(): void {
+    setNewWorkspaceName("");
+    setStartAfterCreate(true);
+    setDefaultDockerOnly(true);
+    setCreateWorkspaceError(null);
+    setCreatingWorkspace(false);
+    setCreateWorkspaceProgress(0);
+  }
+
+  function handleCreateWorkspaceOpenChange(open: boolean): void {
+    if (creatingWorkspace && !open) {
+      return;
+    }
+    setCreateWorkspaceOpen(open);
+    if (!open) {
+      resetCreateWorkspaceForm();
+    }
+  }
+
+  function openCreateWorkspaceDialog(): void {
+    if (isMobile && openMobile) {
+      setOpenMobile(false);
+      window.setTimeout(() => {
+        setCreateWorkspaceOpen(true);
+      }, 0);
+      return;
+    }
+    setCreateWorkspaceOpen(true);
+  }
 
   function closeMobileSidebar(): void {
     if (isMobile) {
@@ -1334,11 +1339,10 @@ function PortalShellLayout(props: {
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("switch_user");
-  const currentWorkspaceSummary = currentWorkspaceName
-    ? sidebarWorkspaces?.find((workspace) => workspace.name === currentWorkspaceName) ?? null
-    : null;
   const workspaceStatusRoute = currentWorkspaceName
-    ? workspacePaneLink(currentWorkspaceName, "paseo")
+    ? (currentWorkspacePane === "paseo"
+      ? workspaceLink(currentWorkspaceName)
+      : workspacePaneLink(currentWorkspaceName, "paseo"))
     : "";
   const isWorkspaceSection = location.pathname.includes("/workspaces");
   const currentPaneTitle = location.pathname.includes("/admin")
@@ -1359,7 +1363,7 @@ function PortalShellLayout(props: {
     activeUserId,
     workspaces: sidebarWorkspaces ?? [],
     workspacesLoading: sidebarWorkspacesLoading,
-    openCreateWorkspaceDialog: () => setCreateWorkspaceOpen(true),
+    openCreateWorkspaceDialog,
   };
 
   return (
@@ -1390,91 +1394,10 @@ function PortalShellLayout(props: {
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <AlertDialog
-                      open={createWorkspaceOpen}
-                      onOpenChange={(open) => {
-                        if (creatingWorkspace && !open) {
-                          return;
-                        }
-                        setCreateWorkspaceOpen(open);
-                        if (!open) {
-                          setNewWorkspaceName("");
-                          setStartAfterCreate(true);
-                          setDefaultDockerOnly(true);
-                          setCreateWorkspaceError(null);
-                          setCreatingWorkspace(false);
-                          setCreateWorkspaceProgress(0);
-                        }
-                      }}
-                    >
-                      <AlertDialogTrigger asChild>
-                        <SidebarMenuButton>
-                          <PlusCircle />
-                          <span>{t("add_workspace")}</span>
-                        </SidebarMenuButton>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t("add_workspace")}</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {t("add_workspace_desc")}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <form className="grid gap-4" onSubmit={(event) => void handleCreateWorkspace(event)}>
-                          <div className="grid gap-2">
-                            <Label htmlFor="new-workspace-name">{t("workspace_name")}</Label>
-                            <Input
-                              id="new-workspace-name"
-                              value={newWorkspaceName}
-                              onChange={(event) => setNewWorkspaceName(event.target.value)}
-                              placeholder={t("workspace_example")}
-                              autoComplete="off"
-                              disabled={creatingWorkspace}
-                            />
-                          </div>
-                          <label className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-border"
-                              checked={startAfterCreate}
-                              onChange={(event) => setStartAfterCreate(event.target.checked)}
-                              disabled={creatingWorkspace}
-                            />
-                            <span>{t("start_after_create_option")}</span>
-                          </label>
-                          <label className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-border"
-                              checked={defaultDockerOnly}
-                              onChange={(event) => setDefaultDockerOnly(event.target.checked)}
-                              disabled={creatingWorkspace}
-                            />
-                            <span>{t("docker_only_option")}</span>
-                          </label>
-                          {creatingWorkspace && (
-                            <div className="grid gap-2">
-                              <div className="flex justify-between text-sm text-muted-foreground">
-                                <span>{t("provisioning")}</span>
-                                <span>{createWorkspaceProgress}%</span>
-                              </div>
-                              <Progress value={createWorkspaceProgress} />
-                            </div>
-                          )}
-                          {createWorkspaceError && (
-                            <p className="text-sm text-destructive">{createWorkspaceError}</p>
-                          )}
-                          <AlertDialogFooter>
-                            <AlertDialogCancel disabled={creatingWorkspace}>
-                              {t("cancel")}
-                            </AlertDialogCancel>
-                            <Button type="submit" disabled={creatingWorkspace || !newWorkspaceName.trim()}>
-                              {creatingWorkspace ? t("provisioning") : t("create_workspace")}
-                            </Button>
-                          </AlertDialogFooter>
-                        </form>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <SidebarMenuButton onClick={openCreateWorkspaceDialog}>
+                      <PlusCircle />
+                      <span>{t("add_workspace")}</span>
+                    </SidebarMenuButton>
                   </SidebarMenuItem>
                   {sidebarWorkspacesLoading && (
                     <div className="px-2 py-3 text-sm text-muted-foreground">
@@ -1628,9 +1551,6 @@ function PortalShellLayout(props: {
               >
                 <Link to={workspaceStatusRoute}>
                   <span>{t("workspace_status_button")}</span>
-                  <Badge variant="secondary" className="ml-2">
-                    {workspaceSummaryStatusLabel(currentWorkspaceSummary, t)}
-                  </Badge>
                 </Link>
               </Button>
             ) : null}
@@ -1639,6 +1559,156 @@ function PortalShellLayout(props: {
             {props.children}
           </div>
         </SidebarInset>
+        {isMobile ? (
+          <Sheet
+            open={createWorkspaceOpen}
+            onOpenChange={handleCreateWorkspaceOpenChange}
+          >
+            <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>{t("add_workspace")}</SheetTitle>
+                <SheetDescription>{t("add_workspace_desc")}</SheetDescription>
+              </SheetHeader>
+              <form
+                className="grid gap-4 py-4"
+                onSubmit={(event) => void handleCreateWorkspace(event)}
+              >
+                <div className="grid gap-2">
+                  <Label htmlFor="new-workspace-name-mobile">{t("workspace_name")}</Label>
+                  <Input
+                    id="new-workspace-name-mobile"
+                    value={newWorkspaceName}
+                    onChange={(event) => setNewWorkspaceName(event.target.value)}
+                    placeholder={t("workspace_example")}
+                    autoComplete="off"
+                    disabled={creatingWorkspace}
+                  />
+                </div>
+                <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border"
+                    checked={startAfterCreate}
+                    onChange={(event) => setStartAfterCreate(event.target.checked)}
+                    disabled={creatingWorkspace}
+                  />
+                  <span>{t("start_after_create_option")}</span>
+                </label>
+                <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border"
+                    checked={defaultDockerOnly}
+                    onChange={(event) => setDefaultDockerOnly(event.target.checked)}
+                    disabled={creatingWorkspace}
+                  />
+                  <span>{t("docker_only_option")}</span>
+                </label>
+                {creatingWorkspace && (
+                  <div className="grid gap-2">
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>{t("provisioning")}</span>
+                      <span>{createWorkspaceProgress}%</span>
+                    </div>
+                    <Progress value={createWorkspaceProgress} />
+                  </div>
+                )}
+                {createWorkspaceError && (
+                  <p className="text-sm text-destructive">{createWorkspaceError}</p>
+                )}
+                <SheetFooter className="gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleCreateWorkspaceOpenChange(false)}
+                    disabled={creatingWorkspace}
+                  >
+                    {t("cancel")}
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={creatingWorkspace || !newWorkspaceName.trim()}
+                  >
+                    {creatingWorkspace ? t("provisioning") : t("create_workspace")}
+                  </Button>
+                </SheetFooter>
+              </form>
+            </SheetContent>
+          </Sheet>
+        ) : (
+          <AlertDialog
+            open={createWorkspaceOpen}
+            onOpenChange={handleCreateWorkspaceOpenChange}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("add_workspace")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("add_workspace_desc")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <form
+                className="grid gap-4"
+                onSubmit={(event) => void handleCreateWorkspace(event)}
+              >
+                <div className="grid gap-2">
+                  <Label htmlFor="new-workspace-name">{t("workspace_name")}</Label>
+                  <Input
+                    id="new-workspace-name"
+                    value={newWorkspaceName}
+                    onChange={(event) => setNewWorkspaceName(event.target.value)}
+                    placeholder={t("workspace_example")}
+                    autoComplete="off"
+                    disabled={creatingWorkspace}
+                  />
+                </div>
+                <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border"
+                    checked={startAfterCreate}
+                    onChange={(event) => setStartAfterCreate(event.target.checked)}
+                    disabled={creatingWorkspace}
+                  />
+                  <span>{t("start_after_create_option")}</span>
+                </label>
+                <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border"
+                    checked={defaultDockerOnly}
+                    onChange={(event) => setDefaultDockerOnly(event.target.checked)}
+                    disabled={creatingWorkspace}
+                  />
+                  <span>{t("docker_only_option")}</span>
+                </label>
+                {creatingWorkspace && (
+                  <div className="grid gap-2">
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>{t("provisioning")}</span>
+                      <span>{createWorkspaceProgress}%</span>
+                    </div>
+                    <Progress value={createWorkspaceProgress} />
+                  </div>
+                )}
+                {createWorkspaceError && (
+                  <p className="text-sm text-destructive">{createWorkspaceError}</p>
+                )}
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={creatingWorkspace}>
+                    {t("cancel")}
+                  </AlertDialogCancel>
+                  <Button
+                    type="submit"
+                    disabled={creatingWorkspace || !newWorkspaceName.trim()}
+                  >
+                    {creatingWorkspace ? t("provisioning") : t("create_workspace")}
+                  </Button>
+                </AlertDialogFooter>
+              </form>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </>
     </PortalShellContext.Provider>
   );
