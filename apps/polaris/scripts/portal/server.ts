@@ -151,18 +151,6 @@ function findProfile(userId: string): PortalProfileSummary | null {
   return listPortalProfiles().find((profile) => profile.id === userId) ?? null;
 }
 
-function defaultPortalUserId(): string | null {
-  const firstProfile = listPortalProfiles()[0];
-  return firstProfile?.id ?? null;
-}
-
-function resolveDefaultPortalUserId(session: TrustedPortalSession | null): string | null {
-  if (session) {
-    return session.role === "admin" ? defaultPortalUserId() : session.polarisUserId;
-  }
-  return defaultPortalUserId();
-}
-
 function requireProfile(
   res: ServerResponse,
   routeUserId: string,
@@ -500,9 +488,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (segments.length === 0) {
         sendJson(res, 200, {
           service: "polaris-portal-api",
-          defaultUserId: resolveDefaultPortalUserId(trustedSession),
+          authEnabled: true,
           endpoints: [
-            "/api/default-user",
             "/api/users",
             "/api/users/:userId",
             "/api/users/:userId/workspaces",
@@ -527,12 +514,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               ? profiles.filter((profile) => profile.id === trustedSession.polarisUserId)
               : profiles,
           );
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "default-user") {
-          sendJson(res, 200, {
-            defaultUserId: resolveDefaultPortalUserId(trustedSession),
-          });
           return;
         }
         if (segments.length === 2 && segments[1] === "user-mapping" && req.method === "GET") {
