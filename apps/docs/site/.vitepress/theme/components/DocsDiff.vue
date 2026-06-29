@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { useData } from "vitepress";
 import { computed, ref } from "vue";
-import {
-  docsDiffs,
-  docsVersions,
-  type DocsDiffData,
-  type DocsVersionData,
-} from "../generated/docs-data";
+import { docsDiffs, docsVersions, type DocsDiffData, type DocsVersionData } from "../generated/docs-data";
 
 type DiffSegment = {
   type: "same" | "added" | "removed";
@@ -38,9 +33,9 @@ type SyntaxToken = {
 };
 
 const { frontmatter } = useData();
-const versions = docsVersions as DocsVersionData[];
 const diffs = docsDiffs as DocsDiffData[];
-const diffMode = ref<"unified" | "sideBySide">("unified");
+const versions = docsVersions as DocsVersionData[];
+const diffMode = ref<"unified" | "split">("unified");
 
 const filePath = computed(() => String(frontmatter.value.diffPath ?? ""));
 const pageTitle = computed(() => String(frontmatter.value.title ?? filePath.value));
@@ -72,6 +67,9 @@ const unifiedPatch = computed(() => {
 });
 
 const unifiedRows = computed(() => parseUnifiedPatch(unifiedPatch.value));
+const visibleUnifiedRows = computed(() =>
+  unifiedRows.value.filter((row) => row.kind !== "meta"),
+);
 const sideBySideRows = computed(() =>
   buildSideBySideRows(leftFile.value?.content ?? "", rightFile.value?.content ?? ""),
 );
@@ -368,10 +366,6 @@ function parseUnifiedPatch(patch: string): UnifiedRow[] {
 
   return rows;
 }
-
-const visibleUnifiedRows = computed(() =>
-  unifiedRows.value.filter((row) => row.kind !== "meta"),
-);
 </script>
 
 <template>
@@ -392,8 +386,8 @@ const visibleUnifiedRows = computed(() =>
           <div class="docs-static-pill">{{ rightVersion }}</div>
         </div>
         <div class="docs-toolbar-group docs-toolbar-group--modes">
-          <span>Mode</span>
-          <div class="docs-mode-switch" role="tablist" aria-label="Diff mode">
+          <span>View</span>
+          <div class="docs-mode-switch" role="tablist" aria-label="Diff view">
             <button
               :class="{ active: diffMode === 'unified' }"
               type="button"
@@ -404,11 +398,11 @@ const visibleUnifiedRows = computed(() =>
               Unified
             </button>
             <button
-              :class="{ active: diffMode === 'sideBySide' }"
+              :class="{ active: diffMode === 'split' }"
               type="button"
               role="tab"
-              :aria-selected="diffMode === 'sideBySide'"
-              @click="diffMode = 'sideBySide'"
+              :aria-selected="diffMode === 'split'"
+              @click="diffMode = 'split'"
             >
               Split
             </button>

@@ -84,19 +84,19 @@
 .docs-mode-switch {
   display: inline-flex;
   gap: 3px;
-  padding: 3px;
+  padding: 2px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 999px;
   background: var(--vp-c-bg-soft);
 }
 
 .docs-mode-switch button {
-  padding: 7px 12px;
+  padding: 6px 11px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--vp-c-text-2);
-  font-size: 14px;
+  font-size: 13px;
   font: inherit;
   cursor: pointer;
 }
@@ -104,7 +104,6 @@
 .docs-mode-switch button.active {
   background: var(--vp-c-bg);
   color: var(--vp-c-text-1);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .docs-panel {
@@ -238,11 +237,11 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   border-bottom: 0;
-  background: var(--docs-panel-meta);
+  background: transparent;
 }
 
 .docs-side-title {
-  padding: 6px 0 8px;
+  padding: 4px 0 6px;
   color: var(--docs-panel-muted);
   font-size: 11px;
   font-weight: 700;
@@ -343,10 +342,5 @@
   .docs-side-header,
   .docs-side-row {
     grid-template-columns: 1fr;
-  }
-
-  .docs-side-cell + .docs-side-cell {
-    border-top: 0;
-    border-left: 0;
   }
 }
