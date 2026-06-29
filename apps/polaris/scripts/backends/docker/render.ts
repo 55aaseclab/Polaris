@@ -6,6 +6,7 @@ import {
   dockerNetfsServer,
   isNetfsSource,
   netfsMountOptions,
+  netfsResolvedPath,
   requireNetfsField,
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
@@ -58,6 +59,16 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
 } {
   const source = workspace.attachments.workspaceData.source;
   if (isNetfsSource(source)) {
+    if (source.server?.trim() === "netfs.local") {
+      return {
+        mountBlock: [
+          "      - type: bind",
+          `        source: ${JSON.stringify(netfsResolvedPath(source))}`,
+          "        target: /workspace/project",
+        ],
+        volumeBlock: [],
+      };
+    }
     const server = dockerNetfsServer(source);
     const device = dockerNetfsDevicePath(source);
     const options = [`addr=${server}`, ...netfsMountOptions(source)].join(",");
@@ -134,14 +145,40 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
   if (!workspace.agent.enabled) {
     return [];
   }
-  const observerPath = path.join(REPO_ROOT, "apps", "polaris", "scripts", "evolution", "runtime-observer.mjs");
-  const script = fs.readFileSync(observerPath, "utf8");
-  const encoded = Buffer.from(script, "utf8").toString("base64");
-  const runtimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-observer.mjs`;
+  const memoryObserverPath = path.join(
+    REPO_ROOT,
+    "apps",
+    "polaris",
+    "scripts",
+    "evolution",
+    "runtime-memory-observer.mjs",
+  );
+  const statusObserverPath = path.join(
+    REPO_ROOT,
+    "apps",
+    "polaris",
+    "scripts",
+    "runtime",
+    "status-observer.mjs",
+  );
+  const memoryScript = fs.readFileSync(memoryObserverPath, "utf8");
+  const statusScript = fs.readFileSync(statusObserverPath, "utf8");
+  const memoryEncoded = Buffer.from(memoryScript, "utf8").toString("base64");
+  const statusEncoded = Buffer.from(statusScript, "utf8").toString("base64");
+  const memoryRuntimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.mjs`;
+  const statusRuntimePath = `${workspace.agent.runtime.evolutionRoot}/status-observer.mjs`;
+  const reportUrl = (
+    process.env.POLARIS_RUNTIME_EXECUTOR_BASE_URL?.trim()
+    || process.env.POLARIS_EXECUTOR_BASE_URL?.trim()
+    || ""
+  ).replace(/\/+$/, "");
+  const reportSecret = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim() || "";
   return [
-    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(runtimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`,
-    `chmod 755 ${runtimePath}`,
-    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${runtimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-observer.log 2>&1 &`,
+    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(memoryRuntimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(memoryEncoded)}));`)}`,
+    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(statusRuntimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(statusEncoded)}));`)}`,
+    `chmod 755 ${memoryRuntimePath} ${statusRuntimePath}`,
+    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${memoryRuntimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.log 2>&1 &`,
+    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} POLARIS_RUNTIME_STATUS_REPORT_URL=${q(reportUrl ? `${reportUrl}/workspaces/status/report` : "")} POLARIS_RUNTIME_STATUS_REPORT_SECRET=${q(reportSecret)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${statusRuntimePath} > ${workspace.agent.runtime.evolutionRoot}/status-observer.log 2>&1 &`,
   ];
 }
 
@@ -349,6 +386,8 @@ ${portLines || '      - "6767:6767"'}
       POLARIS_WORKSPACE_MEMORY_FILE: ${workspace.evolution?.workspaceMemoryFile ?? ""}
       POLARIS_USER_MEMORY_FILE: ${workspace.evolution?.userMemoryFile ?? ""}
       POLARIS_MEMORY_SNAPSHOT_FILE: ${workspace.evolution?.sessionSnapshotFile ?? ""}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
 ${workspaceDataVolume.mountBlock.join("\n")}
       - type: volume

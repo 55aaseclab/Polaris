@@ -22,8 +22,8 @@ const managerId = process.env.POLARIS_MANAGER_ID || "paseo";
 const agentsRoot = path.join(paseoHome, "agents");
 const eventsFile = path.join(evolutionRoot, "execution-events.jsonl");
 const candidatesFile = path.join(evolutionRoot, "memory-candidates.jsonl");
-const stateFile = path.join(evolutionRoot, "runtime-observer-state.json");
-const logPrefix = "[polaris-evolution-observer]";
+const stateFile = path.join(evolutionRoot, "runtime-memory-observer-state.json");
+const logPrefix = "[polaris-runtime-memory-observer]";
 const pollIntervalMs = 60000;
 const memoryLimitDefault = Number(process.env.POLARIS_MEMORY_RECALL_LIMIT || 6);
 
@@ -476,7 +476,7 @@ async function poll() {
 
 export async function main() {
   ensureDir(evolutionRoot);
-  log("starting observer", {
+  log("starting memory observer", {
     paseoHome,
     evolutionRoot,
     workspaceMemoryFile,
@@ -495,7 +495,8 @@ export async function main() {
   }, pollIntervalMs);
 }
 
-const isMainModule = typeof process.argv[1] === "string" && process.argv[1].endsWith("runtime-observer.mjs");
+const isMainModule =
+  typeof process.argv[1] === "string" && process.argv[1].endsWith("runtime-memory-observer.mjs");
 
 if (isMainModule) {
   void main().catch((error) => {

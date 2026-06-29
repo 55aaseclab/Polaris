@@ -109,14 +109,14 @@ Polaris 会综合：
 当前语义是：
 
 - portal detail read 优先读取 `status.json`
-- runtime observer 可以主动回报状态 patch
+- runtime status observer 可以主动回报状态 patch
 - 显式 refresh 仍然保留，但不再是默认读路径
 - start / stop / live switch 可以先写缓存状态，再异步 refresh
 
 当前关键文件：
 
 - `apps/polaris/scripts/executor/operations.ts`
-- `apps/polaris/scripts/evolution/runtime-observer.mjs`
+- `apps/polaris/scripts/runtime/status-observer.mjs`
 - `apps/polaris-web/src/App.tsx`
 
 ### 运行时凭证切换

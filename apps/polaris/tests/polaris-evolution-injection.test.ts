@@ -276,7 +276,8 @@ test("renderers expose memory files and session snapshot paths to runtime consum
     assert.match(dockerRendered, /POLARIS_USER_MEMORY_FILE/);
     assert.match(dockerRendered, /POLARIS_MEMORY_SNAPSHOT_FILE/);
     assert.match(dockerRendered, /\.polaris\/MEMORY\.md/);
-    assert.match(dockerRendered, /runtime-observer\.mjs/);
+    assert.match(dockerRendered, /runtime-memory-observer\.mjs/);
+    assert.match(dockerRendered, /status-observer\.mjs/);
     assert.match(podRendered, /POLARIS_WORKSPACE_MEMORY_FILE/);
     assert.match(podRendered, /POLARIS_USER_MEMORY_FILE/);
     assert.match(podRendered, /POLARIS_MEMORY_SNAPSHOT_FILE/);

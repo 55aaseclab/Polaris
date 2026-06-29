@@ -17,8 +17,10 @@
 ### Changed
 
 - Root docs index now treats docs as releaseable artifacts.
-- Polaris docs now describe the portal, executor, runtime observer, and status
-  cache model together.
+- Polaris docs now describe the portal, executor, runtime status observer, and
+  status cache model together.
+- Runtime status reporting and runtime memory observation are now described as
+  separate runtime layers.
 - Remote deploy docs now describe host/data/env ownership more explicitly.
 - Polaris docs now describe the concrete behavior after the latest performance
   optimization pass instead of only the intended direction.

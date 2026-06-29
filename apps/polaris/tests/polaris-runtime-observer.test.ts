@@ -10,9 +10,9 @@ import {
   shouldPersistMemory,
   shouldUseModelSummarizer,
   deriveAgentObservationUpdate,
-} from "../scripts/evolution/runtime-observer.mjs";
+} from "../scripts/evolution/runtime-memory-observer.mjs";
 
-test("runtime observer selects bounded memory entries by confidence and recency", () => {
+test("runtime memory observer selects bounded memory entries by confidence and recency", () => {
   const entries = [
     {
       id: "a",
@@ -52,7 +52,7 @@ test("runtime observer selects bounded memory entries by confidence and recency"
   assert.deepEqual(selected.map((item) => item.title), ["High new", "High old"]);
 });
 
-test("runtime observer deduplicates equivalent memory entries", () => {
+test("runtime memory observer deduplicates equivalent memory entries", () => {
   const entries = [
     {
       id: "a",
@@ -81,7 +81,7 @@ test("runtime observer deduplicates equivalent memory entries", () => {
   assert.equal(selected.length, 1);
 });
 
-test("runtime observer renders workspace memory and snapshot", () => {
+test("runtime memory observer renders workspace memory and snapshot", () => {
   const entries = [
     {
       id: "a",
@@ -114,7 +114,7 @@ test("runtime observer renders workspace memory and snapshot", () => {
   assert.match(snapshot, /User Memory/);
 });
 
-test("runtime observer fallback memory stays memory-oriented", () => {
+test("runtime memory observer fallback memory stays memory-oriented", () => {
   const memory = buildFallbackMemoryChange(
     {
       provider: "codex",
@@ -129,19 +129,19 @@ test("runtime observer fallback memory stays memory-oriented", () => {
   assert.match(memory.title, /Runtime failure recovery/);
 });
 
-test("runtime observer persistence policy is conservative by default", () => {
+test("runtime memory observer persistence policy is conservative by default", () => {
   assert.equal(shouldPersistMemory(null, "running"), false);
   assert.equal(shouldPersistMemory("running", "idle"), true);
   assert.equal(shouldPersistMemory("running", "error"), true);
 });
 
-test("runtime observer summarizer policy only targets meaningful runs", () => {
+test("runtime memory observer summarizer policy only targets meaningful runs", () => {
   assert.equal(shouldUseModelSummarizer("running"), false);
   assert.equal(shouldUseModelSummarizer("idle"), true);
   assert.equal(shouldUseModelSummarizer("error"), true);
 });
 
-test("runtime observer derives memory capture from daemon-owned agent records", async () => {
+test("runtime memory observer derives memory capture from daemon-owned agent records", async () => {
   const record = {
     id: "agent-1",
     provider: "codex",
@@ -159,7 +159,7 @@ test("runtime observer derives memory capture from daemon-owned agent records", 
   assert.ok(derived.memoryEntry);
 });
 
-test("runtime observer infers completion when the first poll already sees idle attention", async () => {
+test("runtime memory observer infers completion when the first poll already sees idle attention", async () => {
   const record = {
     id: "agent-short",
     provider: "codex",
@@ -180,7 +180,7 @@ test("runtime observer infers completion when the first poll already sees idle a
   assert.equal(derived.memoryEntry?.target, "user-memory");
 });
 
-test("runtime observer emits task-failed and workspace memory for error transitions", async () => {
+test("runtime memory observer emits task-failed and workspace memory for error transitions", async () => {
   const record = {
     id: "agent-error",
     provider: "codex",
