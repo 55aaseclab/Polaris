@@ -4,7 +4,7 @@ set -euo pipefail
 
 POLARIS_PASEO_GIT_URL="${POLARIS_PASEO_GIT_URL:-https://github.com/cyruscyliu/paseo.git}"
 POLARIS_PASEO_GIT_REF="${POLARIS_PASEO_GIT_REF:-3d6b4adc68dc426789974e7c0bbad9d783a34c1f}"
-POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-/paseo}"
+POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-}"
 
 paseo_local_npm() {
   npx -y npm@10.9.2 "$@"
@@ -31,11 +31,12 @@ paseo_local_patch_fingerprint_file() {
 }
 
 paseo_local_patch_fingerprint() {
-  find apps/paseo/patches -type f -print0 \
-    | sort -z \
-    | xargs -0 sha256sum \
-    | sha256sum \
-    | awk '{print $1}'
+  {
+    printf '%s\n' "base_url=${POLARIS_PASEO_WEB_BASE_URL}"
+    find apps/paseo/patches -type f -print0 \
+      | sort -z \
+      | xargs -0 sha256sum
+  } | sha256sum | awk '{print $1}'
 }
 
 paseo_local_prepare_dist() {
