@@ -71,17 +71,22 @@ export function workspaceConfigPath(
   );
 }
 
-export function workspaceConfigExists(project: string): boolean {
-  assertNoProjectNameCollision(project);
-  const userScopedMatches = fs.existsSync(USER_SECRETS_ROOT)
-    ? fs.readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .flatMap((entry) => [
-        workspaceConfigPath(project, "docker", entry.name),
-        workspaceConfigPath(project, "pod", entry.name),
-        workspaceConfigPath(project, "kubevirt-vm", entry.name),
-      ])
-    : [];
+export function workspaceConfigExists(project: string, userProfileId?: string): boolean {
+  if (!userProfileId?.trim()) {
+    assertNoProjectNameCollision(project);
+  }
+  const candidateUserIds = userProfileId?.trim()
+    ? [userProfileId.trim()]
+    : fs.existsSync(USER_SECRETS_ROOT)
+      ? fs.readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+      : [];
+  const userScopedMatches = candidateUserIds.flatMap((candidateUserId) => [
+    workspaceConfigPath(project, "docker", candidateUserId),
+    workspaceConfigPath(project, "pod", candidateUserId),
+    workspaceConfigPath(project, "kubevirt-vm", candidateUserId),
+  ]);
   return [
     ...userScopedMatches,
     path.join(REPO_ROOT, "agents", `${project}.agent.yaml`),

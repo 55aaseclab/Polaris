@@ -5,8 +5,8 @@ import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSessio
 import { loadWorkspaceForCommand } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
 
-export async function statusCommand(project: string): Promise<void> {
-  const { workspace, driver } = loadWorkspaceForCommand("status", project);
+export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
+  const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
   const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
   const observation = await driver.inspect(workspace);
   const drift = computeWorkspaceDrift(workspace, observation);

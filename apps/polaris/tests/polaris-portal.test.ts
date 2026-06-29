@@ -956,6 +956,57 @@ test("portal API workspace detail does not leak bindings from another user with 
   }
 });
 
+test("portal API can provision the same workspace name for a different user", async () => {
+  const workspace = uniqueName("portal-shared-name");
+  const firstUserId = uniqueName("portal-shared-a");
+  const secondUserId = uniqueName("portal-shared-b");
+  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
+  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+
+  try {
+    await createUserCommand([firstUserId, "--name", "Shared A", "--email", `${firstUserId}@polaris.local`]);
+    await createUserCommand([secondUserId, "--name", "Shared B", "--email", `${secondUserId}@polaris.local`]);
+    await createCommand([workspace, "--user", firstUserId]);
+
+    await withFakePath(
+      {
+        docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
+      },
+      async () => {
+        await withPortalServer(async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              workspaceName: workspace,
+              defaultDockerOnly: true,
+              startAfterCreate: false,
+            }),
+          });
+          const bodyText = await response.text();
+          assert.equal(response.status, 202, bodyText);
+        });
+
+        const finalProgress = await waitForProvisionDone(secondUserId, workspace);
+        assert.equal(finalProgress.phase, "done", finalProgress.message);
+        assert.equal(finalProgress.done, true, finalProgress.message);
+        assert.equal(
+          fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
+          true,
+        );
+      },
+    );
+  } finally {
+    clearWorkspaceProvisionProgress(secondUserId, workspace);
+    fs.rmSync(firstProfilePath, { force: true });
+    fs.rmSync(secondProfilePath, { force: true });
+    fs.rmSync(firstUserRoot, { recursive: true, force: true });
+    fs.rmSync(secondUserRoot, { recursive: true, force: true });
+  }
+});
+
 test("portal API previews workspace asset content", async () => {
   await withPortalServer(async (baseUrl) => {
     const response = await fetch(

@@ -355,6 +355,56 @@ The intended create UX is now:
 4. recover unfinished jobs on reload or route restore
 5. surface structured error copy instead of raw backend strings
 
+### User-Scoped Workspace Names
+
+Workspace names in the portal flow are now resolved in user scope, not global
+scope.
+
+That means this is valid:
+
+- user `alice` owns workspace `test`
+- user `bob` also owns workspace `test`
+
+This used to fail during portal provisioning because parts of the create path
+still treated `project` as globally unique.
+
+The important fix is not only at create time.
+The full lifecycle path now carries user context through:
+
+- spec existence checks
+- config synthesis
+- image preparation
+- start
+- stop
+- final status capture
+- async refresh after cached state writes
+
+In concrete terms, the portal executor no longer relies on an ambiguous
+`test@docker` lookup when another user also has `test`.
+It resolves against:
+
+- `config/users/<user>/workspaces/<workspace>/...`
+- `state/status.json`
+- `state/provision.json`
+
+This closes a real bug where:
+
+1. the sidebar create job stayed at `0%`
+2. executor immediately wrote `workspace-provision-failed`
+3. the message incorrectly blamed another user owning the same workspace name
+
+Relevant files:
+
+- `apps/polaris/scripts/config/load.ts`
+- `apps/polaris/scripts/config/provision.ts`
+- `apps/polaris/scripts/config/scaffold.ts`
+- `apps/polaris/scripts/cli/commands/create.ts`
+- `apps/polaris/scripts/cli/commands/shared.ts`
+- `apps/polaris/scripts/cli/commands/start.ts`
+- `apps/polaris/scripts/cli/commands/status.ts`
+- `apps/polaris/scripts/cli/commands/stop.ts`
+- `apps/polaris/scripts/executor/operations.ts`
+
 ## Runtime Observer
 
 The runtime status observer runs inside the workspace container.

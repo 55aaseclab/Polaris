@@ -313,6 +313,63 @@ test("runCli user create adds the default RightCode codex credential when config
   }
 });
 
+test("runCli create allows the same workspace name under a different user", async () => {
+  const workspace = uniqueProjectName("cli-shared-workspace");
+  const firstUserId = uniqueProjectName("cli-shared-user-a");
+  const secondUserId = uniqueProjectName("cli-shared-user-b");
+  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
+  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      firstUserId,
+      "--name",
+      "CLI Shared User A",
+      "--email",
+      `${firstUserId}@polaris.local`,
+    ]);
+    await runCli([
+      "user",
+      "create",
+      secondUserId,
+      "--name",
+      "CLI Shared User B",
+      "--email",
+      `${secondUserId}@polaris.local`,
+    ]);
+
+    await runCli(["create", workspace, "--user", firstUserId]);
+    const stdout = await captureStdout(async () => {
+      await runCli(["create", workspace, "--user", secondUserId]);
+    });
+    const parsed = parseJsonOutput<{
+      project: string;
+      userProfile: { id: string };
+      configPath: string;
+    }>(stdout);
+
+    assert.equal(parsed.project, workspace);
+    assert.equal(parsed.userProfile.id, secondUserId);
+    assert.equal(
+      parsed.configPath,
+      `config/users/${secondUserId}/workspaces/${workspace}/docker.agent.yaml`,
+    );
+    assert.equal(
+      fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
+      true,
+    );
+  } finally {
+    fs.rmSync(firstProfilePath, { force: true });
+    fs.rmSync(secondProfilePath, { force: true });
+    fs.rmSync(firstUserRoot, { recursive: true, force: true });
+    fs.rmSync(secondUserRoot, { recursive: true, force: true });
+  }
+});
+
 test("runCli user delete removes the user profile, secrets root, and Clerk mapping", async () => {
   const userProfileId = uniqueProjectName("cli-user-delete");
   const clerkUsername = `${userProfileId}-clerk`;

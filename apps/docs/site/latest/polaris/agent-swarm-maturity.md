@@ -308,6 +308,31 @@ workspace create 现在也属于 agent runtime 体验的一部分，而不是纯
 
 - `config/users/<userId>/workspaces/<workspace>/state/provision.json`
 
+### 5.1 User-scoped workspace identity
+
+portal create 还有一个很关键但很容易漏掉的前提：
+`workspace name` 不能再被 portal 路径当成全局唯一键。
+
+现在应该按：
+
+- `userId`
+- `workspace`
+
+联合定位。
+
+也就是说：
+
+- `userA/test`
+- `userB/test`
+
+应该是两个合法 workspace。
+
+如果 create 阶段允许了这一点，但 start / status / stop / refresh 仍然只按
+`test@docker` 去找配置，那么 UI 还是会在 0% 或 finalize 阶段报错。
+
+这一轮修复的意义，不只是“允许重名创建”，而是把整条 portal lifecycle 的
+用户上下文带透。
+
 ## 页面职责
 
 ### Workspace Detail 页
