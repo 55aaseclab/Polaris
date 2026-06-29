@@ -3,7 +3,7 @@ title: remote-deploy
 aside: false
 pageClass: diff-page
 diffPath: "operations/remote-deploy.md"
-leftVersion: "0.2.2"
+leftVersion: "0.2.3"
 rightVersion: "latest"
 ---
 

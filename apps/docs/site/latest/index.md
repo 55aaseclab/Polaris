@@ -2,13 +2,14 @@
 
 This directory is the active documentation tree for the current Polaris work.
 
-Unlike `docs/0.2.2`, this version is not only a snapshot.
+Unlike the frozen release snapshots, this version is not only a snapshot.
 It is the maintained reference that should explain how the system works today,
 how to operate it, and how to debug it when behavior diverges from expectation.
 
 ## Version Model
 
-- `0.2.2`: frozen snapshot
+- `0.2.2`: earlier frozen snapshot
+- `0.2.3`: current release snapshot
 - `latest`: current maintained docs
 
 ## Reading Order
@@ -23,7 +24,7 @@ If you are new to the repo, read in this order:
 ## Current Docs
 
 - [VERSION.md](./VERSION.md): current docs release metadata
-- [CHANGELOG.md](./CHANGELOG.md): what changed from `0.2.2`
+- [CHANGELOG.md](./CHANGELOG.md): what changed from `0.2.3`
 - `polaris/index.md`: Polaris architecture, lifecycle,
   stack modes, status model, and debugging
 - [polaris/isolation-maturity.md](./polaris/isolation-maturity.md): backend

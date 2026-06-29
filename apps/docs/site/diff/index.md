@@ -5,4 +5,4 @@ pageClass: diff-page
 
 # Diff
 
-Open a file from the sidebar.
+Compare `0.2.3` against `latest` from the sidebar.

@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-06-29
+
+Versioned the docs as release artifacts and tightened Polaris workspace
+operation around local stack behavior, portal UX, and runtime state handling.
+
+### Added
+
+- Added a versioned docs viewer app under `apps/docs` with release snapshots,
+  inline diffs, and a maintained `latest` track.
+- Added a frozen `0.2.3` docs snapshot so the current release can be compared
+  against future documentation updates.
+
+### Changed
+
+- Updated Polaris docs structure and release metadata to treat docs as
+  versioned product artifacts instead of a single mutable tree.
+- Refined local Polaris stack behavior around host-run services, local Paseo
+  app routing, and workspace runtime readiness checks.
+- Tightened portal workspace UX around user-scoped workspace resolution,
+  provisioning progress handling, and create-flow controls.
+- Clarified Polaris isolation and user-management semantics, especially around
+  shared user identity state, workspace runtime state, and runtime credential
+  behavior.
+
 ## [0.2.2] - 2026-06-28
 
 Expanded the Polaris web portal, host executor flow, and live credential

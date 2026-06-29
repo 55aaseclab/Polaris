@@ -39,7 +39,13 @@ const versionDirs = fs
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
   .filter((name) => !name.startsWith(".") && name !== "diff")
-  .sort((left, right) => (left === "latest" ? 1 : right === "latest" ? -1 : left.localeCompare(right)));
+  .sort((left, right) => (left === "latest"
+    ? 1
+    : right === "latest"
+      ? -1
+      : left.localeCompare(right, undefined, { numeric: true })));
+
+const latestReleaseVersion = versionDirs.filter((version) => version !== "latest").at(-1) ?? null;
 
 const versions = versionDirs.map((version) => {
   const versionRoot = path.join(docsRoot, version);
@@ -150,7 +156,11 @@ function resetDiffDocs(rootDir) {
 function writeDiffDocs(diffEntries) {
   resetDiffDocs(diffDocsRoot);
   for (const entry of diffEntries) {
-    if (entry.leftVersion !== "0.2.2" || entry.rightVersion !== "latest") {
+    if (
+      !latestReleaseVersion
+      || entry.leftVersion !== latestReleaseVersion
+      || entry.rightVersion !== "latest"
+    ) {
       continue;
     }
     const slug = safeSlug(entry.path);
@@ -182,7 +192,9 @@ function writeDiffDocs(diffEntries) {
     "",
     "# Diff",
     "",
-    "Open a file from the sidebar.",
+    latestReleaseVersion
+      ? `Compare \`${latestReleaseVersion}\` against \`latest\` from the sidebar.`
+      : "Open a file from the sidebar.",
     "",
   ];
   fs.writeFileSync(path.join(diffDocsRoot, "index.md"), indexLines.join("\n"), "utf8");
