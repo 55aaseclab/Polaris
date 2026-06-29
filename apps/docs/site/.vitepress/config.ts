@@ -76,7 +76,7 @@ export default defineConfig({
     siteTitle: "Polaris Docs",
     nav: [
       { text: "Latest", link: "/latest/" },
-      { text: "0.2.2", link: "/0.2.2/" },
+      { text: "0.2.4", link: "/0.2.4/" },
       { text: "Diff", link: "/diff/" },
     ],
     sidebar: {
@@ -92,11 +92,44 @@ export default defineConfig({
         {
           text: "Polaris",
           items: [
+            { text: "What Your Team Gets", link: "/latest/polaris/what-your-team-gets" },
             { text: "Overview", link: "/latest/polaris/" },
-            { text: "Isolation Maturity", link: "/latest/polaris/isolation-maturity" },
             { text: "Agent Swarm Maturity", link: "/latest/polaris/agent-swarm-maturity" },
-            { text: "Evolution Maturity", link: "/latest/polaris/evolution-maturity" },
-            { text: "User Management Maturity", link: "/latest/polaris/user-management-maturity" },
+          ],
+        },
+        {
+          text: "Onboarding",
+          items: [
+            { text: "Overview", link: "/latest/polaris/onboarding/" },
+            { text: "Shared Docker Foundation", link: "/latest/polaris/onboarding/shared-docker-foundation" },
+            { text: "Workspace Command Surface", link: "/latest/polaris/onboarding/workspace-command-surface" },
+            { text: "Others", link: "/latest/polaris/onboarding/others" },
+          ],
+        },
+        {
+          text: "Governed Use",
+          items: [
+            { text: "Overview", link: "/latest/polaris/governed-use/" },
+            { text: "Ownership Model", link: "/latest/polaris/governed-use/ownership-model" },
+            { text: "Credential Switch", link: "/latest/polaris/governed-use/credential-switch" },
+            { text: "Clerk Integration", link: "/latest/polaris/governed-use/clerk-integration" },
+          ],
+        },
+        {
+          text: "Shared Infrastructure",
+          items: [
+            { text: "Overview", link: "/latest/polaris/shared-infrastructure/" },
+            { text: "Isolation Boundary", link: "/latest/polaris/shared-infrastructure/isolation-boundary" },
+            { text: "Runtime State And Driver Switching", link: "/latest/polaris/shared-infrastructure/runtime-state-and-driver-switching" },
+            { text: "Others", link: "/latest/polaris/shared-infrastructure/others" },
+          ],
+        },
+        {
+          text: "Member Exit And Handover",
+          items: [
+            { text: "Overview", link: "/latest/polaris/member-exit-and-handover/" },
+            { text: "Personal And Team Context", link: "/latest/polaris/member-exit-and-handover/personal-and-team-context" },
+            { text: "Others", link: "/latest/polaris/member-exit-and-handover/others" },
           ],
         },
         {
@@ -115,36 +148,38 @@ export default defineConfig({
           ],
         },
       ],
-      "/0.2.2/": [
+      "/0.2.4/": [
         {
-          text: "0.2.2",
+          text: "0.2.4",
           items: [
-            { text: "Overview", link: "/0.2.2/" },
+            { text: "Overview", link: "/0.2.4/" },
           ],
         },
         {
           text: "Polaris",
           items: [
-            { text: "Overview", link: "/0.2.2/polaris/" },
-            { text: "Isolation Maturity", link: "/0.2.2/polaris/isolation-maturity" },
-            { text: "Agent Swarm Maturity", link: "/0.2.2/polaris/agent-swarm-maturity" },
-            { text: "Evolution Maturity", link: "/0.2.2/polaris/evolution-maturity" },
-            { text: "User Management Maturity", link: "/0.2.2/polaris/user-management-maturity" },
+            { text: "Overview", link: "/0.2.4/polaris/" },
+            { text: "What Your Team Gets", link: "/0.2.4/polaris/what-your-team-gets" },
+            { text: "Onboarding", link: "/0.2.4/polaris/onboarding/" },
+            { text: "Governed Use", link: "/0.2.4/polaris/governed-use/" },
+            { text: "Shared Infrastructure", link: "/0.2.4/polaris/shared-infrastructure/" },
+            { text: "Member Exit And Handover", link: "/0.2.4/polaris/member-exit-and-handover/" },
+            { text: "Agent Swarm Maturity", link: "/0.2.4/polaris/agent-swarm-maturity" },
           ],
         },
         {
           text: "Operations",
           items: [
-            { text: "Remote Deploy", link: "/0.2.2/operations/remote-deploy" },
-            { text: "K3s Multi-Machine Setup", link: "/0.2.2/operations/setup-k3s-across-multiple-machines" },
+            { text: "Remote Deploy", link: "/0.2.4/operations/remote-deploy" },
+            { text: "K3s Multi-Machine Setup", link: "/0.2.4/operations/setup-k3s-across-multiple-machines" },
           ],
         },
         {
           text: "Tooling",
           items: [
-            { text: "Workspace README", link: "/0.2.2/tooling/workspace/" },
-            { text: "Host README", link: "/0.2.2/tooling/host/" },
-            { text: "Alacritty", link: "/0.2.2/tooling/host/alacritty" },
+            { text: "Workspace README", link: "/0.2.4/tooling/workspace/" },
+            { text: "Host README", link: "/0.2.4/tooling/host/" },
+            { text: "Alacritty", link: "/0.2.4/tooling/host/alacritty" },
           ],
         },
       ],
