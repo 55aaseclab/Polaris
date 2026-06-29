@@ -1642,7 +1642,7 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   assert.match(rendered, /source: demo-project-state\b/);
   assert.match(rendered, /driver_opts:\n      type: "nfs"/);
   assert.match(rendered, /o: "addr=127\.0\.0\.1,nfsvers=4\.1,hard,rw"/);
-  assert.match(rendered, /device: ":\/"/);
+  assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
   assert.match(rendered, /demo-workspace-data:\n    name: demo-workspace-data/);
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
 });
