@@ -2077,17 +2077,17 @@ test("portal API deletes a stopped workspace and removes it from the profile ind
   }
 });
 
-test("portal root advertises the API surface and default user", async () => {
+test("portal root advertises the API surface without a default user fallback", async () => {
   await withPortalServer(async (baseUrl) => {
     const response = await fetch(baseUrl);
     assert.equal(response.status, 200);
     const payload = await response.json() as {
       service: string;
-      defaultUserId: string | null;
+      authEnabled: boolean;
       endpoints: string[];
     };
     assert.equal(payload.service, "polaris-portal-api");
-    assert.equal(payload.defaultUserId, "100000000000000001");
+    assert.equal(payload.authEnabled, true);
     assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
   });
 });
