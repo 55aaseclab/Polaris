@@ -51,6 +51,7 @@ import {
   type PortalCredentialSummary,
   type PortalCredentialPreview,
   type PortalProfileSummary,
+  type PortalProvisionProgress,
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
@@ -1418,6 +1419,7 @@ function PortalShellLayout(props: {
   const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
   const [createWorkspaceJobId, setCreateWorkspaceJobId] = useState<string | null>(null);
   const [createWorkspaceTarget, setCreateWorkspaceTarget] = useState<string | null>(null);
+  const [createWorkspaceStatus, setCreateWorkspaceStatus] = useState<PortalProvisionProgress["status"] | null>(null);
   const [cancellingWorkspace, setCancellingWorkspace] = useState(false);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
   const isAdmin = mapping?.role === "admin";
@@ -1450,6 +1452,7 @@ function PortalShellLayout(props: {
       if (!jobIdHint || progress.jobId === jobIdHint) {
         setCreateWorkspaceJobId(progress.jobId);
         setCreateWorkspaceTarget(workspace);
+        setCreateWorkspaceStatus(progress.status);
         setCreateWorkspaceProgress((current) => {
           if (progress.done) {
             return progress.percent;
@@ -1498,6 +1501,7 @@ function PortalShellLayout(props: {
     setCreateWorkspaceProgress(0);
     setCreateWorkspaceJobId(null);
     setCreateWorkspaceTarget(null);
+    setCreateWorkspaceStatus(null);
     setCancellingWorkspace(false);
   }
 
@@ -1559,6 +1563,7 @@ function PortalShellLayout(props: {
       });
       setCreateWorkspaceJobId(queued.jobId);
       setCreateWorkspaceTarget(trimmedName);
+      setCreateWorkspaceStatus(queued.status);
       setCreateWorkspaceProgress(queued.percent);
       await pollWorkspaceProvisionUntilDone(activeUserId, trimmedName, queued.jobId);
       setCreateWorkspaceProgress(100);
@@ -1581,7 +1586,12 @@ function PortalShellLayout(props: {
 
   async function handleCancelWorkspaceProvision(): Promise<void> {
     const workspace = createWorkspaceTarget?.trim() || newWorkspaceName.trim();
-    if (!activeUserId || !workspace || cancellingWorkspace) {
+    if (
+      !activeUserId
+      || !workspace
+      || cancellingWorkspace
+      || createWorkspaceStatus !== "queued"
+    ) {
       return;
     }
     setCancellingWorkspace(true);
@@ -1589,6 +1599,7 @@ function PortalShellLayout(props: {
       const progress = await cancelWorkspaceProvision(activeUserId, workspace);
       setCreateWorkspaceJobId(progress.jobId);
       setCreateWorkspaceTarget(workspace);
+      setCreateWorkspaceStatus(progress.status);
       setCreateWorkspaceProgress(progress.percent);
       setCreateWorkspaceError(
         formatProvisionError({
@@ -1628,6 +1639,7 @@ function PortalShellLayout(props: {
     setNewWorkspaceName(resumable.name);
     setCreateWorkspaceJobId(resumable.progress.jobId);
     setCreateWorkspaceTarget(resumable.name);
+    setCreateWorkspaceStatus(resumable.progress.status);
     setCreateWorkspaceProgress(resumable.progress.percent);
     setCreateWorkspaceError(null);
   }, [
@@ -1643,6 +1655,10 @@ function PortalShellLayout(props: {
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("switch_user");
+  const createWorkspaceCancelEnabled =
+    creatingWorkspace
+    && createWorkspaceStatus === "queued"
+    && !cancellingWorkspace;
   const workspaceStatusRoute = currentWorkspaceName
     ? (currentWorkspacePane === "paseo"
       ? workspaceLink(currentWorkspaceName)
@@ -1985,13 +2001,13 @@ function PortalShellLayout(props: {
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      if (creatingWorkspace) {
+                      if (createWorkspaceCancelEnabled) {
                         void handleCancelWorkspaceProvision();
                         return;
                       }
                       handleCreateWorkspaceOpenChange(false);
                     }}
-                    disabled={cancellingWorkspace}
+                    disabled={creatingWorkspace ? !createWorkspaceCancelEnabled : cancellingWorkspace}
                   >
                     {creatingWorkspace ? t("cancel") : t("cancel")}
                   </Button>
@@ -2074,13 +2090,13 @@ function PortalShellLayout(props: {
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      if (creatingWorkspace) {
+                      if (createWorkspaceCancelEnabled) {
                         void handleCancelWorkspaceProvision();
                         return;
                       }
                       handleCreateWorkspaceOpenChange(false);
                     }}
-                    disabled={cancellingWorkspace}
+                    disabled={creatingWorkspace ? !createWorkspaceCancelEnabled : cancellingWorkspace}
                   >
                     {t("cancel")}
                   </Button>
