@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-06-29
+
+Reorganized Polaris documentation around customer-facing product flows and
+retired the older single-page technical write-ups in favor of sectioned docs.
+
+### Added
+
+- Added customer-oriented Polaris doc sections for onboarding, governed use,
+  shared infrastructure, and member exit and handover.
+- Added a frozen `0.2.4` docs snapshot for the reorganized documentation
+  structure.
+
+### Changed
+
+- Reworked the Polaris docs information architecture so customer outcomes are
+  the primary entry point and technical depth is distributed into focused
+  sub-documents.
+- Merged older technical notes into the new section docs and their `others`
+  pages instead of keeping separate top-level maturity pages for the same
+  topics.
+- Updated docs navigation, version metadata, and diff generation to use
+  `0.2.4` as the current release baseline.
+
 ## [0.2.3] - 2026-06-29
 
 Versioned the docs as release artifacts and tightened Polaris workspace
