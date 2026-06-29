@@ -217,7 +217,7 @@ Relevant files:
 - `apps/polaris/scripts/executor/operations.ts`
 - `apps/polaris/scripts/executor/server.ts`
 - `apps/polaris/scripts/executor/client.ts`
-- `apps/polaris/scripts/evolution/runtime-observer.mjs`
+- `apps/polaris/scripts/runtime/status-observer.mjs`
 - `apps/polaris/scripts/portal/service.ts`
 
 ### Why This Matters
@@ -240,7 +240,7 @@ In concrete terms:
 
 - workspace detail reads no longer trigger implicit refresh side effects
 - create finalization explicitly materializes the final `status.json`
-- runtime observer can report status patches back to the executor
+- runtime status observer can report status patches back to the executor
 - start, stop, and live credential switch write cached state first, then
   schedule an async refresh
 
@@ -260,7 +260,7 @@ The current cached-status path is spread across:
 - `apps/polaris/scripts/executor/operations.ts`
 - `apps/polaris/scripts/executor/server.ts`
 - `apps/polaris/scripts/executor/client.ts`
-- `apps/polaris/scripts/evolution/runtime-observer.mjs`
+- `apps/polaris/scripts/runtime/status-observer.mjs`
 
 The key persisted files are:
 
@@ -270,7 +270,7 @@ The key persisted files are:
 Current write sources:
 
 - provision finalize writes final `status.json`
-- runtime observer writes status patches through the executor report endpoint
+- runtime status observer writes status patches through the executor report endpoint
 - start / stop / live switch write cached state immediately
 - explicit refresh rewrites state from a deep probe
 
@@ -357,7 +357,7 @@ The intended create UX is now:
 
 ## Runtime Observer
 
-The runtime observer runs inside the workspace container.
+The runtime status observer runs inside the workspace container.
 
 Its role is to:
 
@@ -401,8 +401,9 @@ If a lifecycle path is wrong, inspect logs in this order:
 3. `.tmp/paseo/stack.web.err.log`
 4. workspace `status.json`
 5. workspace `provision.json`
-6. runtime `runtime-observer.log`
-7. daemon log inside workspace state
+6. runtime `status-observer.log`
+7. runtime `runtime-memory-observer.log`
+8. daemon log inside workspace state
 
 Key log events added by the performance work:
 
@@ -420,7 +421,7 @@ These logs are intended to answer:
 - which phase it is in now
 - whether cancellation was only requested or already applied
 - whether a state change was written from cache or from a deep refresh
-- whether runtime observer reporting is reaching the executor
+- whether runtime status observer reporting is reaching the executor
 
 ### Minimal Acceptance Checks
 
@@ -536,7 +537,7 @@ For the optimized path, also verify:
 
 - repeated detail reads do not trigger extra command-side refresh work
 - shared-image logs appear when Dockerfiles are equivalent
-- `workspace-status-reported` appears when runtime observer reporting is active
+- `workspace-status-reported` appears when runtime status observer reporting is active
 - create flow can recover an unfinished job without a full page reset
 
 ## Related Docs

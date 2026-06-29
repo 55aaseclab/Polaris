@@ -193,7 +193,7 @@ workspace 状态当前已经不再把 deep probe 当成默认读路径。
 
 - `apps/polaris/scripts/portal/service.ts`
 - `apps/polaris/scripts/executor/operations.ts`
-- `apps/polaris/scripts/evolution/runtime-observer.mjs`
+- `apps/polaris/scripts/runtime/status-observer.mjs`
 
 当前关键状态文件：
 
@@ -310,7 +310,7 @@ workspace 隔离状态至少分开表达：
 也就是：
 
 - start / stop / live switch 这类动作可以先更新缓存状态
-- 后续再由异步 refresh 或 runtime observer 把状态面校正到最新事实
+- 后续再由异步 refresh 或 runtime status observer 把状态面校正到最新事实
 
 这样做的目的不是放弃准确性，而是避免每次用户动作都同步卡在重探测上。
 

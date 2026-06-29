@@ -12,6 +12,14 @@ private feature of one specific harness.
 Polaris keeps evidence, candidates, committed memory, provider data, and
 session snapshots separate.
 
+The runtime memory loop is now explicitly separate from runtime status
+reporting.
+
+- `apps/polaris/scripts/evolution/runtime-memory-observer.mjs` owns runtime
+  event capture, candidate memory derivation, and memory snapshots.
+- `apps/polaris/scripts/runtime/status-observer.mjs` owns daemon readiness and
+  status patch reporting.
+
 | Concern | Contents | Control-plane source of truth | Runtime / user-facing file |
 |---|---|---|---|
 | Runtime evidence | Execution events used to feed review | `config/users/<user>/polaris/workspaces/<project>/store.db` table `execution_events` | `<evolutionRoot>/execution-events.jsonl` and `<evolutionRoot>/memory-candidates.jsonl` |

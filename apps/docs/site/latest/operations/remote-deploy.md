@@ -72,7 +72,7 @@ For the current status model, executor reachability is no longer optional.
 
 Why:
 
-- runtime observer reports status patches back to the executor
+- runtime status observer reports status patches back to the executor
 - container-to-host resolution is part of normal status freshness
 - if this path is broken, the UI may look stale even when the runtime is fine
 
@@ -155,7 +155,7 @@ You want to confirm:
 
 - the portal can serve cached workspace detail immediately
 - explicit refresh still works
-- runtime observer can reach the executor when the workspace is running
+- runtime status observer can reach the executor when the workspace is running
 
 ## Debugging
 
@@ -206,7 +206,7 @@ Symptoms:
 
 Check:
 
-- runtime observer log
+- runtime status observer log
 - executor base URL env
 - host resolution from inside the container
 
