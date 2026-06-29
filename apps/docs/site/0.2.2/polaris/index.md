@@ -125,7 +125,7 @@ pnpm --dir apps/polaris run polaris -- status <project>
 
 ## More Docs
 
-- [portal-business-flow.md](./portal-business-flow.md)
+- `portal-business-flow.md` is not included in the frozen `0.2.2` snapshot.
 - [isolation-maturity.md](./isolation-maturity.md)
 - [agent-swarm-maturity.md](./agent-swarm-maturity.md)
 - [evolution-maturity.md](./evolution-maturity.md)

@@ -27,6 +27,12 @@ apps/polaris/.tmp/
 apps/polaris-web/dist/
 apps/polaris-web/test-results/
 apps/polaris/.coverage/
+apps/docs/node_modules/
+apps/docs/dist/
+apps/docs/site/.vitepress/cache/
+apps/docs/site/.vitepress/dist/
+apps/docs/tsconfig.app.tsbuildinfo
+apps/docs/tsconfig.node.tsbuildinfo
 .env.local
 .env.dev
 .env.prod

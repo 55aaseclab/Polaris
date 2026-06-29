@@ -7,6 +7,8 @@
     "polaris:server": "pnpm --filter polaris run server",
     "polaris:executor": "pnpm --filter polaris run executor",
     "polaris:web": "pnpm --filter polaris-web exec vite --host 0.0.0.0",
+    "docs:web": "pnpm --filter docs-viewer run dev",
+    "docs:build": "pnpm --filter docs-viewer run build",
     "build": "pnpm --filter polaris run build && pnpm --filter polaris-web run build",
     "check": "pnpm --filter polaris run check && pnpm --filter polaris-web run check",
     "test:polaris": "pnpm --filter polaris run test",

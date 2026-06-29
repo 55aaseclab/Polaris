@@ -1,0 +1,18 @@
+{
+  "name": "docs-viewer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node ./scripts/generate-docs-data.mjs",
+    "dev": "vitepress dev site --host 0.0.0.0 --port 4180",
+    "prebuild": "node ./scripts/generate-docs-data.mjs",
+    "build": "vitepress build site",
+    "check": "vitepress build site"
+  },
+  "devDependencies": {
+    "markdown-it": "^14.1.0",
+    "typescript": "^5.9.2",
+    "vitepress": "^1.6.3"
+  }
+}
