@@ -258,6 +258,154 @@ workspace 状态当前已经不再把 deep probe 当成默认读路径。
 - `pi`
 - `opencode`
 - `ssh`
+
+当前还包括和 Codex 持久化相关的 XDG 根：
+
+- `codex-xdg/config`
+- `codex-xdg/data`
+- `codex-xdg/state`
+
+这些目录不是实现噪音。
+它们属于用户身份持久化契约的一部分。
+
+## Toolchain Assembly
+
+workspace 内看到的 agent CLI 不应该只理解成“镜像里自带了一个二进制”。
+
+Polaris 当前把工具链拆成三层：
+
+1. 持久化工具安装根
+2. runtime 内的稳定入口
+3. 针对特定 provider 的环境包装
+
+### 持久化工具安装根
+
+当前 Docker backend 会把工具安装到：
+
+```text
+/workspace/state/tooling/polaris
+```
+
+这就是当前 runtime state volume 里的 tool root。
+
+它承载：
+
+- `paseo`
+- `codex`
+- `claude`
+- `copilot`
+- `opencode`
+- `pi`
+- `pnpm`
+- 对应的 `node_modules`
+
+这样做的目的不是好看。
+而是为了：
+
+- workspace 重启后不重复安装 agent CLI
+- 把工具链缓存从镜像层和临时容器层解耦出来
+- 让 runtime bootstrap 更稳定
+
+### 真实 binary 与 wrapper 的关系
+
+当前有两种 `codex` 路径同时存在：
+
+```text
+/workspace/state/tooling/polaris/bin/codex
+/usr/local/bin/codex
+```
+
+它们不是重复，也不是冲突。
+
+当前语义是：
+
+- `/workspace/state/tooling/polaris/bin/codex`
+  是真实的 Codex CLI 安装入口
+- `/usr/local/bin/codex`
+  是 Polaris 在 bootstrap 时生成的 wrapper
+
+wrapper 的职责是：
+
+- 注入 `CODEX_HOME`
+- 注入 `XDG_CONFIG_HOME`
+- 注入 `XDG_DATA_HOME`
+- 注入 `XDG_STATE_HOME`
+- 注入 `NPM_CONFIG_PREFIX`
+- 然后再 `exec` 到真实 binary
+
+也就是说，用户或脚本如果执行：
+
+```text
+/usr/local/bin/codex
+```
+
+拿到的是 Polaris 期望的持久化环境。
+
+### 为什么还会看到真实 binary 直启
+
+有些上层运行时不会只依赖 shell PATH。
+
+例如当前 Paseo 的 Codex provider 可能直接解析并启动：
+
+```text
+/workspace/state/tooling/polaris/bin/codex app-server
+```
+
+这不代表 wrapper 没意义。
+这只说明上层 provider 走的是“真实 binary + 显式 env 注入”模型，而不是
+“纯 PATH 查找”模型。
+
+所以验收时不能只看命令行长什么样。
+要同时看：
+
+- 实际启动命令
+- 实际进程环境变量
+
+### Codex 持久化为什么依赖 XDG
+
+当前 Codex 会把会话相关状态写到：
+
+- `CODEX_HOME`
+- `XDG_CONFIG_HOME`
+- `XDG_DATA_HOME`
+- `XDG_STATE_HOME`
+
+至少从当前 Paseo 集成假设来看，thread resume 需要依赖这些目录里的持久化
+rollout / session 数据。
+
+因此：
+
+- 只持久化 `~/.codex/auth.json`
+  这类凭证文件是不够的
+- 只记住 `threadId`
+  也不够
+- 必须把 thread handle 与对应的持久化状态目录一起看成恢复契约
+
+### 当前容易踩的坑
+
+如果只持久化了 provider handle，例如：
+
+- `threadId`
+- `nativeHandle`
+
+但没有保证对应的 Codex rollout/session 文件仍然存在，就会出现：
+
+- Paseo 记得要恢复哪个 thread
+- Codex 却找不到该 thread 对应的 rollout
+- 最终报 `no rollout found for thread id ...`
+
+这不是 Codex 自己的隔离问题。
+这是 Polaris / runtime integration 在恢复契约上做得不完整。
+
+### 当前应有的恢复原则
+
+对这种 provider session 恢复，正确模型应该是：
+
+- 句柄存在，不代表会话一定可恢复
+- provider handle 必须和其 durable state 一起验证
+- 如果 durable state 已丢失，应该把该 handle 视为失效
+- 失效后应退回冷启动，而不是把整个 workspace detail 或 agent timeline
+  请求打爆
 - 以及 Polaris 用户级凭证物料
 
 它会被装配到 workspace runtime 中，例如：
