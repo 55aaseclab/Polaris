@@ -13,6 +13,8 @@
 - Explicit documentation for the recent Polaris performance work:
   shared prebuilt images, cached status reads, runtime status reporting,
   portal provisioning jobs, and local UI updates.
+- Explicit documentation for user-scoped workspace name resolution in portal
+  provisioning and runtime lifecycle commands.
 
 ### Changed
 
@@ -21,6 +23,8 @@
   status cache model together.
 - Runtime status reporting and runtime memory observation are now described as
   separate runtime layers.
+- Polaris docs now describe same-name workspaces as user-scoped records instead
+  of global project-name collisions in the portal flow.
 - Remote deploy docs now describe host/data/env ownership more explicitly.
 - Polaris docs now describe the concrete behavior after the latest performance
   optimization pass instead of only the intended direction.

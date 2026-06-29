@@ -11,8 +11,11 @@ import {
 } from "../../evolution/runtime.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
 
-export function loadWorkspaceForProjectRef(projectRef: string): WorkspaceSpec {
-  const resolved = resolveWorkspaceConfigPath(projectRef);
+export function loadWorkspaceForProjectRef(
+  projectRef: string,
+  userProfileId?: string,
+): WorkspaceSpec {
+  const resolved = resolveWorkspaceConfigPath(projectRef, userProfileId);
   return loadWorkspaceFromConfigPath(
     resolved.configPath,
     resolved.project,
@@ -21,13 +24,17 @@ export function loadWorkspaceForProjectRef(projectRef: string): WorkspaceSpec {
   );
 }
 
-export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleAction"], projectRef: string): {
+export function loadWorkspaceForCommand(
+  command: WorkspaceStatus["lifecycleAction"],
+  projectRef: string,
+  userProfileId?: string,
+): {
   workspace: WorkspaceSpec;
   driver: ReturnType<typeof getBackendDriver>;
 } {
-  logInfo("cli", "load-workspace", { command, projectRef });
-  ensureWorkspaceConfig(projectRef);
-  const workspace = loadWorkspaceForProjectRef(projectRef);
+  logInfo("cli", "load-workspace", { command, projectRef, userProfileId });
+  ensureWorkspaceConfig(projectRef, userProfileId);
+  const workspace = loadWorkspaceForProjectRef(projectRef, userProfileId);
   const driver = getBackendDriver(workspace.backend.kind);
   logDebug("cli", "workspace-loaded", {
     command,
@@ -41,12 +48,13 @@ export function loadWorkspaceForCommand(command: WorkspaceStatus["lifecycleActio
 export async function loadExecutableWorkspaceForCommand(
   command: WorkspaceStatus["lifecycleAction"],
   projectRef: string,
+  userProfileId?: string,
 ): Promise<{
   workspace: WorkspaceSpec;
   driver: ReturnType<typeof getBackendDriver>;
 }> {
-  ensureProvisionedWorkspace(projectRef);
-  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef);
+  ensureProvisionedWorkspace(projectRef, userProfileId);
+  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef, userProfileId);
   const preparedWorkspace = await prepareEvolutionMemorySnapshot(workspace);
   return { workspace: preparedWorkspace, driver };
 }

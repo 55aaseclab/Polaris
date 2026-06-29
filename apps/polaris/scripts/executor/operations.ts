@@ -305,7 +305,7 @@ function loadUserWorkspace(
     backend === "pod" && profileHint
       ? `${workspace}@${backend}:${profileHint}`
       : `${workspace}@${backend}`;
-  const ensuredConfig = ensureWorkspaceConfig(projectRef);
+  const ensuredConfig = ensureWorkspaceConfig(projectRef, userId);
   const configPath =
     ensuredConfig?.configPath ?? workspaceConfigPath(workspace, backend, userId);
   return loadWorkspaceFromConfigPath(
@@ -589,12 +589,12 @@ function ensureWorkspaceImageTargets(
   workspace: string,
   defaultDockerOnly = false,
 ): void {
-  ensureCanonicalWorkspaceImage(`${workspace}@docker`);
+  ensureCanonicalWorkspaceImage(`${workspace}@docker`, userId);
   if (defaultDockerOnly) {
     return;
   }
-  ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`);
-  ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`);
+  ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`, userId);
+  ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`, userId);
   const kubevirtWorkspace = loadUserWorkspace(
     userId,
     workspace,
@@ -612,10 +612,10 @@ function ensureWorkspaceTargetSpecs(
   defaultDockerOnly = false,
 ): void {
   fs.mkdirSync(portalRoot(userId, workspace), { recursive: true });
-  ensureWorkspaceConfig(`${workspace}@docker`);
+  ensureWorkspaceConfig(`${workspace}@docker`, userId);
   if (!defaultDockerOnly) {
-    ensureWorkspaceConfig(`${workspace}@pod:gvisor`);
-    ensureWorkspaceConfig(`${workspace}@kubevirt-vm`);
+    ensureWorkspaceConfig(`${workspace}@pod:gvisor`, userId);
+    ensureWorkspaceConfig(`${workspace}@kubevirt-vm`, userId);
   }
   const selectionPath = path.join(
     portalRoot(userId, workspace),
@@ -713,7 +713,7 @@ async function provisionWorkspaceInternal(
       cancellable: false,
     });
     await maybeDelayProvisionStep(userId, workspace, "start");
-    await startCommand(`${workspace}@docker`);
+    await startCommand(`${workspace}@docker`, userId);
   }
 
   updateProgress(userId, workspace, {
@@ -728,7 +728,7 @@ async function provisionWorkspaceInternal(
     workspace,
     summary.selectedDriver ?? { backend: "docker" },
   );
-  await captureStdout(() => statusCommand(finalRef));
+  await captureStdout(() => statusCommand(finalRef, userId));
 
   updateProgress(userId, workspace, {
     status: "completed",
@@ -741,10 +741,14 @@ async function provisionWorkspaceInternal(
   });
 }
 
-async function startWorkspaceWithoutWait(projectRef: string): Promise<void> {
+async function startWorkspaceWithoutWait(
+  projectRef: string,
+  userProfileId?: string,
+): Promise<void> {
   const { workspace, driver } = await loadExecutableWorkspaceForCommand(
     "start",
     projectRef,
+    userProfileId,
   );
   await driver.start(workspace);
 }
@@ -775,7 +779,7 @@ export async function refreshPortalWorkspaceStatus(
       ref,
     });
     try {
-      await captureStdout(() => statusCommand(ref));
+      await captureStdout(() => statusCommand(ref, userId));
       logInfo("executor", "workspace-status-refresh-completed", {
         userId,
         workspace,
@@ -1004,7 +1008,7 @@ export async function stopPortalWorkspace(
     workspace,
     ref,
   });
-  await stopCommand(ref);
+  await stopCommand(ref, userId);
   writeCachedWorkspaceStatusUpdate({
     userId,
     workspace,
@@ -1060,7 +1064,7 @@ export async function startPortalWorkspace(
     workspace,
     ref,
   });
-  await startCommand(ref);
+  await startCommand(ref, userId);
   writeCachedWorkspaceStatusUpdate({
     userId,
     workspace,
@@ -1218,7 +1222,7 @@ export async function bindPortalWorkspaceAgent(input: {
     target,
   );
   if (restarted) {
-    await stopCommand(ref);
+    await stopCommand(ref, input.userId);
   }
   const updated = updatePortalWorkspaceAgentBinding({
     userId: input.userId,
@@ -1228,7 +1232,7 @@ export async function bindPortalWorkspaceAgent(input: {
     enabled: true,
   });
   renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startWorkspaceWithoutWait(ref);
+  await startWorkspaceWithoutWait(ref, input.userId);
   return {
     enabled: true,
     driver: ref,
@@ -1261,7 +1265,7 @@ export async function unbindPortalWorkspaceAgent(input: {
     target,
   );
   if (restarted) {
-    await stopCommand(ref);
+    await stopCommand(ref, input.userId);
   }
   const updated = updatePortalWorkspaceAgentBinding({
     userId: input.userId,
@@ -1270,7 +1274,7 @@ export async function unbindPortalWorkspaceAgent(input: {
     enabled: false,
   });
   renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startWorkspaceWithoutWait(ref);
+  await startWorkspaceWithoutWait(ref, input.userId);
   return {
     enabled: false,
     driver: ref,

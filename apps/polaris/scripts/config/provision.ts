@@ -58,21 +58,25 @@ function sharedWorkspaceImageRef(dockerfileDigest: string): string {
   return `ttl.sh/polaris-workspace-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:24h`;
 }
 
-function configMatches(project: string): WorkspaceConfigMatch[] {
+function configMatches(project: string, userProfileId?: string): WorkspaceConfigMatch[] {
   if (!fs.existsSync(USER_ROOT)) {
     return [];
   }
 
-  return fs
-    .readdirSync(USER_ROOT, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) =>
+  const candidateUserIds = userProfileId?.trim()
+    ? [userProfileId.trim()]
+    : fs.readdirSync(USER_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+
+  return candidateUserIds
+    .flatMap((candidateUserId) =>
       (["docker", "pod", "kubevirt-vm"] as const)
         .map((backendKind) => {
-          const configPath = workspaceConfigPath(project, backendKind, entry.name);
+          const configPath = workspaceConfigPath(project, backendKind, candidateUserId);
           return fs.existsSync(configPath)
             ? {
-                userProfileId: entry.name,
+                userProfileId: candidateUserId,
                 project,
                 backendKind,
                 configPath,
@@ -84,12 +88,16 @@ function configMatches(project: string): WorkspaceConfigMatch[] {
     .sort((left, right) => left.configPath.localeCompare(right.configPath));
 }
 
-function findConfig(project: string, backendKind: BackendKind): WorkspaceConfigMatch | null {
-  return configMatches(project).find((match) => match.backendKind === backendKind) ?? null;
+function findConfig(
+  project: string,
+  backendKind: BackendKind,
+  userProfileId?: string,
+): WorkspaceConfigMatch | null {
+  return configMatches(project, userProfileId).find((match) => match.backendKind === backendKind) ?? null;
 }
 
-function bestSourceConfig(project: string): WorkspaceConfigMatch | null {
-  const matches = configMatches(project);
+function bestSourceConfig(project: string, userProfileId?: string): WorkspaceConfigMatch | null {
+  const matches = configMatches(project, userProfileId);
   return matches.find((match) => match.backendKind === "docker") ?? matches[0] ?? null;
 }
 
@@ -225,18 +233,21 @@ function synthesizeConfigDoc(
   return doc;
 }
 
-export function ensureWorkspaceConfig(projectRef: string): WorkspaceConfigMatch | null {
+export function ensureWorkspaceConfig(
+  projectRef: string,
+  userProfileId?: string,
+): WorkspaceConfigMatch | null {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   if (!backendHint) {
     return null;
   }
 
-  const existing = findConfig(project, backendHint);
+  const existing = findConfig(project, backendHint, userProfileId);
   if (existing) {
     return existing;
   }
 
-  const source = bestSourceConfig(project);
+  const source = bestSourceConfig(project, userProfileId);
   if (!source) {
     return null;
   }
@@ -390,10 +401,13 @@ function allRecordedWorkspaceImageRefs(dockerfileDigest: string): string[] {
   return [...refs];
 }
 
-export function ensureCanonicalWorkspaceImage(projectRef: string): void {
+export function ensureCanonicalWorkspaceImage(
+  projectRef: string,
+  userProfileId?: string,
+): void {
   const { project } = parseWorkspaceReference(projectRef);
-  const ensured = ensureWorkspaceConfig(projectRef);
-  const source = ensured ?? bestSourceConfig(project);
+  const ensured = ensureWorkspaceConfig(projectRef, userProfileId);
+  const source = ensured ?? bestSourceConfig(project, userProfileId);
   if (!source) {
     return;
   }
@@ -471,7 +485,7 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
   recordBuild();
 }
 
-export function ensureProvisionedWorkspace(projectRef: string): void {
-  ensureWorkspaceConfig(projectRef);
-  ensureCanonicalWorkspaceImage(projectRef);
+export function ensureProvisionedWorkspace(projectRef: string, userProfileId?: string): void {
+  ensureWorkspaceConfig(projectRef, userProfileId);
+  ensureCanonicalWorkspaceImage(projectRef, userProfileId);
 }

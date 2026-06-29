@@ -46,3 +46,13 @@ export function assertProjectNameAvailable(project: string): void {
     `Project name '${project}' is already in use by user ${owners[0]}. Choose a different project name until user-qualified runtime naming is implemented.`,
   );
 }
+
+export function assertProjectNameAvailableForUser(
+  project: string,
+  userProfileId: string,
+): void {
+  const owners = projectOwners(project);
+  if (owners.includes(userProfileId)) {
+    return;
+  }
+}

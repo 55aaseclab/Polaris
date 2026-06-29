@@ -2402,11 +2402,19 @@ function EmptyPane(props: { title: string; description: string }) {
 }
 
 function WorkspaceDetailPage() {
+  const { data: users } = useAsyncValue(listUsers, []);
+  return (
+    <PortalShell users={users ?? []}>
+      <WorkspaceDetailContent />
+    </PortalShell>
+  );
+}
+
+function WorkspaceDetailContent() {
   const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const { data: users } = useAsyncValue(listUsers, []);
   const { refreshWorkspaces } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
@@ -3063,14 +3071,12 @@ function WorkspaceDetailPage() {
   }
 
   return (
-    <PortalShell users={users ?? []}>
-      <div className={currentPane === "" ? "flex min-h-0 w-full min-w-0 flex-1 flex-col" : "grid w-full min-w-0 gap-6"}>
-        {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-        {renderPane()}
-      </div>
-    </PortalShell>
+    <div className={currentPane === "" ? "flex min-h-0 w-full min-w-0 flex-1 flex-col" : "grid w-full min-w-0 gap-6"}>
+      {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+      {renderPane()}
+    </div>
   );
 }
 

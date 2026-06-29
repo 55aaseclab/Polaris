@@ -77,18 +77,26 @@ export function parseWorkspaceReference(projectRef: string): {
   };
 }
 
-function resolveBackendHint(project: string, explicitHint?: WorkspaceSpec["backend"]["kind"]): WorkspaceSpec["backend"]["kind"] | undefined {
+function resolveBackendHint(
+  project: string,
+  explicitHint?: WorkspaceSpec["backend"]["kind"],
+  userProfileId?: string,
+): WorkspaceSpec["backend"]["kind"] | undefined {
   if (explicitHint) {
     return explicitHint;
   }
-  return readWorkspaceDriverSelection(project)?.backend;
+  return readWorkspaceDriverSelection(project, userProfileId)?.backend;
 }
 
-function resolveProfileHint(project: string, explicitHint?: string): string | undefined {
+function resolveProfileHint(
+  project: string,
+  explicitHint?: string,
+  userProfileId?: string,
+): string | undefined {
   if (explicitHint) {
     return explicitHint;
   }
-  return readWorkspaceDriverSelection(project)?.profile;
+  return readWorkspaceDriverSelection(project, userProfileId)?.profile;
 }
 
 function loadPodProfileDefaults(profileName: string): { backendProfile?: string } {
@@ -102,7 +110,11 @@ function loadPodProfileDefaults(profileName: string): { backendProfile?: string 
   };
 }
 
-function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"]["kind"]): string[] {
+function specCandidates(
+  project: string,
+  backendHint?: WorkspaceSpec["backend"]["kind"],
+  userProfileId?: string,
+): string[] {
   const userScopedSpecs = (
     backendKind: WorkspaceSpec["backend"]["kind"] | "kubevirt",
   ): string[] => {
@@ -113,10 +125,14 @@ function specCandidates(project: string, backendHint?: WorkspaceSpec["backend"][
     if (!fs.existsSync(USER_SECRETS_ROOT)) {
       return [];
     }
-    return fs
-      .readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(USER_SECRETS_ROOT, entry.name, "workspaces", project, backendFile));
+    const candidateUserIds = userProfileId?.trim()
+      ? [userProfileId.trim()]
+      : fs.readdirSync(USER_SECRETS_ROOT, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    return candidateUserIds.map((candidateUserId) =>
+      path.join(USER_SECRETS_ROOT, candidateUserId, "workspaces", project, backendFile)
+    );
   };
   const preferredBackend =
     backendHint === "kubevirt-vm"
@@ -852,17 +868,23 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
   return [];
 }
 
-export function resolveWorkspaceConfigPath(projectRef: string): {
+export function resolveWorkspaceConfigPath(
+  projectRef: string,
+  userProfileId?: string,
+): {
   configPath: string;
   project: string;
   backendHint?: WorkspaceSpec["backend"]["kind"];
   profileHint?: string;
 } {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
-  assertNoProjectNameCollision(project);
-  const resolvedBackendHint = resolveBackendHint(project, backendHint);
-  const resolvedProfileHint = resolveProfileHint(project, profileHint);
-  const configPath = specCandidates(project, resolvedBackendHint).find((candidate) => fs.existsSync(candidate));
+  if (!userProfileId?.trim()) {
+    assertNoProjectNameCollision(project);
+  }
+  const resolvedBackendHint = resolveBackendHint(project, backendHint, userProfileId);
+  const resolvedProfileHint = resolveProfileHint(project, profileHint, userProfileId);
+  const configPath = specCandidates(project, resolvedBackendHint, userProfileId)
+    .find((candidate) => fs.existsSync(candidate));
   if (!configPath) {
     throw new Error(`Config not found for project '${project}'`);
   }
