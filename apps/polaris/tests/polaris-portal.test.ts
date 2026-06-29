@@ -6,15 +6,21 @@ import os from "node:os";
 import { once } from "node:events";
 import yaml from "js-yaml";
 import { createPortalServer } from "../scripts/portal/server.js";
+import {
+  getPortalWorkspaceDetail,
+  reportPortalWorkspaceStatus,
+  stopPortalWorkspace,
+} from "../scripts/portal/service.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
   listOwnedWorkspaces,
   readWorkspaceProvisionProgress,
+  readWorkspaceStatus,
   writeWorkspaceProvisionProgress,
   clearWorkspaceProvisionProgress,
 } from "../scripts/core/portal.js";
-import { writeWorkspaceDriverSelection } from "../scripts/output/state-store.js";
+import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
@@ -116,6 +122,24 @@ async function withPortalAuthEnv(
   }
 }
 
+async function withEnv(
+  name: string,
+  value: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = process.env[name];
+  process.env[name] = value;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
+}
+
 async function withSyntheticMemberUser(
   fn: (userId: string, workspace: string) => Promise<void>,
 ): Promise<void> {
@@ -184,6 +208,196 @@ test("portal provisioning progress persists across reads", () => {
     assert.deepEqual(readWorkspaceProvisionProgress(userId, workspace), progress);
   } finally {
     clearWorkspaceProvisionProgress(userId, workspace);
+  }
+});
+
+test("portal workspace detail reads cached state without implicit refresh side effects", async () => {
+  await withFakePath(
+    {
+      docker: "#!/bin/sh\nexit 0\n",
+      kubectl: "#!/bin/sh\nexit 0\n",
+    },
+    async ({ readCommandLog }) => {
+      const detail = getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+      assert.equal(detail.name, "demo");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual(readCommandLog(), []);
+    },
+  );
+});
+
+test("portal API accepts runtime status reports and persists cached workspace state", async () => {
+  const userId = DEMO_USER_ID;
+  const workspace = "demo";
+  const previous = readWorkspaceStatus(userId, workspace);
+  writeWorkspaceStatus({
+    project: workspace,
+    state: "saved",
+    backend: {
+      kind: "docker",
+      instanceState: "stopped",
+    },
+    driver: {
+      target: "docker",
+      baseImage: "ttl.sh/example:24h",
+      runtimeKind: "docker-container",
+      runtimeRef: `${workspace}-docker`,
+      runtimeState: "stopped",
+    },
+    health: {
+      backendLiveness: "stopped",
+      workspaceReadiness: "not-ready",
+      daemonReadiness: "degraded",
+      reason: "test setup",
+    },
+    daemon: {
+      manager: {
+        state: "missing",
+      },
+    },
+    details: {},
+  }, userId);
+  try {
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/users/${userId}/workspaces/${workspace}/refresh`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      assert.equal(response.status, 200);
+    });
+    await withPortalServer(async (baseUrl) => {
+      const detailBefore = await fetch(
+        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
+      );
+      assert.equal(detailBefore.status, 200);
+      const parsedBefore = await detailBefore.json() as {
+        status?: { state?: string; daemon?: { manager?: { state?: string } } };
+      };
+      assert.equal(parsedBefore.status?.state, "saved");
+
+      await reportPortalWorkspaceStatus({
+        userId,
+        workspace,
+        status: {
+          state: "ready",
+          backend: {
+            instanceState: "running",
+          },
+          driver: {
+            runtimeState: "running",
+          },
+          daemon: {
+            manager: {
+              state: "ok",
+            },
+          },
+          details: {
+            backendDetail: "reported by test",
+          },
+        },
+      });
+
+      const detailAfter = await fetch(
+        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
+      );
+      assert.equal(detailAfter.status, 200);
+      const parsedAfter = await detailAfter.json() as {
+        status?: {
+          state?: string;
+          backend?: { instanceState?: string };
+          driver?: { runtimeState?: string };
+          daemon?: { manager?: { state?: string } };
+          details?: { backendDetail?: string };
+        };
+      };
+      assert.equal(parsedAfter.status?.state, "ready");
+      assert.equal(parsedAfter.status?.backend?.instanceState, "running");
+      assert.equal(parsedAfter.status?.driver?.runtimeState, "running");
+      assert.equal(parsedAfter.status?.daemon?.manager?.state, "ok");
+      assert.equal(parsedAfter.status?.details?.backendDetail, "reported by test");
+    });
+  } finally {
+    if (previous) {
+      writeWorkspaceStatus(previous, userId);
+    }
+  }
+});
+
+test("portal workspace stop writes cached status before the async refresh completes", async () => {
+  const userId = uniqueName("portal-stop-cache-user");
+  const workspace = uniqueName("portal-stop-cache");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  try {
+    await createUserCommand([userId, "--name", "Portal Stop Cache User", "--email", `${userId}@polaris.local`]);
+    await createCommand([workspace, "--user", userId]);
+    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
+    writeWorkspaceStatus({
+      project: workspace,
+      state: "ready",
+      backend: {
+        kind: "docker",
+        instanceState: "running",
+      },
+      driver: {
+        target: "docker",
+        baseImage: "ttl.sh/example:24h",
+        runtimeKind: "docker-container",
+        runtimeRef: `${workspace}-docker`,
+        runtimeState: "running",
+      },
+      health: {
+        backendLiveness: "running",
+        workspaceReadiness: "ready",
+        daemonReadiness: "ready",
+        reason: "test setup",
+      },
+      details: {},
+    }, userId);
+
+    await withFakePath(
+      {
+        docker: "#!/bin/sh\nif [ \"$1\" = \"compose\" ] && [ \"$4\" = \"stop\" ]; then sleep 0.05; exit 0; fi\nif [ \"$1\" = \"compose\" ] && [ \"$4\" = \"ps\" ]; then sleep 0.3; exit 0; fi\nif [ \"$1\" = \"compose\" ]; then exit 0; fi\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nexit 0\n",
+        kubectl: "#!/bin/sh\nexit 0\n",
+      },
+      async () => {
+        const stderrChunks: string[] = [];
+        const originalWrite = process.stderr.write.bind(process.stderr);
+        process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+          stderrChunks.push(
+            typeof chunk === "string"
+              ? chunk
+              : Buffer.from(chunk).toString("utf8"),
+          );
+          const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+          callback?.();
+          return true;
+        }) as typeof process.stderr.write;
+        try {
+          await stopPortalWorkspace(userId, workspace);
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        } finally {
+          process.stderr.write = originalWrite;
+        }
+        const stderrOutput = stderrChunks.join("");
+        const cachedIndex = stderrOutput.indexOf("workspace-status-cached");
+        const refreshCompletedIndex = stderrOutput.indexOf("workspace-status-refresh-completed");
+        assert.notEqual(cachedIndex, -1);
+        assert.notEqual(refreshCompletedIndex, -1);
+        assert.ok(cachedIndex < refreshCompletedIndex);
+      },
+    );
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+      recursive: true,
+      force: true,
+    });
   }
 });
 
@@ -1060,12 +1274,97 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
       },
     );
 
+    const workspaceStatusPath = path.join(workspaceRoot, "state", "status.json");
+    assert.equal(fs.existsSync(workspaceStatusPath), true);
+    const finalStatus = JSON.parse(fs.readFileSync(workspaceStatusPath, "utf8")) as {
+      state?: string;
+      backend?: { instanceState?: string };
+    };
+    assert.equal(finalStatus.state, "not-applied");
+    assert.equal(finalStatus.backend?.instanceState, "missing");
+
     assert.equal(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml")), true);
     assert.equal(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml")), true);
     assert.equal(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml")), true);
 
     const profileAfter = (yaml.load(fs.readFileSync(profileFile, "utf8")) ?? {}) as { workspaces?: string[] };
     assert.ok(profileAfter.workspaces?.includes(workspace));
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(codexAuth, { force: true });
+    fs.rmSync(codexConfig, { force: true });
+    fs.rmSync(claudeSettings, { force: true });
+    fs.rmSync(privateKey, { force: true });
+    fs.rmSync(publicKey, { force: true });
+    fs.rmSync(profileFile, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API can cancel a queued or running workspace provision job", async () => {
+  const userId = uniqueName("portal-cancel-user");
+  const workspace = uniqueName("portal-cancel");
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
+  const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
+  const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
+  const privateKey = path.join(userRoot, "credentials", "ssh", "id_ed25519");
+  const publicKey = path.join(userRoot, "credentials", "ssh", "id_ed25519.pub");
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Cancel User", "--email", `${userId}@polaris.local`]);
+    fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
+    fs.mkdirSync(path.dirname(privateKey), { recursive: true });
+    fs.writeFileSync(codexAuth, "{}\n", "utf8");
+    fs.writeFileSync(codexConfig, "model = 'gpt-5'\n", "utf8");
+    fs.writeFileSync(claudeSettings, "{}\n", "utf8");
+    fs.writeFileSync(privateKey, "dummy-private-key\n", "utf8");
+    fs.writeFileSync(
+      publicKey,
+      `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
+      "utf8",
+    );
+
+    await withEnv("POLARIS_TEST_PROVISION_STEP_DELAY_MS", "250", async () => {
+      await withFakePath(
+        {
+          docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
+        },
+        async () => {
+          await withPortalServer(async (baseUrl) => {
+            const createResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ workspaceName: workspace }),
+            });
+            assert.equal(createResponse.status, 202);
+
+            const cancelResponse = await fetch(
+              `${baseUrl}/api/users/${userId}/workspaces/${workspace}/provision/cancel`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({}),
+              },
+            );
+            assert.equal(cancelResponse.status, 200);
+          });
+
+          const finalProgress = await waitFor(() => {
+            const progress = readWorkspaceProvisionProgress(userId, workspace);
+            return progress?.done ? progress : null;
+          }, { timeoutMs: 10000 });
+          assert.equal(finalProgress.status, "cancelled");
+          assert.equal(finalProgress.phase, "cancelled");
+          assert.equal(finalProgress.errorCode, "workspace-provision-cancelled");
+          assert.equal(finalProgress.retryable, true);
+        },
+      );
+    });
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     clearWorkspaceProvisionProgress(userId, workspace);

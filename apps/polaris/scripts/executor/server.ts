@@ -8,9 +8,11 @@ import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import {
   bindPortalWorkspaceAgent,
+  cancelProvisionWorkspace,
   deletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
+  reportPortalWorkspaceStatus,
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
@@ -122,6 +124,33 @@ export function createExecutorServer(
           readRequiredString(body, "workspace"),
         );
         sendJson(res, 200, { refreshed: true });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/status/report") {
+        const body = await readBody(req);
+        const userId = readRequiredString(body, "userId");
+        const workspace = readRequiredString(body, "workspace");
+        const status = body.status;
+        if (!status || typeof status !== "object") {
+          throw new Error("status is required");
+        }
+        const result = await reportPortalWorkspaceStatus({
+          userId,
+          workspace,
+          status: status as never,
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/provision/cancel") {
+        const body = await readBody(req);
+        const result = await cancelProvisionWorkspace(
+          readRequiredString(body, "userId"),
+          readRequiredString(body, "workspace"),
+        );
+        sendJson(res, 200, result);
         return;
       }
 

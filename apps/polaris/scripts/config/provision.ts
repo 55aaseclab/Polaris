@@ -5,7 +5,11 @@ import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
 import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
 import { logInfo } from "../utils/log.js";
-import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import {
+  polarisNetfsLocalExportRoot,
+  polarisUsersRoot,
+  repoRoot,
+} from "../utils/paths.js";
 import { runCommand } from "../utils/shell.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -17,7 +21,7 @@ function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
-    export_path: "/exports/polaris/workspaces",
+    export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
     volume_ref: `${project}-workspace-data`,
@@ -35,9 +39,23 @@ interface WorkspaceConfigMatch {
 
 interface WorkspaceImageBuildState {
   imageRef: string;
+  sharedImageRef: string;
   dockerfileDigest: string;
   dockerfilePath: string;
   updatedAt: string;
+}
+
+function sanitizeImageTagSegment(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "default";
+}
+
+function sharedWorkspaceImageRef(dockerfileDigest: string): string {
+  return `ttl.sh/polaris-workspace-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:24h`;
 }
 
 function configMatches(project: string): WorkspaceConfigMatch[] {
@@ -301,6 +319,77 @@ function writeWorkspaceImageBuildState(
   fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+function buildSharedWorkspaceImage(args: {
+  dockerfilePath: string;
+  sharedImageRef: string;
+  cacheRefs: string[];
+}): void {
+  logInfo("provision", "workspace-shared-image-build", {
+    sharedImageRef: args.sharedImageRef,
+    dockerfile: path.relative(REPO_ROOT, args.dockerfilePath),
+    cacheRefs: args.cacheRefs,
+  });
+  const commandArgs = ["build"];
+  for (const cacheRef of args.cacheRefs) {
+    commandArgs.push("--cache-from", cacheRef);
+  }
+  commandArgs.push("-f", args.dockerfilePath, "-t", args.sharedImageRef, ".");
+  runCommand("docker", commandArgs);
+}
+
+function tagWorkspaceImage(sharedImageRef: string, imageRef: string): void {
+  if (sharedImageRef === imageRef) {
+    return;
+  }
+  logInfo("provision", "workspace-image-tag", {
+    sharedImageRef,
+    imageRef,
+  });
+  runCommand("docker", ["tag", sharedImageRef, imageRef]);
+}
+
+function allRecordedWorkspaceImageRefs(dockerfileDigest: string): string[] {
+  if (!fs.existsSync(USER_ROOT)) {
+    return [];
+  }
+  const refs = new Set<string>();
+  for (const userEntry of fs.readdirSync(USER_ROOT, { withFileTypes: true })) {
+    if (!userEntry.isDirectory()) {
+      continue;
+    }
+    const workspacesRoot = path.join(USER_ROOT, userEntry.name, "workspaces");
+    if (!fs.existsSync(workspacesRoot)) {
+      continue;
+    }
+    for (const workspaceEntry of fs.readdirSync(workspacesRoot, { withFileTypes: true })) {
+      if (!workspaceEntry.isDirectory()) {
+        continue;
+      }
+      const statePath = path.join(workspacesRoot, workspaceEntry.name, "state", "image-build.json");
+      if (!fs.existsSync(statePath)) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(
+          fs.readFileSync(statePath, "utf8"),
+        ) as Partial<WorkspaceImageBuildState>;
+        if (parsed.dockerfileDigest !== dockerfileDigest) {
+          continue;
+        }
+        if (typeof parsed.sharedImageRef === "string" && parsed.sharedImageRef.trim()) {
+          refs.add(parsed.sharedImageRef.trim());
+        }
+        if (typeof parsed.imageRef === "string" && parsed.imageRef.trim()) {
+          refs.add(parsed.imageRef.trim());
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return [...refs];
+}
+
 export function ensureCanonicalWorkspaceImage(projectRef: string): void {
   const { project } = parseWorkspaceReference(projectRef);
   const ensured = ensureWorkspaceConfig(projectRef);
@@ -312,32 +401,22 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
   const imageRef = workspaceImageRef(source.userProfileId, source.project);
   const dockerfileState = syncWorkspaceDockerfileTemplate(source.userProfileId);
   const dockerfileDigest = digestFile(dockerfileState.path);
+  const sharedImageRef = sharedWorkspaceImageRef(dockerfileDigest);
   const recordedBuild = readWorkspaceImageBuildState(source);
   const buildStateMatches =
     recordedBuild?.imageRef === imageRef
+    && recordedBuild?.sharedImageRef === sharedImageRef
     && recordedBuild?.dockerfileDigest === dockerfileDigest
     && recordedBuild?.dockerfilePath === path.relative(REPO_ROOT, dockerfileState.path);
   const recordBuild = (): void => {
     writeWorkspaceImageBuildState(source, {
       imageRef,
+      sharedImageRef,
       dockerfileDigest,
       dockerfilePath: path.relative(REPO_ROOT, dockerfileState.path),
       updatedAt: new Date().toISOString(),
     });
   };
-  if (dockerfileState.refreshed) {
-    logInfo("provision", "workspace-image-build", {
-      project: source.project,
-      userProfileId: source.userProfileId,
-      imageRef,
-      dockerfile: path.relative(REPO_ROOT, dockerfileState.path),
-      reason: "dockerfile-template-refreshed",
-    });
-    runCommand("docker", ["build", "-f", dockerfileState.path, "-t", imageRef, "."]);
-    recordBuild();
-    return;
-  }
-
   if (buildStateMatches && (hasLocalImage(imageRef) || canPullImage(imageRef))) {
     return;
   }
@@ -349,18 +428,46 @@ export function ensureCanonicalWorkspaceImage(projectRef: string): void {
     );
   }
 
+  if (hasLocalImage(sharedImageRef) || canPullImage(sharedImageRef)) {
+    logInfo("provision", "workspace-image-reused", {
+      project: source.project,
+      userProfileId: source.userProfileId,
+      imageRef,
+      sharedImageRef,
+      dockerfile: path.relative(REPO_ROOT, dockerfile),
+      reason: buildStateMatches
+        ? "workspace-image-missing"
+        : dockerfileState.refreshed
+          ? "dockerfile-template-refreshed"
+          : recordedBuild
+            ? "dockerfile-digest-changed"
+            : "image-build-state-missing",
+    });
+    tagWorkspaceImage(sharedImageRef, imageRef);
+    recordBuild();
+    return;
+  }
+
   logInfo("provision", "workspace-image-build", {
     project: source.project,
     userProfileId: source.userProfileId,
     imageRef,
+    sharedImageRef,
     dockerfile: path.relative(REPO_ROOT, dockerfile),
     reason: dockerfileState.created
       ? "dockerfile-created"
+      : dockerfileState.refreshed
+        ? "dockerfile-template-refreshed"
       : !buildStateMatches
         ? (recordedBuild ? "dockerfile-digest-changed" : "image-build-state-missing")
         : "image-missing",
   });
-  runCommand("docker", ["build", "-f", dockerfile, "-t", imageRef, "."]);
+  buildSharedWorkspaceImage({
+    dockerfilePath: dockerfile,
+    sharedImageRef,
+    cacheRefs: [sharedImageRef, imageRef, ...allRecordedWorkspaceImageRefs(dockerfileDigest)],
+  });
+  tagWorkspaceImage(sharedImageRef, imageRef);
   recordBuild();
 }
 

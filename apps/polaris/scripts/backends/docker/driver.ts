@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
@@ -12,9 +13,11 @@ import {
   dockerNetfsServer,
   isNetfsSource,
   netfsMountOptions,
+  netfsResolvedPath,
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
 import { renderAndWriteDockerWorkspace } from "./render.js";
+import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
 
 function extractPairingUrl(raw: string): string | undefined {
@@ -30,6 +33,14 @@ function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   const source = workspace.attachments.workspaceData.source;
   if (!isNetfsSource(source)) {
     return;
+  }
+  if (source.server?.trim() === "netfs.local") {
+    const exportPath = netfsResolvedPath(source);
+    fs.mkdirSync(exportPath, { recursive: true });
+    logInfo("docker-driver", "workspace-netfs-export-ready", {
+      project: workspace.identity.projectName,
+      exportPath,
+    });
   }
   const volumeName = workspaceDataDockerVolumeName(workspace);
   const expectedOptions = {

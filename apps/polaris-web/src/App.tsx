@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   activateCredential,
+  cancelWorkspaceProvision,
   createCredential,
   createWorkspace,
   createPortalUser,
@@ -137,6 +138,7 @@ type PortalShellContextValue = {
   workspacesLoading: boolean;
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
+  refreshWorkspaces: () => void;
 };
 
 const COPY: Record<Language, Record<string, string>> = {
@@ -306,10 +308,23 @@ const COPY: Record<Language, Record<string, string>> = {
     status_error: "Error",
     status_failed: "Failed",
     status_provisioning: "Provisioning",
+    provisioning_queued: "Queued",
+    provisioning_running: "Running",
+    provisioning_cancelling: "Cancelling",
+    provisioning_cancelled: "Cancelled",
+    provisioning_completed: "Completed",
+    provisioning_failed: "Failed",
+    error_image_build_failed: "Image build failed.",
+    error_workspace_runtime_failed: "Workspace runtime failed to start correctly.",
+    error_workspace_provision_failed: "Workspace provisioning failed.",
+    error_workspace_provision_cancelled: "Workspace provisioning was cancelled.",
+    error_generic: "Something went wrong.",
     status_not_selected: "Not selected",
     workspace_not_started: "Not started",
     workspace_stopped: "Stopped",
+    workspace_starting: "Starting",
     workspace_ready: "Driver ready",
+    workspace_ready_to_pair: "Ready to pair",
     workspace_attention: "Needs attention",
     workspace_unknown: "Unknown",
     runtime_not_started: "Not started",
@@ -523,10 +538,23 @@ const COPY: Record<Language, Record<string, string>> = {
     status_error: "错误",
     status_failed: "失败",
     status_provisioning: "准备中",
+    provisioning_queued: "排队中",
+    provisioning_running: "执行中",
+    provisioning_cancelling: "取消中",
+    provisioning_cancelled: "已取消",
+    provisioning_completed: "已完成",
+    provisioning_failed: "失败",
+    error_image_build_failed: "镜像构建失败。",
+    error_workspace_runtime_failed: "工作空间运行时启动失败。",
+    error_workspace_provision_failed: "工作空间准备失败。",
+    error_workspace_provision_cancelled: "工作空间准备已取消。",
+    error_generic: "出现异常。",
     status_not_selected: "未选中",
     workspace_not_started: "未启动",
     workspace_stopped: "已停止",
+    workspace_starting: "启动中",
     workspace_ready: "驱动就绪",
+    workspace_ready_to_pair: "可配对",
     workspace_attention: "需要处理",
     workspace_unknown: "未知",
     runtime_not_started: "未启动",
@@ -802,6 +830,84 @@ function translateState(
   }
 }
 
+function translateProvisionStatus(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "queued":
+      return t("provisioning_queued");
+    case "running":
+      return t("provisioning_running");
+    case "cancelling":
+      return t("provisioning_cancelling");
+    case "cancelled":
+      return t("provisioning_cancelled");
+    case "completed":
+      return t("provisioning_completed");
+    case "error":
+      return t("provisioning_failed");
+    default:
+      return t("status_unknown");
+  }
+}
+
+function translateErrorCode(
+  errorCode: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (errorCode) {
+    case "image-build-failed":
+      return t("error_image_build_failed");
+    case "workspace-runtime-failed":
+      return t("error_workspace_runtime_failed");
+    case "workspace-provision-cancelled":
+      return t("error_workspace_provision_cancelled");
+    case "workspace-provision-failed":
+      return t("error_workspace_provision_failed");
+    default:
+      return t("error_generic");
+  }
+}
+
+function formatProvisionError(args: {
+  errorCode?: string;
+  message?: string;
+  t: (key: string) => string;
+}): string {
+  const friendly = translateErrorCode(args.errorCode, args.t);
+  const detail = args.message?.trim();
+  if (!detail || detail === friendly) {
+    return friendly;
+  }
+  return `${friendly} ${detail}`;
+}
+
+function formatActionError(
+  error: unknown,
+  t: (key: string) => string,
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return t("error_generic");
+  }
+  const separator = ": ";
+  const index = trimmed.indexOf(separator);
+  if (index > 0) {
+    const errorCode = trimmed.slice(0, index).trim();
+    const detail = trimmed.slice(index + separator.length).trim();
+    if (/^[a-z0-9-]+$/i.test(errorCode)) {
+      return formatProvisionError({
+        errorCode,
+        message: detail,
+        t,
+      });
+    }
+  }
+  return trimmed;
+}
+
 function translatePairingState(
   value: string | null | undefined,
   t: (key: string) => string,
@@ -835,15 +941,93 @@ function translateWorkspaceRuntimeState(
   switch (value) {
     case "not-applied":
       return t("workspace_not_started");
+    case "created":
+      return t("workspace_starting");
     case "saved":
+    case "stopped":
       return t("workspace_stopped");
+    case "running":
     case "ready":
       return t("workspace_ready");
     case "degraded":
+    case "unsupported":
+    case "error":
+    case "failed":
       return t("workspace_attention");
     default:
       return value;
   }
+}
+
+function translateWorkspaceSummaryState(
+  summary: PortalWorkspaceSummary,
+  t: (key: string) => string,
+): string {
+  const progress = summary.progress;
+  if (progress) {
+    if (!progress.done) {
+      return translateProvisionStatus(progress.status, t);
+    }
+    if (progress.status === "error" || progress.status === "cancelled") {
+      return translateProvisionStatus(progress.status, t);
+    }
+  }
+
+  const state = summary.status?.state;
+  if (state === "ready") {
+    const pairingState = summary.status?.daemon?.pairing?.state;
+    if (pairingState === "ok" || pairingState === "ready") {
+      return t("workspace_ready_to_pair");
+    }
+  }
+  if (state) {
+    return translateWorkspaceRuntimeState(state, t);
+  }
+
+  const runtimeState =
+    summary.status?.driver?.runtimeState ?? summary.status?.backend.instanceState;
+  return translateWorkspaceRuntimeState(runtimeState, t);
+}
+
+function workspaceSummaryBadgeVariant(
+  summary: PortalWorkspaceSummary,
+): "default" | "secondary" | "destructive" | "outline" {
+  const progress = summary.progress;
+  if (progress) {
+    switch (progress.status) {
+      case "error":
+      case "cancelled":
+        return "destructive";
+      case "completed":
+        return "secondary";
+      case "queued":
+      case "running":
+      case "cancelling":
+        return "default";
+      default:
+        return "outline";
+    }
+  }
+
+  const state = summary.status?.state;
+  const runtimeState =
+    summary.status?.driver?.runtimeState ?? summary.status?.backend.instanceState;
+  if (state === "ready") {
+    return "secondary";
+  }
+  if (
+    state === "degraded"
+    || state === "error"
+    || state === "failed"
+    || runtimeState === "degraded"
+    || runtimeState === "unsupported"
+  ) {
+    return "destructive";
+  }
+  if (state === "saved" || runtimeState === "stopped" || runtimeState === "missing") {
+    return "outline";
+  }
+  return "secondary";
 }
 
 function translatePaseoState(
@@ -1225,6 +1409,17 @@ function PortalShellLayout(props: {
   const location = useLocation();
   const navigate = useNavigate();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [startAfterCreate, setStartAfterCreate] = useState(true);
+  const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
+  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
+  const [createWorkspaceJobId, setCreateWorkspaceJobId] = useState<string | null>(null);
+  const [createWorkspaceTarget, setCreateWorkspaceTarget] = useState<string | null>(null);
+  const [cancellingWorkspace, setCancellingWorkspace] = useState(false);
+  const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
   const isAdmin = mapping?.role === "admin";
   const activeUserId = String(routeUserId ?? "").trim();
   const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
@@ -1234,18 +1429,65 @@ function PortalShellLayout(props: {
     error: sidebarWorkspacesError,
   } = useAsyncValue(
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
-    [activeUserId],
+    [activeUserId, workspaceRefreshTick],
   );
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
   const currentWorkspacePane = pathParts[4] ?? "";
-  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [startAfterCreate, setStartAfterCreate] = useState(true);
-  const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
-  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
-  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
+
+  async function pollWorkspaceProvisionUntilDone(
+    userId: string,
+    workspace: string,
+    jobIdHint?: string | null,
+  ): Promise<PortalWorkspaceDetail> {
+    for (;;) {
+      const detail = await getWorkspaceDetail(userId, workspace);
+      const progress = detail.progress;
+      if (!progress) {
+        await sleep(1000);
+        continue;
+      }
+      if (!jobIdHint || progress.jobId === jobIdHint) {
+        setCreateWorkspaceJobId(progress.jobId);
+        setCreateWorkspaceTarget(workspace);
+        setCreateWorkspaceProgress((current) => {
+          if (progress.done) {
+            return progress.percent;
+          }
+          if (progress.phase === "start") {
+            const floor = progress.percent;
+            if (current < floor) {
+              return floor;
+            }
+            return Math.min(current + 1, 99);
+          }
+          return progress.percent;
+        });
+        if (progress.status === "cancelled") {
+          throw new Error(
+            formatProvisionError({
+              errorCode: progress.errorCode ?? "workspace-provision-cancelled",
+              message: progress.message,
+              t,
+            }),
+          );
+        }
+        if (progress.status === "error" || progress.phase === "error" || progress.error) {
+          throw new Error(
+            formatProvisionError({
+              errorCode: progress.errorCode,
+              message: progress.error ?? progress.message,
+              t,
+            }),
+          );
+        }
+        if (progress.done && progress.percent >= 100) {
+          return detail;
+        }
+      }
+      await sleep(1000);
+    }
+  }
 
   function resetCreateWorkspaceForm(): void {
     setNewWorkspaceName("");
@@ -1254,6 +1496,9 @@ function PortalShellLayout(props: {
     setCreateWorkspaceError(null);
     setCreatingWorkspace(false);
     setCreateWorkspaceProgress(0);
+    setCreateWorkspaceJobId(null);
+    setCreateWorkspaceTarget(null);
+    setCancellingWorkspace(false);
   }
 
   function handleCreateWorkspaceOpenChange(open: boolean): void {
@@ -1312,49 +1557,86 @@ function PortalShellLayout(props: {
         defaultDockerOnly,
         startAfterCreate,
       });
+      setCreateWorkspaceJobId(queued.jobId);
+      setCreateWorkspaceTarget(trimmedName);
       setCreateWorkspaceProgress(queued.percent);
-      for (;;) {
-        const detail = await getWorkspaceDetail(activeUserId, trimmedName);
-        const progress = detail.progress;
-        if (!progress) {
-          await sleep(1000);
-          continue;
-        }
-        if (progress.phase === "error" || progress.error) {
-          throw new Error(progress.error ?? progress.message);
-        }
-        setCreateWorkspaceProgress((current) => {
-          if (progress.done) {
-            return progress.percent;
-          }
-          if (progress.phase === "start") {
-            const floor = progress.percent;
-            if (current < floor) {
-              return floor;
-            }
-            return Math.min(current + 1, 99);
-          }
-          return progress.percent;
-        });
-        if (progress.done && progress.percent >= 100) {
-          break;
-        }
-        await sleep(1000);
-      }
+      await pollWorkspaceProvisionUntilDone(activeUserId, trimmedName, queued.jobId);
       setCreateWorkspaceProgress(100);
+      setWorkspaceRefreshTick((current) => current + 1);
+      setCreateWorkspaceJobId(null);
+      setCreateWorkspaceTarget(null);
       setCreateWorkspaceOpen(false);
       setNewWorkspaceName("");
       setStartAfterCreate(true);
       setDefaultDockerOnly(true);
-      window.location.assign(
+      navigate(
         `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
       );
     } catch (cause: unknown) {
-      setCreateWorkspaceError(cause instanceof Error ? cause.message : String(cause));
+      setCreateWorkspaceError(formatActionError(cause, t));
     } finally {
       setCreatingWorkspace(false);
     }
   }
+
+  async function handleCancelWorkspaceProvision(): Promise<void> {
+    const workspace = createWorkspaceTarget?.trim() || newWorkspaceName.trim();
+    if (!activeUserId || !workspace || cancellingWorkspace) {
+      return;
+    }
+    setCancellingWorkspace(true);
+    try {
+      const progress = await cancelWorkspaceProvision(activeUserId, workspace);
+      setCreateWorkspaceJobId(progress.jobId);
+      setCreateWorkspaceTarget(workspace);
+      setCreateWorkspaceProgress(progress.percent);
+      setCreateWorkspaceError(
+        formatProvisionError({
+          errorCode: progress.errorCode,
+          message: progress.message,
+          t,
+        }),
+      );
+    } catch (error) {
+      setCreateWorkspaceError(formatActionError(error, t));
+    } finally {
+      setCancellingWorkspace(false);
+    }
+  }
+
+  useEffect(() => {
+    if (
+      !activeUserId
+      || creatingWorkspace
+      || createWorkspaceJobId
+      || createWorkspaceTarget
+      || !sidebarWorkspaces?.length
+    ) {
+      return;
+    }
+    const resumable = sidebarWorkspaces.find((workspace) =>
+      workspace.progress
+      && !workspace.progress.done
+      && (workspace.progress.status === "queued"
+        || workspace.progress.status === "running"
+        || workspace.progress.status === "cancelling"),
+    );
+    if (!resumable?.progress) {
+      return;
+    }
+    setCreateWorkspaceOpen(true);
+    setNewWorkspaceName(resumable.name);
+    setCreateWorkspaceJobId(resumable.progress.jobId);
+    setCreateWorkspaceTarget(resumable.name);
+    setCreateWorkspaceProgress(resumable.progress.percent);
+    setCreateWorkspaceError(null);
+  }, [
+    activeUserId,
+    createWorkspaceJobId,
+    createWorkspaceTarget,
+    creatingWorkspace,
+    sidebarWorkspaces,
+  ]);
 
   const activeUserInitial = (activeUser?.name || activeUser?.id || "?")
     .trim()
@@ -1367,6 +1649,52 @@ function PortalShellLayout(props: {
       : workspacePaneLink(currentWorkspaceName, "paseo"))
     : "";
   const isWorkspaceSection = location.pathname.includes("/workspaces");
+  useEffect(() => {
+    if (!activeUserId || !createWorkspaceTarget || !createWorkspaceJobId || creatingWorkspace) {
+      return;
+    }
+    let cancelled = false;
+    setCreatingWorkspace(true);
+    setCreateWorkspaceError(null);
+    void pollWorkspaceProvisionUntilDone(
+      activeUserId,
+      createWorkspaceTarget,
+      createWorkspaceJobId,
+    )
+      .then(() => {
+        if (cancelled) {
+          return;
+        }
+        setCreateWorkspaceProgress(100);
+        setWorkspaceRefreshTick((current) => current + 1);
+        setCreateWorkspaceJobId(null);
+        setCreateWorkspaceTarget(null);
+        setCreateWorkspaceOpen(false);
+        navigate(
+          `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(createWorkspaceTarget)}`,
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setCreateWorkspaceError(formatActionError(cause, t));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCreatingWorkspace(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeUserId,
+    createWorkspaceJobId,
+    createWorkspaceTarget,
+    creatingWorkspace,
+    navigate,
+  ]);
+
   const currentPaneTitle = location.pathname.includes("/admin")
     ? t("administration")
     : location.pathname.includes("/credentials")
@@ -1387,6 +1715,9 @@ function PortalShellLayout(props: {
     workspacesLoading: sidebarWorkspacesLoading,
     workspacesError: sidebarWorkspacesError,
     openCreateWorkspaceDialog,
+    refreshWorkspaces: () => {
+      setWorkspaceRefreshTick((current) => current + 1);
+    },
   };
 
   return (
@@ -1436,6 +1767,8 @@ function PortalShellLayout(props: {
                     const active = location.pathname.includes(
                       `/workspaces/${encodeURIComponent(workspace.name)}`,
                     );
+                    const workspaceStateLabel = translateWorkspaceSummaryState(workspace, t);
+                    const workspaceStateVariant = workspaceSummaryBadgeVariant(workspace);
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
@@ -1443,6 +1776,14 @@ function PortalShellLayout(props: {
                             <FolderKanban />
                             <span className="flex min-w-0 flex-col">
                               <span className="truncate">{workspace.name}</span>
+                              <span className="mt-1 flex">
+                                <Badge
+                                  variant={workspaceStateVariant}
+                                  className="max-w-full truncate px-1.5 py-0 text-[10px] font-medium"
+                                >
+                                  {workspaceStateLabel}
+                                </Badge>
+                              </span>
                             </span>
                           </Link>
                         </SidebarMenuButton>
@@ -1635,9 +1976,14 @@ function PortalShellLayout(props: {
                 {creatingWorkspace && (
                   <div className="grid gap-2">
                     <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{t("provisioning")}</span>
+                      <span>{translateProvisionStatus(cancellingWorkspace ? "cancelling" : "running", t)}</span>
                       <span>{createWorkspaceProgress}%</span>
                     </div>
+                    {createWorkspaceJobId ? (
+                      <div className="text-xs text-muted-foreground">
+                        job: {createWorkspaceJobId}
+                      </div>
+                    ) : null}
                     <Progress value={createWorkspaceProgress} />
                   </div>
                 )}
@@ -1648,10 +1994,16 @@ function PortalShellLayout(props: {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => handleCreateWorkspaceOpenChange(false)}
-                    disabled={creatingWorkspace}
+                    onClick={() => {
+                      if (creatingWorkspace) {
+                        void handleCancelWorkspaceProvision();
+                        return;
+                      }
+                      handleCreateWorkspaceOpenChange(false);
+                    }}
+                    disabled={cancellingWorkspace}
                   >
-                    {t("cancel")}
+                    {creatingWorkspace ? t("cancel") : t("cancel")}
                   </Button>
                   <Button
                     type="submit"
@@ -1713,9 +2065,14 @@ function PortalShellLayout(props: {
                 {creatingWorkspace && (
                   <div className="grid gap-2">
                     <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{t("provisioning")}</span>
+                      <span>{translateProvisionStatus(cancellingWorkspace ? "cancelling" : "running", t)}</span>
                       <span>{createWorkspaceProgress}%</span>
                     </div>
+                    {createWorkspaceJobId ? (
+                      <div className="text-xs text-muted-foreground">
+                        job: {createWorkspaceJobId}
+                      </div>
+                    ) : null}
                     <Progress value={createWorkspaceProgress} />
                   </div>
                 )}
@@ -1723,9 +2080,20 @@ function PortalShellLayout(props: {
                   <p className="text-sm text-destructive">{createWorkspaceError}</p>
                 )}
                 <AlertDialogFooter>
-                  <AlertDialogCancel disabled={creatingWorkspace}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (creatingWorkspace) {
+                        void handleCancelWorkspaceProvision();
+                        return;
+                      }
+                      handleCreateWorkspaceOpenChange(false);
+                    }}
+                    disabled={cancellingWorkspace}
+                  >
                     {t("cancel")}
-                  </AlertDialogCancel>
+                  </Button>
                   <Button
                     type="submit"
                     disabled={creatingWorkspace || !newWorkspaceName.trim()}
@@ -2037,7 +2405,9 @@ function WorkspaceDetailPage() {
   const { t } = useLanguage();
   const { userId = "", workspaceName = "" } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const { data: users } = useAsyncValue(listUsers, []);
+  const { refreshWorkspaces } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
@@ -2186,7 +2556,12 @@ function WorkspaceDetailPage() {
     setSwitching(true);
     try {
       await switchWorkspaceDriver(userId, workspaceName, driver);
-      window.location.reload();
+      await refreshWorkspaceStatus(userId, workspaceName);
+      refreshWorkspaces();
+      setRefreshTick((current) => current + 1);
+      setActionError(null);
+    } catch (error) {
+      setActionError(formatActionError(error, t));
     } finally {
       setSwitching(false);
     }
@@ -2197,9 +2572,10 @@ function WorkspaceDetailPage() {
     setDeleting(true);
     try {
       await deleteWorkspace(userId, workspaceName);
-      window.location.assign(`/users/${encodeURIComponent(userId)}/workspaces`);
+      refreshWorkspaces();
+      navigate(`/users/${encodeURIComponent(userId)}/workspaces`);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(formatActionError(error, t));
     } finally {
       setDeleting(false);
     }
@@ -2210,9 +2586,11 @@ function WorkspaceDetailPage() {
     setStopping(true);
     try {
       await stopWorkspace(userId, workspaceName);
-      window.location.reload();
+      await refreshWorkspaceStatus(userId, workspaceName);
+      refreshWorkspaces();
+      setRefreshTick((current) => current + 1);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(formatActionError(error, t));
     } finally {
       setStopping(false);
     }
@@ -2223,9 +2601,11 @@ function WorkspaceDetailPage() {
     setStarting(true);
     try {
       await startWorkspace(userId, workspaceName);
-      window.location.reload();
+      await refreshWorkspaceStatus(userId, workspaceName);
+      refreshWorkspaces();
+      setRefreshTick((current) => current + 1);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(formatActionError(error, t));
     } finally {
       setStarting(false);
     }
@@ -2238,7 +2618,7 @@ function WorkspaceDetailPage() {
       await refreshWorkspaceStatus(userId, workspaceName);
       setRefreshTick((current) => current + 1);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(formatActionError(error, t));
     } finally {
       setRefreshing(false);
     }
@@ -2263,7 +2643,7 @@ function WorkspaceDetailPage() {
       await refreshWorkspaceStatus(userId, workspaceName);
       setRefreshTick((current) => current + 1);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(formatActionError(error, t));
     } finally {
       setSwitching(false);
     }
