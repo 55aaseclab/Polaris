@@ -1,0 +1,494 @@
+# Agent Swarm Maturity
+
+本文档描述 Polaris 当前的 agent / manager 模型。
+
+重点是把四件事拆开：
+
+- Paseo daemon
+- Paseo server / pairing offer
+- 工作空间状态面
+- 运行时凭证切换
+
+这四者相关，但不是同一个开关。
+
+## 一句话原则
+
+- Polaris 负责把 manager 运行面装配进工作空间。
+- Paseo daemon 是工作空间内的 manager 进程。
+- Paseo server / pairing offer 是连接面，不等于 daemon 进程本身。
+- harness 凭证选择和 live switch 属于身份物料切换，不负责创建或销毁
+  daemon。
+
+## 核心对象
+
+- 工作空间：agent 运行的隔离环境。
+- Paseo daemon：工作空间内的 manager daemon。
+- pairing offer：daemon 暴露出的连接地址和 server identity。
+- 工作空间状态：Polaris 合成出的 agent 运行视图。
+- live credential selection：运行中的 harness 凭证选择状态。
+
+## 文件落点
+
+- 工作空间 manager 状态：
+  `config/users/<userId>/workspaces/<workspace>/state/status.json`
+- 工作空间 manager 持久态：
+  `config/users/<userId>/workspaces/<workspace>/state/`
+- 工作空间运行时 manager 数据：
+  `/workspace/state/paseo`
+- 工作空间运行时 evolution 数据：
+  `/workspace/state/paseo/evolution`
+- 运行时装配后的 manager home：
+  `~/.paseo`
+
+## 当前模型
+
+### Paseo daemon
+
+Paseo daemon 是 Polaris 当前接入的 manager 进程。
+
+当前语义是：
+
+- daemon 运行在工作空间内部
+- daemon 默认监听 `0.0.0.0:6767`
+- Polaris 在 render / start 阶段负责装配 daemon 运行环境
+- Polaris 会在运行时检查 daemon 是否真正处于 `running/reachable`
+  状态
+
+当前 Polaris 不把 daemon 状态和凭证状态混为一谈。
+
+因此：
+
+- 没有 agent 凭证，不等于 daemon 关闭
+- daemon ready，不等于某个 harness 已经选中凭证
+
+### Paseo server / pairing offer
+
+Polaris 当前不是直接控制远端 Paseo server。
+
+它控制的是工作空间内 daemon 生成的 pairing offer。
+
+当前检查点包括：
+
+- `serverId` 是否存在
+- daemon status 返回的 `serverId` 是否和持久化 `server-id` 一致
+- pairing offer 中的 `serverId` 是否和 daemon `serverId` 一致
+- pairing URL 是否可以被规范化为当前门户可用地址
+
+因此当前所谓的 `Paseo server` 更准确说是：
+
+- daemon status 提供的 server identity
+- daemon pair 生成的 live target / pairing URL
+
+### 工作空间状态面
+
+Polaris 当前已经把 agent 运行相关状态合成为统一状态面。
+
+当前重点包括：
+
+- backend 是否存在、是否运行
+- daemon manager 是否 ready
+- daemon pairing 是否 ready
+- daemonAddress
+- supportedHarnesses
+- liveTarget
+- 用户级默认凭证是否已解析
+- 各 harness 的 live credential 选择结果
+
+这部分状态不会只依赖某一个后端本地返回值。
+
+Polaris 会综合：
+
+- backend observation
+- runtime assembly 检查
+- daemon status 检查
+- pairing URL 检查
+- 持久化 runtime selection
+
+最近一轮性能优化把这部分从“同步重探测优先”改成了“缓存状态面优先”。
+
+当前语义是：
+
+- portal detail read 优先读取 `status.json`
+- runtime observer 可以主动回报状态 patch
+- 显式 refresh 仍然保留，但不再是默认读路径
+- start / stop / live switch 可以先写缓存状态，再异步 refresh
+
+当前关键文件：
+
+- `apps/polaris/scripts/executor/operations.ts`
+- `apps/polaris/scripts/evolution/runtime-observer.mjs`
+- `apps/polaris-web/src/App.tsx`
+
+### 运行时凭证切换
+
+Polaris 当前已经支持运行时凭证切换。
+
+这不是修改 daemon 类型。
+
+这也不是重建用户资料。
+
+当前语义是：
+
+- 读取目标用户凭证
+- 校验该凭证属于对应 harness
+- 把凭证物料写入 `user-identity-state`
+- 记录工作空间当前 harness 的 live selection
+- 刷新状态面，反映当前运行时选择
+
+当前支持 live switch 的 harness 包括：
+
+- `ssh`
+- `codex`
+- `claude`
+- `copilot`
+- `opencode`
+- `pi`
+
+最近一轮优化还让 live switch 的状态反馈更快：
+
+- 先写当前 harness 的 cached live selection
+- 再触发异步状态 refresh
+
+因此用户不需要等待一次完整深探测，页面就能先反映“当前选择已经切换”。
+
+验收时要看两个层面：
+
+- UI 是否立刻切到新 selection
+- 后续 refresh 是否把状态面稳定下来
+
+## 当前状态语义
+
+### daemon 状态
+
+daemon 状态至少分开表达：
+
+- manager state
+- pairing state
+- daemon detail
+- pairing URL
+
+当前 ready 的判断不是只看进程存在。
+
+还会检查：
+
+- `localDaemon == running`
+- `connectedDaemon == reachable`
+- `serverId` 与持久化值一致
+
+### live target
+
+`liveTarget` 表示当前工作空间暴露出的 pairing URL。
+
+它描述的是连接入口。
+
+它不表示：
+
+- 当前用了哪个 harness
+- 当前选中了哪个 credential
+
+### supported harnesses
+
+`supportedHarnesses` 表示当前 manager / runtime 允许工作的 harness 集合。
+
+它描述能力面。
+
+它不表示：
+
+- 所有 harness 都已配置好凭证
+- 所有 harness 都已有 live selection
+
+### credential status
+
+当前凭证状态分成两层：
+
+1. 用户级默认或工作空间绑定的解析结果
+2. 运行时 live switch 后的按 harness 选择结果
+
+当前状态面里会表达：
+
+- `codex.state`
+- `codex.source`
+- `live.switchableHarnesses`
+- `live.supportedHarnesses`
+- `live.selectedHarness`
+- `live.selectedCredentialId`
+- `live.selectedCredentialLabel`
+- `live.selectedByHarness`
+
+这意味着 Polaris 当前已经不是只表达一个“当前 agent credential”。
+
+它已经表达成按 harness 维度的运行时选择视图。
+
+## 主流程
+
+### 1. 工作空间启动
+
+1. Polaris 装配 workspace data、runtime state 和 user identity。
+2. Polaris 装配 `~/.paseo`。
+3. Polaris 启动或拉起 Paseo daemon。
+4. Polaris 检查 daemon status。
+5. Polaris 读取 pairing offer 并进入状态面。
+
+### 2. 查看状态
+
+1. Polaris 检查 backend 是否存在和运行。
+2. Polaris 检查 runtime assembly 是否完整。
+3. Polaris 检查 daemon manager 状态。
+4. Polaris 检查 pairing URL 与 `serverId` 一致性。
+5. Polaris 合成 `status.json` 和门户状态响应。
+
+但在当前实现里，这个过程已经分成两种路径：
+
+#### 快路径
+
+- 读取 `status.json`
+- 读取 live credential selection
+- 返回门户状态
+
+#### 慢路径
+
+- 显式 refresh
+- start / stop / create finalize
+- observer 回报后的校正
+
+这一点很关键，因为“状态页打开很慢”和“daemon 确实有问题”现在不再是
+同一个问题。
+
+### 3. 工作空间级 agent-auth 绑定
+
+当前 `/paseo/bind` 和 `/paseo/unbind` 仍然保留，但它们只是兼容路径。
+
+绑定时：
+
+1. 前端选择一个 `agent-auth` 凭证。
+2. 后端只更新当前 driver spec 的
+   `credentials.bindings[purpose=agent-auth]`。
+3. 后端保留其他绑定。
+4. 后端重渲染并重启当前 driver。
+
+解绑时：
+
+1. 后端只移除当前 driver spec 里的 `agent-auth` 绑定。
+2. 用户级默认凭证和 live runtime selection 仍可独立存在。
+3. 后端重渲染并重启当前 driver。
+
+### 4. 运行时 live credential switch
+
+1. 前端选择某个 harness 对应的用户级凭证。
+2. 后端调用 live switch 接口。
+3. 后端把目标凭证物料写入运行时 identity state。
+4. 后端写入当前工作空间的 live selection。
+5. 状态刷新后按 harness 展示新的运行时凭证来源。
+
+### 5. Portal create job
+
+workspace create 现在也属于 agent runtime 体验的一部分，而不是纯控制面
+脚本。
+
+当前 portal create 已经是 job model：
+
+- 有 `jobId`
+- 有 `status`
+- 有 `phase`
+- 有 `percent`
+- 有 `errorCode`
+- 支持 resume
+- 支持 cancel
+
+这很重要，因为 daemon ready / pairing ready 不再只能靠整页刷新去碰运气。
+前端可以围绕 job 状态稳定推进 UI。
+
+当前关键文件：
+
+- `apps/polaris-web/src/App.tsx`
+- `apps/polaris-web/src/lib/api.ts`
+- `apps/polaris/scripts/executor/operations.ts`
+
+当前关键状态文件：
+
+- `config/users/<userId>/workspaces/<workspace>/state/provision.json`
+
+## 页面职责
+
+### Workspace Detail 页
+
+- 展示 daemon 状态
+- 展示 pairing 状态
+- 展示 supported harnesses
+- 展示 live target
+- 展示用户级默认凭证解析结果
+- 展示各 harness 的 live credential 选择
+- 提供工作空间级 override
+- 提供 live credential switch
+
+### Sidebar / create flow
+
+最近一轮优化后，用户实际最常感知到的变化在这里：
+
+- 创建工作空间时 sidebar 会局部更新
+- 未完成的创建 job 可以恢复
+- 删除工作空间不再整页 reload
+- start / stop / switch 后状态会局部刷新
+
+也就是说，portal 当前已经开始把“manager 状态面”当成持续同步的 UI，
+而不是靠全页重载兜底。
+
+这部分验收不要只看“最后有没有成功”。
+还要看：
+
+- create 过程中 sidebar 有没有持续更新
+- 浏览器刷新后未完成 job 能不能恢复
+- delete 后是否只是本地导航切换
+
+## 调试重点
+
+如果 agent 相关体验慢或错，先区分是哪一种失败：
+
+### daemon / pairing 真失败
+
+看：
+
+- `workspace-status-reported`
+- `workspace-status-refresh-completed`
+- `daemon.manager.state`
+- `daemon.pairing.state`
+
+### portal 只是没有正确消费缓存状态
+
+看：
+
+- `status.json`
+- `provision.json`
+- 前端是否还在直接展示原始内部状态串
+- 前端是否错误依赖 full-page reload
+
+最小检查命令：
+
+```bash
+cat config/users/<user>/workspaces/<workspace>/state/provision.json
+cat config/users/<user>/workspaces/<workspace>/state/status.json
+rg -n "workspace-provision-progress|workspace-status-cached|workspace-status-reported" \
+  .tmp/paseo/stack.executor.err.log
+```
+
+## 边界
+
+- Polaris 当前接入的是 Paseo-first manager 模型。
+- Polaris 当前表达的是单工作空间内的 manager 运行面。
+- Polaris 当前已经有多 harness 运行时切换，但还不是完整的 swarm
+  task graph。
+- credential switch 不负责启动或停止 daemon。
+- pairing URL 不等于 credential selection。
+
+## CLI 设计
+
+当前 agent / manager 运行面已经有明确的 CLI 命令面。
+
+根入口是：
+
+```bash
+pnpm --dir apps/polaris run polaris -- ...
+```
+
+### start
+
+```bash
+pnpm --dir apps/polaris run polaris -- start <workspaceRef>
+```
+
+当前语义是：
+
+- 启动 workspace runtime
+- 装配 `~/.paseo`
+- 启动或拉起 Paseo daemon
+- 等待 workspace 进入可检查状态
+
+### stop
+
+```bash
+pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
+```
+
+当前语义是：
+
+- 停止当前 workspace runtime
+- 停止该 workspace 内的 daemon 承载环境
+
+### restart
+
+```bash
+pnpm --dir apps/polaris run polaris -- restart <workspaceRef>
+```
+
+当前语义是：
+
+- 重启当前 workspace runtime
+- 保留 manager 相关 durable state 语义边界
+
+### status
+
+```bash
+pnpm --dir apps/polaris run polaris -- status <workspaceRef>
+```
+
+当前语义是：
+
+- 检查 backend 是否运行
+- 检查 runtime assembly
+- 检查 daemon manager 状态
+- 检查 pairing 状态
+- 输出 `supportedHarnesses`、`liveTarget` 和 credential selection 视图
+
+### logs
+
+```bash
+pnpm --dir apps/polaris run polaris -- logs <workspaceRef>
+```
+
+当前语义是：
+
+- 读取当前 workspace runtime 的 backend 日志
+- 辅助判断 daemon、assembly 和 runtime 问题
+
+### 工作空间级 agent-auth override
+
+当前 CLI 没有单独暴露一个 `bind` / `unbind` 顶层命令。
+
+当前这部分主要通过门户与 executor 路径表达。
+
+语义上它对应的是：
+
+- 给当前 workspace driver 写入 `agent-auth` 绑定
+- 或移除当前 driver 上的 `agent-auth` 绑定
+- 然后重渲染并重启该 driver
+
+这属于 workspace spec 级 override。
+
+它不等于运行时 live switch。
+
+### live-switch
+
+```bash
+pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> \
+  [--harness <ssh|codex|claude|copilot|opencode|pi>]
+```
+
+当前语义是：
+
+- 只对运行中的 workspace 生效
+- 校验目标 backend 当前支持 live switch
+- 校验目标 credential 与 harness 对应关系
+- 把物料写入运行时 `user-identity-state`
+- 写入 workspace 当前的 live selection
+- 刷新 `status` 视图
+
+当前它属于 workspace runtime 命令面。
+
+它不属于用户管理命令面。
+
+### 设计约束
+
+- daemon 生命周期跟随 workspace runtime，而不是跟随用户凭证状态。
+- `status` 负责表达 daemon、pairing、harness 和 selection 的分层状态。
+- workspace 级 `agent-auth` override 和 runtime `live-switch` 是两条不同路径。
+- `live-switch` 改变的是运行时身份物料，不改变 daemon 类型。
