@@ -4,7 +4,11 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { userIdentityDurablePaths } from "../core/identity-layout.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
-import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import {
+  polarisNetfsLocalExportRoot,
+  polarisUsersRoot,
+  repoRoot,
+} from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
@@ -17,7 +21,7 @@ function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
-    export_path: "/exports/polaris/workspaces",
+    export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
     volume_ref: `${project}-workspace-data`,
@@ -203,7 +207,14 @@ function userDockerfilePath(userProfileId: string): string {
 }
 
 function defaultWorkspaceDockerfileTemplatePath(): string {
-  return userDockerfilePath(DEMO_USER_PROFILE_ID);
+  return path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    DEMO_USER_PROFILE_ID,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
 }
 
 function filesHaveSameContents(leftPath: string, rightPath: string): boolean {

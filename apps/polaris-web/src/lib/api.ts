@@ -31,15 +31,22 @@ export type ManagedHarness =
   | "pi";
 
 export interface PortalProvisionProgress {
+  jobId: string;
   workspace: string;
   userId: string;
+  status: "queued" | "running" | "completed" | "error" | "cancelled" | "cancelling";
   phase: string;
   step: number;
   totalSteps: number;
   percent: number;
   message: string;
+  startedAt: string;
   updatedAt: string;
   done: boolean;
+  cancelRequested?: boolean;
+  cancellable?: boolean;
+  errorCode?: string;
+  retryable?: boolean;
   error?: string;
 }
 
@@ -475,6 +482,19 @@ export async function createWorkspace(
         defaultDockerOnly: options?.defaultDockerOnly ?? false,
         startAfterCreate: options?.startAfterCreate ?? false,
       }),
+    },
+  );
+}
+
+export async function cancelWorkspaceProvision(
+  userId: string,
+  workspace: string,
+): Promise<PortalProvisionProgress> {
+  return apiFetch<PortalProvisionProgress>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/provision/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
     },
   );
 }

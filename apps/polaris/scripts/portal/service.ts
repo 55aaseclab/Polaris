@@ -27,12 +27,15 @@ import {
   type PortalWorkspaceDetail,
   type PortalWorkspaceSummary,
 } from "../core/portal.js";
+import type { WorkspaceStatus } from "../core/workspace.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
+  cancelProvisionWorkspace as cancelProvisionWorkspaceExecutor,
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
+  reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
   startPortalWorkspace as startPortalWorkspaceExecutor,
   stopPortalWorkspace as stopPortalWorkspaceExecutor,
   switchPortalWorkspace as switchPortalWorkspaceExecutor,
@@ -78,7 +81,6 @@ export function getPortalWorkspaceDetail(
   userId: string,
   workspace: string,
 ): PortalWorkspaceDetail {
-  void refreshPortalWorkspaceStatus(userId, workspace);
   return loadWorkspaceDetail(userId, workspace);
 }
 
@@ -261,6 +263,13 @@ export async function queueProvisionWorkspace(
   });
 }
 
+export async function cancelPortalWorkspaceProvision(
+  userId: string,
+  workspace: string,
+) {
+  return cancelProvisionWorkspaceExecutor({ userId, workspace });
+}
+
 export async function switchPortalWorkspace(
   userId: string,
   workspace: string,
@@ -296,6 +305,14 @@ export async function refreshPortalWorkspace(
 ): Promise<{ refreshed: true }> {
   await refreshPortalWorkspaceStatus(userId, workspace);
   return { refreshed: true };
+}
+
+export async function reportPortalWorkspaceStatus(input: {
+  userId: string;
+  workspace: string;
+  status: Partial<WorkspaceStatus>;
+}): Promise<{ reported: true }> {
+  return reportPortalWorkspaceStatusExecutor(input);
 }
 
 export async function switchPortalWorkspaceLiveCredential(input: {

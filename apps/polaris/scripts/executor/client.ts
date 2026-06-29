@@ -5,11 +5,14 @@ import type {
   PortalProvisionProgress,
   PortalWorkspaceDetail,
 } from "../core/portal.js";
+import type { WorkspaceStatus } from "../core/workspace.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentLocal,
+  cancelProvisionWorkspace as cancelProvisionWorkspaceLocal,
   deletePortalWorkspace as deletePortalWorkspaceLocal,
   queueProvisionWorkspace as queueProvisionWorkspaceLocal,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusLocal,
+  reportPortalWorkspaceStatus as reportPortalWorkspaceStatusLocal,
   startPortalWorkspace as startPortalWorkspaceLocal,
   stopPortalWorkspace as stopPortalWorkspaceLocal,
   switchPortalWorkspace as switchPortalWorkspaceLocal,
@@ -103,6 +106,35 @@ export async function refreshPortalWorkspaceStatus(input: {
       await refreshPortalWorkspaceStatusLocal(input.userId, input.workspace);
       return { refreshed: true };
     },
+  );
+}
+
+export async function cancelProvisionWorkspace(input: {
+  userId: string;
+  workspace: string;
+}): Promise<PortalProvisionProgress> {
+  return executorRequest(
+    "/workspaces/provision/cancel",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    () => cancelProvisionWorkspaceLocal(input.userId, input.workspace),
+  );
+}
+
+export async function reportPortalWorkspaceStatus(input: {
+  userId: string;
+  workspace: string;
+  status: Partial<WorkspaceStatus>;
+}): Promise<{ reported: true }> {
+  return executorRequest(
+    "/workspaces/status/report",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    () => reportPortalWorkspaceStatusLocal(input),
   );
 }
 

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -30,6 +31,13 @@ import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
+  const digest = createHash("sha256")
+    .update(fs.readFileSync(dockerfilePath))
+    .digest("hex");
+  return `ttl.sh/polaris-workspace-prebuilt-${digest.slice(0, 32)}:24h`;
+}
 
 function loadWorkspaceFromRefForTest(projectRef: string) {
   const resolved = resolveWorkspaceConfigPath(projectRef);
@@ -710,6 +718,15 @@ test("ensureCanonicalWorkspaceImage builds the canonical docker image locally wh
   const project = uniqueProjectName("image-provision");
   const imageRef = workspaceImageRef(DEMO_USER_PROFILE_ID, project);
   const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  const dockerfilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    DEMO_USER_PROFILE_ID,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
+  const sharedImageRef = sharedWorkspaceImageRefForTest(dockerfilePath);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
   fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
 
@@ -729,13 +746,22 @@ fi
 if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
   exit 1
 fi
+if [[ "$1 $2 $3" == "image inspect ${sharedImageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" && "$2" == "${sharedImageRef}" ]]; then
+  exit 1
+fi
 exit 0
 `,
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
         assert.deepEqual(readCommandLog(), [
-          `build -f ${path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")} -t ${imageRef} .`,
+          `image inspect ${sharedImageRef}`,
+          `pull ${sharedImageRef}`,
+          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${dockerfilePath} -t ${sharedImageRef} .`,
+          `tag ${sharedImageRef} ${imageRef}`,
         ]);
       },
     );
@@ -796,6 +822,7 @@ test("ensureCanonicalWorkspaceImage rebuilds when the user Dockerfile is refresh
     "docker",
     "workspace-prebuilt.Dockerfile",
   );
+  const sharedImageRef = sharedWorkspaceImageRefForTest(templateDockerfile);
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
   fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
@@ -821,13 +848,22 @@ fi
 if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
   exit 0
 fi
+if [[ "$1 $2 $3" == "image inspect ${sharedImageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" && "$2" == "${sharedImageRef}" ]]; then
+  exit 1
+fi
 exit 0
 `,
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
         assert.deepEqual(readCommandLog(), [
-          `build -f ${userDockerfile} -t ${imageRef} .`,
+          `image inspect ${sharedImageRef}`,
+          `pull ${sharedImageRef}`,
+          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${userDockerfile} -t ${sharedImageRef} .`,
+          `tag ${sharedImageRef} ${imageRef}`,
         ]);
         assert.equal(
           fs.readFileSync(userDockerfile, "utf8"),
@@ -855,6 +891,7 @@ test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without m
     "docker",
     "workspace-prebuilt.Dockerfile",
   );
+  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
 
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
   fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
@@ -879,13 +916,104 @@ fi
 if [[ "$1" == "pull" && "$2" == "${imageRef}" ]]; then
   exit 0
 fi
+if [[ "$1 $2 $3" == "image inspect ${sharedImageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" && "$2" == "${sharedImageRef}" ]]; then
+  exit 1
+fi
 exit 0
 `,
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
         assert.deepEqual(readCommandLog(), [
-          `build -f ${userDockerfile} -t ${imageRef} .`,
+          `image inspect ${sharedImageRef}`,
+          `pull ${sharedImageRef}`,
+          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${userDockerfile} -t ${sharedImageRef} .`,
+          `tag ${sharedImageRef} ${imageRef}`,
+        ]);
+      },
+    );
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test("ensureCanonicalWorkspaceImage reuses a shared prebuilt image from another workspace with the same Dockerfile", async () => {
+  const userProfileId = uniqueProjectName("shared-image-user");
+  const sourceProject = uniqueProjectName("shared-image-source");
+  const targetProject = uniqueProjectName("shared-image-target");
+  const sourceImageRef = workspaceImageRef(userProfileId, sourceProject);
+  const targetImageRef = workspaceImageRef(userProfileId, targetProject);
+  const sourceDockerPath = workspaceConfigPath(sourceProject, "docker", userProfileId);
+  const targetDockerPath = workspaceConfigPath(targetProject, "docker", userProfileId);
+  const userDockerfile = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    userProfileId,
+    "docker",
+    "workspace-prebuilt.Dockerfile",
+  );
+  fs.mkdirSync(path.dirname(sourceDockerPath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetDockerPath), { recursive: true });
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), sourceDockerPath);
+  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), targetDockerPath);
+  fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile"),
+    userDockerfile,
+  );
+  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
+  const dockerfileDigest = createHash("sha256")
+    .update(fs.readFileSync(userDockerfile))
+    .digest("hex");
+  fs.writeFileSync(
+    path.join(path.dirname(sourceDockerPath), "state", "image-build.json"),
+    `${JSON.stringify({
+      imageRef: sourceImageRef,
+      sharedImageRef,
+      dockerfileDigest,
+      dockerfilePath: path.relative(REPO_ROOT, userDockerfile),
+      updatedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const targetDoc = (yaml.load(fs.readFileSync(targetDockerPath, "utf8")) ?? {}) as Record<string, any>;
+  targetDoc.project = targetProject;
+  targetDoc.user_profile = userProfileId;
+  targetDoc.runtime.base_image = targetImageRef;
+  fs.writeFileSync(targetDockerPath, yaml.dump(targetDoc, { lineWidth: 120, noRefs: true }), "utf8");
+
+  try {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$1 $2 $3" == "image inspect ${targetImageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" && "$2" == "${targetImageRef}" ]]; then
+  exit 1
+fi
+if [[ "$1 $2 $3" == "image inspect ${sharedImageRef}" ]]; then
+  exit 0
+fi
+if [[ "$1" == "pull" && "$2" == "${sharedImageRef}" ]]; then
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        ensureCanonicalWorkspaceImage(`${targetProject}@docker`);
+        assert.deepEqual(readCommandLog(), [
+          `image inspect ${sharedImageRef}`,
+          `tag ${sharedImageRef} ${targetImageRef}`,
         ]);
       },
     );

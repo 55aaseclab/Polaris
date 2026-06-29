@@ -84,15 +84,22 @@ export interface PortalWorkspaceAssetPreview {
 }
 
 export interface PortalProvisionProgress {
+  jobId: string;
   workspace: string;
   userId: string;
+  status: "queued" | "running" | "completed" | "error" | "cancelled" | "cancelling";
   phase: string;
   step: number;
   totalSteps: number;
   percent: number;
   message: string;
+  startedAt: string;
   updatedAt: string;
   done: boolean;
+  cancelRequested?: boolean;
+  cancellable?: boolean;
+  errorCode?: string;
+  retryable?: boolean;
   error?: string;
 }
 
