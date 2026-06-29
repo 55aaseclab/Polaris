@@ -41,10 +41,14 @@ ensure_base_packages() {
   case "$manager" in
     apt)
       sudo apt-get update || log "apt-get update had errors, continuing"
-      sudo apt-get install -y curl git tar gzip ca-certificates rsync
+      sudo apt-get install -y \
+        curl git tar gzip ca-certificates rsync \
+        nfs-kernel-server rpcbind
       ;;
     dnf)
-      sudo dnf install -y curl git tar gzip ca-certificates rsync
+      sudo dnf install -y \
+        curl git tar gzip ca-certificates rsync \
+        nfs-utils rpcbind
       ;;
     brew)
       brew install curl git rsync
