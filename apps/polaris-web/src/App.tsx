@@ -1767,8 +1767,6 @@ function PortalShellLayout(props: {
                     const active = location.pathname.includes(
                       `/workspaces/${encodeURIComponent(workspace.name)}`,
                     );
-                    const workspaceStateLabel = translateWorkspaceSummaryState(workspace, t);
-                    const workspaceStateVariant = workspaceSummaryBadgeVariant(workspace);
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
@@ -1776,14 +1774,6 @@ function PortalShellLayout(props: {
                             <FolderKanban />
                             <span className="flex min-w-0 flex-col">
                               <span className="truncate">{workspace.name}</span>
-                              <span className="mt-1 flex">
-                                <Badge
-                                  variant={workspaceStateVariant}
-                                  className="max-w-full truncate px-1.5 py-0 text-[10px] font-medium"
-                                >
-                                  {workspaceStateLabel}
-                                </Badge>
-                              </span>
                             </span>
                           </Link>
                         </SidebarMenuButton>
