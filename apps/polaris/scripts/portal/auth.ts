@@ -122,6 +122,16 @@ export async function authenticatePortalRequest(
   if (!clerkUserId) {
     throw new Error("invalid-auth-token");
   }
+  const directMapping = findUserMapEntry({ clerkUserId });
+  if (directMapping) {
+    return {
+      clerkUserId,
+      clerkUsername: null,
+      polarisUserId: directMapping.polarisUserId,
+      role: directMapping.role,
+      plan: directMapping.plan,
+    };
+  }
   const clerkUser = await fetchClerkUser(clerkUserId);
   const clerkUsername = resolveClerkUsername(clerkUser);
   const mapping = findUserMapEntry({

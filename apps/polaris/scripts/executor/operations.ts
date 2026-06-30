@@ -1286,3 +1286,32 @@ export async function unbindPortalWorkspaceAgent(input: {
     restarted,
   };
 }
+
+export async function healthCheckPortalWorkspaceExecutor(
+  baseUrl: string,
+  headers: HeadersInit,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/health`, {
+      method: "GET",
+      headers,
+    });
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Polaris executor health check failed for ${baseUrl}/health: ${cause}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Polaris executor health check failed (${response.status} ${response.statusText}) for ${baseUrl}/health: ${await response.text()}`,
+    );
+  }
+  const payload = await response.json() as { ok?: boolean };
+  if (payload.ok !== true) {
+    throw new Error(
+      `Polaris executor health check returned an unexpected payload for ${baseUrl}/health`,
+    );
+  }
+}

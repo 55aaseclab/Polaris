@@ -68,7 +68,7 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   if (removedUserRoot) {
     deleteAllManagedCredentialsForUser(userProfileId);
   }
-  const removedMappings = deleteUserMapEntriesForPolarisUserId(userProfileId);
+  const removedMappings = await deleteUserMapEntriesForPolarisUserId(userProfileId);
 
   fs.rmSync(profilePath, { force: true });
   fs.rmSync(userRoot, { recursive: true, force: true });

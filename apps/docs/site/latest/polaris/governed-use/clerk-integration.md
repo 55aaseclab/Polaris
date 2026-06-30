@@ -17,6 +17,8 @@ Current mapping storage:
 - `config/users/user-map.json`
 
 Current writes to that mapping file are serialized and committed atomically.
+The write path now avoids blocking the whole portal process while waiting for
+the mapping lock.
 
 Typical mapping keys include:
 
@@ -36,7 +38,9 @@ Current login flow:
 2. the frontend reads Clerk identity
 3. the backend verifies the Clerk session before serving Polaris API routes
 4. the backend resolves Clerk-to-Polaris mapping
-4. the frontend enters `/users/<userId>/workspaces`
+5. the backend should prefer local Clerk-user-id mapping when available, and
+   avoid unnecessary Clerk profile fetches on already-mapped requests
+6. the frontend enters `/users/<userId>/workspaces`
 
 Current registration flow:
 

@@ -7,17 +7,7 @@ import type {
 } from "../core/portal.js";
 import type { WorkspaceStatus } from "../core/workspace.js";
 import {
-  bindPortalWorkspaceAgent as bindPortalWorkspaceAgentLocal,
-  cancelProvisionWorkspace as cancelProvisionWorkspaceLocal,
-  deletePortalWorkspace as deletePortalWorkspaceLocal,
-  queueProvisionWorkspace as queueProvisionWorkspaceLocal,
-  refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusLocal,
-  reportPortalWorkspaceStatus as reportPortalWorkspaceStatusLocal,
-  startPortalWorkspace as startPortalWorkspaceLocal,
-  stopPortalWorkspace as stopPortalWorkspaceLocal,
-  switchPortalWorkspace as switchPortalWorkspaceLocal,
-  switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialLocal,
-  unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentLocal,
+  healthCheckPortalWorkspaceExecutor,
 } from "./operations.js";
 
 function executorBaseUrl(): string | null {
@@ -36,17 +26,42 @@ function executorHeaders(): HeadersInit {
   return headers;
 }
 
+function describeExecutorEndpointFailure(
+  baseUrl: string,
+  pathname: string,
+  response: Response,
+  responseBody: string,
+): string {
+  if (response.status === 404) {
+    return [
+      `Polaris executor endpoint '${baseUrl}${pathname}' returned 404.`,
+      "The configured POLARIS_EXECUTOR_BASE_URL does not appear to be a Polaris executor.",
+      `Response body: ${responseBody}`,
+    ].join(" ");
+  }
+  if (response.status === 403) {
+    return [
+      `Polaris executor endpoint '${baseUrl}${pathname}' rejected the request with 403.`,
+      "Check POLARIS_EXECUTOR_SHARED_SECRET on both the portal and executor processes.",
+      `Response body: ${responseBody}`,
+    ].join(" ");
+  }
+  return `Polaris executor request failed (${response.status} ${response.statusText}) for ${pathname}: ${responseBody}`;
+}
+
 async function executorRequest<T>(
   pathname: string,
   init: RequestInit,
-  fallback: () => T | Promise<T>,
 ): Promise<T> {
   const baseUrl = executorBaseUrl();
   if (!baseUrl) {
-    return await fallback();
+    throw new Error(
+      `POLARIS_EXECUTOR_BASE_URL is required for executor request ${pathname}`,
+    );
   }
   let response: Response;
   try {
+    await healthCheckPortalWorkspaceExecutor(baseUrl, executorHeaders());
     response = await fetch(`${baseUrl}${pathname}`, {
       ...init,
       headers: {
@@ -65,8 +80,9 @@ async function executorRequest<T>(
     );
   }
   if (!response.ok) {
+    const responseBody = await response.text();
     throw new Error(
-      `Polaris executor request failed (${response.status} ${response.statusText}) for ${pathname}: ${await response.text()}`,
+      describeExecutorEndpointFailure(baseUrl, pathname, response, responseBody),
     );
   }
   return (await response.json()) as T;
@@ -84,11 +100,6 @@ export async function queueProvisionWorkspace(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () =>
-      queueProvisionWorkspaceLocal(input.userId, input.workspace, {
-        defaultDockerOnly: input.defaultDockerOnly,
-        startAfterCreate: input.startAfterCreate,
-      }),
   );
 }
 
@@ -101,10 +112,6 @@ export async function refreshPortalWorkspaceStatus(input: {
     {
       method: "POST",
       body: JSON.stringify(input),
-    },
-    async () => {
-      await refreshPortalWorkspaceStatusLocal(input.userId, input.workspace);
-      return { refreshed: true };
     },
   );
 }
@@ -119,7 +126,6 @@ export async function cancelProvisionWorkspace(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => cancelProvisionWorkspaceLocal(input.userId, input.workspace),
   );
 }
 
@@ -134,7 +140,6 @@ export async function reportPortalWorkspaceStatus(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => reportPortalWorkspaceStatusLocal(input),
   );
 }
 
@@ -149,8 +154,6 @@ export async function switchPortalWorkspace(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () =>
-      switchPortalWorkspaceLocal(input.userId, input.workspace, input.target),
   );
 }
 
@@ -169,7 +172,6 @@ export async function deletePortalWorkspace(input: {
       method: "DELETE",
       body: JSON.stringify(input),
     },
-    () => deletePortalWorkspaceLocal(input.userId, input.workspace),
   );
 }
 
@@ -183,7 +185,6 @@ export async function stopPortalWorkspace(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => stopPortalWorkspaceLocal(input.userId, input.workspace),
   );
 }
 
@@ -197,7 +198,6 @@ export async function startPortalWorkspace(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => startPortalWorkspaceLocal(input.userId, input.workspace),
   );
 }
 
@@ -217,7 +217,6 @@ export async function switchPortalWorkspaceLiveCredential(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => switchPortalWorkspaceLiveCredentialLocal(input),
   );
 }
 
@@ -238,7 +237,6 @@ export async function bindPortalWorkspaceAgent(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => bindPortalWorkspaceAgentLocal(input),
   );
 }
 
@@ -258,6 +256,5 @@ export async function unbindPortalWorkspaceAgent(input: {
       method: "POST",
       body: JSON.stringify(input),
     },
-    () => unbindPortalWorkspaceAgentLocal(input),
   );
 }

@@ -58,6 +58,10 @@ Polaris code and Polaris data are separate concerns.
 Code lives in this repo.
 User and workspace data live under `POLARIS_DATA_ROOT`.
 
+Polaris should not start without that variable.
+Missing runtime data-root configuration is treated as a startup error, not as
+a signal to fall back into the checked-out repo tree.
+
 Important roots:
 
 - `POLARIS_DATA_ROOT/users`
