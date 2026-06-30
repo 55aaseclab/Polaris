@@ -33,8 +33,17 @@ export interface PortalAdminUserSummary extends PortalProfileSummary {
   plan: "free" | "pro";
   clerkUsernames: string[];
   clerkUserIds: string[];
+  roleLockedByBootstrap: boolean;
   credentialCount: number;
   archivedWorkspaceCount: number;
+  mappingPresent: boolean;
+  profilePresent: boolean;
+  userRootPresent: boolean;
+  integrityStatus:
+    | "ok"
+    | "mapping-only"
+    | "profile-only"
+    | "profile-root-missing";
 }
 
 export interface PortalDriverTarget {

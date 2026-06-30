@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import {
   activateManagedCredential,
   createManagedHarnessCredential,
@@ -32,10 +34,12 @@ import type { WorkspaceStatus } from "../core/workspace.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
+  listUserAccessSummaries,
   readUserAccessSummary,
   updateUserAccessEntry,
   type PortalUserAccessSummary,
 } from "./user-map.js";
+import { polarisUsersRoot } from "../utils/paths.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   cancelProvisionWorkspace as cancelProvisionWorkspaceExecutor,
@@ -49,7 +53,11 @@ import {
   switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
+
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
+
+export class PortalUserDeletionBlockedError extends Error {}
 
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
@@ -89,27 +97,69 @@ export function listPortalArchivedWorkspaces(
 
 export function listPortalAdminUsers(): Array<
   PortalProfileSummary &
-  PortalUserAccessSummary &
+  Partial<PortalUserAccessSummary> &
   {
     credentialCount: number;
     archivedWorkspaceCount: number;
+    mappingPresent: boolean;
+    profilePresent: boolean;
+    userRootPresent: boolean;
+    integrityStatus:
+      | "ok"
+      | "mapping-only"
+      | "profile-only"
+      | "profile-root-missing";
   }
 > {
-  return listPortalProfiles().map((profile) => {
-    const access = readUserAccessSummary(profile.id) ?? {
-      polarisUserId: profile.id,
-      role: "user" as const,
-      plan: "free" as const,
-      clerkUsernames: [],
-      clerkUserIds: [],
-    };
-    return {
-      ...profile,
-      ...access,
-      credentialCount: listPortalCredentials(profile.id).length,
-      archivedWorkspaceCount: listArchivedWorkspaces(profile.id).length,
-    };
-  });
+  const profiles = listPortalProfiles();
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const accessSummaries = listUserAccessSummaries();
+  const accessById = new Map(accessSummaries.map((access) => [access.polarisUserId, access]));
+  const userIds = new Set<string>([
+    ...profiles.map((profile) => profile.id),
+    ...accessSummaries.map((access) => access.polarisUserId),
+  ]);
+  return Array.from(userIds)
+    .sort((left, right) => left.localeCompare(right))
+    .map((userId) => {
+      const profile = profilesById.get(userId) ?? null;
+      const access = accessById.get(userId) ?? null;
+      const userRootPresent = fs.existsSync(path.join(USER_ROOT, userId));
+      const integrityStatus =
+        access && profile && userRootPresent
+          ? "ok"
+          : access && profile
+            ? "profile-root-missing"
+          : access && !profile
+            ? "mapping-only"
+          : !access && profile
+            ? "profile-only"
+            : "mapping-only";
+      const baseProfile: PortalProfileSummary = profile ?? {
+        id: userId,
+        name: "",
+        email: "",
+        workspaces: [],
+      };
+      const baseAccess = access ?? {
+        polarisUserId: userId,
+        role: "user" as const,
+        plan: "free" as const,
+        clerkUsernames: [],
+        clerkUserIds: [],
+        roleLockedByBootstrap: false,
+      };
+      return {
+        ...baseProfile,
+        ...baseAccess,
+        credentialCount: listPortalCredentials(userId).length,
+        archivedWorkspaceCount: listArchivedWorkspaces(userId).length,
+        mappingPresent: Boolean(access),
+        profilePresent: Boolean(profile),
+        userRootPresent,
+        integrityStatus,
+      };
+    });
 }
 
 export function updatePortalUserAccess(
@@ -394,6 +444,11 @@ export async function deletePortalUser(userId: string): Promise<{
   deleted: true;
   userId: string;
 }> {
+  if (readUserAccessSummary(userId)) {
+    throw new PortalUserDeletionBlockedError(
+      `Polaris user '${userId}' still has Clerk mappings. Remove or migrate the mapping before deletion.`,
+    );
+  }
   await deleteUserCommand([userId]);
   return {
     deleted: true,
