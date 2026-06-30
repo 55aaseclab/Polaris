@@ -14,6 +14,7 @@ import {
   upsertUserMapUserId,
 } from "../scripts/portal/user-map.js";
 import { withUserMutationLock } from "../scripts/utils/user-mutation-lock.js";
+import { withWorkspaceLifecycleLock } from "../scripts/utils/workspace-lifecycle-lock.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
@@ -32,6 +33,7 @@ import {
   reportPortalWorkspaceStatus,
   startPortalWorkspace,
   stopPortalWorkspace,
+  switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
 } from "../scripts/portal/service.js";
@@ -48,6 +50,7 @@ import {
   clearWorkspaceProvisionProgress,
 } from "../scripts/core/portal.js";
 import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
+import { readWorkspaceDriverSelection } from "../scripts/output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
@@ -622,6 +625,39 @@ test("user mutation lock serializes same-user writers", async () => {
     events.push("second:start");
     events.push("second:end");
   });
+  await Promise.all([first, second]);
+  assert.deepEqual(events, [
+    "first:start",
+    "first:end",
+    "second:start",
+    "second:end",
+  ]);
+});
+
+test("workspace lifecycle lock serializes same-workspace writers", async () => {
+  const userId = uniqueName("portal-workspace-lock-user");
+  const workspace = uniqueName("portal-workspace-lock");
+  const events: string[] = [];
+  const first = withWorkspaceLifecycleLock(
+    import.meta.url,
+    userId,
+    workspace,
+    async () => {
+      events.push("first:start");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      events.push("first:end");
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const second = withWorkspaceLifecycleLock(
+    import.meta.url,
+    userId,
+    workspace,
+    async () => {
+      events.push("second:start");
+      events.push("second:end");
+    },
+  );
   await Promise.all([first, second]);
   assert.deepEqual(events, [
     "first:start",
@@ -1665,6 +1701,108 @@ exit 0
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
     clearWorkspaceProvisionProgress(userId, workspace);
+  }
+});
+
+test("portal service switches the same workspace name for a different user", async () => {
+  const firstUserId = uniqueName("portal-switch-scope-a");
+  const secondUserId = uniqueName("portal-switch-scope-b");
+  const workspace = uniqueName("portal-switch-shared");
+
+  try {
+    await createUserCommand([
+      firstUserId,
+      "--name",
+      "Switch Scope A",
+      "--email",
+      `${firstUserId}@polaris.local`,
+    ]);
+    await createUserCommand([
+      secondUserId,
+      "--name",
+      "Switch Scope B",
+      "--email",
+      `${secondUserId}@polaris.local`,
+    ]);
+    await createCommand([workspace, "--user", firstUserId]);
+    await createCommand([workspace, "--user", secondUserId]);
+    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, firstUserId);
+    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, secondUserId);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then exit 0; fi
+if [[ "$1" == "exec" ]]; then exit 0; fi
+if [[ "$1" == "cp" ]]; then exit 0; fi
+if [[ "$1" == "volume" ]]; then exit 0; fi
+if [[ "$1" == "run" ]]; then exit 0; fi
+if [[ "$1" == "inspect" ]]; then printf '[{"State":{"Running":false}}]'; exit 0; fi
+exit 0
+`,
+        kubectl: `
+if [[ "$1" == "apply" ]]; then exit 0; fi
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "deployment" ]]; then printf '{"metadata":{"name":"%s"}}' "$2"; exit 0; fi
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" ]]; then printf '%s-pod' "$2"; exit 0; fi
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "svc" ]]; then printf '%s' "$2"; exit 0; fi
+if [[ "$1" == "-n" && "$3" == "exec" ]]; then
+  command="\${@:8}"
+  if [[ "$command" == *"paseo daemon status --json"* ]]; then
+    printf '{"serverId":"srv_test","localDaemon":"running","connectedDaemon":"reachable"}'
+    exit 0
+  fi
+  if [[ "$command" == *"paseo daemon pair --json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl90ZXN0In0"}'
+    exit 0
+  fi
+  if [[ "$command" == *"/server-id"* ]]; then
+    printf 'srv_test'
+    exit 0
+  fi
+  exit 0
+fi
+if [[ "$1" == "-n" && "$3" == "logs" ]]; then exit 0; fi
+if [[ "$1" == "-n" && "$3" == "delete" ]]; then exit 0; fi
+if [[ "$1" == "-n" && "$3" == "rollout" ]]; then exit 0; fi
+exit 0
+`,
+      },
+      async () => {
+        const result = await switchPortalWorkspace(
+          secondUserId,
+          workspace,
+          { backend: "pod", profile: "gvisor" },
+        );
+        assert.equal(result.project, workspace);
+        assert.equal(result.selectedBackend, "pod");
+        assert.equal(result.selectedProfile, "gvisor");
+        assert.deepEqual(
+          readWorkspaceDriverSelection(workspace, secondUserId),
+          { backend: "pod", profile: "gvisor" },
+        );
+        assert.deepEqual(
+          readWorkspaceDriverSelection(workspace, firstUserId),
+          { backend: "docker" },
+        );
+      },
+    );
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", firstUserId), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", secondUserId), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(
+      path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`),
+      { force: true },
+    );
+    fs.rmSync(
+      path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`),
+      { force: true },
+    );
   }
 });
 

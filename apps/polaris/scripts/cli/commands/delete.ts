@@ -11,7 +11,7 @@ import { projectOwners } from "../../config/project-ownership.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../../utils/paths.js";
-import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
+import { withWorkspaceMutationLock } from "../../utils/workspace-lifecycle-lock.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -179,7 +179,7 @@ export async function archiveWorkspaceOwnedByUser(userId: string, workspace: str
   archivedAt: string;
   workspace: string;
 }> {
-  return withUserMutationLock(import.meta.url, userId, async () => {
+  return withWorkspaceMutationLock(import.meta.url, userId, workspace, async () => {
     const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
     const archivedAt = new Date();
     const archiveId = archiveIdFor(workspace, archivedAt);
@@ -228,7 +228,7 @@ export async function deleteWorkspaceOwnedByUser(userId: string, workspace: stri
   deleted: true;
   workspace: string;
 }> {
-  return withUserMutationLock(import.meta.url, userId, async () => {
+  return withWorkspaceMutationLock(import.meta.url, userId, workspace, async () => {
     const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(portalStateRoot, { recursive: true, force: true });

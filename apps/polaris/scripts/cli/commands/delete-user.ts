@@ -72,22 +72,6 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const { userProfileId } = parseDeleteUserArgs(argv);
   const profilePath = profilePathFor(userProfileId);
   const userRoot = userRootFor(userProfileId);
-  const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
-  const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
-  if (activeWorkspaces.length > 0 || archivedWorkspaces.length > 0) {
-    throw new Error(
-      [
-        `User '${userProfileId}' cannot be deleted while workspace data still exists.`,
-        activeWorkspaces.length > 0
-          ? `Active workspaces: ${activeWorkspaces.join(", ")}`
-          : null,
-        archivedWorkspaces.length > 0
-          ? `Archived workspaces: ${archivedWorkspaces.join(", ")}`
-          : null,
-        "Archive or delete active workspaces first, then clear archived workspaces explicitly.",
-      ].filter(Boolean).join(" "),
-    );
-  }
   const removedProfile = fs.existsSync(profilePath);
   const removedUserRoot = fs.existsSync(userRoot);
   const rollbackRoot = fs.mkdtempSync(
@@ -99,6 +83,22 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
 
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
+    const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
+    if (activeWorkspaces.length > 0 || archivedWorkspaces.length > 0) {
+      throw new Error(
+        [
+          `User '${userProfileId}' cannot be deleted while workspace data still exists.`,
+          activeWorkspaces.length > 0
+            ? `Active workspaces: ${activeWorkspaces.join(", ")}`
+            : null,
+          archivedWorkspaces.length > 0
+            ? `Archived workspaces: ${archivedWorkspaces.join(", ")}`
+            : null,
+          "Archive or delete active workspaces first, then clear archived workspaces explicitly.",
+        ].filter(Boolean).join(" "),
+      );
+    }
     let removedMappings: {
       clerkUsernames: string[];
       clerkUserIds: string[];
