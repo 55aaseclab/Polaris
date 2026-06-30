@@ -31,6 +31,11 @@ interface UserMapFile {
 
 export class UserMapConflictError extends Error {}
 
+export interface UserMapEntrySnapshot {
+  clerkUsernameEntries: Record<string, PortalUserMapEntry>;
+  clerkUserIdEntries: Record<string, PortalUserMapEntry>;
+}
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -99,7 +104,7 @@ async function tryClearStaleUserMapLock(): Promise<boolean> {
   return true;
 }
 
-async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
   const timeoutMs = userMapLockTimeoutMs();
   for (;;) {
@@ -168,6 +173,36 @@ export function readUserMap(): UserMapFile {
     return { users: {} };
   }
   return JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as UserMapFile;
+}
+
+function snapshotEntriesForPolarisUserId(
+  current: UserMapFile,
+  polarisUserId: string,
+): UserMapEntrySnapshot {
+  return {
+    clerkUsernameEntries: Object.fromEntries(
+      Object.entries(current.users)
+        .filter(([, entry]) => entry.polarisUserId === polarisUserId),
+    ),
+    clerkUserIdEntries: Object.fromEntries(
+      Object.entries(current.userIds ?? {})
+        .filter(([, entry]) => entry.polarisUserId === polarisUserId),
+    ),
+  };
+}
+
+function deleteEntriesForPolarisUserId(
+  current: UserMapFile,
+  polarisUserId: string,
+): UserMapEntrySnapshot {
+  const snapshot = snapshotEntriesForPolarisUserId(current, polarisUserId);
+  for (const clerkUsername of Object.keys(snapshot.clerkUsernameEntries)) {
+    delete current.users[clerkUsername];
+  }
+  for (const clerkUserId of Object.keys(snapshot.clerkUserIdEntries)) {
+    delete current.userIds?.[clerkUserId];
+  }
+  return snapshot;
 }
 
 export function writeUserMap(value: UserMapFile): void {
@@ -286,6 +321,53 @@ export async function upsertUserMapEntry(
   });
 }
 
+export async function upsertUserMapEntries(input: {
+  clerkUsername?: string;
+  clerkUserId?: string;
+  entry: PortalUserMapEntry;
+}): Promise<void> {
+  const normalizedUsername = normalizeClerkUsername(input.clerkUsername ?? "");
+  const normalizedUserId = normalizeClerkUserId(input.clerkUserId ?? "");
+  if (!normalizedUsername && !normalizedUserId) {
+    throw new Error("Clerk identity is required");
+  }
+  await withUserMapLock(async () => {
+    const current = readUserMap();
+    current.userIds ??= {};
+    if (normalizedUsername) {
+      const existing = current.users[normalizedUsername];
+      if (existing && existing.polarisUserId !== input.entry.polarisUserId) {
+        throw new UserMapConflictError(
+          `Clerk username '${normalizedUsername}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+        );
+      }
+    }
+    if (normalizedUserId) {
+      const existing = current.userIds[normalizedUserId];
+      if (existing && existing.polarisUserId !== input.entry.polarisUserId) {
+        throw new UserMapConflictError(
+          `Clerk user id '${normalizedUserId}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+        );
+      }
+    }
+    if (normalizedUsername) {
+      current.users[normalizedUsername] = {
+        polarisUserId: input.entry.polarisUserId,
+        role: input.entry.role,
+        plan: input.entry.plan,
+      };
+    }
+    if (normalizedUserId) {
+      current.userIds[normalizedUserId] = {
+        polarisUserId: input.entry.polarisUserId,
+        role: input.entry.role,
+        plan: input.entry.plan,
+      };
+    }
+    writeUserMap(current);
+  });
+}
+
 export async function upsertUserMapUserId(
   clerkUserId: string,
   entry: PortalUserMapEntry,
@@ -337,29 +419,64 @@ export async function deleteUserMapEntriesForPolarisUserId(
 }> {
   return withUserMapLock(async () => {
     const current = readUserMap();
-    const removedUsernames = Object.entries(current.users)
-      .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-      .map(([clerkUsername]) => clerkUsername);
-    const removedUserIds = Object.entries(current.userIds ?? {})
-      .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-      .map(([clerkUserId]) => clerkUserId);
+    const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
+    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
+    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
     if (removedUsernames.length === 0 && removedUserIds.length === 0) {
       return {
         clerkUsernames: [],
         clerkUserIds: [],
       };
     }
-    for (const clerkUsername of removedUsernames) {
-      delete current.users[clerkUsername];
-    }
-    for (const clerkUserId of removedUserIds) {
-      delete current.userIds?.[clerkUserId];
-    }
     writeUserMap(current);
     return {
       clerkUsernames: removedUsernames,
       clerkUserIds: removedUserIds,
     };
+  });
+}
+
+export async function deleteUserMapEntriesWithSnapshot(
+  polarisUserId: string,
+): Promise<UserMapEntrySnapshot> {
+  return withUserMapLock(async () => {
+    const current = readUserMap();
+    const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
+    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
+    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
+    if (removedUsernames.length > 0 || removedUserIds.length > 0) {
+      writeUserMap(current);
+    }
+    return removed;
+  });
+}
+
+export async function withDeletedUserMapEntries<T>(
+  polarisUserId: string,
+  fn: (snapshot: UserMapEntrySnapshot) => Promise<T>,
+): Promise<T> {
+  return withUserMapLock(async () => {
+    const current = readUserMap();
+    const snapshot = deleteEntriesForPolarisUserId(current, polarisUserId);
+    const removedUsernames = Object.keys(snapshot.clerkUsernameEntries);
+    const removedUserIds = Object.keys(snapshot.clerkUserIdEntries);
+    if (removedUsernames.length > 0 || removedUserIds.length > 0) {
+      writeUserMap(current);
+    }
+    try {
+      return await fn(snapshot);
+    } catch (error) {
+      const rollback = readUserMap();
+      rollback.userIds ??= {};
+      for (const [clerkUsername, entry] of Object.entries(snapshot.clerkUsernameEntries)) {
+        rollback.users[clerkUsername] = entry;
+      }
+      for (const [clerkUserId, entry] of Object.entries(snapshot.clerkUserIdEntries)) {
+        rollback.userIds[clerkUserId] = entry;
+      }
+      writeUserMap(rollback);
+      throw error;
+    }
   });
 }
 

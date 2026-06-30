@@ -383,7 +383,7 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   const clerkUsername = `${userProfileId}-clerk`;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const userMapPath = path.join(REPO_ROOT, "config", "user-map.json");
+  const userMapPath = path.join(REPO_ROOT, "config", "users", "user-map.json");
   const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
 
   try {
@@ -415,6 +415,62 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(userMapPath, { force: true });
+    } else {
+      fs.writeFileSync(userMapPath, originalUserMap, "utf8");
+    }
+  }
+});
+
+test("runCli user create rolls back scaffolded state when the Clerk mapping conflicts", async () => {
+  const firstUserId = uniqueProjectName("cli-user-conflict-a");
+  const secondUserId = uniqueProjectName("cli-user-conflict-b");
+  const clerkUsername = `${uniqueProjectName("cli-clerk-conflict")}-clerk`;
+  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
+  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+  const userMapPath = path.join(REPO_ROOT, "config", "users", "user-map.json");
+  const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      firstUserId,
+      "--name",
+      "CLI Conflict A",
+      "--email",
+      `${firstUserId}@polaris.local`,
+      "--clerk",
+      clerkUsername,
+    ]);
+
+    await assert.rejects(
+      async () => {
+        await runCli([
+          "user",
+          "create",
+          secondUserId,
+          "--name",
+          "CLI Conflict B",
+          "--email",
+          `${secondUserId}@polaris.local`,
+          "--clerk",
+          clerkUsername,
+        ]);
+      },
+      /already mapped/i,
+    );
+
+    assert.equal(fs.existsSync(secondProfilePath), false);
+    assert.equal(fs.existsSync(secondUserRoot), false);
+  } finally {
+    fs.rmSync(firstProfilePath, { force: true });
+    fs.rmSync(secondProfilePath, { force: true });
+    fs.rmSync(firstUserRoot, { recursive: true, force: true });
+    fs.rmSync(secondUserRoot, { recursive: true, force: true });
     if (originalUserMap === null) {
       fs.rmSync(userMapPath, { force: true });
     } else {

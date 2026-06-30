@@ -6,7 +6,6 @@ import {
   parsePortalDriverTarget,
   readPortalProfile,
   type PortalProfileSummary,
-  updatePortalProfile,
 } from "../core/portal.js";
 import {
   requireMappedPortalSession,
@@ -41,6 +40,7 @@ import {
   switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
   createPortalUser,
+  updatePortalUserProfile,
 } from "./service.js";
 
 type ParsedBody = Record<string, string>;
@@ -343,7 +343,7 @@ async function handleProfileUpdate(
   userId: string,
 ): Promise<void> {
   const body = await readBody(req);
-  const updated = updatePortalProfile(userId, {
+  const updated = await updatePortalUserProfile(userId, {
     ...(body.name !== undefined ? { name: body.name.trim() } : {}),
     ...(body.email !== undefined ? { email: body.email.trim() } : {}),
     ...(body.githubAccount !== undefined ? { githubAccount: body.githubAccount.trim() } : {}),

@@ -1,12 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
 import { scaffoldUserProfileById } from "../../config/scaffold.js";
 import { ensureRequiredProfileCredentials } from "../../config/credentials.js";
 import { logInfo } from "../../utils/log.js";
 import {
   type PolarisPlan,
   type PolarisRole,
-  upsertUserMapEntry,
-  upsertUserMapUserId,
+  upsertUserMapEntries,
 } from "../../portal/user-map.js";
+import { polarisUsersRoot } from "../../utils/paths.js";
+import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
 function bootstrapAdminTokens(): Set<string> {
   return new Set(
@@ -77,42 +80,51 @@ export async function createUserCommand(argv: string[]): Promise<void> {
     clerkUserId,
     role,
   });
-  const created = scaffoldUserProfileById({
-    id: userProfileId,
-    ...(name ? { name } : {}),
-    ...(email ? { email } : {}),
-  });
-  const defaultCredentials = ensureRequiredProfileCredentials(created.id);
-  if (clerkUsername) {
-    await upsertUserMapEntry(clerkUsername, {
-      polarisUserId: created.id,
-      role: resolvedRole,
-      plan: plan ?? "free",
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const usersRoot = polarisUsersRoot(import.meta.url);
+    const created = scaffoldUserProfileById({
+      id: userProfileId,
+      ...(name ? { name } : {}),
+      ...(email ? { email } : {}),
     });
-  }
-  if (clerkUserId) {
-    await upsertUserMapUserId(clerkUserId, {
-      polarisUserId: created.id,
-      role: resolvedRole,
-      plan: plan ?? "free",
-    });
-  }
-  logInfo("cli", "user-profile-scaffolded", {
-    userProfileId: created.id,
-    created: created.created,
-  });
-  process.stdout.write(`${JSON.stringify({
-    userProfile: {
-      id: created.id,
+    let defaultCredentials: Array<{ id: string }> = [];
+    try {
+      defaultCredentials = ensureRequiredProfileCredentials(created.id);
+      if (clerkUsername || clerkUserId) {
+        await upsertUserMapEntries({
+          ...(clerkUsername ? { clerkUsername } : {}),
+          ...(clerkUserId ? { clerkUserId } : {}),
+          entry: {
+            polarisUserId: created.id,
+            role: resolvedRole,
+            plan: plan ?? "free",
+          },
+        });
+      }
+    } catch (error) {
+      if (created.created) {
+        fs.rmSync(path.join(usersRoot, "profiles", `${created.id}.yaml`), { force: true });
+        fs.rmSync(path.join(usersRoot, created.id), { recursive: true, force: true });
+      }
+      throw error;
+    }
+    logInfo("cli", "user-profile-scaffolded", {
+      userProfileId: created.id,
       created: created.created,
-      profilePath: created.profilePath,
-      secretsRoot: created.secretsRoot,
-      name: created.name,
-      email: created.email,
-    },
-    credentials: {
-      registryRoot: `config/users/${created.id}/credentials`,
-      defaults: defaultCredentials.map((credential) => credential.id),
-    },
-  }, null, 2)}\n`);
+    });
+    process.stdout.write(`${JSON.stringify({
+      userProfile: {
+        id: created.id,
+        created: created.created,
+        profilePath: created.profilePath,
+        secretsRoot: created.secretsRoot,
+        name: created.name,
+        email: created.email,
+      },
+      credentials: {
+        registryRoot: `config/users/${created.id}/credentials`,
+        defaults: defaultCredentials.map((credential) => credential.id),
+      },
+    }, null, 2)}\n`);
+  });
 }

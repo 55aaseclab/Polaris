@@ -9,6 +9,7 @@ import {
 } from "../../config/credentials.js";
 import { isManagedHarness, type ManagedHarness } from "../../config/credential-catalog.js";
 import { logInfo } from "../../utils/log.js";
+import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
 function parseFlag(argv: string[], flag: string): string | undefined {
   const index = argv.findIndex((value) => value === flag);
@@ -111,34 +112,36 @@ export async function addUserCredentialCommand(argv: string[]): Promise<void> {
     model,
     activate,
   } = parseAddCredentialArgs(argv);
-  ensureUserProfileExists(userProfileId);
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    ensureUserProfileExists(userProfileId);
 
-  const defaultBaseId = harness === "ssh"
-    ? "github-ssh"
-    : harness === "codex"
-      ? sanitizeCredentialId(`codex-${providerName ?? presetId ?? "rightcode"}`) || "codex"
-      : sanitizeCredentialId(`${harness}-${providerName ?? presetId ?? harness}`) || harness;
-  const credential = createManagedHarnessCredential({
-    userProfileId,
-    harness,
-    credentialId: credentialId
-      ? sanitizeCredentialId(credentialId)
-      : ensureUniqueCredentialId(userProfileId, defaultBaseId),
-    ...(label ? { label } : {}),
-    ...(providerName ? { providerName } : {}),
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(apiKey !== undefined ? { apiKey } : {}),
-    ...(presetId ? { presetId } : {}),
-    ...(model ? { model } : {}),
-    activate,
-  });
+    const defaultBaseId = harness === "ssh"
+      ? "github-ssh"
+      : harness === "codex"
+        ? sanitizeCredentialId(`codex-${providerName ?? presetId ?? "rightcode"}`) || "codex"
+        : sanitizeCredentialId(`${harness}-${providerName ?? presetId ?? harness}`) || harness;
+    const credential = createManagedHarnessCredential({
+      userProfileId,
+      harness,
+      credentialId: credentialId
+        ? sanitizeCredentialId(credentialId)
+        : ensureUniqueCredentialId(userProfileId, defaultBaseId),
+      ...(label ? { label } : {}),
+      ...(providerName ? { providerName } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(presetId ? { presetId } : {}),
+      ...(model ? { model } : {}),
+      activate,
+    });
 
-  logInfo("cli", "user-credential-created", {
-    userProfileId,
-    credentialId: credential.id,
-    harness,
+    logInfo("cli", "user-credential-created", {
+      userProfileId,
+      credentialId: credential.id,
+      harness,
+    });
+    process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
   });
-  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
 }
 
 export async function createUserCredentialCommand(argv: string[]): Promise<void> {
@@ -147,13 +150,15 @@ export async function createUserCredentialCommand(argv: string[]): Promise<void>
 
 export async function deleteUserCredentialCommand(argv: string[]): Promise<void> {
   const { userProfileId, credentialId } = parseDeleteCredentialArgs(argv);
-  const credential = deleteManagedCredential({ userProfileId, credentialId });
-  logInfo("cli", "user-credential-deleted", {
-    userProfileId,
-    credentialId,
-    removed: credential.removed,
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const credential = deleteManagedCredential({ userProfileId, credentialId });
+    logInfo("cli", "user-credential-deleted", {
+      userProfileId,
+      credentialId,
+      removed: credential.removed,
+    });
+    process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
   });
-  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
 }
 
 export async function listUserCredentialCommand(argv: string[]): Promise<void> {
@@ -165,10 +170,12 @@ export async function listUserCredentialCommand(argv: string[]): Promise<void> {
 
 export async function activateUserCredentialCommand(argv: string[]): Promise<void> {
   const { userProfileId, credentialId } = parseActivateCredentialArgs(argv);
-  const credential = activateManagedCredential({ userProfileId, credentialId });
-  logInfo("cli", "user-credential-activated", {
-    userProfileId,
-    credentialId,
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const credential = activateManagedCredential({ userProfileId, credentialId });
+    logInfo("cli", "user-credential-activated", {
+      userProfileId,
+      credentialId,
+    });
+    process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
   });
-  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
 }
