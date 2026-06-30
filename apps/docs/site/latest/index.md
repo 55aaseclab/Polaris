@@ -27,6 +27,8 @@ If you are new to the repo, read in this order:
 
 - [VERSION.md](./VERSION.md): current docs release metadata
 - [CHANGELOG.md](./CHANGELOG.md): what changed from `0.2.4`
+- [business-model/](./business-model/): market analysis, customer segmentation,
+  and Polaris positioning
 - [polaris/what-your-team-gets.md](./polaris/what-your-team-gets.md): customer-facing
   explanation of Polaris through onboarding, governed use, shared
   infrastructure, and member exit

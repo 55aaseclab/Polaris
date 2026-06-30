@@ -1,10 +1,79 @@
+import fs from "node:fs";
+import path from "node:path";
 import { defineConfig } from "vitepress";
 import { docsDiffs } from "./theme/generated/docs-data.ts";
+
+type SidebarItem = { text: string; link?: string; items?: SidebarItem[] };
 
 function titleize(value: string) {
   return value
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function readMarkdownHeading(filePath: string) {
+  const content = fs.readFileSync(filePath, "utf8");
+  const match = content.match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim() ?? null;
+}
+
+function fileLabel(filePath: string) {
+  const basename = path.basename(filePath, path.extname(filePath));
+  if (basename === "index") {
+    return "Overview";
+  }
+  return readMarkdownHeading(filePath) ?? titleize(basename);
+}
+
+function sortSidebarEntries(left: fs.Dirent, right: fs.Dirent) {
+  if (left.isDirectory() !== right.isDirectory()) {
+    return left.isDirectory() ? -1 : 1;
+  }
+  if (left.name === "index.md" || right.name === "index.md") {
+    return left.name === "index.md" ? -1 : 1;
+  }
+  return left.name.localeCompare(right.name);
+}
+
+function buildDirectoryItems(version: string, rootDir: string, currentDir = rootDir): SidebarItem[] {
+  const entries = fs
+    .readdirSync(currentDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() || entry.name.endsWith(".md"))
+    .sort(sortSidebarEntries);
+
+  const items: SidebarItem[] = [];
+
+  for (const entry of entries) {
+    const absolutePath = path.join(currentDir, entry.name);
+    const relativePath = path.relative(rootDir, absolutePath).replace(/\\/g, "/");
+
+    if (entry.isDirectory()) {
+      items.push({
+        text: titleize(entry.name),
+        items: buildDirectoryItems(version, rootDir, absolutePath),
+      });
+      continue;
+    }
+
+    const markdownPath = relativePath.replace(/\.md$/i, "");
+    const linkPath = markdownPath === "index" ? "" : `/${markdownPath}`;
+    items.push({
+      text: fileLabel(absolutePath),
+      link: `/${version}${linkPath}`,
+    });
+  }
+
+  return items;
+}
+
+function buildVersionSidebar(version: string) {
+  const versionRoot = path.resolve(__dirname, "..", version);
+  return [
+    {
+      text: version === "latest" ? "Latest" : version,
+      items: buildDirectoryItems(version, versionRoot),
+    },
+  ];
 }
 
 function diffFileLabel(filePath: string) {
@@ -84,109 +153,8 @@ export default defineConfig({
       { text: "Diff", link: "/diff/" },
     ],
     sidebar: {
-      "/latest/": [
-        {
-          text: "Latest",
-          items: [
-            { text: "Overview", link: "/latest/" },
-            { text: "Version", link: "/latest/VERSION" },
-            { text: "Changelog", link: "/latest/CHANGELOG" },
-          ],
-        },
-        {
-          text: "Polaris",
-          items: [
-            { text: "What Your Team Gets", link: "/latest/polaris/what-your-team-gets" },
-            { text: "Overview", link: "/latest/polaris/" },
-            { text: "Agent Swarm Maturity", link: "/latest/polaris/agent-swarm-maturity" },
-          ],
-        },
-        {
-          text: "Onboarding",
-          items: [
-            { text: "Overview", link: "/latest/polaris/onboarding/" },
-            { text: "Shared Docker Foundation", link: "/latest/polaris/onboarding/shared-docker-foundation" },
-            { text: "Workspace Command Surface", link: "/latest/polaris/onboarding/workspace-command-surface" },
-            { text: "Others", link: "/latest/polaris/onboarding/others" },
-          ],
-        },
-        {
-          text: "Governed Use",
-          items: [
-            { text: "Overview", link: "/latest/polaris/governed-use/" },
-            { text: "Ownership Model", link: "/latest/polaris/governed-use/ownership-model" },
-            { text: "Credential Switch", link: "/latest/polaris/governed-use/credential-switch" },
-            { text: "Clerk Integration", link: "/latest/polaris/governed-use/clerk-integration" },
-          ],
-        },
-        {
-          text: "Shared Infrastructure",
-          items: [
-            { text: "Overview", link: "/latest/polaris/shared-infrastructure/" },
-            { text: "Isolation Boundary", link: "/latest/polaris/shared-infrastructure/isolation-boundary" },
-            { text: "Runtime State And Driver Switching", link: "/latest/polaris/shared-infrastructure/runtime-state-and-driver-switching" },
-            { text: "Others", link: "/latest/polaris/shared-infrastructure/others" },
-          ],
-        },
-        {
-          text: "Member Exit And Handover",
-          items: [
-            { text: "Overview", link: "/latest/polaris/member-exit-and-handover/" },
-            { text: "Personal And Team Context", link: "/latest/polaris/member-exit-and-handover/personal-and-team-context" },
-            { text: "Others", link: "/latest/polaris/member-exit-and-handover/others" },
-          ],
-        },
-        {
-          text: "Operations",
-          items: [
-            { text: "Remote Deploy", link: "/latest/operations/remote-deploy" },
-            { text: "K3s Multi-Machine Setup", link: "/latest/operations/setup-k3s-across-multiple-machines" },
-          ],
-        },
-        {
-          text: "Tooling",
-          items: [
-            { text: "Workspace README", link: "/latest/tooling/workspace/" },
-            { text: "Host README", link: "/latest/tooling/host/" },
-            { text: "Alacritty", link: "/latest/tooling/host/alacritty" },
-          ],
-        },
-      ],
-      "/0.2.4/": [
-        {
-          text: "0.2.4",
-          items: [
-            { text: "Overview", link: "/0.2.4/" },
-          ],
-        },
-        {
-          text: "Polaris",
-          items: [
-            { text: "Overview", link: "/0.2.4/polaris/" },
-            { text: "What Your Team Gets", link: "/0.2.4/polaris/what-your-team-gets" },
-            { text: "Onboarding", link: "/0.2.4/polaris/onboarding/" },
-            { text: "Governed Use", link: "/0.2.4/polaris/governed-use/" },
-            { text: "Shared Infrastructure", link: "/0.2.4/polaris/shared-infrastructure/" },
-            { text: "Member Exit And Handover", link: "/0.2.4/polaris/member-exit-and-handover/" },
-            { text: "Agent Swarm Maturity", link: "/0.2.4/polaris/agent-swarm-maturity" },
-          ],
-        },
-        {
-          text: "Operations",
-          items: [
-            { text: "Remote Deploy", link: "/0.2.4/operations/remote-deploy" },
-            { text: "K3s Multi-Machine Setup", link: "/0.2.4/operations/setup-k3s-across-multiple-machines" },
-          ],
-        },
-        {
-          text: "Tooling",
-          items: [
-            { text: "Workspace README", link: "/0.2.4/tooling/workspace/" },
-            { text: "Host README", link: "/0.2.4/tooling/host/" },
-            { text: "Alacritty", link: "/0.2.4/tooling/host/alacritty" },
-          ],
-        },
-      ],
+      "/latest/": buildVersionSidebar("latest"),
+      "/0.2.4/": buildVersionSidebar("0.2.4"),
       "/diff/": [
         {
           text: "Diff",
