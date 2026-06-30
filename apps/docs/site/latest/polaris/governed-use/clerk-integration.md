@@ -17,8 +17,16 @@ Current mapping storage:
 - `config/users/user-map.json`
 
 Current writes to that mapping file are serialized and committed atomically.
-The write path now avoids blocking the whole portal process while waiting for
-the mapping lock.
+The write path now uses a lock heartbeat and stale-lock recovery instead of
+failing early while a stranded lock directory is still inside its TTL window.
+
+Current lock behavior:
+
+- mapping writes take an exclusive lock
+- the lock emits a heartbeat while the writer is still alive
+- stale recovery checks the heartbeat first, then the lock directory itself
+- if a previous writer crashed, Polaris waits through the TTL window and then
+  clears the stranded lock automatically
 
 Typical mapping keys include:
 
@@ -80,8 +88,8 @@ That admin flow can:
 - review portal users
 - inspect Clerk mappings
 - surface mapping-only, profile-only, and missing-user-root integrity states
-- block direct user deletion while Clerk mappings still exist
-- keep the delete button visible, but disabled, while a Clerk mapping still exists
+- delete a Polaris user and its stored Clerk mapping together
+- roll back the Polaris-side delete if filesystem cleanup fails partway through
 - show admin role as configured state, not as an in-portal workflow
 
 For first bootstrap, Polaris can also elevate named users through:

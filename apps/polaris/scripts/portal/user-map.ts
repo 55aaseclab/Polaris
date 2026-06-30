@@ -4,6 +4,8 @@ import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_MAP_PATH = path.join(polarisUsersRoot(import.meta.url), "user-map.json");
 const USER_MAP_LOCK_PATH = `${USER_MAP_PATH}.lock`;
+const DEFAULT_USER_MAP_LOCK_TTL_MS = 30_000;
+const DEFAULT_USER_MAP_LOCK_TIMEOUT_BUFFER_MS = 5_000;
 
 export type PolarisRole = "admin" | "user";
 export type PolarisPlan = "free" | "pro";
@@ -33,26 +35,94 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function userMapLockTtlMs(): number {
+  const configured = Number(process.env.POLARIS_USER_MAP_LOCK_TTL_MS ?? "");
+  if (Number.isFinite(configured) && configured >= 100) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_USER_MAP_LOCK_TTL_MS;
+}
+
+function userMapLockTimeoutMs(): number {
+  return userMapLockTtlMs() + DEFAULT_USER_MAP_LOCK_TIMEOUT_BUFFER_MS;
+}
+
+function userMapLockHeartbeatPath(): string {
+  return path.join(USER_MAP_LOCK_PATH, "heartbeat");
+}
+
+async function touchUserMapLockHeartbeat(): Promise<void> {
+  const heartbeatPath = userMapLockHeartbeatPath();
+  const now = new Date();
+  try {
+    await fs.promises.utimes(heartbeatPath, now, now);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      await fs.promises.writeFile(heartbeatPath, "", "utf8");
+      return;
+    }
+    throw error;
+  }
+}
+
+function startUserMapLockHeartbeat(): NodeJS.Timeout {
+  const intervalMs = Math.max(100, Math.min(1_000, Math.floor(userMapLockTtlMs() / 4)));
+  const timer = setInterval(() => {
+    void touchUserMapLockHeartbeat().catch(() => {
+      // Ignore cleanup races while the lock is being released.
+    });
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
+
+async function tryClearStaleUserMapLock(): Promise<boolean> {
+  const heartbeatPath = userMapLockHeartbeatPath();
+  try {
+    const stats = await fs.promises.stat(heartbeatPath)
+      .catch(async (error) => {
+        if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+          return fs.promises.stat(USER_MAP_LOCK_PATH);
+        }
+        throw error;
+      });
+    if (Date.now() - stats.mtimeMs < userMapLockTtlMs()) {
+      return false;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+  await fs.promises.rm(USER_MAP_LOCK_PATH, { recursive: true, force: true });
+  return true;
+}
+
 async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
-  const timeoutMs = 5000;
+  const timeoutMs = userMapLockTimeoutMs();
   for (;;) {
     try {
       await fs.promises.mkdir(USER_MAP_LOCK_PATH);
+      await touchUserMapLockHeartbeat();
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
         throw error;
       }
+      await tryClearStaleUserMapLock();
       if (Date.now() - startedAt >= timeoutMs) {
         throw new Error("Timed out waiting for the Polaris user-map lock");
       }
       await sleepMs(25);
     }
   }
+  const heartbeat = startUserMapLockHeartbeat();
   try {
     return await fn();
   } finally {
+    clearInterval(heartbeat);
     await fs.promises.rm(USER_MAP_LOCK_PATH, { recursive: true, force: true });
   }
 }
@@ -259,7 +329,12 @@ export async function deleteUserMapEntry(clerkUsername: string): Promise<boolean
   });
 }
 
-export async function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): Promise<string[]> {
+export async function deleteUserMapEntriesForPolarisUserId(
+  polarisUserId: string,
+): Promise<{
+  clerkUsernames: string[];
+  clerkUserIds: string[];
+}> {
   return withUserMapLock(async () => {
     const current = readUserMap();
     const removedUsernames = Object.entries(current.users)
@@ -269,7 +344,10 @@ export async function deleteUserMapEntriesForPolarisUserId(polarisUserId: string
       .filter(([, entry]) => entry.polarisUserId === polarisUserId)
       .map(([clerkUserId]) => clerkUserId);
     if (removedUsernames.length === 0 && removedUserIds.length === 0) {
-      return [];
+      return {
+        clerkUsernames: [],
+        clerkUserIds: [],
+      };
     }
     for (const clerkUsername of removedUsernames) {
       delete current.users[clerkUsername];
@@ -278,7 +356,10 @@ export async function deleteUserMapEntriesForPolarisUserId(polarisUserId: string
       delete current.userIds?.[clerkUserId];
     }
     writeUserMap(current);
-    return removedUsernames;
+    return {
+      clerkUsernames: removedUsernames,
+      clerkUserIds: removedUserIds,
+    };
   });
 }
 

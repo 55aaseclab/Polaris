@@ -56,8 +56,6 @@ import {
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
-export class PortalUserDeletionBlockedError extends Error {}
-
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
 }
@@ -432,11 +430,6 @@ export async function deletePortalUser(userId: string): Promise<{
   deleted: true;
   userId: string;
 }> {
-  if (readUserAccessSummary(userId)) {
-    throw new PortalUserDeletionBlockedError(
-      `Polaris user '${userId}' still has Clerk mappings. Remove or migrate the mapping before deletion.`,
-    );
-  }
   await deleteUserCommand([userId]);
   return {
     deleted: true,

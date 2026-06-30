@@ -43,8 +43,8 @@ export async function createCommand(argv: string[]): Promise<void> {
       ? outputPath
       : ensureWorkspaceConfig(requestedRef, userProfileId)?.configPath ?? outputPath;
     const displayConfigPath = path.isAbsolute(backendConfigPath)
-      ? path.relative(REPO_ROOT, backendConfigPath).replace(/\\/g, "/")
-      : backendConfigPath;
+      ? backendConfigPath.replace(/\\/g, "/")
+      : path.resolve(REPO_ROOT, backendConfigPath).replace(/\\/g, "/");
     logInfo("cli", "workspace-scaffolded", {
       project,
       backend: scaffoldBackend,

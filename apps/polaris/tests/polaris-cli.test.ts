@@ -356,7 +356,15 @@ test("runCli create allows the same workspace name under a different user", asyn
     assert.equal(parsed.userProfile.id, secondUserId);
     assert.equal(
       parsed.configPath,
-      `config/users/${secondUserId}/workspaces/${workspace}/docker.agent.yaml`,
+      path.join(
+        REPO_ROOT,
+        "config",
+        "users",
+        secondUserId,
+        "workspaces",
+        workspace,
+        "docker.agent.yaml",
+      ),
     );
     assert.equal(
       fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
