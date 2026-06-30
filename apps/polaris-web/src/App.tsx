@@ -279,7 +279,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_status_mapping_only: "Mapping only",
     admin_status_profile_only: "Profile only",
     admin_status_profile_root_missing: "Profile root missing",
-    admin_delete_requires_mapping_cleanup: "Clear Clerk mapping before deletion.",
     admin_delete_user: "Delete user",
     admin_delete_user_confirm_title: "Delete user?",
     admin_delete_user_confirm_description: "This removes the user profile, credentials, mappings, and all workspace state under that user.",
@@ -531,7 +530,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_status_mapping_only: "只有映射",
     admin_status_profile_only: "只有资料",
     admin_status_profile_root_missing: "资料存在但目录缺失",
-    admin_delete_requires_mapping_cleanup: "请先清理 Clerk 映射，再删除该用户。",
     admin_delete_user: "删除用户",
     admin_delete_user_confirm_title: "删除这个用户？",
     admin_delete_user_confirm_description: "这会删除该用户的资料、凭证、映射，以及该用户下的全部工作空间状态。",
@@ -2689,46 +2687,35 @@ function AdminPage() {
                           >
                             {t("admin_open_scope")}
                           </Button>
-                          {entry.mappingPresent ? (
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              disabled
-                              title={t("admin_delete_requires_mapping_cleanup")}
-                            >
-                              {t("admin_delete_user")}
-                            </Button>
-                          ) : (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={isSaving}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={isSaving}
+                              >
+                                {isSaving ? t("admin_deleting") : t("admin_delete_user")}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  {t("admin_delete_user_confirm_title")}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {t("admin_delete_user_confirm_description")}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => void handleDeleteUser(entry.id)}
                                 >
                                   {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>
-                                    {t("admin_delete_user_confirm_title")}
-                                  </AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    {t("admin_delete_user_confirm_description")}
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => void handleDeleteUser(entry.id)}
-                                  >
-                                    {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          )}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </td>
                     </tr>

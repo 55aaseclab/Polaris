@@ -15,6 +15,15 @@ export interface AuthenticatedPortalSession {
   plan: PolarisPlan | null;
 }
 
+export class PortalAuthError extends Error {
+  readonly statusCode: number;
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = "PortalAuthError";
+    this.statusCode = statusCode;
+  }
+}
+
 interface ClerkLikeUser {
   id?: string | null;
   username?: string | null;
@@ -45,7 +54,10 @@ function forbidden(res: ServerResponse, message = "Forbidden"): void {
 function clerkSecretKey(): string {
   const value = String(process.env.CLERK_SECRET_KEY ?? "").trim();
   if (!value) {
-    throw new Error("CLERK_SECRET_KEY is required for Polaris portal auth");
+    throw new PortalAuthError(
+      "CLERK_SECRET_KEY is required for Polaris portal auth",
+      500,
+    );
   }
   return value;
 }
@@ -118,14 +130,22 @@ export async function authenticatePortalRequest(
 ): Promise<AuthenticatedPortalSession> {
   const token = readBearerToken(req);
   if (!token) {
-    throw new Error("missing-auth-token");
+    throw new PortalAuthError("Authentication is required", 401);
   }
-  const verified = await verifyToken(token, {
-    secretKey: clerkSecretKey(),
-  });
+  let verified: Awaited<ReturnType<typeof verifyToken>>;
+  try {
+    verified = await verifyToken(token, {
+      secretKey: clerkSecretKey(),
+    });
+  } catch (error) {
+    if (error instanceof PortalAuthError) {
+      throw error;
+    }
+    throw new PortalAuthError("Invalid Clerk session", 401);
+  }
   const clerkUserId = String(verified.sub ?? "").trim();
   if (!clerkUserId) {
-    throw new Error("invalid-auth-token");
+    throw new PortalAuthError("Invalid Clerk session", 401);
   }
   const directMapping = findUserMapEntry({ clerkUserId });
   if (directMapping) {
@@ -138,7 +158,18 @@ export async function authenticatePortalRequest(
       plan: directMapping.plan,
     };
   }
-  const clerkUser = await fetchClerkUser(clerkUserId);
+  let clerkUser: ClerkLikeUser;
+  try {
+    clerkUser = await fetchClerkUser(clerkUserId);
+  } catch (error) {
+    if (error instanceof PortalAuthError) {
+      throw error;
+    }
+    throw new PortalAuthError(
+      "Clerk user lookup failed while authenticating the portal session",
+      502,
+    );
+  }
   const clerkUsername = resolveClerkUsername(clerkUser);
   const mapping = findUserMapEntry({
     clerkUserId,
@@ -160,12 +191,15 @@ export async function requirePortalSession(
   try {
     return await authenticatePortalRequest(req);
   } catch (error) {
-    unauthorized(
-      res,
-      error instanceof Error && error.message === "missing-auth-token"
-        ? "Authentication is required"
-        : "Invalid Clerk session",
-    );
+    if (error instanceof PortalAuthError) {
+      if (error.statusCode === 401) {
+        unauthorized(res, error.message);
+        return null;
+      }
+      sendJson(res, error.statusCode, { error: error.message });
+      return null;
+    }
+    sendJson(res, 500, { error: "Portal authentication failed" });
     return null;
   }
 }

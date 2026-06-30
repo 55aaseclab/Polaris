@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { deleteAllManagedCredentialsForUser } from "../../config/credentials.js";
 import { deleteUserMapEntriesForPolarisUserId } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
@@ -31,6 +30,31 @@ function listChildDirectories(root: string): string[] {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
+}
+
+function copyIfExists(source: string, destination: string): boolean {
+  if (!fs.existsSync(source)) {
+    return false;
+  }
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    force: true,
+  });
+  return true;
+}
+
+function restorePath(backupPath: string, targetPath: string): void {
+  if (!fs.existsSync(backupPath)) {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    return;
+  }
+  fs.rmSync(targetPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.cpSync(backupPath, targetPath, {
+    recursive: true,
+    force: true,
+  });
 }
 
 function parseDeleteUserArgs(argv: string[]): { userProfileId: string } {
@@ -65,13 +89,48 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   }
   const removedProfile = fs.existsSync(profilePath);
   const removedUserRoot = fs.existsSync(userRoot);
-  if (removedUserRoot) {
-    deleteAllManagedCredentialsForUser(userProfileId);
-  }
-  const removedMappings = await deleteUserMapEntriesForPolarisUserId(userProfileId);
+  const userMapPath = path.join(USER_ROOT, "user-map.json");
+  const rollbackRoot = fs.mkdtempSync(
+    path.join(path.dirname(userRoot), `.delete-user-${userProfileId}-`),
+  );
+  const profileBackupPath = path.join(rollbackRoot, "profile.yaml");
+  const userRootBackupPath = path.join(rollbackRoot, "user-root");
+  const userMapBackupPath = path.join(rollbackRoot, "user-map.json");
+  const hadProfile = copyIfExists(profilePath, profileBackupPath);
+  const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
+  const hadUserMap = copyIfExists(userMapPath, userMapBackupPath);
 
-  fs.rmSync(profilePath, { force: true });
-  fs.rmSync(userRoot, { recursive: true, force: true });
+  let removedMappings: {
+    clerkUsernames: string[];
+    clerkUserIds: string[];
+  } = {
+    clerkUsernames: [],
+    clerkUserIds: [],
+  };
+  try {
+    removedMappings = await deleteUserMapEntriesForPolarisUserId(userProfileId);
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (hadProfile) {
+      restorePath(profileBackupPath, profilePath);
+    } else {
+      fs.rmSync(profilePath, { force: true });
+    }
+    if (hadUserRoot) {
+      restorePath(userRootBackupPath, userRoot);
+    } else {
+      fs.rmSync(userRoot, { recursive: true, force: true });
+    }
+    if (hadUserMap) {
+      restorePath(userMapBackupPath, userMapPath);
+    } else {
+      fs.rmSync(userMapPath, { force: true });
+    }
+    throw error;
+  } finally {
+    fs.rmSync(rollbackRoot, { recursive: true, force: true });
+  }
 
   logInfo("cli", "user-profile-deleted", {
     userProfileId,
@@ -84,12 +143,17 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
       {
         userProfile: {
           id: userProfileId,
-          removed: removedProfile || removedUserRoot || removedMappings.length > 0,
+          removed:
+            removedProfile
+            || removedUserRoot
+            || removedMappings.clerkUsernames.length > 0
+            || removedMappings.clerkUserIds.length > 0,
           profilePath: `config/users/profiles/${userProfileId}.yaml`,
           secretsRoot: `config/users/${userProfileId}`,
         },
         mappings: {
-          removedClerkUsernames: removedMappings,
+          removedClerkUsernames: removedMappings.clerkUsernames,
+          removedClerkUserIds: removedMappings.clerkUserIds,
         },
       },
       null,

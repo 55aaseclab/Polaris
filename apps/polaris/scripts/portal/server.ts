@@ -25,7 +25,6 @@ import {
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
   deletePortalUser,
-  PortalUserDeletionBlockedError,
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalWorkspace,
@@ -419,15 +418,7 @@ async function handleUserDelete(
   res: ServerResponse,
   userId: string,
 ): Promise<void> {
-  try {
-    sendJson(res, 200, await deletePortalUser(userId));
-  } catch (error) {
-    if (error instanceof PortalUserDeletionBlockedError) {
-      sendJson(res, 409, { error: error.message });
-      return;
-    }
-    throw error;
-  }
+  sendJson(res, 200, await deletePortalUser(userId));
 }
 
 function isApiPath(segments: string[]): boolean {

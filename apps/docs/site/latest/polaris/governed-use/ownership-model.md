@@ -119,6 +119,7 @@ If user deletion is executed, Polaris currently removes:
 - the user profile
 - user credentials and generated material
 - the Clerk-to-Polaris mapping
+- the user-scoped workspace root when no workspace data remains
 
 User deletion is now rejected when workspace data still exists under that user.
 
@@ -127,8 +128,12 @@ That includes:
 - active workspaces
 - archived workspaces
 
-The admin portal also keeps the delete action visible.
-It disables that action when a live Clerk mapping still exists for the user.
+The admin portal keeps the delete action visible for admins.
+It now deletes the Polaris user record and the stored Clerk mapping together in
+one operation.
+
+If filesystem deletion fails partway through, Polaris restores the user profile,
+user root, and mapping state instead of leaving a half-deleted user behind.
 
 It does not delete the Clerk platform user object itself.
 
