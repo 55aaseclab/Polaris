@@ -11,7 +11,7 @@ TARGET_COLOR="${2:-}"
 REMOTE_APP_DIR="${3:-/srv/polaris/app}"
 REMOTE_ENV_FILE="${4:-/etc/polaris/polaris.env}"
 REMOTE_ACTIVE_COLOR_FILE="${5:-/etc/polaris/active-color}"
-REMOTE_UPSTREAM_FILE="${6:-/etc/nginx/conf.d/polaris-gateway-upstream.conf}"
+REMOTE_UPSTREAM_FILE="${6:-/etc/nginx/snippets/polaris-gateway-upstream.conf}"
 
 if [ -n "${TARGET_COLOR}" ]; then
   TARGET_COLOR_ARG="'${TARGET_COLOR}'"

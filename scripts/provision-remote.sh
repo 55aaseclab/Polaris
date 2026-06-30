@@ -14,7 +14,7 @@ REMOTE_ENV_DIR="$(dirname "${REMOTE_ENV_FILE}")"
 REMOTE_DATA_ROOT="${4:-/srv/polaris/data}"
 REMOTE_NETFS_EXPORT_ROOT="${5:-/exports/polaris/workspaces}"
 REMOTE_ACTIVE_COLOR_FILE="${REMOTE_ENV_DIR}/active-color"
-REMOTE_UPSTREAM_FILE="/etc/nginx/conf.d/polaris-gateway-upstream.conf"
+REMOTE_UPSTREAM_FILE="/etc/nginx/snippets/polaris-gateway-upstream.conf"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -55,7 +55,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/workspaces' '${REMOTE_NETFS_EXPORT_ROOT}'
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/workspaces' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
 \${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/workspaces' '${REMOTE_NETFS_EXPORT_ROOT}'
 \${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/workspaces ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
   printf '%s\n' '${REMOTE_DATA_ROOT}/workspaces ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
@@ -97,12 +97,37 @@ if [ ! -f '${REMOTE_UPSTREAM_FILE}' ]; then
   cp '${REMOTE_APP_DIR}/deploy/nginx/polaris-upstream.blue.conf' '${REMOTE_UPSTREAM_FILE}'
 fi
 
+nginx_dump=\"\$(nginx -T 2>/dev/null || true)\"
+missing=0
+
+if ! printf '%s\n' \"\$nginx_dump\" | grep -Fq 'include ${REMOTE_UPSTREAM_FILE};'; then
+  echo 'remote provisioning: nginx check failed: missing include ${REMOTE_UPSTREAM_FILE};' >&2
+  missing=1
+fi
+
+if ! printf '%s\n' \"\$nginx_dump\" | grep -Fq 'proxy_pass \$polaris_upstream;'; then
+  echo 'remote provisioning: nginx check failed: missing proxy_pass \$polaris_upstream;' >&2
+  missing=1
+fi
+
+if [ \"\$missing\" -eq 1 ]; then
+  printf '%s\n' \
+    'next steps:' \
+    '1. Fill real values into ${REMOTE_ENV_FILE}' \
+    '2. Production data root: ${REMOTE_DATA_ROOT}' \
+    '3. In the Polaris host nginx server block, add: include ${REMOTE_UPSTREAM_FILE};' \
+    '4. In the same location / block, use: proxy_pass \$polaris_upstream;' \
+    '5. Run nginx -t && nginx -s reload on the remote host' \
+    '6. Re-run: bash ./scripts/provision-remote.sh ${REMOTE_HOST}' >&2
+  exit 2
+fi
+
 printf '%s\n' \
   'remote provisioning: ok' \
+  'nginx gateway check: ok' \
   'next steps:' \
   '1. Fill real values into ${REMOTE_ENV_FILE}' \
   '2. Production data root: ${REMOTE_DATA_ROOT}' \
-  '3. Update the host-level gateway for the Polaris vhost so it includes ${REMOTE_UPSTREAM_FILE} and uses proxy_pass $polaris_upstream;' \
-  '4. Run nginx -t && nginx -s reload on the remote host' \
-  '5. From your local machine, run: bash ./scripts/cd-remote.sh ${REMOTE_HOST}' \
+  '3. Run nginx -t && nginx -s reload on the remote host if you changed the upstream file' \
+  '4. From your local machine, run: bash ./scripts/cd-remote.sh ${REMOTE_HOST}' \
 "
