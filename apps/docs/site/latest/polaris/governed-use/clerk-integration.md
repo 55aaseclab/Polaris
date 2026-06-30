@@ -34,6 +34,13 @@ That lock also covers workspace create, archive, and delete operations.
 Same-user control-plane mutations are serialized while a delete or
 rollback-sensitive write is in progress.
 
+Polaris now also applies a workspace lifecycle lock keyed by
+`userId + workspace`.
+That lock covers provision, switch, start, stop, archive, delete, live
+credential switching, and workspace agent binding changes.
+Workspace-scoped lifecycle writes now serialize even when they come from the
+executor background path.
+
 Typical mapping keys include:
 
 - `clerkUserId`

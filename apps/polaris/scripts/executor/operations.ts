@@ -26,7 +26,7 @@ import {
   writeWorkspaceProvisionProgress,
 } from "../core/portal.js";
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
-import { createCommand } from "../cli/commands/create.js";
+import { createWorkspaceForUser } from "../cli/commands/create.js";
 import { performWorkspaceSwitch, type SwitchResult } from "../cli/commands/switch.js";
 import { archiveWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import { loadExecutableWorkspaceForCommand } from "../cli/commands/shared.js";
@@ -41,6 +41,10 @@ import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
 import { writeWorkspaceLiveCredentialSelection, writeWorkspaceStatus } from "../output/state-store.js";
 import { logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import {
+  withWorkspaceLifecycleLock,
+  withWorkspaceMutationLock,
+} from "../utils/workspace-lifecycle-lock.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -640,105 +644,112 @@ async function provisionWorkspaceInternal(
     startAfterCreate?: boolean;
   },
 ): Promise<void> {
-  const defaultDockerOnly = options?.defaultDockerOnly ?? false;
-  const startAfterCreate = options?.startAfterCreate ?? false;
-  if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
-    await createCommand([workspace, "--user", userId]);
-  }
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "starting",
-    step: 0,
-    message: "starting workspace provisioning",
-    cancellable: true,
-  });
-  assertProvisionNotCancelled(userId, workspace);
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "specs",
-    step: 1,
-    message: "ensuring driver specs",
-  });
-  await maybeDelayProvisionStep(userId, workspace, "specs");
-  ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
-  assertProvisionNotCancelled(userId, workspace);
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "images",
-    step: 2,
-    message: "ensuring workspace images",
-  });
-  await maybeDelayProvisionStep(userId, workspace, "images");
-  ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
-  assertProvisionNotCancelled(userId, workspace);
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "manifests",
-    step: 3,
-    message: "rendering backend manifests",
-  });
-  await maybeDelayProvisionStep(userId, workspace, "manifests");
-  renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
-  assertProvisionNotCancelled(userId, workspace);
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "status",
-    step: 4,
-    message: "collecting workspace status",
-  });
-  await maybeDelayProvisionStep(userId, workspace, "status");
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (summary.selectedDriver === null) {
-    updateProgress(userId, workspace, {
-      status: "running",
-      phase: "selection",
-      step: 5,
-      message: "defaulting driver selection",
-    });
-    await maybeDelayProvisionStep(userId, workspace, "selection");
-  }
-  assertProvisionNotCancelled(userId, workspace);
-
-  if (startAfterCreate) {
-    updateProgress(userId, workspace, {
-      status: "running",
-      phase: "start",
-      step: 6,
-      message: "starting workspace",
-      cancellable: false,
-    });
-    await maybeDelayProvisionStep(userId, workspace, "start");
-    await startCommand(`${workspace}@docker`, userId);
-  }
-
-  updateProgress(userId, workspace, {
-    status: "running",
-    phase: "finalize",
-    step: PROVISION_TOTAL_STEPS,
-    message: "capturing final workspace status",
-    cancellable: false,
-  });
-  await maybeDelayProvisionStep(userId, workspace, "finalize");
-  const finalRef = workspaceRefFromTarget(
+  return withWorkspaceMutationLock(
+    import.meta.url,
+    userId,
     workspace,
-    summary.selectedDriver ?? { backend: "docker" },
-  );
-  await captureStdout(() => statusCommand(finalRef, userId));
+    async () => {
+      const defaultDockerOnly = options?.defaultDockerOnly ?? false;
+      const startAfterCreate = options?.startAfterCreate ?? false;
+      if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
+        await createWorkspaceForUser(workspace, userId);
+      }
 
-  updateProgress(userId, workspace, {
-    status: "completed",
-    phase: "done",
-    step: PROVISION_TOTAL_STEPS,
-    message: "workspace provisioning complete",
-    done: true,
-    percent: 100,
-    cancellable: false,
-  });
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "starting",
+        step: 0,
+        message: "starting workspace provisioning",
+        cancellable: true,
+      });
+      assertProvisionNotCancelled(userId, workspace);
+
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "specs",
+        step: 1,
+        message: "ensuring driver specs",
+      });
+      await maybeDelayProvisionStep(userId, workspace, "specs");
+      ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
+      assertProvisionNotCancelled(userId, workspace);
+
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "images",
+        step: 2,
+        message: "ensuring workspace images",
+      });
+      await maybeDelayProvisionStep(userId, workspace, "images");
+      ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
+      assertProvisionNotCancelled(userId, workspace);
+
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "manifests",
+        step: 3,
+        message: "rendering backend manifests",
+      });
+      await maybeDelayProvisionStep(userId, workspace, "manifests");
+      renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
+      assertProvisionNotCancelled(userId, workspace);
+
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "status",
+        step: 4,
+        message: "collecting workspace status",
+      });
+      await maybeDelayProvisionStep(userId, workspace, "status");
+      const summary = loadWorkspaceSummary(userId, workspace);
+      if (summary.selectedDriver === null) {
+        updateProgress(userId, workspace, {
+          status: "running",
+          phase: "selection",
+          step: 5,
+          message: "defaulting driver selection",
+        });
+        await maybeDelayProvisionStep(userId, workspace, "selection");
+      }
+      assertProvisionNotCancelled(userId, workspace);
+
+      if (startAfterCreate) {
+        updateProgress(userId, workspace, {
+          status: "running",
+          phase: "start",
+          step: 6,
+          message: "starting workspace",
+          cancellable: false,
+        });
+        await maybeDelayProvisionStep(userId, workspace, "start");
+        await startCommand(`${workspace}@docker`, userId);
+      }
+
+      updateProgress(userId, workspace, {
+        status: "running",
+        phase: "finalize",
+        step: PROVISION_TOTAL_STEPS,
+        message: "capturing final workspace status",
+        cancellable: false,
+      });
+      await maybeDelayProvisionStep(userId, workspace, "finalize");
+      const finalRef = workspaceRefFromTarget(
+        workspace,
+        summary.selectedDriver ?? { backend: "docker" },
+      );
+      await captureStdout(() => statusCommand(finalRef, userId));
+
+      updateProgress(userId, workspace, {
+        status: "completed",
+        phase: "done",
+        step: PROVISION_TOTAL_STEPS,
+        message: "workspace provisioning complete",
+        done: true,
+        percent: 100,
+        cancellable: false,
+      });
+    },
+  );
 }
 
 async function startWorkspaceWithoutWait(
@@ -978,12 +989,12 @@ export async function cancelProvisionWorkspace(
 }
 
 export async function switchPortalWorkspace(
-  _userId: string,
+  userId: string,
   workspace: string,
   target: PortalDriverTarget,
 ): Promise<SwitchResult> {
   const ref = workspaceRefFromTarget(workspace, target);
-  return performWorkspaceSwitch(ref);
+  return performWorkspaceSwitch(ref, userId);
 }
 
 export async function deletePortalWorkspace(
@@ -1002,112 +1013,116 @@ export async function stopPortalWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ stopped: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
-  }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-  logInfo("executor", "workspace-stop-started", {
-    userId,
-    workspace,
-    ref,
+  return withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
+    const summary = loadWorkspaceSummary(userId, workspace);
+    if (!summary.selectedDriver) {
+      throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    }
+    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+    logInfo("executor", "workspace-stop-started", {
+      userId,
+      workspace,
+      ref,
+    });
+    await stopCommand(ref, userId);
+    writeCachedWorkspaceStatusUpdate({
+      userId,
+      workspace,
+      reason: "workspace-stopped",
+      mutate: (current, currentSummary) => {
+        if (!current) {
+          return null;
+        }
+        return {
+          ...current,
+          backend: {
+            ...current.backend,
+            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
+            instanceState: "stopped",
+          },
+          driver: current.driver
+            ? {
+                ...current.driver,
+                runtimeState: "stopped",
+              }
+            : current.driver,
+          state: "saved",
+          health: {
+            ...current.health,
+            backendLiveness: "stopped",
+            workspaceReadiness: "not-ready",
+            daemonReadiness: "degraded",
+            reason: "workspace stopped",
+          },
+        };
+      },
+    });
+    void refreshPortalWorkspaceStatus(userId, workspace);
+    logInfo("executor", "workspace-stop-completed", {
+      userId,
+      workspace,
+      ref,
+    });
+    return { stopped: true };
   });
-  await stopCommand(ref, userId);
-  writeCachedWorkspaceStatusUpdate({
-    userId,
-    workspace,
-    reason: "workspace-stopped",
-    mutate: (current, currentSummary) => {
-      if (!current) {
-        return null;
-      }
-      return {
-        ...current,
-        backend: {
-          ...current.backend,
-          kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          instanceState: "stopped",
-        },
-        driver: current.driver
-          ? {
-              ...current.driver,
-              runtimeState: "stopped",
-            }
-          : current.driver,
-        state: "saved",
-        health: {
-          ...current.health,
-          backendLiveness: "stopped",
-          workspaceReadiness: "not-ready",
-          daemonReadiness: "degraded",
-          reason: "workspace stopped",
-        },
-      };
-    },
-  });
-  void refreshPortalWorkspaceStatus(userId, workspace);
-  logInfo("executor", "workspace-stop-completed", {
-    userId,
-    workspace,
-    ref,
-  });
-  return { stopped: true };
 }
 
 export async function startPortalWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ started: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
-  }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-  logInfo("executor", "workspace-start-started", {
-    userId,
-    workspace,
-    ref,
+  return withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
+    const summary = loadWorkspaceSummary(userId, workspace);
+    if (!summary.selectedDriver) {
+      throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    }
+    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+    logInfo("executor", "workspace-start-started", {
+      userId,
+      workspace,
+      ref,
+    });
+    await startCommand(ref, userId);
+    writeCachedWorkspaceStatusUpdate({
+      userId,
+      workspace,
+      reason: "workspace-started",
+      mutate: (current, currentSummary) => {
+        if (!current) {
+          return null;
+        }
+        return {
+          ...current,
+          backend: {
+            ...current.backend,
+            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
+            instanceState: "running",
+          },
+          driver: current.driver
+            ? {
+                ...current.driver,
+                runtimeState: "running",
+              }
+            : current.driver,
+          state: "ready",
+          health: {
+            ...current.health,
+            backendLiveness: "running",
+            workspaceReadiness: "starting",
+            daemonReadiness: current.health.daemonReadiness || "unknown",
+            reason: "workspace start requested",
+          },
+        };
+      },
+    });
+    void refreshPortalWorkspaceStatus(userId, workspace);
+    logInfo("executor", "workspace-start-completed", {
+      userId,
+      workspace,
+      ref,
+    });
+    return { started: true };
   });
-  await startCommand(ref, userId);
-  writeCachedWorkspaceStatusUpdate({
-    userId,
-    workspace,
-    reason: "workspace-started",
-    mutate: (current, currentSummary) => {
-      if (!current) {
-        return null;
-      }
-      return {
-        ...current,
-        backend: {
-          ...current.backend,
-          kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          instanceState: "running",
-        },
-        driver: current.driver
-          ? {
-              ...current.driver,
-              runtimeState: "running",
-            }
-          : current.driver,
-        state: "ready",
-        health: {
-          ...current.health,
-          backendLiveness: "running",
-          workspaceReadiness: "starting",
-          daemonReadiness: current.health.daemonReadiness || "unknown",
-          reason: "workspace start requested",
-        },
-      };
-    },
-  });
-  void refreshPortalWorkspaceStatus(userId, workspace);
-  logInfo("executor", "workspace-start-completed", {
-    userId,
-    workspace,
-    ref,
-  });
-  return { started: true };
 }
 
 export async function switchPortalWorkspaceLiveCredential(input: {
@@ -1120,85 +1135,94 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   driver: string;
   credentialId: string;
 }> {
-  if (!supportsLiveCredentialSwitch(input.harness)) {
-    throw new Error(
-      `Live credential switching is not supported for harness '${input.harness}'`,
-    );
-  }
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const target = summary.selectedDriver;
-  if (!target) {
-    throw new Error(
-      `Workspace '${input.workspace}' does not have a selected driver`,
-    );
-  }
-  const workspaceSpec = loadPortalWorkspaceByTarget(
+  return withWorkspaceLifecycleLock(
+    import.meta.url,
     input.userId,
     input.workspace,
-    target,
-  );
-  if (
-    workspaceSpec.backend.kind !== "docker" &&
-    workspaceSpec.backend.kind !== "pod"
-  ) {
-    throw new Error(
-      `Live credential switching is not supported for backend '${workspaceSpec.backend.kind}'`,
-    );
-  }
-  const observation = await getBackendDriver(workspaceSpec.backend.kind).inspect(
-    workspaceSpec,
-  );
-  if (!observation.backend.exists || !observation.backend.running) {
-    throw new Error(
-      `Workspace '${input.workspace}' is not running on ${workspaceSpec.backend.kind}`,
-    );
-  }
-  switchWorkspaceLiveCredentialMaterial({
-    workspace: workspaceSpec,
-    userId: input.userId,
-    credentialId: input.credentialId,
-    harness: input.harness,
-    requireSupported: true,
-  });
-  const ref = workspaceRefFromTarget(input.workspace, target);
-  writeCachedWorkspaceStatusUpdate({
-    userId: input.userId,
-    workspace: input.workspace,
-    reason: "live-credential-switched",
-    mutate: (current) => {
-      if (!current?.credentials?.live) {
-        return current;
+    async () => {
+      if (!supportsLiveCredentialSwitch(input.harness)) {
+        throw new Error(
+          `Live credential switching is not supported for harness '${input.harness}'`,
+        );
       }
-      const selectedByHarness = {
-        ...(current.credentials.live.selectedByHarness ?? {}),
-        [input.harness]: {
-          credentialId: input.credentialId,
-          label: current.credentials.live.selectedByHarness?.[input.harness]?.label ?? input.credentialId,
-          source: "runtime-state" as const,
+      const summary = loadWorkspaceSummary(input.userId, input.workspace);
+      const target = summary.selectedDriver;
+      if (!target) {
+        throw new Error(
+          `Workspace '${input.workspace}' does not have a selected driver`,
+        );
+      }
+      const workspaceSpec = loadPortalWorkspaceByTarget(
+        input.userId,
+        input.workspace,
+        target,
+      );
+      if (
+        workspaceSpec.backend.kind !== "docker" &&
+        workspaceSpec.backend.kind !== "pod"
+      ) {
+        throw new Error(
+          `Live credential switching is not supported for backend '${workspaceSpec.backend.kind}'`,
+        );
+      }
+      const observation = await getBackendDriver(workspaceSpec.backend.kind).inspect(
+        workspaceSpec,
+      );
+      if (!observation.backend.exists || !observation.backend.running) {
+        throw new Error(
+          `Workspace '${input.workspace}' is not running on ${workspaceSpec.backend.kind}`,
+        );
+      }
+      switchWorkspaceLiveCredentialMaterial({
+        workspace: workspaceSpec,
+        userId: input.userId,
+        credentialId: input.credentialId,
+        harness: input.harness,
+        requireSupported: true,
+      });
+      const ref = workspaceRefFromTarget(input.workspace, target);
+      writeCachedWorkspaceStatusUpdate({
+        userId: input.userId,
+        workspace: input.workspace,
+        reason: "live-credential-switched",
+        mutate: (current) => {
+          if (!current?.credentials?.live) {
+            return current;
+          }
+          const selectedByHarness = {
+            ...(current.credentials.live.selectedByHarness ?? {}),
+            [input.harness]: {
+              credentialId: input.credentialId,
+              label:
+                current.credentials.live.selectedByHarness?.[input.harness]
+                  ?.label ?? input.credentialId,
+              source: "runtime-state" as const,
+            },
+          };
+          return {
+            ...current,
+            credentials: {
+              ...current.credentials,
+              live: {
+                ...current.credentials.live,
+                selectedHarness: input.harness,
+                selectedCredentialId: input.credentialId,
+                selectedCredentialLabel: selectedByHarness[input.harness].label,
+                source: "runtime-state",
+                selectedByHarness,
+              },
+            },
+          };
         },
-      };
+      });
+      void refreshPortalWorkspaceStatus(input.userId, input.workspace);
       return {
-        ...current,
-        credentials: {
-          ...current.credentials,
-          live: {
-            ...current.credentials.live,
-            selectedHarness: input.harness,
-            selectedCredentialId: input.credentialId,
-            selectedCredentialLabel: selectedByHarness[input.harness].label,
-            source: "runtime-state",
-            selectedByHarness,
-          },
-        },
+        switched: true,
+        driver: ref,
+        credentialId: input.credentialId,
       };
     },
-  });
-  void refreshPortalWorkspaceStatus(input.userId, input.workspace);
-  return {
-    switched: true,
-    driver: ref,
-    credentialId: input.credentialId,
-  };
+  );
 }
 
 export async function bindPortalWorkspaceAgent(input: {
@@ -1212,37 +1236,44 @@ export async function bindPortalWorkspaceAgent(input: {
   credentialBindings: PortalWorkspaceDetail["credentialBindings"];
   restarted: boolean;
 }> {
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const target = input.driver ?? summary.selectedDriver;
-  if (!target) {
-    throw new Error(
-      `Workspace '${input.workspace}' does not have a selected driver`,
-    );
-  }
-  const ref = workspaceRefFromTarget(input.workspace, target);
-  const restarted = await shouldRecycleRunningWorkspace(
+  return withWorkspaceLifecycleLock(
+    import.meta.url,
     input.userId,
     input.workspace,
-    target,
+    async () => {
+      const summary = loadWorkspaceSummary(input.userId, input.workspace);
+      const target = input.driver ?? summary.selectedDriver;
+      if (!target) {
+        throw new Error(
+          `Workspace '${input.workspace}' does not have a selected driver`,
+        );
+      }
+      const ref = workspaceRefFromTarget(input.workspace, target);
+      const restarted = await shouldRecycleRunningWorkspace(
+        input.userId,
+        input.workspace,
+        target,
+      );
+      if (restarted) {
+        await stopCommand(ref, input.userId);
+      }
+      const updated = updatePortalWorkspaceAgentBinding({
+        userId: input.userId,
+        workspace: input.workspace,
+        target,
+        credentialId: input.credentialId,
+        enabled: true,
+      });
+      renderWorkspaceTarget(input.userId, input.workspace, target);
+      await startWorkspaceWithoutWait(ref, input.userId);
+      return {
+        enabled: true,
+        driver: ref,
+        credentialBindings: updated.credentialBindings,
+        restarted,
+      };
+    },
   );
-  if (restarted) {
-    await stopCommand(ref, input.userId);
-  }
-  const updated = updatePortalWorkspaceAgentBinding({
-    userId: input.userId,
-    workspace: input.workspace,
-    target,
-    credentialId: input.credentialId,
-    enabled: true,
-  });
-  renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startWorkspaceWithoutWait(ref, input.userId);
-  return {
-    enabled: true,
-    driver: ref,
-    credentialBindings: updated.credentialBindings,
-    restarted,
-  };
 }
 
 export async function unbindPortalWorkspaceAgent(input: {
@@ -1255,36 +1286,43 @@ export async function unbindPortalWorkspaceAgent(input: {
   credentialBindings: PortalWorkspaceDetail["credentialBindings"];
   restarted: boolean;
 }> {
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const target = input.driver ?? summary.selectedDriver;
-  if (!target) {
-    throw new Error(
-      `Workspace '${input.workspace}' does not have a selected driver`,
-    );
-  }
-  const ref = workspaceRefFromTarget(input.workspace, target);
-  const restarted = await shouldRecycleRunningWorkspace(
+  return withWorkspaceLifecycleLock(
+    import.meta.url,
     input.userId,
     input.workspace,
-    target,
+    async () => {
+      const summary = loadWorkspaceSummary(input.userId, input.workspace);
+      const target = input.driver ?? summary.selectedDriver;
+      if (!target) {
+        throw new Error(
+          `Workspace '${input.workspace}' does not have a selected driver`,
+        );
+      }
+      const ref = workspaceRefFromTarget(input.workspace, target);
+      const restarted = await shouldRecycleRunningWorkspace(
+        input.userId,
+        input.workspace,
+        target,
+      );
+      if (restarted) {
+        await stopCommand(ref, input.userId);
+      }
+      const updated = updatePortalWorkspaceAgentBinding({
+        userId: input.userId,
+        workspace: input.workspace,
+        target,
+        enabled: false,
+      });
+      renderWorkspaceTarget(input.userId, input.workspace, target);
+      await startWorkspaceWithoutWait(ref, input.userId);
+      return {
+        enabled: false,
+        driver: ref,
+        credentialBindings: updated.credentialBindings,
+        restarted,
+      };
+    },
   );
-  if (restarted) {
-    await stopCommand(ref, input.userId);
-  }
-  const updated = updatePortalWorkspaceAgentBinding({
-    userId: input.userId,
-    workspace: input.workspace,
-    target,
-    enabled: false,
-  });
-  renderWorkspaceTarget(input.userId, input.workspace, target);
-  await startWorkspaceWithoutWait(ref, input.userId);
-  return {
-    enabled: false,
-    driver: ref,
-    credentialBindings: updated.credentialBindings,
-    restarted,
-  };
 }
 
 export async function healthCheckPortalWorkspaceExecutor(

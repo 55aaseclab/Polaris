@@ -7,6 +7,7 @@ import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { readWorkspaceDriverSelection, writeWorkspaceDriverSelection } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
+import { withWorkspaceLifecycleLock } from "../../utils/workspace-lifecycle-lock.js";
 import { loadExecutableWorkspaceForCommand, loadWorkspaceForProjectRef, waitForWorkspaceReady } from "./shared.js";
 
 const SUPPORTED_BACKENDS: Array<WorkspaceSpec["backend"]["kind"]> = [
@@ -15,10 +16,14 @@ const SUPPORTED_BACKENDS: Array<WorkspaceSpec["backend"]["kind"]> = [
   "kubevirt-vm",
 ];
 
-function loadWorkspaceForBackend(project: string, backend: WorkspaceSpec["backend"]["kind"]): WorkspaceSpec | null {
+function loadWorkspaceForBackend(
+  project: string,
+  backend: WorkspaceSpec["backend"]["kind"],
+  userProfileId?: string,
+): WorkspaceSpec | null {
   try {
-    ensureWorkspaceConfig(`${project}@${backend}`);
-    const workspace = loadWorkspaceForProjectRef(`${project}@${backend}`);
+    ensureWorkspaceConfig(`${project}@${backend}`, userProfileId);
+    const workspace = loadWorkspaceForProjectRef(`${project}@${backend}`, userProfileId);
     return workspace.backend.kind === backend ? workspace : null;
   } catch (error) {
     if (error instanceof Error && /Config not found/.test(error.message)) {
@@ -663,13 +668,17 @@ async function importSwitchState(
   }
 }
 
-async function stopCompetingBackends(project: string, targetBackend: WorkspaceSpec["backend"]["kind"]): Promise<WorkspaceSpec["backend"]["kind"][]> {
+async function stopCompetingBackends(
+  project: string,
+  targetBackend: WorkspaceSpec["backend"]["kind"],
+  userProfileId?: string,
+): Promise<WorkspaceSpec["backend"]["kind"][]> {
   const stopped: WorkspaceSpec["backend"]["kind"][] = [];
   for (const backend of SUPPORTED_BACKENDS) {
     if (backend === targetBackend) {
       continue;
     }
-    const workspace = loadWorkspaceForBackend(project, backend);
+    const workspace = loadWorkspaceForBackend(project, backend, userProfileId);
     if (!workspace) {
       continue;
     }
@@ -696,6 +705,7 @@ async function stopCompetingBackends(project: string, targetBackend: WorkspaceSp
 async function runningBackendsForProject(
   project: string,
   targetBackend: WorkspaceSpec["backend"]["kind"],
+  userProfileId?: string,
 ): Promise<Array<{
   backend: WorkspaceSpec["backend"]["kind"];
   workspace: WorkspaceSpec;
@@ -708,7 +718,7 @@ async function runningBackendsForProject(
     if (backend === targetBackend) {
       continue;
     }
-    const workspace = loadWorkspaceForBackend(project, backend);
+    const workspace = loadWorkspaceForBackend(project, backend, userProfileId);
     if (!workspace) {
       continue;
     }
@@ -731,105 +741,134 @@ export interface SwitchResult {
   selectionFile: string | null;
 }
 
-export async function performWorkspaceSwitch(projectRef: string): Promise<SwitchResult> {
+export async function performWorkspaceSwitch(
+  projectRef: string,
+  userProfileId?: string,
+): Promise<SwitchResult> {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
     throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
   }
-  ensureProvisionedWorkspace(projectRef);
-  const targetRef = backendHint === "pod" && profileHint
-    ? `${project}@${backendHint}:${profileHint}`
-    : `${project}@${backendHint}`;
-  ensureWorkspaceConfig(targetRef);
-  const previewWorkspace = loadWorkspaceForProjectRef(targetRef);
-  await getBackendDriver(previewWorkspace.backend.kind).render(previewWorkspace);
+  const runSwitch = async (): Promise<SwitchResult> => {
+    ensureProvisionedWorkspace(projectRef, userProfileId);
+    const targetRef = backendHint === "pod" && profileHint
+      ? `${project}@${backendHint}:${profileHint}`
+      : `${project}@${backendHint}`;
+    ensureWorkspaceConfig(targetRef, userProfileId);
+    const previewWorkspace = loadWorkspaceForProjectRef(targetRef, userProfileId);
+    await getBackendDriver(previewWorkspace.backend.kind).render(previewWorkspace);
 
-  const previousSelection = readWorkspaceDriverSelection(project);
-  const previousBackend = previousSelection?.backend;
-  const previousSelectionWorkspace = previousBackend
-    ? loadWorkspaceForBackend(project, previousBackend)
-    : null;
-  const runningBackends = await runningBackendsForProject(project, backendHint);
-  const selectedRunningWorkspace = previousBackend
-    ? runningBackends.find((entry) => entry.backend === previousBackend)?.workspace ?? null
-    : null;
-  const selectedExportableWorkspace =
-    previousSelectionWorkspace &&
-    previousBackend &&
-    previousBackend !== backendHint &&
-    (selectedRunningWorkspace !== null || previousBackend === "kubevirt-vm")
-      ? previousSelectionWorkspace
+    const previousSelection = readWorkspaceDriverSelection(project, userProfileId);
+    const previousBackend = previousSelection?.backend;
+    const previousSelectionWorkspace = previousBackend
+      ? loadWorkspaceForBackend(project, previousBackend, userProfileId)
       : null;
-  const previousWorkspace = selectedExportableWorkspace
-    ?? selectedRunningWorkspace
-    ?? (runningBackends.length === 1 ? runningBackends[0]?.workspace ?? null : null);
-  const effectivePreviousBackend = previousWorkspace?.backend.kind ?? previousBackend ?? null;
-  const shouldStopBeforeExport =
-    previousWorkspace &&
-    effectivePreviousBackend &&
-    effectivePreviousBackend !== backendHint &&
-    effectivePreviousBackend === "kubevirt-vm";
-  const stoppedBackends = shouldStopBeforeExport
-    ? await stopCompetingBackends(project, backendHint)
-    : [];
-  const exportedSwitchState = previousWorkspace && effectivePreviousBackend && effectivePreviousBackend !== backendHint
-    ? await exportSwitchState(previousWorkspace)
-    : null;
-  const finalizedStoppedBackends = shouldStopBeforeExport
-    ? stoppedBackends
-    : await stopCompetingBackends(project, backendHint);
-  await setWorkspaceDataExportDesiredState(project, backendHint === "docker");
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand("start", targetRef);
-  const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm"
-    ? 600000
-    : workspace.backend.kind === "docker"
-      ? 120000
-      : 45000;
-  let selectionFile: string | undefined;
-  try {
-    if (
-      exportedSwitchState &&
-      (workspace.backend.kind === "docker" || workspace.backend.kind === "kubevirt-vm")
-    ) {
-      logInfo("cli", "switch-migrate-small-state", {
+    const runningBackends = await runningBackendsForProject(
+      project,
+      backendHint,
+      userProfileId,
+    );
+    const selectedRunningWorkspace = previousBackend
+      ? runningBackends.find((entry) => entry.backend === previousBackend)?.workspace ?? null
+      : null;
+    const selectedExportableWorkspace =
+      previousSelectionWorkspace &&
+      previousBackend &&
+      previousBackend !== backendHint &&
+      (selectedRunningWorkspace !== null || previousBackend === "kubevirt-vm")
+        ? previousSelectionWorkspace
+        : null;
+    const previousWorkspace = selectedExportableWorkspace
+      ?? selectedRunningWorkspace
+      ?? (runningBackends.length === 1 ? runningBackends[0]?.workspace ?? null : null);
+    const effectivePreviousBackend = previousWorkspace?.backend.kind ?? previousBackend ?? null;
+    const shouldStopBeforeExport =
+      previousWorkspace &&
+      effectivePreviousBackend &&
+      effectivePreviousBackend !== backendHint &&
+      effectivePreviousBackend === "kubevirt-vm";
+    const stoppedBackends = shouldStopBeforeExport
+      ? await stopCompetingBackends(project, backendHint, userProfileId)
+      : [];
+    const exportedSwitchState =
+      previousWorkspace &&
+      effectivePreviousBackend &&
+      effectivePreviousBackend !== backendHint
+        ? await exportSwitchState(previousWorkspace)
+        : null;
+    const finalizedStoppedBackends = shouldStopBeforeExport
+      ? stoppedBackends
+      : await stopCompetingBackends(project, backendHint, userProfileId);
+    await setWorkspaceDataExportDesiredState(project, backendHint === "docker");
+    const { workspace, driver } = await loadExecutableWorkspaceForCommand(
+      "start",
+      targetRef,
+      userProfileId,
+    );
+    const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm"
+      ? 600000
+      : workspace.backend.kind === "docker"
+        ? 120000
+        : 45000;
+    let selectionFile: string | undefined;
+    try {
+      if (
+        exportedSwitchState &&
+        (workspace.backend.kind === "docker" || workspace.backend.kind === "kubevirt-vm")
+      ) {
+        logInfo("cli", "switch-migrate-small-state", {
+          project,
+          fromBackend: effectivePreviousBackend,
+          toBackend: backendHint,
+          phase: "pre-start",
+        });
+        await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+      }
+      await driver.start(workspace);
+      if (exportedSwitchState && workspace.backend.kind === "pod") {
+        logInfo("cli", "switch-migrate-small-state", {
+          project,
+          fromBackend: effectivePreviousBackend,
+          toBackend: backendHint,
+        });
+        await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+        await driver.restart(workspace);
+        await importSwitchState(workspace, exportedSwitchState, POST_RESTART_ATTACHMENTS);
+      }
+      await waitForWorkspaceReady(workspace, readyTimeoutMs);
+      selectionFile = writeWorkspaceDriverSelection(
         project,
-        fromBackend: effectivePreviousBackend,
-        toBackend: backendHint,
-        phase: "pre-start",
-      });
-      await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+        {
+          backend: backendHint,
+          profile: backendHint === "pod" ? profileHint : undefined,
+        },
+        userProfileId,
+      );
+    } finally {
+      if (exportedSwitchState) {
+        fs.rmSync(exportedSwitchState, { recursive: true, force: true });
+      }
     }
-    await driver.start(workspace);
-    if (exportedSwitchState && workspace.backend.kind === "pod") {
-      logInfo("cli", "switch-migrate-small-state", {
-        project,
-        fromBackend: effectivePreviousBackend,
-        toBackend: backendHint,
-      });
-      await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
-      await driver.restart(workspace);
-      await importSwitchState(workspace, exportedSwitchState, POST_RESTART_ATTACHMENTS);
-    }
-    await waitForWorkspaceReady(workspace, readyTimeoutMs);
-    selectionFile = writeWorkspaceDriverSelection(project, {
-      backend: backendHint,
-      profile: backendHint === "pod" ? profileHint : undefined,
-    });
-  } finally {
-    if (exportedSwitchState) {
-      fs.rmSync(exportedSwitchState, { recursive: true, force: true });
-    }
-  }
 
-  return {
-    project,
-    previousBackend: effectivePreviousBackend ?? null,
-    previousProfile: previousSelection?.profile ?? null,
-    selectedBackend: backendHint,
-    selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
-    stoppedBackends: finalizedStoppedBackends,
-    selectionFile: selectionFile ?? null,
+    return {
+      project,
+      previousBackend: effectivePreviousBackend ?? null,
+      previousProfile: previousSelection?.profile ?? null,
+      selectedBackend: backendHint,
+      selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
+      stoppedBackends: finalizedStoppedBackends,
+      selectionFile: selectionFile ?? null,
+    };
   };
+  if (!userProfileId?.trim()) {
+    return runSwitch();
+  }
+  return withWorkspaceLifecycleLock(
+    import.meta.url,
+    userProfileId,
+    project,
+    runSwitch,
+  );
 }
 
 export async function switchCommand(projectRef: string): Promise<void> {
