@@ -243,6 +243,8 @@ pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
 - restore archived workspace state back into the active workspace list
 - reject restore when the active workspace name already exists
 - add portal restore action for archived workspaces
+- reduce reliance on `withFakePath` command stubs by adding more real backend
+  smoke and integration coverage for workspace lifecycle flows
 
 ## Why This Matters
 
