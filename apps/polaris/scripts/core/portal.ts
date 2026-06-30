@@ -605,22 +605,10 @@ export function readPortalCredentialPreview(userId: string, credentialPath: stri
       truncated: false,
     };
   }
-  const raw = fs.readFileSync(absolute);
-  if (raw.includes(0)) {
-    return {
-      path: trimmed,
-      content: "[binary content hidden]",
-      truncated: false,
-    };
-  }
-  const MAX_PREVIEW_CHARS = 4000;
-  const content = raw.toString("utf8");
   return {
     path: trimmed,
-    content: content.length > MAX_PREVIEW_CHARS
-      ? `${content.slice(0, MAX_PREVIEW_CHARS)}\n…`
-      : content,
-    truncated: content.length > MAX_PREVIEW_CHARS,
+    content: "[credential preview hidden]",
+    truncated: false,
   };
 }
 

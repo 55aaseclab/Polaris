@@ -16,6 +16,8 @@ Current mapping storage:
 
 - `config/users/user-map.json`
 
+Current writes to that mapping file are serialized and committed atomically.
+
 Typical mapping keys include:
 
 - `clerkUserId`
@@ -32,7 +34,8 @@ Current login flow:
 
 1. user signs in through Clerk
 2. the frontend reads Clerk identity
-3. the backend resolves Clerk-to-Polaris mapping
+3. the backend verifies the Clerk session before serving Polaris API routes
+4. the backend resolves Clerk-to-Polaris mapping
 4. the frontend enters `/users/<userId>/workspaces`
 
 Current registration flow:
@@ -78,3 +81,17 @@ That admin flow can:
 For first bootstrap, Polaris can also elevate named users through:
 
 - `POLARIS_BOOTSTRAP_ADMIN_USERS`
+
+## Current Server-Side Enforcement
+
+Current portal API behavior now assumes Clerk-authenticated access.
+
+That means:
+
+- unauthenticated API requests are rejected
+- normal users can access only their own Polaris user scope
+- admin-only routes are enforced on the server side
+- self-registration must match the authenticated Clerk identity
+
+This matters for self-hosted teams because client-side routing is not treated
+as the security boundary.

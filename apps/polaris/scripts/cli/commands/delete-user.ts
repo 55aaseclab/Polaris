@@ -15,6 +15,24 @@ function userRootFor(userProfileId: string): string {
   return path.join(USER_ROOT, userProfileId);
 }
 
+function activeWorkspacesRootFor(userProfileId: string): string {
+  return path.join(USER_ROOT, userProfileId, "workspaces");
+}
+
+function archivedWorkspacesRootFor(userProfileId: string): string {
+  return path.join(USER_ROOT, userProfileId, "archives", "workspaces");
+}
+
+function listChildDirectories(root: string): string[] {
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function parseDeleteUserArgs(argv: string[]): { userProfileId: string } {
   const userProfileId = argv[0]?.trim();
   if (!userProfileId) {
@@ -29,6 +47,22 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const { userProfileId } = parseDeleteUserArgs(argv);
   const profilePath = profilePathFor(userProfileId);
   const userRoot = userRootFor(userProfileId);
+  const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
+  const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
+  if (activeWorkspaces.length > 0 || archivedWorkspaces.length > 0) {
+    throw new Error(
+      [
+        `User '${userProfileId}' cannot be deleted while workspace data still exists.`,
+        activeWorkspaces.length > 0
+          ? `Active workspaces: ${activeWorkspaces.join(", ")}`
+          : null,
+        archivedWorkspaces.length > 0
+          ? `Archived workspaces: ${archivedWorkspaces.join(", ")}`
+          : null,
+        "Archive or delete active workspaces first, then clear archived workspaces explicitly.",
+      ].filter(Boolean).join(" "),
+    );
+  }
   const removedProfile = fs.existsSync(profilePath);
   const removedUserRoot = fs.existsSync(userRoot);
   if (removedUserRoot) {

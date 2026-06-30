@@ -3,6 +3,7 @@ import path from "node:path";
 import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_MAP_PATH = path.join(polarisUsersRoot(import.meta.url), "user-map.json");
+const USER_MAP_LOCK_PATH = `${USER_MAP_PATH}.lock`;
 
 export type PolarisRole = "admin" | "user";
 export type PolarisPlan = "free" | "pro";
@@ -27,6 +28,34 @@ interface UserMapFile {
 }
 
 export class UserMapConflictError extends Error {}
+
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withUserMapLock<T>(fn: () => T): T {
+  const startedAt = Date.now();
+  const timeoutMs = 5000;
+  while (true) {
+    try {
+      fs.mkdirSync(USER_MAP_LOCK_PATH);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error("Timed out waiting for the Polaris user-map lock");
+      }
+      sleepMs(25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(USER_MAP_LOCK_PATH, { recursive: true, force: true });
+  }
+}
 
 function normalizeClerkUsername(value: string): string {
   return value.trim().toLowerCase();
@@ -68,7 +97,9 @@ export function readUserMap(): UserMapFile {
 
 export function writeUserMap(value: UserMapFile): void {
   fs.mkdirSync(path.dirname(USER_MAP_PATH), { recursive: true });
-  fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const tempPath = `${USER_MAP_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.renameSync(tempPath, USER_MAP_PATH);
 }
 
 export function findUserMapEntry(input: string | {
@@ -162,20 +193,22 @@ export function upsertUserMapEntry(
   if (!normalized) {
     throw new Error("Clerk username is required");
   }
-  const current = readUserMap();
-  const existing = current.users[normalized];
-  if (existing && existing.polarisUserId !== entry.polarisUserId) {
-    throw new UserMapConflictError(
-      `Clerk username '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
-    );
-  }
-  current.users[normalized] = {
-    polarisUserId: entry.polarisUserId,
-    role: entry.role,
-    plan: entry.plan,
-  };
-  writeUserMap(current);
-  return current.users[normalized];
+  return withUserMapLock(() => {
+    const current = readUserMap();
+    const existing = current.users[normalized];
+    if (existing && existing.polarisUserId !== entry.polarisUserId) {
+      throw new UserMapConflictError(
+        `Clerk username '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+      );
+    }
+    current.users[normalized] = {
+      polarisUserId: entry.polarisUserId,
+      role: entry.role,
+      plan: entry.plan,
+    };
+    writeUserMap(current);
+    return current.users[normalized];
+  });
 }
 
 export function upsertUserMapUserId(
@@ -186,21 +219,23 @@ export function upsertUserMapUserId(
   if (!normalized) {
     throw new Error("Clerk user id is required");
   }
-  const current = readUserMap();
-  current.userIds ??= {};
-  const existing = current.userIds[normalized];
-  if (existing && existing.polarisUserId !== entry.polarisUserId) {
-    throw new UserMapConflictError(
-      `Clerk user id '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
-    );
-  }
-  current.userIds[normalized] = {
-    polarisUserId: entry.polarisUserId,
-    role: entry.role,
-    plan: entry.plan,
-  };
-  writeUserMap(current);
-  return current.userIds[normalized];
+  return withUserMapLock(() => {
+    const current = readUserMap();
+    current.userIds ??= {};
+    const existing = current.userIds[normalized];
+    if (existing && existing.polarisUserId !== entry.polarisUserId) {
+      throw new UserMapConflictError(
+        `Clerk user id '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+      );
+    }
+    current.userIds[normalized] = {
+      polarisUserId: entry.polarisUserId,
+      role: entry.role,
+      plan: entry.plan,
+    };
+    writeUserMap(current);
+    return current.userIds[normalized];
+  });
 }
 
 export function deleteUserMapEntry(clerkUsername: string): boolean {
@@ -208,70 +243,76 @@ export function deleteUserMapEntry(clerkUsername: string): boolean {
   if (!normalized) {
     return false;
   }
-  const current = readUserMap();
-  if (!current.users[normalized]) {
-    return false;
-  }
-  delete current.users[normalized];
-  writeUserMap(current);
-  return true;
+  return withUserMapLock(() => {
+    const current = readUserMap();
+    if (!current.users[normalized]) {
+      return false;
+    }
+    delete current.users[normalized];
+    writeUserMap(current);
+    return true;
+  });
 }
 
 export function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): string[] {
-  const current = readUserMap();
-  const removedUsernames = Object.entries(current.users)
-    .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-    .map(([clerkUsername]) => clerkUsername);
-  const removedUserIds = Object.entries(current.userIds ?? {})
-    .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-    .map(([clerkUserId]) => clerkUserId);
-  if (removedUsernames.length === 0 && removedUserIds.length === 0) {
-    return [];
-  }
-  for (const clerkUsername of removedUsernames) {
-    delete current.users[clerkUsername];
-  }
-  for (const clerkUserId of removedUserIds) {
-    delete current.userIds?.[clerkUserId];
-  }
-  writeUserMap(current);
-  return removedUsernames;
+  return withUserMapLock(() => {
+    const current = readUserMap();
+    const removedUsernames = Object.entries(current.users)
+      .filter(([, entry]) => entry.polarisUserId === polarisUserId)
+      .map(([clerkUsername]) => clerkUsername);
+    const removedUserIds = Object.entries(current.userIds ?? {})
+      .filter(([, entry]) => entry.polarisUserId === polarisUserId)
+      .map(([clerkUserId]) => clerkUserId);
+    if (removedUsernames.length === 0 && removedUserIds.length === 0) {
+      return [];
+    }
+    for (const clerkUsername of removedUsernames) {
+      delete current.users[clerkUsername];
+    }
+    for (const clerkUserId of removedUserIds) {
+      delete current.userIds?.[clerkUserId];
+    }
+    writeUserMap(current);
+    return removedUsernames;
+  });
 }
 
 export function updateUserAccessEntry(
   polarisUserId: string,
   patch: Partial<Pick<PortalUserMapEntry, "role" | "plan">>,
 ): PortalUserAccessSummary {
-  const current = readUserMap();
-  let touched = false;
-  for (const entry of Object.values(current.users)) {
-    if (entry.polarisUserId !== polarisUserId) {
-      continue;
+  withUserMapLock(() => {
+    const current = readUserMap();
+    let touched = false;
+    for (const entry of Object.values(current.users)) {
+      if (entry.polarisUserId !== polarisUserId) {
+        continue;
+      }
+      if (patch.role) {
+        entry.role = patch.role;
+      }
+      if (patch.plan) {
+        entry.plan = patch.plan;
+      }
+      touched = true;
     }
-    if (patch.role) {
-      entry.role = patch.role;
+    for (const entry of Object.values(current.userIds ?? {})) {
+      if (entry.polarisUserId !== polarisUserId) {
+        continue;
+      }
+      if (patch.role) {
+        entry.role = patch.role;
+      }
+      if (patch.plan) {
+        entry.plan = patch.plan;
+      }
+      touched = true;
     }
-    if (patch.plan) {
-      entry.plan = patch.plan;
+    if (!touched) {
+      throw new Error(`Polaris user '${polarisUserId}' does not have a Clerk mapping yet`);
     }
-    touched = true;
-  }
-  for (const entry of Object.values(current.userIds ?? {})) {
-    if (entry.polarisUserId !== polarisUserId) {
-      continue;
-    }
-    if (patch.role) {
-      entry.role = patch.role;
-    }
-    if (patch.plan) {
-      entry.plan = patch.plan;
-    }
-    touched = true;
-  }
-  if (!touched) {
-    throw new Error(`Polaris user '${polarisUserId}' does not have a Clerk mapping yet`);
-  }
-  writeUserMap(current);
+    writeUserMap(current);
+  });
   const updated = readUserAccessSummary(polarisUserId);
   if (!updated) {
     throw new Error(`Polaris user '${polarisUserId}' access could not be reloaded`);

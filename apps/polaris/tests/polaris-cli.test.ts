@@ -415,6 +415,36 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   }
 });
 
+test("runCli user delete rejects users that still have workspace data", async () => {
+  const userProfileId = uniqueProjectName("cli-user-delete-blocked");
+  const workspace = uniqueProjectName("cli-user-delete-workspace");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI User Delete Blocked",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    await runCli(["create", workspace, "--user", userProfileId]);
+
+    await assert.rejects(
+      async () => {
+        await runCli(["user", "delete", userProfileId]);
+      },
+      /cannot be deleted while workspace data still exists/i,
+    );
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("runCli archive moves a workspace into the user archive", async () => {
   const userProfileId = uniqueProjectName("cli-archive-user");
   const workspace = uniqueProjectName("cli-archive-workspace");

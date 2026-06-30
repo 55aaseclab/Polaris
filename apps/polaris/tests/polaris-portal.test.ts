@@ -92,18 +92,20 @@ ${body}
 async function withPortalServer(
   fn: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
-  const server = createPortalServer(0);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Portal server did not expose a TCP address");
-  }
-  try {
-    await fn(`http://127.0.0.1:${address.port}`);
-  } finally {
-    server.close();
-    await once(server, "close");
-  }
+  await withEnv("POLARIS_TEST_PORTAL_AUTH", "1", async () => {
+    const server = createPortalServer(0);
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Portal server did not expose a TCP address");
+    }
+    try {
+      await fn(`http://127.0.0.1:${address.port}`);
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  });
 }
 
 async function withEnv(
@@ -122,6 +124,22 @@ async function withEnv(
       process.env[name] = previous;
     }
   }
+}
+
+function portalTestHeaders(input?: {
+  clerkUserId?: string;
+  clerkUsername?: string;
+  polarisUserId?: string;
+  role?: "admin" | "user";
+  plan?: "free" | "pro";
+}): Record<string, string> {
+  return {
+    ...(input?.clerkUserId ? { "x-polaris-test-clerk-user-id": input.clerkUserId } : {}),
+    ...(input?.clerkUsername ? { "x-polaris-test-clerk-username": input.clerkUsername } : {}),
+    ...(input?.polarisUserId ? { "x-polaris-test-polaris-user-id": input.polarisUserId } : {}),
+    ...(input?.role ? { "x-polaris-test-role": input.role } : {}),
+    ...(input?.plan ? { "x-polaris-test-plan": input.plan } : {}),
+  };
 }
 
 async function withSyntheticMemberUser(
@@ -430,6 +448,54 @@ test("portal API serves route-scoped workspaces and credentials without auth", a
   });
 });
 
+test("portal API rejects unauthenticated admin access", async () => {
+  const server = createPortalServer(0);
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/admin/users`);
+    assert.equal(response.status, 401);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("portal API rejects cross-user access for a normal user session", async () => {
+  const firstUserId = uniqueName("portal-scope-user-a");
+  const secondUserId = uniqueName("portal-scope-user-b");
+  const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
+    profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
+    userRoot: path.join(REPO_ROOT, "config", "users", userId),
+  }));
+
+  try {
+    await createUserCommand([firstUserId, "--name", "Scope User A", "--email", `${firstUserId}@polaris.local`]);
+    await createUserCommand([secondUserId, "--name", "Scope User B", "--email", `${secondUserId}@polaris.local`]);
+
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
+        headers: portalTestHeaders({
+          clerkUserId: `clerk-${firstUserId}`,
+          clerkUsername: firstUserId,
+          polarisUserId: firstUserId,
+          role: "user",
+          plan: "free",
+        }),
+      });
+      assert.equal(response.status, 403);
+    });
+  } finally {
+    for (const target of cleanupTargets) {
+      fs.rmSync(target.profilePath, { force: true });
+      fs.rmSync(target.userRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test("portal API previews credential asset content", async () => {
   const credentialId = uniqueName("portal-preview");
   const userId = DEMO_USER_ID;
@@ -458,7 +524,7 @@ test("portal API previews credential asset content", async () => {
       assert.equal(previewResponse.status, 200);
       const preview = await previewResponse.json() as { path: string; content: string; truncated: boolean };
       assert.equal(preview.path, `credentials/generated/${credentialId}/auth.json`);
-      assert.match(preview.content, /preview-test/);
+      assert.equal(preview.content, "[credential preview hidden]");
       assert.equal(preview.truncated, false);
     });
   } finally {
@@ -1009,8 +1075,9 @@ test("portal API previews workspace asset content", async () => {
 });
 
 test("portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
-  const userProfileId = uniqueName("portal-user");
-  const clerkUsername = uniqueName("clerk-user");
+  const clerkUsername = uniqueName("portal-user");
+  const clerkUserId = `clerk-${clerkUsername}`;
+  const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
@@ -1019,7 +1086,13 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
     await withPortalServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...portalTestHeaders({
+            clerkUserId,
+            clerkUsername,
+          }),
+        },
         body: JSON.stringify({
           userProfileId,
           clerkUsername,
@@ -1059,8 +1132,9 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
 });
 
 test("portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
-  const userProfileId = uniqueName("portal-no-email");
-  const clerkUsername = uniqueName("clerk-no-email");
+  const clerkUsername = uniqueName("portal-no-email");
+  const clerkUserId = `clerk-${clerkUsername}`;
+  const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
@@ -1069,7 +1143,13 @@ test("portal API creates a user profile without a Clerk email by using a synthet
     await withPortalServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...portalTestHeaders({
+            clerkUserId,
+            clerkUsername,
+          }),
+        },
         body: JSON.stringify({
           userProfileId,
           clerkUsername,
@@ -1102,8 +1182,9 @@ test("portal API creates a user profile without a Clerk email by using a synthet
 test("portal API creates the default RightCode codex credential when configured", async () => {
   const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
-  const userProfileId = uniqueName("portal-codex-default");
-  const clerkUsername = uniqueName("clerk-codex-default");
+  const clerkUsername = uniqueName("portal-codex-default");
+  const clerkUserId = `clerk-${clerkUsername}`;
+  const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
@@ -1112,7 +1193,13 @@ test("portal API creates the default RightCode codex credential when configured"
     await withPortalServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...portalTestHeaders({
+            clerkUserId,
+            clerkUsername,
+          }),
+        },
         body: JSON.stringify({
           userProfileId,
           clerkUsername,
@@ -1217,6 +1304,12 @@ test("portal API resolves Clerk username mappings from the live mapping file", a
     await withPortalServer(async (baseUrl) => {
       const response = await fetch(
         `${baseUrl}/api/user-mapping?clerkUsername=${encodeURIComponent(clerkUsername)}`,
+        {
+          headers: portalTestHeaders({
+            clerkUserId: `clerk-${clerkUsername}`,
+            clerkUsername,
+          }),
+        },
       );
       assert.equal(response.status, 200);
       const payload = await response.json() as {
@@ -2216,7 +2309,13 @@ test("portal user creation promotes bootstrap admins automatically", async () =>
       await withPortalServer(async (baseUrl) => {
         const response = await fetch(`${baseUrl}/api/users`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...portalTestHeaders({
+              clerkUserId: `clerk-${userId}`,
+              clerkUsername: userId,
+            }),
+          },
           body: JSON.stringify({
             userProfileId: userId,
             clerkUsername: userId,

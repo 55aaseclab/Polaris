@@ -8,6 +8,14 @@ import {
   type PortalProfileSummary,
   updatePortalProfile,
 } from "../core/portal.js";
+import {
+  requireMappedPortalSession,
+  requirePortalAdmin,
+  requirePortalScope,
+  requirePortalSession,
+  selfProvisionedPolarisUserId,
+  sessionMatchesCurrentIdentity,
+} from "./auth.js";
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
@@ -46,7 +54,7 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
     "content-length": Buffer.byteLength(payload),
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type",
+    "access-control-allow-headers": "authorization,content-type",
   });
   res.end(payload);
 }
@@ -70,10 +78,6 @@ function notFound(res: ServerResponse): void {
 
 function badRequest(res: ServerResponse, message: string): void {
   sendJson(res, 400, { error: message });
-}
-
-function forbidden(res: ServerResponse, message = "Forbidden"): void {
-  sendJson(res, 403, { error: message });
 }
 
 function parseFormBody(raw: string): ParsedBody {
@@ -108,14 +112,6 @@ async function readBody(req: IncomingMessage): Promise<ParsedBody> {
 
 function routeSegments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
-}
-
-function readHeader(req: IncomingMessage, name: string): string | null {
-  const value = req.headers[name];
-  if (Array.isArray(value)) {
-    return value[0]?.trim() || null;
-  }
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function findProfile(userId: string): PortalProfileSummary | null {
@@ -412,6 +408,10 @@ async function handleUserCreate(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  const session = await requirePortalSession(req, res);
+  if (!session) {
+    return;
+  }
   const body = await readBody(req);
   const userProfileId = body.userProfileId?.trim() || "";
   const clerkUsername = body.clerkUsername?.trim() || "";
@@ -424,15 +424,37 @@ async function handleUserCreate(
     badRequest(res, "Missing Clerk identity");
     return;
   }
+  if (session.role !== "admin") {
+    if (session.polarisUserId) {
+      sendJson(res, 403, { error: "This Clerk user is already provisioned in Polaris" });
+      return;
+    }
+    if (!sessionMatchesCurrentIdentity(session, { clerkUsername, clerkUserId })) {
+      sendJson(res, 403, { error: "User creation must match the authenticated Clerk identity" });
+      return;
+    }
+    if (userProfileId !== selfProvisionedPolarisUserId(session)) {
+      sendJson(res, 403, { error: "User creation must use the current Clerk identity as the Polaris user id" });
+      return;
+    }
+  }
   try {
     const created = await createPortalUser({
       userProfileId,
-      ...(clerkUsername ? { clerkUsername } : {}),
-      ...(clerkUserId ? { clerkUserId } : {}),
+      ...(session.role === "admin"
+        ? (clerkUsername ? { clerkUsername } : {})
+        : (session.clerkUsername ? { clerkUsername: session.clerkUsername } : {})),
+      ...(session.role === "admin"
+        ? (clerkUserId ? { clerkUserId } : {})
+        : { clerkUserId: session.clerkUserId }),
       ...(body.email?.trim() ? { email: body.email.trim() } : {}),
       ...(body.name !== undefined ? { name: body.name.trim() } : {}),
-      ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
-      ...(body.plan === "free" || body.plan === "pro" ? { plan: body.plan } : {}),
+      ...(session.role === "admin" && (body.role === "admin" || body.role === "user")
+        ? { role: body.role }
+        : {}),
+      ...(session.role === "admin" && (body.plan === "free" || body.plan === "pro")
+        ? { plan: body.plan }
+        : {}),
     });
     sendJson(res, 201, created);
   } catch (error) {
@@ -464,7 +486,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         res.writeHead(204, {
           "access-control-allow-origin": "*",
           "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
-          "access-control-allow-headers": "content-type",
+          "access-control-allow-headers": "authorization,content-type",
         });
         res.end();
         return;
@@ -491,26 +513,59 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             await handleUserCreate(req, res);
             return;
           }
-          sendJson(res, 200, listPortalProfiles());
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          sendJson(
+            res,
+            200,
+            session.role === "admin"
+              ? listPortalProfiles()
+              : listPortalProfiles().filter((profile) => profile.id === session.polarisUserId),
+          );
           return;
         }
         if (segments.length === 3 && segments[1] === "users" && req.method === "DELETE") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requirePortalAdmin(res, session)) {
+            return;
+          }
+          if (session.polarisUserId === decodeURIComponent(segments[2])) {
+            sendJson(res, 403, { error: "The current admin cannot delete their own Polaris user" });
+            return;
+          }
           await handleUserDelete(res, decodeURIComponent(segments[2]));
           return;
         }
         if (segments.length === 2 && segments[1] === "user-mapping" && req.method === "GET") {
+          const session = await requirePortalSession(req, res);
+          if (!session) {
+            return;
+          }
           const clerkUsername = url.searchParams.get("clerkUsername")?.trim() || "";
           const clerkUserId = url.searchParams.get("clerkUserId")?.trim() || "";
+          if (!sessionMatchesCurrentIdentity(session, { clerkUsername, clerkUserId })) {
+            sendJson(res, 403, { error: "The requested mapping does not match the authenticated Clerk identity" });
+            return;
+          }
           sendJson(res, 200, {
-            clerkUsername,
-            clerkUserId,
-            mapping: clerkUsername || clerkUserId
-              ? findUserMapEntry({ clerkUsername, clerkUserId })
+            clerkUsername: session.clerkUsername ?? "",
+            clerkUserId: session.clerkUserId,
+            mapping: session.clerkUserId || session.clerkUsername
+              ? findUserMapEntry({
+                clerkUserId: session.clerkUserId,
+                ...(session.clerkUsername ? { clerkUsername: session.clerkUsername } : {}),
+              })
               : null,
           });
           return;
         }
         if (segments.length === 3 && segments[1] === "admin" && segments[2] === "users" && req.method === "GET") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requirePortalAdmin(res, session)) {
+            return;
+          }
           sendJson(res, 200, {
             users: listPortalAdminUsers(),
           });
@@ -523,6 +578,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           segments[4] === "access" &&
           req.method === "POST"
         ) {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requirePortalAdmin(res, session)) {
+            return;
+          }
           await handleAdminUserAccessUpdate(
             req,
             res,
@@ -531,8 +590,17 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
         if (segments[1] === "session") {
+          const session = await requirePortalSession(req, res);
+          if (!session) {
+            return;
+          }
           sendJson(res, 200, {
             authMode: "clerk-browser-session",
+            authenticated: true,
+            clerkUserId: session.clerkUserId,
+            clerkUsername: session.clerkUsername,
+            polarisUserId: session.polarisUserId,
+            role: session.role,
           });
           return;
         }
@@ -540,7 +608,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           notFound(res);
           return;
         }
+        const session = await requirePortalSession(req, res);
+        if (!session) {
+          return;
+        }
         const routeUserId = decodeURIComponent(segments[2]);
+        if (!requirePortalScope(res, session, routeUserId)) {
+          return;
+        }
         const profile = requireProfile(res, routeUserId);
         if (!profile) {
           return;

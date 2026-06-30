@@ -269,11 +269,22 @@ function apiBase(): string {
   return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_POLARIS_API_BASE?.replace(/\/$/, "") ?? "";
 }
 
+let authTokenProvider: (() => Promise<string | null>) | null = null;
+
+export function setApiAuthTokenProvider(
+  provider: (() => Promise<string | null>) | null,
+): void {
+  authTokenProvider = provider;
+}
+
 async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
+  const token = authTokenProvider ? await authTokenProvider() : null;
   const response = await fetch(`${apiBase()}${pathname}`, {
     ...init,
+    credentials: "include",
     headers: {
       "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
