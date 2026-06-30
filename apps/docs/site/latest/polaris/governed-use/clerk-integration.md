@@ -30,7 +30,8 @@ Current lock behavior:
 
 Polaris also applies a user-scoped mutation lock around user creation, user
 deletion, profile edits, and user credential writes.
-That keeps same-user control-plane mutations serialized while a delete or
+That lock also covers workspace create, archive, and delete operations.
+Same-user control-plane mutations are serialized while a delete or
 rollback-sensitive write is in progress.
 
 Typical mapping keys include:

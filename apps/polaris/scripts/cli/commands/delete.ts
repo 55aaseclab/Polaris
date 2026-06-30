@@ -11,6 +11,7 @@ import { projectOwners } from "../../config/project-ownership.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../../utils/paths.js";
+import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -178,65 +179,69 @@ export async function archiveWorkspaceOwnedByUser(userId: string, workspace: str
   archivedAt: string;
   workspace: string;
 }> {
-  const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
-  const archivedAt = new Date();
-  const archiveId = archiveIdFor(workspace, archivedAt);
-  const archiveRoot = path.join(archivedWorkspacesRoot(userId), archiveId);
-  const archivedPortalStateRoot = path.join(
-    archivedPortalWorkspacesRoot(userId),
-    archiveId,
-  );
-  moveIntoArchive(root, archiveRoot);
-  if (fs.existsSync(portalStateRoot)) {
-    moveIntoArchive(portalStateRoot, archivedPortalStateRoot);
-  }
-  fs.writeFileSync(
-    path.join(archiveRoot, ".polaris-archive.json"),
-    `${JSON.stringify({
+  return withUserMutationLock(import.meta.url, userId, async () => {
+    const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
+    const archivedAt = new Date();
+    const archiveId = archiveIdFor(workspace, archivedAt);
+    const archiveRoot = path.join(archivedWorkspacesRoot(userId), archiveId);
+    const archivedPortalStateRoot = path.join(
+      archivedPortalWorkspacesRoot(userId),
       archiveId,
-      workspaceName: workspace,
+    );
+    moveIntoArchive(root, archiveRoot);
+    if (fs.existsSync(portalStateRoot)) {
+      moveIntoArchive(portalStateRoot, archivedPortalStateRoot);
+    }
+    fs.writeFileSync(
+      path.join(archiveRoot, ".polaris-archive.json"),
+      `${JSON.stringify({
+        archiveId,
+        workspaceName: workspace,
+        archivedAt: archivedAt.toISOString(),
+        originalWorkspaceRoot: `config/users/${userId}/workspaces/${workspace}`,
+        originalPortalStateRoot: fs.existsSync(archivedPortalStateRoot)
+          ? `config/users/${userId}/.portal/workspaces/${workspace}`
+          : undefined,
+        workspaceRoot: `config/users/${userId}/archives/workspaces/${archiveId}`,
+        portalStateRoot: fs.existsSync(archivedPortalStateRoot)
+          ? `config/users/${userId}/archives/portal-workspaces/${archiveId}`
+          : undefined,
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    removeWorkspaceFromProfile(userId, workspace);
+    logInfo("cli", "workspace-archived", {
+      userId,
+      workspace,
+      archiveId,
+    });
+    return {
+      archived: true,
+      archiveId,
       archivedAt: archivedAt.toISOString(),
-      originalWorkspaceRoot: `config/users/${userId}/workspaces/${workspace}`,
-      originalPortalStateRoot: fs.existsSync(archivedPortalStateRoot)
-        ? `config/users/${userId}/.portal/workspaces/${workspace}`
-        : undefined,
-      workspaceRoot: `config/users/${userId}/archives/workspaces/${archiveId}`,
-      portalStateRoot: fs.existsSync(archivedPortalStateRoot)
-        ? `config/users/${userId}/archives/portal-workspaces/${archiveId}`
-        : undefined,
-    }, null, 2)}\n`,
-    "utf8",
-  );
-  removeWorkspaceFromProfile(userId, workspace);
-  logInfo("cli", "workspace-archived", {
-    userId,
-    workspace,
-    archiveId,
+      workspace,
+    };
   });
-  return {
-    archived: true,
-    archiveId,
-    archivedAt: archivedAt.toISOString(),
-    workspace,
-  };
 }
 
 export async function deleteWorkspaceOwnedByUser(userId: string, workspace: string): Promise<{
   deleted: true;
   workspace: string;
 }> {
-  const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
-  fs.rmSync(root, { recursive: true, force: true });
-  fs.rmSync(portalStateRoot, { recursive: true, force: true });
-  removeWorkspaceFromProfile(userId, workspace);
-  logInfo("cli", "workspace-deleted", {
-    userId,
-    workspace,
+  return withUserMutationLock(import.meta.url, userId, async () => {
+    const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(portalStateRoot, { recursive: true, force: true });
+    removeWorkspaceFromProfile(userId, workspace);
+    logInfo("cli", "workspace-deleted", {
+      userId,
+      workspace,
+    });
+    return {
+      deleted: true,
+      workspace,
+    };
   });
-  return {
-    deleted: true,
-    workspace,
-  };
 }
 
 export async function deleteCommand(projectArg: string): Promise<void> {

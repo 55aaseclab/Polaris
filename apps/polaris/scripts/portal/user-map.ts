@@ -455,17 +455,20 @@ export async function withDeletedUserMapEntries<T>(
   polarisUserId: string,
   fn: (snapshot: UserMapEntrySnapshot) => Promise<T>,
 ): Promise<T> {
-  return withUserMapLock(async () => {
+  const snapshot = await withUserMapLock(async () => {
     const current = readUserMap();
-    const snapshot = deleteEntriesForPolarisUserId(current, polarisUserId);
-    const removedUsernames = Object.keys(snapshot.clerkUsernameEntries);
-    const removedUserIds = Object.keys(snapshot.clerkUserIdEntries);
+    const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
+    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
+    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
     if (removedUsernames.length > 0 || removedUserIds.length > 0) {
       writeUserMap(current);
     }
-    try {
-      return await fn(snapshot);
-    } catch (error) {
+    return removed;
+  });
+  try {
+    return await fn(snapshot);
+  } catch (error) {
+    await withUserMapLock(async () => {
       const rollback = readUserMap();
       rollback.userIds ??= {};
       for (const [clerkUsername, entry] of Object.entries(snapshot.clerkUsernameEntries)) {
@@ -475,9 +478,9 @@ export async function withDeletedUserMapEntries<T>(
         rollback.userIds[clerkUserId] = entry;
       }
       writeUserMap(rollback);
-      throw error;
-    }
-  });
+    });
+    throw error;
+  }
 }
 
 export async function updateUserAccessEntry(
