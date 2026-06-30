@@ -365,7 +365,9 @@ test("registered username-only Clerk user is auto-created in Polaris on return",
     await expectPolarisMapping(username, username);
     await page.goto(`/users/${encodeURIComponent(username)}/workspaces`);
     await expect(
-      page.getByRole("button", { name: /Add workspace|新增工作空间|立即创建/ }),
+      page
+        .getByRole("main")
+        .getByRole("button", { name: /Create now|立即创建/ }),
     ).toBeVisible();
     await expect(
       page.getByText(/No workspaces yet\.|暂无工作空间。/),

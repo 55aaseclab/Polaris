@@ -25,6 +25,10 @@ You can also start it through the `stack` service in `paseo.json`.
 
 Local development requires `.env.dev`.
 
+Live-auth tests use `.env.test`.
+That file should contain the minimal test runtime env, not the local stack env.
+Use `.env.test.example` as the starting template.
+
 The main values are:
 
 ```bash
@@ -38,6 +42,20 @@ VITE_PASEO_APP_BASE_URL=http://HOST_IP:8082
 POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
 VITE_CLERK_SIGN_IN_URL=http://HOST_IP:8000/sign-in/
 VITE_CLERK_SIGN_UP_URL=http://HOST_IP:8000/sign-up/
+```
+
+Minimal local test env:
+
+```bash
+POLARIS_DATA_ROOT=./config
+POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces
+POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
+POLARIS_EXECUTOR_SHARED_SECRET=test-executor-shared-secret
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+VITE_CLERK_DOMAIN=example.clerk.accounts.dev
+VITE_CLERK_SIGN_IN_URL=http://127.0.0.1:8000/sign-in/
+VITE_CLERK_SIGN_UP_URL=http://127.0.0.1:8000/sign-up/
+CLERK_SECRET_KEY=sk_test_xxx
 ```
 
 ## Local CI

@@ -249,6 +249,32 @@
 - 自下而上的吸引力弱于 assistant-first 工具
 - 价值必须通过运行结果证明，而不是靠 demo 体验证明
 
+## 按 business model 区分产品类型
+
+如果只把这些产品都叫做 “AI agent 产品”，判断会变得很乱。
+更有用的分法是同时看三个问题：
+
+- 卖给谁
+- 解决什么组织问题
+- 怎么收费
+
+| 产品类型 | 卖给谁 | 解决什么组织问题 | 怎么收费 |
+| --- | --- | --- | --- |
+| personal agent workbench | 个人开发者，重度 AI 使用者，小团队里的个人贡献者 | 让单个操作者更快使用 agent，减少上下文切换，提升个人 coding 产出 | `per seat`，桌面订阅，高级功能订阅 |
+| local agent runtime / workflow builder | 技术型个人，小团队，自动化搭建者 | 让个人或小团队在本地编排 agent、工具和 workflow，形成可复用自动化 | `per seat`，pro tier，team tier，企业私有部署附加费 |
+| team agent workspace platform | 工程经理，平台团队，IT owner，共享基础设施运营者 | 让团队在受治理的 workspace 模型下完成 onboarding、ownership、credential control、isolation 和 handover continuity | 平台费加 seat 费，`per workspace`，企业合同，托管或支持附加费 |
+| cloud agent infrastructure / managed execution | 需要在共享或云端环境里运行 agent 的公司 | 让组织以隔离、可扩展、可观测的方式运行 agent workload，并控制 backend、runtime 和运维边界 | compute 或 runtime 用量计费，基础设施合同，企业支持 |
+
+这张表的意义不是给每个产品贴唯一标签。
+它的意义是看清楚主要销售逻辑到底是什么。
+
+- `Cortex` 更接近 `personal agent workbench`
+- `Pipora` 更接近 `local agent runtime / workflow builder`
+- `Polaris` 更接近 `team agent workspace platform`
+
+Polaris 还有一部分会向 `cloud agent infrastructure / managed execution`
+延伸，但当前最清晰的主销售逻辑仍然不是卖个人效率，也不是卖单机本地编排。
+
 ## Polaris 的产品定位
 
 Polaris 不应该把自己定位成又一个通用 agent builder。

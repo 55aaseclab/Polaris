@@ -9,7 +9,7 @@
     "check": "tsc -b",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:live-auth": "playwright test e2e/registration.spec.ts"
+    "test:live-auth": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; ./node_modules/.bin/playwright test e2e/registration.spec.ts'"
   },
   "dependencies": {
     "@clerk/localizations": "^4.11.0",

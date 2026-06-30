@@ -8,8 +8,8 @@
     "executor": "pnpm run polaris -- executor",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test --test-concurrency=1 tests/*.test.ts --test-name-pattern='^(?!live auth )'",
-    "test:live-auth": "tsx --test --test-concurrency=1 tests/polaris-portal.test.ts --test-name-pattern='^live auth '",
+    "test": "NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/*.test.ts --test-name-pattern='^(?!live auth )'",
+    "test:live-auth": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-portal.test.ts --test-name-pattern=\"^live auth \"'",
     "test:coverage": "node scripts/test-coverage.mjs"
   },
   "dependencies": {

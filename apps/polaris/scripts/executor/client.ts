@@ -10,6 +10,12 @@ import {
   healthCheckPortalWorkspaceExecutor,
 } from "./operations.js";
 
+const EXECUTOR_HEALTH_TTL_MS = 5000;
+const executorHealthCache = new Map<string, {
+  okUntil: number;
+  inFlight: Promise<void> | null;
+}>();
+
 function executorBaseUrl(): string | null {
   const raw = process.env.POLARIS_EXECUTOR_BASE_URL?.trim();
   return raw ? raw.replace(/\/+$/, "") : null;
@@ -49,6 +55,42 @@ function describeExecutorEndpointFailure(
   return `Polaris executor request failed (${response.status} ${response.statusText}) for ${pathname}: ${responseBody}`;
 }
 
+async function ensureExecutorHealthy(
+  baseUrl: string,
+  headers: HeadersInit,
+): Promise<void> {
+  const cacheKey = JSON.stringify({
+    baseUrl,
+    secret: process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim() ?? "",
+  });
+  const cached = executorHealthCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.okUntil > now) {
+    return;
+  }
+  if (cached?.inFlight) {
+    await cached.inFlight;
+    return;
+  }
+  const inFlight = (async () => {
+    await healthCheckPortalWorkspaceExecutor(baseUrl, headers);
+  })();
+  executorHealthCache.set(cacheKey, {
+    okUntil: 0,
+    inFlight,
+  });
+  try {
+    await inFlight;
+    executorHealthCache.set(cacheKey, {
+      okUntil: Date.now() + EXECUTOR_HEALTH_TTL_MS,
+      inFlight: null,
+    });
+  } catch (error) {
+    executorHealthCache.delete(cacheKey);
+    throw error;
+  }
+}
+
 async function executorRequest<T>(
   pathname: string,
   init: RequestInit,
@@ -60,14 +102,15 @@ async function executorRequest<T>(
     );
   }
   let response: Response;
+  const headers = {
+    ...executorHeaders(),
+    ...(init.headers ?? {}),
+  };
   try {
-    await healthCheckPortalWorkspaceExecutor(baseUrl, executorHeaders());
+    await ensureExecutorHealthy(baseUrl, headers);
     response = await fetch(`${baseUrl}${pathname}`, {
       ...init,
-      headers: {
-        ...executorHeaders(),
-        ...(init.headers ?? {}),
-      },
+      headers,
     });
   } catch (error) {
     const cause = error instanceof Error && error.cause instanceof Error

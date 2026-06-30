@@ -72,6 +72,9 @@ Keep secrets out of the repo.
 Do not rely on repo-local fallback paths for deployed or long-running
 processes.
 
+Local live-auth tests should set `POLARIS_DATA_ROOT=./config` through
+`.env.test`.
+
 For the current status model, executor reachability is no longer optional.
 
 Why:

@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createClerkClient, verifyToken } from "@clerk/backend";
-import { findUserMapEntry, type PolarisPlan, type PolarisRole } from "./user-map.js";
+import {
+  findUserMapEntry,
+  readUserAccessSummary,
+  type PolarisPlan,
+  type PolarisRole,
+} from "./user-map.js";
 
 export interface AuthenticatedPortalSession {
   clerkUserId: string;
@@ -124,9 +129,10 @@ export async function authenticatePortalRequest(
   }
   const directMapping = findUserMapEntry({ clerkUserId });
   if (directMapping) {
+    const accessSummary = readUserAccessSummary(directMapping.polarisUserId);
     return {
       clerkUserId,
-      clerkUsername: null,
+      clerkUsername: accessSummary?.clerkUsernames[0] ?? null,
       polarisUserId: directMapping.polarisUserId,
       role: directMapping.role,
       plan: directMapping.plan,

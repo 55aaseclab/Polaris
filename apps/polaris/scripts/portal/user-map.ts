@@ -28,50 +28,33 @@ interface UserMapFile {
 }
 
 export class UserMapConflictError extends Error {}
-let userMapQueue: Promise<unknown> = Promise.resolve();
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withUserMapProcessQueue<T>(fn: () => Promise<T>): Promise<T> {
-  const previous = userMapQueue.catch(() => undefined);
-  let releaseQueue!: () => void;
-  userMapQueue = new Promise<void>((resolve) => {
-    releaseQueue = resolve;
-  });
-  await previous;
+async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  const timeoutMs = 5000;
+  for (;;) {
+    try {
+      await fs.promises.mkdir(USER_MAP_LOCK_PATH);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error("Timed out waiting for the Polaris user-map lock");
+      }
+      await sleepMs(25);
+    }
+  }
   try {
     return await fn();
   } finally {
-    releaseQueue();
+    await fs.promises.rm(USER_MAP_LOCK_PATH, { recursive: true, force: true });
   }
-}
-
-async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
-  return withUserMapProcessQueue(async () => {
-    const startedAt = Date.now();
-    const timeoutMs = 5000;
-    for (;;) {
-      try {
-        await fs.promises.mkdir(USER_MAP_LOCK_PATH);
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
-          throw error;
-        }
-        if (Date.now() - startedAt >= timeoutMs) {
-          throw new Error("Timed out waiting for the Polaris user-map lock");
-        }
-        await sleepMs(25);
-      }
-    }
-    try {
-      return await fn();
-    } finally {
-      await fs.promises.rm(USER_MAP_LOCK_PATH, { recursive: true, force: true });
-    }
-  });
 }
 
 function normalizeClerkUsername(value: string): string {
