@@ -1,5 +1,5 @@
 import { defineConfig } from "vitepress";
-import { docsVersions } from "./theme/generated/docs-data.ts";
+import { docsDiffs } from "./theme/generated/docs-data.ts";
 
 function titleize(value: string) {
   return value
@@ -18,7 +18,11 @@ function diffFileLabel(filePath: string) {
 
 function buildDiffSidebar() {
   const filePaths = Array.from(
-    new Set(docsVersions.flatMap((version) => version.files.map((file) => file.path))),
+    new Set(
+      docsDiffs
+        .filter((entry) => entry.leftVersion === "0.2.4" && entry.rightVersion === "latest")
+        .map((entry) => entry.path),
+    ),
   ).sort();
 
   const rootItems: Array<{ text: string; link: string }> = [];

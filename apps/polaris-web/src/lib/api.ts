@@ -11,10 +11,30 @@ export interface PortalProfileDetail extends PortalProfileSummary {
   sshComment?: string;
 }
 
+export interface PortalArchivedWorkspaceSummary {
+  archiveId: string;
+  workspaceName: string;
+  archivedAt: string;
+  originalWorkspaceRoot: string;
+  originalPortalStateRoot?: string;
+  workspaceRoot: string;
+  portalStateRoot?: string;
+}
+
 export interface PortalUserMapping {
   polarisUserId: string;
   role: "admin" | "user";
   plan: "free" | "pro";
+}
+
+export interface PortalAdminUserSummary extends PortalProfileSummary {
+  polarisUserId: string;
+  role: "admin" | "user";
+  plan: "free" | "pro";
+  clerkUsernames: string[];
+  clerkUserIds: string[];
+  credentialCount: number;
+  archivedWorkspaceCount: number;
 }
 
 export interface PortalDriverTarget {
@@ -283,6 +303,15 @@ export async function createPortalUser(input: {
   });
 }
 
+export async function deletePortalUser(userId: string): Promise<{
+  deleted: true;
+  userId: string;
+}> {
+  return apiFetch(`/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function resolvePortalUserMapping(
   input: {
     clerkUsername?: string;
@@ -309,6 +338,15 @@ export async function listWorkspaces(userId: string): Promise<PortalWorkspaceSum
     `/users/${encodeURIComponent(userId)}/workspaces`,
   );
   return payload.workspaces;
+}
+
+export async function listArchivedWorkspaces(
+  userId: string,
+): Promise<PortalArchivedWorkspaceSummary[]> {
+  const payload = await apiFetch<{ archivedWorkspaces?: PortalArchivedWorkspaceSummary[] }>(
+    `/users/${encodeURIComponent(userId)}/workspaces`,
+  );
+  return payload.archivedWorkspaces ?? [];
 }
 
 export async function getUserProfile(userId: string): Promise<PortalProfileDetail> {
@@ -516,11 +554,45 @@ export async function switchWorkspaceDriver(
 export async function deleteWorkspace(
   userId: string,
   workspace: string,
-): Promise<{ removed: true }> {
-  return apiFetch<{ removed: true }>(
+): Promise<{
+  archived: true;
+  archiveId: string;
+  archivedAt: string;
+  workspace: string;
+}> {
+  return apiFetch(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export async function listAdminUsers(): Promise<PortalAdminUserSummary[]> {
+  const payload = await apiFetch<{ users: PortalAdminUserSummary[] }>(
+    "/admin/users",
+  );
+  return payload.users;
+}
+
+export async function updateAdminUserAccess(
+  userId: string,
+  patch: {
+    role?: "admin" | "user";
+    plan?: "free" | "pro";
+  },
+): Promise<{
+  polarisUserId: string;
+  role: "admin" | "user";
+  plan: "free" | "pro";
+  clerkUsernames: string[];
+  clerkUserIds: string[];
+}> {
+  return apiFetch(
+    `/admin/users/${encodeURIComponent(userId)}/access`,
+    {
+      method: "POST",
+      body: JSON.stringify(patch),
     },
   );
 }

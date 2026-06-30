@@ -64,6 +64,9 @@ const versions = versionDirs.map((version) => {
 });
 
 function unifiedDiff(leftVersion, rightVersion, filePath, leftContent, rightContent) {
+  if (leftContent === rightContent) {
+    return "";
+  }
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-docs-diff-"));
   const leftRoot = path.join(tempRoot, leftVersion);
   const rightRoot = path.join(tempRoot, rightVersion);
@@ -102,7 +105,7 @@ function unifiedDiff(leftVersion, rightVersion, filePath, leftContent, rightCont
     }
 
     const output = (result.stdout || "").trim();
-    return output || "No textual differences.";
+    return output;
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -138,6 +141,8 @@ for (let leftIndex = 0; leftIndex < versions.length; leftIndex += 1) {
     }
   }
 }
+
+const filteredDiffs = diffs.filter((entry) => entry.unified.trim().length > 0);
 
 function safeSlug(filePath) {
   const withoutExt = filePath.replace(/\.md$/i, "");
@@ -219,9 +224,9 @@ export interface DocsDiffData {
 }
 
 export const docsVersions: DocsVersionData[] = ${JSON.stringify(versions, null, 2)} as const;
-export const docsDiffs: DocsDiffData[] = ${JSON.stringify(diffs, null, 2)} as const;
+export const docsDiffs: DocsDiffData[] = ${JSON.stringify(filteredDiffs, null, 2)} as const;
 `;
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${source}\n`, "utf8");
-writeDiffDocs(diffs);
+writeDiffDocs(filteredDiffs);

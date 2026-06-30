@@ -29,6 +29,7 @@ The main values are:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
+POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
 POLARIS_SERVER_PORT=8787
 POLARIS_WEBPORTAL_PORT=8081
 POLARIS_EXECUTOR_PORT=8788
@@ -72,6 +73,14 @@ The current default is:
 ```bash
 POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
 ```
+
+Optional access bootstrap:
+
+```bash
+POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
+```
+
+Polaris now separates workspace archive from workspace delete.
 
 ## Remote Rollback
 

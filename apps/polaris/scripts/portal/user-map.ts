@@ -13,6 +13,14 @@ export interface PortalUserMapEntry {
   plan: PolarisPlan;
 }
 
+export interface PortalUserAccessSummary {
+  polarisUserId: string;
+  role: PolarisRole;
+  plan: PolarisPlan;
+  clerkUsernames: string[];
+  clerkUserIds: string[];
+}
+
 interface UserMapFile {
   users: Record<string, PortalUserMapEntry>;
   userIds?: Record<string, PortalUserMapEntry>;
@@ -26,6 +34,29 @@ function normalizeClerkUsername(value: string): string {
 
 function normalizeClerkUserId(value: string): string {
   return value.trim();
+}
+
+function bootstrapAdminTokens(): Set<string> {
+  return new Set(
+    String(process.env.POLARIS_BOOTSTRAP_ADMIN_USERS ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function withRoleOverrides(
+  entry: PortalUserMapEntry,
+  identities: string[],
+): PortalUserMapEntry {
+  const overrides = bootstrapAdminTokens();
+  if (identities.some((value) => overrides.has(value.trim().toLowerCase()))) {
+    return {
+      ...entry,
+      role: "admin",
+    };
+  }
+  return entry;
 }
 
 export function readUserMap(): UserMapFile {
@@ -47,14 +78,20 @@ export function findUserMapEntry(input: string | {
   const current = readUserMap();
   if (typeof input === "string") {
     const normalized = normalizeClerkUsername(input);
-    return current.users[normalized] ?? null;
+    const entry = current.users[normalized] ?? null;
+    return entry ? withRoleOverrides(entry, [normalized, entry.polarisUserId]) : null;
   }
   const clerkUserId = normalizeClerkUserId(input.clerkUserId ?? "");
   if (clerkUserId && current.userIds?.[clerkUserId]) {
-    return current.userIds[clerkUserId] ?? null;
+    const entry = current.userIds[clerkUserId] ?? null;
+    return entry ? withRoleOverrides(entry, [clerkUserId, entry.polarisUserId]) : null;
   }
   const clerkUsername = normalizeClerkUsername(input.clerkUsername ?? "");
-  return clerkUsername ? current.users[clerkUsername] ?? null : null;
+  if (!clerkUsername) {
+    return null;
+  }
+  const entry = current.users[clerkUsername] ?? null;
+  return entry ? withRoleOverrides(entry, [clerkUsername, entry.polarisUserId]) : null;
 }
 
 export function findUserMapEntriesForPolarisUserId(
@@ -62,7 +99,59 @@ export function findUserMapEntriesForPolarisUserId(
 ): Array<{ clerkUsername: string; entry: PortalUserMapEntry }> {
   return Object.entries(readUserMap().users)
     .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-    .map(([clerkUsername, entry]) => ({ clerkUsername, entry }));
+    .map(([clerkUsername, entry]) => ({
+      clerkUsername,
+      entry: withRoleOverrides(entry, [clerkUsername, entry.polarisUserId]),
+    }));
+}
+
+export function readUserAccessSummary(
+  polarisUserId: string,
+): PortalUserAccessSummary | null {
+  const current = readUserMap();
+  const usernameEntries = Object.entries(current.users)
+    .filter(([, entry]) => entry.polarisUserId === polarisUserId);
+  const userIdEntries = Object.entries(current.userIds ?? {})
+    .filter(([, entry]) => entry.polarisUserId === polarisUserId);
+  const seed = usernameEntries[0]?.[1] ?? userIdEntries[0]?.[1] ?? null;
+  if (!seed) {
+    const overrides = bootstrapAdminTokens();
+    if (!overrides.has(polarisUserId.trim().toLowerCase())) {
+      return null;
+    }
+    return {
+      polarisUserId,
+      role: "admin",
+      plan: "free",
+      clerkUsernames: [],
+      clerkUserIds: [],
+    };
+  }
+  const effective = withRoleOverrides(seed, [
+    polarisUserId,
+    ...usernameEntries.map(([key]) => key),
+    ...userIdEntries.map(([key]) => key),
+  ]);
+  return {
+    polarisUserId,
+    role: effective.role,
+    plan: effective.plan,
+    clerkUsernames: usernameEntries.map(([clerkUsername]) => clerkUsername).sort(),
+    clerkUserIds: userIdEntries.map(([clerkUserId]) => clerkUserId).sort(),
+  };
+}
+
+export function listUserAccessSummaries(): PortalUserAccessSummary[] {
+  const current = readUserMap();
+  const userIds = new Set<string>([
+    ...Object.values(current.users).map((entry) => entry.polarisUserId),
+    ...Object.values(current.userIds ?? {}).map((entry) => entry.polarisUserId),
+    ...bootstrapAdminTokens(),
+  ]);
+  return Array.from(userIds)
+    .map((polarisUserId) => readUserAccessSummary(polarisUserId))
+    .filter((entry): entry is PortalUserAccessSummary => Boolean(entry))
+    .sort((left, right) => left.polarisUserId.localeCompare(right.polarisUserId));
 }
 
 export function upsertUserMapEntry(
@@ -147,4 +236,45 @@ export function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): str
   }
   writeUserMap(current);
   return removedUsernames;
+}
+
+export function updateUserAccessEntry(
+  polarisUserId: string,
+  patch: Partial<Pick<PortalUserMapEntry, "role" | "plan">>,
+): PortalUserAccessSummary {
+  const current = readUserMap();
+  let touched = false;
+  for (const entry of Object.values(current.users)) {
+    if (entry.polarisUserId !== polarisUserId) {
+      continue;
+    }
+    if (patch.role) {
+      entry.role = patch.role;
+    }
+    if (patch.plan) {
+      entry.plan = patch.plan;
+    }
+    touched = true;
+  }
+  for (const entry of Object.values(current.userIds ?? {})) {
+    if (entry.polarisUserId !== polarisUserId) {
+      continue;
+    }
+    if (patch.role) {
+      entry.role = patch.role;
+    }
+    if (patch.plan) {
+      entry.plan = patch.plan;
+    }
+    touched = true;
+  }
+  if (!touched) {
+    throw new Error(`Polaris user '${polarisUserId}' does not have a Clerk mapping yet`);
+  }
+  writeUserMap(current);
+  const updated = readUserAccessSummary(polarisUserId);
+  if (!updated) {
+    throw new Error(`Polaris user '${polarisUserId}' access could not be reloaded`);
+  }
+  return updated;
 }

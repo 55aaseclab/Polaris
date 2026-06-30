@@ -15,6 +15,7 @@ It is one workspace-oriented command surface that covers:
 - stop
 - restart
 - status
+- archive
 - delete
 
 ## Root Entry
@@ -73,6 +74,18 @@ Current semantics:
 - inspect daemon and service readiness
 - synthesize `status.json`
 
+### Archive
+
+```bash
+pnpm --dir apps/polaris run polaris -- archive <workspaceRef>
+```
+
+Current semantics:
+
+- remove the workspace from the active workspace list
+- preserve the workspace copy under the user archive root
+- preserve workspace-owned saved runtime state under the archive root
+
 ### Delete
 
 ```bash
@@ -84,3 +97,4 @@ Current semantics:
 - remove the workspace saved spec
 - remove the backend realization
 - remove workspace-owned state
+- do not create an archive copy

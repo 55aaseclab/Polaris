@@ -352,7 +352,7 @@ portal create 还有一个很关键但很容易漏掉的前提：
 
 - 创建工作空间时 sidebar 会局部更新
 - 未完成的创建 job 可以恢复
-- 删除工作空间不再整页 reload
+- 归档工作空间不再整页 reload
 - start / stop / switch 后状态会局部刷新
 
 也就是说，portal 当前已经开始把“manager 状态面”当成持续同步的 UI，

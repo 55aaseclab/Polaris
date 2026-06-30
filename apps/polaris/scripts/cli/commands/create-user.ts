@@ -8,6 +8,33 @@ import {
   upsertUserMapUserId,
 } from "../../portal/user-map.js";
 
+function bootstrapAdminTokens(): Set<string> {
+  return new Set(
+    String(process.env.POLARIS_BOOTSTRAP_ADMIN_USERS ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function resolveDefaultRole(args: {
+  userProfileId: string;
+  clerkUsername?: string;
+  clerkUserId?: string;
+  role?: PolarisRole;
+}): PolarisRole {
+  if (args.role) {
+    return args.role;
+  }
+  const overrides = bootstrapAdminTokens();
+  const matches = [
+    args.userProfileId,
+    args.clerkUsername ?? "",
+    args.clerkUserId ?? "",
+  ].some((value) => overrides.has(value.trim().toLowerCase()));
+  return matches ? "admin" : "user";
+}
+
 function parseCreateUserArgs(argv: string[]): {
   userProfileId: string;
   name?: string;
@@ -44,6 +71,12 @@ function parseCreateUserArgs(argv: string[]): {
 
 export async function createUserCommand(argv: string[]): Promise<void> {
   const { userProfileId, name, email, clerkUsername, clerkUserId, role, plan } = parseCreateUserArgs(argv);
+  const resolvedRole = resolveDefaultRole({
+    userProfileId,
+    clerkUsername,
+    clerkUserId,
+    role,
+  });
   const created = scaffoldUserProfileById({
     id: userProfileId,
     ...(name ? { name } : {}),
@@ -53,14 +86,14 @@ export async function createUserCommand(argv: string[]): Promise<void> {
   if (clerkUsername) {
     upsertUserMapEntry(clerkUsername, {
       polarisUserId: created.id,
-      role: role ?? "user",
+      role: resolvedRole,
       plan: plan ?? "free",
     });
   }
   if (clerkUserId) {
     upsertUserMapUserId(clerkUserId, {
       polarisUserId: created.id,
-      role: role ?? "user",
+      role: resolvedRole,
       plan: plan ?? "free",
     });
   }
