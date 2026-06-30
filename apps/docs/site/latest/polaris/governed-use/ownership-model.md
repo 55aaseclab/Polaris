@@ -118,8 +118,14 @@ If user deletion is executed, Polaris currently removes:
 
 - the user profile
 - user credentials and generated material
-- the user's workspace directories
 - the Clerk-to-Polaris mapping
+
+User deletion is now rejected when workspace data still exists under that user.
+
+That includes:
+
+- active workspaces
+- archived workspaces
 
 It does not delete the Clerk platform user object itself.
 
@@ -159,6 +165,11 @@ When a credential is deleted, Polaris removes:
 
 This keeps credential lifecycle aligned with user ownership instead of
 workspace ownership.
+
+The portal no longer returns raw credential file content in preview responses.
+
+Credential file paths can still be listed, but secret material is intentionally
+hidden from browser previews.
 
 ### Default Credential Selection
 
@@ -222,6 +233,7 @@ This model gives teams:
 - less credential sprawl
 - a cleaner separation between login identity and operational identity
 - a better foundation for user-scoped workspace control
+- a safer default for self-hosted user administration
 
 ## Related Docs
 

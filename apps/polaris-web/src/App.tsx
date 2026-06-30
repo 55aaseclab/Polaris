@@ -44,6 +44,7 @@ import {
   listUsers,
   refreshWorkspaceStatus,
   resolvePortalUserMapping,
+  setApiAuthTokenProvider,
   listWorkspaces,
   startWorkspace,
   stopWorkspace,
@@ -726,6 +727,22 @@ function AuthGate(props: { children: ReactNode }) {
     return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
   }
   return <>{props.children}</>;
+}
+
+function ApiAuthBridge() {
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    setApiAuthTokenProvider(async () => {
+      const token = await getToken();
+      return token?.trim() || null;
+    });
+    return () => {
+      setApiAuthTokenProvider(null);
+    };
+  }, [getToken]);
+
+  return null;
 }
 
 function normalizeClerkUsername(value: string | null | undefined): string {
@@ -4113,18 +4130,21 @@ export default function App(props: {
             path="*"
             element={(
               <AuthGate>
-                <Routes>
-                  <Route path="/" element={<OverviewPage />} />
-                  <Route path="/users/:userId/profile" element={<ProfilePage />} />
-                  <Route path="/users/:userId/admin" element={<AdminPage />} />
-                  <Route path="/users/:userId/settings" element={<SettingsPage />} />
-                  <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
-                  <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
-                  <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
-                  <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
-                  <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
-                  <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
-                </Routes>
+                <>
+                  <ApiAuthBridge />
+                  <Routes>
+                    <Route path="/" element={<OverviewPage />} />
+                    <Route path="/users/:userId/profile" element={<ProfilePage />} />
+                    <Route path="/users/:userId/admin" element={<AdminPage />} />
+                    <Route path="/users/:userId/settings" element={<SettingsPage />} />
+                    <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
+                    <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+                    <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+                    <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
+                    <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
+                    <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+                  </Routes>
+                </>
               </AuthGate>
             )}
           />
