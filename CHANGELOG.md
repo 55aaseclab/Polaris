@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-06-30
+
+Hardened Polaris user and workspace control-plane mutation handling around
+workspace lifecycle, portal admin deletion, and scoped workspace operations.
+
+### Added
+
+- Added a dedicated workspace lifecycle lock for provision, switch, start,
+  stop, archive, delete, live credential switching, and workspace agent
+  binding operations.
+- Added regression coverage for same-workspace mutation serialization,
+  user-scoped switch behavior across duplicate workspace names, queued
+  provision protection during user deletion, and lock-consistent delete
+  rollback recovery.
+- Added a frozen `0.2.5` docs snapshot.
+
+### Changed
+
+- Updated workspace create, archive, delete, and executor provision flow to
+  serialize through user and workspace lifecycle locks.
+- Updated portal workspace switch to resolve through explicit user scope.
+- Updated user deletion rollback to snapshot state only after the user lock is
+  held.
+- Updated docs release metadata and changelog baseline to use `0.2.5` as the
+  current release snapshot.
+
 ## [0.2.4] - 2026-06-29
 
 Reorganized Polaris documentation around customer-facing product flows and

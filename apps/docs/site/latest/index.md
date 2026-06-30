@@ -10,7 +10,8 @@ how to operate it, and how to debug it when behavior diverges from expectation.
 
 - `0.2.2`: earlier frozen snapshot
 - `0.2.3`: earlier release snapshot
-- `0.2.4`: current release snapshot
+- `0.2.4`: earlier release snapshot
+- `0.2.5`: current release snapshot
 - `latest`: current maintained docs
 
 ## Reading Order
@@ -26,7 +27,7 @@ If you are new to the repo, read in this order:
 ## Current Docs
 
 - [VERSION.md](./VERSION.md): current docs release metadata
-- [CHANGELOG.md](./CHANGELOG.md): what changed from `0.2.4`
+- [CHANGELOG.md](./CHANGELOG.md): what changed from `0.2.5`
 - [business-model/](./business-model/): market analysis, customer segmentation,
   and Polaris positioning
 - [polaris/what-your-team-gets.md](./polaris/what-your-team-gets.md): customer-facing
