@@ -33,6 +33,7 @@ POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
 POLARIS_SERVER_PORT=8787
 POLARIS_WEBPORTAL_PORT=8081
 POLARIS_EXECUTOR_PORT=8788
+POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 VITE_PASEO_APP_BASE_URL=http://HOST_IP:8082
 POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
 VITE_CLERK_SIGN_IN_URL=http://HOST_IP:8000/sign-in/
@@ -79,6 +80,11 @@ Optional access bootstrap:
 ```bash
 POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
 ```
+
+Executor requirements:
+
+- `POLARIS_EXECUTOR_SHARED_SECRET` is required
+- the executor binds only to `127.0.0.1`
 
 Polaris now separates workspace archive from workspace delete.
 

@@ -22,6 +22,7 @@ import {
 import { parsePortalDriverTarget } from "../core/portal.js";
 
 type JsonObject = Record<string, unknown>;
+const EXECUTOR_LOOPBACK_HOST = "127.0.0.1";
 
 function sendJson(
   res: ServerResponse,
@@ -46,10 +47,19 @@ function readHeader(req: IncomingMessage, name: string): string | null {
 
 function authenticateExecutorRequest(req: IncomingMessage): boolean {
   const expected = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim();
-  if (!expected) {
-    return true;
-  }
   return readHeader(req, "x-polaris-executor-secret") === expected;
+}
+
+function assertExecutorConfiguration(host: string): void {
+  const secret = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim();
+  if (!secret) {
+    throw new Error("POLARIS_EXECUTOR_SHARED_SECRET is required to start the Polaris executor");
+  }
+  if (host !== EXECUTOR_LOOPBACK_HOST) {
+    throw new Error(
+      `Polaris executor must bind to ${EXECUTOR_LOOPBACK_HOST}, received '${host}'`,
+    );
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<JsonObject> {
@@ -82,8 +92,9 @@ function handleError(res: ServerResponse, error: unknown): void {
 
 export function createExecutorServer(
   port = 8788,
-  host = "127.0.0.1",
+  host = EXECUTOR_LOOPBACK_HOST,
 ): Server {
+  assertExecutorConfiguration(host);
   const server = createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/health") {

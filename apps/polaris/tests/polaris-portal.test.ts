@@ -415,20 +415,21 @@ test("portal API serves route-scoped workspaces and credentials without auth", a
     assert.ok(selfPayload.workspaces.some((workspace) => workspace.name === "demo"));
 
     const createResponse = await fetch(
-      `${baseUrl}/api/users/${userId}/credentials/create`,
+      `${baseUrl}/api/users/${userId}/credentials`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          harness: "codex",
           credentialId,
-          kind: "api-key",
           label: "Portal Test Credential",
-          purposes: "agent-auth",
-          content: "{\"token\":\"test\"}\n",
+          providerName: "rightcode",
+          baseUrl: "https://right.codes/codex/v1",
+          apiKey: "test-api-key",
         }),
       },
     );
-    assert.equal(createResponse.status, 200);
+    assert.equal(createResponse.status, 201);
     const created = await createResponse.json() as { id: string };
     assert.equal(created.id, credentialId);
 
@@ -442,7 +443,7 @@ test("portal API serves route-scoped workspaces and credentials without auth", a
   fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
     force: true,
   });
-  fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "generated", credentialId), {
+  fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId), {
     recursive: true,
     force: true,
   });
@@ -503,27 +504,28 @@ test("portal API previews credential asset content", async () => {
   try {
     await withPortalServer(async (baseUrl) => {
       const createResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials/create`,
+        `${baseUrl}/api/users/${userId}/credentials`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            harness: "codex",
             credentialId,
-            kind: "api-key",
             label: "Portal Preview Credential",
-            purposes: "agent-auth",
-            content: "{\"token\":\"preview-test\"}\n",
+            providerName: "rightcode",
+            baseUrl: "https://right.codes/codex/v1",
+            apiKey: "preview-test",
           }),
         },
       );
-      assert.equal(createResponse.status, 200);
+      assert.equal(createResponse.status, 201);
 
       const previewResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials/preview?path=${encodeURIComponent(`credentials/generated/${credentialId}/auth.json`)}`,
+        `${baseUrl}/api/users/${userId}/credentials/preview?path=${encodeURIComponent(`credentials/codex/${credentialId}/auth.json`)}`,
       );
       assert.equal(previewResponse.status, 200);
       const preview = await previewResponse.json() as { path: string; content: string; truncated: boolean };
-      assert.equal(preview.path, `credentials/generated/${credentialId}/auth.json`);
+      assert.equal(preview.path, `credentials/codex/${credentialId}/auth.json`);
       assert.equal(preview.content, "[credential preview hidden]");
       assert.equal(preview.truncated, false);
     });
@@ -531,7 +533,7 @@ test("portal API previews credential asset content", async () => {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "generated", credentialId), {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId), {
       recursive: true,
       force: true,
     });
