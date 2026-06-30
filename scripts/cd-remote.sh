@@ -10,7 +10,7 @@ REMOTE_HOST="$1"
 REMOTE_APP_DIR="${2:-/srv/polaris/app}"
 REMOTE_ENV_FILE="${3:-/etc/polaris/polaris.env}"
 REMOTE_ACTIVE_COLOR_FILE="/etc/polaris/active-color"
-REMOTE_UPSTREAM_FILE="/etc/nginx/conf.d/polaris-gateway-upstream.conf"
+REMOTE_UPSTREAM_FILE="/etc/nginx/snippets/polaris-gateway-upstream.conf"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,7 +31,11 @@ rsync -az --delete \
   --exclude ".venv" \
   --exclude ".cert" \
   --exclude ".env.dev" \
+  --exclude ".env.test" \
   --exclude ".env.prod" \
+  --exclude "test-results" \
+  --exclude "config/exports" \
+  --exclude "config/generated" \
   --exclude "config/users" \
   --exclude "config/state" \
   -e "${RSYNC_RSH}" \

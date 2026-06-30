@@ -26,7 +26,7 @@ Typical remote layout:
 - data dir: `/srv/polaris/data`
 - env file: `/etc/polaris/polaris.env`
 - active color file: `/etc/polaris/active-color`
-- nginx upstream file: `/etc/nginx/conf.d/polaris-gateway-upstream.conf`
+- nginx upstream file: `/etc/nginx/snippets/polaris-gateway-upstream.conf`
 
 ## Local CI
 
@@ -54,6 +54,16 @@ Expected installed packages:
 - `git`
 - Node.js 22
 - `pnpm`
+
+Provision also checks the host nginx gateway shape.
+
+It expects the Polaris vhost to:
+
+- include `/etc/nginx/snippets/polaris-gateway-upstream.conf`
+- forward traffic with `proxy_pass $polaris_upstream;`
+
+If that wiring is missing, provision exits with the exact nginx follow-up steps
+instead of pretending the machine is ready.
 
 ## Environment
 

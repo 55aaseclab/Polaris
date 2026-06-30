@@ -4,7 +4,7 @@ set -euo pipefail
 ENV_FILE="${1:-/etc/polaris/polaris.env}"
 TARGET_COLOR="${2:-}"
 ACTIVE_COLOR_FILE="${3:-/etc/polaris/active-color}"
-UPSTREAM_FILE="${4:-/etc/nginx/conf.d/polaris-gateway-upstream.conf}"
+UPSTREAM_FILE="${4:-/etc/nginx/snippets/polaris-gateway-upstream.conf}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

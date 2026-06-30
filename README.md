@@ -75,7 +75,8 @@ Default remote paths:
 - app dir: `/srv/polaris/app`
 - data dir: `/srv/polaris/data`
 - env file: `/etc/polaris/polaris.env`
-- backup dir: `/home/debian/jianxiaoyi/data/polaris/backups`
+- active color file: `/etc/polaris/active-color`
+- nginx upstream file: `/etc/nginx/snippets/polaris-gateway-upstream.conf`
 
 ## Remote Deploy
 

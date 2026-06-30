@@ -3,7 +3,7 @@ set -euo pipefail
 
 ENV_FILE="${1:-/etc/polaris/polaris.env}"
 ACTIVE_COLOR_FILE="${2:-/etc/polaris/active-color}"
-UPSTREAM_FILE="${3:-/etc/nginx/conf.d/polaris-gateway-upstream.conf}"
+UPSTREAM_FILE="${3:-/etc/nginx/snippets/polaris-gateway-upstream.conf}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/deploy/docker-compose.polaris-bluegreen.yml"
