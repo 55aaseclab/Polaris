@@ -40,7 +40,6 @@ import {
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
-  upsertPortalCredential,
   createPortalUser,
   updatePortalUserAccess,
 } from "./service.js";
@@ -277,43 +276,6 @@ async function handleWorkspacePaseoUnbind(
     driver,
   });
   sendJson(res, 200, result);
-}
-
-async function handleCredentialUpsert(
-  req: IncomingMessage,
-  res: ServerResponse,
-  userId: string,
-): Promise<void> {
-  const body = await readBody(req);
-  const id = body.credentialId?.trim() || body.id?.trim();
-  const kind = body.kind?.trim();
-  const label = body.label?.trim() || id;
-  const purposes = (body.purposes ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const sourcePath = body.sourcePath?.trim() || `credentials/generated/${id}/auth.json`;
-  const content = body.content ?? "{}\n";
-  if (!id || !kind || purposes.length === 0) {
-    badRequest(res, "credentialId, kind, and purposes are required");
-    return;
-  }
-  const saved = upsertPortalCredential(userId, {
-    id,
-    kind: kind as never,
-    label,
-    purposes,
-    files: [
-      {
-        key: body.fileKey?.trim() || "auth.json",
-        sourcePath,
-        content,
-        ...(body.mountPath?.trim() ? { mountPath: body.mountPath.trim() } : {}),
-      },
-    ],
-    ...(body.status?.trim() ? { status: body.status.trim() } : {}),
-  });
-  sendJson(res, 200, saved);
 }
 
 async function handleCredentialCreate(
@@ -669,10 +631,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           sendJson(res, 200, readUserPortalCredentialPreview(routeUserId, credentialPath));
-          return;
-        }
-        if (segments[3] === "credentials" && segments[4] === "create" && req.method === "POST") {
-          await handleCredentialUpsert(req, res, routeUserId);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "GET") {

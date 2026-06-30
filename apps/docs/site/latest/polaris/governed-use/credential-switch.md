@@ -97,6 +97,14 @@ Current semantics:
 The portal also exposes runtime credential switch behavior as part of workspace
 operation.
 
+The portal does not expose a raw file-write credential API anymore.
+
+That means:
+
+- users create supported credential types through typed credential actions
+- credential file paths can still be listed
+- credential preview responses do not return raw secret content
+
 ## Why This Matters
 
 This model gives teams:

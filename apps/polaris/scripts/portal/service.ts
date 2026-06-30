@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-import yaml from "js-yaml";
 import {
   activateManagedCredential,
   createManagedHarnessCredential,
@@ -52,9 +49,6 @@ import {
   switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
   unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
-import { polarisUsersRoot } from "../utils/paths.js";
-
-const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
 function rootKey(userId: string, workspace: string): string {
@@ -226,74 +220,6 @@ export async function activatePortalCredential(
   const summary = listPortalCredentials(userId).find((credential) => credential.id === activated.id);
   if (!summary) {
     throw new Error(`Credential '${activated.id}' could not be loaded after activation`);
-  }
-  return summary;
-}
-
-export function upsertPortalCredential(
-  userId: string,
-  credential: {
-    id: string;
-    kind: PortalCredentialSummary["kind"];
-    label: string;
-    purposes: string[];
-    status?: string;
-    files: Array<{
-      key: string;
-      sourcePath: string;
-      content: string;
-      mountPath?: string;
-    }>;
-  },
-): PortalCredentialSummary {
-  const credentialsRoot = path.join(
-    USER_ROOT,
-    userId,
-    "credentials",
-  );
-  fs.mkdirSync(credentialsRoot, { recursive: true });
-  for (const file of credential.files) {
-    const absolute = path.join(
-      USER_ROOT,
-      userId,
-      file.sourcePath,
-    );
-    fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    fs.writeFileSync(absolute, file.content, "utf8");
-  }
-  const document = {
-    id: credential.id,
-    userId,
-    kind: credential.kind,
-    label: credential.label,
-    purposes: credential.purposes,
-    materialRef: {
-      type: "file",
-      key: credential.id,
-      files: credential.files.map((file) => ({
-        key: file.key,
-        source_path: file.sourcePath,
-        ...(file.mountPath ? { mount_path: file.mountPath } : {}),
-      })),
-    },
-    metadata: {
-      source: "portal",
-    },
-    status: credential.status ?? "ready",
-  };
-  const outputPath = path.join(credentialsRoot, `${credential.id}.yaml`);
-  fs.writeFileSync(
-    outputPath,
-    `${yaml.dump(document, { lineWidth: 120, noRefs: true })}`,
-    "utf8",
-  );
-  const summary = listPortalCredentials(userId).find(
-    (entry) => entry.id === credential.id,
-  );
-  if (!summary) {
-    throw new Error(
-      `Credential '${credential.id}' could not be reloaded after upsert`,
-    );
   }
   return summary;
 }
