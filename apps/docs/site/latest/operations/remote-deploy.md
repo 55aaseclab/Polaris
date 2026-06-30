@@ -68,6 +68,10 @@ The host env file should define at least:
 
 Keep secrets out of the repo.
 
+`POLARIS_DATA_ROOT` is mandatory.
+Do not rely on repo-local fallback paths for deployed or long-running
+processes.
+
 For the current status model, executor reachability is no longer optional.
 
 Why:
@@ -75,6 +79,11 @@ Why:
 - runtime status observer reports status patches back to the executor
 - container-to-host resolution is part of normal status freshness
 - if this path is broken, the UI may look stale even when the runtime is fine
+
+Polaris should also fail clearly when `POLARIS_EXECUTOR_BASE_URL` points to the
+wrong service.
+Executor failures are reported as executor failures.
+They are not silently re-routed into in-process fallback behavior.
 
 ## Persistent Data
 

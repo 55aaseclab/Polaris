@@ -28,32 +28,50 @@ interface UserMapFile {
 }
 
 export class UserMapConflictError extends Error {}
-function sleepMs(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+let userMapQueue: Promise<unknown> = Promise.resolve();
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withUserMapLock<T>(fn: () => T): T {
-  const startedAt = Date.now();
-  const timeoutMs = 5000;
-  while (true) {
-    try {
-      fs.mkdirSync(USER_MAP_LOCK_PATH);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
-        throw error;
-      }
-      if (Date.now() - startedAt >= timeoutMs) {
-        throw new Error("Timed out waiting for the Polaris user-map lock");
-      }
-      sleepMs(25);
-    }
-  }
+async function withUserMapProcessQueue<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = userMapQueue.catch(() => undefined);
+  let releaseQueue!: () => void;
+  userMapQueue = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  await previous;
   try {
-    return fn();
+    return await fn();
   } finally {
-    fs.rmSync(USER_MAP_LOCK_PATH, { recursive: true, force: true });
+    releaseQueue();
   }
+}
+
+async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
+  return withUserMapProcessQueue(async () => {
+    const startedAt = Date.now();
+    const timeoutMs = 5000;
+    for (;;) {
+      try {
+        await fs.promises.mkdir(USER_MAP_LOCK_PATH);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+          throw error;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          throw new Error("Timed out waiting for the Polaris user-map lock");
+        }
+        await sleepMs(25);
+      }
+    }
+    try {
+      return await fn();
+    } finally {
+      await fs.promises.rm(USER_MAP_LOCK_PATH, { recursive: true, force: true });
+    }
+  });
 }
 
 function normalizeClerkUsername(value: string): string {
@@ -189,15 +207,15 @@ export function listUserAccessSummaries(): PortalUserAccessSummary[] {
     .sort((left, right) => left.polarisUserId.localeCompare(right.polarisUserId));
 }
 
-export function upsertUserMapEntry(
+export async function upsertUserMapEntry(
   clerkUsername: string,
   entry: PortalUserMapEntry,
-): PortalUserMapEntry {
+): Promise<PortalUserMapEntry> {
   const normalized = normalizeClerkUsername(clerkUsername);
   if (!normalized) {
     throw new Error("Clerk username is required");
   }
-  return withUserMapLock(() => {
+  return withUserMapLock(async () => {
     const current = readUserMap();
     const existing = current.users[normalized];
     if (existing && existing.polarisUserId !== entry.polarisUserId) {
@@ -215,15 +233,15 @@ export function upsertUserMapEntry(
   });
 }
 
-export function upsertUserMapUserId(
+export async function upsertUserMapUserId(
   clerkUserId: string,
   entry: PortalUserMapEntry,
-): PortalUserMapEntry {
+): Promise<PortalUserMapEntry> {
   const normalized = normalizeClerkUserId(clerkUserId);
   if (!normalized) {
     throw new Error("Clerk user id is required");
   }
-  return withUserMapLock(() => {
+  return withUserMapLock(async () => {
     const current = readUserMap();
     current.userIds ??= {};
     const existing = current.userIds[normalized];
@@ -242,12 +260,12 @@ export function upsertUserMapUserId(
   });
 }
 
-export function deleteUserMapEntry(clerkUsername: string): boolean {
+export async function deleteUserMapEntry(clerkUsername: string): Promise<boolean> {
   const normalized = normalizeClerkUsername(clerkUsername);
   if (!normalized) {
     return false;
   }
-  return withUserMapLock(() => {
+  return withUserMapLock(async () => {
     const current = readUserMap();
     if (!current.users[normalized]) {
       return false;
@@ -258,8 +276,8 @@ export function deleteUserMapEntry(clerkUsername: string): boolean {
   });
 }
 
-export function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): string[] {
-  return withUserMapLock(() => {
+export async function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): Promise<string[]> {
+  return withUserMapLock(async () => {
     const current = readUserMap();
     const removedUsernames = Object.entries(current.users)
       .filter(([, entry]) => entry.polarisUserId === polarisUserId)
@@ -281,11 +299,11 @@ export function deleteUserMapEntriesForPolarisUserId(polarisUserId: string): str
   });
 }
 
-export function updateUserAccessEntry(
+export async function updateUserAccessEntry(
   polarisUserId: string,
   patch: Partial<Pick<PortalUserMapEntry, "role" | "plan">>,
-): PortalUserAccessSummary {
-  withUserMapLock(() => {
+): Promise<PortalUserAccessSummary> {
+  await withUserMapLock(async () => {
     const current = readUserMap();
     let touched = false;
     for (const entry of Object.values(current.users)) {

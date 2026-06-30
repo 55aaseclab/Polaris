@@ -84,14 +84,14 @@ export async function createUserCommand(argv: string[]): Promise<void> {
   });
   const defaultCredentials = ensureRequiredProfileCredentials(created.id);
   if (clerkUsername) {
-    upsertUserMapEntry(clerkUsername, {
+    await upsertUserMapEntry(clerkUsername, {
       polarisUserId: created.id,
       role: resolvedRole,
       plan: plan ?? "free",
     });
   }
   if (clerkUserId) {
-    upsertUserMapUserId(clerkUserId, {
+    await upsertUserMapUserId(clerkUserId, {
       polarisUserId: created.id,
       role: resolvedRole,
       plan: plan ?? "free",
