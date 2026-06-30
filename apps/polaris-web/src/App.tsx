@@ -31,12 +31,15 @@ import {
   createCredential,
   createWorkspace,
   createPortalUser,
+  deletePortalUser,
   deleteCredential,
   deleteWorkspace,
   getCredentialCatalog,
   getCredentialPreview,
   getWorkspaceAssetPreview,
   getWorkspaceDetail,
+  listAdminUsers,
+  listArchivedWorkspaces,
   listCredentials,
   listUsers,
   refreshWorkspaceStatus,
@@ -46,6 +49,9 @@ import {
   stopWorkspace,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
+  updateAdminUserAccess,
+  type PortalAdminUserSummary,
+  type PortalArchivedWorkspaceSummary,
   type ManagedHarness,
   type PortalCredentialCatalog,
   type PortalCredentialSummary,
@@ -146,7 +152,7 @@ const COPY: Record<Language, Record<string, string>> = {
   en: {
     app_name: "Polaris",
     select_user: "Select a user",
-    switch_user: "Switch user",
+    manage_users: "Manage users",
     switch_workspace: "Select workspace",
     workspaces: "Workspaces",
     add_workspace: "Add workspace",
@@ -171,9 +177,9 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_workspace_action: "Switch driver",
     start_workspace: "Start workspace",
     stop_workspace: "Stop workspace",
-    remove_workspace: "Delete workspace",
-    remove_workspace_confirm_title: "Delete workspace?",
-    remove_workspace_confirm_description: "This removes the workspace definition and its saved runtime data. Running workspaces must be stopped before deletion.",
+    remove_workspace: "Archive workspace",
+    remove_workspace_confirm_title: "Archive workspace?",
+    remove_workspace_confirm_description: "This moves the workspace into the user archive and removes it from the active list. Running workspaces must be stopped before archiving.",
     deleting: "Deleting...",
     starting: "Starting...",
     stopping: "Stopping...",
@@ -249,11 +255,29 @@ const COPY: Record<Language, Record<string, string>> = {
     user_profile: "User profile",
     user_profile_desc: "Edit the active user information.",
     administration: "Administration",
-    administration_desc: "Switch users and manage portal-level actions.",
+    administration_desc: "Manage portal users and access.",
     settings_title: "Settings",
     settings_desc: "Choose the language used across the portal.",
     danger_zone: "Danger zone",
-    workspace_danger_zone_desc: "Stop or delete this workspace.",
+    workspace_danger_zone_desc: "Stop or archive this workspace.",
+    archived_workspaces: "Archived workspaces",
+    no_archived_workspaces: "No archived workspaces",
+    admin_users_title: "Portal users",
+    admin_users_desc: "Review users, scope ownership, and manage portal access.",
+    admin_user_role: "Role",
+    admin_user_plan: "Plan",
+    admin_user_credentials: "Credentials",
+    admin_user_archives: "Archived",
+    admin_user_mappings: "Mappings",
+    admin_open_scope: "Open scope",
+    admin_promote: "Promote to admin",
+    admin_demote: "Set as user",
+    admin_saving: "Saving...",
+    admin_no_mapping: "No Clerk mapping",
+    admin_delete_user: "Delete user",
+    admin_delete_user_confirm_title: "Delete user?",
+    admin_delete_user_confirm_description: "This removes the user profile, credentials, mappings, and all workspace state under that user.",
+    admin_deleting: "Deleting...",
     paseo_credential: "Workspace credential override",
     paseo_credential_desc: "Optionally apply a workspace-specific agent-auth credential for this driver.",
     loading_paseo_credentials: "Loading agent credentials...",
@@ -275,7 +299,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ssh_comment: "SSH comment",
     user_id: "User id",
     ssh_mode: "SSH mode",
-    tracked_workspaces: "Tracked workspaces",
+    tracked_workspaces: "Active",
     purposes: "Purposes",
     workspace_example: "my-workspace",
     select_driver: "Select driver",
@@ -376,7 +400,7 @@ const COPY: Record<Language, Record<string, string>> = {
   zh: {
     app_name: "Polaris",
     select_user: "选择用户",
-    switch_user: "切换用户",
+    manage_users: "管理用户",
     switch_workspace: "选择工作空间",
     workspaces: "工作空间",
     add_workspace: "新增工作空间",
@@ -401,9 +425,9 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_workspace_action: "切换驱动",
     start_workspace: "启动工作空间",
     stop_workspace: "停止工作空间",
-    remove_workspace: "删除工作空间",
-    remove_workspace_confirm_title: "删除这个工作空间？",
-    remove_workspace_confirm_description: "这会删除工作空间定义及其已保存的运行时数据。运行中的工作空间必须先停止，才能删除。",
+    remove_workspace: "归档工作空间",
+    remove_workspace_confirm_title: "归档这个工作空间？",
+    remove_workspace_confirm_description: "这会把工作空间移入用户归档区，并从当前列表中移除。运行中的工作空间必须先停止，才能归档。",
     deleting: "删除中…",
     starting: "启动中…",
     stopping: "停止中…",
@@ -479,11 +503,29 @@ const COPY: Record<Language, Record<string, string>> = {
     user_profile: "用户资料",
     user_profile_desc: "编辑当前用户信息。",
     administration: "管理",
-    administration_desc: "切换用户并管理门户级操作。",
+    administration_desc: "管理门户用户和访问权限。",
     settings_title: "设置",
     settings_desc: "选择整个门户使用的语言。",
     danger_zone: "危险操作",
-    workspace_danger_zone_desc: "停止或删除这个工作空间。",
+    workspace_danger_zone_desc: "停止或归档这个工作空间。",
+    archived_workspaces: "已归档工作空间",
+    no_archived_workspaces: "没有已归档工作空间",
+    admin_users_title: "门户用户",
+    admin_users_desc: "查看用户、归属范围和门户访问权限。",
+    admin_user_role: "角色",
+    admin_user_plan: "套餐",
+    admin_user_credentials: "凭证",
+    admin_user_archives: "归档",
+    admin_user_mappings: "映射",
+    admin_open_scope: "打开用户范围",
+    admin_promote: "设为管理员",
+    admin_demote: "设为普通用户",
+    admin_saving: "保存中…",
+    admin_no_mapping: "还没有 Clerk 映射",
+    admin_delete_user: "删除用户",
+    admin_delete_user_confirm_title: "删除这个用户？",
+    admin_delete_user_confirm_description: "这会删除该用户的资料、凭证、映射，以及该用户下的全部工作空间状态。",
+    admin_deleting: "删除中…",
     paseo_credential: "工作空间凭证覆盖",
     paseo_credential_desc: "可选地为当前 driver 应用一个工作空间级 agent-auth 凭证。",
     loading_paseo_credentials: "正在加载 agent 凭证…",
@@ -505,7 +547,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ssh_comment: "SSH 注释",
     user_id: "用户 ID",
     ssh_mode: "SSH 模式",
-    tracked_workspaces: "已跟踪工作空间",
+    tracked_workspaces: "活跃",
     purposes: "用途",
     workspace_example: "my-workspace",
     select_driver: "选择驱动",
@@ -1654,7 +1696,7 @@ function PortalShellLayout(props: {
     .trim()
     .charAt(0)
     .toUpperCase();
-  const activeUserName = activeUser?.name || activeUser?.id || t("switch_user");
+  const activeUserName = activeUser?.name || activeUser?.id || t("manage_users");
   const createWorkspaceCancelEnabled =
     creatingWorkspace
     && createWorkspaceStatus === "queued"
@@ -1720,7 +1762,9 @@ function PortalShellLayout(props: {
       : isWorkspaceSection
         ? t("workspace_header_title")
         : t("app_name");
-  const currentPaneSubtitle = location.pathname.includes("/credentials")
+  const currentPaneSubtitle = location.pathname.includes("/admin")
+    ? t("admin_users_desc")
+    : location.pathname.includes("/credentials")
     ? t("credentials_header_desc")
     : isWorkspaceSection
       ? (currentWorkspaceName || t("workspace_header_empty"))
@@ -1816,7 +1860,7 @@ function PortalShellLayout(props: {
                     <SidebarMenuButton asChild isActive={location.pathname.includes("/admin")}>
                       <Link to={`/users/${encodeURIComponent(activeUser.id)}/admin`}>
                         <CircleUser />
-                        <span>{t("switch_user")}</span>
+                        <span>{t("manage_users")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -2248,6 +2292,13 @@ function WorkspaceIndexContent(props: {
 }) {
   const { t } = useLanguage();
   const { workspaces, workspacesLoading, workspacesError } = usePortalShell();
+  const {
+    data: archivedWorkspaces,
+    error: archivedWorkspacesError,
+  } = useAsyncValue(
+    () => listArchivedWorkspaces(props.userId),
+    [props.userId],
+  );
 
   if (workspacesLoading) {
     return (
@@ -2275,15 +2326,47 @@ function WorkspaceIndexContent(props: {
   }
 
   return (
-    <WorkspaceEmptyState
-      title={t("workspace_empty_title")}
-      descriptionLines={[
-        t("workspace_empty_description_line_1"),
-        t("workspace_empty_description_line_2"),
-        t("workspace_empty_description_line_3"),
-      ]}
-      onOpenCredentials={props.onOpenCredentials}
-    />
+    <div className="grid gap-6">
+      <WorkspaceEmptyState
+        title={t("workspace_empty_title")}
+        descriptionLines={[
+          t("workspace_empty_description_line_1"),
+          t("workspace_empty_description_line_2"),
+          t("workspace_empty_description_line_3"),
+        ]}
+        onOpenCredentials={props.onOpenCredentials}
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("archived_workspaces")}</CardTitle>
+          <CardDescription>
+            {archivedWorkspacesError
+              ? archivedWorkspacesError
+              : ((archivedWorkspaces?.length ?? 0) > 0
+                ? `${archivedWorkspaces?.length ?? 0}`
+                : t("no_archived_workspaces"))}
+          </CardDescription>
+        </CardHeader>
+        {(archivedWorkspaces?.length ?? 0) > 0 ? (
+          <CardContent className="grid gap-3">
+            {archivedWorkspaces?.map((entry) => (
+              <div
+                key={entry.archiveId}
+                className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/60 p-3"
+              >
+                <div className="grid gap-1">
+                  <div className="font-medium">{entry.workspaceName}</div>
+                  <div className="text-xs text-muted-foreground">{entry.archiveId}</div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {entry.archivedAt || t("unknown")}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        ) : null}
+      </Card>
+    </div>
   );
 }
 
@@ -2348,47 +2431,211 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "" } = useParams();
   const navigate = useNavigate();
-  const { data: users } = useAsyncValue(listUsers, []);
-  const { mapping } = useCurrentUserMapping();
+  const [reloadKey, setReloadKey] = useState(0);
+  const { data: users } = useAsyncValue(listUsers, [reloadKey]);
+  const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
+    listAdminUsers,
+    [reloadKey],
+  );
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [adminActionError, setAdminActionError] = useState<string | null>(null);
+  const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
 
-  if (mapping?.role !== "admin") {
+  if (mappingLoading) {
+    return (
+      <PortalShell users={users ?? []}>
+        <div className="grid w-full gap-6">
+          <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
+        </div>
+      </PortalShell>
+    );
+  }
+
+  if (mappingError) {
+    return (
+      <PortalShell users={users ?? []}>
+        <div className="grid w-full gap-6">
+          <p className="text-sm text-destructive">{mappingError}</p>
+        </div>
+      </PortalShell>
+    );
+  }
+
+  if (!mapping || mapping.role !== "admin") {
     return <Navigate to={`/users/${encodeURIComponent(userId)}/workspaces`} replace />;
+  }
+
+  async function handleRoleUpdate(
+    targetUserId: string,
+    role: "admin" | "user",
+  ): Promise<void> {
+    if (savingUserId) {
+      return;
+    }
+    setSavingUserId(targetUserId);
+    setAdminActionError(null);
+    try {
+      await updateAdminUserAccess(targetUserId, { role });
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setAdminActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  async function handleDeleteUser(targetUserId: string): Promise<void> {
+    if (savingUserId) {
+      return;
+    }
+    setSavingUserId(targetUserId);
+    setAdminActionError(null);
+    try {
+      await deletePortalUser(targetUserId);
+      const nextUsers = (users ?? []).filter((entry) => entry.id !== targetUserId);
+      setReloadKey((current) => current + 1);
+      if (targetUserId === userId) {
+        const fallbackUserId = nextUsers[0]?.id;
+        if (fallbackUserId) {
+          navigate(`/users/${encodeURIComponent(fallbackUserId)}/admin`, { replace: true });
+        } else {
+          navigate("/", { replace: true });
+        }
+      }
+    } catch (error) {
+      setAdminActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingUserId(null);
+    }
   }
 
   return (
     <PortalShell users={users ?? []}>
       <div className="grid w-full gap-6">
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{t("administration")}</div>
-          <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
-        </div>
-        <Separator />
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="grid gap-4">
           <div className="min-w-0">
-            <div className="text-sm font-medium">{t("switch_user")}</div>
-            <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("manage_users")}</div>
+              <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
+            </div>
           </div>
-          <div className="w-full min-w-0 sm:w-[18rem]">
-            <Select
-              value={userId}
-              onValueChange={(value) => {
-                if (!value) {
-                  return;
-                }
-                navigate(`/users/${encodeURIComponent(value)}/admin`);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t("switch_user")} />
-              </SelectTrigger>
-              <SelectContent>
-                {(users ?? []).map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {user.name || user.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {adminUsersLoading ? (
+            <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
+          ) : null}
+          {adminUsersError ? (
+            <p className="text-sm text-destructive">{adminUsersError}</p>
+          ) : null}
+          {adminActionError ? (
+            <p className="text-sm text-destructive">{adminActionError}</p>
+          ) : null}
+          <div className="overflow-x-auto rounded-[1.25rem] border border-border bg-white">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-border/60 bg-muted/30">
+                <tr>
+                  <th className="px-4 py-3 font-medium">{t("users")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin_user_role")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin_user_mappings")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin_user_credentials")}</th>
+                  <th className="px-4 py-3 font-medium">{t("tracked_workspaces")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin_user_archives")}</th>
+                  <th className="px-4 py-3 font-medium text-right">{t("asset_action")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {(adminUsers ?? []).map((entry) => {
+                  const isSaving = savingUserId === entry.id;
+                  const mappingSummary = [
+                    ...entry.clerkUsernames,
+                    ...entry.clerkUserIds,
+                  ];
+                  return (
+                    <tr key={entry.id} className="align-top">
+                      <td className="px-4 py-4">
+                        <div className="grid gap-1">
+                          <span className="font-medium">{entry.name || entry.id}</span>
+                          <span className="text-xs text-muted-foreground">{entry.id}</span>
+                          <span className="text-xs text-muted-foreground">{entry.email || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Badge variant={entry.role === "admin" ? "default" : "secondary"}>
+                          {entry.role}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {mappingSummary.length > 0 ? mappingSummary.join(", ") : t("admin_no_mapping")}
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {entry.credentialCount}
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {entry.workspaces.length}
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {entry.archivedWorkspaceCount}
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              navigate(`/users/${encodeURIComponent(entry.id)}/workspaces`)}
+                          >
+                            {t("admin_open_scope")}
+                          </Button>
+                          <Button
+                            variant={entry.role === "admin" ? "secondary" : "outline"}
+                            size="sm"
+                            disabled={isSaving || mappingSummary.length === 0}
+                            onClick={() =>
+                              void handleRoleUpdate(
+                                entry.id,
+                                entry.role === "admin" ? "user" : "admin",
+                              )}
+                          >
+                            {isSaving
+                              ? t("admin_saving")
+                              : entry.role === "admin"
+                                ? t("admin_demote")
+                                : t("admin_promote")}
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={isSaving}
+                              >
+                                {isSaving ? t("admin_deleting") : t("admin_delete_user")}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  {t("admin_delete_user_confirm_title")}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {t("admin_delete_user_confirm_description")}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => void handleDeleteUser(entry.id)}
+                                >
+                                  {isSaving ? t("admin_deleting") : t("admin_delete_user")}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

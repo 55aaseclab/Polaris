@@ -14,6 +14,7 @@ import {
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
+  listArchivedWorkspaces,
   listOwnedWorkspaces,
   readWorkspaceProvisionProgress,
   readWorkspaceStatus,
@@ -102,23 +103,6 @@ async function withPortalServer(
   } finally {
     server.close();
     await once(server, "close");
-  }
-}
-
-async function withPortalAuthEnv(
-  secret: string,
-  fn: () => Promise<void>,
-): Promise<void> {
-  const previous = process.env.POLARIS_AUTH_SHARED_SECRET;
-  process.env.POLARIS_AUTH_SHARED_SECRET = secret;
-  try {
-    await fn();
-  } finally {
-    if (previous === undefined) {
-      delete process.env.POLARIS_AUTH_SHARED_SECRET;
-    } else {
-      process.env.POLARIS_AUTH_SHARED_SECRET = previous;
-    }
   }
 }
 
@@ -1160,6 +1144,57 @@ test("portal API creates the default RightCode codex credential when configured"
   }
 });
 
+test("portal API deletes a user profile, user root, and Clerk mapping", async () => {
+  const userProfileId = uniqueName("portal-delete-user");
+  const clerkUsername = uniqueName("clerk-delete-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+
+  try {
+    await createUserCommand([
+      userProfileId,
+      "--name",
+      "Portal Delete User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+      "--clerk",
+      clerkUsername,
+    ]);
+
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userProfileId)}`,
+        { method: "DELETE" },
+      );
+      assert.equal(response.status, 200);
+      const payload = await response.json() as {
+        deleted: true;
+        userId: string;
+      };
+      assert.equal(payload.deleted, true);
+      assert.equal(payload.userId, userProfileId);
+    });
+
+    assert.equal(fs.existsSync(profilePath), false);
+    assert.equal(fs.existsSync(userRoot), false);
+    const userMap = fs.existsSync(USER_MAP_PATH)
+      ? JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+        users?: Record<string, unknown>;
+      }
+      : {};
+    assert.equal(Boolean(userMap.users?.[clerkUsername]), false);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
 
 test("portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
@@ -2012,7 +2047,7 @@ exit 0
   }
 });
 
-test("portal API deletes a stopped workspace and removes it from the profile index", async () => {
+test("portal API archives a stopped workspace and removes it from the active profile index", async () => {
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -2060,8 +2095,12 @@ test("portal API deletes a stopped workspace and removes it from the profile ind
         { method: "DELETE" },
       );
       assert.equal(response.status, 200);
-      const payload = await response.json() as { removed: boolean };
-      assert.equal(payload.removed, true);
+      const payload = await response.json() as {
+        archived: boolean;
+        archiveId: string;
+      };
+      assert.equal(payload.archived, true);
+      assert.match(payload.archiveId, new RegExp(`${workspace}$`));
     });
 
     assert.equal(fs.existsSync(workspaceRoot), false);
@@ -2071,8 +2110,14 @@ test("portal API deletes a stopped workspace and removes it from the profile ind
       ? profileAfter.workspaces.map((value) => String(value))
       : [];
     assert.equal(remaining.includes(workspace), false);
+    assert.ok(listArchivedWorkspaces(userId).some((entry) => entry.workspaceName === workspace));
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(portalStateRoot, { recursive: true, force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "archives"), {
+      recursive: true,
+      force: true,
+    });
     fs.writeFileSync(profileFile, originalProfile, "utf8");
   }
 });
@@ -2083,59 +2128,115 @@ test("portal root advertises the API surface without a default user fallback", a
     assert.equal(response.status, 200);
     const payload = await response.json() as {
       service: string;
-      authEnabled: boolean;
+      authMode: string;
       endpoints: string[];
     };
     assert.equal(payload.service, "polaris-portal-api");
-    assert.equal(payload.authEnabled, true);
+    assert.equal(payload.authMode, "clerk-browser-session");
     assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
   });
 });
 
-test("portal API restricts normal users to their own scope when trusted auth headers are enabled", async () => {
-  await withPortalAuthEnv("test-secret", async () => {
-    await withSyntheticMemberUser(async (userId) => {
-      await withPortalServer(async (baseUrl) => {
-        const ownResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
-          headers: {
-            "x-polaris-auth-shared-secret": "test-secret",
-            "x-polaris-user-id": userId,
-            "x-polaris-user-role": "user",
-            "x-polaris-user-email": `${userId}@polaris.local`,
-            "x-polaris-user-plan": "free",
+test("portal API allows admins to inspect users and update access roles", async () => {
+  const userId = uniqueName("portal-admin-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  try {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(userRoot, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: userId,
+        name: "Portal Admin Target",
+        email: `${userId}@polaris.local`,
+        workspaces: [],
+      }, { lineWidth: 120, noRefs: true }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      USER_MAP_PATH,
+      `${JSON.stringify({
+        users: {
+          [userId]: {
+            polarisUserId: userId,
+            role: "user",
+            plan: "free",
           },
-        });
-        assert.equal(ownResponse.status, 200);
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await withPortalServer(async (baseUrl) => {
+      const listResponse = await fetch(`${baseUrl}/api/admin/users`);
+      assert.equal(listResponse.status, 200);
+      const listed = await listResponse.json() as {
+        users: Array<{ id: string; role: string }>;
+      };
+      assert.ok(listed.users.some((entry) => entry.id === userId && entry.role === "user"));
 
-        const crossResponse = await fetch(`${baseUrl}/api/users/${DEMO_USER_ID}/workspaces`, {
+      const updateResponse = await fetch(
+        `${baseUrl}/api/admin/users/${encodeURIComponent(userId)}/access`,
+        {
+          method: "POST",
           headers: {
-            "x-polaris-auth-shared-secret": "test-secret",
-            "x-polaris-user-id": userId,
-            "x-polaris-user-role": "user",
-            "x-polaris-user-email": `${userId}@polaris.local`,
-            "x-polaris-user-plan": "free",
+            "content-type": "application/json",
           },
-        });
-        assert.equal(crossResponse.status, 403);
-      });
+          body: JSON.stringify({ role: "admin" }),
+        },
+      );
+      assert.equal(updateResponse.status, 200);
+      const updated = await updateResponse.json() as { role: string };
+      assert.equal(updated.role, "admin");
     });
-  });
+
+    const userMap = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+      users: Record<string, { role: string }>;
+    };
+    assert.equal(userMap.users[userId]?.role, "admin");
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
 });
 
-test("portal API allows admin users to access cross-user scopes when trusted auth headers are enabled", async () => {
-  await withPortalAuthEnv("test-secret", async () => {
-    await withPortalServer(async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/users/100000000000000001/workspaces`, {
-        headers: {
-          "x-polaris-auth-shared-secret": "test-secret",
-          "x-polaris-user-id": "100000000000000001",
-          "x-polaris-user-role": "admin",
-          "x-polaris-user-email": "admin@example.com",
-        },
+test("portal user creation promotes bootstrap admins automatically", async () => {
+  const userId = "bootstrap-admin";
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", userId, async () => {
+    try {
+      await withPortalServer(async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/users`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            userProfileId: userId,
+            clerkUsername: userId,
+            name: "Bootstrap Admin",
+          }),
+        });
+        assert.equal(response.status, 201);
       });
-      assert.equal(response.status, 200);
-      const payload = await response.json() as { workspaces: Array<{ name: string }> };
-      assert.ok(payload.workspaces.some((workspace) => workspace.name === "demo"));
-    });
+      const userMap = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+        users: Record<string, { role: string }>;
+      };
+      assert.equal(userMap.users[userId]?.role, "admin");
+    } finally {
+      fs.rmSync(profilePath, { force: true });
+      fs.rmSync(userRoot, { recursive: true, force: true });
+      if (originalUserMap === null) {
+        fs.rmSync(USER_MAP_PATH, { force: true });
+      } else {
+        fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+      }
+    }
   });
 });

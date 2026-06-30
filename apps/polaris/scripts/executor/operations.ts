@@ -28,7 +28,7 @@ import {
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createCommand } from "../cli/commands/create.js";
 import { performWorkspaceSwitch, type SwitchResult } from "../cli/commands/switch.js";
-import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
+import { archiveWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import { loadExecutableWorkspaceForCommand } from "../cli/commands/shared.js";
 import { startCommand } from "../cli/commands/start.js";
 import { statusCommand } from "../cli/commands/status.js";
@@ -989,9 +989,13 @@ export async function switchPortalWorkspace(
 export async function deletePortalWorkspace(
   userId: string,
   workspace: string,
-): Promise<{ removed: true }> {
-  await deleteWorkspaceOwnedByUser(userId, workspace);
-  return { removed: true };
+): Promise<{
+  archived: true;
+  archiveId: string;
+  archivedAt: string;
+  workspace: string;
+}> {
+  return archiveWorkspaceOwnedByUser(userId, workspace);
 }
 
 export async function stopPortalWorkspace(

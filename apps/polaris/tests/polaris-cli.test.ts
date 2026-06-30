@@ -415,6 +415,84 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
   }
 });
 
+test("runCli archive moves a workspace into the user archive", async () => {
+  const userProfileId = uniqueProjectName("cli-archive-user");
+  const workspace = uniqueProjectName("cli-archive-workspace");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userProfileId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const archivedRoot = path.join(userRoot, "archives", "workspaces");
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Archive User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    await runCli(["create", workspace, "--user", userProfileId]);
+
+    await runCli(["archive", workspace]);
+
+    assert.equal(fs.existsSync(workspaceRoot), false);
+    const archiveEntries = fs.existsSync(archivedRoot)
+      ? fs.readdirSync(archivedRoot)
+      : [];
+    assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${workspace}`)), true);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("runCli delete removes a workspace without creating an archive", async () => {
+  const userProfileId = uniqueProjectName("cli-delete-user");
+  const workspace = uniqueProjectName("cli-delete-workspace");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userProfileId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const archivedRoot = path.join(userRoot, "archives", "workspaces");
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Delete User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    await runCli(["create", workspace, "--user", userProfileId]);
+
+    await runCli(["delete", workspace]);
+
+    assert.equal(fs.existsSync(workspaceRoot), false);
+    const archiveEntries = fs.existsSync(archivedRoot)
+      ? fs.readdirSync(archivedRoot)
+      : [];
+    assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${workspace}`)), false);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("runCli user credential add, list, and activate manage codex credentials explicitly", async () => {
   const userProfileId = uniqueProjectName("cli-user-credential");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);

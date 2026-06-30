@@ -46,6 +46,7 @@ Current ownership rules:
 - one workspace belongs to one user
 - one user can own many workspaces
 - the same project name is not shared globally without user scope
+- active workspaces and archived workspaces are treated differently
 
 In operational terms, the effective identity is:
 
@@ -55,6 +56,12 @@ In operational terms, the effective identity is:
 not only:
 
 - `workspace`
+
+When a workspace is no longer needed day to day, Polaris can archive it
+without treating removal as silent destruction.
+
+That means the active workspace list becomes smaller, while an archived copy
+and its saved runtime state can still be retained under the user archive root.
 
 ### Credentials
 
@@ -164,6 +171,48 @@ That means a user can:
 - let workspaces resolve the user's active credential by default
 
 This default-selection path is separate from workspace runtime `live-switch`.
+
+### Workspace Archive
+
+Workspace lifecycle now separates active use from archived retention.
+
+When a workspace is archived, Polaris:
+
+- removes it from the active workspace list
+- removes it from the user's active workspace index
+- preserves the archived workspace copy under the user archive root
+- keeps user-scoped identity and credential state separate from workspace
+  lifecycle
+
+Current CLI entry:
+
+```bash
+pnpm --dir apps/polaris run polaris -- archive <workspaceRef>
+```
+
+### Workspace Delete
+
+Workspace delete is now separate from workspace archive.
+
+When a workspace is deleted, Polaris:
+
+- removes the workspace copy
+- removes workspace-owned runtime state
+- removes it from the user's active workspace index
+- does not keep an archive copy
+
+Current CLI entry:
+
+```bash
+pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
+```
+
+### TODO
+
+- add workspace restore from the user archive root
+- restore archived workspace state back into the active workspace list
+- reject restore when the active workspace name already exists
+- add portal restore action for archived workspaces
 
 ## Why This Matters
 

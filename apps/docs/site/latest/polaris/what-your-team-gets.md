@@ -42,12 +42,14 @@ What your team gets today:
 
 - a clear ownership model for users, workspaces, and credentials
 - per-harness live credential switching for supported runtimes
+- an admin control point for user scope and portal access
 
 What that means for your team:
 
 - less ambiguity about which identity is active
 - less accidental credential sprawl
 - better operator control over how agents run
+- a clearer way to separate normal users from portal administrators
 
 If you need the technical detail behind this:
 

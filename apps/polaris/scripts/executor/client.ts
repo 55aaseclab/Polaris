@@ -157,7 +157,12 @@ export async function switchPortalWorkspace(input: {
 export async function deletePortalWorkspace(input: {
   userId: string;
   workspace: string;
-}): Promise<{ removed: true }> {
+}): Promise<{
+  archived: true;
+  archiveId: string;
+  archivedAt: string;
+  workspace: string;
+}> {
   return executorRequest(
     "/workspaces",
     {

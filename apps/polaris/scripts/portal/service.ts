@@ -12,6 +12,8 @@ import {
 } from "../config/credential-catalog.js";
 import {
   credentialCatalog,
+  listArchivedWorkspaces,
+  listPortalProfiles,
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
@@ -19,16 +21,24 @@ import {
   readPortalWorkspaceAssetPreview,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
+  type PortalArchivedWorkspaceSummary,
   type PortalCredentialSummary,
   type PortalCredentialPreview,
   type PortalCredentialCatalog,
   type PortalWorkspaceAssetPreview,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
+  type PortalProfileSummary,
   type PortalWorkspaceSummary,
 } from "../core/portal.js";
 import type { WorkspaceStatus } from "../core/workspace.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
+import { deleteUserCommand } from "../cli/commands/delete-user.js";
+import {
+  readUserAccessSummary,
+  updateUserAccessEntry,
+  type PortalUserAccessSummary,
+} from "./user-map.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   cancelProvisionWorkspace as cancelProvisionWorkspaceExecutor,
@@ -75,6 +85,47 @@ export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
   return listOwnedWorkspaces(userId).map((workspace) =>
     loadWorkspaceSummary(userId, workspace),
   );
+}
+
+export function listPortalArchivedWorkspaces(
+  userId: string,
+): PortalArchivedWorkspaceSummary[] {
+  return listArchivedWorkspaces(userId);
+}
+
+export function listPortalAdminUsers(): Array<
+  PortalProfileSummary &
+  PortalUserAccessSummary &
+  {
+    credentialCount: number;
+    archivedWorkspaceCount: number;
+  }
+> {
+  return listPortalProfiles().map((profile) => {
+    const access = readUserAccessSummary(profile.id) ?? {
+      polarisUserId: profile.id,
+      role: "user" as const,
+      plan: "free" as const,
+      clerkUsernames: [],
+      clerkUserIds: [],
+    };
+    return {
+      ...profile,
+      ...access,
+      credentialCount: listPortalCredentials(profile.id).length,
+      archivedWorkspaceCount: listArchivedWorkspaces(profile.id).length,
+    };
+  });
+}
+
+export function updatePortalUserAccess(
+  userId: string,
+  patch: {
+    role?: "admin" | "user";
+    plan?: "free" | "pro";
+  },
+): PortalUserAccessSummary {
+  return updateUserAccessEntry(userId, patch);
 }
 
 export function getPortalWorkspaceDetail(
@@ -281,7 +332,12 @@ export async function switchPortalWorkspace(
 export async function deletePortalWorkspace(
   userId: string,
   workspace: string,
-): Promise<{ removed: true }> {
+): Promise<{
+  archived: true;
+  archiveId: string;
+  archivedAt: string;
+  workspace: string;
+}> {
   return deletePortalWorkspaceExecutor({ userId, workspace });
 }
 
@@ -396,10 +452,8 @@ export async function createPortalUser(input: {
     email,
     ...(input.clerkUsername?.trim() ? ["--clerk", input.clerkUsername.trim()] : []),
     ...(input.clerkUserId?.trim() ? ["--clerk-user-id", input.clerkUserId.trim()] : []),
-    "--role",
-    input.role ?? "user",
-    "--plan",
-    input.plan ?? "free",
+    ...(input.role ? ["--role", input.role] : []),
+    ...(input.plan ? ["--plan", input.plan] : []),
   ]);
   const created = readPortalProfile(userProfileId);
   if (!created) {
@@ -408,4 +462,15 @@ export async function createPortalUser(input: {
     );
   }
   return created;
+}
+
+export async function deletePortalUser(userId: string): Promise<{
+  deleted: true;
+  userId: string;
+}> {
+  await deleteUserCommand([userId]);
+  return {
+    deleted: true,
+    userId,
+  };
 }

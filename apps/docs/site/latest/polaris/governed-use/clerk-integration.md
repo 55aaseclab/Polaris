@@ -24,6 +24,7 @@ Typical mapping keys include:
 Mapped result:
 
 - `polarisUserId`
+- access role and plan
 
 ## Login And Registration Flow
 
@@ -62,3 +63,18 @@ They do not implicitly create a default Codex provider credential.
 - show user details
 - manage user-owned credentials
 - create, delete, and activate credentials
+
+### Administration
+
+The portal now includes an admin view for user-level access control.
+
+That admin flow can:
+
+- review portal users
+- inspect Clerk mappings
+- promote a mapped user to `admin`
+- demote a mapped user back to `user`
+
+For first bootstrap, Polaris can also elevate named users through:
+
+- `POLARIS_BOOTSTRAP_ADMIN_USERS`
