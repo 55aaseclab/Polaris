@@ -2,17 +2,17 @@
 set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
-  echo "Usage: $0 <remote-host> [remote-app-dir] [remote-env-file] [remote-data-root] [remote-netfs-export-root]" >&2
+  echo "Usage: $0 <remote-host> [remote-app-dir] [remote-data-root] [remote-netfs-export-root]" >&2
   echo "Prereqs: ssh access, sudo-capable remote user, host-level nginx gateway, and real production secrets ready for the remote env file." >&2
   exit 1
 fi
 
 REMOTE_HOST="$1"
 REMOTE_APP_DIR="${2:-/srv/polaris/app}"
-REMOTE_ENV_FILE="${3:-/etc/polaris/polaris.env}"
+REMOTE_DATA_ROOT="${3:-/srv/polaris/data}"
+REMOTE_NETFS_EXPORT_ROOT="${4:-/exports/polaris/workspaces}"
+REMOTE_ENV_FILE="/etc/polaris/polaris.env"
 REMOTE_ENV_DIR="$(dirname "${REMOTE_ENV_FILE}")"
-REMOTE_DATA_ROOT="${4:-/srv/polaris/data}"
-REMOTE_NETFS_EXPORT_ROOT="${5:-/exports/polaris/workspaces}"
 REMOTE_ACTIVE_COLOR_FILE="${REMOTE_ENV_DIR}/active-color"
 REMOTE_UPSTREAM_FILE="/etc/nginx/snippets/polaris-gateway-upstream.conf"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
@@ -73,13 +73,45 @@ rsync -az \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
 
 ssh "${REMOTE_HOST}" "set -euo pipefail
-if [ ! -f '${REMOTE_ENV_FILE}' ]; then
-  cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
-fi
+upsert_env_line() {
+  local key=\"\$1\"
+  local value=\"\$2\"
+  local file=\"\$3\"
+  local temp_file
+  temp_file=\"\$(mktemp)\"
+  awk -v key=\"\${key}\" -v value=\"\${value}\" '
+    BEGIN { updated = 0 }
+    index(\$0, key \"=\") == 1 {
+      print key \"=\" value
+      updated = 1
+      next
+    }
+    { print }
+    END {
+      if (updated == 0) {
+        print key \"=\" value
+      }
+    }
+  ' \"\${file}\" > \"\${temp_file}\"
+  mv \"\${temp_file}\" \"\${file}\"
+}
 
-if ! grep -q '^POLARIS_DATA_ROOT=' '${REMOTE_ENV_FILE}'; then
-  printf '\nPOLARIS_DATA_ROOT=%s\n' '${REMOTE_DATA_ROOT}' >> '${REMOTE_ENV_FILE}'
-fi
+generate_executor_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return 0
+  fi
+  python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+}
+
+cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+
+upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_EXECUTOR_SHARED_SECRET' \"\$(generate_executor_secret)\" '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/users' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/users' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/users/' '${REMOTE_DATA_ROOT}/users/'
@@ -114,6 +146,7 @@ if [ \"\$missing\" -eq 1 ]; then
   printf '%s\n' \
     'next steps:' \
     '1. Fill real values into ${REMOTE_ENV_FILE}' \
+    '   Required: Clerk publishable and secret keys' \
     '2. Production data root: ${REMOTE_DATA_ROOT}' \
     '3. In the Polaris host nginx server block, add: include ${REMOTE_UPSTREAM_FILE};' \
     '4. In the same location / block, use: proxy_pass \$polaris_upstream;' \
@@ -127,6 +160,7 @@ printf '%s\n' \
   'nginx gateway check: ok' \
   'next steps:' \
   '1. Fill real values into ${REMOTE_ENV_FILE}' \
+  '   Required: Clerk publishable and secret keys' \
   '2. Production data root: ${REMOTE_DATA_ROOT}' \
   '3. Run nginx -t && nginx -s reload on the remote host if you changed the upstream file' \
   '4. From your local machine, run: bash ./scripts/cd-remote.sh ${REMOTE_HOST}' \

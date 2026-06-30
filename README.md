@@ -33,7 +33,7 @@ The main values are:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
+POLARIS_BOOTSTRAP_ADMIN_USERS=<clerk-username-1>,<clerk-username-2>
 POLARIS_SERVER_PORT=8787
 POLARIS_WEBPORTAL_PORT=8081
 POLARIS_EXECUTOR_PORT=8788
@@ -52,7 +52,7 @@ POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces
 POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 POLARIS_EXECUTOR_SHARED_SECRET=test-executor-shared-secret
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
-VITE_CLERK_DOMAIN=example.clerk.accounts.dev
+VITE_CLERK_DOMAIN=clerk.your-domain.example
 VITE_CLERK_SIGN_IN_URL=http://127.0.0.1:8000/sign-in/
 VITE_CLERK_SIGN_UP_URL=http://127.0.0.1:8000/sign-up/
 CLERK_SECRET_KEY=sk_test_xxx
@@ -97,7 +97,7 @@ POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
 Optional access bootstrap:
 
 ```bash
-POLARIS_BOOTSTRAP_ADMIN_USERS=cyruscyliu
+POLARIS_BOOTSTRAP_ADMIN_USERS=<clerk-username-1>,<clerk-username-2>
 ```
 
 Executor requirements:
