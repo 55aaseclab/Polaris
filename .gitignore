@@ -41,6 +41,7 @@ config/users/user-map.json
 # K3S kata configs
 agents
 config/state/
+config/exports/
 config/generated/**
 
 # Repo-local agent credentials

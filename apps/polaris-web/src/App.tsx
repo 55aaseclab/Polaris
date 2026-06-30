@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useAuth, useClerk, useUser } from "@clerk/react";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Link,
@@ -38,6 +38,7 @@ import {
   getCredentialPreview,
   getWorkspaceAssetPreview,
   getWorkspaceDetail,
+  getPortalSession,
   listAdminUsers,
   listArchivedWorkspaces,
   listCredentials,
@@ -50,7 +51,6 @@ import {
   stopWorkspace,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
-  updateAdminUserAccess,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
   type ManagedHarness,
@@ -59,6 +59,7 @@ import {
   type PortalCredentialPreview,
   type PortalProfileSummary,
   type PortalProvisionProgress,
+  type PortalSession,
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
@@ -272,9 +273,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_archives: "Archived",
     admin_user_mappings: "Mappings",
     admin_open_scope: "Open scope",
-    admin_promote: "Promote to admin",
-    admin_demote: "Set as user",
-    admin_demote_locked: "Bootstrap admin lock",
     admin_saving: "Saving...",
     admin_no_mapping: "No Clerk mapping",
     admin_status_ok: "OK",
@@ -282,7 +280,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_status_profile_only: "Profile only",
     admin_status_profile_root_missing: "Profile root missing",
     admin_delete_requires_mapping_cleanup: "Clear Clerk mapping before deletion.",
-    admin_demote_locked_hint: "This admin role is forced by POLARIS_BOOTSTRAP_ADMIN_USERS.",
     admin_delete_user: "Delete user",
     admin_delete_user_confirm_title: "Delete user?",
     admin_delete_user_confirm_description: "This removes the user profile, credentials, mappings, and all workspace state under that user.",
@@ -528,9 +525,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_archives: "归档",
     admin_user_mappings: "映射",
     admin_open_scope: "打开用户范围",
-    admin_promote: "设为管理员",
-    admin_demote: "设为普通用户",
-    admin_demote_locked: "Bootstrap 管理员锁定",
     admin_saving: "保存中…",
     admin_no_mapping: "还没有 Clerk 映射",
     admin_status_ok: "正常",
@@ -538,7 +532,6 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_status_profile_only: "只有资料",
     admin_status_profile_root_missing: "资料存在但目录缺失",
     admin_delete_requires_mapping_cleanup: "请先清理 Clerk 映射，再删除该用户。",
-    admin_demote_locked_hint: "这个管理员角色被 POLARIS_BOOTSTRAP_ADMIN_USERS 强制锁定。",
     admin_delete_user: "删除用户",
     admin_delete_user_confirm_title: "删除这个用户？",
     admin_delete_user_confirm_description: "这会删除该用户的资料、凭证、映射，以及该用户下的全部工作空间状态。",
@@ -731,15 +724,46 @@ function normalizePath(pathname: string): string {
 
 function AuthGate(props: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
+  const [backendSession, setBackendSession] = useState<PortalSession | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
   useEffect(() => {
-    if (!isLoaded || userId) {
+    let cancelled = false;
+    void getPortalSession()
+      .then((session) => {
+        if (!cancelled) {
+          setBackendSession(session);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBackendSession(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSessionLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasBackendSession =
+    backendSession?.authenticated && Boolean(backendSession.clerkUserId);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+    if (userId || hasBackendSession || sessionLoading) {
       return;
     }
     window.location.assign(portalSignInUrl());
-  }, [isLoaded, userId]);
+  }, [hasBackendSession, isLoaded, sessionLoading, userId]);
 
-  if (!isLoaded || !userId) {
+  if (!isLoaded || sessionLoading || (!userId && !hasBackendSession)) {
     return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
   }
   return <>{props.children}</>;
@@ -748,7 +772,7 @@ function AuthGate(props: { children: ReactNode }) {
 function ApiAuthBridge() {
   const { getToken } = useAuth();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setApiAuthTokenProvider(async () => {
       const token = await getToken();
       return token?.trim() || null;
@@ -794,6 +818,10 @@ function resolvePolarisProfileIdCandidate(user: {
 
 function useCurrentUserMapping() {
   const { user } = useUser();
+  const { data: backendSession } = useAsyncValue<PortalSession | null>(
+    () => getPortalSession(),
+    [],
+  );
   const clerkUsername = resolveClerkIdentityKey(user);
   const clerkUserId = String(user?.id ?? "").trim();
   const { data, error, loading } = useAsyncValue<PortalUserMapping | null>(
@@ -802,7 +830,22 @@ function useCurrentUserMapping() {
       : Promise.resolve(null),
     [clerkUserId, clerkUsername],
   );
-  return { clerkUsername, clerkUserId, mapping: data, mappingError: error, mappingLoading: loading };
+  const useBackendSessionIdentity =
+    !clerkUsername && !clerkUserId && Boolean(backendSession?.authenticated);
+  const sessionMapping = backendSession?.polarisUserId && backendSession.role
+    ? {
+      polarisUserId: backendSession.polarisUserId,
+      role: backendSession.role,
+      plan: "free" as const,
+    }
+    : null;
+  return {
+    clerkUsername: useBackendSessionIdentity ? (backendSession?.clerkUsername ?? "") : clerkUsername,
+    clerkUserId: useBackendSessionIdentity ? backendSession?.clerkUserId ?? "" : clerkUserId,
+    mapping: useBackendSessionIdentity ? sessionMapping : data,
+    mappingError: useBackendSessionIdentity ? null : error,
+    mappingLoading: useBackendSessionIdentity ? false : loading,
+  };
 }
 
 function SignInPage() {
@@ -2237,6 +2280,10 @@ function OverviewPage() {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const { user } = useUser();
+  const { data: backendSession } = useAsyncValue<PortalSession | null>(
+    () => getPortalSession(),
+    [],
+  );
   const {
     clerkUsername,
     clerkUserId,
@@ -2247,13 +2294,18 @@ function OverviewPage() {
   const [registrationError, setRegistrationError] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
   const registrationStartedRef = useRef(false);
+  const canSelfRegister =
+    Boolean(clerkUsername || clerkUserId || backendSession?.clerkUsername || backendSession?.clerkUserId);
 
   const explicitMappedUserId = mapping?.polarisUserId ?? null;
-  const nextPolarisUserId = resolvePolarisProfileIdCandidate(user);
+  const nextPolarisUserId = resolvePolarisProfileIdCandidate(user)
+    || backendSession?.clerkUsername
+    || backendSession?.clerkUserId
+    || "";
 
   useEffect(() => {
     if (
-      !clerkUsername
+      !canSelfRegister
       || !nextPolarisUserId
       || mappingLoading
       || Boolean(mappingError)
@@ -2270,10 +2322,22 @@ function OverviewPage() {
       userProfileId: nextPolarisUserId,
       ...(clerkUsername ? { clerkUsername } : {}),
       ...(clerkUserId ? { clerkUserId } : {}),
+      ...(!clerkUsername && backendSession?.clerkUsername
+        ? { clerkUsername: backendSession.clerkUsername }
+        : {}),
+      ...(!clerkUserId && backendSession?.clerkUserId
+        ? { clerkUserId: backendSession.clerkUserId }
+        : {}),
       ...(user?.primaryEmailAddress?.emailAddress?.trim()
         ? { email: user.primaryEmailAddress.emailAddress.trim() }
         : {}),
-      name: user?.fullName?.trim() || user?.username?.trim() || clerkUsername,
+      name:
+        user?.fullName?.trim()
+        || user?.username?.trim()
+        || clerkUsername
+        || backendSession?.clerkUsername
+        || backendSession?.clerkUserId
+        || nextPolarisUserId,
       role: "user",
       plan: "free",
     })
@@ -2288,9 +2352,11 @@ function OverviewPage() {
         setRegistering(false);
       });
   }, [
+    canSelfRegister,
     clerkUsername,
     clerkUserId,
     explicitMappedUserId,
+    backendSession,
     mappingError,
     mappingLoading,
     navigate,
@@ -2516,25 +2582,6 @@ function AdminPage() {
     return <Navigate to={`/users/${encodeURIComponent(userId)}/workspaces`} replace />;
   }
 
-  async function handleRoleUpdate(
-    targetUserId: string,
-    role: "admin" | "user",
-  ): Promise<void> {
-    if (savingUserId) {
-      return;
-    }
-    setSavingUserId(targetUserId);
-    setAdminActionError(null);
-    try {
-      await updateAdminUserAccess(targetUserId, { role });
-      setReloadKey((current) => current + 1);
-    } catch (error) {
-      setAdminActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSavingUserId(null);
-    }
-  }
-
   async function handleDeleteUser(targetUserId: string): Promise<void> {
     if (savingUserId) {
       return;
@@ -2600,7 +2647,6 @@ function AdminPage() {
                     ...entry.clerkUsernames,
                     ...entry.clerkUserIds,
                   ];
-                  const roleActionLocked = entry.role === "admin" && entry.roleLockedByBootstrap;
                   return (
                     <tr key={entry.id} className="align-top">
                       <td className="px-4 py-4">
@@ -2642,25 +2688,6 @@ function AdminPage() {
                               navigate(`/users/${encodeURIComponent(entry.id)}/workspaces`)}
                           >
                             {t("admin_open_scope")}
-                          </Button>
-                          <Button
-                            variant={entry.role === "admin" ? "secondary" : "outline"}
-                            size="sm"
-                            disabled={isSaving || mappingSummary.length === 0 || roleActionLocked}
-                            title={roleActionLocked ? t("admin_demote_locked_hint") : undefined}
-                            onClick={() =>
-                              void handleRoleUpdate(
-                                entry.id,
-                                entry.role === "admin" ? "user" : "admin",
-                              )}
-                          >
-                            {isSaving
-                              ? t("admin_saving")
-                              : roleActionLocked
-                                ? t("admin_demote_locked")
-                              : entry.role === "admin"
-                                ? t("admin_demote")
-                                : t("admin_promote")}
                           </Button>
                           {entry.mappingPresent ? (
                             <Button
@@ -3136,6 +3163,35 @@ function WorkspaceDetailContent() {
       <div className="grid gap-6">
         <div className="grid gap-6">
           <div className="min-w-0">
+            <div className="text-base font-semibold">{t("workspace_state")}</div>
+            <div className="text-sm text-muted-foreground">
+              {t("workspace_danger_zone_desc")}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">
+                {runtimeRunning ? t("stop_workspace") : t("start_workspace")}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {runtimeRunning
+                  ? translateInstanceState(data?.status?.driver?.runtimeState, t)
+                  : translateInstanceState(data?.status?.backend?.instanceState, t)}
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void (runtimeRunning ? handleStop() : handleStart())}
+              disabled={loading || starting || stopping || deleting}
+            >
+              {runtimeRunning
+                ? (stopping ? t("stopping") : t("stop_workspace"))
+                : (starting ? t("starting") : t("start_workspace"))}
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-6">
+          <div className="min-w-0">
             <div className="text-base font-semibold text-destructive">{t("danger_zone")}</div>
           </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -3347,17 +3403,6 @@ function WorkspaceDetailContent() {
                   </div>
                   {renderDriverSwitchControls()}
                 </div>
-                <div className="flex justify-end">
-                  <Button
-                    variant="outline"
-                    onClick={() => void (runtimeRunning ? handleStop() : handleStart())}
-                    disabled={loading || starting || stopping || deleting}
-                  >
-                    {runtimeRunning
-                      ? (stopping ? t("stopping") : t("stop_workspace"))
-                      : (starting ? t("starting") : t("start_workspace"))}
-                  </Button>
-                </div>
               </div>
             </div>
             <Separator />
@@ -3383,9 +3428,12 @@ function WorkspaceDetailContent() {
             </div>
             <Separator />
           </div>
-          {renderControlsCard()}
         </div>
       );
+    }
+
+    if (currentPane === "controls") {
+      return renderControlsCard();
     }
 
     return (
@@ -4196,6 +4244,7 @@ export default function App(props: {
                     <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
                     <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
                     <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+                    <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
                     <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
                     <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
                     <Route path="/users/:userId/credentials" element={<CredentialsPage />} />

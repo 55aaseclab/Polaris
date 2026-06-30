@@ -16,11 +16,7 @@ import {
   selfProvisionedPolarisUserId,
   sessionMatchesCurrentIdentity,
 } from "./auth.js";
-import {
-  BootstrapAdminRoleLockedError,
-  findUserMapEntry,
-  UserMapConflictError,
-} from "./user-map.js";
+import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
@@ -46,7 +42,6 @@ import {
   switchPortalWorkspaceLiveCredential,
   unbindPortalWorkspaceAgent,
   createPortalUser,
-  updatePortalUserAccess,
 } from "./service.js";
 
 type ParsedBody = Record<string, string>;
@@ -181,27 +176,6 @@ async function handleWorkspaceDelete(
 ): Promise<void> {
   const result = await deletePortalWorkspace(userId, workspace);
   sendJson(res, 200, result);
-}
-
-async function handleAdminUserAccessUpdate(
-  req: IncomingMessage,
-  res: ServerResponse,
-  userId: string,
-): Promise<void> {
-  const body = await readBody(req);
-  try {
-    const updated = updatePortalUserAccess(userId, {
-      ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
-      ...(body.plan === "free" || body.plan === "pro" ? { plan: body.plan } : {}),
-    });
-    sendJson(res, 200, updated);
-  } catch (error) {
-    if (error instanceof BootstrapAdminRoleLockedError) {
-      sendJson(res, 409, { error: error.message });
-      return;
-    }
-    throw error;
-  }
 }
 
 async function handleWorkspaceStop(
@@ -552,24 +526,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, {
             users: listPortalAdminUsers(),
           });
-          return;
-        }
-        if (
-          segments.length === 5 &&
-          segments[1] === "admin" &&
-          segments[2] === "users" &&
-          segments[4] === "access" &&
-          req.method === "POST"
-        ) {
-          const session = await requirePortalSession(req, res);
-          if (!session || !requirePortalAdmin(res, session)) {
-            return;
-          }
-          await handleAdminUserAccessUpdate(
-            req,
-            res,
-            decodeURIComponent(segments[3]),
-          );
           return;
         }
         if (segments[1] === "session") {

@@ -108,42 +108,9 @@ async function fetchClerkUser(clerkUserId: string): Promise<ClerkLikeUser> {
   return await client.users.getUser(clerkUserId);
 }
 
-function readTestSession(req: IncomingMessage): AuthenticatedPortalSession | null {
-  if (process.env.NODE_ENV !== "test" && process.env.POLARIS_TEST_PORTAL_AUTH !== "1") {
-    return null;
-  }
-  const clerkUserId = readHeader(req, "x-polaris-test-clerk-user-id");
-  if (!clerkUserId) {
-    return {
-      clerkUserId: "test-clerk-admin",
-      clerkUsername: "test-admin",
-      polarisUserId: "100000000000000001",
-      role: "admin",
-      plan: "free",
-    };
-  }
-  const clerkUsername = normalizeClerkUsername(
-    readHeader(req, "x-polaris-test-clerk-username"),
-  );
-  const polarisUserId = readHeader(req, "x-polaris-test-polaris-user-id");
-  const roleHeader = readHeader(req, "x-polaris-test-role");
-  const planHeader = readHeader(req, "x-polaris-test-plan");
-  return {
-    clerkUserId,
-    clerkUsername,
-    polarisUserId: polarisUserId || null,
-    role: roleHeader === "admin" || roleHeader === "user" ? roleHeader : null,
-    plan: planHeader === "free" || planHeader === "pro" ? planHeader : null,
-  };
-}
-
 export async function authenticatePortalRequest(
   req: IncomingMessage,
 ): Promise<AuthenticatedPortalSession> {
-  const testSession = readTestSession(req);
-  if (testSession) {
-    return testSession;
-  }
   const token = readBearerToken(req);
   if (!token) {
     throw new Error("missing-auth-token");

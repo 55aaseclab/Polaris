@@ -130,12 +130,6 @@ That includes:
 The admin portal also keeps the delete action visible.
 It disables that action when a live Clerk mapping still exists for the user.
 
-Role management follows the same principle for bootstrap-locked admins.
-
-If a user is forced to `admin` through `POLARIS_BOOTSTRAP_ADMIN_USERS`, the
-portal still shows the demote action, but marks it unavailable and the backend
-rejects direct demotion.
-
 It does not delete the Clerk platform user object itself.
 
 Current CLI entry:
