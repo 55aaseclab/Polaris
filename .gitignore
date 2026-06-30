@@ -29,6 +29,7 @@ apps/polaris-web/test-results/
 apps/polaris/.coverage/
 apps/docs/node_modules/
 apps/docs/dist/
+apps/docs/site/diff/
 apps/docs/site/.vitepress/cache/
 apps/docs/site/.vitepress/dist/
 apps/docs/tsconfig.app.tsbuildinfo
