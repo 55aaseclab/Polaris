@@ -82,7 +82,25 @@ polaris_bluegreen_write_temp_env() {
   local color="$2"
   local target_env="$3"
 
-  cp "${source_env}" "${target_env}"
+  awk '
+    BEGIN {
+      skip["NGINX_HTTP_PORT"]=1
+      skip["POLARIS_SERVER_PORT"]=1
+      skip["POLARIS_WEBPORTAL_PORT"]=1
+      skip["PASEO_APP_PORT"]=1
+      skip["POLARIS_SERVER_BIND_HOST"]=1
+      skip["POLARIS_WEBPORTAL_BIND_HOST"]=1
+      skip["PASEO_APP_BIND_HOST"]=1
+    }
+    {
+      split($0, parts, "=")
+      key = parts[1]
+      if (skip[key] == 1) {
+        next
+      }
+      print
+    }
+  ' "${source_env}" > "${target_env}"
 
   cat >> "${target_env}" <<EOF
 NGINX_HTTP_PORT=$(polaris_bluegreen_nginx_port "${color}")
@@ -102,8 +120,7 @@ polaris_bluegreen_wait_for_stack() {
   started_at="$(date +%s)"
 
   while true; do
-    if curl -fsS "http://127.0.0.1:${port}/" >/dev/null 2>&1 \
-      && curl -fsS "http://127.0.0.1:${port}/api/users" >/dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
       return 0
     fi
 

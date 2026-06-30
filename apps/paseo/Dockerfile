@@ -12,7 +12,7 @@ RUN npm install -g serve@14
 
 WORKDIR /opt
 
-COPY patches /tmp/paseo-patches
+COPY apps/paseo/patches /tmp/paseo-patches
 
 RUN git clone "${PASEO_GIT_URL}" paseo \
   && cd paseo \

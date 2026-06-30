@@ -33,6 +33,11 @@ trap 'rm -f "${temp_env}"' EXIT
 
 polaris_bluegreen_write_temp_env "${ENV_FILE}" "${target_color}" "${temp_env}"
 
+set -a
+# shellcheck disable=SC1090
+source "${temp_env}"
+set +a
+
 pnpm install --frozen-lockfile
 pnpm --filter polaris run build
 
