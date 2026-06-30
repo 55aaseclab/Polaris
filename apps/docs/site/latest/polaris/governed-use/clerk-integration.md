@@ -75,12 +75,24 @@ That admin flow can:
 
 - review portal users
 - inspect Clerk mappings
+- surface mapping-only, profile-only, and missing-user-root integrity states
 - promote a mapped user to `admin`
 - demote a mapped user back to `user`
+- block direct user deletion while Clerk mappings still exist
+- keep the delete button visible, but disabled, while a Clerk mapping still exists
 
 For first bootstrap, Polaris can also elevate named users through:
 
 - `POLARIS_BOOTSTRAP_ADMIN_USERS`
+
+If a user is elevated through `POLARIS_BOOTSTRAP_ADMIN_USERS`, that admin role
+is treated as locked.
+
+That means:
+
+- the portal keeps the demote action visible
+- the demote action is disabled in the admin view
+- the backend rejects direct demotion requests for that user
 
 ## Current Server-Side Enforcement
 

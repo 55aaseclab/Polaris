@@ -266,6 +266,7 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_users_title: "Portal users",
     admin_users_desc: "Review users, scope ownership, and manage portal access.",
     admin_user_role: "Role",
+    admin_user_status: "Status",
     admin_user_plan: "Plan",
     admin_user_credentials: "Credentials",
     admin_user_archives: "Archived",
@@ -273,8 +274,15 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_open_scope: "Open scope",
     admin_promote: "Promote to admin",
     admin_demote: "Set as user",
+    admin_demote_locked: "Bootstrap admin lock",
     admin_saving: "Saving...",
     admin_no_mapping: "No Clerk mapping",
+    admin_status_ok: "OK",
+    admin_status_mapping_only: "Mapping only",
+    admin_status_profile_only: "Profile only",
+    admin_status_profile_root_missing: "Profile root missing",
+    admin_delete_requires_mapping_cleanup: "Clear Clerk mapping before deletion.",
+    admin_demote_locked_hint: "This admin role is forced by POLARIS_BOOTSTRAP_ADMIN_USERS.",
     admin_delete_user: "Delete user",
     admin_delete_user_confirm_title: "Delete user?",
     admin_delete_user_confirm_description: "This removes the user profile, credentials, mappings, and all workspace state under that user.",
@@ -514,6 +522,7 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_users_title: "门户用户",
     admin_users_desc: "查看用户、归属范围和门户访问权限。",
     admin_user_role: "角色",
+    admin_user_status: "状态",
     admin_user_plan: "套餐",
     admin_user_credentials: "凭证",
     admin_user_archives: "归档",
@@ -521,8 +530,15 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_open_scope: "打开用户范围",
     admin_promote: "设为管理员",
     admin_demote: "设为普通用户",
+    admin_demote_locked: "Bootstrap 管理员锁定",
     admin_saving: "保存中…",
     admin_no_mapping: "还没有 Clerk 映射",
+    admin_status_ok: "正常",
+    admin_status_mapping_only: "只有映射",
+    admin_status_profile_only: "只有资料",
+    admin_status_profile_root_missing: "资料存在但目录缺失",
+    admin_delete_requires_mapping_cleanup: "请先清理 Clerk 映射，再删除该用户。",
+    admin_demote_locked_hint: "这个管理员角色被 POLARIS_BOOTSTRAP_ADMIN_USERS 强制锁定。",
     admin_delete_user: "删除用户",
     admin_delete_user_confirm_title: "删除这个用户？",
     admin_delete_user_confirm_description: "这会删除该用户的资料、凭证、映射，以及该用户下的全部工作空间状态。",
@@ -1014,6 +1030,24 @@ function translateWorkspaceRuntimeState(
     case "error":
     case "failed":
       return t("workspace_attention");
+    default:
+      return value;
+  }
+}
+
+function translateAdminIntegrityStatus(
+  value: PortalAdminUserSummary["integrityStatus"],
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "ok":
+      return t("admin_status_ok");
+    case "mapping-only":
+      return t("admin_status_mapping_only");
+    case "profile-only":
+      return t("admin_status_profile_only");
+    case "profile-root-missing":
+      return t("admin_status_profile_root_missing");
     default:
       return value;
   }
@@ -2551,6 +2585,7 @@ function AdminPage() {
                 <tr>
                   <th className="px-4 py-3 font-medium">{t("users")}</th>
                   <th className="px-4 py-3 font-medium">{t("admin_user_role")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin_user_status")}</th>
                   <th className="px-4 py-3 font-medium">{t("admin_user_mappings")}</th>
                   <th className="px-4 py-3 font-medium">{t("admin_user_credentials")}</th>
                   <th className="px-4 py-3 font-medium">{t("tracked_workspaces")}</th>
@@ -2565,6 +2600,7 @@ function AdminPage() {
                     ...entry.clerkUsernames,
                     ...entry.clerkUserIds,
                   ];
+                  const roleActionLocked = entry.role === "admin" && entry.roleLockedByBootstrap;
                   return (
                     <tr key={entry.id} className="align-top">
                       <td className="px-4 py-4">
@@ -2577,6 +2613,11 @@ function AdminPage() {
                       <td className="px-4 py-4">
                         <Badge variant={entry.role === "admin" ? "default" : "secondary"}>
                           {entry.role}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Badge variant={entry.integrityStatus === "ok" ? "secondary" : "outline"}>
+                          {translateAdminIntegrityStatus(entry.integrityStatus, t)}
                         </Badge>
                       </td>
                       <td className="px-4 py-4 text-muted-foreground">
@@ -2596,6 +2637,7 @@ function AdminPage() {
                           <Button
                             variant="outline"
                             size="sm"
+                            disabled={!entry.profilePresent}
                             onClick={() =>
                               navigate(`/users/${encodeURIComponent(entry.id)}/workspaces`)}
                           >
@@ -2604,7 +2646,8 @@ function AdminPage() {
                           <Button
                             variant={entry.role === "admin" ? "secondary" : "outline"}
                             size="sm"
-                            disabled={isSaving || mappingSummary.length === 0}
+                            disabled={isSaving || mappingSummary.length === 0 || roleActionLocked}
+                            title={roleActionLocked ? t("admin_demote_locked_hint") : undefined}
                             onClick={() =>
                               void handleRoleUpdate(
                                 entry.id,
@@ -2613,39 +2656,52 @@ function AdminPage() {
                           >
                             {isSaving
                               ? t("admin_saving")
+                              : roleActionLocked
+                                ? t("admin_demote_locked")
                               : entry.role === "admin"
                                 ? t("admin_demote")
                                 : t("admin_promote")}
                           </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={isSaving}
-                              >
-                                {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  {t("admin_delete_user_confirm_title")}
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  {t("admin_delete_user_confirm_description")}
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => void handleDeleteUser(entry.id)}
+                          {entry.mappingPresent ? (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled
+                              title={t("admin_delete_requires_mapping_cleanup")}
+                            >
+                              {t("admin_delete_user")}
+                            </Button>
+                          ) : (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={isSaving}
                                 >
                                   {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>
+                                    {t("admin_delete_user_confirm_title")}
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {t("admin_delete_user_confirm_description")}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => void handleDeleteUser(entry.id)}
+                                  >
+                                    {isSaving ? t("admin_deleting") : t("admin_delete_user")}
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          )}
                         </div>
                       </td>
                     </tr>

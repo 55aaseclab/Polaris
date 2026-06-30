@@ -20,6 +20,7 @@ export interface PortalUserAccessSummary {
   plan: PolarisPlan;
   clerkUsernames: string[];
   clerkUserIds: string[];
+  roleLockedByBootstrap: boolean;
 }
 
 interface UserMapFile {
@@ -28,6 +29,7 @@ interface UserMapFile {
 }
 
 export class UserMapConflictError extends Error {}
+export class BootstrapAdminRoleLockedError extends Error {}
 
 function sleepMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -88,6 +90,11 @@ function withRoleOverrides(
   return entry;
 }
 
+function hasBootstrapAdminOverride(identities: string[]): boolean {
+  const overrides = bootstrapAdminTokens();
+  return identities.some((value) => overrides.has(value.trim().toLowerCase()));
+}
+
 export function readUserMap(): UserMapFile {
   if (!fs.existsSync(USER_MAP_PATH)) {
     return { users: {} };
@@ -145,9 +152,14 @@ export function readUserAccessSummary(
   const userIdEntries = Object.entries(current.userIds ?? {})
     .filter(([, entry]) => entry.polarisUserId === polarisUserId);
   const seed = usernameEntries[0]?.[1] ?? userIdEntries[0]?.[1] ?? null;
+  const identities = [
+    polarisUserId,
+    ...usernameEntries.map(([key]) => key),
+    ...userIdEntries.map(([key]) => key),
+  ];
+  const roleLockedByBootstrap = hasBootstrapAdminOverride(identities);
   if (!seed) {
-    const overrides = bootstrapAdminTokens();
-    if (!overrides.has(polarisUserId.trim().toLowerCase())) {
+    if (!roleLockedByBootstrap) {
       return null;
     }
     return {
@@ -156,19 +168,17 @@ export function readUserAccessSummary(
       plan: "free",
       clerkUsernames: [],
       clerkUserIds: [],
+      roleLockedByBootstrap,
     };
   }
-  const effective = withRoleOverrides(seed, [
-    polarisUserId,
-    ...usernameEntries.map(([key]) => key),
-    ...userIdEntries.map(([key]) => key),
-  ]);
+  const effective = withRoleOverrides(seed, identities);
   return {
     polarisUserId,
     role: effective.role,
     plan: effective.plan,
     clerkUsernames: usernameEntries.map(([clerkUsername]) => clerkUsername).sort(),
     clerkUserIds: userIdEntries.map(([clerkUserId]) => clerkUserId).sort(),
+    roleLockedByBootstrap,
   };
 }
 
@@ -281,6 +291,12 @@ export function updateUserAccessEntry(
   polarisUserId: string,
   patch: Partial<Pick<PortalUserMapEntry, "role" | "plan">>,
 ): PortalUserAccessSummary {
+  const current = readUserAccessSummary(polarisUserId);
+  if (patch.role === "user" && current?.roleLockedByBootstrap) {
+    throw new BootstrapAdminRoleLockedError(
+      `Polaris user '${polarisUserId}' is forced to admin by POLARIS_BOOTSTRAP_ADMIN_USERS`,
+    );
+  }
   withUserMapLock(() => {
     const current = readUserMap();
     let touched = false;

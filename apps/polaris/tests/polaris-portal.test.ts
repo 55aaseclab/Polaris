@@ -6,6 +6,7 @@ import os from "node:os";
 import { once } from "node:events";
 import yaml from "js-yaml";
 import { createPortalServer } from "../scripts/portal/server.js";
+import { deleteUserMapEntriesForPolarisUserId } from "../scripts/portal/user-map.js";
 import {
   getPortalWorkspaceDetail,
   reportPortalWorkspaceStatus,
@@ -1252,6 +1253,14 @@ test("portal API deletes a user profile, user root, and Clerk mapping", async ()
     ]);
 
     await withPortalServer(async (baseUrl) => {
+      const blockedResponse = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userProfileId)}`,
+        { method: "DELETE" },
+      );
+      assert.equal(blockedResponse.status, 409);
+
+      deleteUserMapEntriesForPolarisUserId(userProfileId);
+
       const response = await fetch(
         `${baseUrl}/api/users/${encodeURIComponent(userProfileId)}`,
         { method: "DELETE" },
@@ -2301,6 +2310,100 @@ test("portal API allows admins to inspect users and update access roles", async 
   }
 });
 
+test("portal API admin list includes mapping-only users", async () => {
+  const userId = uniqueName("portal-mapping-only");
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  try {
+    fs.writeFileSync(
+      USER_MAP_PATH,
+      `${JSON.stringify({
+        users: {
+          [userId]: {
+            polarisUserId: userId,
+            role: "user",
+            plan: "free",
+          },
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await withPortalServer(async (baseUrl) => {
+      const listResponse = await fetch(`${baseUrl}/api/admin/users`);
+      assert.equal(listResponse.status, 200);
+      const listed = await listResponse.json() as {
+        users: Array<{
+          id: string;
+          integrityStatus: string;
+          mappingPresent: boolean;
+          profilePresent: boolean;
+        }>;
+      };
+      assert.ok(
+        listed.users.some((entry) =>
+          entry.id === userId
+          && entry.integrityStatus === "mapping-only"
+          && entry.mappingPresent === true
+          && entry.profilePresent === false),
+      );
+    });
+  } finally {
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
+test("portal API rejects deleting a user that still has Clerk mappings", async () => {
+  const userId = uniqueName("portal-mapped-delete");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  try {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(userRoot, { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: userId,
+        name: "Mapped Delete Target",
+        email: `${userId}@polaris.local`,
+        workspaces: [],
+      }, { lineWidth: 120, noRefs: true }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      USER_MAP_PATH,
+      `${JSON.stringify({
+        users: {
+          [userId]: {
+            polarisUserId: userId,
+            role: "user",
+            plan: "free",
+          },
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await withPortalServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/users/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      );
+      assert.equal(response.status, 409);
+    });
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
 test("portal user creation promotes bootstrap admins automatically", async () => {
   const userId = "bootstrap-admin";
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
@@ -2330,6 +2433,75 @@ test("portal user creation promotes bootstrap admins automatically", async () =>
         users: Record<string, { role: string }>;
       };
       assert.equal(userMap.users[userId]?.role, "admin");
+    } finally {
+      fs.rmSync(profilePath, { force: true });
+      fs.rmSync(userRoot, { recursive: true, force: true });
+      if (originalUserMap === null) {
+        fs.rmSync(USER_MAP_PATH, { force: true });
+      } else {
+        fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+      }
+    }
+  });
+});
+
+test("portal API rejects demoting a bootstrap-locked admin", async () => {
+  const userId = "bootstrap-admin-locked";
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", userId, async () => {
+    try {
+      fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+      fs.mkdirSync(userRoot, { recursive: true });
+      fs.writeFileSync(
+        profilePath,
+        yaml.dump({
+          id: userId,
+          name: "Bootstrap Locked Admin",
+          email: `${userId}@polaris.local`,
+          workspaces: [],
+        }, { lineWidth: 120, noRefs: true }),
+        "utf8",
+      );
+      fs.writeFileSync(
+        USER_MAP_PATH,
+        `${JSON.stringify({
+          users: {
+            [userId]: {
+              polarisUserId: userId,
+              role: "admin",
+              plan: "free",
+            },
+          },
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      await withPortalServer(async (baseUrl) => {
+        const listResponse = await fetch(`${baseUrl}/api/admin/users`);
+        assert.equal(listResponse.status, 200);
+        const listed = await listResponse.json() as {
+          users: Array<{ id: string; roleLockedByBootstrap: boolean; role: string }>;
+        };
+        assert.ok(
+          listed.users.some((entry) =>
+            entry.id === userId
+            && entry.role === "admin"
+            && entry.roleLockedByBootstrap === true),
+        );
+
+        const updateResponse = await fetch(
+          `${baseUrl}/api/admin/users/${encodeURIComponent(userId)}/access`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ role: "user" }),
+          },
+        );
+        assert.equal(updateResponse.status, 409);
+      });
     } finally {
       fs.rmSync(profilePath, { force: true });
       fs.rmSync(userRoot, { recursive: true, force: true });

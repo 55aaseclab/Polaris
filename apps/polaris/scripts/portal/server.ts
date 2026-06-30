@@ -16,7 +16,11 @@ import {
   selfProvisionedPolarisUserId,
   sessionMatchesCurrentIdentity,
 } from "./auth.js";
-import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
+import {
+  BootstrapAdminRoleLockedError,
+  findUserMapEntry,
+  UserMapConflictError,
+} from "./user-map.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
@@ -25,6 +29,7 @@ import {
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
   deletePortalUser,
+  PortalUserDeletionBlockedError,
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalWorkspace,
@@ -184,11 +189,19 @@ async function handleAdminUserAccessUpdate(
   userId: string,
 ): Promise<void> {
   const body = await readBody(req);
-  const updated = updatePortalUserAccess(userId, {
-    ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
-    ...(body.plan === "free" || body.plan === "pro" ? { plan: body.plan } : {}),
-  });
-  sendJson(res, 200, updated);
+  try {
+    const updated = updatePortalUserAccess(userId, {
+      ...(body.role === "admin" || body.role === "user" ? { role: body.role } : {}),
+      ...(body.plan === "free" || body.plan === "pro" ? { plan: body.plan } : {}),
+    });
+    sendJson(res, 200, updated);
+  } catch (error) {
+    if (error instanceof BootstrapAdminRoleLockedError) {
+      sendJson(res, 409, { error: error.message });
+      return;
+    }
+    throw error;
+  }
 }
 
 async function handleWorkspaceStop(
@@ -432,7 +445,15 @@ async function handleUserDelete(
   res: ServerResponse,
   userId: string,
 ): Promise<void> {
-  sendJson(res, 200, await deletePortalUser(userId));
+  try {
+    sendJson(res, 200, await deletePortalUser(userId));
+  } catch (error) {
+    if (error instanceof PortalUserDeletionBlockedError) {
+      sendJson(res, 409, { error: error.message });
+      return;
+    }
+    throw error;
+  }
 }
 
 function isApiPath(segments: string[]): boolean {
