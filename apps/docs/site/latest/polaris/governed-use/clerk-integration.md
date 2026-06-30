@@ -76,23 +76,13 @@ That admin flow can:
 - review portal users
 - inspect Clerk mappings
 - surface mapping-only, profile-only, and missing-user-root integrity states
-- promote a mapped user to `admin`
-- demote a mapped user back to `user`
 - block direct user deletion while Clerk mappings still exist
 - keep the delete button visible, but disabled, while a Clerk mapping still exists
+- show admin role as configured state, not as an in-portal workflow
 
 For first bootstrap, Polaris can also elevate named users through:
 
 - `POLARIS_BOOTSTRAP_ADMIN_USERS`
-
-If a user is elevated through `POLARIS_BOOTSTRAP_ADMIN_USERS`, that admin role
-is treated as locked.
-
-That means:
-
-- the portal keeps the demote action visible
-- the demote action is disabled in the admin view
-- the backend rejects direct demotion requests for that user
 
 ## Current Server-Side Enforcement
 
@@ -107,3 +97,24 @@ That means:
 
 This matters for self-hosted teams because client-side routing is not treated
 as the security boundary.
+
+## Test Layers
+
+Polaris now treats Clerk-backed testing as a separate live-auth layer.
+
+Current split:
+
+- normal Polaris tests cover service and control-plane behavior without Clerk
+- live-auth backend tests use a real `CLERK_SECRET_KEY`
+- browser registration and route tests live in Playwright E2E
+
+Current commands:
+
+```bash
+pnpm --filter polaris run test
+pnpm --filter polaris run test:live-auth
+pnpm --filter polaris-web run test:live-auth
+```
+
+The goal is to keep default test runs independent from external auth, while
+still keeping the real Clerk integration exercised in a dedicated group.

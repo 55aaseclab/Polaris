@@ -36,7 +36,6 @@ import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
   listUserAccessSummaries,
   readUserAccessSummary,
-  updateUserAccessEntry,
   type PortalUserAccessSummary,
 } from "./user-map.js";
 import { polarisUsersRoot } from "../utils/paths.js";
@@ -147,7 +146,6 @@ export function listPortalAdminUsers(): Array<
         plan: "free" as const,
         clerkUsernames: [],
         clerkUserIds: [],
-        roleLockedByBootstrap: false,
       };
       return {
         ...baseProfile,
@@ -160,16 +158,6 @@ export function listPortalAdminUsers(): Array<
         integrityStatus,
       };
     });
-}
-
-export function updatePortalUserAccess(
-  userId: string,
-  patch: {
-    role?: "admin" | "user";
-    plan?: "free" | "pro";
-  },
-): PortalUserAccessSummary {
-  return updateUserAccessEntry(userId, patch);
 }
 
 export function getPortalWorkspaceDetail(

@@ -4,8 +4,8 @@ import { config as loadEnv } from "dotenv";
 import { defineConfig } from "@playwright/test";
 
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url));
-const PLAYWRIGHT_WEB_PORT = 4174;
-const PLAYWRIGHT_API_PORT = 8788;
+const PLAYWRIGHT_WEB_PORT = 14174;
+const PLAYWRIGHT_API_PORT = 18798;
 
 loadEnv({ path: path.resolve(DIRNAME, ".env.local") });
 
@@ -20,13 +20,13 @@ export default defineConfig({
     {
       command: `pnpm --filter polaris run polaris -- portal ${PLAYWRIGHT_API_PORT} 0.0.0.0`,
       url: `http://127.0.0.1:${PLAYWRIGHT_API_PORT}`,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       cwd: path.resolve(DIRNAME, "../.."),
     },
     {
-      command: `POLARIS_WEB_PORT=${PLAYWRIGHT_WEB_PORT} POLARIS_API_PROXY_TARGET=http://127.0.0.1:${PLAYWRIGHT_API_PORT} pnpm --filter polaris-web run dev -- --host 0.0.0.0`,
+      command: `POLARIS_WEB_PORT=${PLAYWRIGHT_WEB_PORT} POLARIS_API_PROXY_TARGET=http://127.0.0.1:${PLAYWRIGHT_API_PORT} pnpm --filter polaris-web exec vite --host 0.0.0.0 --port ${PLAYWRIGHT_WEB_PORT}`,
       url: `http://127.0.0.1:${PLAYWRIGHT_WEB_PORT}`,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       cwd: path.resolve(DIRNAME, "../.."),
     },
   ],

@@ -17,6 +17,47 @@ function requiredAbsoluteUrl(name: string): string {
   }
 }
 
+function deriveFrontendApiHost(): string | null {
+  const publishableKey = trimValue(env?.VITE_CLERK_PUBLISHABLE_KEY);
+  if (!publishableKey) {
+    return null;
+  }
+  const encoded = publishableKey.split("_").slice(2).join("_");
+  if (!encoded) {
+    return null;
+  }
+  try {
+    return atob(encoded).replace(/\$$/, "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveClerkHostedUrl(pathname: "/sign-in/" | "/sign-up/"): string {
+  const signInPath = pathname === "/sign-in/";
+  const explicit = trimValue(
+    signInPath
+      ? env?.VITE_CLERK_SIGN_IN_URL
+      : env?.VITE_CLERK_SIGN_UP_URL,
+  );
+  if (explicit) {
+    try {
+      return new URL(explicit).toString();
+    } catch {
+      throw new Error(
+        `${signInPath ? "VITE_CLERK_SIGN_IN_URL" : "VITE_CLERK_SIGN_UP_URL"} must be an absolute URL`,
+      );
+    }
+  }
+  const domain = trimValue(env?.VITE_CLERK_DOMAIN) ?? deriveFrontendApiHost();
+  if (!domain) {
+    throw new Error(
+      `${signInPath ? "VITE_CLERK_SIGN_IN_URL" : "VITE_CLERK_SIGN_UP_URL"} is required`,
+    );
+  }
+  return new URL(pathname, `https://${domain.replace(/^https?:\/\//, "")}`).toString();
+}
+
 function optionalAbsoluteUrl(name: string): string | undefined {
   const value = trimValue(env?.[name]);
   if (!value) {
@@ -38,11 +79,11 @@ export function clerkPublishableKey(): string {
 }
 
 export function clerkSignInUrl(): string {
-  return requiredAbsoluteUrl("VITE_CLERK_SIGN_IN_URL");
+  return resolveClerkHostedUrl("/sign-in/");
 }
 
 export function clerkSignUpUrl(): string {
-  return requiredAbsoluteUrl("VITE_CLERK_SIGN_UP_URL");
+  return resolveClerkHostedUrl("/sign-up/");
 }
 
 export function clerkDomain(): string | undefined {

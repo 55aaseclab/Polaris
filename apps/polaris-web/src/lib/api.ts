@@ -27,13 +27,21 @@ export interface PortalUserMapping {
   plan: "free" | "pro";
 }
 
+export interface PortalSession {
+  authMode: string;
+  authenticated: boolean;
+  clerkUserId: string;
+  clerkUsername: string | null;
+  polarisUserId: string | null;
+  role: "admin" | "user" | null;
+}
+
 export interface PortalAdminUserSummary extends PortalProfileSummary {
   polarisUserId: string;
   role: "admin" | "user";
   plan: "free" | "pro";
   clerkUsernames: string[];
   clerkUserIds: string[];
-  roleLockedByBootstrap: boolean;
   credentialCount: number;
   archivedWorkspaceCount: number;
   mappingPresent: boolean;
@@ -306,6 +314,10 @@ async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
 
 export async function listUsers(): Promise<PortalProfileSummary[]> {
   return apiFetch<PortalProfileSummary[]>("/users");
+}
+
+export async function getPortalSession(): Promise<PortalSession> {
+  return apiFetch<PortalSession>("/session");
 }
 
 export async function createPortalUser(input: {
@@ -593,28 +605,6 @@ export async function listAdminUsers(): Promise<PortalAdminUserSummary[]> {
     "/admin/users",
   );
   return payload.users;
-}
-
-export async function updateAdminUserAccess(
-  userId: string,
-  patch: {
-    role?: "admin" | "user";
-    plan?: "free" | "pro";
-  },
-): Promise<{
-  polarisUserId: string;
-  role: "admin" | "user";
-  plan: "free" | "pro";
-  clerkUsernames: string[];
-  clerkUserIds: string[];
-}> {
-  return apiFetch(
-    `/admin/users/${encodeURIComponent(userId)}/access`,
-    {
-      method: "POST",
-      body: JSON.stringify(patch),
-    },
-  );
 }
 
 export async function stopWorkspace(

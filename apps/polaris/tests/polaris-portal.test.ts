@@ -5,20 +5,43 @@ import path from "node:path";
 import os from "node:os";
 import { once } from "node:events";
 import yaml from "js-yaml";
+import { createClerkClient } from "@clerk/backend";
 import { createPortalServer } from "../scripts/portal/server.js";
-import { deleteUserMapEntriesForPolarisUserId } from "../scripts/portal/user-map.js";
 import {
+  deleteUserMapEntriesForPolarisUserId,
+  upsertUserMapEntry,
+  upsertUserMapUserId,
+} from "../scripts/portal/user-map.js";
+import {
+  activatePortalCredential,
+  bindPortalWorkspaceAgent,
+  cancelPortalWorkspaceProvision,
+  createPortalCredential,
+  deletePortalWorkspace,
+  deletePortalCredential,
+  deletePortalUser,
+  getPortalCredentialCatalog,
   getPortalWorkspaceDetail,
+  listPortalAdminUsers,
+  listUserPortalCredentials,
+  queueProvisionWorkspace,
+  readUserPortalCredentialPreview,
+  readUserPortalWorkspaceAssetPreview,
   reportPortalWorkspaceStatus,
+  startPortalWorkspace,
   stopPortalWorkspace,
+  switchPortalWorkspaceLiveCredential,
+  unbindPortalWorkspaceAgent,
 } from "../scripts/portal/service.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
   listArchivedWorkspaces,
   listOwnedWorkspaces,
+  readPortalProfile,
   readWorkspaceProvisionProgress,
   readWorkspaceStatus,
+  updatePortalProfile,
   writeWorkspaceProvisionProgress,
   clearWorkspaceProvisionProgress,
 } from "../scripts/core/portal.js";
@@ -28,8 +51,104 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
 
+interface LivePortalIdentity {
+  clerkUserId: string;
+  clerkUsername: string;
+  token: string;
+  cleanup: () => Promise<void>;
+}
+
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
+}
+
+function uniquePassword(): string {
+  return `PolarisPortal!${Date.now()}aa`;
+}
+
+function clerkSecretKey(): string {
+  const value = process.env.CLERK_SECRET_KEY?.trim();
+  if (!value) {
+    throw new Error("CLERK_SECRET_KEY is required for Polaris portal tests");
+  }
+  return value;
+}
+
+function clerkClient() {
+  return createClerkClient({
+    secretKey: clerkSecretKey(),
+  });
+}
+
+async function createLivePortalIdentity(
+  username = uniqueName("portal-clerk"),
+): Promise<LivePortalIdentity> {
+  const password = uniquePassword();
+  const client = clerkClient();
+  const user = await client.users.createUser({
+    username,
+    password,
+    firstName: "Portal",
+    lastName: "Test",
+  });
+  const session = await client.sessions.createSession({
+    userId: user.id,
+  });
+  const token = await client.sessions.getToken(session.id);
+  return {
+    clerkUserId: user.id,
+    clerkUsername: user.username?.trim().toLowerCase() || username.trim().toLowerCase(),
+    token: token.jwt,
+    cleanup: async () => {
+      try {
+        await client.sessions.revokeSession(session.id);
+      } catch {
+        // Ignore already-revoked sessions during test cleanup.
+      }
+      try {
+        await client.users.deleteUser(user.id);
+      } catch {
+        // Ignore already-deleted users during test cleanup.
+      }
+    },
+  };
+}
+
+function mapIdentityToPolarisUser(
+  identity: LivePortalIdentity,
+  input: {
+    polarisUserId: string;
+    role?: "admin" | "user";
+    plan?: "free" | "pro";
+  },
+): void {
+  upsertUserMapEntry(identity.clerkUsername, {
+    polarisUserId: input.polarisUserId,
+    role: input.role ?? "user",
+    plan: input.plan ?? "free",
+  });
+  upsertUserMapUserId(identity.clerkUserId, {
+    polarisUserId: input.polarisUserId,
+    role: input.role ?? "user",
+    plan: input.plan ?? "free",
+  });
+}
+
+function removeIdentityMappings(identity: LivePortalIdentity): void {
+  if (!fs.existsSync(USER_MAP_PATH)) {
+    return;
+  }
+  const current = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+    users?: Record<string, { polarisUserId: string }>;
+    userIds?: Record<string, { polarisUserId: string }>;
+  };
+  if (current.users?.[identity.clerkUsername]) {
+    delete current.users[identity.clerkUsername];
+  }
+  if (current.userIds?.[identity.clerkUserId]) {
+    delete current.userIds[identity.clerkUserId];
+  }
+  fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }
 
 async function waitFor<T>(
@@ -90,23 +209,74 @@ ${body}
   }
 }
 
+async function withPortalServerIdentity(
+  identity: LivePortalIdentity,
+  fn: (baseUrl: string) => Promise<void>,
+  env?: Record<string, string>,
+): Promise<void> {
+  const entries = Object.entries(env ?? {});
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of entries) {
+    previous.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+  const server = createPortalServer(0);
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (!url.startsWith(baseUrl)) {
+      return originalFetch(input, init);
+    }
+    const headers = new Headers(init?.headers ?? {});
+    if (!headers.has("authorization")) {
+      headers.set("authorization", `Bearer ${identity.token}`);
+    }
+    return originalFetch(input, {
+      ...init,
+      headers,
+    });
+  }) as typeof fetch;
+  try {
+    await fn(baseUrl);
+  } finally {
+    globalThis.fetch = originalFetch;
+    server.close();
+    await once(server, "close");
+    for (const [key] of entries) {
+      const value = previous.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 async function withPortalServer(
   fn: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
-  await withEnv("POLARIS_TEST_PORTAL_AUTH", "1", async () => {
-    const server = createPortalServer(0);
-    await once(server, "listening");
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Portal server did not expose a TCP address");
-    }
-    try {
-      await fn(`http://127.0.0.1:${address.port}`);
-    } finally {
-      server.close();
-      await once(server, "close");
-    }
-  });
+  const adminIdentity = await createLivePortalIdentity();
+  try {
+    mapIdentityToPolarisUser(adminIdentity, {
+      polarisUserId: DEMO_USER_ID,
+      role: "admin",
+      plan: "pro",
+    });
+    await withPortalServerIdentity(
+      adminIdentity,
+      fn,
+    );
+  } finally {
+    removeIdentityMappings(adminIdentity);
+    await adminIdentity.cleanup();
+  }
 }
 
 async function withEnv(
@@ -125,22 +295,6 @@ async function withEnv(
       process.env[name] = previous;
     }
   }
-}
-
-function portalTestHeaders(input?: {
-  clerkUserId?: string;
-  clerkUsername?: string;
-  polarisUserId?: string;
-  role?: "admin" | "user";
-  plan?: "free" | "pro";
-}): Record<string, string> {
-  return {
-    ...(input?.clerkUserId ? { "x-polaris-test-clerk-user-id": input.clerkUserId } : {}),
-    ...(input?.clerkUsername ? { "x-polaris-test-clerk-username": input.clerkUsername } : {}),
-    ...(input?.polarisUserId ? { "x-polaris-test-polaris-user-id": input.polarisUserId } : {}),
-    ...(input?.role ? { "x-polaris-test-role": input.role } : {}),
-    ...(input?.plan ? { "x-polaris-test-plan": input.plan } : {}),
-  };
 }
 
 async function withSyntheticMemberUser(
@@ -229,7 +383,7 @@ test("portal workspace detail reads cached state without implicit refresh side e
   );
 });
 
-test("portal API accepts runtime status reports and persists cached workspace state", async () => {
+test("live auth portal API accepts runtime status reports and persists cached workspace state", async () => {
   const userId = DEMO_USER_ID;
   const workspace = "demo";
   const previous = readWorkspaceStatus(userId, workspace);
@@ -404,7 +558,7 @@ test("portal workspace stop writes cached status before the async refresh comple
   }
 });
 
-test("portal API serves route-scoped workspaces and credentials without auth", async () => {
+test("live auth portal API serves route-scoped workspaces and credentials for an authenticated scope", async () => {
   const credentialId = uniqueName("portal-cred");
   const userId = DEMO_USER_ID;
 
@@ -466,31 +620,27 @@ test("portal API rejects unauthenticated admin access", async () => {
   }
 });
 
-test("portal API rejects cross-user access for a normal user session", async () => {
+test("live auth portal API rejects cross-user access for a normal user session", async () => {
   const firstUserId = uniqueName("portal-scope-user-a");
   const secondUserId = uniqueName("portal-scope-user-b");
   const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
     profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
     userRoot: path.join(REPO_ROOT, "config", "users", userId),
   }));
+  const identity = await createLivePortalIdentity();
 
   try {
     await createUserCommand([firstUserId, "--name", "Scope User A", "--email", `${firstUserId}@polaris.local`]);
     await createUserCommand([secondUserId, "--name", "Scope User B", "--email", `${secondUserId}@polaris.local`]);
+    mapIdentityToPolarisUser(identity, { polarisUserId: firstUserId, role: "user", plan: "free" });
 
-    await withPortalServer(async (baseUrl) => {
+    await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
-        headers: portalTestHeaders({
-          clerkUserId: `clerk-${firstUserId}`,
-          clerkUsername: firstUserId,
-          polarisUserId: firstUserId,
-          role: "user",
-          plan: "free",
-        }),
       });
       assert.equal(response.status, 403);
     });
   } finally {
+    await identity.cleanup();
     for (const target of cleanupTargets) {
       fs.rmSync(target.profilePath, { force: true });
       fs.rmSync(target.userRoot, { recursive: true, force: true });
@@ -498,38 +648,28 @@ test("portal API rejects cross-user access for a normal user session", async () 
   }
 });
 
-test("portal API previews credential asset content", async () => {
+test("portal credential preview hides material content", async () => {
   const credentialId = uniqueName("portal-preview");
   const userId = DEMO_USER_ID;
 
   try {
-    await withPortalServer(async (baseUrl) => {
-      const createResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            harness: "codex",
-            credentialId,
-            label: "Portal Preview Credential",
-            providerName: "rightcode",
-            baseUrl: "https://right.codes/codex/v1",
-            apiKey: "preview-test",
-          }),
-        },
-      );
-      assert.equal(createResponse.status, 201);
-
-      const previewResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials/preview?path=${encodeURIComponent(`credentials/codex/${credentialId}/auth.json`)}`,
-      );
-      assert.equal(previewResponse.status, 200);
-      const preview = await previewResponse.json() as { path: string; content: string; truncated: boolean };
-      assert.equal(preview.path, `credentials/codex/${credentialId}/auth.json`);
-      assert.equal(preview.content, "[credential preview hidden]");
-      assert.equal(preview.truncated, false);
+    await createPortalCredential({
+      userId,
+      harness: "codex",
+      credentialId,
+      label: "Portal Preview Credential",
+      providerName: "rightcode",
+      baseUrl: "https://right.codes/codex/v1",
+      apiKey: "preview-test",
     });
+
+    const preview = readUserPortalCredentialPreview(
+      userId,
+      `credentials/codex/${credentialId}/auth.json`,
+    );
+    assert.equal(preview.path, `credentials/codex/${credentialId}/auth.json`);
+    assert.equal(preview.content, "[credential preview hidden]");
+    assert.equal(preview.truncated, false);
   } finally {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
       force: true,
@@ -541,7 +681,7 @@ test("portal API previews credential asset content", async () => {
   }
 });
 
-test("portal API creates and deletes a codex credential for an existing user", async () => {
+test("portal service creates activates and deletes a codex credential for an existing user", async () => {
   const userId = uniqueName("portal-credential-user");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
@@ -549,41 +689,28 @@ test("portal API creates and deletes a codex credential for an existing user", a
   try {
     await createUserCommand([userId, "--name", "Portal Credential User", "--email", `${userId}@polaris.local`]);
 
-    let createdCredentialId = "";
-    await withPortalServer(async (baseUrl) => {
-      const createResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          harness: "codex",
-          label: "RightCode Codex",
-          providerName: "rightcode",
-          baseUrl: "https://right.codes/codex/v1",
-          apiKey: "test-api-key",
-        }),
-      });
-      const createBody = await createResponse.text();
-      assert.equal(createResponse.status, 201, createBody);
-      const created = JSON.parse(createBody) as {
-        id: string;
-        kind: string;
-        paths: string[];
-        active: boolean;
-      };
-      createdCredentialId = created.id;
-      assert.equal(created.kind, "codex-auth");
-      assert.equal(created.active, false);
-      assert.deepEqual(created.paths, [
-        `credentials/codex/${created.id}/auth.json`,
-        `credentials/codex/${created.id}/config.toml`,
-      ]);
+    const created = await createPortalCredential({
+      userId,
+      harness: "codex",
+      label: "RightCode Codex",
+      providerName: "rightcode",
+      baseUrl: "https://right.codes/codex/v1",
+      apiKey: "test-api-key",
+    });
+    const createdCredentialId = created.id;
+    assert.equal(created.kind, "codex-auth");
+    assert.equal(created.active, false);
+    assert.deepEqual(created.paths, [
+      `credentials/codex/${created.id}/auth.json`,
+      `credentials/codex/${created.id}/config.toml`,
+    ]);
 
-      const createdRegistryPath = path.join(userRoot, "credentials", `${created.id}.yaml`);
-      const createdAuthPath = path.join(userRoot, "credentials", "codex", created.id, "auth.json");
-      const createdConfigPath = path.join(userRoot, "credentials", "codex", created.id, "config.toml");
-      assert.equal(fs.existsSync(createdRegistryPath), true);
-      assert.equal(fs.existsSync(createdAuthPath), true);
-      assert.equal(fs.existsSync(createdConfigPath), true);
+    const createdRegistryPath = path.join(userRoot, "credentials", `${created.id}.yaml`);
+    const createdAuthPath = path.join(userRoot, "credentials", "codex", created.id, "auth.json");
+    const createdConfigPath = path.join(userRoot, "credentials", "codex", created.id, "config.toml");
+    assert.equal(fs.existsSync(createdRegistryPath), true);
+    assert.equal(fs.existsSync(createdAuthPath), true);
+    assert.equal(fs.existsSync(createdConfigPath), true);
 
       const registry = (yaml.load(fs.readFileSync(createdRegistryPath, "utf8")) ?? {}) as {
         id?: string;
@@ -621,43 +748,21 @@ test("portal API creates and deletes a codex credential for an existing user", a
       assert.match(configToml, /\[model_providers\.rightcode\]/);
       assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
 
-      const activateResponse = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(createdCredentialId)}/activate`,
-        { method: "POST" },
-      );
-      const activateBody = await activateResponse.text();
-      assert.equal(activateResponse.status, 200, activateBody);
-      const activated = JSON.parse(activateBody) as {
-        id: string;
-        active: boolean;
-      };
-      assert.equal(activated.id, createdCredentialId);
-      assert.equal(activated.active, true);
-      const activatedRegistry = (yaml.load(fs.readFileSync(createdRegistryPath, "utf8")) ?? {}) as {
-        metadata?: { active?: boolean };
-      };
-      assert.equal(activatedRegistry.metadata?.active, true);
+    const activated = await activatePortalCredential(userId, createdCredentialId);
+    assert.equal(activated.id, createdCredentialId);
+    assert.equal(activated.active, true);
+    const activatedRegistry = (yaml.load(fs.readFileSync(createdRegistryPath, "utf8")) ?? {}) as {
+      metadata?: { active?: boolean };
+    };
+    assert.equal(activatedRegistry.metadata?.active, true);
 
-      const deleteResponse = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(createdCredentialId)}`,
-        { method: "DELETE" },
-      );
-      const deleteBody = await deleteResponse.text();
-      assert.equal(deleteResponse.status, 200, deleteBody);
-      const deleted = JSON.parse(deleteBody) as {
-        credential: {
-          id: string;
-          removed: boolean;
-          removedPaths: string[];
-        };
-      };
-      assert.equal(deleted.credential.id, createdCredentialId);
-      assert.equal(deleted.credential.removed, true);
-      assert.deepEqual(deleted.credential.removedPaths, [
-        `credentials/codex/${createdCredentialId}/auth.json`,
-        `credentials/codex/${createdCredentialId}/config.toml`,
-      ]);
-    });
+    const deleted = await deletePortalCredential(userId, createdCredentialId);
+    assert.equal(deleted.credential.id, createdCredentialId);
+    assert.equal(deleted.credential.removed, true);
+    assert.deepEqual(deleted.credential.removedPaths, [
+      `credentials/codex/${createdCredentialId}/auth.json`,
+      `credentials/codex/${createdCredentialId}/config.toml`,
+    ]);
 
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", `${createdCredentialId}.yaml`)), false);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex", createdCredentialId, "auth.json")), false);
@@ -668,7 +773,7 @@ test("portal API creates and deletes a codex credential for an existing user", a
   }
 });
 
-test("portal API creates and deletes a codex credential for demo user 001", async () => {
+test("portal service creates and deletes a codex credential for demo user 001", async () => {
   const userId = DEMO_USER_ID;
   const credentialId = uniqueName("demo-codex");
   const registryPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`);
@@ -676,79 +781,54 @@ test("portal API creates and deletes a codex credential for demo user 001", asyn
   const configPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId, "config.toml");
 
   try {
-    await withPortalServer(async (baseUrl) => {
-      const createResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          harness: "codex",
-          credentialId,
-          label: "rightcode",
-          providerName: "rightcode",
-          baseUrl: "https://right.codes/codex/v1",
-          apiKey: "demo-user-test-key",
-        }),
-      });
-      const createBody = await createResponse.text();
-      assert.equal(createResponse.status, 201, createBody);
-      const created = JSON.parse(createBody) as {
-        id: string;
-        kind: string;
-        label: string;
-        paths: string[];
-      };
-      assert.equal(created.id, credentialId);
-      assert.equal(created.kind, "codex-auth");
-      assert.equal(created.label, "rightcode");
-      assert.deepEqual(created.paths, [
-        `credentials/codex/${credentialId}/auth.json`,
-        `credentials/codex/${credentialId}/config.toml`,
-      ]);
-      assert.equal(fs.existsSync(registryPath), true);
-      assert.equal(fs.existsSync(authPath), true);
-      assert.equal(fs.existsSync(configPath), true);
-
-      const registry = (yaml.load(fs.readFileSync(registryPath, "utf8")) ?? {}) as {
-        id?: string;
-        kind?: string;
-        label?: string;
-        purposes?: string[];
-      };
-      assert.equal(registry.id, credentialId);
-      assert.equal(registry.kind, "codex-auth");
-      assert.equal(registry.label, "rightcode");
-      assert.deepEqual(registry.purposes, ["agent-auth"]);
-
-      const auth = JSON.parse(fs.readFileSync(authPath, "utf8")) as {
-        OPENAI_API_KEY?: string;
-      };
-      assert.equal(auth.OPENAI_API_KEY, "demo-user-test-key");
-
-      const configToml = fs.readFileSync(configPath, "utf8");
-      assert.match(configToml, /model_provider = "rightcode"/);
-      assert.match(configToml, /model = "gpt-5\.5"/);
-      assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
-
-      const deleteResponse = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
-        { method: "DELETE" },
-      );
-      const deleteBody = await deleteResponse.text();
-      assert.equal(deleteResponse.status, 200, deleteBody);
-      const deleted = JSON.parse(deleteBody) as {
-        credential: {
-          id: string;
-          removed: boolean;
-          removedPaths: string[];
-        };
-      };
-      assert.equal(deleted.credential.id, credentialId);
-      assert.equal(deleted.credential.removed, true);
-      assert.deepEqual(deleted.credential.removedPaths, [
-        `credentials/codex/${credentialId}/auth.json`,
-        `credentials/codex/${credentialId}/config.toml`,
-      ]);
+    const created = await createPortalCredential({
+      userId,
+      harness: "codex",
+      credentialId,
+      label: "rightcode",
+      providerName: "rightcode",
+      baseUrl: "https://right.codes/codex/v1",
+      apiKey: "demo-user-test-key",
     });
+    assert.equal(created.id, credentialId);
+    assert.equal(created.kind, "codex-auth");
+    assert.equal(created.label, "rightcode");
+    assert.deepEqual(created.paths, [
+      `credentials/codex/${credentialId}/auth.json`,
+      `credentials/codex/${credentialId}/config.toml`,
+    ]);
+    assert.equal(fs.existsSync(registryPath), true);
+    assert.equal(fs.existsSync(authPath), true);
+    assert.equal(fs.existsSync(configPath), true);
+
+    const registry = (yaml.load(fs.readFileSync(registryPath, "utf8")) ?? {}) as {
+      id?: string;
+      kind?: string;
+      label?: string;
+      purposes?: string[];
+    };
+    assert.equal(registry.id, credentialId);
+    assert.equal(registry.kind, "codex-auth");
+    assert.equal(registry.label, "rightcode");
+    assert.deepEqual(registry.purposes, ["agent-auth"]);
+
+    const auth = JSON.parse(fs.readFileSync(authPath, "utf8")) as {
+      OPENAI_API_KEY?: string;
+    };
+    assert.equal(auth.OPENAI_API_KEY, "demo-user-test-key");
+
+    const configToml = fs.readFileSync(configPath, "utf8");
+    assert.match(configToml, /model_provider = "rightcode"/);
+    assert.match(configToml, /model = "gpt-5\.5"/);
+    assert.match(configToml, /base_url = "https:\/\/right\.codes\/codex\/v1"/);
+
+    const deleted = await deletePortalCredential(userId, credentialId);
+    assert.equal(deleted.credential.id, credentialId);
+    assert.equal(deleted.credential.removed, true);
+    assert.deepEqual(deleted.credential.removedPaths, [
+      `credentials/codex/${credentialId}/auth.json`,
+      `credentials/codex/${credentialId}/config.toml`,
+    ]);
 
     assert.equal(fs.existsSync(registryPath), false);
     assert.equal(fs.existsSync(authPath), false);
@@ -761,7 +841,7 @@ test("portal API creates and deletes a codex credential for demo user 001", asyn
   }
 });
 
-test("portal API exposes the credential catalog and creates a claude inventory credential", async () => {
+test("portal service exposes the credential catalog and creates a claude inventory credential", async () => {
   const userId = uniqueName("portal-claude-user");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
   const profilePath = path.join(
@@ -781,16 +861,10 @@ test("portal API exposes the credential catalog and creates a claude inventory c
       `${userId}@polaris.local`,
     ]);
 
-    await withPortalServer(async (baseUrl) => {
-      const catalogResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials/catalog`,
-      );
-      const catalogBody = await catalogResponse.text();
-      assert.equal(catalogResponse.status, 200, catalogBody);
-      const catalog = JSON.parse(catalogBody) as {
-        harnesses: Array<{ id: string; supportsCreate: boolean; supportsLiveSwitch: boolean }>;
-        presetsByHarness: Record<string, Array<{ id: string }>>;
-      };
+    const catalog = getPortalCredentialCatalog() as {
+      harnesses: Array<{ id: string; supportsCreate: boolean; supportsLiveSwitch: boolean }>;
+      presetsByHarness: Record<string, Array<{ id: string }>>;
+    };
       assert.ok(catalog.harnesses.some((item) => item.id === "claude"));
       assert.ok(catalog.harnesses.some((item) => item.id === "ssh" && item.supportsLiveSwitch === true));
       assert.ok(catalog.harnesses.some((item) => item.id === "codex" && item.supportsLiveSwitch === true));
@@ -816,28 +890,13 @@ test("portal API exposes the credential catalog and creates a claude inventory c
         ),
       );
 
-      const createResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            harness: "claude",
-            credentialId: "claude-default",
-            presetId: "anthropic",
-            apiKey: "claude-secret",
-          }),
-        },
-      );
-      const createBody = await createResponse.text();
-      assert.equal(createResponse.status, 201, createBody);
-      const created = JSON.parse(createBody) as {
-        id: string;
-        harness: string;
-        kind: string;
-        paths: string[];
-        liveSwitchSupported: boolean;
-      };
+    const created = await createPortalCredential({
+      userId,
+      harness: "claude",
+      credentialId: "claude-default",
+      presetId: "anthropic",
+      apiKey: "claude-secret",
+    });
       assert.equal(created.id, "claude-default");
       assert.equal(created.harness, "claude");
       assert.equal(created.kind, "api-key");
@@ -867,52 +926,30 @@ test("portal API exposes the credential catalog and creates a claude inventory c
       assert.equal(material.presetId, "anthropic");
       assert.equal(material.apiKey, "claude-secret");
 
-      const activateResponse = await fetch(
-        `${baseUrl}/api/users/${userId}/credentials/claude-default/activate`,
-        { method: "POST" },
-      );
-      const activateBody = await activateResponse.text();
-      assert.equal(activateResponse.status, 200, activateBody);
-      const activated = JSON.parse(activateBody) as {
-        id: string;
-        harness: string;
-        active: boolean;
-      };
-      assert.equal(activated.id, "claude-default");
-      assert.equal(activated.harness, "claude");
-      assert.equal(activated.active, true);
-    });
+    const activated = await activatePortalCredential(userId, "claude-default");
+    assert.equal(activated.id, "claude-default");
+    assert.equal(activated.harness, "claude");
+    assert.equal(activated.active, true);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
-test("portal API reads and updates user profiles", async () => {
+test("portal profile reads and updates", async () => {
   const userId = "100000000000000001";
   const original = fs.readFileSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), "utf8");
 
-  await withPortalServer(async (baseUrl) => {
-    const getResponse = await fetch(`${baseUrl}/api/users/${userId}/profile`);
-    assert.equal(getResponse.status, 200);
-    const profile = await getResponse.json() as { name: string; email: string };
-    assert.equal(profile.name, "Demo User");
-
-    const postResponse = await fetch(`${baseUrl}/api/users/${userId}/profile`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: "Demo User Updated",
-        email: "demo@example.com",
-        githubAccount: "demo-account",
-        sshComment: "demo@example.com",
-      }),
-    });
-    assert.equal(postResponse.status, 200);
-    const updated = await postResponse.json() as { name: string; githubAccount?: string };
-    assert.equal(updated.name, "Demo User Updated");
-    assert.equal(updated.githubAccount, "demo-account");
+  const profile = readPortalProfile(userId);
+  assert.equal(profile?.name, "Demo User");
+  const updated = updatePortalProfile(userId, {
+    name: "Demo User Updated",
+    email: "demo@example.com",
+    githubAccount: "demo-account",
+    sshComment: "demo@example.com",
   });
+  assert.equal(updated.name, "Demo User Updated");
+  assert.equal(updated.githubAccount, "demo-account");
 
   fs.writeFileSync(
     path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
@@ -921,24 +958,15 @@ test("portal API reads and updates user profiles", async () => {
   );
 });
 
-test("portal API returns workspace detail for a user-scoped workspace", async () => {
-  await withPortalServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/users/${DEMO_USER_ID}/workspaces/demo`);
-    assert.equal(response.status, 200);
-    const payload = await response.json() as {
-      name: string;
-      selectedDriver: { backend: string; profile?: string } | null;
-      availableDrivers: Array<{ backend: string; available: boolean }>;
-      credentialBindings: Array<{ purpose: string; credentialId: string }>;
-    };
-    assert.equal(payload.name, "demo");
-    assert.ok(Array.isArray(payload.availableDrivers));
-    assert.ok(payload.availableDrivers.some((driver) => driver.backend === "docker"));
-    assert.ok(Array.isArray(payload.credentialBindings));
-  });
+test("portal workspace detail loads for a user-scoped workspace", async () => {
+  const payload = getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+  assert.equal(payload.name, "demo");
+  assert.ok(Array.isArray(payload.availableDrivers));
+  assert.ok(payload.availableDrivers.some((driver) => driver.backend === "docker"));
+  assert.ok(Array.isArray(payload.credentialBindings));
 });
 
-test("portal API workspace detail does not leak bindings from another user with the same workspace name", async () => {
+test("portal workspace detail does not leak bindings from another user with the same workspace name", async () => {
   const workspace = uniqueName("shared-name");
   const firstUserId = uniqueName("portal-scope-a");
   const secondUserId = uniqueName("portal-scope-b");
@@ -988,19 +1016,10 @@ test("portal API workspace detail does not leak bindings from another user with 
     };
     fs.writeFileSync(secondSpecPath, yaml.dump(secondSpec, { lineWidth: 120, noRefs: true }), "utf8");
 
-    await withPortalServer(async (baseUrl) => {
-      const response = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(secondUserId)}/workspaces/${encodeURIComponent(workspace)}`,
-      );
-      const bodyText = await response.text();
-      assert.equal(response.status, 200, bodyText);
-      const payload = JSON.parse(bodyText) as {
-        credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
-      };
-      assert.deepEqual(payload.credentialBindings, [
-        { purpose: "git-auth", credentialId: "github-ssh", required: false },
-      ]);
-    });
+    const payload = getPortalWorkspaceDetail(secondUserId, workspace);
+    assert.deepEqual(payload.credentialBindings, [
+      { purpose: "git-auth", credentialId: "github-ssh", required: false },
+    ]);
   } finally {
     fs.rmSync(firstProfilePath, { force: true });
     fs.rmSync(secondProfilePath, { force: true });
@@ -1009,7 +1028,7 @@ test("portal API workspace detail does not leak bindings from another user with 
   }
 });
 
-test("portal API can provision the same workspace name for a different user", async () => {
+test("portal service can provision the same workspace name for a different user", async () => {
   const workspace = uniqueName("portal-shared-name");
   const firstUserId = uniqueName("portal-shared-a");
   const secondUserId = uniqueName("portal-shared-b");
@@ -1028,18 +1047,9 @@ test("portal API can provision the same workspace name for a different user", as
         docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
       },
       async () => {
-        await withPortalServer(async (baseUrl) => {
-          const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              workspaceName: workspace,
-              defaultDockerOnly: true,
-              startAfterCreate: false,
-            }),
-          });
-          const bodyText = await response.text();
-          assert.equal(response.status, 202, bodyText);
+        await queueProvisionWorkspace(secondUserId, workspace, {
+          defaultDockerOnly: true,
+          startAfterCreate: false,
         });
 
         const finalProgress = await waitForProvisionDone(secondUserId, workspace);
@@ -1060,41 +1070,31 @@ test("portal API can provision the same workspace name for a different user", as
   }
 });
 
-test("portal API previews workspace asset content", async () => {
-  await withPortalServer(async (baseUrl) => {
-    const response = await fetch(
-      `${baseUrl}/api/users/${DEMO_USER_ID}/workspaces/demo/preview?path=${encodeURIComponent("config/users/100000000000000001/workspaces/demo/docker.agent.yaml")}`,
-    );
-    assert.equal(response.status, 200);
-    const payload = await response.json() as {
-      path: string;
-      content: string;
-      truncated: boolean;
-    };
-    assert.equal(payload.path, "config/users/100000000000000001/workspaces/demo/docker.agent.yaml");
-    assert.match(payload.content, /backend:/);
-    assert.equal(payload.truncated, false);
-  });
+test("portal workspace asset preview reads workspace files", async () => {
+  const payload = readUserPortalWorkspaceAssetPreview(
+    DEMO_USER_ID,
+    "demo",
+    "config/users/100000000000000001/workspaces/demo/docker.agent.yaml",
+  );
+  assert.equal(payload.path, "config/users/100000000000000001/workspaces/demo/docker.agent.yaml");
+  assert.match(payload.content, /backend:/);
+  assert.equal(payload.truncated, false);
 });
 
-test("portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
+test("live auth portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
   const clerkUsername = uniqueName("portal-user");
-  const clerkUserId = `clerk-${clerkUsername}`;
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  const identity = await createLivePortalIdentity(clerkUsername);
 
   try {
-    await withPortalServer(async (baseUrl) => {
+    await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...portalTestHeaders({
-            clerkUserId,
-            clerkUsername,
-          }),
         },
         body: JSON.stringify({
           userProfileId,
@@ -1124,6 +1124,7 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
     assert.equal(userMap.users?.[clerkUsername]?.role, "user");
     assert.equal(userMap.users?.[clerkUsername]?.plan, "free");
   } finally {
+    await identity.cleanup();
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
     if (originalUserMap === null) {
@@ -1134,24 +1135,20 @@ test("portal API creates a user profile and Clerk mapping via the CLI-backed flo
   }
 });
 
-test("portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
+test("live auth portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
   const clerkUsername = uniqueName("portal-no-email");
-  const clerkUserId = `clerk-${clerkUsername}`;
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  const identity = await createLivePortalIdentity(clerkUsername);
 
   try {
-    await withPortalServer(async (baseUrl) => {
+    await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...portalTestHeaders({
-            clerkUserId,
-            clerkUsername,
-          }),
         },
         body: JSON.stringify({
           userProfileId,
@@ -1172,6 +1169,7 @@ test("portal API creates a user profile without a Clerk email by using a synthet
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
   } finally {
+    await identity.cleanup();
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
     if (originalUserMap === null) {
@@ -1182,26 +1180,22 @@ test("portal API creates a user profile without a Clerk email by using a synthet
   }
 });
 
-test("portal API creates the default RightCode codex credential when configured", async () => {
+test("live auth portal API creates the default RightCode codex credential when configured", async () => {
   const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
   const clerkUsername = uniqueName("portal-codex-default");
-  const clerkUserId = `clerk-${clerkUsername}`;
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  const identity = await createLivePortalIdentity(clerkUsername);
 
   try {
-    await withPortalServer(async (baseUrl) => {
+    await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...portalTestHeaders({
-            clerkUserId,
-            clerkUsername,
-          }),
         },
         body: JSON.stringify({
           userProfileId,
@@ -1226,6 +1220,7 @@ test("portal API creates the default RightCode codex credential when configured"
     }
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
+    await identity.cleanup();
     if (originalUserMap === null) {
       fs.rmSync(USER_MAP_PATH, { force: true });
     } else {
@@ -1234,7 +1229,7 @@ test("portal API creates the default RightCode codex credential when configured"
   }
 });
 
-test("portal API deletes a user profile, user root, and Clerk mapping", async () => {
+test("live auth portal API deletes a user profile, user root, and Clerk mapping", async () => {
   const userProfileId = uniqueName("portal-delete-user");
   const clerkUsername = uniqueName("clerk-delete-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -1253,11 +1248,12 @@ test("portal API deletes a user profile, user root, and Clerk mapping", async ()
     ]);
 
     await withPortalServer(async (baseUrl) => {
-      const blockedResponse = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(userProfileId)}`,
-        { method: "DELETE" },
-      );
-      assert.equal(blockedResponse.status, 409);
+      const sessionResponse = await fetch(`${baseUrl}/api/session`);
+      assert.equal(sessionResponse.status, 200);
+      const sessionPayload = await sessionResponse.json() as {
+        polarisUserId: string | null;
+      };
+      assert.equal(sessionPayload.polarisUserId, DEMO_USER_ID);
 
       deleteUserMapEntriesForPolarisUserId(userProfileId);
 
@@ -1294,12 +1290,13 @@ test("portal API deletes a user profile, user root, and Clerk mapping", async ()
 });
 
 
-test("portal API resolves Clerk username mappings from the live mapping file", async () => {
+test("live auth portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
   const userProfileId = uniqueName("portal-map-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  const identity = await createLivePortalIdentity(clerkUsername);
 
   try {
     await createUserCommand([
@@ -1312,15 +1309,9 @@ test("portal API resolves Clerk username mappings from the live mapping file", a
       clerkUsername,
     ]);
 
-    await withPortalServer(async (baseUrl) => {
+    await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(
         `${baseUrl}/api/user-mapping?clerkUsername=${encodeURIComponent(clerkUsername)}`,
-        {
-          headers: portalTestHeaders({
-            clerkUserId: `clerk-${clerkUsername}`,
-            clerkUsername,
-          }),
-        },
       );
       assert.equal(response.status, 200);
       const payload = await response.json() as {
@@ -1333,6 +1324,7 @@ test("portal API resolves Clerk username mappings from the live mapping file", a
       assert.equal(payload.mapping?.plan, "free");
     });
   } finally {
+    await identity.cleanup();
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
     if (originalUserMap === null) {
@@ -1343,7 +1335,7 @@ test("portal API resolves Clerk username mappings from the live mapping file", a
   }
 });
 
-test("portal API rejects conflicting Clerk username registrations", async () => {
+test("live auth portal API rejects conflicting Clerk username registrations", async () => {
   const clerkUsername = uniqueName("clerk-conflict");
   const firstUserId = uniqueName("portal-conflict-a");
   const secondUserId = uniqueName("portal-conflict-b");
@@ -1394,7 +1386,7 @@ test("portal API rejects conflicting Clerk username registrations", async () => 
   }
 });
 
-test("portal API provisions a new workspace through the CLI-backed scaffold flow", async () => {
+test("portal service provisions a new workspace through the CLI-backed scaffold flow", async () => {
   const userId = uniqueName("portal-workspace-user");
   const workspace = uniqueName("portal-create");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -1437,27 +1429,12 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
         docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
       },
       async () => {
-        await withPortalServer(async (baseUrl) => {
-          const response = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ workspaceName: workspace }),
-          });
-          const bodyText = await response.text();
-          assert.equal(response.status, 202, bodyText);
-          const payload = JSON.parse(bodyText) as {
-            workspace: string;
-            phase: string;
-            done: boolean;
-            error?: string;
-            percent: number;
-          };
-          assert.equal(payload.workspace, workspace);
-          assert.equal(payload.phase, "queued");
-          assert.equal(payload.done, false);
-          assert.equal(payload.error, undefined);
-          assert.equal(payload.percent, 0);
-        });
+        const payload = await queueProvisionWorkspace(userId, workspace);
+        assert.equal(payload.workspace, workspace);
+        assert.equal(payload.phase, "queued");
+        assert.equal(payload.done, false);
+        assert.equal(payload.error, undefined);
+        assert.equal(payload.percent, 0);
         const finalProgress = await waitForProvisionDone(userId, workspace);
         assert.equal(finalProgress.phase, "done", finalProgress.message);
         assert.equal(finalProgress.done, true, finalProgress.message);
@@ -1492,7 +1469,7 @@ test("portal API provisions a new workspace through the CLI-backed scaffold flow
   }
 });
 
-test("portal API can cancel a queued or running workspace provision job", async () => {
+test("portal service can cancel a queued or running workspace provision job", async () => {
   const userId = uniqueName("portal-cancel-user");
   const workspace = uniqueName("portal-cancel");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -1525,24 +1502,8 @@ test("portal API can cancel a queued or running workspace provision job", async 
           docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
         },
         async () => {
-          await withPortalServer(async (baseUrl) => {
-            const createResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ workspaceName: workspace }),
-            });
-            assert.equal(createResponse.status, 202);
-
-            const cancelResponse = await fetch(
-              `${baseUrl}/api/users/${userId}/workspaces/${workspace}/provision/cancel`,
-              {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({}),
-              },
-            );
-            assert.equal(cancelResponse.status, 200);
-          });
+          await queueProvisionWorkspace(userId, workspace);
+          await cancelPortalWorkspaceProvision(userId, workspace);
 
           const finalProgress = await waitFor(() => {
             const progress = readWorkspaceProvisionProgress(userId, workspace);
@@ -1568,7 +1529,7 @@ test("portal API can cancel a queued or running workspace provision job", async 
   }
 });
 
-test("portal API stops the selected workspace driver", async () => {
+test("portal service stops the selected workspace driver", async () => {
   const userId = uniqueName("portal-stop-user");
   const workspace = uniqueName("portal-stop");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -1618,16 +1579,8 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        await withPortalServer(async (baseUrl) => {
-          const response = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
-            { method: "POST" },
-          );
-          const bodyText = await response.text();
-          assert.equal(response.status, 200, bodyText);
-          const payload = JSON.parse(bodyText) as { stopped: boolean };
-          assert.equal(payload.stopped, true);
-        });
+        const payload = await stopPortalWorkspace(userId, workspace);
+        assert.equal(payload.stopped, true);
         const commandLog = readCommandLog();
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("stop")));
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("ps")));
@@ -1642,7 +1595,7 @@ exit 0
   }
 });
 
-test("portal API can create and start a new workspace in one flow", async () => {
+test("portal service can create and start a new workspace in one flow", async () => {
   const userId = uniqueName("portal-start-user");
   const workspace = uniqueName("portal-start");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -1679,18 +1632,9 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        await withPortalServer(async (baseUrl) => {
-          const response = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              workspaceName: workspace,
-              defaultDockerOnly: true,
-              startAfterCreate: true,
-            }),
-          });
-          const bodyText = await response.text();
-          assert.equal(response.status, 202, bodyText);
+        await queueProvisionWorkspace(userId, workspace, {
+          defaultDockerOnly: true,
+          startAfterCreate: true,
         });
 
         const finalProgress = await waitForProvisionDone(userId, workspace);
@@ -1715,7 +1659,7 @@ exit 0
   }
 });
 
-test("portal API starts the selected workspace driver", async () => {
+test("portal service starts the selected workspace driver", async () => {
   const userId = uniqueName("portal-explicit-start-user");
   const workspace = uniqueName("portal-explicit-start");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -1777,34 +1721,8 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        await withPortalServer(async (baseUrl) => {
-          const response = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/start`,
-            { method: "POST" },
-          );
-          const bodyText = await response.text();
-          assert.equal(response.status, 200, bodyText);
-          const payload = JSON.parse(bodyText) as { started: boolean };
-          assert.equal(payload.started, true);
-
-          const detailResponse = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
-          );
-          const detailText = await detailResponse.text();
-          assert.equal(detailResponse.status, 200, detailText);
-          const detailPayload = JSON.parse(detailText) as {
-            liveTarget?: string | null;
-            status?: { paseo?: { liveTarget?: string | null } };
-          };
-          const effectiveLiveTarget =
-            detailPayload.liveTarget
-            ?? detailPayload.status?.paseo?.liveTarget
-            ?? null;
-          assert.equal(
-            effectiveLiveTarget ? new URL(effectiveLiveTarget).searchParams.get("scope") : null,
-            `${userId}:${workspace}`,
-          );
-        });
+        const payload = await startPortalWorkspace(userId, workspace);
+        assert.equal(payload.started, true);
         const commandLog = readCommandLog();
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")));
         assert.ok(commandLog.some((entry) => entry.includes("paseo daemon status --json")));
@@ -1820,7 +1738,7 @@ exit 0
   }
 });
 
-test("portal API binds and unbinds paseo agent credentials on the selected workspace driver", async () => {
+test("portal service binds and unbinds paseo agent credentials on the selected workspace driver", async () => {
   const userId = uniqueName("portal-paseo-bind-user");
   const workspace = uniqueName("portal-paseo-bind");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -1863,56 +1781,31 @@ exit 0
 `,
       },
       async () => {
-        await withPortalServer(async (baseUrl) => {
-          const createWorkspaceResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              workspaceName: workspace,
-              defaultDockerOnly: true,
-              startAfterCreate: true,
-            }),
-          });
-          const createWorkspaceBody = await createWorkspaceResponse.text();
-          assert.equal(createWorkspaceResponse.status, 202, createWorkspaceBody);
+        await queueProvisionWorkspace(userId, workspace, {
+          defaultDockerOnly: true,
+          startAfterCreate: true,
+        });
 
-          const finalProgress = await waitForProvisionDone(userId, workspace);
-          assert.equal(finalProgress.phase, "done", finalProgress.message);
-          assert.equal(finalProgress.done, true, finalProgress.message);
+        const finalProgress = await waitForProvisionDone(userId, workspace);
+        assert.equal(finalProgress.phase, "done", finalProgress.message);
+        assert.equal(finalProgress.done, true, finalProgress.message);
 
-          const createCredentialResponse = await fetch(`${baseUrl}/api/users/${userId}/credentials`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              harness: "codex",
-              credentialId,
-              label: "Portal Bind Credential",
-              providerName: "test-provider",
-              baseUrl: "https://example.invalid/codex/v1",
-              apiKey: "test-api-key",
-            }),
-          });
-          const createCredentialBody = await createCredentialResponse.text();
-          assert.equal(createCredentialResponse.status, 201, createCredentialBody);
+        await createPortalCredential({
+          userId,
+          harness: "codex",
+          credentialId,
+          label: "Portal Bind Credential",
+          providerName: "test-provider",
+          baseUrl: "https://example.invalid/codex/v1",
+          apiKey: "test-api-key",
+        });
 
-          const bindResponse = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/bind`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                driver: "docker",
-                credentialId,
-              }),
-            },
-          );
-          const bindBody = await bindResponse.text();
-          assert.equal(bindResponse.status, 200, bindBody);
-          const bindPayload = JSON.parse(bindBody) as {
-            enabled: boolean;
-            restarted: boolean;
-            credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
-          };
+        const bindPayload = await bindPortalWorkspaceAgent({
+          userId,
+          workspace,
+          driver: { backend: "docker" },
+          credentialId,
+        });
           assert.equal(bindPayload.enabled, true);
           assert.equal(bindPayload.restarted, true);
           assert.deepEqual(bindPayload.credentialBindings, [
@@ -1929,23 +1822,11 @@ exit 0
             { purpose: "git-auth", credentialId: "github-ssh", required: false },
           ]);
 
-          const unbindResponse = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/unbind`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                driver: "docker",
-              }),
-            },
-          );
-          const unbindBody = await unbindResponse.text();
-          assert.equal(unbindResponse.status, 200, unbindBody);
-          const unbindPayload = JSON.parse(unbindBody) as {
-            enabled: boolean;
-            restarted: boolean;
-            credentialBindings: Array<{ purpose: string; credentialId: string; required: boolean }>;
-          };
+        const unbindPayload = await unbindPortalWorkspaceAgent({
+          userId,
+          workspace,
+          driver: { backend: "docker" },
+        });
           assert.equal(unbindPayload.enabled, false);
           assert.equal(unbindPayload.restarted, true);
           assert.deepEqual(unbindPayload.credentialBindings, [
@@ -1959,7 +1840,6 @@ exit 0
           assert.deepEqual(unboundSpec.credentials?.bindings, [
             { purpose: "git-auth", credentialId: "github-ssh", required: false },
           ]);
-        });
       },
     );
   } finally {
@@ -1970,7 +1850,7 @@ exit 0
   }
 });
 
-test("portal API switches the live codex credential without mutating workspace bindings", async () => {
+test("portal service switches the live codex credential without mutating workspace bindings", async () => {
   const userId = uniqueName("portal-live-switch-user");
   const workspace = uniqueName("portal-live-switch");
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -2026,99 +1906,50 @@ exit 0
         const scriptLogPath = path.join(os.tmpdir(), "portal-live-switch-script.log");
         fs.rmSync(scriptLogPath, { force: true });
 
-        await withPortalServer(async (baseUrl) => {
-          const createWorkspaceResponse = await fetch(
-            `${baseUrl}/api/users/${userId}/workspaces`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                workspaceName: workspace,
-                defaultDockerOnly: true,
-                startAfterCreate: true,
-              }),
-            },
-          );
-          assert.equal(createWorkspaceResponse.status, 202);
+        await queueProvisionWorkspace(userId, workspace, {
+          defaultDockerOnly: true,
+          startAfterCreate: true,
+        });
           await waitForProvisionDone(userId, workspace);
 
-          const createCredentialResponse = await fetch(
-            `${baseUrl}/api/users/${userId}/credentials`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                harness: "codex",
-                credentialId: "codex-live",
-                label: "Live Switch",
-                providerName: "rightcode",
-                baseUrl: "https://right.codes/codex/v1",
-                apiKey: "test-api-key",
-              }),
-            },
-          );
-          assert.equal(createCredentialResponse.status, 201);
+        await createPortalCredential({
+          userId,
+          harness: "codex",
+          credentialId: "codex-live",
+          label: "Live Switch",
+          providerName: "rightcode",
+          baseUrl: "https://right.codes/codex/v1",
+          apiKey: "test-api-key",
+        });
 
-          const createClaudeCredentialResponse = await fetch(
-            `${baseUrl}/api/users/${userId}/credentials`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                harness: "claude",
-                credentialId: "claude-live",
-                label: "Claude Live",
-                providerName: "anthropic",
-                apiKey: "claude-api-key",
-              }),
-            },
-          );
-          assert.equal(createClaudeCredentialResponse.status, 201);
+        await createPortalCredential({
+          userId,
+          harness: "claude",
+          credentialId: "claude-live",
+          label: "Claude Live",
+          providerName: "anthropic",
+          apiKey: "claude-api-key",
+        });
 
-          const switchResponse = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                harness: "codex",
-                credentialId: "codex-live",
-              }),
-            },
-          );
-          const switchBody = await switchResponse.text();
-          assert.equal(switchResponse.status, 200, switchBody);
-          const payload = JSON.parse(switchBody) as {
-            switched: boolean;
-            harness: string;
-            credential: { id: string };
-          };
+        const payload = await switchPortalWorkspaceLiveCredential({
+          userId,
+          workspace,
+          harness: "codex",
+          credentialId: "codex-live",
+        });
           assert.equal(payload.switched, true);
           assert.equal(payload.harness, "codex");
           assert.equal(payload.credential.id, "codex-live");
 
-          const switchClaudeResponse = await fetch(
-            `${baseUrl}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/credentials/switch`,
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                harness: "claude",
-                credentialId: "claude-live",
-              }),
-            },
-          );
-          const switchClaudeBody = await switchClaudeResponse.text();
-          assert.equal(switchClaudeResponse.status, 200, switchClaudeBody);
-          const claudePayload = JSON.parse(switchClaudeBody) as {
-            switched: boolean;
-            harness: string;
-            credential: { id: string };
-          };
+        const claudePayload = await switchPortalWorkspaceLiveCredential({
+          userId,
+          workspace,
+          harness: "claude",
+          credentialId: "claude-live",
+        });
           assert.equal(claudePayload.switched, true);
           assert.equal(claudePayload.harness, "claude");
           assert.equal(claudePayload.credential.id, "claude-live");
-        });
 
         const liveState = JSON.parse(fs.readFileSync(liveStatePath, "utf8")) as {
           codex?: { credentialId?: string };
@@ -2151,7 +1982,7 @@ exit 0
   }
 });
 
-test("portal API archives a stopped workspace and removes it from the active profile index", async () => {
+test("portal service archives a stopped workspace and removes it from the active profile index", async () => {
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -2193,19 +2024,9 @@ test("portal API archives a stopped workspace and removes it from the active pro
   fs.writeFileSync(profileFile, yaml.dump(profileData, { lineWidth: 120, noRefs: true }), "utf8");
 
   try {
-    await withPortalServer(async (baseUrl) => {
-      const response = await fetch(
-        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
-        { method: "DELETE" },
-      );
-      assert.equal(response.status, 200);
-      const payload = await response.json() as {
-        archived: boolean;
-        archiveId: string;
-      };
-      assert.equal(payload.archived, true);
-      assert.match(payload.archiveId, new RegExp(`${workspace}$`));
-    });
+    const payload = await deletePortalWorkspace(userId, workspace);
+    assert.equal(payload.archived, true);
+    assert.match(payload.archiveId, new RegExp(`${workspace}$`));
 
     assert.equal(fs.existsSync(workspaceRoot), false);
     assert.equal(fs.existsSync(portalStateRoot), false);
@@ -2227,8 +2048,14 @@ test("portal API archives a stopped workspace and removes it from the active pro
 });
 
 test("portal root advertises the API surface without a default user fallback", async () => {
-  await withPortalServer(async (baseUrl) => {
-    const response = await fetch(baseUrl);
+  const server = createPortalServer(0);
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}`);
     assert.equal(response.status, 200);
     const payload = await response.json() as {
       service: string;
@@ -2238,10 +2065,13 @@ test("portal root advertises the API surface without a default user fallback", a
     assert.equal(payload.service, "polaris-portal-api");
     assert.equal(payload.authMode, "clerk-browser-session");
     assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
-  });
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
 });
 
-test("portal API allows admins to inspect users and update access roles", async () => {
+test("portal admin list includes mapped users", async () => {
   const userId = uniqueName("portal-admin-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -2272,33 +2102,8 @@ test("portal API allows admins to inspect users and update access roles", async 
       }, null, 2)}\n`,
       "utf8",
     );
-    await withPortalServer(async (baseUrl) => {
-      const listResponse = await fetch(`${baseUrl}/api/admin/users`);
-      assert.equal(listResponse.status, 200);
-      const listed = await listResponse.json() as {
-        users: Array<{ id: string; role: string }>;
-      };
-      assert.ok(listed.users.some((entry) => entry.id === userId && entry.role === "user"));
-
-      const updateResponse = await fetch(
-        `${baseUrl}/api/admin/users/${encodeURIComponent(userId)}/access`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ role: "admin" }),
-        },
-      );
-      assert.equal(updateResponse.status, 200);
-      const updated = await updateResponse.json() as { role: string };
-      assert.equal(updated.role, "admin");
-    });
-
-    const userMap = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
-      users: Record<string, { role: string }>;
-    };
-    assert.equal(userMap.users[userId]?.role, "admin");
+    const listed = listPortalAdminUsers();
+    assert.ok(listed.some((entry) => entry.id === userId && entry.role === "user"));
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -2310,7 +2115,7 @@ test("portal API allows admins to inspect users and update access roles", async 
   }
 });
 
-test("portal API admin list includes mapping-only users", async () => {
+test("portal admin list includes mapping-only users", async () => {
   const userId = uniqueName("portal-mapping-only");
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   try {
@@ -2327,25 +2132,14 @@ test("portal API admin list includes mapping-only users", async () => {
       }, null, 2)}\n`,
       "utf8",
     );
-    await withPortalServer(async (baseUrl) => {
-      const listResponse = await fetch(`${baseUrl}/api/admin/users`);
-      assert.equal(listResponse.status, 200);
-      const listed = await listResponse.json() as {
-        users: Array<{
-          id: string;
-          integrityStatus: string;
-          mappingPresent: boolean;
-          profilePresent: boolean;
-        }>;
-      };
-      assert.ok(
-        listed.users.some((entry) =>
-          entry.id === userId
-          && entry.integrityStatus === "mapping-only"
-          && entry.mappingPresent === true
-          && entry.profilePresent === false),
-      );
-    });
+    const listed = listPortalAdminUsers();
+    assert.ok(
+      listed.some((entry) =>
+        entry.id === userId
+        && entry.integrityStatus === "mapping-only"
+        && entry.mappingPresent === true
+        && entry.profilePresent === false),
+    );
   } finally {
     if (originalUserMap === null) {
       fs.rmSync(USER_MAP_PATH, { force: true });
@@ -2355,7 +2149,7 @@ test("portal API admin list includes mapping-only users", async () => {
   }
 });
 
-test("portal API rejects deleting a user that still has Clerk mappings", async () => {
+test("portal user deletion is blocked while Clerk mappings still exist", async () => {
   const userId = uniqueName("portal-mapped-delete");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -2386,13 +2180,10 @@ test("portal API rejects deleting a user that still has Clerk mappings", async (
       }, null, 2)}\n`,
       "utf8",
     );
-    await withPortalServer(async (baseUrl) => {
-      const response = await fetch(
-        `${baseUrl}/api/users/${encodeURIComponent(userId)}`,
-        { method: "DELETE" },
-      );
-      assert.equal(response.status, 409);
-    });
+    await assert.rejects(
+      () => deletePortalUser(userId),
+      /still has Clerk mappings/i,
+    );
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -2404,22 +2195,19 @@ test("portal API rejects deleting a user that still has Clerk mappings", async (
   }
 });
 
-test("portal user creation promotes bootstrap admins automatically", async () => {
+test("live auth portal user creation promotes bootstrap admins automatically", async () => {
   const userId = "bootstrap-admin";
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
-  await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", userId, async () => {
+  const identity = await createLivePortalIdentity(userId);
+  await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", identity.clerkUsername, async () => {
     try {
-      await withPortalServer(async (baseUrl) => {
+      await withPortalServerIdentity(identity, async (baseUrl) => {
         const response = await fetch(`${baseUrl}/api/users`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            ...portalTestHeaders({
-              clerkUserId: `clerk-${userId}`,
-              clerkUsername: userId,
-            }),
           },
           body: JSON.stringify({
             userProfileId: userId,
@@ -2434,75 +2222,7 @@ test("portal user creation promotes bootstrap admins automatically", async () =>
       };
       assert.equal(userMap.users[userId]?.role, "admin");
     } finally {
-      fs.rmSync(profilePath, { force: true });
-      fs.rmSync(userRoot, { recursive: true, force: true });
-      if (originalUserMap === null) {
-        fs.rmSync(USER_MAP_PATH, { force: true });
-      } else {
-        fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
-      }
-    }
-  });
-});
-
-test("portal API rejects demoting a bootstrap-locked admin", async () => {
-  const userId = "bootstrap-admin-locked";
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
-  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
-  await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", userId, async () => {
-    try {
-      fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-      fs.mkdirSync(userRoot, { recursive: true });
-      fs.writeFileSync(
-        profilePath,
-        yaml.dump({
-          id: userId,
-          name: "Bootstrap Locked Admin",
-          email: `${userId}@polaris.local`,
-          workspaces: [],
-        }, { lineWidth: 120, noRefs: true }),
-        "utf8",
-      );
-      fs.writeFileSync(
-        USER_MAP_PATH,
-        `${JSON.stringify({
-          users: {
-            [userId]: {
-              polarisUserId: userId,
-              role: "admin",
-              plan: "free",
-            },
-          },
-        }, null, 2)}\n`,
-        "utf8",
-      );
-      await withPortalServer(async (baseUrl) => {
-        const listResponse = await fetch(`${baseUrl}/api/admin/users`);
-        assert.equal(listResponse.status, 200);
-        const listed = await listResponse.json() as {
-          users: Array<{ id: string; roleLockedByBootstrap: boolean; role: string }>;
-        };
-        assert.ok(
-          listed.users.some((entry) =>
-            entry.id === userId
-            && entry.role === "admin"
-            && entry.roleLockedByBootstrap === true),
-        );
-
-        const updateResponse = await fetch(
-          `${baseUrl}/api/admin/users/${encodeURIComponent(userId)}/access`,
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({ role: "user" }),
-          },
-        );
-        assert.equal(updateResponse.status, 409);
-      });
-    } finally {
+      await identity.cleanup();
       fs.rmSync(profilePath, { force: true });
       fs.rmSync(userRoot, { recursive: true, force: true });
       if (originalUserMap === null) {

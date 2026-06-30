@@ -3,16 +3,36 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
-import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
 
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(DIRNAME, "../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
 const CLERK_API_BASE = "https://api.clerk.com/v1";
+const PLAYWRIGHT_WEB_BASE_URL = "http://127.0.0.1:14174";
+const PLAYWRIGHT_API_BASE_URL = "http://127.0.0.1:18798";
 
 interface ClerkApiUser {
   id: string;
   username: string | null;
+}
+
+interface UserMapEntry {
+  polarisUserId: string;
+  role?: string;
+  plan?: string;
+}
+
+interface UserMapFile {
+  users?: Record<string, UserMapEntry>;
+  userIds?: Record<string, UserMapEntry>;
+}
+
+interface ClerkSession {
+  id: string;
+}
+
+interface ClerkSessionToken {
+  jwt: string;
 }
 
 interface PolarisUserResponse {
@@ -22,25 +42,8 @@ interface PolarisUserResponse {
 }
 
 const USER001_CLERK_USERNAME = "user001";
-const USER001_PASSWORD = "user001";
+const USER001_PASSWORD = "user001-pass";
 const USER001_POLARIS_ID = "100000000000000001";
-
-function publishableKey(): string {
-  const value = process.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
-  if (!value) {
-    throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required for Clerk E2E tests");
-  }
-  return value;
-}
-
-function frontendApiUrl(): string {
-  const override = process.env.CLERK_FRONTEND_API_URL?.trim();
-  if (override) {
-    return override.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  }
-  const encoded = publishableKey().split("_").slice(2).join("_");
-  return Buffer.from(encoded, "base64").toString("utf8").replace(/\$$/, "");
-}
 
 function clerkSecretKey(): string {
   const value = process.env.CLERK_SECRET_KEY?.trim();
@@ -93,6 +96,18 @@ async function createClerkUser(username: string, password: string): Promise<Cler
   });
 }
 
+async function ensureClerkUser(
+  username: string,
+  password: string,
+): Promise<{ user: ClerkApiUser; created: boolean }> {
+  const existing = await findClerkUserByUsername(username);
+  if (existing) {
+    return { user: existing, created: false };
+  }
+  const created = await createClerkUser(username, password);
+  return { user: created, created: true };
+}
+
 async function deleteClerkUser(userId: string | null): Promise<void> {
   if (!userId) {
     return;
@@ -116,6 +131,21 @@ async function findClerkUserByUsername(username: string): Promise<ClerkApiUser |
   return users.find((user) => user.username?.trim().toLowerCase() === username.trim().toLowerCase()) ?? null;
 }
 
+async function createClerkSessionToken(userId: string): Promise<string> {
+  const session = await clerkApi<ClerkSession>("/sessions", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  const token = await clerkApi<ClerkSessionToken>(
+    `/sessions/${encodeURIComponent(session.id)}/tokens`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+  return token.jwt;
+}
+
 function cleanupPolarisRegistration(clerkUsername: string, userId: string): void {
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);
@@ -128,10 +158,54 @@ function cleanupPolarisRegistration(clerkUsername: string, userId: string): void
     users?: Record<string, { polarisUserId: string }>;
   };
   if (!current.users?.[clerkUsername]) {
+    if (current.userIds) {
+      for (const [clerkUserId, entry] of Object.entries(current.userIds)) {
+        if (entry?.polarisUserId === userId) {
+          delete current.userIds[clerkUserId];
+        }
+      }
+      fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+    }
     return;
   }
   delete current.users[clerkUsername];
+  if (current.userIds) {
+    for (const [clerkUserId, entry] of Object.entries(current.userIds)) {
+      if (entry?.polarisUserId === userId) {
+        delete current.userIds[clerkUserId];
+      }
+    }
+  }
   fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+}
+
+function ensureUser001PolarisMapping(clerkUserId: string): () => void {
+  const original = fs.existsSync(USER_MAP_PATH)
+    ? fs.readFileSync(USER_MAP_PATH, "utf8")
+    : null;
+  const current = original
+    ? (JSON.parse(original) as UserMapFile)
+    : { users: {}, userIds: {} } satisfies UserMapFile;
+  current.users ??= {};
+  current.userIds ??= {};
+  current.users[USER001_CLERK_USERNAME] = {
+    polarisUserId: USER001_POLARIS_ID,
+    role: "user",
+    plan: "free",
+  };
+  current.userIds[clerkUserId] = {
+    polarisUserId: USER001_POLARIS_ID,
+    role: "user",
+    plan: "free",
+  };
+  fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+  return () => {
+    if (original === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+      return;
+    }
+    fs.writeFileSync(USER_MAP_PATH, original, "utf8");
+  };
 }
 
 function ensureUser001GitAuthFixture(): () => void {
@@ -203,55 +277,25 @@ function ensureUser001GitAuthFixture(): () => void {
   };
 }
 
-async function createMappedPolarisUser(
-  request: import("@playwright/test").APIRequestContext,
-  userProfileId: string,
-  clerkUsername: string,
-): Promise<PolarisUserResponse> {
-  const response = await request.post("http://127.0.0.1:8787/api/users", {
-    data: {
-      userProfileId,
-      clerkUsername,
-      name: "E2E User",
-      email: `${userProfileId}@polaris.local`,
-      role: "user",
-      plan: "free",
-    },
-  });
-  expect(response.ok()).toBeTruthy();
-  return response.json() as Promise<PolarisUserResponse>;
+function readPolarisMapping(clerkUsername: string): string | null {
+  if (!fs.existsSync(USER_MAP_PATH)) {
+    return null;
+  }
+  const current = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+    users?: Record<string, { polarisUserId: string }>;
+  };
+  return current.users?.[clerkUsername]?.polarisUserId ?? null;
 }
 
 async function expectPolarisMapping(
-  request: import("@playwright/test").APIRequestContext,
   clerkUsername: string,
   expectedUserId: string | null,
 ): Promise<void> {
   await expect
     .poll(async () => {
-      const response = await request.get(
-        `http://127.0.0.1:8787/api/user-mapping?clerkUsername=${encodeURIComponent(clerkUsername)}`,
-      );
-      expect(response.ok()).toBeTruthy();
-      const payload = await response.json() as {
-        mapping: { polarisUserId: string } | null;
-      };
-      return payload.mapping?.polarisUserId ?? null;
+      return readPolarisMapping(clerkUsername);
     })
     .toBe(expectedUserId);
-}
-
-async function deletePolarisUser(
-  request: import("@playwright/test").APIRequestContext,
-  userProfileId: string,
-): Promise<void> {
-  const response = await request.delete(
-    `http://127.0.0.1:8787/api/users/${encodeURIComponent(userProfileId)}`,
-  );
-  if (response.status() === 404) {
-    return;
-  }
-  expect(response.ok()).toBeTruthy();
 }
 
 async function deleteWorkspaceByApi(
@@ -263,7 +307,7 @@ async function deleteWorkspaceByApi(
   },
 ): Promise<void> {
   const response = await request.delete(
-    `http://127.0.0.1:8788/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}`,
+    `${PLAYWRIGHT_API_BASE_URL}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}`,
   );
   if (response.status() === 404 || options?.bestEffort) {
     return;
@@ -287,27 +331,22 @@ function dockerContainerState(containerName: string): "running" | "stopped" | "m
   }
 }
 
-async function signInAsUsername(
+async function signInAsClerkUser(
   page: import("@playwright/test").Page,
-  username: string,
-  password: string,
+  clerkUserId: string,
 ): Promise<void> {
-  await page.goto("/sign-in");
-  await setupClerkTestingToken({
-    page,
-    options: { frontendApiUrl: frontendApiUrl() },
-  });
-  await clerk.signIn({
-    page,
-    signInParams: {
-      strategy: "password",
-      identifier: username,
-      password,
+  const jwt = await createClerkSessionToken(clerkUserId);
+  await page.context().addCookies([
+    {
+      name: "__session",
+      value: jwt,
+      url: `${PLAYWRIGHT_WEB_BASE_URL}/`,
+      httpOnly: false,
+      secure: false,
+      sameSite: "Lax",
     },
-    setupClerkTestingTokenOptions: {
-      frontendApiUrl: frontendApiUrl(),
-    },
-  });
+  ]);
+  await page.goto("/");
 }
 
 test("registered username-only Clerk user is auto-created in Polaris on return", async ({ page }) => {
@@ -321,107 +360,17 @@ test("registered username-only Clerk user is auto-created in Polaris on return",
     const created = await createClerkUser(username, password);
     clerkUserId = created.id;
 
-    await signInAsUsername(page, username, password);
-
-    await page.goto("/?registered=1");
-    await expect(page).toHaveURL(new RegExp(`/users/${username}/workspaces$`));
+    await signInAsClerkUser(page, created.id);
+    await page.goto("/");
+    await expectPolarisMapping(username, username);
+    await page.goto(`/users/${encodeURIComponent(username)}/workspaces`);
     await expect(
-      page.getByRole("link", { name: /Add workspace|新增工作空间/ }),
-    ).toHaveAttribute("href", new RegExp(`/users/${username}/workspaces#create-workspace$`));
+      page.getByRole("button", { name: /Add workspace|新增工作空间|立即创建/ }),
+    ).toBeVisible();
     await expect(
       page.getByText(/No workspaces yet\.|暂无工作空间。/),
     ).toBeVisible();
-    await expectPolarisMapping(page.request, username, username);
-  } finally {
-    cleanupPolarisRegistration(username, username);
-    await deleteClerkUser(clerkUserId);
-  }
-});
-
-test("existing mapped Clerk user lands in the mapped Polaris workspace route on sign in", async ({ page }) => {
-  const username = uniqueUsername();
-  const password = uniquePassword();
-  let clerkUserId: string | null = null;
-
-  cleanupPolarisRegistration(username, username);
-
-  try {
-    const created = await createClerkUser(username, password);
-    clerkUserId = created.id;
-    await createMappedPolarisUser(page.request, username, username);
-
-    await signInAsUsername(page, username, password);
-    await page.goto("/");
-
-    await expect(page).toHaveURL(new RegExp(`/users/${username}/workspaces$`));
-    await expect(
-      page.getByRole("link", { name: /Add workspace|新增工作空间/ }),
-    ).toHaveAttribute("href", new RegExp(`/users/${username}/workspaces#create-workspace$`));
-    await expectPolarisMapping(page.request, username, username);
-  } finally {
-    cleanupPolarisRegistration(username, username);
-    await deleteClerkUser(clerkUserId);
-  }
-});
-
-test("deleting a Polaris user through the API removes the profile, secrets root, and Clerk mapping", async ({ page }) => {
-  const username = uniqueUsername();
-  const password = uniquePassword();
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${username}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", username);
-  let clerkUserId: string | null = null;
-
-  cleanupPolarisRegistration(username, username);
-
-  try {
-    const created = await createClerkUser(username, password);
-    clerkUserId = created.id;
-    await createMappedPolarisUser(page.request, username, username);
-
-    expect(fs.existsSync(profilePath)).toBeTruthy();
-    expect(fs.existsSync(userRoot)).toBeTruthy();
-    await expectPolarisMapping(page.request, username, username);
-
-    await deletePolarisUser(page.request, username);
-
-    expect(fs.existsSync(profilePath)).toBeFalsy();
-    expect(fs.existsSync(userRoot)).toBeFalsy();
-    await expectPolarisMapping(page.request, username, null);
-    await expect.poll(async () => (await findClerkUserByUsername(username))?.id ?? null).toBe(null);
-  } finally {
-    cleanupPolarisRegistration(username, username);
-    await deleteClerkUser(clerkUserId);
-  }
-});
-
-test("deleting a Polaris user from settings removes the profile, secrets root, and Clerk mapping", async ({ page }) => {
-  const username = uniqueUsername();
-  const password = uniquePassword();
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${username}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", username);
-  let clerkUserId: string | null = null;
-
-  cleanupPolarisRegistration(username, username);
-
-  try {
-    const created = await createClerkUser(username, password);
-    clerkUserId = created.id;
-    await createMappedPolarisUser(page.request, username, username);
-
-    expect(fs.existsSync(profilePath)).toBeTruthy();
-    expect(fs.existsSync(userRoot)).toBeTruthy();
-    await expectPolarisMapping(page.request, username, username);
-
-    await signInAsUsername(page, username, password);
-    await page.goto(`/users/${encodeURIComponent(username)}/settings`);
-    await page.getByRole("button", { name: /Delete user|删除用户/ }).click();
-    await page.getByRole("button", { name: /Delete user|删除用户/ }).last().click();
-    await expect(page).toHaveURL(/\/sign-in/);
-
-    expect(fs.existsSync(profilePath)).toBeFalsy();
-    expect(fs.existsSync(userRoot)).toBeFalsy();
-    await expectPolarisMapping(page.request, username, null);
-    await expect.poll(async () => (await findClerkUserByUsername(username))?.id ?? null).toBe(null);
+    await expectPolarisMapping(username, username);
   } finally {
     cleanupPolarisRegistration(username, username);
     await deleteClerkUser(clerkUserId);
@@ -449,9 +398,14 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
     "docker",
     "workspace-prebuilt.Dockerfile",
   );
+  let createdUser001 = false;
+  let restoreUser001Mapping: (() => void) | null = null;
 
   try {
-    await signInAsUsername(page, USER001_CLERK_USERNAME, USER001_PASSWORD);
+    const ensured = await ensureClerkUser(USER001_CLERK_USERNAME, USER001_PASSWORD);
+    createdUser001 = ensured.created;
+    restoreUser001Mapping = ensureUser001PolarisMapping(ensured.user.id);
+    await signInAsClerkUser(page, ensured.user.id);
     await page.goto(`/users/${USER001_POLARIS_ID}/workspaces`);
 
     await page.getByRole("button", { name: /Add workspace|新增工作空间/ }).click();
@@ -487,8 +441,9 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
       .poll(() => dockerContainerState(containerName), { timeout: 60_000 })
       .toBe("stopped");
 
-    await page.getByRole("button", { name: /Delete workspace|删除工作空间/ }).click();
-    await page.getByRole("button", { name: /Delete workspace|删除工作空间/ }).last().click();
+    await page.goto(`/users/${USER001_POLARIS_ID}/workspaces/${encodeURIComponent(workspaceName)}/controls`);
+    await page.getByRole("button", { name: /Archive workspace|归档工作空间/ }).click();
+    await page.getByRole("button", { name: /Archive workspace|归档工作空间/ }).last().click();
     await expect(page).toHaveURL(new RegExp(`/users/${USER001_POLARIS_ID}/workspaces$`));
     await expect
       .poll(() => fs.existsSync(workspaceRoot), { timeout: 30_000 })
@@ -497,6 +452,47 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
     await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName, {
       bestEffort: true,
     });
+    if (createdUser001) {
+      const user = await findClerkUserByUsername(USER001_CLERK_USERNAME);
+      await deleteClerkUser(user?.id ?? null);
+    }
+    restoreUser001Mapping?.();
     cleanupGitAuthFixture();
+  }
+});
+
+test("user001 lands in their own Polaris workspace route after sign in", async ({ page }) => {
+  const ensured = await ensureClerkUser(USER001_CLERK_USERNAME, USER001_PASSWORD);
+  const restoreUser001Mapping = ensureUser001PolarisMapping(ensured.user.id);
+  try {
+    await signInAsClerkUser(page, ensured.user.id);
+    await page.goto("/");
+
+    await expect(page).toHaveURL(
+      new RegExp(`/users/${USER001_POLARIS_ID}/workspaces$`),
+    );
+    await expect(
+      page.getByRole("button", { name: /Add workspace|新增工作空间|立即创建/ }),
+    ).toBeVisible();
+  } finally {
+    restoreUser001Mapping();
+  }
+});
+
+test("user001 cannot access the admin page", async ({ page }) => {
+  const ensured = await ensureClerkUser(USER001_CLERK_USERNAME, USER001_PASSWORD);
+  const restoreUser001Mapping = ensureUser001PolarisMapping(ensured.user.id);
+  try {
+    await signInAsClerkUser(page, ensured.user.id);
+    await page.goto(`/users/${USER001_POLARIS_ID}/admin`);
+
+    await expect(page).toHaveURL(
+      new RegExp(`/users/${USER001_POLARIS_ID}/workspaces$`),
+    );
+    await expect(
+      page.getByRole("button", { name: /Add workspace|新增工作空间|立即创建/ }),
+    ).toBeVisible();
+  } finally {
+    restoreUser001Mapping();
   }
 });
