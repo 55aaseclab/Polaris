@@ -35,6 +35,7 @@ apps/docs/tsconfig.app.tsbuildinfo
 apps/docs/tsconfig.node.tsbuildinfo
 .env.local
 .env.dev
+.env.test
 .env.prod
 config/users/user-map.json
 

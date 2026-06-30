@@ -109,7 +109,7 @@ Polaris now treats Clerk-backed testing as a separate live-auth layer.
 Current split:
 
 - normal Polaris tests cover service and control-plane behavior without Clerk
-- live-auth backend tests use a real `CLERK_SECRET_KEY`
+- local live-auth tests load the minimal test env from `.env.test`
 - browser registration and route tests live in Playwright E2E
 
 Current commands:
@@ -122,3 +122,22 @@ pnpm --filter polaris-web run test:live-auth
 
 The goal is to keep default test runs independent from external auth, while
 still keeping the real Clerk integration exercised in a dedicated group.
+
+For local development, `pnpm --filter polaris run test:live-auth` and
+`pnpm --filter polaris-web run test:live-auth` read repo-root `.env.test`.
+
+That file should stay minimal.
+It is not meant to mirror `.env.dev`.
+
+Current expected contents include:
+
+- `POLARIS_DATA_ROOT=./config`
+- `POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces`
+- loopback executor vars for local tests
+- `VITE_CLERK_PUBLISHABLE_KEY`
+- `VITE_CLERK_DOMAIN`
+- `VITE_CLERK_SIGN_IN_URL`
+- `VITE_CLERK_SIGN_UP_URL`
+- `CLERK_SECRET_KEY`
+
+Use `.env.test.example` as the template.

@@ -7,6 +7,7 @@ import { once } from "node:events";
 import yaml from "js-yaml";
 import { createClerkClient } from "@clerk/backend";
 import { createPortalServer } from "../scripts/portal/server.js";
+import { createExecutorServer } from "../scripts/executor/server.js";
 import {
   deleteUserMapEntriesForPolarisUserId,
   upsertUserMapEntry,
@@ -50,6 +51,12 @@ import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
+const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
+const liveAuthTest = process.env.CLERK_SECRET_KEY?.trim() ? test : test.skip;
+
+let executorServer: import("node:http").Server | null = null;
+let executorBaseUrl = "";
+const previousExecutorEnv = new Map<string, string | undefined>();
 
 interface LivePortalIdentity {
   clerkUserId: string;
@@ -65,6 +72,39 @@ function uniqueName(prefix: string): string {
 function uniquePassword(): string {
   return `PolarisPortal!${Date.now()}aa`;
 }
+
+test.before(async () => {
+  for (const name of [
+    "POLARIS_EXECUTOR_BASE_URL",
+    "POLARIS_EXECUTOR_SHARED_SECRET",
+  ]) {
+    previousExecutorEnv.set(name, process.env[name]);
+  }
+  process.env.POLARIS_EXECUTOR_SHARED_SECRET = EXECUTOR_TEST_SECRET;
+  executorServer = createExecutorServer(0);
+  await once(executorServer, "listening");
+  const address = executorServer.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Executor server did not expose a TCP address");
+  }
+  executorBaseUrl = `http://127.0.0.1:${address.port}`;
+  process.env.POLARIS_EXECUTOR_BASE_URL = executorBaseUrl;
+});
+
+test.after(async () => {
+  if (executorServer) {
+    executorServer.close();
+    await once(executorServer, "close");
+    executorServer = null;
+  }
+  for (const [name, value] of previousExecutorEnv.entries()) {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  }
+});
 
 function clerkSecretKey(): string {
   const value = process.env.CLERK_SECRET_KEY?.trim();
@@ -114,20 +154,20 @@ async function createLivePortalIdentity(
   };
 }
 
-function mapIdentityToPolarisUser(
+async function mapIdentityToPolarisUser(
   identity: LivePortalIdentity,
   input: {
     polarisUserId: string;
     role?: "admin" | "user";
     plan?: "free" | "pro";
   },
-): void {
-  upsertUserMapEntry(identity.clerkUsername, {
+): Promise<void> {
+  await upsertUserMapEntry(identity.clerkUsername, {
     polarisUserId: input.polarisUserId,
     role: input.role ?? "user",
     plan: input.plan ?? "free",
   });
-  upsertUserMapUserId(identity.clerkUserId, {
+  await upsertUserMapUserId(identity.clerkUserId, {
     polarisUserId: input.polarisUserId,
     role: input.role ?? "user",
     plan: input.plan ?? "free",
@@ -264,7 +304,7 @@ async function withPortalServer(
 ): Promise<void> {
   const adminIdentity = await createLivePortalIdentity();
   try {
-    mapIdentityToPolarisUser(adminIdentity, {
+    await mapIdentityToPolarisUser(adminIdentity, {
       polarisUserId: DEMO_USER_ID,
       role: "admin",
       plan: "pro",
@@ -383,7 +423,7 @@ test("portal workspace detail reads cached state without implicit refresh side e
   );
 });
 
-test("live auth portal API accepts runtime status reports and persists cached workspace state", async () => {
+liveAuthTest("live auth portal API accepts runtime status reports and persists cached workspace state", async () => {
   const userId = DEMO_USER_ID;
   const workspace = "demo";
   const previous = readWorkspaceStatus(userId, workspace);
@@ -558,7 +598,7 @@ test("portal workspace stop writes cached status before the async refresh comple
   }
 });
 
-test("live auth portal API serves route-scoped workspaces and credentials for an authenticated scope", async () => {
+liveAuthTest("live auth portal API serves route-scoped workspaces and credentials for an authenticated scope", async () => {
   const credentialId = uniqueName("portal-cred");
   const userId = DEMO_USER_ID;
 
@@ -620,7 +660,7 @@ test("portal API rejects unauthenticated admin access", async () => {
   }
 });
 
-test("live auth portal API rejects cross-user access for a normal user session", async () => {
+liveAuthTest("live auth portal API rejects cross-user access for a normal user session", async () => {
   const firstUserId = uniqueName("portal-scope-user-a");
   const secondUserId = uniqueName("portal-scope-user-b");
   const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
@@ -632,7 +672,7 @@ test("live auth portal API rejects cross-user access for a normal user session",
   try {
     await createUserCommand([firstUserId, "--name", "Scope User A", "--email", `${firstUserId}@polaris.local`]);
     await createUserCommand([secondUserId, "--name", "Scope User B", "--email", `${secondUserId}@polaris.local`]);
-    mapIdentityToPolarisUser(identity, { polarisUserId: firstUserId, role: "user", plan: "free" });
+    await mapIdentityToPolarisUser(identity, { polarisUserId: firstUserId, role: "user", plan: "free" });
 
     await withPortalServerIdentity(identity, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
@@ -1081,7 +1121,7 @@ test("portal workspace asset preview reads workspace files", async () => {
   assert.equal(payload.truncated, false);
 });
 
-test("live auth portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
+liveAuthTest("live auth portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
   const clerkUsername = uniqueName("portal-user");
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -1135,7 +1175,7 @@ test("live auth portal API creates a user profile and Clerk mapping via the CLI-
   }
 });
 
-test("live auth portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
+liveAuthTest("live auth portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
   const clerkUsername = uniqueName("portal-no-email");
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -1180,7 +1220,7 @@ test("live auth portal API creates a user profile without a Clerk email by using
   }
 });
 
-test("live auth portal API creates the default RightCode codex credential when configured", async () => {
+liveAuthTest("live auth portal API creates the default RightCode codex credential when configured", async () => {
   const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
   const clerkUsername = uniqueName("portal-codex-default");
@@ -1229,7 +1269,7 @@ test("live auth portal API creates the default RightCode codex credential when c
   }
 });
 
-test("live auth portal API deletes a user profile, user root, and Clerk mapping", async () => {
+liveAuthTest("live auth portal API deletes a user profile, user root, and Clerk mapping", async () => {
   const userProfileId = uniqueName("portal-delete-user");
   const clerkUsername = uniqueName("clerk-delete-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -1290,7 +1330,7 @@ test("live auth portal API deletes a user profile, user root, and Clerk mapping"
 });
 
 
-test("live auth portal API resolves Clerk username mappings from the live mapping file", async () => {
+liveAuthTest("live auth portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
   const userProfileId = uniqueName("portal-map-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -1335,7 +1375,67 @@ test("live auth portal API resolves Clerk username mappings from the live mappin
   }
 });
 
-test("live auth portal API rejects conflicting Clerk username registrations", async () => {
+liveAuthTest("live auth user-map writes remain consistent under concurrent async updates", async () => {
+  const firstIdentity = await createLivePortalIdentity(uniqueName("clerk-concurrent-a"));
+  const secondIdentity = await createLivePortalIdentity(uniqueName("clerk-concurrent-b"));
+  const firstUserId = uniqueName("portal-concurrent-a");
+  const secondUserId = uniqueName("portal-concurrent-b");
+  const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
+    profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
+    userRoot: path.join(REPO_ROOT, "config", "users", userId),
+  }));
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+
+  try {
+    await Promise.all([
+      createUserCommand([
+        firstUserId,
+        "--name",
+        "Concurrent User A",
+        "--email",
+        `${firstUserId}@polaris.local`,
+        "--clerk",
+        firstIdentity.clerkUsername,
+        "--clerk-user-id",
+        firstIdentity.clerkUserId,
+      ]),
+      createUserCommand([
+        secondUserId,
+        "--name",
+        "Concurrent User B",
+        "--email",
+        `${secondUserId}@polaris.local`,
+        "--clerk",
+        secondIdentity.clerkUsername,
+        "--clerk-user-id",
+        secondIdentity.clerkUserId,
+      ]),
+    ]);
+
+    const current = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+      users?: Record<string, { polarisUserId: string }>;
+      userIds?: Record<string, { polarisUserId: string }>;
+    };
+    assert.equal(current.users?.[firstIdentity.clerkUsername]?.polarisUserId, firstUserId);
+    assert.equal(current.userIds?.[firstIdentity.clerkUserId]?.polarisUserId, firstUserId);
+    assert.equal(current.users?.[secondIdentity.clerkUsername]?.polarisUserId, secondUserId);
+    assert.equal(current.userIds?.[secondIdentity.clerkUserId]?.polarisUserId, secondUserId);
+  } finally {
+    await firstIdentity.cleanup();
+    await secondIdentity.cleanup();
+    for (const target of cleanupTargets) {
+      fs.rmSync(target.profilePath, { force: true });
+      fs.rmSync(target.userRoot, { recursive: true, force: true });
+    }
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
+liveAuthTest("live auth portal API rejects conflicting Clerk username registrations", async () => {
   const clerkUsername = uniqueName("clerk-conflict");
   const firstUserId = uniqueName("portal-conflict-a");
   const secondUserId = uniqueName("portal-conflict-b");
@@ -2195,7 +2295,7 @@ test("portal user deletion is blocked while Clerk mappings still exist", async (
   }
 });
 
-test("live auth portal user creation promotes bootstrap admins automatically", async () => {
+liveAuthTest("live auth portal user creation promotes bootstrap admins automatically", async () => {
   const userId = "bootstrap-admin";
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userId);

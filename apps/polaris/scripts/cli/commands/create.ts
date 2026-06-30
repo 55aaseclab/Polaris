@@ -1,3 +1,4 @@
+import path from "node:path";
 import { parseWorkspaceReference } from "../../config/load.js";
 import { assertProjectNameAvailableForUser } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
@@ -9,7 +10,10 @@ import {
 } from "../../config/scaffold.js";
 import { ensureWorkspaceConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
+import { repoRoot } from "../../utils/paths.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
+
+const REPO_ROOT = repoRoot(import.meta.url);
 
 function parseCreateArgs(argv: string[]): { projectRef: string; userProfileId: string } {
   const projectRef = argv[0]?.trim();
@@ -38,17 +42,20 @@ export async function createCommand(argv: string[]): Promise<void> {
     const backendConfigPath = scaffoldBackend === "docker"
       ? outputPath
       : ensureWorkspaceConfig(requestedRef, userProfileId)?.configPath ?? outputPath;
+    const displayConfigPath = path.isAbsolute(backendConfigPath)
+      ? path.relative(REPO_ROOT, backendConfigPath).replace(/\\/g, "/")
+      : backendConfigPath;
     logInfo("cli", "workspace-scaffolded", {
       project,
       backend: scaffoldBackend,
-      configPath: backendConfigPath,
+      configPath: displayConfigPath,
       userProfileId,
     });
     process.stdout.write(`${JSON.stringify({
       project,
       backend: scaffoldBackend,
       created: "saved-spec",
-      configPath: backendConfigPath,
+      configPath: displayConfigPath,
       userProfile: {
         id: userProfileId,
         created: false,

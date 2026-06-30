@@ -9,6 +9,9 @@ export function polarisDataRoot(importMetaUrl: string): string {
   const root = repoRoot(importMetaUrl);
   const configured = process.env.POLARIS_DATA_ROOT?.trim();
   if (!configured) {
+    if (process.env.NODE_ENV === "test") {
+      return path.join(root, "config");
+    }
     throw new Error(
       `POLARIS_DATA_ROOT is required for Polaris runtime paths (repo root: ${root})`,
     );
