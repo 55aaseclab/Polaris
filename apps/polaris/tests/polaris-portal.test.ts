@@ -13,6 +13,7 @@ import {
   upsertUserMapEntry,
   upsertUserMapUserId,
 } from "../scripts/portal/user-map.js";
+import { withUserMutationLock } from "../scripts/utils/user-mutation-lock.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
@@ -606,6 +607,28 @@ test("user-map waits through the TTL window and then recovers a stranded fresh l
       fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
     }
   }
+});
+
+test("user mutation lock serializes same-user writers", async () => {
+  const userId = uniqueName("portal-lock-user");
+  const events: string[] = [];
+  const first = withUserMutationLock(import.meta.url, userId, async () => {
+    events.push("first:start");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    events.push("first:end");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const second = withUserMutationLock(import.meta.url, userId, async () => {
+    events.push("second:start");
+    events.push("second:end");
+  });
+  await Promise.all([first, second]);
+  assert.deepEqual(events, [
+    "first:start",
+    "first:end",
+    "second:start",
+    "second:end",
+  ]);
 });
 
 
@@ -1940,6 +1963,85 @@ test("portal user deletion restores profile root and mappings when filesystem de
       users?: Record<string, { polarisUserId: string }>;
     };
     assert.equal(currentMap.users?.[`${userId}-username`]?.polarisUserId, userId);
+  } finally {
+    fs.rmSync = originalRmSync;
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
+test("portal user deletion rollback preserves unrelated user-map updates", async () => {
+  const userId = uniqueName("portal-delete-preserve");
+  const unrelatedUserId = uniqueName("portal-unrelated");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
+  const originalRmSync = fs.rmSync;
+  let injectedFailure = false;
+  try {
+    fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+    fs.mkdirSync(path.join(userRoot, "credentials"), { recursive: true });
+    fs.writeFileSync(
+      profilePath,
+      yaml.dump({
+        id: userId,
+        name: "Preserve Target",
+        email: `${userId}@polaris.local`,
+        workspaces: [],
+      }, { lineWidth: 120, noRefs: true }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      USER_MAP_PATH,
+      `${JSON.stringify({
+        users: {
+          [`${userId}-username`]: {
+            polarisUserId: userId,
+            role: "user",
+            plan: "free",
+          },
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    fs.rmSync = ((target: fs.PathLike, options?: fs.RmOptions) => {
+      if (!injectedFailure && target === userRoot) {
+        injectedFailure = true;
+        const current = fs.existsSync(USER_MAP_PATH)
+          ? JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+            users?: Record<string, { polarisUserId: string; role: string; plan: string }>;
+          }
+          : { users: {} };
+        current.users ??= {};
+        current.users[`${unrelatedUserId}-username`] = {
+          polarisUserId: unrelatedUserId,
+          role: "user",
+          plan: "free",
+        };
+        fs.writeFileSync(USER_MAP_PATH, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+        throw new Error("simulated deletion failure after unrelated mapping update");
+      }
+      return originalRmSync(target, options);
+    }) as typeof fs.rmSync;
+
+    await assert.rejects(
+      () => deletePortalUser(userId),
+      /simulated deletion failure after unrelated mapping update/i,
+    );
+
+    const current = JSON.parse(fs.readFileSync(USER_MAP_PATH, "utf8")) as {
+      users?: Record<string, { polarisUserId: string }>;
+    };
+    assert.equal(current.users?.[`${userId}-username`]?.polarisUserId, userId);
+    assert.equal(
+      current.users?.[`${unrelatedUserId}-username`]?.polarisUserId,
+      unrelatedUserId,
+    );
   } finally {
     fs.rmSync = originalRmSync;
     fs.rmSync(profilePath, { force: true });

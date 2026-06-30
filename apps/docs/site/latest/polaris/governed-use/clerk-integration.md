@@ -28,6 +28,11 @@ Current lock behavior:
 - if a previous writer crashed, Polaris waits through the TTL window and then
   clears the stranded lock automatically
 
+Polaris also applies a user-scoped mutation lock around user creation, user
+deletion, profile edits, and user credential writes.
+That keeps same-user control-plane mutations serialized while a delete or
+rollback-sensitive write is in progress.
+
 Typical mapping keys include:
 
 - `clerkUserId`
@@ -65,6 +70,9 @@ Current registration defaults create:
 - the Clerk mapping
 
 They do not implicitly create a default Codex provider credential.
+
+If the Clerk mapping step fails, Polaris rolls back the newly created profile
+and user root instead of leaving partial user state behind.
 
 ## Portal Responsibilities
 
@@ -116,7 +124,7 @@ Polaris now treats Clerk-backed testing as a separate live-auth layer.
 
 Current split:
 
-- normal Polaris tests cover service and control-plane behavior without Clerk
+- normal Polaris tests recursively discover non-live backend tests without Clerk
 - local live-auth tests load the minimal test env from `.env.test`
 - browser registration and route tests live in Playwright E2E
 

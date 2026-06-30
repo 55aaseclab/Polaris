@@ -20,6 +20,7 @@ import {
   readPortalWorkspaceAssetPreview,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
+  updatePortalProfile,
   type PortalArchivedWorkspaceSummary,
   type PortalCredentialSummary,
   type PortalCredentialPreview,
@@ -39,6 +40,7 @@ import {
   type PortalUserAccessSummary,
 } from "./user-map.js";
 import { polarisUsersRoot } from "../utils/paths.js";
+import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   cancelProvisionWorkspace as cancelProvisionWorkspaceExecutor,
@@ -202,27 +204,29 @@ export async function createPortalCredential(input: {
   model?: string;
   activate?: boolean;
 }): Promise<PortalCredentialSummary> {
-  const created = createManagedHarnessCredential({
-    userProfileId: input.userId,
-    harness: input.harness,
-    ...(input.credentialId?.trim() ? { credentialId: input.credentialId.trim() } : {}),
-    ...(input.label?.trim() ? { label: input.label.trim() } : {}),
-    ...(input.providerName?.trim() ? { providerName: input.providerName.trim() } : {}),
-    ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
-    ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
-    ...(input.presetId?.trim() ? { presetId: input.presetId.trim() } : {}),
-    ...(input.model?.trim() ? { model: input.model.trim() } : {}),
-    ...(input.activate ? { activate: true } : {}),
-  });
-  const summary = listPortalCredentials(input.userId).find(
-    (credential) => credential.id === created.id,
-  );
-  if (!summary) {
-    throw new Error(
-      `Credential '${created.id}' could not be loaded after creation`,
+  return withUserMutationLock(import.meta.url, input.userId, async () => {
+    const created = createManagedHarnessCredential({
+      userProfileId: input.userId,
+      harness: input.harness,
+      ...(input.credentialId?.trim() ? { credentialId: input.credentialId.trim() } : {}),
+      ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+      ...(input.providerName?.trim() ? { providerName: input.providerName.trim() } : {}),
+      ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim() } : {}),
+      ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
+      ...(input.presetId?.trim() ? { presetId: input.presetId.trim() } : {}),
+      ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+      ...(input.activate ? { activate: true } : {}),
+    });
+    const summary = listPortalCredentials(input.userId).find(
+      (credential) => credential.id === created.id,
     );
-  }
-  return summary;
+    if (!summary) {
+      throw new Error(
+        `Credential '${created.id}' could not be loaded after creation`,
+      );
+    }
+    return summary;
+  });
 }
 
 export async function deletePortalCredential(
@@ -237,27 +241,29 @@ export async function deletePortalCredential(
       removedPaths: string[];
     };
   }> {
-  return {
+  return withUserMutationLock(import.meta.url, userId, async () => ({
     credential: deleteManagedCredential({
       userProfileId: userId,
       credentialId,
     }),
-  };
+  }));
 }
 
 export async function activatePortalCredential(
   userId: string,
   credentialId: string,
 ): Promise<PortalCredentialSummary> {
-  const activated = activateManagedCredential({
-    userProfileId: userId,
-    credentialId,
+  return withUserMutationLock(import.meta.url, userId, async () => {
+    const activated = activateManagedCredential({
+      userProfileId: userId,
+      credentialId,
+    });
+    const summary = listPortalCredentials(userId).find((credential) => credential.id === activated.id);
+    if (!summary) {
+      throw new Error(`Credential '${activated.id}' could not be loaded after activation`);
+    }
+    return summary;
   });
-  const summary = listPortalCredentials(userId).find((credential) => credential.id === activated.id);
-  if (!summary) {
-    throw new Error(`Credential '${activated.id}' could not be loaded after activation`);
-  }
-  return summary;
 }
 
 export async function queueProvisionWorkspace(
@@ -424,6 +430,20 @@ export async function createPortalUser(input: {
     );
   }
   return created;
+}
+
+export async function updatePortalUserProfile(
+  userId: string,
+  patch: {
+    name?: string;
+    email?: string;
+    githubAccount?: string;
+    sshComment?: string;
+  },
+): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
+  return withUserMutationLock(import.meta.url, userId, async () =>
+    updatePortalProfile(userId, patch),
+  );
 }
 
 export async function deletePortalUser(userId: string): Promise<{

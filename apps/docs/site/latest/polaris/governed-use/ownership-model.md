@@ -106,6 +106,12 @@ User creation currently does three important things:
 Current onboarding defaults create managed SSH material.
 They do not implicitly create a default Codex provider credential.
 
+User creation now holds a user-scoped mutation lock while it scaffolds the
+profile, creates default credential material, and writes Clerk mapping data.
+
+If the Clerk mapping write fails, Polaris removes the newly scaffolded profile
+and user root instead of leaving an orphaned Polaris user behind.
+
 Current CLI entry:
 
 ```bash
@@ -134,6 +140,11 @@ one operation.
 
 If filesystem deletion fails partway through, Polaris restores the user profile,
 user root, and mapping state instead of leaving a half-deleted user behind.
+
+User deletion also runs under the same user-scoped mutation lock used by
+profile and credential writes.
+That prevents same-user profile or credential mutations from racing the delete
+flow while it is in progress.
 
 It does not delete the Clerk platform user object itself.
 

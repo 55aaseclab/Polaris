@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { deleteUserMapEntriesForPolarisUserId } from "../../portal/user-map.js";
+import { withDeletedUserMapEntries } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
+import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 
@@ -89,75 +90,74 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   }
   const removedProfile = fs.existsSync(profilePath);
   const removedUserRoot = fs.existsSync(userRoot);
-  const userMapPath = path.join(USER_ROOT, "user-map.json");
   const rollbackRoot = fs.mkdtempSync(
     path.join(path.dirname(userRoot), `.delete-user-${userProfileId}-`),
   );
   const profileBackupPath = path.join(rollbackRoot, "profile.yaml");
   const userRootBackupPath = path.join(rollbackRoot, "user-root");
-  const userMapBackupPath = path.join(rollbackRoot, "user-map.json");
   const hadProfile = copyIfExists(profilePath, profileBackupPath);
   const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
-  const hadUserMap = copyIfExists(userMapPath, userMapBackupPath);
 
-  let removedMappings: {
-    clerkUsernames: string[];
-    clerkUserIds: string[];
-  } = {
-    clerkUsernames: [],
-    clerkUserIds: [],
-  };
-  try {
-    removedMappings = await deleteUserMapEntriesForPolarisUserId(userProfileId);
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
-  } catch (error) {
-    if (hadProfile) {
-      restorePath(profileBackupPath, profilePath);
-    } else {
-      fs.rmSync(profilePath, { force: true });
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    let removedMappings: {
+      clerkUsernames: string[];
+      clerkUserIds: string[];
+    } = {
+      clerkUsernames: [],
+      clerkUserIds: [],
+    };
+    try {
+      await withDeletedUserMapEntries(userProfileId, async (snapshot) => {
+        removedMappings = {
+          clerkUsernames: Object.keys(snapshot.clerkUsernameEntries),
+          clerkUserIds: Object.keys(snapshot.clerkUserIdEntries),
+        };
+        fs.rmSync(profilePath, { force: true });
+        fs.rmSync(userRoot, { recursive: true, force: true });
+      });
+    } catch (error) {
+      if (hadProfile) {
+        restorePath(profileBackupPath, profilePath);
+      } else {
+        fs.rmSync(profilePath, { force: true });
+      }
+      if (hadUserRoot) {
+        restorePath(userRootBackupPath, userRoot);
+      } else {
+        fs.rmSync(userRoot, { recursive: true, force: true });
+      }
+      throw error;
+    } finally {
+      fs.rmSync(rollbackRoot, { recursive: true, force: true });
     }
-    if (hadUserRoot) {
-      restorePath(userRootBackupPath, userRoot);
-    } else {
-      fs.rmSync(userRoot, { recursive: true, force: true });
-    }
-    if (hadUserMap) {
-      restorePath(userMapBackupPath, userMapPath);
-    } else {
-      fs.rmSync(userMapPath, { force: true });
-    }
-    throw error;
-  } finally {
-    fs.rmSync(rollbackRoot, { recursive: true, force: true });
-  }
 
-  logInfo("cli", "user-profile-deleted", {
-    userProfileId,
-    removedProfile,
-    removedUserRoot,
-    removedMappings,
+    logInfo("cli", "user-profile-deleted", {
+      userProfileId,
+      removedProfile,
+      removedUserRoot,
+      removedMappings,
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          userProfile: {
+            id: userProfileId,
+            removed:
+              removedProfile
+              || removedUserRoot
+              || removedMappings.clerkUsernames.length > 0
+              || removedMappings.clerkUserIds.length > 0,
+            profilePath: `config/users/profiles/${userProfileId}.yaml`,
+            secretsRoot: `config/users/${userProfileId}`,
+          },
+          mappings: {
+            removedClerkUsernames: removedMappings.clerkUsernames,
+            removedClerkUserIds: removedMappings.clerkUserIds,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
   });
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        userProfile: {
-          id: userProfileId,
-          removed:
-            removedProfile
-            || removedUserRoot
-            || removedMappings.clerkUsernames.length > 0
-            || removedMappings.clerkUserIds.length > 0,
-          profilePath: `config/users/profiles/${userProfileId}.yaml`,
-          secretsRoot: `config/users/${userProfileId}`,
-        },
-        mappings: {
-          removedClerkUsernames: removedMappings.clerkUsernames,
-          removedClerkUserIds: removedMappings.clerkUserIds,
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
 }
