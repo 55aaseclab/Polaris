@@ -72,16 +72,6 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const { userProfileId } = parseDeleteUserArgs(argv);
   const profilePath = profilePathFor(userProfileId);
   const userRoot = userRootFor(userProfileId);
-  const removedProfile = fs.existsSync(profilePath);
-  const removedUserRoot = fs.existsSync(userRoot);
-  const rollbackRoot = fs.mkdtempSync(
-    path.join(path.dirname(userRoot), `.delete-user-${userProfileId}-`),
-  );
-  const profileBackupPath = path.join(rollbackRoot, "profile.yaml");
-  const userRootBackupPath = path.join(rollbackRoot, "user-root");
-  const hadProfile = copyIfExists(profilePath, profileBackupPath);
-  const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
-
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
     const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
     const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
@@ -99,6 +89,15 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
         ].filter(Boolean).join(" "),
       );
     }
+    const removedProfile = fs.existsSync(profilePath);
+    const removedUserRoot = fs.existsSync(userRoot);
+    const rollbackRoot = fs.mkdtempSync(
+      path.join(path.dirname(userRoot), `.delete-user-${userProfileId}-`),
+    );
+    const profileBackupPath = path.join(rollbackRoot, "profile.yaml");
+    const userRootBackupPath = path.join(rollbackRoot, "user-root");
+    const hadProfile = copyIfExists(profilePath, profileBackupPath);
+    const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
     let removedMappings: {
       clerkUsernames: string[];
       clerkUserIds: string[];

@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
-import { workspaceConfigPath } from "../config/scaffold.js";
+import { userProfileExists, workspaceConfigPath } from "../config/scaffold.js";
 import { readManagedCredentialRecord } from "../config/credentials.js";
 import {
   supportsLiveCredentialSwitch,
@@ -41,6 +41,7 @@ import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
 import { writeWorkspaceLiveCredentialSelection, writeWorkspaceStatus } from "../output/state-store.js";
 import { logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   withWorkspaceLifecycleLock,
   withWorkspaceMutationLock,
@@ -873,47 +874,52 @@ export async function queueProvisionWorkspace(
     startAfterCreate?: boolean;
   },
 ): Promise<PortalProvisionProgress> {
-  const key = rootKey(userId, workspace);
-  const existing = provisionJobs.get(key);
-  if (existing) {
-    logInfo("executor", "workspace-provision-queue-reused", {
+  return withUserMutationLock(import.meta.url, userId, async () => {
+    if (!userProfileExists(userId)) {
+      throw new Error(`User profile '${userId}' was not found. Create it first with user create.`);
+    }
+    const key = rootKey(userId, workspace);
+    const existing = provisionJobs.get(key);
+    if (existing) {
+      logInfo("executor", "workspace-provision-queue-reused", {
+        userId,
+        workspace,
+      });
+      return (
+        readWorkspaceProvisionProgress(userId, workspace) ??
+        updateProgress(userId, workspace, {
+          status: "queued",
+          phase: "queued",
+          step: 0,
+          percent: 0,
+          done: false,
+          error: undefined,
+          message: "workspace provisioning queued",
+          cancellable: true,
+        })
+      );
+    }
+
+    const queuedProgress = updateProgress(userId, workspace, {
+      status: "queued",
+      phase: "queued",
+      step: 0,
+      percent: 0,
+      done: false,
+      error: undefined,
+      message: "workspace provisioning queued",
+      cancellable: true,
+    });
+    logInfo("executor", "workspace-provision-queued", {
       userId,
       workspace,
+      jobId: queuedProgress.jobId,
+      defaultDockerOnly: options?.defaultDockerOnly ?? false,
+      startAfterCreate: options?.startAfterCreate ?? false,
     });
-    return (
-      readWorkspaceProvisionProgress(userId, workspace) ??
-      updateProgress(userId, workspace, {
-        status: "queued",
-        phase: "queued",
-        step: 0,
-        percent: 0,
-        done: false,
-        error: undefined,
-        message: "workspace provisioning queued",
-        cancellable: true,
-      })
-    );
-  }
-
-  const queuedProgress = updateProgress(userId, workspace, {
-    status: "queued",
-    phase: "queued",
-    step: 0,
-    percent: 0,
-    done: false,
-    error: undefined,
-    message: "workspace provisioning queued",
-    cancellable: true,
+    void startProvisionWorkspace(userId, workspace, options);
+    return queuedProgress;
   });
-  logInfo("executor", "workspace-provision-queued", {
-    userId,
-    workspace,
-    jobId: queuedProgress.jobId,
-    defaultDockerOnly: options?.defaultDockerOnly ?? false,
-    startAfterCreate: options?.startAfterCreate ?? false,
-  });
-  void startProvisionWorkspace(userId, workspace, options);
-  return queuedProgress;
 }
 
 export function startProvisionWorkspace(

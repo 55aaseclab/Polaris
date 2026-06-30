@@ -2191,3 +2191,117 @@ test("portal user deletion rollback preserves unrelated user-map updates", async
     }
   }
 });
+
+test("portal user deletion rejects users with queued workspace provisioning", async () => {
+  const userId = uniqueName("portal-delete-queued-user");
+  const workspace = uniqueName("portal-delete-queued-workspace");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Queued Delete User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+    writeWorkspaceProvisionProgress(userId, workspace, {
+      jobId: uniqueName("queued-job"),
+      userId,
+      workspace,
+      status: "queued",
+      phase: "queued",
+      step: 0,
+      totalSteps: 7,
+      percent: 0,
+      message: "workspace provisioning queued",
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      done: false,
+      cancellable: true,
+    });
+
+    await assert.rejects(
+      () => deletePortalUser(userId),
+      /workspace data still exists|queued/i,
+    );
+    assert.equal(fs.existsSync(profilePath), true);
+    assert.equal(fs.existsSync(userRoot), true);
+  } finally {
+    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal user deletion rollback restores the lock-consistent user snapshot", async () => {
+  const userId = uniqueName("portal-delete-rollback-user");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userCredentialPath = path.join(
+    userRoot,
+    "credentials",
+    "codex",
+    "rollback-check",
+    "auth.json",
+  );
+  const originalRmSync = fs.rmSync;
+
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Rollback Snapshot User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+    await createPortalCredential({
+      userId,
+      harness: "codex",
+      credentialId: "rollback-check",
+      label: "Rollback Check",
+      providerName: "rightcode",
+      baseUrl: "https://right.codes/codex/v1",
+      apiKey: "rollback-key",
+    });
+
+    let injectedFailure = false;
+    fs.rmSync = ((targetPath: fs.PathLike, options?: fs.RmOptions) => {
+      const normalized = typeof targetPath === "string"
+        ? targetPath
+        : Buffer.isBuffer(targetPath)
+          ? targetPath.toString("utf8")
+          : String(targetPath);
+      if (!injectedFailure && normalized === userRoot) {
+        injectedFailure = true;
+        throw new Error("simulated user-root deletion failure");
+      }
+      return originalRmSync(targetPath, options);
+    }) as typeof fs.rmSync;
+
+    await assert.rejects(
+      () => deletePortalUser(userId),
+      /simulated user-root deletion failure/,
+    );
+    assert.equal(fs.existsSync(profilePath), true);
+    assert.equal(fs.existsSync(userRoot), true);
+    assert.equal(fs.existsSync(userCredentialPath), true);
+  } finally {
+    fs.rmSync = originalRmSync;
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
