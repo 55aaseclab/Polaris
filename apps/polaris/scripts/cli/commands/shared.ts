@@ -82,7 +82,6 @@ export async function waitForWorkspaceReady(
       project: workspace.identity.projectName,
       backend: workspace.backend.kind,
       state: status.state,
-      daemonReadiness: status.health.daemonReadiness,
       reason: status.health.reason,
     });
 

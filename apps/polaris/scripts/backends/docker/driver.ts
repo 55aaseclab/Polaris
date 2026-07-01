@@ -3,12 +3,6 @@ import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
 import {
-  evaluateDaemonStatusObservation,
-  evaluatePairingObservation,
-  parseConnectionOfferServerId,
-  parsePaseoDaemonStatus,
-} from "../../core/paseo.js";
-import {
   dockerNetfsDevicePath,
   dockerNetfsServer,
   isNetfsSource,
@@ -20,15 +14,6 @@ import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import { renderAndWriteDockerWorkspace } from "./render.js";
 import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
-
-function extractPairingUrl(raw: string): string | undefined {
-  try {
-    const parsed = JSON.parse(raw) as { url?: unknown };
-    return typeof parsed.url === "string" && parsed.url.trim() ? parsed.url.trim() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   const source = workspace.attachments.workspaceData.source;
@@ -145,44 +130,10 @@ export class DockerDriver implements BackendDriver {
       const result = spawnSync("docker", ["exec", id, "sh", "-lc", command], { encoding: "utf8" });
       return result.status === 0 ? String(result.stdout || "") : "";
     };
-    const daemonStatusRaw =
-      workspace.agent.enabled && exists && running
-        ? execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`)
-        : "";
-    const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
-    const persistedServerId =
-      workspace.agent.enabled && exists && running
-        ? execOutput(`cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null`).trim() || null
-        : null;
-    const daemonObserved =
-      workspace.agent.enabled && exists && running
-        ? evaluateDaemonStatusObservation({
-            status: daemonStatus,
-            persistedServerId,
-            readyFileDetail: workspace.agent.runtime.readyFile ?? "/tmp/.ready",
-          })
-        : workspace.agent.enabled
-          ? { observed: false, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" }
-          : { observed: true, detail: "daemon not required" };
     const githubAuthObserved =
       exists && running && workspace.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
-    const pairingUrl =
-      workspace.agent.enabled && exists && running
-        ? extractPairingUrl(execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon pair --json 2>/dev/null || true`))
-        : undefined;
-    const pairingServerId = pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null;
-    const pairingObserved = workspace.agent.enabled && exists && running
-          ? evaluatePairingObservation({
-          expectedServerId: daemonStatus?.serverId ?? persistedServerId,
-          cachedServerId: pairingServerId,
-          pairingUrl,
-          pairingFileDetail: "paseo daemon pair",
-        })
-      : workspace.agent.enabled
-        ? { observed: false, detail: "paseo daemon pair" }
-        : { observed: true, detail: "daemon not required" };
 
     return {
       backend: {
@@ -208,18 +159,7 @@ export class DockerDriver implements BackendDriver {
           ? { observed: githubAuthObserved, detail: workspace.userProfile.github.account }
           : undefined,
       } : {},
-      daemon: {
-        manager: workspace.health.requiresDaemon && exists && running
-          ? daemonObserved
-          : workspace.health.requiresDaemon
-            ? { observed: false, detail: workspace.agent.runtime.readyFile }
-            : { observed: true, detail: "daemon not required" },
-        pairing: workspace.health.requiresDaemon && exists && running
-          ? pairingObserved
-          : workspace.health.requiresDaemon
-            ? { observed: false, detail: "paseo daemon pair" }
-            : { observed: true, detail: "daemon not required" },
-      },
+      daemon: {},
       services: {
         declared: workspace.connectivity.servicePorts.length ? 1 : 0,
         observed: workspace.connectivity.servicePorts.length ? (exists ? 1 : 0) : 0,

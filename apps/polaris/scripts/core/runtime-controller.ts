@@ -10,27 +10,10 @@ import type {
 } from "./workspace.js";
 import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
 import { readWorkspaceLiveCredentialSelections } from "../output/state-store.js";
-import { normalizePairingUrl } from "./pairing-url.js";
-import { parseConnectionOfferServerId } from "./paseo.js";
 import {
   workspaceRuntimeResourceName,
   workspaceRuntimeScopeName,
 } from "./workspace-name.js";
-
-function parseDaemonServerId(detail?: string): string | undefined {
-  if (!detail) {
-    return undefined;
-  }
-  const okMatch = detail.match(/daemon status ok \(([^)]+)\)/);
-  if (okMatch?.[1]?.trim()) {
-    return okMatch[1].trim();
-  }
-  const mismatchMatch = detail.match(/daemon serverId ([^\s)]+)/);
-  if (mismatchMatch?.[1]?.trim()) {
-    return mismatchMatch[1].trim();
-  }
-  return undefined;
-}
 
 function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
   return workspace.runtime.authFiles.some((entry) => {
@@ -105,16 +88,6 @@ function runtimeCheck(observed: BackendObservation["runtimeAssembly"][keyof Back
     return { state: "unknown" };
   }
   return observed.observed ? { state: "ok", detail: observed.detail } : { state: "missing", detail: observed.detail };
-}
-
-function daemonCheck(observed: BackendObservation["daemon"][keyof BackendObservation["daemon"]]): CheckStatus {
-  if (!observed) {
-    return { state: "unknown" };
-  }
-  const normalizedUrl = normalizePairingUrl(observed.url);
-  return observed.observed
-    ? { state: "ok", detail: observed.detail, ...(normalizedUrl ? { url: normalizedUrl } : {}) }
-    : { state: "missing", detail: observed.detail, ...(normalizedUrl ? { url: normalizedUrl } : {}) };
 }
 
 function expectsHarnessCredentialAssembly(
@@ -403,19 +376,6 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
       }
     }
 
-    if (workspace.health.requiresDaemon) {
-      for (const [target, observed] of Object.entries(observation.daemon)) {
-        if (observed && !observed.observed) {
-          items.push({
-            kind: "daemon",
-            target,
-            severity: "warning",
-            message: observed.detail || `${target} daemon check is not ready`,
-          });
-        }
-      }
-    }
-
     if (
       typeof observation.services.declared === "number" &&
       typeof observation.services.observed === "number" &&
@@ -443,10 +403,6 @@ export function synthesizeWorkspaceStatus(
   drift: WorkspaceDrift,
   lifecycleAction: WorkspaceStatus["lifecycleAction"],
 ): WorkspaceStatus {
-  const liveTarget = normalizePairingUrl(observation.daemon.pairing?.url) ?? null;
-  const paseoServerId =
-    parseConnectionOfferServerId(liveTarget ?? "")
-    ?? parseDaemonServerId(observation.daemon.manager?.detail);
   const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
   const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
   const state: WorkspaceStatus["state"] = !observation.backend.exists
@@ -479,18 +435,7 @@ export function synthesizeWorkspaceStatus(
     health: {
       backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "stopped") : "missing",
       workspaceReadiness: state === "ready" ? "ready" : "not-ready",
-      daemonReadiness: workspace.health.requiresDaemon
-        ? observation.daemon.manager
-          ? (observation.daemon.manager.observed ? "ready" : "degraded")
-          : "unknown"
-        : "not-applicable",
       reason: drift.items[0]?.message,
-    },
-    paseo: {
-      daemonAddress: workspace.agent.runtime.daemonAddress,
-      ...(paseoServerId ? { serverId: paseoServerId } : {}),
-      supportedHarnesses: workspace.agent.harnesses,
-      liveTarget,
     },
     credentials: {
       codex: codexCredentialStatus(workspace),
@@ -518,10 +463,6 @@ export function synthesizeWorkspaceStatus(
       codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.runtimeAssembly.codex),
       claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.runtimeAssembly.claude),
       ssh: runtimeCheck(observation.runtimeAssembly.ssh),
-    },
-    daemon: {
-      manager: daemonCheck(observation.daemon.manager),
-      pairing: daemonCheck(observation.daemon.pairing),
     },
     drift,
   };

@@ -15,7 +15,6 @@ import {
   normalizePairingUrl,
   resolveConfiguredPaseoAppBaseUrl,
 } from "./pairing-url.js";
-import { parseConnectionOfferServerId } from "./paseo.js";
 import {
   readWorkspaceDriverSelection,
   workspaceSelectionPath,
@@ -130,6 +129,33 @@ function userWorkspacesRoot(userId: string): string {
 
 function workspaceRoot(userId: string, workspace: string): string {
   return path.join(userWorkspacesRoot(userId), workspace);
+}
+
+function workspacePaseoStateRoot(userId: string, workspace: string): string {
+  return path.join(workspaceStateDir(workspace, userId), "paseo");
+}
+
+function readPersistedPaseoServerId(userId: string, workspace: string): string | null {
+  const filePath = path.join(workspacePaseoStateRoot(userId, workspace), "server-id");
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  const value = fs.readFileSync(filePath, "utf8").trim();
+  return value || null;
+}
+
+function readPersistedPaseoPairingUrl(userId: string, workspace: string): string | null {
+  const filePath = path.join(workspacePaseoStateRoot(userId, workspace), "pairing.json");
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { url?: unknown };
+    const raw = typeof parsed.url === "string" ? parsed.url.trim() : "";
+    return normalizePairingUrl(raw, process.env, workspacePaseoScope(userId, workspace)) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function userArchivedWorkspacesRoot(userId: string): string {
@@ -421,14 +447,10 @@ export function readWorkspaceStatus(userId: string, workspace: string): Workspac
 }
 
 export function resolveLiveTarget(
-  status: WorkspaceStatus | null,
-  scope?: string,
+  userId: string,
+  workspace: string,
 ): string | null {
-  return normalizePairingUrl(
-    status?.paseo?.liveTarget ?? status?.daemon?.pairing?.url,
-    process.env,
-    scope,
-  ) ?? null;
+  return readPersistedPaseoPairingUrl(userId, workspace);
 }
 
 function buildReconnectTarget(
@@ -461,24 +483,19 @@ function buildReconnectTarget(
 }
 
 function resolveReconnectState(
-  status: WorkspaceStatus | null,
+  userId: string,
+  workspace: string,
   scope?: string,
 ): {
   reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
   reconnectTarget: string | null;
   liveTarget: string | null;
 } {
-  const liveTarget = resolveLiveTarget(status, scope);
-  const serverId = status?.paseo?.serverId?.trim() || "";
-  const managerState = status?.daemon?.manager?.state;
-  const pairingState = status?.daemon?.pairing?.state;
+  const liveTarget = resolveLiveTarget(userId, workspace);
+  const serverId = readPersistedPaseoServerId(userId, workspace) ?? "";
   const reconnectTarget = buildReconnectTarget(serverId, liveTarget, scope);
 
-  if (
-    reconnectTarget
-    && serverId
-    && (managerState === "ok" || pairingState === "ok")
-  ) {
+  if (reconnectTarget && serverId) {
     return {
       reconnectMode: "reconnectable",
       reconnectTarget,
@@ -692,23 +709,6 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
   const selectedDriver = readWorkspaceSelection(userId, workspace);
   const paseoScope = workspacePaseoScope(userId, workspace);
   let status = readWorkspaceStatus(userId, workspace);
-  if (status?.paseo && !status.paseo.serverId) {
-    const liveTarget = resolveLiveTarget(status, paseoScope);
-    const pairingServerId = parseConnectionOfferServerId(liveTarget ?? "");
-    const daemonDetail = status.daemon?.manager?.detail;
-    const daemonServerId = typeof daemonDetail === "string"
-      ? daemonDetail.match(/daemon status ok \(([^)]+)\)/)?.[1]?.trim()
-      : undefined;
-    status = {
-      ...status,
-      paseo: {
-        ...status.paseo,
-        ...(pairingServerId || daemonServerId
-          ? { serverId: pairingServerId ?? daemonServerId }
-          : {}),
-      },
-    };
-  }
   const assets = status?.assets as
     | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
     | undefined;
@@ -736,38 +736,13 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
       }
     }
   }
-  if (status && !status.paseo) {
-    const preferredTargets = [
-      selectedDriver,
-      { backend: "docker" as const },
-      { backend: "pod" as const, profile: "gvisor" },
-      { backend: "kubevirt-vm" as const },
-    ].filter(Boolean) as PortalDriverTarget[];
-    for (const target of preferredTargets) {
-      try {
-        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
-        status = {
-          ...status,
-          paseo: {
-            daemonAddress: loaded.agent.runtime.daemonAddress,
-            serverId: parseConnectionOfferServerId(resolveLiveTarget(status, paseoScope) ?? ""),
-            supportedHarnesses: loaded.agent.harnesses,
-            liveTarget: resolveLiveTarget(status, paseoScope),
-          },
-        };
-        break;
-      } catch {
-        continue;
-      }
-    }
-  }
   if (status?.assets) {
     status = {
       ...status,
       assets: normalizeWorkspaceAssets(status.assets),
     };
   }
-  const reconnect = resolveReconnectState(status, paseoScope);
+  const reconnect = resolveReconnectState(userId, workspace, paseoScope);
   return {
     name: workspace,
     drivers: PORTAL_DRIVER_TARGETS,
