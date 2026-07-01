@@ -51,8 +51,7 @@ Paseo daemon 是 Polaris 当前接入的 manager 进程。
 - daemon 运行在工作空间内部
 - daemon 默认监听 `0.0.0.0:6767`
 - Polaris 在 render / start 阶段负责装配 daemon 运行环境
-- Polaris 会在运行时检查 daemon 是否真正处于 `running/reachable`
-  状态
+- Polaris 当前不再把 `paseo daemon status` 作为工作空间状态面的主探针
 
 当前 Polaris 不把 daemon 状态和凭证状态混为一谈。
 
@@ -67,17 +66,15 @@ Polaris 当前不是直接控制远端 Paseo server。
 
 它控制的是工作空间内 daemon 生成的 pairing offer。
 
-当前检查点包括：
+当前元数据来源已经收口为两份持久文件：
 
-- `serverId` 是否存在
-- daemon status 返回的 `serverId` 是否和持久化 `server-id` 一致
-- pairing offer 中的 `serverId` 是否和 daemon `serverId` 一致
-- pairing URL 是否可以被规范化为当前门户可用地址
+- `~/.paseo/server-id`
+- `~/.paseo/pairing.json`
 
-因此当前所谓的 `Paseo server` 更准确说是：
+因此当前所谓的 `Paseo server / pairing offer` 更准确说是：
 
-- daemon status 提供的 server identity
-- daemon pair 生成的 live target / pairing URL
+- `server-id` 提供的 server identity
+- `pairing.json` 提供的 live target / pairing URL
 
 ### 工作空间状态面
 
@@ -86,11 +83,6 @@ Polaris 当前已经把 agent 运行相关状态合成为统一状态面。
 当前重点包括：
 
 - backend 是否存在、是否运行
-- daemon manager 是否 ready
-- daemon pairing 是否 ready
-- daemonAddress
-- supportedHarnesses
-- liveTarget
 - 用户级默认凭证是否已解析
 - 各 harness 的 live credential 选择结果
 
@@ -100,16 +92,22 @@ Polaris 会综合：
 
 - backend observation
 - runtime assembly 检查
-- daemon status 检查
-- pairing URL 检查
 - 持久化 runtime selection
 
 最近一轮性能优化把这部分从“同步重探测优先”改成了“缓存状态面优先”。
 
+最近一轮进一步收口后：
+
+- `status.json` 不再缓存 `paseo` / `daemon` 细节
+- portal 需要 reconnect 元数据时，直接读取 `server-id` 与
+  `pairing.json`
+- workspace ready gate 也改成文件级探测，不再依赖
+  `paseo daemon status`
+
 当前语义是：
 
 - portal detail read 优先读取 `status.json`
-- runtime status observer 可以主动回报状态 patch
+- runtime status observer 只回报 workspace 主生命周期
 - 显式 refresh 仍然保留，但不再是默认读路径
 - start / stop / live switch 可以先写缓存状态，再异步 refresh
 - 用户可见生命周期不再依赖单独的 provisioning progress 文件
@@ -158,23 +156,6 @@ Polaris 当前已经支持运行时凭证切换。
 - 后续 refresh 是否把状态面稳定下来
 
 ## 当前状态语义
-
-### daemon 状态
-
-daemon 状态至少分开表达：
-
-- manager state
-- pairing state
-- daemon detail
-- pairing URL
-
-当前 ready 的判断不是只看进程存在。
-
-还会检查：
-
-- `localDaemon == running`
-- `connectedDaemon == reachable`
-- `serverId` 与持久化值一致
 
 ### live target
 
@@ -227,16 +208,19 @@ daemon 状态至少分开表达：
 1. Polaris 装配 workspace data、runtime state 和 user identity。
 2. Polaris 装配 `~/.paseo`。
 3. Polaris 启动或拉起 Paseo daemon。
-4. Polaris 检查 daemon status。
-5. Polaris 读取 pairing offer 并进入状态面。
+4. Polaris 等待 `server-id` 和 `pairing.json` 到位。
+5. Polaris 读取 reconnect 元数据并进入状态面。
 
 ### 2. 查看状态
 
 1. Polaris 检查 backend 是否存在和运行。
 2. Polaris 检查 runtime assembly 是否完整。
-3. Polaris 检查 daemon manager 状态。
-4. Polaris 检查 pairing URL 与 `serverId` 一致性。
-5. Polaris 合成 `status.json` 和门户状态响应。
+3. Polaris 合成 `status.json` 和门户状态响应。
+
+如果门户需要 reconnect 元数据，则单独读取：
+
+- `~/.paseo/server-id`
+- `~/.paseo/pairing.json`
 
 但在当前实现里，这个过程已经分成两种路径：
 

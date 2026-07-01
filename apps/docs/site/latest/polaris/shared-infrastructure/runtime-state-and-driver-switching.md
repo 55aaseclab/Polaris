@@ -77,11 +77,21 @@ In practice this means:
 The portal also avoids presenting a summarized `Paseo status` line because it
 collapses multiple low-level signals into a misleading single conclusion.
 
-Instead, the portal should prefer raw connection details such as:
+Instead, the portal should prefer the reconnect metadata that actually drives
+embedded Paseo:
 
-- daemon address
-- server id
-- reconnect target
+- persisted `server-id`
+- persisted `pairing.json`
+- reconnect target derived from those two files
+
+Polaris no longer derives reconnect metadata from `paseo daemon status`.
+
+The current rule is:
+
+- `serverId` comes only from `~/.paseo/server-id`
+- pair link comes only from `~/.paseo/pairing.json`
+- the portal reads those files when it needs reconnect metadata instead of
+  trusting a cached status payload
 
 ## Embedded Paseo Behavior
 
@@ -96,3 +106,11 @@ That means:
   for a different running workspace
 - a stopped workspace should remove only its own active iframe and leave the
   pane empty instead of trying to reconnect
+
+The backend readiness gate is also file-based now:
+
+- wait for `~/.paseo/server-id` to become non-empty
+- wait for `~/.paseo/pairing.json` to contain a `url`
+
+This avoids blocking workspace readiness on the heavier `paseo daemon status`
+command.
