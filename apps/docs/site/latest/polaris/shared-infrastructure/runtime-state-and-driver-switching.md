@@ -34,3 +34,43 @@ This is the basis for:
 - state continuity during normal operations
 - backend portability
 - scaling across different infrastructure choices
+
+## Portal State Model
+
+The portal should treat workspace state as the primary lifecycle signal.
+
+That means the top-level workspace action area is driven by the persisted
+workspace state, not by a separate synthesized driver-runtime label.
+
+Current persisted workspace states are:
+
+- `not-applied`
+- `starting`
+- `saved`
+- `stopping`
+- `ready`
+- `archiving`
+- `degraded`
+- `unsupported`
+
+The important operator rule is:
+
+- the workspace status explains the lifecycle of the workspace as a whole
+- driver details are supporting information, not the primary action state
+
+In practice this means:
+
+- `starting`, `stopping`, and `archiving` should survive a page refresh
+- the portal should not rely only on local in-memory UI state for these
+  transitions
+- driver-specific facts such as runtime kind or runtime reference belong in
+  the driver details area
+
+The portal also avoids presenting a summarized `Paseo status` line because it
+collapses multiple low-level signals into a misleading single conclusion.
+
+Instead, the portal should prefer raw connection details such as:
+
+- daemon address
+- server id
+- reconnect target

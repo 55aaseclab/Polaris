@@ -10,7 +10,11 @@ import {
   type HarnessProviderPresetSummary,
 } from "../config/credential-catalog.js";
 import { buildStatusAssets } from "./status-assets.js";
-import { normalizePairingUrl } from "./pairing-url.js";
+import {
+  extractOfferFragment,
+  normalizePairingUrl,
+  resolveConfiguredPaseoAppBaseUrl,
+} from "./pairing-url.js";
 import { parseConnectionOfferServerId } from "./paseo.js";
 import {
   readWorkspaceDriverSelection,
@@ -120,6 +124,8 @@ export interface PortalWorkspaceSummary {
   status: WorkspaceStatus | null;
   progress: PortalProvisionProgress | null;
   liveTarget: string | null;
+  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+  reconnectTarget: string | null;
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
@@ -463,6 +469,74 @@ export function resolveLiveTarget(
   ) ?? null;
 }
 
+function buildReconnectTarget(
+  serverId: string | null | undefined,
+  pairingTarget: string | null | undefined,
+  scope?: string,
+): string | null {
+  const normalizedServerId = String(serverId ?? "").trim();
+  if (!normalizedServerId) {
+    return null;
+  }
+  const appBaseUrl = resolveConfiguredPaseoAppBaseUrl(process.env);
+  if (!appBaseUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(`${appBaseUrl.replace(/\/$/, "")}/h/${encodeURIComponent(normalizedServerId)}`);
+    const normalizedScope = String(scope ?? "").trim();
+    if (normalizedScope) {
+      url.searchParams.set("scope", normalizedScope);
+    }
+    const offer = extractOfferFragment(String(pairingTarget ?? ""));
+    if (offer) {
+      url.hash = `offer=${offer}`;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveReconnectState(
+  status: WorkspaceStatus | null,
+  scope?: string,
+): {
+  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+  reconnectTarget: string | null;
+  liveTarget: string | null;
+} {
+  const liveTarget = resolveLiveTarget(status, scope);
+  const serverId = status?.paseo?.serverId?.trim() || "";
+  const managerState = status?.daemon?.manager?.state;
+  const pairingState = status?.daemon?.pairing?.state;
+  const reconnectTarget = buildReconnectTarget(serverId, liveTarget, scope);
+
+  if (
+    reconnectTarget
+    && serverId
+    && (managerState === "ok" || pairingState === "ok")
+  ) {
+    return {
+      reconnectMode: "reconnectable",
+      reconnectTarget,
+      liveTarget,
+    };
+  }
+  if (liveTarget) {
+    return {
+      reconnectMode: "needs-pairing",
+      reconnectTarget: liveTarget,
+      liveTarget,
+    };
+  }
+  return {
+    reconnectMode: "unknown",
+    reconnectTarget: null,
+    liveTarget: null,
+  };
+}
+
 function workspacePaseoScope(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
 }
@@ -731,13 +805,16 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
       assets: normalizeWorkspaceAssets(status.assets),
     };
   }
+  const reconnect = resolveReconnectState(status, paseoScope);
   return {
     name: workspace,
     drivers: PORTAL_DRIVER_TARGETS,
     selectedDriver,
     status,
     progress: readWorkspaceProvisionProgress(userId, workspace),
-    liveTarget: resolveLiveTarget(status, paseoScope),
+    liveTarget: reconnect.liveTarget,
+    reconnectMode: reconnect.reconnectMode,
+    reconnectTarget: reconnect.reconnectTarget,
   };
 }
 

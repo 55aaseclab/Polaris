@@ -444,11 +444,6 @@ export function synthesizeWorkspaceStatus(
     ?? parseDaemonServerId(observation.daemon.manager?.detail);
   const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
   const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
-  const backendState = !observation.backend.exists
-    ? "missing"
-    : observation.backend.running
-      ? "running"
-      : "stopped";
   const state: WorkspaceStatus["state"] = !observation.backend.exists
     ? "not-applied"
     : !observation.backend.running && !drift.hasErrors
@@ -464,14 +459,12 @@ export function synthesizeWorkspaceStatus(
     backend: {
       kind: workspace.backend.kind,
       profile: workspace.backend.profile,
-      instanceState: backendState,
     },
     driver: {
       target: driverTarget(workspace),
       baseImage: workspace.runtime.baseImage,
       runtimeKind: driverRuntimeKind(workspace),
       runtimeRef: driverRuntimeRef(workspace, observation),
-      runtimeState: backendState,
       ...(workspace.runtime.rootdiskImage
         ? { rootdiskImage: workspace.runtime.rootdiskImage }
         : {}),

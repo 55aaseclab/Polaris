@@ -16,7 +16,6 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",
       state: status.state,
-      backendState: status.backend.instanceState,
       daemonReadiness: status.health.daemonReadiness,
       reason: status.health.reason,
     });
@@ -31,7 +30,6 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
     project: status.project,
     backend: status.backend.kind,
     state: status.state,
-    backendState: status.backend.instanceState,
     statusFile: outputPath,
   });
   process.stdout.write(`${JSON.stringify({ ...status, statusFile: outputPath }, null, 2)}\n`);
