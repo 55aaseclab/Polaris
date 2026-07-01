@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22 AS artifact
+
+ARG PASEO_WEB_BASE_URL=/paseo
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update \
+  && apt-get install -y --no-install-recommends git python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/paseo
+
+COPY apps/paseo/source ./
+COPY apps/paseo/patches /tmp/paseo-patches
+
+RUN git init -q \
+  && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-defaults.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-agent-init-logging.patch \
+  && rm -rf .git
+
+RUN --mount=type=cache,target=/root/.npm \
+  --mount=type=cache,target=/root/.cache \
+  npm ci --ignore-scripts --no-audit --prefer-offline \
+  && PATH="/opt/paseo/node_modules/.bin:${PATH}" node scripts/postinstall-patches.mjs
+
+ENV PASEO_WEB_BASE_URL=${PASEO_WEB_BASE_URL}
+
+RUN --mount=type=cache,target=/root/.npm \
+  --mount=type=cache,target=/root/.cache \
+  npm run build:web --workspace=@getpaseo/app \
+  && base_url="${PASEO_WEB_BASE_URL%/}" \
+  && if [ -n "$base_url" ]; then \
+    sed -i "s#href=\"/manifest.json\"#href=\"${base_url}/manifest.json\"#" /opt/paseo/packages/app/dist/index.html; \
+    sed -i "s#\"id\": \"/\"#\"id\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
+    sed -i "s#\"start_url\": \"/\"#\"start_url\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
+    sed -i "s#\"scope\": \"/\"#\"scope\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
+    sed -i "s#\"src\": \"/#\"src\": \"${base_url}/#g" /opt/paseo/packages/app/dist/manifest.json; \
+  fi
+
+FROM scratch AS artifact-export
+
+COPY --from=artifact /opt/paseo/packages/app/dist /dist

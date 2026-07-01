@@ -26,6 +26,7 @@ import {
   getPortalCredentialCatalog,
   getPortalWorkspaceDetail,
   listPortalAdminUsers,
+  listPortalWorkspaces,
   listUserPortalCredentials,
   queueProvisionWorkspace,
   readUserPortalCredentialPreview,
@@ -49,7 +50,12 @@ import {
   writeWorkspaceProvisionProgress,
   clearWorkspaceProvisionProgress,
 } from "../scripts/core/portal.js";
-import { writeWorkspaceDriverSelection, writeWorkspaceStatus } from "../scripts/output/state-store.js";
+import {
+  workspaceSelectionPath,
+  writeWorkspaceDriverSelection,
+  writeWorkspaceStatus,
+} from "../scripts/output/state-store.js";
+import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
 import { readWorkspaceDriverSelection } from "../scripts/output/state-store.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -411,17 +417,52 @@ test("portal provisioning progress persists across reads", () => {
   }
 });
 
-test("portal workspace detail reads cached state without implicit refresh side effects", async () => {
+test("portal workspace detail refreshes status before returning", async () => {
   await withFakePath(
     {
       docker: "#!/bin/sh\nexit 0\n",
       kubectl: "#!/bin/sh\nexit 0\n",
     },
     async ({ readCommandLog }) => {
-      const detail = getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
-      assert.equal(detail.name, "demo");
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      assert.deepEqual(readCommandLog(), []);
+      const previousSelection = readWorkspaceDriverSelection("demo", DEMO_USER_ID);
+      try {
+        writeWorkspaceDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
+        const detail = await getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+        assert.equal(detail.name, "demo");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(readCommandLog().length > 0);
+      } finally {
+        if (previousSelection) {
+          writeWorkspaceDriverSelection("demo", previousSelection, DEMO_USER_ID);
+        } else {
+          fs.rmSync(workspaceSelectionPath("demo", DEMO_USER_ID), { force: true });
+        }
+      }
+    },
+  );
+});
+
+test("portal workspace list refreshes status before returning", async () => {
+  await withFakePath(
+    {
+      docker: "#!/bin/sh\nexit 0\n",
+      kubectl: "#!/bin/sh\nexit 0\n",
+    },
+    async ({ readCommandLog }) => {
+      const previousSelection = readWorkspaceDriverSelection("demo", DEMO_USER_ID);
+      try {
+        writeWorkspaceDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
+        const workspaces = await listPortalWorkspaces(DEMO_USER_ID);
+        assert.ok(workspaces.some((workspace) => workspace.name === "demo"));
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.ok(readCommandLog().length > 0);
+      } finally {
+        if (previousSelection) {
+          writeWorkspaceDriverSelection("demo", previousSelection, DEMO_USER_ID);
+        } else {
+          fs.rmSync(workspaceSelectionPath("demo", DEMO_USER_ID), { force: true });
+        }
+      }
     },
   );
 });
@@ -446,7 +487,7 @@ test("portal workspace stop writes cached status before the async refresh comple
         target: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
-        runtimeRef: `${workspace}-docker`,
+        runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
         runtimeState: "running",
       },
       health: {
@@ -979,7 +1020,7 @@ test("portal profile reads and updates", async () => {
 });
 
 test("portal workspace detail loads for a user-scoped workspace", async () => {
-  const payload = getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+  const payload = await getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
   assert.equal(payload.name, "demo");
   assert.ok(Array.isArray(payload.availableDrivers));
   assert.ok(payload.availableDrivers.some((driver) => driver.backend === "docker"));
@@ -1036,7 +1077,7 @@ test("portal workspace detail does not leak bindings from another user with the 
     };
     fs.writeFileSync(secondSpecPath, yaml.dump(secondSpec, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const payload = getPortalWorkspaceDetail(secondUserId, workspace);
+    const payload = await getPortalWorkspaceDetail(secondUserId, workspace);
     assert.deepEqual(payload.credentialBindings, [
       { purpose: "git-auth", credentialId: "github-ssh", required: false },
     ]);

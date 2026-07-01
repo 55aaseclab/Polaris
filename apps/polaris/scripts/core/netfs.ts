@@ -1,4 +1,5 @@
 import type { DurableAttachment, WorkspaceSpec } from "./workspace.js";
+import { workspaceRuntimeScopeName } from "./workspace-name.js";
 
 type AttachmentSource = DurableAttachment["source"];
 
@@ -52,13 +53,21 @@ export function netfsResolvedPath(source: AttachmentSource): string {
 }
 
 export function workspaceDataClaimName(workspace: WorkspaceSpec): string {
+  const runtimeScope = workspaceRuntimeScopeName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+  );
   return workspace.attachments.workspaceData.source.volumeRef?.trim()
-    || `${workspace.identity.projectName}-workspace-data`;
+    || `${runtimeScope}-workspace-data`;
 }
 
 export function workspaceDataDockerVolumeName(workspace: WorkspaceSpec): string {
+  const runtimeScope = workspaceRuntimeScopeName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+  );
   return workspace.attachments.workspaceData.source.volumeRef?.trim()
-    || `${workspace.identity.projectName}-workspace-data`;
+    || `${runtimeScope}-workspace-data`;
 }
 
 export function workspaceDataPersistentVolumeName(

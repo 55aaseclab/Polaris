@@ -7,6 +7,10 @@ import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "../scripts/core/workspace-name.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceSelectionPath,
@@ -408,19 +412,19 @@ test("default CLI dispatch uses status instead of apply", async () => {
   await withFakePath(
     {
       kubectl: `#!/usr/bin/env bash
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -440,7 +444,7 @@ test("backend selectors disambiguate shared project names like demo@docker", asy
   await withFakePath(
     {
       docker: `#!/usr/bin/env bash
-if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -487,7 +491,7 @@ if [[ "$*" == *" up -d"* ]]; then
   printf 'running\n' > "$state_file"
   exit 0
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -519,14 +523,14 @@ if [[ "$*" == *"rollout restart"* ]]; then
   printf 'running\n' > "$state_file"
   exit 0
 fi
-if [[ "$*" == *"get deployment demo"* ]]; then
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
-    printf '{"metadata":{"name":"demo"}}'
+    printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'pod-1'
     exit 0
@@ -536,11 +540,11 @@ fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
-if [[ "$*" == *"scale deployment demo --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
   printf 'stopped\n' > "$state_file"
   exit 0
 fi
@@ -592,19 +596,19 @@ test("switch accepts pod driver variants such as kata", async () => {
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -697,7 +701,7 @@ KUBEVIRT_EXISTS=$KUBEVIRT_EXISTS
 KUBEVIRT_RUNNING=$KUBEVIRT_RUNNING
 EOF
 }
-if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   [[ "$DOCKER_RUNNING" == "1" ]] && printf 'docker-id'
   exit 0
 fi
@@ -764,84 +768,84 @@ fi
 if [[ "$*" == *"wait --for=jsonpath="* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment demo -o json"* ]]; then
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} -o json"* ]]; then
   if [[ "$POD_EXISTS" == "1" ]]; then
-    printf '{"metadata":{"name":"demo"}}'
+    printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   [[ "$POD_RUNNING" == "1" ]] && printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$POD_EXISTS" == "1" || "$KUBEVIRT_EXISTS" == "1" ]]; then
-    printf 'demo'
+    printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"scale deployment demo --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
   POD_RUNNING=0
   POD_EXISTS=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"rollout restart deployment demo"* ]]; then
+if [[ "$*" == *"rollout restart deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   POD_RUNNING=1
   POD_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"get vm demo-vm"* ]]; then
-  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf 'demo-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi demo-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   [[ "$KUBEVIRT_RUNNING" == "1" ]] && printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get secret demo-vm-cloudinit"* ]]; then
-  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf 'demo-vm-cloudinit'
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
+  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"patch vm demo-vm"* && "$*" == *'"runStrategy":"Halted"'* ]]; then
+if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Halted"'* ]]; then
   KUBEVIRT_RUNNING=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"patch vm demo-vm"* && "$*" == *'"runStrategy":"Always"'* ]]; then
+if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Always"'* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt stop"* && "$*" == *"demo-vm"* ]]; then
+if [[ "$*" == *"virt stop"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt start"* && "$*" == *"demo-vm"* ]]; then
+if [[ "$*" == *"virt start"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt restart"* && "$*" == *"demo-vm"* ]]; then
+if [[ "$*" == *"virt restart"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/demo"* ]]; then
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   port_spec=""
   for arg in "$@"; do
     case "$arg" in
@@ -993,7 +997,7 @@ if [[ "$*" == *"get pod -l app=${podProject}"* ]]; then
   printf '${podProject}-pod'
   exit 0
 fi
-if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${vmProject}-vm"* ]]; then
+if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, vmProject, "vm")}"* ]]; then
   printf '${vmProject}-launcher'
   exit 0
 fi

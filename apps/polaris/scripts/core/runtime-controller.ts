@@ -12,6 +12,10 @@ import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
 import { readWorkspaceLiveCredentialSelections } from "../output/state-store.js";
 import { normalizePairingUrl } from "./pairing-url.js";
 import { parseConnectionOfferServerId } from "./paseo.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "./workspace-name.js";
 
 function parseDaemonServerId(detail?: string): string | undefined {
   if (!detail) {
@@ -293,15 +297,16 @@ function driverRuntimeRef(
   workspace: WorkspaceSpec,
   observation: BackendObservation,
 ): string {
+  const runtimeScope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
   if (workspace.backend.kind === "docker") {
-    return `container/${workspace.identity.projectName}-docker`;
+    return `container/${runtimeScope}-docker`;
   }
   if (workspace.backend.kind === "pod") {
     return observation.backend.detail?.startsWith("pod/")
       ? observation.backend.detail
-      : `deployment/${workspace.identity.projectName}`;
+      : `deployment/${runtimeScope}`;
   }
-  return `vm/${workspace.identity.projectName}-vm`;
+  return `vm/${workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm")}`;
 }
 
 function runtimeAssemblyCheck(

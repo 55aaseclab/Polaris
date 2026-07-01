@@ -44,7 +44,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pnpm install
-paseo_dist_dir="$(paseo_local_prepare_dist)"
+paseo_dist_dir="$(paseo_local_build_dist)"
 
 POLARIS_WEB_PORT="${WEB_PORT}" \
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \

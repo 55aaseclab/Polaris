@@ -12,11 +12,31 @@ import {
   workspaceDataClaimName,
   workspaceDataPersistentVolumeName,
 } from "../../core/netfs.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "../../core/workspace-name.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const GENERATED_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "generated", "kubevirt");
 const FALLBACK_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "kubevirt", "templates");
+
+function runtimeScope(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+}
+
+function vmName(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm");
+}
+
+function cloudInitSecretName(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeResourceName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+    "vm-cloudinit",
+  );
+}
 
 function indentBlock(text: string, spaces: number): string {
   const prefix = " ".repeat(spaces);
@@ -82,7 +102,7 @@ function existingPersistentVolumeClaimName(
     "kubectl",
     [
       "-n",
-      workspace.identity.projectName,
+      runtimeScope(workspace),
       "get",
       "pvc",
       claimName,
@@ -120,7 +140,7 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
         `    server: ${requireNetfsField(source.server, "server", "workspace-data")}`,
         `    path: ${netfsResolvedPath(source)}`,
         "  claimRef:",
-        `    namespace: ${workspace.identity.projectName}`,
+        `    namespace: ${runtimeScope(workspace)}`,
         `    name: ${claimName}`,
       ].join("\n"));
       docs.push([
@@ -128,7 +148,7 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
         "kind: PersistentVolumeClaim",
         "metadata:",
         `  name: ${claimName}`,
-        `  namespace: ${workspace.identity.projectName}`,
+        `  namespace: ${runtimeScope(workspace)}`,
         "spec:",
         "  accessModes:",
         "  - ReadWriteMany",
@@ -145,7 +165,7 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
       "kind: PersistentVolumeClaim",
       "metadata:",
       `  name: ${requireAttachmentVolumeRef(workspace, "workspaceData")}`,
-      `  namespace: ${workspace.identity.projectName}`,
+      `  namespace: ${runtimeScope(workspace)}`,
       "spec:",
       "  accessModes:",
       "  - ReadWriteOnce",
@@ -163,7 +183,7 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
       "kind: PersistentVolumeClaim",
       "metadata:",
       `  name: ${requireAttachmentVolumeRef(workspace, attachment)}`,
-      `  namespace: ${workspace.identity.projectName}`,
+      `  namespace: ${runtimeScope(workspace)}`,
       "spec:",
       "  accessModes:",
       "  - ReadWriteOnce",
@@ -176,6 +196,9 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
 }
 
 function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
+  const scope = runtimeScope(workspace);
+  const virtualMachineName = vmName(workspace);
+  const cloudInitName = cloudInitSecretName(workspace);
   const paseoAppBaseUrl = resolveConfiguredPaseoAppBaseUrl();
   const rootdiskImage =
     workspace.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
@@ -213,7 +236,9 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
     )
     .replaceAll("__SERVICE_PORTS__", renderedServicePorts)
     .replaceAll("__INTERFACE_PORTS__", renderedInterfacePorts)
-    .replaceAll("__PROJECT__", workspace.identity.projectName)
+    .replaceAll("__PROJECT__", scope)
+    .replaceAll(`${scope}-vm-cloudinit`, cloudInitName)
+    .replaceAll(`${scope}-vm`, virtualMachineName)
     .replaceAll(
       "__WORKSPACE_DATA_VOLUME__",
       requireAttachmentVolumeRef(workspace, "workspaceData"),

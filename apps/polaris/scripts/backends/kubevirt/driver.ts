@@ -12,6 +12,10 @@ import { renderAndWriteKubevirtWorkspace } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
 import { workspaceDataClaimName } from "../../core/netfs.js";
 import { kubevirtProbePassword } from "./probe-access.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "../../core/workspace-name.js";
 
 function hasKubectlVirt(): boolean {
   const result = spawnSync("kubectl", ["virt", "--help"], { encoding: "utf8" });
@@ -36,6 +40,22 @@ function terminateChildProcess(child: ReturnType<typeof spawn>): void {
     }
   }
   child.kill("SIGTERM");
+}
+
+function runtimeScope(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+}
+
+function vmName(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm");
+}
+
+function cloudInitSecretName(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeResourceName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+    "vm-cloudinit",
+  );
 }
 
 function waitForPortForwardReady(
@@ -143,10 +163,10 @@ function kubevirtNodeSshEndpoint(
     "kubectl",
     [
       "-n",
-      workspace.identity.projectName,
+      runtimeScope(workspace),
       "get",
       "vmi",
-      `${workspace.identity.projectName}-vm`,
+      vmName(workspace),
       "-o",
       "jsonpath={.status.nodeName}",
     ],
@@ -175,7 +195,7 @@ function kubevirtNodeSshEndpoint(
     "kubectl",
     [
       "-n",
-      workspace.identity.projectName,
+      runtimeScope(workspace),
       "get",
       "svc",
       serviceName,
@@ -256,7 +276,7 @@ async function runKubevirtSshCommand(
   let child: ReturnType<typeof spawn> | undefined;
   try {
     child = await waitForPortForwardReady(
-      workspace.identity.projectName,
+      runtimeScope(workspace),
       serviceName,
       localPort,
       22,
@@ -477,34 +497,34 @@ function normalizeKubevirtCommandRef(
   return workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json";
 }
 
-function patchVmRunStrategy(project: string, runStrategy: "Always" | "Halted"): void {
+function patchVmRunStrategy(workspace: WorkspaceSpec, runStrategy: "Always" | "Halted"): void {
   runCommand("kubectl", [
     "-n",
-    project,
+    runtimeScope(workspace),
     "patch",
     "vm",
-    `${project}-vm`,
+    vmName(workspace),
     "--type=merge",
     "-p",
     JSON.stringify({ spec: { runStrategy } }),
   ]);
 }
 
-function runVmLifecycleAction(project: string, action: "start" | "stop" | "restart"): void {
+function runVmLifecycleAction(workspace: WorkspaceSpec, action: "start" | "stop" | "restart"): void {
   if (hasKubectlVirt()) {
-    runCommand("kubectl", ["virt", action, "-n", project, `${project}-vm`]);
+    runCommand("kubectl", ["virt", action, "-n", runtimeScope(workspace), vmName(workspace)]);
     return;
   }
   if (action === "start") {
-    patchVmRunStrategy(project, "Always");
+    patchVmRunStrategy(workspace, "Always");
     return;
   }
   if (action === "stop") {
-    patchVmRunStrategy(project, "Halted");
+    patchVmRunStrategy(workspace, "Halted");
     return;
   }
-  patchVmRunStrategy(project, "Halted");
-  patchVmRunStrategy(project, "Always");
+  patchVmRunStrategy(workspace, "Halted");
+  patchVmRunStrategy(workspace, "Always");
 }
 
 function extractPairingUrl(raw: string): string | undefined {
@@ -519,7 +539,7 @@ function extractPairingUrl(raw: string): string | undefined {
 function kubevirtServiceName(workspace: WorkspaceSpec): string | null {
   const service = spawnSync(
     "kubectl",
-    ["-n", workspace.identity.projectName, "get", "svc", workspace.identity.projectName, "-o", "jsonpath={.metadata.name}"],
+    ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"],
     { encoding: "utf8" },
   );
   const name = (service.stdout || "").trim();
@@ -532,7 +552,7 @@ async function syncKubevirtGuestState(
 ): Promise<void> {
   const vmi = spawnSync(
     "kubectl",
-    ["-n", workspace.identity.projectName, "get", "vmi", `${workspace.identity.projectName}-vm`, "-o", "jsonpath={.status.phase}"],
+    ["-n", runtimeScope(workspace), "get", "vmi", vmName(workspace), "-o", "jsonpath={.status.phase}"],
     { encoding: "utf8" },
   );
   if ((vmi.stdout || "").trim() !== "Running") {
@@ -565,18 +585,18 @@ export class KubevirtDriver implements BackendDriver {
   async start(workspace: WorkspaceSpec): Promise<void> {
     const outputPath = renderAndWriteKubevirtWorkspace(workspace);
     runCommand("kubectl", ["apply", "-f", outputPath]);
-    runVmLifecycleAction(workspace.identity.projectName, "start");
+    runVmLifecycleAction(workspace, "start");
     await ensureKubevirtGuestRuntime(workspace);
   }
 
   async stop(workspace: WorkspaceSpec): Promise<void> {
     await syncKubevirtGuestState(workspace, "sync-out");
-    runVmLifecycleAction(workspace.identity.projectName, "stop");
+    runVmLifecycleAction(workspace, "stop");
   }
 
   async restart(workspace: WorkspaceSpec): Promise<void> {
     await syncKubevirtGuestState(workspace, "sync-out");
-    runVmLifecycleAction(workspace.identity.projectName, "restart");
+    runVmLifecycleAction(workspace, "restart");
   }
 
   async rebuild(workspace: WorkspaceSpec): Promise<void> {
@@ -595,36 +615,36 @@ export class KubevirtDriver implements BackendDriver {
   async logs(workspace: WorkspaceSpec): Promise<void> {
     const launcher = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "pod", "-l", `vm.kubevirt.io/name=${workspace.identity.projectName}-vm`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", runtimeScope(workspace), "get", "pod", "-l", `vm.kubevirt.io/name=${vmName(workspace)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (launcher.stdout || "").trim();
     if (!podName) {
       throw new Error(`No KubeVirt launcher pod found for ${workspace.identity.projectName}`);
     }
-    runCommand("kubectl", ["-n", workspace.identity.projectName, "logs", podName, "--tail=200"]);
+    runCommand("kubectl", ["-n", runtimeScope(workspace), "logs", podName, "--tail=200"]);
   }
 
   async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
     const vm = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "vm", `${workspace.identity.projectName}-vm`, "-o", "jsonpath={.metadata.name}"],
+      ["-n", runtimeScope(workspace), "get", "vm", vmName(workspace), "-o", "jsonpath={.metadata.name}"],
       { encoding: "utf8" },
     );
     const exists = vm.status === 0 && Boolean((vm.stdout || "").trim());
     const vmi = exists
-      ? spawnSync("kubectl", ["-n", workspace.identity.projectName, "get", "vmi", `${workspace.identity.projectName}-vm`, "-o", "jsonpath={.status.phase}"], { encoding: "utf8" })
+      ? spawnSync("kubectl", ["-n", runtimeScope(workspace), "get", "vmi", vmName(workspace), "-o", "jsonpath={.status.phase}"], { encoding: "utf8" })
       : { status: 1, stdout: "", stderr: "" };
     const phase = (vmi.stdout || "").trim();
     const running = phase === "Running";
     const service = workspace.connectivity.servicePorts.length
-      ? spawnSync("kubectl", ["-n", workspace.identity.projectName, "get", "svc", workspace.identity.projectName, "-o", "jsonpath={.metadata.name}"], { encoding: "utf8" })
+      ? spawnSync("kubectl", ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"], { encoding: "utf8" })
       : { status: 0, stdout: "", stderr: "" };
     const serviceName = (service.stdout || "").trim();
     const serviceCount = serviceName ? 1 : 0;
     const cloudInit = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "secret", `${workspace.identity.projectName}-vm-cloudinit`, "-o", "jsonpath={.metadata.name}"],
+      ["-n", runtimeScope(workspace), "get", "secret", cloudInitSecretName(workspace), "-o", "jsonpath={.metadata.name}"],
       { encoding: "utf8" },
     );
     const cloudInitPresent = cloudInit.status === 0 && Boolean((cloudInit.stdout || "").trim());
@@ -731,12 +751,12 @@ export class KubevirtDriver implements BackendDriver {
       }
       if (action.kind === "restart-runtime") {
         await syncKubevirtGuestState(workspace, "sync-out");
-        runVmLifecycleAction(workspace.identity.projectName, "restart");
+        runVmLifecycleAction(workspace, "restart");
         continue;
       }
       if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
         await syncKubevirtGuestState(workspace, "sync-out");
-        runVmLifecycleAction(workspace.identity.projectName, "restart");
+        runVmLifecycleAction(workspace, "restart");
         continue;
       }
       if (action.kind === "report-unrecoverable-drift") {

@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
+import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import {
   listPortalProfiles,
   parsePortalDriverTarget,
@@ -552,9 +553,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         const workspace = decodeURIComponent(segments[4] ?? "");
         if (segments.length === 4 && segments[3] === "workspaces" && req.method === "GET") {
+          const workspaces = await listPortalWorkspaces(routeUserId);
           sendJson(res, 200, {
             user: profile,
-            workspaces: listPortalWorkspaces(routeUserId),
+            workspaces,
             archivedWorkspaces: listPortalArchivedWorkspaces(routeUserId),
           });
           return;
@@ -666,6 +668,20 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           const workspaceName = body.workspaceName?.trim();
           if (!workspaceName) {
             badRequest(res, "workspaceName is required");
+            return;
+          }
+          try {
+            assertProjectNameAvailableForUser(workspaceName, routeUserId);
+          } catch (error) {
+            sendJson(res, 409, {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return;
+          }
+          if ((await listPortalWorkspaces(routeUserId)).some((entry) => entry.name === workspaceName)) {
+            sendJson(res, 409, {
+              error: `Workspace '${workspaceName}' already exists for user ${routeUserId}.`,
+            });
             return;
           }
           const provision = await queueProvisionWorkspace(routeUserId, workspaceName, {
