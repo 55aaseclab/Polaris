@@ -43,6 +43,9 @@ pnpm --filter polaris run build
 
 docker compose -f "${COMPOSE_FILE}" -p "${project_name}" --env-file "${temp_env}" up -d --build
 
+systemctl restart polaris-executor.service
+systemctl restart polaris-executor-bridge-proxy.service
+
 polaris_bluegreen_wait_for_stack "${target_port}"
 polaris_bluegreen_switch_upstream "${target_color}" "${UPSTREAM_FILE}" "${ACTIVE_COLOR_FILE}"
 

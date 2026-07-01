@@ -29,7 +29,7 @@ else
 fi
 
 \${SUDO} apt-get update
-\${SUDO} apt-get install -y docker.io docker-compose-plugin nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind
+\${SUDO} apt-get install -y docker.io docker-compose-plugin nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind socat
 \${SUDO} systemctl enable --now docker
 \${SUDO} systemctl enable --now nginx
 \${SUDO} systemctl enable --now rpcbind
@@ -70,6 +70,12 @@ rsync -az \
   ./.env.prod.example "${REMOTE_HOST}:${REMOTE_APP_DIR}/.env.prod.example"
 rsync -az \
   -e "${RSYNC_RSH}" \
+  ./scripts/run-polaris-executor-host.sh "${REMOTE_HOST}:${REMOTE_APP_DIR}/scripts/run-polaris-executor-host.sh"
+rsync -az \
+  -e "${RSYNC_RSH}" \
+  ./scripts/run-polaris-executor-bridge-proxy.sh "${REMOTE_HOST}:${REMOTE_APP_DIR}/scripts/run-polaris-executor-bridge-proxy.sh"
+rsync -az \
+  -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
 
 ssh "${REMOTE_HOST}" "set -euo pipefail
@@ -107,11 +113,19 @@ print(secrets.token_hex(32))
 PY
 }
 
-cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+if [ ! -f '${REMOTE_ENV_FILE}' ]; then
+  cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+fi
 
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
-upsert_env_line 'POLARIS_EXECUTOR_SHARED_SECRET' \"\$(generate_executor_secret)\" '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_EXECUTOR_HOST' '127.0.0.1' '${REMOTE_ENV_FILE}'
+
+if ! grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=' '${REMOTE_ENV_FILE}' \
+  || grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=$' '${REMOTE_ENV_FILE}' \
+  || grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=change-me-to-a-long-random-secret$' '${REMOTE_ENV_FILE}'; then
+  upsert_env_line 'POLARIS_EXECUTOR_SHARED_SECRET' \"\$(generate_executor_secret)\" '${REMOTE_ENV_FILE}'
+fi
 
 if [ -d '${REMOTE_APP_DIR}/config/users' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/users' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/users/' '${REMOTE_DATA_ROOT}/users/'
@@ -128,6 +142,47 @@ fi
 if [ ! -f '${REMOTE_UPSTREAM_FILE}' ]; then
   cp '${REMOTE_APP_DIR}/deploy/nginx/polaris-upstream.blue.conf' '${REMOTE_UPSTREAM_FILE}'
 fi
+
+cat > /etc/systemd/system/polaris-executor.service <<EOF
+[Unit]
+Description=Polaris host executor
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=${REMOTE_APP_DIR}
+Environment=POLARIS_ENV_FILE=${REMOTE_ENV_FILE}
+ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/run-polaris-executor-host.sh ${REMOTE_ENV_FILE}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/polaris-executor-bridge-proxy.service <<EOF
+[Unit]
+Description=Polaris executor bridge proxy
+After=network.target docker.service polaris-executor.service
+Wants=docker.service polaris-executor.service
+
+[Service]
+Type=simple
+WorkingDirectory=${REMOTE_APP_DIR}
+ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/run-polaris-executor-bridge-proxy.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable polaris-executor.service
+systemctl enable polaris-executor-bridge-proxy.service
+systemctl restart polaris-executor.service
+systemctl restart polaris-executor-bridge-proxy.service
 
 nginx_dump=\"\$(nginx -T 2>/dev/null || true)\"
 missing=0
