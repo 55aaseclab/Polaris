@@ -140,12 +140,6 @@ function mergeWorkspaceStatus(
         ...(incoming.driver ?? {}),
       }
     : undefined;
-  const paseo = current.paseo || incoming.paseo
-    ? {
-        ...(current.paseo ?? {}),
-        ...(incoming.paseo ?? {}),
-      }
-    : undefined;
   const codexCredentials = current.credentials?.codex || incoming.credentials?.codex
     ? {
         ...(current.credentials?.codex ?? {}),
@@ -199,8 +193,10 @@ function mergeWorkspaceStatus(
     lifecycleAction: incoming.lifecycleAction ?? current.lifecycleAction,
     state: mergeWorkspaceState(current.state, incoming.state),
     health: {
-      ...current.health,
-      ...incoming.health,
+      backendLiveness: incoming.health.backendLiveness ?? current.health.backendLiveness,
+      workspaceReadiness: incoming.health.workspaceReadiness ?? current.health.workspaceReadiness,
+      daemonReadiness: incoming.health.daemonReadiness,
+      reason: incoming.health.reason ?? current.health.reason,
     },
     details: {
       ...current.details,
@@ -210,13 +206,9 @@ function mergeWorkspaceStatus(
     drift: incoming.drift ?? current.drift,
     attachments: incoming.attachments ?? current.attachments,
     runtimeAssembly: incoming.runtimeAssembly ?? current.runtimeAssembly,
-    daemon: incoming.daemon ?? current.daemon,
   };
   if (driver?.target && driver.baseImage && driver.runtimeKind && driver.runtimeRef) {
     merged.driver = driver as NonNullable<WorkspaceStatus["driver"]>;
-  }
-  if (paseo?.daemonAddress && paseo.supportedHarnesses && paseo.liveTarget !== undefined) {
-    merged.paseo = paseo as NonNullable<WorkspaceStatus["paseo"]>;
   }
   if (codexCredentials?.state || liveCredentials) {
     merged.credentials = credentials as NonNullable<WorkspaceStatus["credentials"]>;
@@ -232,6 +224,8 @@ function mergeWorkspaceStatus(
   if (ssh?.mode && ssh.selfCheck) {
     merged.ssh = ssh as NonNullable<WorkspaceStatus["ssh"]>;
   }
+  delete ((merged as unknown) as Record<string, unknown>).paseo;
+  delete ((merged as unknown) as Record<string, unknown>).daemon;
   return merged;
 }
 

@@ -330,14 +330,8 @@ export interface WorkspaceStatus {
   health: {
     backendLiveness: string;
     workspaceReadiness: string;
-    daemonReadiness: string;
+    daemonReadiness?: string;
     reason?: string;
-  };
-  paseo?: {
-    daemonAddress: string;
-    serverId?: string;
-    supportedHarnesses: string[];
-    liveTarget: string | null;
   };
   credentials?: {
     codex?: {
@@ -426,7 +420,6 @@ export interface WorkspaceStatus {
   drift?: WorkspaceDrift;
   attachments?: Record<string, CheckStatus>;
   runtimeAssembly?: Record<string, CheckStatus>;
-  daemon?: Record<string, CheckStatus>;
 }
 
 export interface ObservationItem {

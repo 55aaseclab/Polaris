@@ -2,23 +2,8 @@ import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
 import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
-import {
-  evaluateDaemonStatusObservation,
-  evaluatePairingObservation,
-  parseConnectionOfferServerId,
-  parsePaseoDaemonStatus,
-} from "../../core/paseo.js";
 import { runCommand } from "../../utils/shell.js";
 import { renderAndWritePodWorkspace } from "./render.js";
-
-function extractPairingUrl(raw: string): string | undefined {
-  try {
-    const parsed = JSON.parse(raw) as { url?: unknown };
-    return typeof parsed.url === "string" && parsed.url.trim() ? parsed.url.trim() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export class PodDriver implements BackendDriver {
   readonly kind = "pod" as const;
@@ -131,45 +116,10 @@ export class PodDriver implements BackendDriver {
       : { status: 0, stdout: "", stderr: "" };
     const serviceCount = (observedServices.stdout || "").trim() ? 1 : 0;
 
-    const daemonStatusRaw =
-      workspace.agent.enabled && podName
-        ? execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`)
-        : "";
-    const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
-    const persistedServerId =
-      workspace.agent.enabled && podName
-        ? execOutput(`cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null`).trim() || null
-        : null;
-    const daemonObserved =
-      workspace.agent.enabled &&
-      podName
-        ? evaluateDaemonStatusObservation({
-            status: daemonStatus,
-            persistedServerId,
-            readyFileDetail: workspace.agent.runtime.readyFile ?? "/tmp/.ready",
-          })
-        : workspace.agent.enabled
-          ? { observed: false, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" }
-          : { observed: true, detail: "daemon not required" };
     const githubAuthObserved =
       running && workspace.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
-    const pairingUrl =
-      workspace.agent.enabled && podName
-        ? extractPairingUrl(execOutput(`timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon pair --json 2>/dev/null || true`))
-        : undefined;
-    const pairingServerId = pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null;
-    const pairingObserved = workspace.agent.enabled && podName
-      ? evaluatePairingObservation({
-          expectedServerId: daemonStatus?.serverId ?? persistedServerId,
-          cachedServerId: pairingServerId,
-          pairingUrl,
-          pairingFileDetail: "paseo daemon pair",
-        })
-      : workspace.agent.enabled
-        ? { observed: false, detail: "paseo daemon pair" }
-        : { observed: true, detail: "daemon not required" };
 
     return {
       backend: {
@@ -195,18 +145,7 @@ export class PodDriver implements BackendDriver {
           ? { observed: githubAuthObserved, detail: workspace.userProfile.github.account }
           : undefined,
       } : {},
-      daemon: {
-        manager: workspace.health.requiresDaemon && running
-          ? daemonObserved
-          : workspace.health.requiresDaemon
-            ? { observed: false, detail: workspace.agent.runtime.readyFile }
-            : { observed: true, detail: "daemon not required" },
-        pairing: workspace.health.requiresDaemon && running
-          ? pairingObserved
-          : workspace.health.requiresDaemon
-            ? { observed: false, detail: "paseo daemon pair" }
-            : { observed: true, detail: "daemon not required" },
-      },
+      daemon: {},
       services: {
         declared: workspace.connectivity.servicePorts.length ? 1 : 0,
         observed: serviceCount,

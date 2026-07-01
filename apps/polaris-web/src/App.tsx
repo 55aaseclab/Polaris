@@ -2678,7 +2678,7 @@ function WorkspaceDetailContent() {
   const harnessOptions = Array.from(
     new Set(
       [
-        ...(liveStatus?.supportedHarnesses ?? workspaceData?.status?.paseo?.supportedHarnesses ?? []),
+        ...(liveStatus?.supportedHarnesses ?? []),
         ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
       ],
     ),
@@ -2688,13 +2688,7 @@ function WorkspaceDetailContent() {
   );
   const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
-  const embeddedPortalUrl =
-    workspaceData?.reconnectTarget
-    ?? buildPaseoReconnectUrl(
-      workspaceData?.status?.paseo?.serverId,
-      workspaceData?.liveTarget ?? workspaceData?.status?.paseo?.liveTarget,
-      paseoScope,
-    );
+  const embeddedPortalUrl = workspaceData?.reconnectTarget ?? workspaceData?.liveTarget ?? null;
   const workspaceFrameKey = `${userId.trim()}:${workspaceName.trim()}`;
   const activeEmbeddedPaseoFrame = embeddedPaseoFrames.find(
     (frame) => frame.workspaceKey === workspaceFrameKey,
@@ -3207,12 +3201,7 @@ function WorkspaceDetailContent() {
 
     if (currentPane === "paseo") {
       const liveTarget =
-        workspaceData.reconnectTarget
-        ?? buildPaseoReconnectUrl(
-          workspaceData.status?.paseo?.serverId,
-          workspaceData.liveTarget ?? workspaceData.status?.paseo?.liveTarget,
-          paseoScope,
-        );
+        workspaceData.reconnectTarget ?? workspaceData.liveTarget;
       const driverStatus = workspaceData.status?.driver;
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
@@ -3230,53 +3219,17 @@ function WorkspaceDetailContent() {
                   {refreshing ? t("refreshing") : t("refresh")}
                 </Button>
               </div>
-              <div className="grid gap-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("paseo_server_id")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <span className="break-all">
-                      {workspaceData.status?.paseo?.serverId ?? t("unknown")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("daemon_address")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <span className="break-all">
-                      {workspaceData.status?.paseo?.daemonAddress ?? t("unknown")}
-                    </span>
-                  </div>
-                </div>
+              {liveTarget ? (
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{t("live_target")}</div>
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <span className="break-all">
-                      {liveTarget ?? t("unknown")}
-                    </span>
+                    <span className="break-all">{liveTarget}</span>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("supported_harnesses")}</div>
-                  </div>
-                  <div className="flex w-full min-w-0 flex-col items-start gap-3 sm:w-[28rem] sm:items-end">
-                    <div className="flex w-full flex-wrap justify-start gap-2 sm:justify-end">
-                      {(workspaceData.status?.paseo?.supportedHarnesses ?? []).length > 0
-                        ? workspaceData.status?.paseo?.supportedHarnesses?.map((item) => (
-                            <Badge key={item} variant="secondary">{item}</Badge>
-                          ))
-                        : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
-                    </div>
-                    {renderLiveCredentialControls()}
-                  </div>
-                </div>
-              </div>
+              ) : null}
+              {renderLiveCredentialControls()}
             </div>
             <Separator />
             {renderWorkspaceControlsCard()}

@@ -80,12 +80,6 @@ export interface PortalWorkspaceStatus {
     runtimeRef: string;
     rootdiskImage?: string;
   };
-  paseo?: {
-    daemonAddress: string;
-    serverId?: string;
-    supportedHarnesses: string[];
-    liveTarget: string | null;
-  };
   credentials?: {
     codex?: {
       state?: "selected" | "not-selected";
@@ -110,12 +104,7 @@ export interface PortalWorkspaceStatus {
   health?: {
     backendLiveness?: string;
     workspaceReadiness?: string;
-    daemonReadiness?: string;
     reason?: string;
-  };
-  daemon?: {
-    manager?: { state?: string };
-    pairing?: { state?: string; url?: string };
   };
   evolution?: {
     artifactCount: number;

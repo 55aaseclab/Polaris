@@ -16,7 +16,6 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",
       state: status.state,
-      daemonReadiness: status.health.daemonReadiness,
       reason: status.health.reason,
     });
     await finalizeEvolutionSession(workspace, evolutionSessionId);

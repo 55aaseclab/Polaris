@@ -2,12 +2,6 @@ import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
-import {
-  evaluateDaemonStatusObservation,
-  evaluatePairingObservation,
-  parsePaseoDaemonStatus,
-  parseConnectionOfferServerId,
-} from "../../core/paseo.js";
 import { renderAndWriteKubevirtWorkspace } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
 import { workspaceDataClaimName } from "../../core/netfs.js";
@@ -350,14 +344,18 @@ async function ensureKubevirtGuestRuntime(
   const waitForDaemonReady = async (timeoutMs: number): Promise<boolean> => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      const daemonStatus = await runKubevirtSshCommand(
+      const readyCheck = await runKubevirtSshCommand(
         workspace,
         serviceName,
-        `timeout 10s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json`,
-        20000,
+        [
+          "set -eu",
+          `test -s ${workspace.agent.runtime.stateRoot}/server-id`,
+          `test -f ${normalizeKubevirtCommandRef(workspace)}`,
+          `grep -q '"url"[[:space:]]*:' ${normalizeKubevirtCommandRef(workspace)}`,
+        ].join("\n"),
+        10000,
       );
-      const parsed = daemonStatus.ok ? parsePaseoDaemonStatus(daemonStatus.stdout) : null;
-      if (parsed?.localDaemon === "running" && parsed.connectedDaemon === "reachable") {
+      if (readyCheck.ok) {
         return true;
       }
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -388,7 +386,6 @@ async function ensureKubevirtGuestRuntime(
 
 interface KubevirtRuntimeSnapshot {
   guestReachable: boolean;
-  daemonStatusRaw: string;
   persistedServerId: string | null;
   pairingRaw: string;
   workspaceDataObserved: boolean;
@@ -410,14 +407,11 @@ async function collectKubevirtRuntimeSnapshot(
   const command = [
     "set -eu",
     "printf 'guestReachable=1\\n'",
-    "printf 'daemonStatusRaw<<EOF\\n'",
-    `timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon status --json 2>/dev/null || true`,
-    "printf 'EOF\\n'",
     "printf 'persistedServerId<<EOF\\n'",
     `cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null || true`,
     "printf 'EOF\\n'",
     "printf 'pairingRaw<<EOF\\n'",
-    `timeout 5s env PASEO_HOME=${workspace.agent.runtime.stateRoot} paseo daemon pair --json 2>/dev/null || true`,
+    `cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null || true`,
     "printf 'EOF\\n'",
     `test -d ${workspace.attachments.workspaceData.mountRoot} && echo workspaceDataObserved=1 || echo workspaceDataObserved=0`,
     `test -d ${workspace.attachments.workspaceRuntimeState.mountRoot} && echo workspaceRuntimeObserved=1 || echo workspaceRuntimeObserved=0`,
@@ -434,7 +428,6 @@ async function collectKubevirtRuntimeSnapshot(
   if (!result.ok) {
     return {
       guestReachable: false,
-      daemonStatusRaw: "",
       persistedServerId: null,
       pairingRaw: "",
       workspaceDataObserved: false,
@@ -475,7 +468,6 @@ async function collectKubevirtRuntimeSnapshot(
   const block = (key: string): string => blocks.get(key) ?? "";
   return {
     guestReachable: flag("guestReachable"),
-    daemonStatusRaw: block("daemonStatusRaw"),
     persistedServerId: block("persistedServerId") || null,
     pairingRaw: block("pairingRaw"),
     workspaceDataObserved: flag("workspaceDataObserved"),
@@ -659,40 +651,14 @@ export class KubevirtDriver implements BackendDriver {
         ? await collectKubevirtRuntimeSnapshot(workspace, serviceName)
         : null;
     const guestReachable = runtimeSnapshot?.guestReachable ?? false;
-    const daemonStatusRaw =
-      workspace.agent.enabled && guestReachable
-        ? runtimeSnapshot?.daemonStatusRaw ?? ""
-        : "";
-    const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
     const persistedServerId =
       workspace.agent.enabled && guestReachable
         ? runtimeSnapshot?.persistedServerId ?? null
         : null;
-    const daemonObserved =
-      workspace.agent.enabled && exists && running
-        ? evaluateDaemonStatusObservation({
-            status: daemonStatus,
-            persistedServerId,
-            readyFileDetail: workspace.agent.runtime.readyFile ?? "/tmp/.ready",
-          })
-        : workspace.agent.enabled
-          ? { observed: false, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" }
-          : { observed: true, detail: "daemon not required" };
     const pairingUrl =
       workspace.agent.enabled && guestReachable
         ? extractPairingUrl(runtimeSnapshot?.pairingRaw ?? "")
         : undefined;
-    const pairingObserved =
-      workspace.agent.enabled && exists && running
-          ? evaluatePairingObservation({
-            expectedServerId: daemonStatus?.serverId ?? persistedServerId,
-            cachedServerId: pairingUrl ? parseConnectionOfferServerId(pairingUrl) ?? null : null,
-            pairingUrl,
-            pairingFileDetail: "paseo daemon pair",
-          })
-        : workspace.agent.enabled
-          ? { observed: false, detail: "paseo daemon pair" }
-          : { observed: true, detail: "daemon not required" };
     return {
       backend: {
         kind: workspace.backend.kind,
@@ -722,14 +688,7 @@ export class KubevirtDriver implements BackendDriver {
             ssh: { observed: runtimeSnapshot?.sshObserved ?? false, detail: `${workspace.runtime.home}/.ssh` },
           }
         : {},
-      daemon: workspace.agent.enabled
-        ? {
-            manager: exists && running
-              ? daemonObserved
-              : { observed: false, detail: workspace.agent.runtime.readyFile },
-            pairing: pairingObserved,
-          }
-        : { pairing: pairingObserved },
+      daemon: {},
       services: {
         declared: workspace.connectivity.servicePorts.length ? 1 : 0,
         observed: serviceCount,

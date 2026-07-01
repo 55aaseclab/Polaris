@@ -589,10 +589,8 @@ async function provisionWorkspaceInternal(
         health: {
           backendLiveness: current?.health.backendLiveness ?? "missing",
           workspaceReadiness: "not-ready",
-          daemonReadiness: current?.health.daemonReadiness ?? "unknown",
           reason: "workspace creation in progress",
         },
-        paseo: current?.paseo,
         credentials: current?.credentials,
         details: current?.details ?? {},
         evolution: current?.evolution,
@@ -601,7 +599,6 @@ async function provisionWorkspaceInternal(
         drift: current?.drift,
         attachments: current?.attachments,
         runtimeAssembly: current?.runtimeAssembly,
-        daemon: current?.daemon,
       }));
       if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
         await createWorkspaceForUser(workspace, userId);
@@ -710,7 +707,6 @@ export async function reportPortalWorkspaceStatus(input: {
     health: {
       backendLiveness: summary.status?.health.backendLiveness ?? "unknown",
       workspaceReadiness: summary.status?.health.workspaceReadiness ?? "unknown",
-      daemonReadiness: summary.status?.health.daemonReadiness ?? "unknown",
       ...(input.status.health ?? {}),
     },
     details: {
@@ -718,7 +714,6 @@ export async function reportPortalWorkspaceStatus(input: {
       ...(input.status.details ?? {}),
     },
     ...(input.status.driver ? { driver: input.status.driver } : {}),
-    ...(input.status.paseo ? { paseo: input.status.paseo } : {}),
     ...(input.status.credentials ? { credentials: input.status.credentials } : {}),
     ...(input.status.evolution ? { evolution: input.status.evolution } : {}),
     ...(input.status.ssh ? { ssh: input.status.ssh } : {}),
@@ -726,7 +721,6 @@ export async function reportPortalWorkspaceStatus(input: {
     ...(input.status.drift ? { drift: input.status.drift } : {}),
     ...(input.status.attachments ? { attachments: input.status.attachments } : {}),
     ...(input.status.runtimeAssembly ? { runtimeAssembly: input.status.runtimeAssembly } : {}),
-    ...(input.status.daemon ? { daemon: input.status.daemon } : {}),
   };
   writeWorkspaceStatus(next, input.userId);
   logInfo("executor", "workspace-status-reported", {
@@ -806,10 +800,8 @@ export function startProvisionWorkspace(
         health: {
           backendLiveness: current?.health.backendLiveness ?? "missing",
           workspaceReadiness: "not-ready",
-          daemonReadiness: current?.health.daemonReadiness ?? "degraded",
           reason: classified.message,
         },
-        paseo: current?.paseo,
         credentials: current?.credentials,
         details: current?.details ?? {},
         evolution: current?.evolution,
@@ -818,7 +810,6 @@ export function startProvisionWorkspace(
         drift: current?.drift,
         attachments: current?.attachments,
         runtimeAssembly: current?.runtimeAssembly,
-        daemon: current?.daemon,
       }));
       logWarn("executor", "workspace-provision-failed", {
         userId,
@@ -960,7 +951,6 @@ export async function startPortalWorkspace(
             ...current.health,
             backendLiveness: "starting",
             workspaceReadiness: "not-ready",
-            daemonReadiness: current.health.daemonReadiness || "unknown",
             reason: "workspace start requested",
           },
         };
