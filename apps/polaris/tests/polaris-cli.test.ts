@@ -7,7 +7,7 @@ import os from "node:os";
 import yaml from "js-yaml";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
-import { assertNoProjectNameCollision } from "../scripts/config/project-ownership.js";
+import { assertNoProjectNameCollision, assertProjectNameAvailableForUser } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
@@ -530,6 +530,38 @@ test("runCli archive moves a workspace into the user archive", async () => {
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("assertProjectNameAvailableForUser rejects names already used by archived workspaces", () => {
+  const dataRoot = process.env.POLARIS_DATA_ROOT;
+  assert.ok(dataRoot, "POLARIS_DATA_ROOT must be set for this test");
+
+  const userProfileId = uniqueProjectName("cli-archived-name-user");
+  const workspace = uniqueProjectName("cli-archived-name-workspace");
+  const archiveId = `20260701T000000Z-${workspace}`;
+  const archiveRoot = path.join(dataRoot, "users", userProfileId, "archives", "workspaces", archiveId);
+
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(archiveRoot, ".polaris-archive.json"),
+    JSON.stringify({
+      archiveId,
+      workspaceName: workspace,
+      archivedAt: "2026-07-01T00:00:00.000Z",
+      originalWorkspaceRoot: `config/users/${userProfileId}/workspaces/${workspace}`,
+      workspaceRoot: `config/users/${userProfileId}/archives/workspaces/${archiveId}`,
+    }, null, 2) + "\n",
+    "utf8",
+  );
+
+  try {
+    assert.throws(
+      () => assertProjectNameAvailableForUser(workspace, userProfileId),
+      new RegExp(`Workspace '${workspace}' is already archived for user ${userProfileId}`),
+    );
+  } finally {
+    fs.rmSync(path.join(dataRoot, "users", userProfileId), { recursive: true, force: true });
   }
 });
 
