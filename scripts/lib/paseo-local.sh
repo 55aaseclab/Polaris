@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-}"
+POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-/paseo}"
 POLARIS_PASEO_BUILDER_NAME="${POLARIS_PASEO_BUILDER_NAME:-polaris-builder}"
 
 paseo_local_runtime_root() {
@@ -24,6 +24,7 @@ paseo_local_buildkit_cache_dir() {
 paseo_local_input_fingerprint() {
   {
     printf '%s\n' "base_url=${POLARIS_PASEO_WEB_BASE_URL}"
+    sha256sum apps/paseo/rewrite-export-base-url.mjs
     find apps/paseo/source apps/paseo/patches -type f -print0 \
       | sort -z \
       | xargs -0 sha256sum
@@ -64,7 +65,34 @@ paseo_local_build_dist() {
   mkdir -p "${dist_dir}"
   cp -a "${tmp_dir}/dist/." "${dist_dir}/"
   printf '%s\n' "${wanted_fingerprint}" > "${fingerprint_file}"
+  paseo_local_verify_dist_base_url
   printf '%s\n' "${dist_dir}"
+}
+
+paseo_local_verify_dist_base_url() {
+  local dist_dir base_url index_file manifest_file
+
+  dist_dir="$(paseo_local_dist_dir)"
+  base_url="${POLARIS_PASEO_WEB_BASE_URL%/}"
+  index_file="${dist_dir}/index.html"
+  manifest_file="${dist_dir}/manifest.json"
+
+  if [ ! -f "${index_file}" ] || [ ! -f "${manifest_file}" ]; then
+    printf 'paseo artifact verification failed: missing index.html or manifest.json\n' >&2
+    return 1
+  fi
+
+  if [ -n "${base_url}" ]; then
+    grep -q "href=\"${base_url}/manifest.json\"" "${index_file}"
+    grep -q "href=\"${base_url}/_expo/static/css/" "${index_file}"
+    grep -q "src=\"${base_url}/_expo/static/js/web/" "${index_file}"
+    grep -q "\"start_url\": \"${base_url}/\"" "${manifest_file}"
+    grep -q "\"scope\": \"${base_url}/\"" "${manifest_file}"
+    if grep -Eq '(href|src)="/(_expo|manifest\.json|favicon\.ico|apple-touch-icon\.png)' "${index_file}"; then
+      printf 'paseo artifact verification failed: root-absolute asset path remained in index.html\n' >&2
+      return 1
+    fi
+  fi
 }
 
 paseo_local_clean() {

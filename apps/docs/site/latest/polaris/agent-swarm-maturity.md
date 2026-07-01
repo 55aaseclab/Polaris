@@ -112,6 +112,7 @@ Polaris 会综合：
 - runtime status observer 可以主动回报状态 patch
 - 显式 refresh 仍然保留，但不再是默认读路径
 - start / stop / live switch 可以先写缓存状态，再异步 refresh
+- 用户可见生命周期不再依赖单独的 provisioning progress 文件
 
 当前关键文件：
 

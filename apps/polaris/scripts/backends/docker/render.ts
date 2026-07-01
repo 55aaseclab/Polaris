@@ -325,7 +325,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     ...(workspace.runtime.bootstrapProfile === "prebuilt"
       ? []
       : [
-          `apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ${workspace.runtime.aptPackages.join(" ")} && rm -rf /var/lib/apt/lists/*`,
+          `apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ripgrep ${workspace.runtime.aptPackages.join(" ")} && rm -rf /var/lib/apt/lists/*`,
           ...(workspace.runtime.installRustup
             ? ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"]
             : []),

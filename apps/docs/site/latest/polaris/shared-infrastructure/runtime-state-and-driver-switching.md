@@ -40,7 +40,8 @@ This is the basis for:
 The portal should treat workspace state as the primary lifecycle signal.
 
 That means the top-level workspace action area is driven by the persisted
-workspace state, not by a separate synthesized driver-runtime label.
+workspace state, not by a separate synthesized driver-runtime label or a
+separate provisioning-progress file.
 
 Current persisted workspace states are:
 
@@ -64,6 +65,8 @@ In practice this means:
 - `creating`, `starting`, `stopping`, and `archiving` should survive a page refresh
 - the portal should not rely only on local in-memory UI state for these
   transitions
+- the system should not expose or depend on a separate `provision.json`
+  progress model for user-visible lifecycle state
 - portal detail reads may refresh runtime observations, but they should merge
   with existing lifecycle state instead of blindly overwriting it
 - portal list reads should return the workspace list immediately instead of

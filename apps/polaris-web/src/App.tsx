@@ -1611,21 +1611,19 @@ function PortalShellLayout(props: {
     }
     setCreatingWorkspace(true);
     setCreateWorkspaceError(null);
-    setCreateWorkspaceOpen(false);
-    setNewWorkspaceName("");
-    setStartAfterCreate(true);
-    setDefaultDockerOnly(true);
     try {
       await createWorkspace(activeUserId, trimmedName, {
         defaultDockerOnly: nextDefaultDockerOnly,
         startAfterCreate: nextStartAfterCreate,
       });
+      setCreateWorkspaceOpen(false);
+      resetCreateWorkspaceForm();
       setWorkspaceRefreshTick((current) => current + 1);
       navigate(
         `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
       );
-    } catch {
-      setWorkspaceRefreshTick((current) => current + 1);
+    } catch (error) {
+      setCreateWorkspaceError(formatActionError(error, t));
     } finally {
       setCreatingWorkspace(false);
     }

@@ -49,6 +49,9 @@ Key log events include:
 - `workspace-status-refresh-started`
 - `workspace-status-refresh-completed`
 
+Polaris should debug workspace lifecycle from `status.json` and runtime logs,
+not from a separate provisioning progress file.
+
 ## Docker Compose Isolation
 
 Docker workspaces now render a unique compose `name:` based on

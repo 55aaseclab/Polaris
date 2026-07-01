@@ -2,7 +2,6 @@ import type { SwitchResult } from "../cli/commands/switch.js";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import type {
   PortalDriverTarget,
-  PortalProvisionProgress,
   PortalWorkspaceDetail,
 } from "../core/portal.js";
 import type { WorkspaceStatus } from "../core/workspace.js";
@@ -136,7 +135,7 @@ export async function queueProvisionWorkspace(input: {
   workspace: string;
   defaultDockerOnly?: boolean;
   startAfterCreate?: boolean;
-}): Promise<PortalProvisionProgress> {
+}): Promise<{ queued: true; workspace: string }> {
   return executorRequest(
     "/workspaces/provision",
     {
@@ -152,19 +151,6 @@ export async function refreshPortalWorkspaceStatus(input: {
 }): Promise<{ refreshed: true }> {
   return executorRequest(
     "/workspaces/status/refresh",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function cancelProvisionWorkspace(input: {
-  userId: string;
-  workspace: string;
-}): Promise<PortalProvisionProgress> {
-  return executorRequest(
-    "/workspaces/provision/cancel",
     {
       method: "POST",
       body: JSON.stringify(input),
