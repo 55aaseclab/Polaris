@@ -92,26 +92,12 @@ export interface PortalWorkspaceStatus {
   backend: {
     kind?: string;
     profile?: string;
-    instanceState?:
-      | "missing"
-      | "created"
-      | "running"
-      | "stopped"
-      | "degraded"
-      | "unsupported";
   };
   driver?: {
     target: string;
     baseImage: string;
     runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
     runtimeRef: string;
-    runtimeState:
-      | "missing"
-      | "created"
-      | "running"
-      | "stopped"
-      | "degraded"
-      | "unsupported";
     rootdiskImage?: string;
   };
   paseo?: {
@@ -213,6 +199,8 @@ export interface PortalWorkspaceSummary {
   status: PortalWorkspaceStatus | null;
   progress: PortalProvisionProgress | null;
   liveTarget: string | null;
+  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+  reconnectTarget: string | null;
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {

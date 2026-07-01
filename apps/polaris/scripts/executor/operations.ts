@@ -230,8 +230,6 @@ function writeCachedWorkspaceStatusUpdate(args: {
     workspace: args.workspace,
     reason: args.reason,
     state: next.state,
-    backendState: next.backend.instanceState,
-    runtimeState: next.driver?.runtimeState,
   });
 }
 
@@ -860,8 +858,6 @@ export async function reportPortalWorkspaceStatus(input: {
     userId: input.userId,
     workspace: input.workspace,
     state: next.state,
-    backendState: next.backend.instanceState,
-    runtimeState: next.driver?.runtimeState,
   });
   return { reported: true };
 }
@@ -1012,6 +1008,25 @@ export async function deletePortalWorkspace(
   archivedAt: string;
   workspace: string;
 }> {
+  writeCachedWorkspaceStatusUpdate({
+    userId,
+    workspace,
+    reason: "workspace-archiving",
+    mutate: (current) => {
+      if (!current) {
+        return null;
+      }
+      return {
+        ...current,
+        state: "archiving",
+        health: {
+          ...current.health,
+          workspaceReadiness: "not-ready",
+          reason: "workspace archiving",
+        },
+      };
+    },
+  });
   return archiveWorkspaceOwnedByUser(userId, workspace);
 }
 
@@ -1030,6 +1045,29 @@ export async function stopPortalWorkspace(
       workspace,
       ref,
     });
+    writeCachedWorkspaceStatusUpdate({
+      userId,
+      workspace,
+      reason: "workspace-stopping",
+      mutate: (current, currentSummary) => {
+        if (!current) {
+          return null;
+        }
+        return {
+          ...current,
+          backend: {
+            ...current.backend,
+            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
+          },
+          state: "stopping",
+          health: {
+            ...current.health,
+            workspaceReadiness: "not-ready",
+            reason: "workspace stop requested",
+          },
+        };
+      },
+    });
     await stopCommand(ref, userId);
     writeCachedWorkspaceStatusUpdate({
       userId,
@@ -1044,14 +1082,7 @@ export async function stopPortalWorkspace(
           backend: {
             ...current.backend,
             kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-            instanceState: "stopped",
           },
-          driver: current.driver
-            ? {
-                ...current.driver,
-                runtimeState: "stopped",
-              }
-            : current.driver,
           state: "saved",
           health: {
             ...current.health,
@@ -1088,6 +1119,31 @@ export async function startPortalWorkspace(
       workspace,
       ref,
     });
+    writeCachedWorkspaceStatusUpdate({
+      userId,
+      workspace,
+      reason: "workspace-starting",
+      mutate: (current, currentSummary) => {
+        if (!current) {
+          return null;
+        }
+        return {
+          ...current,
+          backend: {
+            ...current.backend,
+            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
+          },
+          state: "starting",
+          health: {
+            ...current.health,
+            backendLiveness: "starting",
+            workspaceReadiness: "not-ready",
+            daemonReadiness: current.health.daemonReadiness || "unknown",
+            reason: "workspace start requested",
+          },
+        };
+      },
+    });
     await startCommand(ref, userId);
     writeCachedWorkspaceStatusUpdate({
       userId,
@@ -1102,14 +1158,7 @@ export async function startPortalWorkspace(
           backend: {
             ...current.backend,
             kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-            instanceState: "running",
           },
-          driver: current.driver
-            ? {
-                ...current.driver,
-                runtimeState: "running",
-              }
-            : current.driver,
           state: "ready",
           health: {
             ...current.health,

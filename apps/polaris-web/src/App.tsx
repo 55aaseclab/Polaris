@@ -432,8 +432,8 @@ const COPY: Record<Language, Record<string, string>> = {
     stop_workspace: "停止工作空间",
     remove_workspace: "归档工作空间",
     remove_workspace_confirm_title: "归档这个工作空间？",
-    remove_workspace_confirm_description: "这会把工作空间移入用户归档区，并从当前列表中移除。运行中的工作空间必须先停止，才能归档。",
-    deleting: "删除中…",
+    remove_workspace_confirm_description: "这会把工作空间移入用户归档区，并从当前列表中移除，不可逆。",
+    deleting: "归档中…",
     starting: "启动中…",
     stopping: "停止中…",
     cancel: "取消",
@@ -884,28 +884,6 @@ function driverLabel(driver: { backend: string; profile?: string } | null): stri
     : driver.backend;
 }
 
-function translateInstanceState(
-  value: string | null | undefined,
-  t: (key: string) => string,
-): string {
-  switch (value) {
-    case "missing":
-      return t("instance_missing");
-    case "created":
-      return t("instance_created");
-    case "running":
-      return t("instance_running");
-    case "stopped":
-      return t("instance_stopped");
-    case "degraded":
-      return t("instance_degraded");
-    case "unsupported":
-      return t("instance_unsupported");
-    default:
-      return value || t("unknown");
-  }
-}
-
 function translateDriverRuntimeKind(
   value: string | null | undefined,
   t: (key: string) => string,
@@ -1058,21 +1036,22 @@ function translateWorkspaceRuntimeState(
   switch (value) {
     case "not-applied":
       return t("workspace_not_started");
-    case "created":
+    case "starting":
       return t("workspace_starting");
+    case "stopping":
+      return t("stopping");
+    case "archiving":
+      return t("deleting");
     case "saved":
-    case "stopped":
       return t("workspace_stopped");
-    case "running":
     case "ready":
       return t("workspace_ready");
     case "degraded":
+      return t("workspace_attention");
     case "unsupported":
-    case "error":
-    case "failed":
       return t("workspace_attention");
     default:
-      return value;
+      return t("workspace_unknown");
   }
 }
 
@@ -1109,19 +1088,10 @@ function translateWorkspaceSummaryState(
   }
 
   const state = summary.status?.state;
-  if (state === "ready") {
-    const pairingState = summary.status?.daemon?.pairing?.state;
-    if (pairingState === "ok" || pairingState === "ready") {
-      return t("workspace_ready_to_pair");
-    }
-  }
   if (state) {
     return translateWorkspaceRuntimeState(state, t);
   }
-
-  const runtimeState =
-    summary.status?.driver?.runtimeState ?? summary.status?.backend.instanceState;
-  return translateWorkspaceRuntimeState(runtimeState, t);
+  return t("workspace_unknown");
 }
 
 function workspaceSummaryBadgeVariant(
@@ -1145,49 +1115,23 @@ function workspaceSummaryBadgeVariant(
   }
 
   const state = summary.status?.state;
-  const runtimeState =
-    summary.status?.driver?.runtimeState ?? summary.status?.backend.instanceState;
   if (state === "ready") {
     return "secondary";
+  }
+  if (state === "starting" || state === "stopping" || state === "archiving") {
+    return "default";
   }
   if (
     state === "degraded"
     || state === "error"
     || state === "failed"
-    || runtimeState === "degraded"
-    || runtimeState === "unsupported"
   ) {
     return "destructive";
   }
-  if (state === "saved" || runtimeState === "stopped" || runtimeState === "missing") {
+  if (state === "saved" || state === "not-applied") {
     return "outline";
   }
   return "secondary";
-}
-
-function translatePaseoState(
-  daemon: PortalWorkspaceDetail["status"] extends infer T
-    ? T extends { daemon?: infer D }
-      ? D | undefined
-      : undefined
-    : undefined,
-  t: (key: string) => string,
-): string {
-  const pairingState = daemon?.pairing?.state;
-  const managerState = daemon?.manager?.state;
-  if (pairingState === "ok" || pairingState === "ready") {
-    return t("paseo_ready_to_pair");
-  }
-  if (managerState === "ok" || managerState === "ready") {
-    return t("paseo_daemon_ready");
-  }
-  if (managerState === "missing" || managerState === "unknown" || !managerState) {
-    return t("paseo_starting");
-  }
-  if (managerState === "error" || managerState === "failed" || managerState === "warning") {
-    return t("paseo_attention");
-  }
-  return t("paseo_unknown");
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1317,6 +1261,35 @@ function normalizePaseoPortalUrl(
   return upgradePaseoUrlForSecureOrigin(
     buildScopedPaseoPortalUrl(appBaseUrl, offer, effectiveScope),
   );
+}
+
+function buildPaseoReconnectUrl(
+  serverId: string | null | undefined,
+  liveTarget: string | null | undefined,
+  scope?: string | null,
+): string | null {
+  const normalizedServerId = String(serverId ?? "").trim();
+  if (!normalizedServerId) {
+    return normalizePaseoPortalUrl(liveTarget, scope);
+  }
+  const appBaseUrl = configuredPaseoAppBaseUrl();
+  if (!appBaseUrl) {
+    return normalizePaseoPortalUrl(liveTarget, scope);
+  }
+  try {
+    const url = new URL(`${appBaseUrl.replace(/\/$/, "")}/h/${encodeURIComponent(normalizedServerId)}`);
+    const normalizedScope = normalizePaseoScope(scope);
+    if (normalizedScope) {
+      url.searchParams.set("scope", normalizedScope);
+    }
+    const offer = extractOfferFragment(String(liveTarget ?? ""));
+    if (offer) {
+      url.hash = `offer=${offer}`;
+    }
+    return upgradePaseoUrlForSecureOrigin(url.toString());
+  } catch {
+    return normalizePaseoPortalUrl(liveTarget, scope);
+  }
 }
 
 function workspacePaseoScope(userId: string, workspaceName: string): string {
@@ -2788,9 +2761,7 @@ function WorkspaceDetailContent() {
   );
   const [driver, setDriver] = useState("");
   const [switching, setSwitching] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [paseoCredentialSelections, setPaseoCredentialSelections] = useState<
     Partial<Record<ManagedHarness, string>>
@@ -2817,13 +2788,41 @@ function WorkspaceDetailContent() {
   );
   const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
-  const embeddedPortalUrl = normalizePaseoPortalUrl(
-    data?.liveTarget ?? data?.status?.paseo?.liveTarget,
-    paseoScope,
-  );
-  const runtimeRunning =
-    data?.status?.driver?.runtimeState === "running"
-    || data?.status?.backend.instanceState === "running";
+  const embeddedPortalUrl =
+    data?.reconnectTarget
+    ?? buildPaseoReconnectUrl(
+      data?.status?.paseo?.serverId,
+      data?.liveTarget ?? data?.status?.paseo?.liveTarget,
+      paseoScope,
+    );
+  const runtimeRunning = data?.status?.state === "ready";
+  const persistedWorkspaceAction =
+    data?.status?.state === "starting"
+      ? "starting"
+      : data?.status?.state === "stopping"
+        ? "stopping"
+        : data?.status?.state === "archiving"
+          ? "deleting"
+          : null;
+  const effectiveRuntimeRunning =
+    (workspaceAction ?? persistedWorkspaceAction) === "starting"
+      ? true
+      : (workspaceAction ?? persistedWorkspaceAction) === "stopping"
+        || (workspaceAction ?? persistedWorkspaceAction) === "deleting"
+        ? false
+        : runtimeRunning;
+  const effectiveWorkspaceAction = workspaceAction ?? persistedWorkspaceAction;
+  const starting = effectiveWorkspaceAction === "starting";
+  const stopping = effectiveWorkspaceAction === "stopping";
+  const deleting = effectiveWorkspaceAction === "deleting";
+  const workspaceActionInFlight = effectiveWorkspaceAction !== null;
+  const workspaceStateLabel = deleting
+    ? t("deleting")
+    : starting
+      ? t("workspace_starting")
+      : stopping
+        ? t("stopping")
+        : translateWorkspaceRuntimeState(data?.status?.state, t);
   const evolutionSections: AssetSection[] = assets?.evolutionFiles
     ? [
         {
@@ -2913,6 +2912,31 @@ function WorkspaceDetailContent() {
     };
   }, [data?.progress?.done, data?.progress?.phase, workspaceName, userId]);
 
+  useEffect(() => {
+    if (!workspaceAction) {
+      return;
+    }
+    if (workspaceAction === "starting" && runtimeRunning) {
+      setWorkspaceAction(null);
+      return;
+    }
+    if (workspaceAction === "stopping" && !runtimeRunning) {
+      setWorkspaceAction(null);
+    }
+  }, [runtimeRunning, workspaceAction]);
+
+  useEffect(() => {
+    if (!effectiveWorkspaceAction || effectiveWorkspaceAction === "deleting") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setRefreshTick((current) => current + 1);
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [effectiveWorkspaceAction]);
+
   async function handleSwitch(): Promise<void> {
     if (!driver) {
       return;
@@ -2934,45 +2958,42 @@ function WorkspaceDetailContent() {
 
   async function handleDelete(): Promise<void> {
     setActionError(null);
-    setDeleting(true);
+    setWorkspaceAction("deleting");
     try {
       await deleteWorkspace(userId, workspaceName);
       refreshWorkspaces();
       navigate(`/users/${encodeURIComponent(userId)}/workspaces`);
     } catch (error) {
+      setWorkspaceAction(null);
       setActionError(formatActionError(error, t));
-    } finally {
-      setDeleting(false);
     }
   }
 
   async function handleStop(): Promise<void> {
     setActionError(null);
-    setStopping(true);
+    setWorkspaceAction("stopping");
     try {
       await stopWorkspace(userId, workspaceName);
       await refreshWorkspaceStatus(userId, workspaceName);
       refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     } catch (error) {
+      setWorkspaceAction(null);
       setActionError(formatActionError(error, t));
-    } finally {
-      setStopping(false);
     }
   }
 
   async function handleStart(): Promise<void> {
     setActionError(null);
-    setStarting(true);
+    setWorkspaceAction("starting");
     try {
       await startWorkspace(userId, workspaceName);
       await refreshWorkspaceStatus(userId, workspaceName);
       refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     } catch (error) {
+      setWorkspaceAction(null);
       setActionError(formatActionError(error, t));
-    } finally {
-      setStarting(false);
     }
   }
 
@@ -3034,7 +3055,7 @@ function WorkspaceDetailContent() {
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={() => void handleSwitch()} disabled={switching || !driver}>
+        <Button onClick={() => void handleSwitch()} disabled>
           <RefreshCw className="h-4 w-4" />
           {switching ? t("switching") : t("switch_workspace_action")}
         </Button>
@@ -3140,7 +3161,7 @@ function WorkspaceDetailContent() {
                   variant="outline"
                   disabled={
                     switching
-                    || !runtimeRunning
+                    || !effectiveRuntimeRunning
                     || !selectedCredentialId
                     || !canLiveSwitch
                   }
@@ -3153,7 +3174,7 @@ function WorkspaceDetailContent() {
             </div>
           );
         })}
-        {!runtimeRunning ? (
+        {!effectiveRuntimeRunning ? (
           <p className="text-sm text-muted-foreground">
             {t("credential_switch_requires_running")}
           </p>
@@ -3162,42 +3183,43 @@ function WorkspaceDetailContent() {
     );
   }
 
-  function renderControlsCard(): ReactNode {
+  function renderWorkspaceControlsCard(): ReactNode {
     return (
       <div className="grid gap-6">
         <div className="grid gap-6">
           <div className="min-w-0">
-            <div className="text-base font-semibold">{t("workspace_state")}</div>
-            <div className="text-sm text-muted-foreground">
-              {t("workspace_danger_zone_desc")}
+            <div className="text-base font-semibold">{t("workspace_header_title")}</div>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("switch_driver")}</div>
+              <div className="text-sm text-muted-foreground">
+                {data?.status?.driver?.target ?? driverLabel(data?.selectedDriver ?? null)}
+              </div>
             </div>
+            {renderDriverSwitchControls()}
           </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="text-sm font-medium">
-                {runtimeRunning ? t("stop_workspace") : t("start_workspace")}
+                {effectiveRuntimeRunning ? t("stop_workspace") : t("start_workspace")}
               </div>
               <div className="text-sm text-muted-foreground">
-                {runtimeRunning
-                  ? translateInstanceState(data?.status?.driver?.runtimeState, t)
-                  : translateInstanceState(data?.status?.backend?.instanceState, t)}
+                {workspaceStateLabel}
               </div>
             </div>
             <Button
-              variant="outline"
-              onClick={() => void (runtimeRunning ? handleStop() : handleStart())}
-              disabled={loading || starting || stopping || deleting}
+              variant={effectiveRuntimeRunning ? "outline" : "default"}
+              onClick={() => void (effectiveRuntimeRunning ? handleStop() : handleStart())}
+              disabled={workspaceActionInFlight}
             >
-              {runtimeRunning
+              {effectiveRuntimeRunning
                 ? (stopping ? t("stopping") : t("stop_workspace"))
                 : (starting ? t("starting") : t("start_workspace"))}
             </Button>
           </div>
         </div>
         <div className="grid gap-6">
-          <div className="min-w-0">
-            <div className="text-base font-semibold text-destructive">{t("danger_zone")}</div>
-          </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="text-sm font-medium text-destructive">{t("remove_workspace")}</div>
@@ -3209,7 +3231,7 @@ function WorkspaceDetailContent() {
               <AlertDialogTrigger asChild>
                 <Button
                   variant="destructive"
-                  disabled={loading || stopping || deleting}
+                  disabled={workspaceActionInFlight}
                 >
                   <Trash2 className="h-4 w-4" />
                   {deleting ? t("deleting") : t("remove_workspace")}
@@ -3263,28 +3285,24 @@ function WorkspaceDetailContent() {
     }
 
     if (currentPane === "") {
-      return embeddedPortalUrl ? (
-        <div className="-mx-4 -my-4 flex min-h-0 flex-1 overflow-hidden sm:-mx-6 sm:-my-6">
-          <iframe
-            key={embeddedPortalUrl}
-            title={`${workspaceName} paseo`}
-            src={embeddedPortalUrl}
-            className="h-full min-h-0 w-full border-0"
-          />
-        </div>
-      ) : (
-        <EmptyPane
-          title={workspaceName}
-          description={t("pairing_unknown")}
-        />
-      );
+      return embeddedPortalUrl
+        ? null
+        : (
+            <EmptyPane
+              title={workspaceName}
+              description={t("unknown")}
+            />
+          );
     }
 
     if (currentPane === "paseo") {
-      const liveTarget = normalizePaseoPortalUrl(
-        data.liveTarget ?? data.status?.paseo?.liveTarget,
-        paseoScope,
-      );
+      const liveTarget =
+        data.reconnectTarget
+        ?? buildPaseoReconnectUrl(
+          data.status?.paseo?.serverId,
+          data.liveTarget ?? data.status?.paseo?.liveTarget,
+          paseoScope,
+        );
       const driverStatus = data.status?.driver;
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
@@ -3303,14 +3321,6 @@ function WorkspaceDetailContent() {
                 </Button>
               </div>
               <div className="grid gap-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("paseo_status")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    {translatePaseoState(data.status?.daemon, t)}
-                  </div>
-                </div>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{t("paseo_server_id")}</div>
@@ -3359,6 +3369,8 @@ function WorkspaceDetailContent() {
               </div>
             </div>
             <Separator />
+            {renderWorkspaceControlsCard()}
+            <Separator />
             <div className="grid gap-4">
               <div className="text-base font-semibold">{t("driver_info")}</div>
               <div className="grid gap-4">
@@ -3396,20 +3408,11 @@ function WorkspaceDetailContent() {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{t("driver_runtime")}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {translateInstanceState(driverStatus?.runtimeState, t)}
-                    </div>
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
                     <div>{translateDriverRuntimeKind(driverStatus?.runtimeKind, t)}</div>
                     <div className="break-all">{driverStatus?.runtimeRef ?? t("unknown")}</div>
                   </div>
-                </div>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("switch_driver")}</div>
-                  </div>
-                  {renderDriverSwitchControls()}
                 </div>
               </div>
             </div>
@@ -3441,7 +3444,7 @@ function WorkspaceDetailContent() {
     }
 
     if (currentPane === "controls") {
-      return renderControlsCard();
+      return renderWorkspaceControlsCard();
     }
 
     return (
@@ -3461,10 +3464,29 @@ function WorkspaceDetailContent() {
   }
 
   return (
-    <div className={currentPane === "" ? "flex min-h-0 w-full min-w-0 flex-1 flex-col" : "grid w-full min-w-0 gap-6"}>
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       {error && <p className="text-sm text-destructive">{error}</p>}
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-      {renderPane()}
+      {embeddedPortalUrl ? (
+        <div
+          className={currentPane === ""
+            ? "-mx-4 -my-4 flex min-h-0 flex-1 overflow-hidden sm:-mx-6 sm:-my-6"
+            : "hidden"}
+        >
+          <iframe
+            title={`${workspaceName} paseo`}
+            src={embeddedPortalUrl}
+            className="h-full min-h-0 w-full border-0"
+          />
+        </div>
+      ) : null}
+      {currentPane === ""
+        ? renderPane()
+        : (
+            <div className="grid w-full min-w-0 gap-6">
+              {renderPane()}
+            </div>
+          )}
     </div>
   );
 }

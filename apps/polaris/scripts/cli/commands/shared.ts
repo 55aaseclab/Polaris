@@ -82,7 +82,6 @@ export async function waitForWorkspaceReady(
       project: workspace.identity.projectName,
       backend: workspace.backend.kind,
       state: status.state,
-      backendState: status.backend.instanceState,
       daemonReadiness: status.health.daemonReadiness,
       reason: status.health.reason,
     });
@@ -102,7 +101,6 @@ export async function waitForWorkspaceReady(
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,
     state: lastStatus?.state,
-    backendState: lastStatus?.backend.instanceState,
     reason: lastStatus?.health.reason,
   });
 
