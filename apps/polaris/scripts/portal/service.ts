@@ -84,10 +84,10 @@ async function refreshPortalWorkspaceStatus(
 
 export async function listPortalWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {
   const workspaces = listOwnedWorkspaces(userId);
-  await Promise.all(workspaces.map(async (workspace) => {
-    await refreshPortalWorkspaceStatus(userId, workspace);
+  return workspaces.map((workspace) => ({
+    ...loadWorkspaceSummary(userId, workspace),
+    status: null,
   }));
-  return workspaces.map((workspace) => loadWorkspaceSummary(userId, workspace));
 }
 
 export function listPortalArchivedWorkspaces(
@@ -166,7 +166,15 @@ export async function getPortalWorkspaceDetail(
   userId: string,
   workspace: string,
 ) : Promise<PortalWorkspaceDetail> {
-  await refreshPortalWorkspaceStatus(userId, workspace);
+  const current = loadWorkspaceSummary(userId, workspace);
+  if (current.status?.state === "creating") {
+    return loadWorkspaceDetail(userId, workspace);
+  }
+  try {
+    await refreshPortalWorkspaceStatus(userId, workspace);
+  } catch {
+    // Fall back to the last readable detail instead of failing the whole request.
+  }
   return loadWorkspaceDetail(userId, workspace);
 }
 

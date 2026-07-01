@@ -44,6 +44,7 @@ workspace state, not by a separate synthesized driver-runtime label.
 
 Current persisted workspace states are:
 
+- `creating`
 - `not-applied`
 - `starting`
 - `saved`
@@ -60,11 +61,13 @@ The important operator rule is:
 
 In practice this means:
 
-- `starting`, `stopping`, and `archiving` should survive a page refresh
+- `creating`, `starting`, `stopping`, and `archiving` should survive a page refresh
 - the portal should not rely only on local in-memory UI state for these
   transitions
-- portal list and detail reads should refresh workspace status before they
-  render `summary.status`
+- portal detail reads may refresh runtime observations, but they should merge
+  with existing lifecycle state instead of blindly overwriting it
+- portal list reads should return the workspace list immediately instead of
+  blocking on per-workspace status refresh
 - driver-specific facts such as runtime kind or runtime reference belong in
   the driver details area
 

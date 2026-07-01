@@ -280,33 +280,23 @@ daemon 状态至少分开表达：
 4. 后端写入当前工作空间的 live selection。
 5. 状态刷新后按 harness 展示新的运行时凭证来源。
 
-### 5. Portal create job
+### 5. Portal create flow
 
-workspace create 现在也属于 agent runtime 体验的一部分，而不是纯控制面
-脚本。
+workspace create 仍然属于 agent runtime 体验的一部分，而不是纯控制面脚本。
 
-当前 portal create 已经是 job model：
+但当前门户 UI 不再把单独的 create job 文件当成主要状态来源。
 
-- 有 `jobId`
-- 有 `status`
-- 有 `phase`
-- 有 `percent`
-- 有 `errorCode`
-- 支持 resume
-- 支持 cancel
+现在的原则是：
 
-这很重要，因为 daemon ready / pairing ready 不再只能靠整页刷新去碰运气。
-前端可以围绕 job 状态稳定推进 UI。
+- workspace 生命周期以 `status.json` 为主
+- `creating`、`starting`、`stopping`、`archiving` 都是 workspace state
+- 列表和 header 不依赖额外的 create-progress 语义
 
-当前关键文件：
+这意味着：
 
-- `apps/polaris-web/src/App.tsx`
-- `apps/polaris-web/src/lib/api.ts`
-- `apps/polaris/scripts/executor/operations.ts`
-
-当前关键状态文件：
-
-- `config/users/<userId>/workspaces/<workspace>/state/provision.json`
+- 创建成功后，门户直接切到新 workspace
+- 失败时也不再靠弹窗内局部状态兜底
+- 如果需要解释当前生命周期，优先看 workspace `status.state`
 
 ### 5.1 User-scoped workspace identity
 
@@ -350,19 +340,19 @@ portal create 还有一个很关键但很容易漏掉的前提：
 
 最近一轮优化后，用户实际最常感知到的变化在这里：
 
-- 创建工作空间时 sidebar 会局部更新
-- 未完成的创建 job 可以恢复
-- 归档工作空间不再整页 reload
-- start / stop / switch 后状态会局部刷新
+- sidebar 先显示 workspace 名单
+- workspace 状态不再阻塞 sidebar 首屏
+- 归档工作空间显示在 sidebar 单独分区
+- “开始创建你的第一个工作空间”空态不再混入 archived workspace
+- start / stop / switch 后状态仍然按详情页和显式刷新路径更新
 
-也就是说，portal 当前已经开始把“manager 状态面”当成持续同步的 UI，
-而不是靠全页重载兜底。
+也就是说，portal 当前把“名单加载”和“状态读取”分开了。
 
 这部分验收不要只看“最后有没有成功”。
 还要看：
 
-- create 过程中 sidebar 有没有持续更新
-- 浏览器刷新后未完成 job 能不能恢复
+- create 后是否直接切到新 workspace
+- sidebar 是否不再因为状态刷新而整体变慢
 - delete 后是否只是本地导航切换
 
 ## 调试重点
@@ -378,21 +368,19 @@ portal create 还有一个很关键但很容易漏掉的前提：
 - `daemon.manager.state`
 - `daemon.pairing.state`
 
-### portal 只是没有正确消费缓存状态
+### portal 只是没有正确消费当前状态
 
 看：
 
 - `status.json`
-- `provision.json`
-- 前端是否还在直接展示原始内部状态串
-- 前端是否错误依赖 full-page reload
+- 前端是否还在依赖额外的 create-progress 语义
+- 详情页读取是否错误触发了覆盖型 refresh
 
 最小检查命令：
 
 ```bash
-cat config/users/<user>/workspaces/<workspace>/state/provision.json
 cat config/users/<user>/workspaces/<workspace>/state/status.json
-rg -n "workspace-provision-progress|workspace-status-cached|workspace-status-reported" \
+rg -n "workspace-status-cached|workspace-status-reported|workspace-status-refresh" \
   .tmp/paseo/stack.executor.err.log
 ```
 

@@ -16,7 +16,10 @@ export function evaluateDaemonStatusObservation(args: {
       detail: `${readyFileDetail} (daemon status unavailable)`,
     };
   }
-  if (status.localDaemon !== "running" || status.connectedDaemon !== "reachable") {
+  const daemonReady =
+    status.connectedDaemon === "reachable"
+    && (status.localDaemon === "running" || status.localDaemon === "stale_pid");
+  if (!daemonReady) {
     return {
       observed: false,
       detail: `${readyFileDetail} (daemon status ${status.localDaemon}/${status.connectedDaemon})`,

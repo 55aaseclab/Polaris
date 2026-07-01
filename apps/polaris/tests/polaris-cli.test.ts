@@ -1975,6 +1975,7 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
   const rendered = fs.readFileSync(outputPath, "utf8");
   const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
+  assert.match(rendered, /external: true/);
   assert.match(rendered, new RegExp(`polaris-${escapedId}-ssh`));
   assert.doesNotMatch(rendered, /bootstrap-secrets/);
 });
