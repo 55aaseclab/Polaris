@@ -30,6 +30,9 @@ bash -n scripts/lib/paseo-local.sh
 echo "[5/5] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
 
+echo "[6/6] paseo artifact verification"
+bash ./scripts/build-paseo-web-artifact.sh >/dev/null
+
 temp_blue_env="$(mktemp)"
 temp_green_env="$(mktemp)"
 trap 'rm -f "${temp_blue_env}" "${temp_green_env}"' EXIT

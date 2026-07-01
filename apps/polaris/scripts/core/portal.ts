@@ -97,26 +97,6 @@ export interface PortalWorkspaceAssetPreview {
   truncated: boolean;
 }
 
-export interface PortalProvisionProgress {
-  jobId: string;
-  workspace: string;
-  userId: string;
-  status: "queued" | "running" | "completed" | "error" | "cancelled" | "cancelling";
-  phase: string;
-  step: number;
-  totalSteps: number;
-  percent: number;
-  message: string;
-  startedAt: string;
-  updatedAt: string;
-  done: boolean;
-  cancelRequested?: boolean;
-  cancellable?: boolean;
-  errorCode?: string;
-  retryable?: boolean;
-  error?: string;
-}
-
 export interface PortalWorkspaceSummary {
   name: string;
   drivers: PortalDriverTarget[];
@@ -197,10 +177,6 @@ export function loadPortalWorkspaceByTarget(
     target.backend,
     target.profile,
   );
-}
-
-function workspaceProvisionStateFile(userId: string, workspace: string): string {
-  return path.join(workspaceStateDir(workspace, userId), "provision.json");
 }
 
 function readJson<T>(filePath: string): T | null {
@@ -391,6 +367,11 @@ export function listOwnedWorkspaces(userId: string): string[] {
   return fs
     .readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) =>
+      PORTAL_DRIVER_TARGETS.some((target) =>
+        fs.existsSync(path.join(root, entry.name, workspaceBackendFile(target)))
+      )
+    )
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
 }
@@ -437,24 +418,6 @@ export function readWorkspaceSelection(userId: string, workspace: string): Porta
 
 export function readWorkspaceStatus(userId: string, workspace: string): WorkspaceStatus | null {
   return readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
-}
-
-export function readWorkspaceProvisionProgress(userId: string, workspace: string): PortalProvisionProgress | null {
-  return readJson<PortalProvisionProgress>(workspaceProvisionStateFile(userId, workspace));
-}
-
-export function writeWorkspaceProvisionProgress(
-  userId: string,
-  workspace: string,
-  progress: PortalProvisionProgress,
-): string {
-  const filePath = workspaceProvisionStateFile(userId, workspace);
-  writeJson(filePath, progress);
-  return filePath;
-}
-
-export function clearWorkspaceProvisionProgress(userId: string, workspace: string): void {
-  fs.rmSync(workspaceProvisionStateFile(userId, workspace), { force: true });
 }
 
 export function resolveLiveTarget(

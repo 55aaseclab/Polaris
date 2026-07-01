@@ -20,7 +20,6 @@ import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   bindPortalWorkspaceAgent,
-  cancelPortalWorkspaceProvision,
   createPortalCredential,
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
@@ -158,15 +157,6 @@ async function handleWorkspaceProvision(
     startAfterCreate: body.startAfterCreate === "true",
   });
   sendJson(res, 202, progress);
-}
-
-async function handleWorkspaceProvisionCancel(
-  res: ServerResponse,
-  userId: string,
-  workspace: string,
-): Promise<void> {
-  const progress = await cancelPortalWorkspaceProvision(userId, workspace);
-  sendJson(res, 200, progress);
 }
 
 async function handleWorkspaceDelete(
@@ -657,10 +647,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
           await handleWorkspaceProvision(req, res, routeUserId, workspace);
-          return;
-        }
-        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "provision" && segments[6] === "cancel" && req.method === "POST") {
-          await handleWorkspaceProvisionCancel(res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 4 && req.method === "POST") {

@@ -43,7 +43,6 @@ import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
-  cancelProvisionWorkspace as cancelProvisionWorkspaceExecutor,
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
@@ -291,13 +290,6 @@ export async function queueProvisionWorkspace(
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
   });
-}
-
-export async function cancelPortalWorkspaceProvision(
-  userId: string,
-  workspace: string,
-) {
-  return cancelProvisionWorkspaceExecutor({ userId, workspace });
 }
 
 export async function switchPortalWorkspace(

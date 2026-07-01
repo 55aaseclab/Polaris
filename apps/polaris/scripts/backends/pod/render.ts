@@ -223,7 +223,7 @@ function buildBootstrap(workspace: WorkspaceSpec): string[] {
     ...buildAgentDirsLine(user, home),
     ...buildAttachmentAssemblyLines(workspace),
     ...buildToolInstallLines(workspace),
-    `          apt-get update && apt-get install -y openssh-client ${workspace.runtime.aptPackages.join(" ")} && \\`,
+    `          apt-get update && apt-get install -y openssh-client ripgrep ${workspace.runtime.aptPackages.join(" ")} && \\`,
     ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
     ...buildEvolutionBootstrapLines(workspace),
     ...buildSshMaterialLines(user, workspace),

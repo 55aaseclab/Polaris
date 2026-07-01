@@ -8,4 +8,5 @@ cd "${ROOT_DIR}"
 source "${ROOT_DIR}/scripts/lib/paseo-local.sh"
 
 paseo_local_build_dist >/dev/null
+paseo_local_verify_dist_base_url
 printf 'artifact=%s\n' "$(paseo_local_dist_dir)"

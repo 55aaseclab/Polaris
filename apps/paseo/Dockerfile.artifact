@@ -14,6 +14,7 @@ WORKDIR /opt/paseo
 
 COPY apps/paseo/source ./
 COPY apps/paseo/patches /tmp/paseo-patches
+COPY apps/paseo/rewrite-export-base-url.mjs /tmp/rewrite-paseo-base-url.mjs
 
 RUN git init -q \
   && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-defaults.patch /tmp/paseo-patches/paseo-web-offer-link.patch \
@@ -31,11 +32,8 @@ RUN --mount=type=cache,target=/root/.npm \
   npm run build:web --workspace=@getpaseo/app \
   && base_url="${PASEO_WEB_BASE_URL%/}" \
   && if [ -n "$base_url" ]; then \
-    sed -i "s#href=\"/manifest.json\"#href=\"${base_url}/manifest.json\"#" /opt/paseo/packages/app/dist/index.html; \
-    sed -i "s#\"id\": \"/\"#\"id\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
-    sed -i "s#\"start_url\": \"/\"#\"start_url\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
-    sed -i "s#\"scope\": \"/\"#\"scope\": \"${base_url}/\"#" /opt/paseo/packages/app/dist/manifest.json; \
-    sed -i "s#\"src\": \"/#\"src\": \"${base_url}/#g" /opt/paseo/packages/app/dist/manifest.json; \
+    BASE_URL="$base_url" node /tmp/rewrite-paseo-base-url.mjs \
+    && rm -f /tmp/rewrite-paseo-base-url.mjs; \
   fi
 
 FROM scratch AS artifact-export

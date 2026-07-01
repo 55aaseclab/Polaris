@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import { userProfileExists, workspaceConfigExists, workspaceConfigPath } from "../config/scaffold.js";
@@ -18,13 +17,10 @@ import {
   loadWorkspaceDetail,
   loadPortalWorkspaceByTarget,
   loadWorkspaceSummary,
-  readWorkspaceProvisionProgress,
   type PortalDriverTarget,
-  type PortalProvisionProgress,
   type PortalWorkspaceDetail,
   updatePortalWorkspaceAgentBinding,
   workspaceRefFromTarget,
-  writeWorkspaceProvisionProgress,
 } from "../core/portal.js";
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createWorkspaceForUser } from "../cli/commands/create.js";
@@ -51,7 +47,6 @@ import {
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
-const PROVISION_TOTAL_STEPS = 7;
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
@@ -90,11 +85,10 @@ function portalRoot(userId: string, workspace: string): string {
   return path.join(USER_ROOT, userId, "workspaces", workspace);
 }
 
-function portalStateProgress(
-  userId: string,
-  workspace: string,
-): PortalProvisionProgress | null {
-  return readWorkspaceProvisionProgress(userId, workspace);
+function clearProvisionState(userId: string, workspace: string): void {
+  fs.rmSync(path.join(portalRoot(userId, workspace), "state", "provision.json"), {
+    force: true,
+  });
 }
 
 function classifyProvisionError(error: unknown): {
@@ -129,90 +123,6 @@ function classifyProvisionError(error: unknown): {
     errorCode: "workspace-provision-failed",
     retryable: true,
   };
-}
-
-function assertProvisionNotCancelled(userId: string, workspace: string): void {
-  const current = portalStateProgress(userId, workspace);
-  if (!current?.cancelRequested) {
-    return;
-  }
-  updateProgress(userId, workspace, {
-    status: "cancelled",
-    phase: "cancelled",
-    message: "workspace provisioning cancelled",
-    done: true,
-    cancellable: false,
-    error: undefined,
-    errorCode: "workspace-provision-cancelled",
-    retryable: true,
-  });
-  throw new Error("workspace provisioning cancelled");
-}
-
-function updateProgress(
-  userId: string,
-  workspace: string,
-  patch: Partial<PortalProvisionProgress>,
-): PortalProvisionProgress {
-  const current = portalStateProgress(userId, workspace) ?? {
-    jobId: randomUUID(),
-    userId,
-    workspace,
-    status: "queued",
-    phase: "queued",
-    step: 0,
-    totalSteps: PROVISION_TOTAL_STEPS,
-    percent: 0,
-    message: "queued",
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    done: false,
-    cancelRequested: false,
-    cancellable: true,
-  };
-  const next: PortalProvisionProgress = {
-    ...current,
-    ...patch,
-    jobId: patch.jobId ?? current.jobId,
-    userId,
-    workspace,
-    status: patch.status
-      ?? (
-        patch.done
-          ? (patch.error ? "error" : current.cancelRequested ? "cancelled" : "completed")
-          : patch.phase === "queued"
-            ? "queued"
-            : current.cancelRequested
-              ? "cancelling"
-              : "running"
-      ),
-    totalSteps: PROVISION_TOTAL_STEPS,
-    percent:
-      patch.percent ??
-      Math.round(
-        ((patch.step ?? current.step) / PROVISION_TOTAL_STEPS) * 100,
-      ),
-    startedAt: patch.startedAt ?? current.startedAt,
-    updatedAt: new Date().toISOString(),
-    done: patch.done ?? current.done,
-    cancelRequested: patch.cancelRequested ?? current.cancelRequested,
-    cancellable: patch.cancellable ?? (patch.done ? false : current.cancellable),
-  };
-  writeWorkspaceProvisionProgress(userId, workspace, next);
-  logInfo("executor", "workspace-provision-progress", {
-    userId,
-    workspace,
-    jobId: next.jobId,
-    status: next.status,
-    phase: next.phase,
-    step: next.step,
-    percent: next.percent,
-    done: next.done,
-    cancelRequested: next.cancelRequested,
-    errorCode: next.errorCode,
-    message: next.message,
-  });
-  return next;
 }
 
 function writeDirectWorkspaceStatus(
@@ -696,101 +606,29 @@ async function provisionWorkspaceInternal(
       if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
         await createWorkspaceForUser(workspace, userId);
       }
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "starting",
-        step: 0,
-        message: "starting workspace provisioning",
-        cancellable: true,
-      });
-      assertProvisionNotCancelled(userId, workspace);
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "specs",
-        step: 1,
-        message: "ensuring driver specs",
-      });
       await maybeDelayProvisionStep(userId, workspace, "specs");
       ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
-      assertProvisionNotCancelled(userId, workspace);
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "images",
-        step: 2,
-        message: "ensuring workspace images",
-      });
       await maybeDelayProvisionStep(userId, workspace, "images");
       ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
-      assertProvisionNotCancelled(userId, workspace);
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "manifests",
-        step: 3,
-        message: "rendering backend manifests",
-      });
       await maybeDelayProvisionStep(userId, workspace, "manifests");
       renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
-      assertProvisionNotCancelled(userId, workspace);
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "status",
-        step: 4,
-        message: "collecting workspace status",
-      });
       await maybeDelayProvisionStep(userId, workspace, "status");
       await captureStdout(() => statusCommand(`${workspace}@docker`, userId));
       const summary = loadWorkspaceSummary(userId, workspace);
       if (summary.selectedDriver === null) {
-        updateProgress(userId, workspace, {
-          status: "running",
-          phase: "selection",
-          step: 5,
-          message: "defaulting driver selection",
-        });
         await maybeDelayProvisionStep(userId, workspace, "selection");
       }
-      assertProvisionNotCancelled(userId, workspace);
 
       if (startAfterCreate) {
-        updateProgress(userId, workspace, {
-          status: "running",
-          phase: "start",
-          step: 6,
-          message: "starting workspace",
-          cancellable: false,
-        });
         await maybeDelayProvisionStep(userId, workspace, "start");
         await startCommand(`${workspace}@docker`, userId);
       }
-
-      updateProgress(userId, workspace, {
-        status: "running",
-        phase: "finalize",
-        step: PROVISION_TOTAL_STEPS,
-        message: "capturing final workspace status",
-        cancellable: false,
-      });
       await maybeDelayProvisionStep(userId, workspace, "finalize");
       const finalRef = workspaceRefFromTarget(
         workspace,
         summary.selectedDriver ?? { backend: "docker" },
       );
       await captureStdout(() => statusCommand(finalRef, userId));
-
-      updateProgress(userId, workspace, {
-        status: "completed",
-        phase: "done",
-        step: PROVISION_TOTAL_STEPS,
-        message: "workspace provisioning complete",
-        done: true,
-        percent: 100,
-        cancellable: false,
-      });
     },
   );
 }
@@ -906,7 +744,7 @@ export async function queueProvisionWorkspace(
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
   },
-): Promise<PortalProvisionProgress> {
+): Promise<{ queued: true; workspace: string }> {
   return withUserMutationLock(import.meta.url, userId, async () => {
     if (!userProfileExists(userId)) {
       throw new Error(`User profile '${userId}' was not found. Create it first with user create.`);
@@ -918,44 +756,22 @@ export async function queueProvisionWorkspace(
         userId,
         workspace,
       });
-      return (
-        readWorkspaceProvisionProgress(userId, workspace) ??
-        updateProgress(userId, workspace, {
-          status: "queued",
-          phase: "queued",
-          step: 0,
-          percent: 0,
-          done: false,
-          error: undefined,
-          message: "workspace provisioning queued",
-          cancellable: true,
-        })
-      );
+      return { queued: true, workspace };
     }
     assertProjectNameAvailableForUser(workspace, userId);
     if (workspaceConfigExists(workspace, userId)) {
       throw new Error(`Workspace '${workspace}' already exists for user ${userId}.`);
     }
-
-    const queuedProgress = updateProgress(userId, workspace, {
-      status: "queued",
-      phase: "queued",
-      step: 0,
-      percent: 0,
-      done: false,
-      error: undefined,
-      message: "workspace provisioning queued",
-      cancellable: true,
-    });
+    await createWorkspaceForUser(workspace, userId);
+    clearProvisionState(userId, workspace);
     logInfo("executor", "workspace-provision-queued", {
       userId,
       workspace,
-      jobId: queuedProgress.jobId,
       defaultDockerOnly: options?.defaultDockerOnly ?? false,
       startAfterCreate: options?.startAfterCreate ?? false,
     });
     void startProvisionWorkspace(userId, workspace, options);
-    return queuedProgress;
+    return { queued: true, workspace };
   });
 }
 
@@ -974,22 +790,10 @@ export function startProvisionWorkspace(
   }
   const job = (async () => {
     try {
+      clearProvisionState(userId, workspace);
       await provisionWorkspaceInternal(userId, workspace, options);
     } catch (error) {
       const classified = classifyProvisionError(error);
-      if (/cancelled/i.test(classified.errorCode)) {
-        return;
-      }
-      updateProgress(userId, workspace, {
-        status: "error",
-        phase: "error",
-        done: true,
-        cancellable: false,
-        message: classified.message,
-        error: classified.message,
-        errorCode: classified.errorCode,
-        retryable: classified.retryable,
-      });
       writeDirectWorkspaceStatus(userId, workspace, (current) => ({
         project: workspace,
         backend: current?.backend ?? {
@@ -1016,45 +820,21 @@ export function startProvisionWorkspace(
         runtimeAssembly: current?.runtimeAssembly,
         daemon: current?.daemon,
       }));
+      logWarn("executor", "workspace-provision-failed", {
+        userId,
+        workspace,
+        errorCode: classified.errorCode,
+        reason: classified.message,
+      });
       throw error;
     } finally {
+      clearProvisionState(userId, workspace);
       provisionJobs.delete(key);
     }
   })();
   job.catch(() => undefined);
   provisionJobs.set(key, job);
   return job;
-}
-
-export async function cancelProvisionWorkspace(
-  userId: string,
-  workspace: string,
-): Promise<PortalProvisionProgress> {
-  const current = portalStateProgress(userId, workspace);
-  if (!current) {
-    throw new Error(`Workspace '${workspace}' does not have an active provision job`);
-  }
-  if (current.done) {
-    logInfo("executor", "workspace-provision-cancel-ignored", {
-      userId,
-      workspace,
-      reason: "job-already-done",
-      status: current.status,
-    });
-    return current;
-  }
-  const cancelled = updateProgress(userId, workspace, {
-    status: "cancelling",
-    cancelRequested: true,
-    message: "cancelling workspace provisioning",
-    cancellable: false,
-  });
-  logInfo("executor", "workspace-provision-cancel-requested", {
-    userId,
-    workspace,
-    jobId: cancelled.jobId,
-  });
-  return cancelled;
 }
 
 export async function switchPortalWorkspace(

@@ -8,7 +8,6 @@ import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import {
   bindPortalWorkspaceAgent,
-  cancelProvisionWorkspace,
   deletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
@@ -151,16 +150,6 @@ export function createExecutorServer(
           workspace,
           status: status as never,
         });
-        sendJson(res, 200, result);
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/workspaces/provision/cancel") {
-        const body = await readBody(req);
-        const result = await cancelProvisionWorkspace(
-          readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
-        );
         sendJson(res, 200, result);
         return;
       }
