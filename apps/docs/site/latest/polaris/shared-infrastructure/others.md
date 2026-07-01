@@ -38,20 +38,29 @@ If a lifecycle path is wrong, inspect logs in this order:
 2. `.tmp/paseo/stack.executor.err.log`
 3. `.tmp/paseo/stack.web.err.log`
 4. workspace `status.json`
-5. workspace `provision.json`
-6. runtime `status-observer.log`
-7. runtime `runtime-memory-observer.log`
-8. daemon log inside workspace state
+5. runtime `status-observer.log`
+6. runtime `runtime-memory-observer.log`
+7. daemon log inside workspace state
 
 Key log events include:
 
-- `workspace-provision-queued`
-- `workspace-provision-progress`
-- `workspace-provision-cancel-requested`
 - `workspace-status-cached`
 - `workspace-status-reported`
 - `workspace-status-refresh-started`
 - `workspace-status-refresh-completed`
+
+## Docker Compose Isolation
+
+Docker workspaces now render a unique compose `name:` based on
+`userId-workspace`.
+
+This matters because archive and delete paths run:
+
+- `docker compose ... down -v --remove-orphans`
+
+Without a unique compose project name, one workspace teardown could remove a
+different workspace container that happened to share the same default Compose
+project identity.
 
 ## Workspace Runtime Command Notes
 

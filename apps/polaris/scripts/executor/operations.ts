@@ -215,6 +215,17 @@ function updateProgress(
   return next;
 }
 
+function writeDirectWorkspaceStatus(
+  userId: string,
+  workspace: string,
+  mutate: (current: WorkspaceStatus | null) => WorkspaceStatus,
+): WorkspaceStatus {
+  const current = loadWorkspaceSummary(userId, workspace).status;
+  const next = mutate(current);
+  writeWorkspaceStatus(next, userId);
+  return next;
+}
+
 function writeCachedWorkspaceStatusUpdate(args: {
   userId: string;
   workspace: string;
@@ -656,6 +667,32 @@ async function provisionWorkspaceInternal(
     async () => {
       const defaultDockerOnly = options?.defaultDockerOnly ?? false;
       const startAfterCreate = options?.startAfterCreate ?? false;
+      writeDirectWorkspaceStatus(userId, workspace, (current) => ({
+        project: workspace,
+        backend: current?.backend ?? {
+          kind: "docker",
+          profile: "legacy",
+        },
+        driver: current?.driver,
+        lifecycleAction: current?.lifecycleAction ?? "status",
+        state: "creating",
+        health: {
+          backendLiveness: current?.health.backendLiveness ?? "missing",
+          workspaceReadiness: "not-ready",
+          daemonReadiness: current?.health.daemonReadiness ?? "unknown",
+          reason: "workspace creation in progress",
+        },
+        paseo: current?.paseo,
+        credentials: current?.credentials,
+        details: current?.details ?? {},
+        evolution: current?.evolution,
+        ssh: current?.ssh,
+        assets: current?.assets,
+        drift: current?.drift,
+        attachments: current?.attachments,
+        runtimeAssembly: current?.runtimeAssembly,
+        daemon: current?.daemon,
+      }));
       if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
         await createWorkspaceForUser(workspace, userId);
       }
@@ -706,6 +743,7 @@ async function provisionWorkspaceInternal(
         message: "collecting workspace status",
       });
       await maybeDelayProvisionStep(userId, workspace, "status");
+      await captureStdout(() => statusCommand(`${workspace}@docker`, userId));
       const summary = loadWorkspaceSummary(userId, workspace);
       if (summary.selectedDriver === null) {
         updateProgress(userId, workspace, {
@@ -822,43 +860,36 @@ export async function reportPortalWorkspaceStatus(input: {
   status: Partial<WorkspaceStatus>;
 }): Promise<{ reported: true }> {
   const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const current = summary.status;
-  const next: WorkspaceStatus = current
-    ? {
-        ...current,
-        ...input.status,
-        backend: {
-          ...current.backend,
-          ...(input.status.backend ?? {}),
-        },
-        driver: current.driver || input.status.driver
-          ? {
-              ...(current.driver ?? {}),
-              ...(input.status.driver ?? {}),
-            }
-          : undefined,
-        health: {
-          ...current.health,
-          ...(input.status.health ?? {}),
-        },
-        paseo: current.paseo || input.status.paseo
-          ? {
-              ...(current.paseo ?? {}),
-              ...(input.status.paseo ?? {}),
-            }
-          : undefined,
-        daemon: current.daemon || input.status.daemon
-          ? {
-              ...(current.daemon ?? {}),
-              ...(input.status.daemon ?? {}),
-            }
-          : undefined,
-        details: {
-          ...current.details,
-          ...(input.status.details ?? {}),
-        },
-      } as WorkspaceStatus
-    : input.status as WorkspaceStatus;
+  const next: WorkspaceStatus = {
+    project: input.workspace,
+    backend: {
+      kind: summary.status?.backend.kind ?? "docker",
+      profile: summary.status?.backend.profile ?? "legacy",
+      ...(input.status.backend ?? {}),
+    },
+    lifecycleAction: input.status.lifecycleAction ?? summary.status?.lifecycleAction ?? "status",
+    state: input.status.state ?? summary.status?.state ?? "not-applied",
+    health: {
+      backendLiveness: summary.status?.health.backendLiveness ?? "unknown",
+      workspaceReadiness: summary.status?.health.workspaceReadiness ?? "unknown",
+      daemonReadiness: summary.status?.health.daemonReadiness ?? "unknown",
+      ...(input.status.health ?? {}),
+    },
+    details: {
+      ...(summary.status?.details ?? {}),
+      ...(input.status.details ?? {}),
+    },
+    ...(input.status.driver ? { driver: input.status.driver } : {}),
+    ...(input.status.paseo ? { paseo: input.status.paseo } : {}),
+    ...(input.status.credentials ? { credentials: input.status.credentials } : {}),
+    ...(input.status.evolution ? { evolution: input.status.evolution } : {}),
+    ...(input.status.ssh ? { ssh: input.status.ssh } : {}),
+    ...(input.status.assets ? { assets: input.status.assets } : {}),
+    ...(input.status.drift ? { drift: input.status.drift } : {}),
+    ...(input.status.attachments ? { attachments: input.status.attachments } : {}),
+    ...(input.status.runtimeAssembly ? { runtimeAssembly: input.status.runtimeAssembly } : {}),
+    ...(input.status.daemon ? { daemon: input.status.daemon } : {}),
+  };
   writeWorkspaceStatus(next, input.userId);
   logInfo("executor", "workspace-status-reported", {
     userId: input.userId,
@@ -959,6 +990,32 @@ export function startProvisionWorkspace(
         errorCode: classified.errorCode,
         retryable: classified.retryable,
       });
+      writeDirectWorkspaceStatus(userId, workspace, (current) => ({
+        project: workspace,
+        backend: current?.backend ?? {
+          kind: "docker",
+          profile: "legacy",
+        },
+        driver: current?.driver,
+        lifecycleAction: current?.lifecycleAction ?? "status",
+        state: "degraded",
+        health: {
+          backendLiveness: current?.health.backendLiveness ?? "missing",
+          workspaceReadiness: "not-ready",
+          daemonReadiness: current?.health.daemonReadiness ?? "degraded",
+          reason: classified.message,
+        },
+        paseo: current?.paseo,
+        credentials: current?.credentials,
+        details: current?.details ?? {},
+        evolution: current?.evolution,
+        ssh: current?.ssh,
+        assets: current?.assets,
+        drift: current?.drift,
+        attachments: current?.attachments,
+        runtimeAssembly: current?.runtimeAssembly,
+        daemon: current?.daemon,
+      }));
       throw error;
     } finally {
       provisionJobs.delete(key);

@@ -46,7 +46,7 @@ Current ownership rules:
 - one workspace belongs to one user
 - one user can own many workspaces
 - the same project name is not shared globally without user scope
-- active workspaces and archived workspaces are treated differently
+- archived workspace names still reserve that name for the same user
 
 In operational terms, the effective identity is:
 
@@ -62,6 +62,10 @@ without treating removal as silent destruction.
 
 That means the active workspace list becomes smaller, while an archived copy
 and its saved runtime state can still be retained under the user archive root.
+
+It also means a user cannot immediately recreate another active workspace with
+the same name while an archived workspace of that name still exists under that
+same user.
 
 ### Credentials
 

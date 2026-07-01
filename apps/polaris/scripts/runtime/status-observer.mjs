@@ -10,6 +10,10 @@ const statusReportSecret = process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET?.tri
 const pollIntervalMs = 60000;
 const logPrefix = "[polaris-runtime-status-observer]";
 
+function daemonManagerReady(parsed) {
+  return parsed.localDaemon === "running" || parsed.localDaemon === "stale_pid";
+}
+
 function log(message, extra) {
   if (extra === undefined) {
     console.error(`${logPrefix} ${message}`);
@@ -59,9 +63,9 @@ export function buildRuntimeStatusPatch(daemon) {
         health: {
           backendLiveness: "running",
           workspaceReadiness: "ready",
-          daemonReadiness: daemon.parsed.localDaemon === "running" ? "ready" : "degraded",
+          daemonReadiness: daemonManagerReady(daemon.parsed) ? "ready" : "degraded",
           reason:
-            daemon.parsed.localDaemon === "running"
+            daemonManagerReady(daemon.parsed)
             && daemon.parsed.connectedDaemon === "reachable"
               ? "runtime status observer reported healthy daemon"
               : `runtime status observer saw daemon ${daemon.parsed.localDaemon}/${daemon.parsed.connectedDaemon}`,
@@ -78,7 +82,7 @@ export function buildRuntimeStatusPatch(daemon) {
         },
         daemon: {
           manager: {
-            state: daemon.parsed.localDaemon === "running" ? "ok" : "missing",
+            state: daemonManagerReady(daemon.parsed) ? "ok" : "missing",
             detail: daemon.parsed.listen || "/tmp/.ready",
           },
           pairing: {

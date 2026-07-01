@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import {
   activateCredential,
-  cancelWorkspaceProvision,
   createCredential,
   createWorkspace,
   createPortalUser,
@@ -59,7 +58,6 @@ import {
   type PortalCredentialSummary,
   type PortalCredentialPreview,
   type PortalProfileSummary,
-  type PortalProvisionProgress,
   type PortalSession,
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
@@ -94,7 +92,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -132,10 +129,6 @@ function basenameForDisplay(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 type LanguageContextValue = {
   language: Language;
   setLanguage: (value: Language) => void;
@@ -149,7 +142,7 @@ type PortalShellContextValue = {
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
   refreshWorkspaces: () => void;
-  embeddedPaseoFrames: Array<{ workspaceKey: string; src: string }>;
+  embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
 };
@@ -357,11 +350,13 @@ const COPY: Record<Language, Record<string, string>> = {
     error_generic: "Something went wrong.",
     status_not_selected: "Not selected",
     workspace_not_started: "Not started",
+    workspace_creating: "Creating",
     workspace_stopped: "Stopped",
     workspace_starting: "Starting",
     workspace_ready: "Driver ready",
     workspace_ready_to_pair: "Ready to pair",
     workspace_attention: "Needs attention",
+    workspace_status_loading: "Reading status",
     workspace_unknown: "Unknown",
     runtime_not_started: "Not started",
     runtime_stopped: "Stopped",
@@ -610,11 +605,13 @@ const COPY: Record<Language, Record<string, string>> = {
     error_generic: "出现异常。",
     status_not_selected: "未选中",
     workspace_not_started: "未启动",
+    workspace_creating: "创建中",
     workspace_stopped: "已停止",
     workspace_starting: "启动中",
     workspace_ready: "驱动就绪",
     workspace_ready_to_pair: "可配对",
     workspace_attention: "需要处理",
+    workspace_status_loading: "正在读取状态",
     workspace_unknown: "未知",
     runtime_not_started: "未启动",
     runtime_stopped: "已停止",
@@ -646,7 +643,7 @@ const COPY: Record<Language, Record<string, string>> = {
     profile: "资料",
     empty_pane: "空白页",
     workspace_header_title: "工作空间",
-    workspace_header_empty: "目前没有工作空间",
+    workspace_header_empty: "未选择工作空间",
     workspace_status_button: "工作空间状态",
     workspace_empty_title: "开始创建你的第一个工作空间",
     workspace_empty_description_line_1: "你还没有工作空间。",
@@ -945,28 +942,6 @@ function translateState(
   }
 }
 
-function translateProvisionStatus(
-  value: string | null | undefined,
-  t: (key: string) => string,
-): string {
-  switch (value) {
-    case "queued":
-      return t("provisioning_queued");
-    case "running":
-      return t("provisioning_running");
-    case "cancelling":
-      return t("provisioning_cancelling");
-    case "cancelled":
-      return t("provisioning_cancelled");
-    case "completed":
-      return t("provisioning_completed");
-    case "error":
-      return t("provisioning_failed");
-    default:
-      return t("status_unknown");
-  }
-}
-
 function translateErrorCode(
   errorCode: string | null | undefined,
   t: (key: string) => string,
@@ -1006,6 +981,12 @@ function formatActionError(
   const trimmed = raw.trim();
   if (!trimmed) {
     return t("error_generic");
+  }
+  if (
+    /already archived for user/i.test(trimmed)
+    || /already exists for user/i.test(trimmed)
+  ) {
+    return t("workspace_name_taken");
   }
   const separator = ": ";
   const index = trimmed.indexOf(separator);
@@ -1054,6 +1035,8 @@ function translateWorkspaceRuntimeState(
     return t("workspace_unknown");
   }
   switch (value) {
+    case "creating":
+      return t("workspace_creating");
     case "not-applied":
       return t("workspace_not_started");
     case "starting":
@@ -1097,16 +1080,6 @@ function translateWorkspaceSummaryState(
   summary: PortalWorkspaceSummary,
   t: (key: string) => string,
 ): string {
-  const progress = summary.progress;
-  if (progress) {
-    if (!progress.done) {
-      return translateProvisionStatus(progress.status, t);
-    }
-    if (progress.status === "error" || progress.status === "cancelled") {
-      return translateProvisionStatus(progress.status, t);
-    }
-  }
-
   const state = summary.status?.state;
   return translateWorkspaceRuntimeState(state, t);
 }
@@ -1122,28 +1095,11 @@ function translateWorkspaceDetailState(
 function workspaceSummaryBadgeVariant(
   summary: PortalWorkspaceSummary,
 ): "default" | "secondary" | "destructive" | "outline" {
-  const progress = summary.progress;
-  if (progress) {
-    switch (progress.status) {
-      case "error":
-      case "cancelled":
-        return "destructive";
-      case "completed":
-        return "secondary";
-      case "queued":
-      case "running":
-      case "cancelling":
-        return "default";
-      default:
-        return "outline";
-    }
-  }
-
   const state = summary.status?.state;
   if (state === "ready") {
     return "secondary";
   }
-  if (state === "starting" || state === "stopping" || state === "archiving") {
+  if (state === "creating" || state === "starting" || state === "stopping" || state === "archiving") {
     return "default";
   }
   if (
@@ -1548,14 +1504,9 @@ function PortalShellLayout(props: {
   const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
-  const [createWorkspaceProgress, setCreateWorkspaceProgress] = useState(0);
-  const [createWorkspaceJobId, setCreateWorkspaceJobId] = useState<string | null>(null);
-  const [createWorkspaceTarget, setCreateWorkspaceTarget] = useState<string | null>(null);
-  const [createWorkspaceStatus, setCreateWorkspaceStatus] = useState<PortalProvisionProgress["status"] | null>(null);
-  const [cancellingWorkspace, setCancellingWorkspace] = useState(false);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<
-    Array<{ workspaceKey: string; src: string }>
+    Array<{ workspaceKey: string; src: string; loaded: boolean }>
   >([]);
   const isAdmin = mapping?.role === "admin";
   const activeUserId = String(routeUserId ?? "").trim();
@@ -1568,75 +1519,28 @@ function PortalShellLayout(props: {
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId, workspaceRefreshTick],
   );
+  const {
+    data: sidebarArchivedWorkspaces,
+  } = useAsyncValue(
+    () => activeUserId ? listArchivedWorkspaces(activeUserId) : Promise.resolve<PortalArchivedWorkspaceSummary[]>([]),
+    [activeUserId, workspaceRefreshTick],
+  );
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
   const currentWorkspacePane = pathParts[4] ?? "";
   const activeFrameKey = currentWorkspaceName
     ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
     : "";
-  const hasActiveEmbeddedPaseoFrame = activeFrameKey
-    ? embeddedPaseoFrames.some((frame) => frame.workspaceKey === activeFrameKey)
-    : false;
+  const activeEmbeddedPaseoFrame = activeFrameKey
+    ? embeddedPaseoFrames.find((frame) => frame.workspaceKey === activeFrameKey) ?? null
+    : null;
+  const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
+  const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
   const createWorkspaceNameError = validateWorkspaceNameInput(newWorkspaceName, t);
   const canSubmitCreateWorkspace =
     !creatingWorkspace
     && newWorkspaceName.trim().length > 0
     && !createWorkspaceNameError;
-
-  async function pollWorkspaceProvisionUntilDone(
-    userId: string,
-    workspace: string,
-    jobIdHint?: string | null,
-  ): Promise<PortalWorkspaceDetail> {
-    for (;;) {
-      const detail = await getWorkspaceDetail(userId, workspace);
-      const progress = detail.progress;
-      if (!progress) {
-        await sleep(1000);
-        continue;
-      }
-      if (!jobIdHint || progress.jobId === jobIdHint) {
-        setCreateWorkspaceJobId(progress.jobId);
-        setCreateWorkspaceTarget(workspace);
-        setCreateWorkspaceStatus(progress.status);
-        setCreateWorkspaceProgress((current) => {
-          if (progress.done) {
-            return progress.percent;
-          }
-          if (progress.phase === "start") {
-            const floor = progress.percent;
-            if (current < floor) {
-              return floor;
-            }
-            return Math.min(current + 1, 99);
-          }
-          return progress.percent;
-        });
-        if (progress.status === "cancelled") {
-          throw new Error(
-            formatProvisionError({
-              errorCode: progress.errorCode ?? "workspace-provision-cancelled",
-              message: progress.message,
-              t,
-            }),
-          );
-        }
-        if (progress.status === "error" || progress.phase === "error" || progress.error) {
-          throw new Error(
-            formatProvisionError({
-              errorCode: progress.errorCode,
-              message: progress.error ?? progress.message,
-              t,
-            }),
-          );
-        }
-        if (progress.done && progress.percent >= 100) {
-          return detail;
-        }
-      }
-      await sleep(1000);
-    }
-  }
 
   function resetCreateWorkspaceForm(): void {
     setNewWorkspaceName("");
@@ -1644,11 +1548,6 @@ function PortalShellLayout(props: {
     setDefaultDockerOnly(true);
     setCreateWorkspaceError(null);
     setCreatingWorkspace(false);
-    setCreateWorkspaceProgress(0);
-    setCreateWorkspaceJobId(null);
-    setCreateWorkspaceTarget(null);
-    setCreateWorkspaceStatus(null);
-    setCancellingWorkspace(false);
   }
 
   function handleCreateWorkspaceOpenChange(open: boolean): void {
@@ -1697,6 +1596,8 @@ function PortalShellLayout(props: {
   async function handleCreateWorkspace(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
     const trimmedName = newWorkspaceName.trim();
+    const nextStartAfterCreate = startAfterCreate;
+    const nextDefaultDockerOnly = defaultDockerOnly;
     if (!activeUserId || !trimmedName || creatingWorkspace) {
       return;
     }
@@ -1710,177 +1611,53 @@ function PortalShellLayout(props: {
     }
     setCreatingWorkspace(true);
     setCreateWorkspaceError(null);
+    setCreateWorkspaceOpen(false);
+    setNewWorkspaceName("");
+    setStartAfterCreate(true);
+    setDefaultDockerOnly(true);
     try {
-      const queued = await createWorkspace(activeUserId, trimmedName, {
-        defaultDockerOnly,
-        startAfterCreate,
+      await createWorkspace(activeUserId, trimmedName, {
+        defaultDockerOnly: nextDefaultDockerOnly,
+        startAfterCreate: nextStartAfterCreate,
       });
-      setCreateWorkspaceJobId(queued.jobId);
-      setCreateWorkspaceTarget(trimmedName);
-      setCreateWorkspaceStatus(queued.status);
-      setCreateWorkspaceProgress(queued.percent);
-      await pollWorkspaceProvisionUntilDone(activeUserId, trimmedName, queued.jobId);
-      setCreateWorkspaceProgress(100);
       setWorkspaceRefreshTick((current) => current + 1);
-      setCreateWorkspaceJobId(null);
-      setCreateWorkspaceTarget(null);
-      setCreateWorkspaceOpen(false);
-      setNewWorkspaceName("");
-      setStartAfterCreate(true);
-      setDefaultDockerOnly(true);
       navigate(
         `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
       );
-    } catch (cause: unknown) {
-      setCreateWorkspaceError(formatActionError(cause, t));
+    } catch {
+      setWorkspaceRefreshTick((current) => current + 1);
     } finally {
       setCreatingWorkspace(false);
     }
   }
-
-  async function handleCancelWorkspaceProvision(): Promise<void> {
-    const workspace = createWorkspaceTarget?.trim() || newWorkspaceName.trim();
-    if (
-      !activeUserId
-      || !workspace
-      || cancellingWorkspace
-      || createWorkspaceStatus !== "queued"
-    ) {
-      return;
-    }
-    setCancellingWorkspace(true);
-    try {
-      const progress = await cancelWorkspaceProvision(activeUserId, workspace);
-      setCreateWorkspaceJobId(progress.jobId);
-      setCreateWorkspaceTarget(workspace);
-      setCreateWorkspaceStatus(progress.status);
-      setCreateWorkspaceProgress(progress.percent);
-      setCreateWorkspaceError(
-        formatProvisionError({
-          errorCode: progress.errorCode,
-          message: progress.message,
-          t,
-        }),
-      );
-    } catch (error) {
-      setCreateWorkspaceError(formatActionError(error, t));
-    } finally {
-      setCancellingWorkspace(false);
-    }
-  }
-
-  useEffect(() => {
-    if (
-      !activeUserId
-      || creatingWorkspace
-      || createWorkspaceJobId
-      || createWorkspaceTarget
-      || !sidebarWorkspaces?.length
-    ) {
-      return;
-    }
-    const resumable = sidebarWorkspaces.find((workspace) =>
-      workspace.progress
-      && !workspace.progress.done
-      && (workspace.progress.status === "queued"
-        || workspace.progress.status === "running"
-        || workspace.progress.status === "cancelling"),
-    );
-    if (!resumable?.progress) {
-      return;
-    }
-    setCreateWorkspaceOpen(true);
-    setNewWorkspaceName(resumable.name);
-    setCreateWorkspaceJobId(resumable.progress.jobId);
-    setCreateWorkspaceTarget(resumable.name);
-    setCreateWorkspaceStatus(resumable.progress.status);
-    setCreateWorkspaceProgress(resumable.progress.percent);
-    setCreateWorkspaceError(null);
-  }, [
-    activeUserId,
-    createWorkspaceJobId,
-    createWorkspaceTarget,
-    creatingWorkspace,
-    sidebarWorkspaces,
-  ]);
 
   const activeUserInitial = (activeUser?.name || activeUser?.id || "?")
     .trim()
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("manage_users");
-  const createWorkspaceCancelEnabled =
-    creatingWorkspace
-    && createWorkspaceStatus === "queued"
-    && !cancellingWorkspace;
   const workspaceStatusRoute = currentWorkspaceName
     ? (currentWorkspacePane === "paseo"
       ? workspaceLink(currentWorkspaceName)
       : workspacePaneLink(currentWorkspaceName, "paseo"))
     : "";
   const isWorkspaceSection = location.pathname.includes("/workspaces");
-  useEffect(() => {
-    if (!activeUserId || !createWorkspaceTarget || !createWorkspaceJobId || creatingWorkspace) {
-      return;
-    }
-    let cancelled = false;
-    setCreatingWorkspace(true);
-    setCreateWorkspaceError(null);
-    void pollWorkspaceProvisionUntilDone(
-      activeUserId,
-      createWorkspaceTarget,
-      createWorkspaceJobId,
-    )
-      .then(() => {
-        if (cancelled) {
-          return;
-        }
-        setCreateWorkspaceProgress(100);
-        setWorkspaceRefreshTick((current) => current + 1);
-        setCreateWorkspaceJobId(null);
-        setCreateWorkspaceTarget(null);
-        setCreateWorkspaceOpen(false);
-        navigate(
-          `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(createWorkspaceTarget)}`,
-        );
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) {
-          setCreateWorkspaceError(formatActionError(cause, t));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setCreatingWorkspace(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeUserId,
-    createWorkspaceJobId,
-    createWorkspaceTarget,
-    creatingWorkspace,
-    navigate,
-  ]);
-
+  const workspaceHeaderSubtitle = sidebarWorkspacesLoading
+    ? ""
+    : currentWorkspaceName
+      ? currentWorkspaceName
+      : (sidebarWorkspaces?.length ?? 0) === 0
+        ? t("no_workspace_for_user")
+        : t("workspace_header_empty");
   const currentPaneTitle = location.pathname.includes("/admin")
     ? t("administration")
     : location.pathname.includes("/credentials")
       ? t("credentials")
     : location.pathname.includes("/settings")
       ? t("settings_title")
-      : isWorkspaceSection
-        ? t("workspace_header_title")
-        : t("app_name");
-  const currentPaneSubtitle = location.pathname.includes("/admin")
-    ? t("admin_users_desc")
-    : location.pathname.includes("/credentials")
-    ? t("credentials_header_desc")
     : isWorkspaceSection
-      ? (currentWorkspaceName || t("workspace_header_empty"))
-    : null;
+        ? workspaceHeaderSubtitle
+        : t("app_name");
   const shellContextValue: PortalShellContextValue = {
     activeUserId,
     workspaces: sidebarWorkspaces ?? [],
@@ -1895,7 +1672,7 @@ function PortalShellLayout(props: {
       setEmbeddedPaseoFrames((current) => {
         const existingIndex = current.findIndex((entry) => entry.workspaceKey === workspaceKey);
         if (existingIndex === -1) {
-          return [...current, { workspaceKey, src }];
+          return [...current, { workspaceKey, src, loaded: false }];
         }
         const existing = current[existingIndex];
         if (existing?.src === src) {
@@ -1903,7 +1680,7 @@ function PortalShellLayout(props: {
         }
         return current.map((entry, index) =>
           index === existingIndex
-            ? { ...entry, src }
+            ? { ...entry, src, loaded: false }
             : entry,
         );
       });
@@ -1939,16 +1716,41 @@ function PortalShellLayout(props: {
         .map((entry) => ({
           workspaceKey: entry.workspaceKey,
           src: nextFrames.get(entry.workspaceKey) ?? entry.src,
+          loaded: entry.loaded,
         }));
       const seen = new Set(next.map((entry) => entry.workspaceKey));
       for (const [workspaceKey, src] of nextFrames.entries()) {
         if (!seen.has(workspaceKey)) {
-          next.push({ workspaceKey, src });
+          next.push({ workspaceKey, src, loaded: false });
         }
       }
       return next;
     });
   }, [activeUserId, sidebarWorkspaces]);
+
+  useEffect(() => {
+    if (
+      !activeUserId
+      || !currentWorkspaceName
+      || sidebarWorkspacesLoading
+      || !sidebarWorkspaces
+    ) {
+      return;
+    }
+    const workspaceStillExists = sidebarWorkspaces.some(
+      (workspace) => workspace.name === currentWorkspaceName,
+    );
+    if (workspaceStillExists) {
+      return;
+    }
+    navigate(`/users/${encodeURIComponent(activeUserId)}/workspaces`, { replace: true });
+  }, [
+    activeUserId,
+    currentWorkspaceName,
+    navigate,
+    sidebarWorkspaces,
+    sidebarWorkspacesLoading,
+  ]);
 
   return (
     <PortalShellContext.Provider value={shellContextValue}>
@@ -1984,8 +1786,8 @@ function PortalShellLayout(props: {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   {sidebarWorkspacesLoading && (
-                    <div className="px-2 py-3 text-sm text-muted-foreground">
-                      {t("loading_workspaces")}
+                    <div className="flex items-center justify-center px-2 py-3 text-muted-foreground">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
                     </div>
                   )}
                   {!sidebarWorkspacesLoading && sidebarWorkspacesError && (
@@ -2000,9 +1802,7 @@ function PortalShellLayout(props: {
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
                           <Link to={workspaceLink(workspace.name)} onClick={handleSidebarNavigate}>
                             <FolderKanban />
-                            <span className="flex min-w-0 flex-col">
-                              <span className="truncate">{workspace.name}</span>
-                            </span>
+                            <span className="truncate">{workspace.name}</span>
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -2016,6 +1816,25 @@ function PortalShellLayout(props: {
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
+            {(sidebarArchivedWorkspaces?.length ?? 0) > 0 && (
+              <SidebarGroup>
+                <SidebarGroupLabel>
+                  {t("archived_workspaces")}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {sidebarArchivedWorkspaces?.map((entry) => (
+                      <SidebarMenuItem key={entry.archiveId}>
+                        <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+                          <FolderKanban className="h-4 w-4" />
+                          <span className="truncate">{entry.workspaceName}</span>
+                        </div>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
           </div>
           {activeUser && isAdmin && (
             <SidebarGroup className="shrink-0 pt-4">
@@ -2026,7 +1845,10 @@ function PortalShellLayout(props: {
                 <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild isActive={location.pathname.includes("/admin")}>
-                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/admin`}>
+                      <Link
+                        to={`/users/${encodeURIComponent(activeUser.id)}/admin`}
+                        onClick={handleSidebarNavigate}
+                      >
                         <CircleUser />
                         <span>{t("manage_users")}</span>
                       </Link>
@@ -2123,11 +1945,6 @@ function PortalShellLayout(props: {
               <div className="truncate text-sm font-semibold">
                 {currentPaneTitle}
               </div>
-              {currentPaneSubtitle ? (
-                <div className="truncate text-xs text-muted-foreground">
-                  {currentPaneSubtitle}
-                </div>
-              ) : null}
             </div>
             {currentWorkspaceName ? (
               <Button
@@ -2144,10 +1961,10 @@ function PortalShellLayout(props: {
           </header>
           {embeddedPaseoFrames.length > 0 ? (
             <div
-              className={hasActiveEmbeddedPaseoFrame
+              className={currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame
                 ? "-mx-4 -my-4 relative flex min-h-0 flex-1 overflow-hidden p-4 sm:-mx-6 sm:-my-6 sm:p-6"
                 : "pointer-events-none absolute inset-0 overflow-hidden opacity-0"}
-              aria-hidden={hasActiveEmbeddedPaseoFrame ? undefined : true}
+              aria-hidden={currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame ? undefined : true}
             >
           {embeddedPaseoFrames.map((frame) => {
             return (
@@ -2155,6 +1972,15 @@ function PortalShellLayout(props: {
                 key={frame.workspaceKey}
                 title={`${frame.workspaceKey} paseo`}
                 src={frame.src}
+                onLoad={() => {
+                  setEmbeddedPaseoFrames((current) =>
+                    current.map((entry) =>
+                      entry.workspaceKey === frame.workspaceKey
+                        ? { ...entry, loaded: true }
+                        : entry
+                    )
+                  );
+                }}
                 className={frame.workspaceKey === activeFrameKey
                   ? "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"
                   : "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 opacity-0 pointer-events-none sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"}
@@ -2164,7 +1990,7 @@ function PortalShellLayout(props: {
             </div>
           ) : null}
           <div
-            className={currentWorkspaceName && currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame
+            className={currentWorkspaceName && currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded
               ? "hidden"
               : "flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"}
           >
@@ -2223,18 +2049,7 @@ function PortalShellLayout(props: {
                   <span>{t("docker_only_option")}</span>
                 </label>
                 {creatingWorkspace && (
-                  <div className="grid gap-2">
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{translateProvisionStatus(cancellingWorkspace ? "cancelling" : "running", t)}</span>
-                      <span>{createWorkspaceProgress}%</span>
-                    </div>
-                    {createWorkspaceJobId ? (
-                      <div className="text-xs text-muted-foreground">
-                        job: {createWorkspaceJobId}
-                      </div>
-                    ) : null}
-                    <Progress value={createWorkspaceProgress} />
-                  </div>
+                  <p className="text-sm text-muted-foreground">{t("provisioning")}</p>
                 )}
                 {createWorkspaceError && (
                   <p className="text-sm text-destructive">{createWorkspaceError}</p>
@@ -2243,16 +2058,10 @@ function PortalShellLayout(props: {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      if (createWorkspaceCancelEnabled) {
-                        void handleCancelWorkspaceProvision();
-                        return;
-                      }
-                      handleCreateWorkspaceOpenChange(false);
-                    }}
-                    disabled={creatingWorkspace ? !createWorkspaceCancelEnabled : cancellingWorkspace}
+                    onClick={() => handleCreateWorkspaceOpenChange(false)}
+                    disabled={creatingWorkspace}
                   >
-                    {creatingWorkspace ? t("cancel") : t("cancel")}
+                    {t("cancel")}
                   </Button>
                   <Button
                     type="submit"
@@ -2318,18 +2127,7 @@ function PortalShellLayout(props: {
                   <span>{t("docker_only_option")}</span>
                 </label>
                 {creatingWorkspace && (
-                  <div className="grid gap-2">
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{translateProvisionStatus(cancellingWorkspace ? "cancelling" : "running", t)}</span>
-                      <span>{createWorkspaceProgress}%</span>
-                    </div>
-                    {createWorkspaceJobId ? (
-                      <div className="text-xs text-muted-foreground">
-                        job: {createWorkspaceJobId}
-                      </div>
-                    ) : null}
-                    <Progress value={createWorkspaceProgress} />
-                  </div>
+                  <p className="text-sm text-muted-foreground">{t("provisioning")}</p>
                 )}
                 {createWorkspaceError && (
                   <p className="text-sm text-destructive">{createWorkspaceError}</p>
@@ -2338,14 +2136,8 @@ function PortalShellLayout(props: {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      if (createWorkspaceCancelEnabled) {
-                        void handleCancelWorkspaceProvision();
-                        return;
-                      }
-                      handleCreateWorkspaceOpenChange(false);
-                    }}
-                    disabled={creatingWorkspace ? !createWorkspaceCancelEnabled : cancellingWorkspace}
+                    onClick={() => handleCreateWorkspaceOpenChange(false)}
+                    disabled={creatingWorkspace}
                   >
                     {t("cancel")}
                   </Button>
@@ -2493,9 +2285,7 @@ function OverviewPage() {
   if (resolvingAccess) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
-        <p className="text-sm text-muted-foreground">
-          {registering ? t("creating_account") : t("loading_profile")}
-        </p>
+        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -2546,13 +2336,6 @@ function WorkspaceIndexContent(props: {
 }) {
   const { t } = useLanguage();
   const { workspaces, workspacesLoading, workspacesError } = usePortalShell();
-  const {
-    data: archivedWorkspaces,
-    error: archivedWorkspacesError,
-  } = useAsyncValue(
-    () => listArchivedWorkspaces(props.userId),
-    [props.userId],
-  );
 
   if (workspacesLoading) {
     return null;
@@ -2576,47 +2359,15 @@ function WorkspaceIndexContent(props: {
   }
 
   return (
-    <div className="grid gap-6">
-      <WorkspaceEmptyState
-        title={t("workspace_empty_title")}
-        descriptionLines={[
-          t("workspace_empty_description_line_1"),
-          t("workspace_empty_description_line_2"),
-          t("workspace_empty_description_line_3"),
-        ]}
-        onOpenCredentials={props.onOpenCredentials}
-      />
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("archived_workspaces")}</CardTitle>
-          <CardDescription>
-            {archivedWorkspacesError
-              ? archivedWorkspacesError
-              : ((archivedWorkspaces?.length ?? 0) > 0
-                ? `${archivedWorkspaces?.length ?? 0}`
-                : t("no_archived_workspaces"))}
-          </CardDescription>
-        </CardHeader>
-        {(archivedWorkspaces?.length ?? 0) > 0 ? (
-          <CardContent className="grid gap-3">
-            {archivedWorkspaces?.map((entry) => (
-              <div
-                key={entry.archiveId}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/60 p-3"
-              >
-                <div className="grid gap-1">
-                  <div className="font-medium">{entry.workspaceName}</div>
-                  <div className="text-xs text-muted-foreground">{entry.archiveId}</div>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {entry.archivedAt || t("unknown")}
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        ) : null}
-      </Card>
-    </div>
+    <WorkspaceEmptyState
+      title={t("workspace_empty_title")}
+      descriptionLines={[
+        t("workspace_empty_description_line_1"),
+        t("workspace_empty_description_line_2"),
+        t("workspace_empty_description_line_3"),
+      ]}
+      onOpenCredentials={props.onOpenCredentials}
+    />
   );
 }
 
@@ -2636,7 +2387,7 @@ function WorkspaceEmptyState(props: {
   if (workspacesLoading) {
     return (
       <div className="flex min-h-[40dvh] w-full items-center justify-center">
-        <div className="text-sm text-muted-foreground">{t("loading_workspaces")}</div>
+        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -2693,8 +2444,8 @@ function AdminPage() {
 
   if (mappingLoading) {
     return (
-      <div className="grid w-full gap-6">
-        <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
+      <div className="flex w-full items-center justify-center py-6">
+        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -2746,7 +2497,9 @@ function AdminPage() {
             </div>
           </div>
           {adminUsersLoading ? (
-            <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
+            <div className="flex items-center justify-center py-2 text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            </div>
           ) : null}
           {adminUsersError ? (
             <p className="text-sm text-destructive">{adminUsersError}</p>
@@ -2870,6 +2623,14 @@ function EmptyPane(props: { title: string; description: string }) {
   );
 }
 
+function PaneSpinner() {
+  return (
+    <div className="flex min-h-[40dvh] w-full items-center justify-center">
+      <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
+
 function WorkspaceDetailPage() {
   return <WorkspaceDetailContent />;
 }
@@ -2937,6 +2698,11 @@ function WorkspaceDetailContent() {
       paseoScope,
     );
   const workspaceFrameKey = `${userId.trim()}:${workspaceName.trim()}`;
+  const activeEmbeddedPaseoFrame = embeddedPaseoFrames.find(
+    (frame) => frame.workspaceKey === workspaceFrameKey,
+  ) ?? null;
+  const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
+  const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
   const runtimeRunning = workspaceData?.status?.state === "ready";
   const persistedWorkspaceAction =
     workspaceData?.status?.state === "starting"
@@ -3052,18 +2818,6 @@ function WorkspaceDetailContent() {
     liveStatus?.selectedByHarness,
     paseoHarnesses,
   ]);
-
-  useEffect(() => {
-    if (!workspaceData?.progress || workspaceData.progress.done) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setRefreshTick((current) => current + 1);
-    }, 2000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [workspaceData?.progress?.done, workspaceData?.progress?.phase, workspaceName, userId]);
 
   useEffect(() => {
     if (!workspaceAction) {
@@ -3236,9 +2990,9 @@ function WorkspaceDetailContent() {
   function renderLiveCredentialControls(): ReactNode {
     if (credentialsLoading) {
       return (
-        <p className="text-sm text-muted-foreground">
-          {t("loading_paseo_credentials")}
-        </p>
+        <div className="flex items-center justify-center py-2 text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+        </div>
       );
     }
     if (credentialsError) {
@@ -3416,7 +3170,7 @@ function WorkspaceDetailContent() {
 
   function renderPane(): ReactNode {
     if (workspaceLoading && !workspaceData) {
-      return null;
+      return <PaneSpinner />;
     }
 
     if (!workspaceData) {
@@ -3438,7 +3192,19 @@ function WorkspaceDetailContent() {
     }
 
     if (currentPane === "") {
-      return null;
+      const statusState = workspaceData?.status?.state ?? null;
+      const statusPending =
+        statusState === "creating"
+        || statusState === "starting"
+        || statusState === "stopping"
+        || statusState === "archiving";
+      const shouldShowDefaultPaneSpinner =
+        workspaceLoading
+        || statusPending
+        || (effectiveRuntimeRunning
+          && Boolean(embeddedPortalUrl)
+          && (!hasActiveEmbeddedPaseoFrame || !activeEmbeddedPaseoFrameLoaded));
+      return shouldShowDefaultPaneSpinner ? <PaneSpinner /> : null;
     }
 
     if (currentPane === "paseo") {
@@ -3602,11 +3368,7 @@ function WorkspaceDetailContent() {
   }
 
   if (workspaceLoading && !workspaceData) {
-    return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
-        <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>
-      </div>
-    );
+    return <PaneSpinner />;
   }
 
   return (
@@ -3859,7 +3621,9 @@ function CredentialManagerContent() {
     <div className="grid w-full min-w-0 gap-6">
         <div className="grid gap-4">
           {(credentialsLoading || !credentialCatalog) && (
-            <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>
+            <div className="flex items-center justify-center py-2 text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            </div>
           )}
           {credentialsError && (
             <p className="text-sm text-destructive">{credentialsError}</p>

@@ -91,10 +91,156 @@ export function workspaceEvolutionStateDir(project: string, userProfileId?: stri
   return path.join(workspaceStateDir(project, userProfileId), "evolution");
 }
 
+function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceStatus;
+  } catch {
+    return null;
+  }
+}
+
+function mergeWorkspaceState(
+  current: WorkspaceStatus["state"] | undefined,
+  incoming: WorkspaceStatus["state"] | undefined,
+): WorkspaceStatus["state"] {
+  if (!incoming) {
+    return current ?? "not-applied";
+  }
+  if (!current) {
+    return incoming;
+  }
+  if (current === "creating") {
+    return ["saved", "ready", "degraded", "unsupported"].includes(incoming) ? incoming : current;
+  }
+  if (current === "starting") {
+    return ["ready", "saved", "degraded", "unsupported"].includes(incoming) ? incoming : current;
+  }
+  if (current === "stopping") {
+    return ["saved", "not-applied", "degraded", "unsupported"].includes(incoming) ? incoming : current;
+  }
+  if (current === "archiving") {
+    return current;
+  }
+  return incoming;
+}
+
+function mergeWorkspaceStatus(
+  current: WorkspaceStatus | null,
+  incoming: WorkspaceStatus,
+): WorkspaceStatus {
+  if (!current) {
+    return incoming;
+  }
+  const driver = current.driver || incoming.driver
+    ? {
+        ...(current.driver ?? {}),
+        ...(incoming.driver ?? {}),
+      }
+    : undefined;
+  const paseo = current.paseo || incoming.paseo
+    ? {
+        ...(current.paseo ?? {}),
+        ...(incoming.paseo ?? {}),
+      }
+    : undefined;
+  const codexCredentials = current.credentials?.codex || incoming.credentials?.codex
+    ? {
+        ...(current.credentials?.codex ?? {}),
+        ...(incoming.credentials?.codex ?? {}),
+      }
+    : undefined;
+  const liveCredentials = current.credentials?.live || incoming.credentials?.live
+    ? {
+        ...(current.credentials?.live ?? {}),
+        ...(incoming.credentials?.live ?? {}),
+        selectedByHarness: {
+          ...(current.credentials?.live?.selectedByHarness ?? {}),
+          ...(incoming.credentials?.live?.selectedByHarness ?? {}),
+        },
+      }
+    : undefined;
+  const credentials = codexCredentials || liveCredentials
+    ? {
+        ...(current.credentials ?? {}),
+        ...(incoming.credentials ?? {}),
+        ...(codexCredentials ? { codex: codexCredentials } : {}),
+        ...(liveCredentials ? { live: liveCredentials } : {}),
+      }
+    : undefined;
+  const evolution = current.evolution || incoming.evolution
+    ? {
+        ...(current.evolution ?? {}),
+        ...(incoming.evolution ?? {}),
+        latestArtifacts: incoming.evolution?.latestArtifacts ?? current.evolution?.latestArtifacts,
+        latestTitles: incoming.evolution?.latestTitles ?? current.evolution?.latestTitles ?? [],
+      }
+    : undefined;
+  const ssh = current.ssh || incoming.ssh
+    ? {
+        ...(current.ssh ?? {}),
+        ...(incoming.ssh ?? {}),
+        selfCheck: {
+          ...(current.ssh?.selfCheck ?? { state: "not-configured", message: "" }),
+          ...(incoming.ssh?.selfCheck ?? {}),
+        },
+      }
+    : undefined;
+  const merged: WorkspaceStatus = {
+    ...current,
+    ...incoming,
+    project: incoming.project,
+    backend: {
+      ...current.backend,
+      ...incoming.backend,
+    },
+    lifecycleAction: incoming.lifecycleAction ?? current.lifecycleAction,
+    state: mergeWorkspaceState(current.state, incoming.state),
+    health: {
+      ...current.health,
+      ...incoming.health,
+    },
+    details: {
+      ...current.details,
+      ...incoming.details,
+    },
+    assets: incoming.assets ?? current.assets,
+    drift: incoming.drift ?? current.drift,
+    attachments: incoming.attachments ?? current.attachments,
+    runtimeAssembly: incoming.runtimeAssembly ?? current.runtimeAssembly,
+    daemon: incoming.daemon ?? current.daemon,
+  };
+  if (driver?.target && driver.baseImage && driver.runtimeKind && driver.runtimeRef) {
+    merged.driver = driver as NonNullable<WorkspaceStatus["driver"]>;
+  }
+  if (paseo?.daemonAddress && paseo.supportedHarnesses && paseo.liveTarget !== undefined) {
+    merged.paseo = paseo as NonNullable<WorkspaceStatus["paseo"]>;
+  }
+  if (codexCredentials?.state || liveCredentials) {
+    merged.credentials = credentials as NonNullable<WorkspaceStatus["credentials"]>;
+  }
+  if (
+    typeof evolution?.artifactCount === "number"
+    && typeof evolution.activeWorkspaceArtifacts === "number"
+    && typeof evolution.activeUserArtifacts === "number"
+    && Array.isArray(evolution.latestTitles)
+  ) {
+    merged.evolution = evolution as NonNullable<WorkspaceStatus["evolution"]>;
+  }
+  if (ssh?.mode && ssh.selfCheck) {
+    merged.ssh = ssh as NonNullable<WorkspaceStatus["ssh"]>;
+  }
+  return merged;
+}
+
 export function writeWorkspaceStatus(status: WorkspaceStatus, userProfileId?: string): string {
   const outputPath = workspaceStatusPath(status.project, userProfileId);
+  const current = readWorkspaceStatusFile(outputPath);
+  const next = mergeWorkspaceStatus(current, status);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
+  fs.writeFileSync(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   if (outputPath !== legacyWorkspaceStatusPath(status.project)) {
     fs.rmSync(legacyWorkspaceStatusPath(status.project), { force: true });
   }

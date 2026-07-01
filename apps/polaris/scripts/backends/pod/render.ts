@@ -170,7 +170,7 @@ function buildPaseoBootstrapLine(enabled: boolean, home: string): string[] {
   ].join("; ");
   return [
     `          python3 -c ${q(configScript)} && \\`,
-    `          paseo_ready() { printf '%s' "$$1" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"running"' && printf '%s' "$$1" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; } && \\`,
+    `          paseo_ready() { printf '%s' "$$1" | grep -Eq '"localDaemon"[[:space:]]*:[[:space:]]*"(running|stale_pid)"' && printf '%s' "$$1" | grep -Eq '"connectedDaemon"[[:space:]]*:[[:space:]]*"reachable"'; } && \\`,
     `          paseo_wait_ready() { for _ in $$(seq 1 15); do paseo_status=$$(timeout 5s env PASEO_HOME=${home}/.paseo paseo daemon status --json 2>/dev/null || true); if paseo_ready "$$paseo_status"; then return 0; fi; sleep 1; done; return 1; } && \\`,
     `          paseo_stop_runner() { paseo_pid=$$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${home}/.paseo/paseo.pid 2>/dev/null | head -n 1); if [ -z "$$paseo_pid" ]; then paseo_pid=$$(cat ${home}/.paseo/paseo.pid 2>/dev/null | tr -cd '0-9'); fi; if [ -n "$$paseo_pid" ]; then paseo_args=$$(ps -o args= -p "$$paseo_pid" 2>/dev/null || true); if printf '%s' "$$paseo_args" | grep -Eq 'daemon-runner|Paseo Supervisor|paseo daemon start'; then pkill -TERM -P "$$paseo_pid" 2>/dev/null || true; kill "$$paseo_pid" 2>/dev/null || true; sleep 1; pkill -KILL -P "$$paseo_pid" 2>/dev/null || true; kill -KILL "$$paseo_pid" 2>/dev/null || true; fi; fi; rm -f ${home}/.paseo/paseo.pid ${home}/.paseo/daemon.log; } && \\`,
     `          if ! paseo_wait_ready; then \\`,

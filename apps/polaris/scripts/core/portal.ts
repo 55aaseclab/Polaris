@@ -122,7 +122,6 @@ export interface PortalWorkspaceSummary {
   drivers: PortalDriverTarget[];
   selectedDriver: PortalDriverTarget | null;
   status: WorkspaceStatus | null;
-  progress: PortalProvisionProgress | null;
   liveTarget: string | null;
   reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
   reconnectTarget: string | null;
@@ -811,7 +810,6 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     drivers: PORTAL_DRIVER_TARGETS,
     selectedDriver,
     status,
-    progress: readWorkspaceProvisionProgress(userId, workspace),
     liveTarget: reconnect.liveTarget,
     reconnectMode: reconnect.reconnectMode,
     reconnectTarget: reconnect.reconnectTarget,

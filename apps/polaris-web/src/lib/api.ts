@@ -127,6 +127,12 @@ export interface PortalWorkspaceStatus {
       }>;
     };
   };
+  health?: {
+    backendLiveness?: string;
+    workspaceReadiness?: string;
+    daemonReadiness?: string;
+    reason?: string;
+  };
   daemon?: {
     manager?: { state?: string };
     pairing?: { state?: string; url?: string };
@@ -197,7 +203,6 @@ export interface PortalWorkspaceSummary {
   drivers: PortalDriverTarget[];
   selectedDriver: PortalDriverTarget | null;
   status: PortalWorkspaceStatus | null;
-  progress: PortalProvisionProgress | null;
   liveTarget: string | null;
   reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
   reconnectTarget: string | null;

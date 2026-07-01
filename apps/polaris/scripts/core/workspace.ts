@@ -318,6 +318,7 @@ export interface WorkspaceStatus {
   };
   lifecycleAction: LifecycleAction;
   state:
+    | "creating"
     | "saved"
     | "not-applied"
     | "starting"
