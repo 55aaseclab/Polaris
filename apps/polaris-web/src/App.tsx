@@ -762,7 +762,7 @@ function AuthGate(props: { children: ReactNode }) {
   }, [hasBackendSession, isLoaded, sessionLoading, userId]);
 
   if (!isLoaded || sessionLoading || (!userId && !hasBackendSession)) {
-    return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
+    return null;
   }
   return <>{props.children}</>;
 }
@@ -857,7 +857,7 @@ function SignInPage() {
   if (isLoaded && userId) {
     return <Navigate to="/" replace />;
   }
-  return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign in...</div>;
+  return null;
 }
 
 function SignUpPage() {
@@ -872,7 +872,7 @@ function SignUpPage() {
   if (isLoaded && userId) {
     return <Navigate to="/" replace />;
   }
-  return <div className="p-6 text-sm text-muted-foreground">Redirecting to sign up...</div>;
+  return null;
 }
 
 function driverLabel(driver: { backend: string; profile?: string } | null): string {
@@ -2437,11 +2437,7 @@ function WorkspaceIndexContent(props: {
   );
 
   if (workspacesLoading) {
-    return (
-      <div className="flex min-h-[40dvh] w-full items-center justify-center">
-        <div className="text-sm text-muted-foreground">{t("loading_first_workspace")}</div>
-      </div>
-    );
+    return null;
   }
 
   if (workspacesError) {
@@ -3244,6 +3240,10 @@ function WorkspaceDetailContent() {
   }
 
   function renderPane(): ReactNode {
+    if (loading && !data) {
+      return null;
+    }
+
     if (!data) {
       return (
         <EmptyPane
@@ -3452,9 +3452,16 @@ function WorkspaceDetailContent() {
     );
   }
 
+  if (loading && !data) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
+        <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>
+      </div>
+    );
+  }
+
   return (
     <div className={currentPane === "" ? "flex min-h-0 w-full min-w-0 flex-1 flex-col" : "grid w-full min-w-0 gap-6"}>
-      {loading && <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
       {renderPane()}
