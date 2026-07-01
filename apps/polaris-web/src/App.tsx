@@ -2278,7 +2278,10 @@ function OverviewPage() {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const { user } = useUser();
-  const { data: backendSession } = useAsyncValue<PortalSession | null>(
+  const {
+    data: backendSession,
+    loading: backendSessionLoading,
+  } = useAsyncValue<PortalSession | null>(
     () => getPortalSession(),
     [],
   );
@@ -2300,6 +2303,14 @@ function OverviewPage() {
     || backendSession?.clerkUsername
     || backendSession?.clerkUserId
     || "";
+  const resolvingAccess =
+    backendSessionLoading
+    || mappingLoading
+    || (!explicitMappedUserId
+      && !mappingError
+      && !registrationError
+      && canSelfRegister
+      && !registering);
 
   useEffect(() => {
     if (
@@ -2364,6 +2375,16 @@ function OverviewPage() {
 
   if (explicitMappedUserId) {
     return <Navigate to={`/users/${encodeURIComponent(explicitMappedUserId)}/workspaces`} replace />;
+  }
+
+  if (resolvingAccess) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
+        <p className="text-sm text-muted-foreground">
+          {registering ? t("creating_account") : t("loading_profile")}
+        </p>
+      </div>
+    );
   }
 
   return (
