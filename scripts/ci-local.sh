@@ -20,6 +20,8 @@ bash -n scripts/ci-local.sh
 bash -n scripts/provision-remote.sh
 bash -n scripts/cd-remote.sh
 bash -n scripts/rollback-remote.sh
+bash -n scripts/build-paseo-web-artifact.sh
+bash -n scripts/clean-paseo-web-artifact.sh
 bash -n scripts/deploy-polaris.sh
 bash -n scripts/rollback-polaris.sh
 bash -n scripts/lib/polaris-bluegreen.sh

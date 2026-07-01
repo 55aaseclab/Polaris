@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertValidWorkspaceProjectName } from "../core/workspace-name.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -38,6 +39,7 @@ export function assertNoProjectNameCollision(project: string): void {
 }
 
 export function assertProjectNameAvailable(project: string): void {
+  assertValidWorkspaceProjectName(project);
   const owners = projectOwners(project);
   if (owners.length === 0) {
     return;
@@ -51,8 +53,15 @@ export function assertProjectNameAvailableForUser(
   project: string,
   userProfileId: string,
 ): void {
+  assertValidWorkspaceProjectName(project);
   const owners = projectOwners(project);
   if (owners.includes(userProfileId)) {
     return;
   }
+  if (owners.length === 0) {
+    return;
+  }
+  throw new Error(
+    `Project name '${project}' is already in use by user ${owners[0]}. Choose a different project name.`,
+  );
 }

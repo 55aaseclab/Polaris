@@ -63,6 +63,8 @@ In practice this means:
 - `starting`, `stopping`, and `archiving` should survive a page refresh
 - the portal should not rely only on local in-memory UI state for these
   transitions
+- portal list and detail reads should refresh workspace status before they
+  render `summary.status`
 - driver-specific facts such as runtime kind or runtime reference belong in
   the driver details area
 
@@ -74,3 +76,17 @@ Instead, the portal should prefer raw connection details such as:
 - daemon address
 - server id
 - reconnect target
+
+## Embedded Paseo Behavior
+
+When the workspace pane embeds Paseo, Polaris should preserve already-running
+workspace frames across workspace switches.
+
+That means:
+
+- switching from one running workspace to another should not force the first
+  workspace iframe to reload
+- switching through a stopped workspace should not discard the hidden iframe
+  for a different running workspace
+- a stopped workspace should remove only its own active iframe and leave the
+  pane empty instead of trying to reconnect

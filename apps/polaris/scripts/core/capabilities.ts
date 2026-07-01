@@ -1,4 +1,5 @@
 import type { WorkspaceSpec } from "./workspace.js";
+import { assertValidWorkspaceProjectName } from "./workspace-name.js";
 
 const POD_PROFILES = new Set(["gvisor", "kata-qemu", "kata-clh", "kata-qemu-tdx"]);
 
@@ -18,6 +19,7 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
   if (!workspace.identity.projectName) {
     throw new Error("Workspace project name is required");
   }
+  assertValidWorkspaceProjectName(workspace.identity.projectName);
   if (!workspace.userProfile.id) {
     throw new Error("Workspace user profile id is required");
   }

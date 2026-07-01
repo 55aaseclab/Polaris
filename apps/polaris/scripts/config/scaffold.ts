@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
 import { userIdentityDurablePaths } from "../core/identity-layout.js";
+import { workspaceRuntimeResourceName } from "../core/workspace-name.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import {
   polarisNetfsLocalExportRoot,
@@ -24,10 +25,14 @@ function workspaceDataNetfsSource(project: string): Record<string, any> {
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
-    volume_ref: `${project}-workspace-data`,
+    volume_ref: workspaceDataVolumeRef(DEMO_USER_PROFILE_ID, project),
     volume_size: "120Gi",
     description: `shared workspace data for ${project}`,
   };
+}
+
+function workspaceDataVolumeRef(userProfileId: string, project: string): string {
+  return workspaceRuntimeResourceName(userProfileId, project, "workspace-data");
 }
 
 function sanitizeImageTagComponent(raw: string, fallback: string): string {

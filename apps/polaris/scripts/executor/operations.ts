@@ -3,7 +3,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
-import { userProfileExists, workspaceConfigPath } from "../config/scaffold.js";
+import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
+import { userProfileExists, workspaceConfigExists, workspaceConfigPath } from "../config/scaffold.js";
 import { readManagedCredentialRecord } from "../config/credentials.js";
 import {
   supportsLiveCredentialSwitch,
@@ -38,6 +39,7 @@ import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
 import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
+import { workspaceRuntimeScopeName } from "../core/workspace-name.js";
 import { writeWorkspaceLiveCredentialSelection, writeWorkspaceStatus } from "../output/state-store.js";
 import { logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
@@ -441,7 +443,11 @@ function runtimeWriteScript(
 }
 
 function dockerContainerName(workspace: WorkspaceSpec): string {
-  return `${workspace.identity.projectName}-docker`;
+  return `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-docker`;
+}
+
+function runtimeScope(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
 }
 
 function runningPodName(workspace: WorkspaceSpec): string {
@@ -449,11 +455,11 @@ function runningPodName(workspace: WorkspaceSpec): string {
     "kubectl",
     [
       "-n",
-      workspace.identity.projectName,
+      runtimeScope(workspace),
       "get",
       "pod",
       "-l",
-      `app=${workspace.identity.projectName}`,
+      `app=${runtimeScope(workspace)}`,
       "-o",
       "jsonpath={.items[0].metadata.name}",
     ],
@@ -481,7 +487,7 @@ function applyLiveRuntimeFiles(
       "kubectl",
       [
         "-n",
-        workspace.identity.projectName,
+        runtimeScope(workspace),
         "exec",
         podName,
         "--",
@@ -895,6 +901,10 @@ export async function queueProvisionWorkspace(
         })
       );
     }
+    assertProjectNameAvailableForUser(workspace, userId);
+    if (workspaceConfigExists(workspace, userId)) {
+      throw new Error(`Workspace '${workspace}' already exists for user ${userId}.`);
+    }
 
     const queuedProgress = updateProgress(userId, workspace, {
       status: "queued",
@@ -1069,32 +1079,7 @@ export async function stopPortalWorkspace(
       },
     });
     await stopCommand(ref, userId);
-    writeCachedWorkspaceStatusUpdate({
-      userId,
-      workspace,
-      reason: "workspace-stopped",
-      mutate: (current, currentSummary) => {
-        if (!current) {
-          return null;
-        }
-        return {
-          ...current,
-          backend: {
-            ...current.backend,
-            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          },
-          state: "saved",
-          health: {
-            ...current.health,
-            backendLiveness: "stopped",
-            workspaceReadiness: "not-ready",
-            daemonReadiness: "degraded",
-            reason: "workspace stopped",
-          },
-        };
-      },
-    });
-    void refreshPortalWorkspaceStatus(userId, workspace);
+    await refreshPortalWorkspaceStatus(userId, workspace);
     logInfo("executor", "workspace-stop-completed", {
       userId,
       workspace,
@@ -1145,32 +1130,7 @@ export async function startPortalWorkspace(
       },
     });
     await startCommand(ref, userId);
-    writeCachedWorkspaceStatusUpdate({
-      userId,
-      workspace,
-      reason: "workspace-started",
-      mutate: (current, currentSummary) => {
-        if (!current) {
-          return null;
-        }
-        return {
-          ...current,
-          backend: {
-            ...current.backend,
-            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          },
-          state: "ready",
-          health: {
-            ...current.health,
-            backendLiveness: "running",
-            workspaceReadiness: "starting",
-            daemonReadiness: current.health.daemonReadiness || "unknown",
-            reason: "workspace start requested",
-          },
-        };
-      },
-    });
-    void refreshPortalWorkspaceStatus(userId, workspace);
+    await refreshPortalWorkspaceStatus(userId, workspace);
     logInfo("executor", "workspace-start-completed", {
       userId,
       workspace,

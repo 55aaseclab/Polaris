@@ -27,6 +27,10 @@ import { renderAndWriteKubevirtWorkspace, renderKubevirtWorkspace } from "../scr
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "../scripts/core/workspace-name.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
@@ -343,28 +347,9 @@ test("runCli create allows the same workspace name under a different user", asyn
     ]);
 
     await runCli(["create", workspace, "--user", firstUserId]);
-    const stdout = await captureStdout(async () => {
-      await runCli(["create", workspace, "--user", secondUserId]);
-    });
-    const parsed = parseJsonOutput<{
-      project: string;
-      userProfile: { id: string };
-      configPath: string;
-    }>(stdout);
-
-    assert.equal(parsed.project, workspace);
-    assert.equal(parsed.userProfile.id, secondUserId);
-    assert.equal(
-      parsed.configPath,
-      path.join(
-        REPO_ROOT,
-        "config",
-        "users",
-        secondUserId,
-        "workspaces",
-        workspace,
-        "docker.agent.yaml",
-      ),
+    await assert.rejects(
+      () => runCli(["create", workspace, "--user", secondUserId]),
+      new RegExp(`Project name '${workspace}' is already in use by user ${firstUserId}`),
     );
     assert.equal(
       fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
@@ -787,7 +772,7 @@ test("runCli live-switch stages non-codex material into user identity state", as
       await withFakeCommands(
         {
           docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf '${project}-docker-id'
   exit 0
 fi
@@ -935,7 +920,7 @@ test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of tru
     assert.equal(podDoc.attachments["workspace-data"].source.sub_path, project);
     assert.equal(
       podDoc.attachments["workspace-runtime-state"].source.volume_ref,
-      `${project}-workspace-runtime-state`,
+      workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-runtime-state"),
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
@@ -1341,7 +1326,7 @@ test("status command exposes evolution explainability details", async () => {
       await withFakeCommands(
         {
           docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -1426,7 +1411,7 @@ test("status exposes ssh self-check for github account on managed-key profiles",
       await withFakeCommands(
         {
           docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -1976,17 +1961,20 @@ test("demo specs reuse the demo profile across docker, pod, and kubevirt backend
     assert.equal(workspace.runtime.gitUserEmail, "demo@example.com");
   }
 
-  assert.equal(dockerWorkspace.attachments.workspaceData.source.volumeRef, "demo-workspace-data");
+  assert.equal(
+    dockerWorkspace.attachments.workspaceData.source.volumeRef,
+    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data"),
+  );
   assert.equal(dockerWorkspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(podWorkspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(kubevirtWorkspace.attachments.workspaceData.source.kind, "netfs");
   assert.equal(
     podWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
-    "demo-workspace-runtime-state",
+    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-runtime-state"),
   );
   assert.equal(
     kubevirtWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
-    "demo-workspace-runtime-state",
+    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-runtime-state"),
   );
 });
 
@@ -1995,12 +1983,18 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
-  assert.match(rendered, /source: demo-workspace-data\b/);
+  assert.match(
+    rendered,
+    new RegExp(`source: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}\\b`),
+  );
   assert.match(rendered, /source: demo-project-state\b/);
   assert.match(rendered, /driver_opts:\n      type: "nfs"/);
   assert.match(rendered, /o: "addr=127\.0\.0\.1,nfsvers=4\.1,hard,rw"/);
   assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
-  assert.match(rendered, /demo-workspace-data:\n    name: demo-workspace-data/);
+  assert.match(
+    rendered,
+    new RegExp(`${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}:\\n    name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}`),
+  );
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
 });
 
@@ -2041,9 +2035,15 @@ test("kubevirt render bridges netfs workspace data through a PV and PVC", () => 
   const rendered = fs.readFileSync(outputPath, "utf8");
 
   assert.match(rendered, /kind: PersistentVolume/);
-  assert.match(rendered, /name: demo-workspace-data-pv/);
+  assert.match(
+    rendered,
+    new RegExp(`name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}-pv`),
+  );
   assert.match(rendered, /kind: PersistentVolumeClaim/);
-  assert.match(rendered, /name: demo-workspace-data/);
+  assert.match(
+    rendered,
+    new RegExp(`name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}`),
+  );
   assert.match(rendered, /server: netfs\.local/);
   assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
   assert.match(rendered, new RegExp(`root:${kubevirtProbePassword(workspace)}`));
@@ -2250,23 +2250,23 @@ test("kubevirt status includes the daemon pairing URL when runtime state exposes
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
-  printf '${project}-vm-cloudinit'
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   sleep 1
   exit 0
@@ -2614,7 +2614,7 @@ test("CLI docker lifecycle commands dispatch through compose and status artifact
     await withFakeCommands(
       {
         docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -2687,7 +2687,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -2714,16 +2714,16 @@ exit 0
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${project}"* ]]; then
-  printf '{"metadata":{"name":"${project}"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${project}"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
 if [[ "$*" == *"paseo daemon status --json"* ]]; then
@@ -2744,7 +2744,7 @@ fi
 if [[ "$*" == *"rollout restart"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"scale deployment ${project} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
   exit 0
 fi
 exit 0
@@ -2798,7 +2798,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -2822,27 +2822,27 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Succeeded'
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${project}"* ]]; then
-  printf '{"metadata":{"name":"${project}"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${project}"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
 if [[ "$*" == *"paseo daemon status --json"* ]]; then
@@ -2863,7 +2863,7 @@ fi
 if [[ "$*" == *"rollout restart"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"scale deployment ${project} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
   exit 0
 fi
 exit 0
@@ -2912,7 +2912,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -2939,37 +2939,37 @@ exit 0
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pvc-import"* ]]; then
+if [[ "$*" == *"wait --for=condition=Ready pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"delete pod ${project}-pvc-import"* ]]; then
+if [[ "$*" == *"delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=delete pod/${project}-pvc-import"* ]]; then
+if [[ "$*" == *"wait --for=delete pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
-  printf '${project}-vm-cloudinit'
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project}"* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   sleep 1
   exit 0
 fi
-if [[ "$*" == *"patch vm ${project}-vm"* ]]; then
+if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   exit 0
 fi
 if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
@@ -3004,25 +3004,25 @@ exit 1
           const commands = readCommandLog();
           const pvcImportCopyIndex = commands.findIndex((entry) =>
             entry.includes(`cp /tmp/`) === false
-              ? entry.includes(`cp`) && entry.includes(`${project}-pvc-import:/root/.paseo`)
+              ? entry.includes(`cp`) && entry.includes(`${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}:/root/.paseo`)
               : false,
           );
           const generatedApplyIndex = commands.findIndex((entry) =>
             entry.includes(`/workspaces/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
           );
           assert.equal(
-            commands.some((entry) => entry.includes(`patch vm ${project}-vm`) && entry.includes(`"runStrategy":"Halted"`)),
+            commands.some((entry) => entry.includes(`patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`) && entry.includes(`"runStrategy":"Halted"`)),
             false,
           );
           assert.ok(
-            commands.some((entry) => entry.includes(`${project}-pvc-import`) && entry.includes("cp")),
+            commands.some((entry) => entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp")),
           );
           assert.ok(
-            commands.some((entry) => entry.includes(`delete pod ${project}-pvc-import --ignore-not-found --wait=false`)),
+            commands.some((entry) => entry.includes(`delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")} --ignore-not-found --wait=false`)),
           );
           assert.ok(generatedApplyIndex >= 0);
           const firstPvcImportCommand = commands.findIndex((entry) =>
-            entry.includes(`${project}-pvc-import`) && entry.includes("cp"),
+            entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp"),
           );
           assert.ok(firstPvcImportCommand >= 0);
           assert.ok(firstPvcImportCommand < generatedApplyIndex);
@@ -3059,7 +3059,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -3083,7 +3083,7 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get deployment ${project}-workspace-data-export"* ]]; then
+if [[ "$*" == *"get deployment ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-data-export")}"* ]]; then
   exit 1
 fi
 if [[ "$*" == *"apply -f "* ]]; then
@@ -3137,7 +3137,7 @@ test("switch exports from the selected kubevirt pvc even when the vm is already 
 if [[ "$*" == *"compose"* && "$*" == *"up -d"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'docker-id'
   exit 0
 fi
@@ -3163,33 +3163,33 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get deployment ${project}-workspace-data-export"* ]]; then
+if [[ "$*" == *"get deployment ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-data-export")}"* ]]; then
   exit 1
 fi
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf ''
   exit 0
 fi
 if [[ "$*" == *"apply -f "* && "$*" == *"pvc-export.yaml"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=condition=Ready pod/${project}-pvc-export"* ]]; then
+if [[ "$*" == *"wait --for=condition=Ready pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"delete pod ${project}-pvc-export"* ]]; then
+if [[ "$*" == *"delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=delete pod/${project}-pvc-export"* ]]; then
+if [[ "$*" == *"wait --for=delete pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
 if [[ "$1" == "-n" && "$3" == "cp" ]] || [[ "$1" == "cp" ]]; then
   exit 0
 fi
-if [[ "$*" == *"patch vm ${project}-vm"* ]]; then
+if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'unexpected stop' >&2
   exit 1
 fi
@@ -3203,7 +3203,7 @@ exit 0
 
           const commands = readCommandLog();
           const pvcExportIndex = commands.findIndex((entry) =>
-            entry.includes(`${project}-pvc-export`) && entry.includes(" cp "),
+            entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")) && entry.includes(" cp "),
           );
           const dockerUpIndex = commands.findIndex((entry) =>
             entry.includes("docker") && entry.includes("compose") && entry.includes("up -d"),
@@ -3213,10 +3213,10 @@ exit 0
           assert.ok(dockerUpIndex >= 0);
           assert.ok(pvcExportIndex < dockerUpIndex);
           assert.ok(
-            commands.some((entry) => entry.includes(`delete pod ${project}-pvc-export --ignore-not-found --wait=false`)),
+            commands.some((entry) => entry.includes(`delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")} --ignore-not-found --wait=false`)),
           );
           assert.equal(
-            commands.some((entry) => entry.includes(`patch vm ${project}-vm`)),
+            commands.some((entry) => entry.includes(`patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)),
             false,
           );
         },
@@ -3238,23 +3238,23 @@ test("kubevirt backend returns structured observations and current status semant
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
-  printf '${project}-vm-cloudinit'
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   sleep 1
   exit 0
@@ -3300,7 +3300,7 @@ test("CLI status and logs cover docker backend through fake docker compose", asy
     await withFakeCommands(
       {
         docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${project}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -3311,7 +3311,7 @@ fi
 if [[ "$1" == "exec" ]]; then
   exit 0
 fi
-if [[ "$*" == *"logs --tail 200 ${project}"* ]]; then
+if [[ "$*" == *"logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'docker logs'
   exit 0
 fi
@@ -3348,7 +3348,7 @@ exit 0
         assert.equal(parsed.driver?.target, "docker");
         assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
-        assert.equal(parsed.driver?.runtimeRef, `container/${project}-docker`);
+        assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
         assert.equal(parsed.driver?.runtimeState, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
         assert.equal(parsed.assets.dockerfile.path, `config/users/${DEMO_USER_PROFILE_ID}/docker/workspace-prebuilt.Dockerfile`);
@@ -3363,8 +3363,8 @@ exit 0
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`compose`) && entry.includes(`ps -q ${project}`)));
-        assert.ok(commands.some((entry) => entry.includes(`logs --tail 200 ${project}`)));
+        assert.ok(commands.some((entry) => entry.includes(`compose`) && entry.includes(`ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
+        assert.ok(commands.some((entry) => entry.includes(`logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
       },
     );
   });
@@ -3377,28 +3377,28 @@ test("CLI status and logs cover kubevirt backend through fake kubectl", async ()
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${project}-vm"* ]]; then
-  printf '${project}-vm'
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${project}-vm"* ]]; then
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${project}"* ]]; then
-  printf '${project}'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${project}-vm-cloudinit"* ]]; then
-  printf '${project}-vm-cloudinit'
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${project} "* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   sleep 1
   exit 0
 fi
-if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${project}-vm"* ]]; then
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'virt-launcher-0'
   exit 0
 fi
@@ -3442,14 +3442,14 @@ exit 1
         assert.equal(parsed.backend.instanceState, "running");
         assert.equal(parsed.driver?.target, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
-        assert.equal(parsed.driver?.runtimeRef, `vm/${project}-vm`);
+        assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
         assert.equal(parsed.driver?.runtimeState, "running");
         assert.equal(parsed.state, "ready");
         assert.equal(parsed.health.daemonReadiness, "ready");
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`get pod -l vm.kubevirt.io/name=${project}-vm`)));
+        assert.ok(commands.some((entry) => entry.includes(`get pod -l vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)));
         assert.ok(commands.some((entry) => entry.includes("logs virt-launcher-0 --tail=200")));
       },
     );

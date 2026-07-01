@@ -5,6 +5,10 @@ import { getBackendDriver } from "../../backends/index.js";
 import { parseWorkspaceReference } from "../../config/load.js";
 import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import type { WorkspaceSpec } from "../../core/workspace.js";
+import {
+  workspaceRuntimeResourceName,
+  workspaceRuntimeScopeName,
+} from "../../core/workspace-name.js";
 import { readWorkspaceDriverSelection, writeWorkspaceDriverSelection } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
 import { withWorkspaceLifecycleLock } from "../../utils/workspace-lifecycle-lock.js";
@@ -37,6 +41,18 @@ function workspaceRefForSelection(project: string, backend: WorkspaceSpec["backe
   return backend === "pod" && profile
     ? `${project}@${backend}:${profile}`
     : `${project}@${backend}`;
+}
+
+function runtimeScope(workspace: WorkspaceSpec): string {
+  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+}
+
+function runtimeResource(workspace: WorkspaceSpec, suffix: string): string {
+  return workspaceRuntimeResourceName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+    suffix,
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -102,7 +118,7 @@ function resolveAttachmentEndpoint(workspace: WorkspaceSpec, detail: string): At
     }
     const podName = detail.slice(prefix.length).trim();
     return podName
-      ? { kind: "pod", namespace: workspace.identity.projectName, podName }
+      ? { kind: "pod", namespace: runtimeScope(workspace), podName }
       : null;
   }
   return null;
@@ -120,33 +136,33 @@ function runChecked(command: string, args: string[]): void {
   }
 }
 
-function workspaceDataExportDeploymentName(project: string): string {
-  return `${project}-workspace-data-export`;
+function workspaceDataExportDeploymentName(workspace: WorkspaceSpec): string {
+  return runtimeResource(workspace, "workspace-data-export");
 }
 
-function hasWorkspaceDataExportDeployment(project: string): boolean {
-  const deploymentName = workspaceDataExportDeploymentName(project);
+function hasWorkspaceDataExportDeployment(workspace: WorkspaceSpec): boolean {
+  const deploymentName = workspaceDataExportDeploymentName(workspace);
   const result = spawnSync(
     "kubectl",
-    ["-n", project, "get", "deployment", deploymentName, "-o", "jsonpath={.metadata.name}"],
+    ["-n", runtimeScope(workspace), "get", "deployment", deploymentName, "-o", "jsonpath={.metadata.name}"],
     { encoding: "utf8" },
   );
   return result.status === 0 && Boolean((result.stdout || "").trim());
 }
 
-async function setWorkspaceDataExportDesiredState(project: string, running: boolean): Promise<void> {
-  if (!hasWorkspaceDataExportDeployment(project)) {
+async function setWorkspaceDataExportDesiredState(workspace: WorkspaceSpec, running: boolean): Promise<void> {
+  if (!hasWorkspaceDataExportDeployment(workspace)) {
     return;
   }
-  const deploymentName = workspaceDataExportDeploymentName(project);
+  const deploymentName = workspaceDataExportDeploymentName(workspace);
   const replicas = running ? "1" : "0";
   logInfo("cli", "switch-workspace-data-export", {
-    project,
+    project: workspace.identity.projectName,
     deployment: deploymentName,
     replicas: Number(replicas),
   });
-  runChecked("kubectl", ["-n", project, "scale", "deployment", deploymentName, `--replicas=${replicas}`]);
-  runChecked("kubectl", ["-n", project, "rollout", "status", `deployment/${deploymentName}`, "--timeout=180s"]);
+  runChecked("kubectl", ["-n", runtimeScope(workspace), "scale", "deployment", deploymentName, `--replicas=${replicas}`]);
+  runChecked("kubectl", ["-n", runtimeScope(workspace), "rollout", "status", `deployment/${deploymentName}`, "--timeout=180s"]);
 }
 
 function switchScratchRoot(): string {
@@ -174,23 +190,24 @@ async function waitForKubevirtAttachmentRelease(
   if (workspace.backend.kind !== "kubevirt-vm") {
     return;
   }
-  const project = workspace.identity.projectName;
+  const namespace = runtimeScope(workspace);
+  const virtualMachineName = runtimeResource(workspace, "vm");
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const vmi = spawnSync(
       "kubectl",
-      ["-n", project, "get", "vmi", `${project}-vm`, "-o", "jsonpath={.metadata.name}"],
+      ["-n", namespace, "get", "vmi", virtualMachineName, "-o", "jsonpath={.metadata.name}"],
       { encoding: "utf8" },
     );
     const launcherPods = spawnSync(
       "kubectl",
       [
         "-n",
-        project,
+        namespace,
         "get",
         "pod",
         "-l",
-        `vm.kubevirt.io/name=${project}-vm`,
+        `vm.kubevirt.io/name=${virtualMachineName}`,
         "-o",
         "jsonpath={range .items[*]}{.metadata.name}:{.status.phase}{\"\\n\"}{end}",
       ],
@@ -341,7 +358,7 @@ function resolveDockerAttachmentVolumeName(
   const fallbackName = (() => {
     switch (attachment) {
       case "workspaceRuntimeState":
-        return `${workspace.identity.projectName}-workspace-runtime-state`;
+        return runtimeResource(workspace, "workspace-runtime-state");
       case "userIdentityState":
         return `polaris-${userScope}-identity`;
     }
@@ -468,14 +485,15 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
   const exportRoot = fs.mkdtempSync(path.join(switchScratchRoot(), "state-"));
   if (workspace.backend.kind === "kubevirt-vm") {
     await waitForKubevirtAttachmentRelease(workspace);
-    const pvcPodName = `${workspace.identity.projectName}-pvc-export`;
+    const namespace = runtimeScope(workspace);
+    const pvcPodName = runtimeResource(workspace, "pvc-export");
     const manifestPath = path.join(exportRoot, "pvc-export.yaml");
     const manifestLines = [
       "apiVersion: v1",
       "kind: Pod",
       "metadata:",
       `  name: ${pvcPodName}`,
-      `  namespace: ${workspace.identity.projectName}`,
+      `  namespace: ${namespace}`,
       "spec:",
       "  restartPolicy: Never",
       "  containers:",
@@ -502,7 +520,7 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
     );
     try {
       runChecked("kubectl", ["apply", "-f", manifestPath]);
-      runChecked("kubectl", ["-n", workspace.identity.projectName, "wait", "--for=condition=Ready", `pod/${pvcPodName}`, "--timeout=60s"]);
+      runChecked("kubectl", ["-n", namespace, "wait", "--for=condition=Ready", `pod/${pvcPodName}`, "--timeout=60s"]);
       for (const attachment of MIGRATED_ATTACHMENTS) {
         const exportDir = attachmentExportDir(exportRoot, attachment);
         fs.mkdirSync(exportDir, { recursive: true });
@@ -515,13 +533,13 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
           fs.mkdirSync(localTarget, { recursive: true });
           runChecked(
             "kubectl",
-            ["-n", workspace.identity.projectName, "cp", `${pvcPodName}:${durablePath}/.`, localTarget],
+            ["-n", namespace, "cp", `${pvcPodName}:${durablePath}/.`, localTarget],
           );
         }
         pruneExportedAttachmentState(attachment, exportDir);
       }
     } finally {
-      deleteTransferPod(workspace.identity.projectName, pvcPodName);
+      deleteTransferPod(namespace, pvcPodName);
     }
     return exportRoot;
   }
@@ -575,14 +593,15 @@ async function importSwitchState(
     return;
   }
   if (workspace.backend.kind === "kubevirt-vm") {
-    const pvcPodName = `${workspace.identity.projectName}-pvc-import`;
+    const namespace = runtimeScope(workspace);
+    const pvcPodName = runtimeResource(workspace, "pvc-import");
     const manifestPath = path.join(exportRoot, "pvc-import.yaml");
     const manifestLines = [
       "apiVersion: v1",
       "kind: Pod",
       "metadata:",
       `  name: ${pvcPodName}`,
-      `  namespace: ${workspace.identity.projectName}`,
+      `  namespace: ${namespace}`,
       "spec:",
       "  restartPolicy: Never",
       "  containers:",
@@ -609,10 +628,10 @@ async function importSwitchState(
     );
     try {
       runChecked("kubectl", ["apply", "-f", manifestPath]);
-      runChecked("kubectl", ["-n", workspace.identity.projectName, "wait", "--for=condition=Ready", `pod/${pvcPodName}`, "--timeout=60s"]);
+      runChecked("kubectl", ["-n", namespace, "wait", "--for=condition=Ready", `pod/${pvcPodName}`, "--timeout=60s"]);
       const importEndpoint: AttachmentEndpoint = {
         kind: "pod",
-        namespace: workspace.identity.projectName,
+        namespace,
         podName: pvcPodName,
       };
       for (const attachment of attachments) {
@@ -626,13 +645,13 @@ async function importSwitchState(
           if (!fs.existsSync(localSource)) {
             continue;
           }
-          runChecked("kubectl", ["-n", workspace.identity.projectName, "exec", pvcPodName, "--", "sh", "-lc", `mkdir -p '${durablePath}'`]);
-          runChecked("kubectl", ["-n", workspace.identity.projectName, "cp", `${localSource}/.`, `${pvcPodName}:${durablePath}`]);
+          runChecked("kubectl", ["-n", namespace, "exec", pvcPodName, "--", "sh", "-lc", `mkdir -p '${durablePath}'`]);
+          runChecked("kubectl", ["-n", namespace, "cp", `${localSource}/.`, `${pvcPodName}:${durablePath}`]);
         }
         normalizeImportedAttachmentOwnership(workspace, importEndpoint, attachment);
       }
     } finally {
-      deleteTransferPod(workspace.identity.projectName, pvcPodName);
+      deleteTransferPod(namespace, pvcPodName);
     }
     return;
   }
@@ -799,12 +818,12 @@ export async function performWorkspaceSwitch(
     const finalizedStoppedBackends = shouldStopBeforeExport
       ? stoppedBackends
       : await stopCompetingBackends(project, backendHint, userProfileId);
-    await setWorkspaceDataExportDesiredState(project, backendHint === "docker");
     const { workspace, driver } = await loadExecutableWorkspaceForCommand(
       "start",
       targetRef,
       userProfileId,
     );
+    await setWorkspaceDataExportDesiredState(workspace, backendHint === "docker");
     const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm"
       ? 600000
       : workspace.backend.kind === "docker"

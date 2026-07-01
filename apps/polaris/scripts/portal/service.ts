@@ -82,10 +82,12 @@ async function refreshPortalWorkspaceStatus(
   return job;
 }
 
-export function listPortalWorkspaces(userId: string): PortalWorkspaceSummary[] {
-  return listOwnedWorkspaces(userId).map((workspace) =>
-    loadWorkspaceSummary(userId, workspace),
-  );
+export async function listPortalWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {
+  const workspaces = listOwnedWorkspaces(userId);
+  await Promise.all(workspaces.map(async (workspace) => {
+    await refreshPortalWorkspaceStatus(userId, workspace);
+  }));
+  return workspaces.map((workspace) => loadWorkspaceSummary(userId, workspace));
 }
 
 export function listPortalArchivedWorkspaces(
@@ -160,10 +162,11 @@ export function listPortalAdminUsers(): Array<
     });
 }
 
-export function getPortalWorkspaceDetail(
+export async function getPortalWorkspaceDetail(
   userId: string,
   workspace: string,
-): PortalWorkspaceDetail {
+) : Promise<PortalWorkspaceDetail> {
+  await refreshPortalWorkspaceStatus(userId, workspace);
   return loadWorkspaceDetail(userId, workspace);
 }
 

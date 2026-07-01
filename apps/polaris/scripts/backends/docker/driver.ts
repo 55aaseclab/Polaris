@@ -16,6 +16,7 @@ import {
   netfsResolvedPath,
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
+import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import { renderAndWriteDockerWorkspace } from "./render.js";
 import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
@@ -64,7 +65,7 @@ function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   } catch {
     // Fall through and recreate the volume with the rendered config.
   }
-  const existingContainer = `${workspace.identity.projectName}-docker`;
+  const existingContainer = `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-docker`;
   const removeVolume = (): void => {
     runCommand("docker", ["volume", "rm", "-f", volumeName]);
   };
@@ -122,12 +123,12 @@ export class DockerDriver implements BackendDriver {
 
   async logs(workspace: WorkspaceSpec): Promise<void> {
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "logs", "--tail", "200", workspace.identity.projectName]);
+    runCommand("docker", ["compose", "-f", outputPath, "logs", "--tail", "200", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
   }
 
   async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    const containerId = spawnSync("docker", ["compose", "-f", outputPath, "ps", "-q", workspace.identity.projectName], { encoding: "utf8" });
+    const containerId = spawnSync("docker", ["compose", "-f", outputPath, "ps", "-q", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)], { encoding: "utf8" });
     const id = (containerId.stdout || "").trim();
     const exists = Boolean(id);
     const inspect = exists

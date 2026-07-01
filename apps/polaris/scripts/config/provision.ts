@@ -4,6 +4,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { parseWorkspaceReference } from "./load.js";
 import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
+import { workspaceRuntimeResourceName } from "../core/workspace-name.js";
 import { logInfo } from "../utils/log.js";
 import {
   polarisNetfsLocalExportRoot,
@@ -17,14 +18,14 @@ const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 type BackendKind = "docker" | "pod" | "kubevirt-vm";
 
-function workspaceDataNetfsSource(project: string): Record<string, any> {
+function workspaceDataNetfsSource(project: string, userProfileId: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
-    volume_ref: `${project}-workspace-data`,
+    volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-data"),
     volume_size: "120Gi",
     description: `shared workspace data for ${project}`,
   };
@@ -129,6 +130,7 @@ function ensureService(doc: Record<string, any>, userProfileId: string): void {
 function synthesizeAttachments(
   doc: Record<string, any>,
   project: string,
+  userProfileId: string,
   backendKind: BackendKind,
 ): void {
   const attachments = ((doc.attachments ??= {}) as Record<string, any>);
@@ -137,16 +139,16 @@ function synthesizeAttachments(
   const userIdentityState = ((attachments["user-identity-state"] ??= {}) as Record<string, any>);
 
   if (backendKind === "kubevirt-vm") {
-    workspaceData.source = workspaceDataNetfsSource(project);
+    workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
     workspaceRuntimeState.source = {
       kind: "persistent-volume",
-      volume_ref: `${project}-workspace-runtime-state`,
+      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
       volume_size: "20Gi",
       description: `reusable workspace runtime state for ${project}`,
     };
     userIdentityState.source = {
       kind: "persistent-volume",
-      volume_ref: `${project}-user-identity-state`,
+      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "user-identity-state"),
       volume_size: "5Gi",
       description: `persistent user identity state for ${project}`,
     };
@@ -154,10 +156,10 @@ function synthesizeAttachments(
   }
 
   if (backendKind === "pod") {
-    workspaceData.source = workspaceDataNetfsSource(project);
+    workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
     workspaceRuntimeState.source = {
       kind: "persistent-volume",
-      volume_ref: `${project}-workspace-runtime-state`,
+      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
       volume_size: "20Gi",
       description: `reusable workspace runtime state for ${project}`,
     };
@@ -168,10 +170,10 @@ function synthesizeAttachments(
     return;
   }
 
-  workspaceData.source = workspaceDataNetfsSource(project);
+  workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
   workspaceRuntimeState.source = {
     kind: "persistent-volume",
-    volume_ref: `${project}-workspace-runtime-state`,
+    volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
     volume_size: "20Gi",
     description: `reusable ${backendKind} workspace runtime state for ${project}`,
   };
@@ -228,7 +230,7 @@ function synthesizeConfigDoc(
     ...(doc.tooling ?? {}),
   };
   ensureService(doc, userProfileId);
-  synthesizeAttachments(doc, project, backendKind);
+  synthesizeAttachments(doc, project, userProfileId, backendKind);
   doc.profile ??= "morpheus";
   return doc;
 }

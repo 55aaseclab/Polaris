@@ -18,6 +18,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 bash ./scripts/ci-local.sh
+bash ./scripts/build-paseo-web-artifact.sh
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 

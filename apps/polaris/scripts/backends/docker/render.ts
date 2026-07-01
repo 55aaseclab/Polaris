@@ -18,6 +18,7 @@ import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
 } from "../../core/identity-layout.js";
+import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
@@ -92,7 +93,7 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
     };
   }
   const workspaceDataVolume = resolveDockerVolume({
-    fallbackName: `${workspace.identity.projectName}-workspace-data`,
+    fallbackName: `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-workspace-data`,
     source,
   });
   return {
@@ -273,11 +274,12 @@ function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
 
 export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const project = workspace.identity.projectName;
-  const serviceName = project;
-  const containerName = `${project}-docker`;
+  const runtimeScope = workspaceRuntimeScopeName(workspace.userProfile.id, project);
+  const serviceName = runtimeScope;
+  const containerName = `${runtimeScope}-docker`;
   const workspaceDataVolume = renderDockerWorkspaceDataVolume(workspace);
   const workspaceRuntimeVolume = resolveDockerVolume({
-    fallbackName: `${project}-workspace-runtime-state`,
+    fallbackName: `${runtimeScope}-workspace-runtime-state`,
     source: workspace.attachments.workspaceRuntimeState.source,
   });
   const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");

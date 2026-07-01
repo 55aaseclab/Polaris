@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
 import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
+import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import {
   evaluateDaemonStatusObservation,
   evaluatePairingObservation,
@@ -32,11 +33,13 @@ export class PodDriver implements BackendDriver {
   }
 
   async stop(workspace: WorkspaceSpec): Promise<void> {
-    runCommand("kubectl", ["-n", workspace.identity.projectName, "scale", "deployment", workspace.identity.projectName, "--replicas=0"]);
+    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+    runCommand("kubectl", ["-n", scope, "scale", "deployment", scope, "--replicas=0"]);
   }
 
   async restart(workspace: WorkspaceSpec): Promise<void> {
-    runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
+    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+    runCommand("kubectl", ["-n", scope, "rollout", "restart", "deployment", scope]);
   }
 
   async rebuild(workspace: WorkspaceSpec): Promise<void> {
@@ -56,21 +59,21 @@ export class PodDriver implements BackendDriver {
   async logs(workspace: WorkspaceSpec): Promise<void> {
     const podNameResult = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "pod", "-l", `app=${workspace.identity.projectName}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "pod", "-l", `app=${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (podNameResult.stdout || "").trim();
     if (podName) {
-      runCommand("kubectl", ["-n", workspace.identity.projectName, "logs", podName, "--tail=200"]);
+      runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "logs", podName, "--tail=200"]);
       return;
     }
-    runCommand("kubectl", ["-n", workspace.identity.projectName, "logs", "deployment/" + workspace.identity.projectName, "--tail=200"]);
+    runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "logs", "deployment/" + workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "--tail=200"]);
   }
 
   async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
     const deployment = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "deployment", workspace.identity.projectName, "-o", "json"],
+      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "-o", "json"],
       { encoding: "utf8" },
     );
     if (deployment.status !== 0 || !deployment.stdout) {
@@ -94,7 +97,7 @@ export class PodDriver implements BackendDriver {
 
     const podNameResult = spawnSync(
       "kubectl",
-      ["-n", workspace.identity.projectName, "get", "pod", "-l", `app=${workspace.identity.projectName}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "pod", "-l", `app=${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (podNameResult.stdout || "").trim();
@@ -104,7 +107,7 @@ export class PodDriver implements BackendDriver {
       if (!podName) return false;
       const result = spawnSync(
         "kubectl",
-        ["-n", workspace.identity.projectName, "exec", podName, "--", "sh", "-lc", command],
+        ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
         { encoding: "utf8" },
       );
       return result.status === 0;
@@ -113,7 +116,7 @@ export class PodDriver implements BackendDriver {
       if (!podName) return "";
       const result = spawnSync(
         "kubectl",
-        ["-n", workspace.identity.projectName, "exec", podName, "--", "sh", "-lc", command],
+        ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
         { encoding: "utf8" },
       );
       return result.status === 0 ? String(result.stdout || "") : "";
@@ -122,7 +125,7 @@ export class PodDriver implements BackendDriver {
     const observedServices = workspace.connectivity.servicePorts.length
       ? spawnSync(
           "kubectl",
-          ["-n", workspace.identity.projectName, "get", "svc", workspace.identity.projectName, "-o", "jsonpath={.metadata.name}"],
+          ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "svc", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "-o", "jsonpath={.metadata.name}"],
           { encoding: "utf8" },
         )
       : { status: 0, stdout: "", stderr: "" };
@@ -224,11 +227,11 @@ export class PodDriver implements BackendDriver {
         continue;
       }
       if (action.kind === "restart-runtime") {
-        runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
+        runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "rollout", "restart", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
         continue;
       }
       if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
-        runCommand("kubectl", ["-n", workspace.identity.projectName, "rollout", "restart", "deployment", workspace.identity.projectName]);
+        runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "rollout", "restart", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
         continue;
       }
       if (action.kind === "report-unrecoverable-drift") {

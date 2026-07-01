@@ -26,6 +26,7 @@ import {
   clearWorkspaceProvisionProgress,
 } from "../../scripts/core/portal.js";
 import { writeWorkspaceStatus } from "../../scripts/output/state-store.js";
+import { workspaceRuntimeScopeName } from "../../scripts/core/workspace-name.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
@@ -270,7 +271,7 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       target: "docker",
       baseImage: "ttl.sh/example:24h",
       runtimeKind: "docker-container",
-      runtimeRef: `${workspace}-docker`,
+      runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
       runtimeState: "stopped",
     },
     health: {

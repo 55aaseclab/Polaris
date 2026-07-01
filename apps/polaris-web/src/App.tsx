@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import {
   Link,
   Navigate,
+  Outlet,
   Route,
   Routes,
   useLocation,
@@ -148,6 +149,9 @@ type PortalShellContextValue = {
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
   refreshWorkspaces: () => void;
+  embeddedPaseoFrames: Array<{ workspaceKey: string; src: string }>;
+  cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
+  removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
 };
 
 const COPY: Record<Language, Record<string, string>> = {
@@ -171,6 +175,8 @@ const COPY: Record<Language, Record<string, string>> = {
     opening_first_workspace: "Opening the first workspace.",
     no_workspace_for_user: "No workspace exists yet for this user.",
     workspace_name: "Workspace name",
+    workspace_name_invalid: "Use 1-63 lowercase letters, numbers, or hyphens. Start and end with a letter or number, and include at least one letter.",
+    workspace_name_taken: "This workspace name already exists for the current user.",
     provisioning: "Provisioning...",
     create_workspace: "Create workspace",
     switch_driver: "Switch driver",
@@ -422,6 +428,8 @@ const COPY: Record<Language, Record<string, string>> = {
     opening_first_workspace: "正在打开首个工作空间。",
     no_workspace_for_user: "该用户还没有工作空间。",
     workspace_name: "工作空间名称",
+    workspace_name_invalid: "工作空间名称需为 1-63 个字符，只能包含小写字母、数字或连字符，首尾必须是字母或数字，且至少包含一个字母。",
+    workspace_name_taken: "这个工作空间名称已经存在。",
     provisioning: "正在准备…",
     create_workspace: "创建工作空间",
     switch_driver: "切换驱动",
@@ -884,6 +892,18 @@ function driverLabel(driver: { backend: string; profile?: string } | null): stri
     : driver.backend;
 }
 
+const WORKSPACE_NAME_INPUT_PATTERN =
+  /^(?=.{1,63}$)(?=.*[a-z])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+function validateWorkspaceNameInput(
+  value: string,
+  t: (key: string) => string,
+): string | null {
+  return WORKSPACE_NAME_INPUT_PATTERN.test(value.trim())
+    ? null
+    : t("workspace_name_invalid");
+}
+
 function translateDriverRuntimeKind(
   value: string | null | undefined,
   t: (key: string) => string,
@@ -1088,10 +1108,15 @@ function translateWorkspaceSummaryState(
   }
 
   const state = summary.status?.state;
-  if (state) {
-    return translateWorkspaceRuntimeState(state, t);
-  }
-  return t("workspace_unknown");
+  return translateWorkspaceRuntimeState(state, t);
+}
+
+function translateWorkspaceDetailState(
+  detail: PortalWorkspaceDetail | null,
+  t: (key: string) => string,
+): string {
+  const state = detail?.status?.state;
+  return translateWorkspaceRuntimeState(state, t);
 }
 
 function workspaceSummaryBadgeVariant(
@@ -1131,7 +1156,7 @@ function workspaceSummaryBadgeVariant(
   if (state === "saved" || state === "not-applied") {
     return "outline";
   }
-  return "secondary";
+  return "outline";
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1529,6 +1554,9 @@ function PortalShellLayout(props: {
   const [createWorkspaceStatus, setCreateWorkspaceStatus] = useState<PortalProvisionProgress["status"] | null>(null);
   const [cancellingWorkspace, setCancellingWorkspace] = useState(false);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
+  const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<
+    Array<{ workspaceKey: string; src: string }>
+  >([]);
   const isAdmin = mapping?.role === "admin";
   const activeUserId = String(routeUserId ?? "").trim();
   const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
@@ -1543,6 +1571,17 @@ function PortalShellLayout(props: {
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
   const currentWorkspacePane = pathParts[4] ?? "";
+  const activeFrameKey = currentWorkspaceName
+    ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
+    : "";
+  const hasActiveEmbeddedPaseoFrame = activeFrameKey
+    ? embeddedPaseoFrames.some((frame) => frame.workspaceKey === activeFrameKey)
+    : false;
+  const createWorkspaceNameError = validateWorkspaceNameInput(newWorkspaceName, t);
+  const canSubmitCreateWorkspace =
+    !creatingWorkspace
+    && newWorkspaceName.trim().length > 0
+    && !createWorkspaceNameError;
 
   async function pollWorkspaceProvisionUntilDone(
     userId: string,
@@ -1659,6 +1698,14 @@ function PortalShellLayout(props: {
     event?.preventDefault();
     const trimmedName = newWorkspaceName.trim();
     if (!activeUserId || !trimmedName || creatingWorkspace) {
+      return;
+    }
+    if (createWorkspaceNameError) {
+      setCreateWorkspaceError(createWorkspaceNameError);
+      return;
+    }
+    if ((sidebarWorkspaces ?? []).some((entry) => entry.name === trimmedName)) {
+      setCreateWorkspaceError(t("workspace_name_taken"));
       return;
     }
     setCreatingWorkspace(true);
@@ -1843,7 +1890,65 @@ function PortalShellLayout(props: {
     refreshWorkspaces: () => {
       setWorkspaceRefreshTick((current) => current + 1);
     },
+    embeddedPaseoFrames,
+    cacheEmbeddedPaseoFrame: (workspaceKey, src) => {
+      setEmbeddedPaseoFrames((current) => {
+        const existingIndex = current.findIndex((entry) => entry.workspaceKey === workspaceKey);
+        if (existingIndex === -1) {
+          return [...current, { workspaceKey, src }];
+        }
+        const existing = current[existingIndex];
+        if (existing?.src === src) {
+          return current;
+        }
+        return current.map((entry, index) =>
+          index === existingIndex
+            ? { ...entry, src }
+            : entry,
+        );
+      });
+    },
+    removeEmbeddedPaseoFrame: (workspaceKey) => {
+      setEmbeddedPaseoFrames((current) =>
+        current.filter((entry) => entry.workspaceKey !== workspaceKey)
+      );
+    },
   };
+
+  useEffect(() => {
+    setEmbeddedPaseoFrames([]);
+  }, [activeUserId]);
+
+  useEffect(() => {
+    if (!activeUserId || !sidebarWorkspaces?.length) {
+      return;
+    }
+    const nextFrames = new Map<string, string>();
+    for (const workspace of sidebarWorkspaces) {
+      const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
+      const scope = workspacePaseoScope(activeUserId, workspace.name);
+      const src = workspace.reconnectTarget
+        ?? normalizePaseoPortalUrl(workspace.liveTarget, scope);
+      if (src) {
+        nextFrames.set(workspaceKey, src);
+      }
+    }
+    setEmbeddedPaseoFrames((current) => {
+      const next = current
+        .filter((entry) => nextFrames.has(entry.workspaceKey))
+        .map((entry) => ({
+          workspaceKey: entry.workspaceKey,
+          src: nextFrames.get(entry.workspaceKey) ?? entry.src,
+        }));
+      const seen = new Set(next.map((entry) => entry.workspaceKey));
+      for (const [workspaceKey, src] of nextFrames.entries()) {
+        if (!seen.has(workspaceKey)) {
+          next.push({ workspaceKey, src });
+        }
+      }
+      return next;
+    });
+  }, [activeUserId, sidebarWorkspaces]);
 
   return (
     <PortalShellContext.Provider value={shellContextValue}>
@@ -1889,9 +1994,7 @@ function PortalShellLayout(props: {
                     </div>
                   )}
                   {sidebarWorkspaces?.map((workspace) => {
-                    const active = location.pathname.includes(
-                      `/workspaces/${encodeURIComponent(workspace.name)}`,
-                    );
+                    const active = currentWorkspaceName === workspace.name;
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
@@ -2039,7 +2142,32 @@ function PortalShellLayout(props: {
               </Button>
             ) : null}
           </header>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+          {embeddedPaseoFrames.length > 0 ? (
+            <div
+              className={hasActiveEmbeddedPaseoFrame
+                ? "-mx-4 -my-4 relative flex min-h-0 flex-1 overflow-hidden p-4 sm:-mx-6 sm:-my-6 sm:p-6"
+                : "pointer-events-none absolute inset-0 overflow-hidden opacity-0"}
+              aria-hidden={hasActiveEmbeddedPaseoFrame ? undefined : true}
+            >
+          {embeddedPaseoFrames.map((frame) => {
+            return (
+              <iframe
+                key={frame.workspaceKey}
+                title={`${frame.workspaceKey} paseo`}
+                src={frame.src}
+                className={frame.workspaceKey === activeFrameKey
+                  ? "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"
+                  : "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 opacity-0 pointer-events-none sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"}
+              />
+            );
+              })}
+            </div>
+          ) : null}
+          <div
+            className={currentWorkspaceName && currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame
+              ? "hidden"
+              : "flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"}
+          >
             {props.children}
           </div>
         </SidebarInset>
@@ -2062,11 +2190,17 @@ function PortalShellLayout(props: {
                   <Input
                     id="new-workspace-name-mobile"
                     value={newWorkspaceName}
-                    onChange={(event) => setNewWorkspaceName(event.target.value)}
+                    onChange={(event) => {
+                      setNewWorkspaceName(event.target.value);
+                      setCreateWorkspaceError(null);
+                    }}
                     placeholder={t("workspace_example")}
                     autoComplete="off"
                     disabled={creatingWorkspace}
                   />
+                  {newWorkspaceName.trim() && createWorkspaceNameError ? (
+                    <p className="text-sm text-destructive">{createWorkspaceNameError}</p>
+                  ) : null}
                 </div>
                 <label className="flex items-center gap-3 text-sm text-muted-foreground">
                   <input
@@ -2122,7 +2256,7 @@ function PortalShellLayout(props: {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={creatingWorkspace || !newWorkspaceName.trim()}
+                    disabled={!canSubmitCreateWorkspace}
                   >
                     {creatingWorkspace ? t("provisioning") : t("create_workspace")}
                   </Button>
@@ -2151,11 +2285,17 @@ function PortalShellLayout(props: {
                   <Input
                     id="new-workspace-name"
                     value={newWorkspaceName}
-                    onChange={(event) => setNewWorkspaceName(event.target.value)}
+                    onChange={(event) => {
+                      setNewWorkspaceName(event.target.value);
+                      setCreateWorkspaceError(null);
+                    }}
                     placeholder={t("workspace_example")}
                     autoComplete="off"
                     disabled={creatingWorkspace}
                   />
+                  {newWorkspaceName.trim() && createWorkspaceNameError ? (
+                    <p className="text-sm text-destructive">{createWorkspaceNameError}</p>
+                  ) : null}
                 </div>
                 <label className="flex items-center gap-3 text-sm text-muted-foreground">
                   <input
@@ -2211,7 +2351,7 @@ function PortalShellLayout(props: {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={creatingWorkspace || !newWorkspaceName.trim()}
+                    disabled={!canSubmitCreateWorkspace}
                   >
                     {creatingWorkspace ? t("provisioning") : t("create_workspace")}
                   </Button>
@@ -2377,21 +2517,26 @@ function OverviewPage() {
   );
 }
 
+function PortalLayout() {
+  const { data: users } = useAsyncValue(listUsers, []);
+  return (
+    <PortalShell users={users ?? []}>
+      <Outlet />
+    </PortalShell>
+  );
+}
+
 function WorkspaceIndexPage() {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const { userId = "" } = useParams();
-  const { data: users } = useAsyncValue(listUsers, []);
-
   return (
-    <PortalShell users={users ?? []}>
-      <WorkspaceIndexContent
-        userId={userId}
-        onOpenCredentials={() => {
-          navigate(`/users/${encodeURIComponent(userId)}/credentials`);
-        }}
-      />
-    </PortalShell>
+    <WorkspaceIndexContent
+      userId={userId}
+      onOpenCredentials={() => {
+        navigate(`/users/${encodeURIComponent(userId)}/credentials`);
+      }}
+    />
   );
 }
 
@@ -2548,21 +2693,17 @@ function AdminPage() {
 
   if (mappingLoading) {
     return (
-      <PortalShell users={users ?? []}>
-        <div className="grid w-full gap-6">
-          <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
-        </div>
-      </PortalShell>
+      <div className="grid w-full gap-6">
+        <p className="text-sm text-muted-foreground">{t("loading_users")}</p>
+      </div>
     );
   }
 
   if (mappingError) {
     return (
-      <PortalShell users={users ?? []}>
-        <div className="grid w-full gap-6">
-          <p className="text-sm text-destructive">{mappingError}</p>
-        </div>
-      </PortalShell>
+      <div className="grid w-full gap-6">
+        <p className="text-sm text-destructive">{mappingError}</p>
+      </div>
     );
   }
 
@@ -2596,9 +2737,8 @@ function AdminPage() {
   }
 
   return (
-    <PortalShell users={users ?? []}>
-      <div className="grid w-full gap-6">
-        <div className="grid gap-4">
+    <div className="grid w-full gap-6">
+      <div className="grid gap-4">
           <div className="min-w-0">
             <div className="min-w-0">
               <div className="text-sm font-medium">{t("manage_users")}</div>
@@ -2714,9 +2854,8 @@ function AdminPage() {
               </tbody>
             </table>
           </div>
-        </div>
       </div>
-    </PortalShell>
+    </div>
   );
 }
 
@@ -2732,12 +2871,7 @@ function EmptyPane(props: { title: string; description: string }) {
 }
 
 function WorkspaceDetailPage() {
-  const { data: users } = useAsyncValue(listUsers, []);
-  return (
-    <PortalShell users={users ?? []}>
-      <WorkspaceDetailContent />
-    </PortalShell>
-  );
+  return <WorkspaceDetailContent />;
 }
 
 function WorkspaceDetailContent() {
@@ -2745,7 +2879,12 @@ function WorkspaceDetailContent() {
   const { userId = "", workspaceName = "" } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const { refreshWorkspaces } = usePortalShell();
+  const {
+    cacheEmbeddedPaseoFrame,
+    embeddedPaseoFrames,
+    removeEmbeddedPaseoFrame,
+    refreshWorkspaces,
+  } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
@@ -2759,6 +2898,8 @@ function WorkspaceDetailContent() {
     () => listCredentials(userId),
     [userId],
   );
+  const workspaceData = data?.name === workspaceName ? data : null;
+  const workspaceLoading = loading || (!!data && !workspaceData);
   const [driver, setDriver] = useState("");
   const [switching, setSwitching] = useState(false);
   const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
@@ -2769,16 +2910,16 @@ function WorkspaceDetailContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const pathParts = location.pathname.split("/").filter(Boolean);
   const currentPane = pathParts[4] ?? "";
-  const assets = data?.status?.assets;
+  const assets = workspaceData?.status?.assets;
   const agentCredentials = (credentials ?? []).filter((credential) =>
     credential.purposes.includes("agent-auth")
   );
-  const liveStatus = data?.status?.credentials?.live;
+  const liveStatus = workspaceData?.status?.credentials?.live;
   const liveSelections = liveStatus?.selectedByHarness ?? {};
   const harnessOptions = Array.from(
     new Set(
       [
-        ...(liveStatus?.supportedHarnesses ?? data?.status?.paseo?.supportedHarnesses ?? []),
+        ...(liveStatus?.supportedHarnesses ?? workspaceData?.status?.paseo?.supportedHarnesses ?? []),
         ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
       ],
     ),
@@ -2789,19 +2930,20 @@ function WorkspaceDetailContent() {
   const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
   const embeddedPortalUrl =
-    data?.reconnectTarget
+    workspaceData?.reconnectTarget
     ?? buildPaseoReconnectUrl(
-      data?.status?.paseo?.serverId,
-      data?.liveTarget ?? data?.status?.paseo?.liveTarget,
+      workspaceData?.status?.paseo?.serverId,
+      workspaceData?.liveTarget ?? workspaceData?.status?.paseo?.liveTarget,
       paseoScope,
     );
-  const runtimeRunning = data?.status?.state === "ready";
+  const workspaceFrameKey = `${userId.trim()}:${workspaceName.trim()}`;
+  const runtimeRunning = workspaceData?.status?.state === "ready";
   const persistedWorkspaceAction =
-    data?.status?.state === "starting"
+    workspaceData?.status?.state === "starting"
       ? "starting"
-      : data?.status?.state === "stopping"
+      : workspaceData?.status?.state === "stopping"
         ? "stopping"
-        : data?.status?.state === "archiving"
+        : workspaceData?.status?.state === "archiving"
           ? "deleting"
           : null;
   const effectiveRuntimeRunning =
@@ -2822,7 +2964,7 @@ function WorkspaceDetailContent() {
       ? t("workspace_starting")
       : stopping
         ? t("stopping")
-        : translateWorkspaceRuntimeState(data?.status?.state, t);
+        : translateWorkspaceDetailState(workspaceData, t);
   const evolutionSections: AssetSection[] = assets?.evolutionFiles
     ? [
         {
@@ -2845,10 +2987,21 @@ function WorkspaceDetailContent() {
     : [];
 
   useEffect(() => {
-    if (data?.selectedDriver) {
-      setDriver(driverLabel(data.selectedDriver));
+    if (workspaceData?.selectedDriver) {
+      setDriver(driverLabel(workspaceData.selectedDriver));
     }
-  }, [data]);
+  }, [workspaceData]);
+
+  useEffect(() => {
+    if (workspaceLoading && !workspaceData) {
+      return;
+    }
+    if (!embeddedPortalUrl || !effectiveRuntimeRunning) {
+      removeEmbeddedPaseoFrame(workspaceFrameKey);
+      return;
+    }
+    cacheEmbeddedPaseoFrame(workspaceFrameKey, embeddedPortalUrl);
+  }, [effectiveRuntimeRunning, embeddedPortalUrl, workspaceData, workspaceFrameKey, workspaceLoading]);
 
   useEffect(() => {
     setPaseoCredentialSelections((current) => {
@@ -2901,7 +3054,7 @@ function WorkspaceDetailContent() {
   ]);
 
   useEffect(() => {
-    if (!data?.progress || data.progress.done) {
+    if (!workspaceData?.progress || workspaceData.progress.done) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -2910,7 +3063,7 @@ function WorkspaceDetailContent() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [data?.progress?.done, data?.progress?.phase, workspaceName, userId]);
+  }, [workspaceData?.progress?.done, workspaceData?.progress?.phase, workspaceName, userId]);
 
   useEffect(() => {
     if (!workspaceAction) {
@@ -3044,7 +3197,7 @@ function WorkspaceDetailContent() {
               <SelectValue placeholder={t("select_driver")} />
             </SelectTrigger>
             <SelectContent>
-              {(data?.availableDrivers ?? []).map((item) => {
+              {(workspaceData?.availableDrivers ?? []).map((item) => {
                 const label = driverLabel(item);
                 return (
                   <SelectItem key={label} value={label}>
@@ -3194,7 +3347,7 @@ function WorkspaceDetailContent() {
             <div className="min-w-0">
               <div className="text-sm font-medium">{t("switch_driver")}</div>
               <div className="text-sm text-muted-foreground">
-                {data?.status?.driver?.target ?? driverLabel(data?.selectedDriver ?? null)}
+                {workspaceData?.status?.driver?.target ?? driverLabel(workspaceData?.selectedDriver ?? null)}
               </div>
             </div>
             {renderDriverSwitchControls()}
@@ -3262,11 +3415,11 @@ function WorkspaceDetailContent() {
   }
 
   function renderPane(): ReactNode {
-    if (loading && !data) {
+    if (workspaceLoading && !workspaceData) {
       return null;
     }
 
-    if (!data) {
+    if (!workspaceData) {
       return (
         <EmptyPane
           title={t("empty_pane")}
@@ -3285,25 +3438,18 @@ function WorkspaceDetailContent() {
     }
 
     if (currentPane === "") {
-      return embeddedPortalUrl
-        ? null
-        : (
-            <EmptyPane
-              title={workspaceName}
-              description={t("unknown")}
-            />
-          );
+      return null;
     }
 
     if (currentPane === "paseo") {
       const liveTarget =
-        data.reconnectTarget
+        workspaceData.reconnectTarget
         ?? buildPaseoReconnectUrl(
-          data.status?.paseo?.serverId,
-          data.liveTarget ?? data.status?.paseo?.liveTarget,
+          workspaceData.status?.paseo?.serverId,
+          workspaceData.liveTarget ?? workspaceData.status?.paseo?.liveTarget,
           paseoScope,
         );
-      const driverStatus = data.status?.driver;
+      const driverStatus = workspaceData.status?.driver;
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
           <div className="grid gap-6">
@@ -3327,7 +3473,7 @@ function WorkspaceDetailContent() {
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
                     <span className="break-all">
-                      {data.status?.paseo?.serverId ?? t("unknown")}
+                      {workspaceData.status?.paseo?.serverId ?? t("unknown")}
                     </span>
                   </div>
                 </div>
@@ -3337,7 +3483,7 @@ function WorkspaceDetailContent() {
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
                     <span className="break-all">
-                      {data.status?.paseo?.daemonAddress ?? t("unknown")}
+                      {workspaceData.status?.paseo?.daemonAddress ?? t("unknown")}
                     </span>
                   </div>
                 </div>
@@ -3357,8 +3503,8 @@ function WorkspaceDetailContent() {
                   </div>
                   <div className="flex w-full min-w-0 flex-col items-start gap-3 sm:w-[28rem] sm:items-end">
                     <div className="flex w-full flex-wrap justify-start gap-2 sm:justify-end">
-                      {(data.status?.paseo?.supportedHarnesses ?? []).length > 0
-                        ? data.status?.paseo?.supportedHarnesses?.map((item) => (
+                      {(workspaceData.status?.paseo?.supportedHarnesses ?? []).length > 0
+                        ? workspaceData.status?.paseo?.supportedHarnesses?.map((item) => (
                             <Badge key={item} variant="secondary">{item}</Badge>
                           ))
                         : <span className="text-sm text-muted-foreground">{t("unknown")}</span>}
@@ -3379,7 +3525,7 @@ function WorkspaceDetailContent() {
                     <div className="text-sm font-medium">{t("current_driver")}</div>
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    {driverStatus?.target ?? driverLabel(data.selectedDriver)}
+                    {driverStatus?.target ?? driverLabel(workspaceData.selectedDriver)}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -3423,8 +3569,8 @@ function WorkspaceDetailContent() {
                   {t("evolution_memory")}
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {data.status?.evolution
-                    ? `${data.status.evolution.artifactCount} ${t("evolution_assets")}`
+                  {workspaceData.status?.evolution
+                    ? `${workspaceData.status.evolution.artifactCount} ${t("evolution_assets")}`
                     : t("no_assets")}
                 </div>
               </div>
@@ -3455,7 +3601,7 @@ function WorkspaceDetailContent() {
     );
   }
 
-  if (loading && !data) {
+  if (workspaceLoading && !workspaceData) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
         <p className="text-sm text-muted-foreground">{t("loading_workspace")}</p>
@@ -3467,19 +3613,6 @@ function WorkspaceDetailContent() {
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       {error && <p className="text-sm text-destructive">{error}</p>}
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-      {embeddedPortalUrl ? (
-        <div
-          className={currentPane === ""
-            ? "-mx-4 -my-4 flex min-h-0 flex-1 overflow-hidden sm:-mx-6 sm:-my-6"
-            : "hidden"}
-        >
-          <iframe
-            title={`${workspaceName} paseo`}
-            src={embeddedPortalUrl}
-            className="h-full min-h-0 w-full border-0"
-          />
-        </div>
-      ) : null}
       {currentPane === ""
         ? renderPane()
         : (
@@ -3616,7 +3749,6 @@ function credentialPathsCell(
 function CredentialManagerContent() {
   const { t } = useLanguage();
   const { userId = "" } = useParams();
-  const { data: users } = useAsyncValue(listUsers, []);
   const [reloadKey, setReloadKey] = useState(0);
   const {
     data: credentials,
@@ -3724,8 +3856,7 @@ function CredentialManagerContent() {
   }
 
   return (
-    <PortalShell users={users ?? []}>
-      <div className="grid w-full min-w-0 gap-6">
+    <div className="grid w-full min-w-0 gap-6">
         <div className="grid gap-4">
           {(credentialsLoading || !credentialCatalog) && (
             <p className="text-sm text-muted-foreground">{t("loading_credentials")}</p>
@@ -4020,7 +4151,6 @@ function CredentialManagerContent() {
           </SheetContent>
         </Sheet>
       </div>
-    </PortalShell>
   );
 }
 
@@ -4044,12 +4174,9 @@ function LegacyWorkspacePaneRedirect() {
 
 function SettingsPage() {
   const { language, setLanguage, t } = useLanguage();
-  const { data: users } = useAsyncValue(listUsers, []);
-
   return (
-    <PortalShell users={users ?? []}>
-      <div className="grid w-full gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="grid w-full gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium">{t("language")}</div>
             <div className="text-sm text-muted-foreground">{t("settings_desc")}</div>
@@ -4067,7 +4194,6 @@ function SettingsPage() {
           </div>
         </div>
       </div>
-    </PortalShell>
   );
 }
 
@@ -4275,16 +4401,18 @@ export default function App(props: {
                   <ApiAuthBridge />
                   <Routes>
                     <Route path="/" element={<OverviewPage />} />
-                    <Route path="/users/:userId/profile" element={<ProfilePage />} />
-                    <Route path="/users/:userId/admin" element={<AdminPage />} />
-                    <Route path="/users/:userId/settings" element={<SettingsPage />} />
-                    <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
-                    <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
-                    <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
-                    <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
-                    <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
-                    <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
-                    <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+                    <Route element={<PortalLayout />}>
+                      <Route path="/users/:userId/profile" element={<ProfilePage />} />
+                      <Route path="/users/:userId/admin" element={<AdminPage />} />
+                      <Route path="/users/:userId/settings" element={<SettingsPage />} />
+                      <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
+                      <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
+                      <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
+                      <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
+                    </Route>
                   </Routes>
                 </>
               </AuthGate>
