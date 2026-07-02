@@ -102,8 +102,13 @@ The portal now includes an admin view for user-level access control.
 That admin flow can:
 
 - review portal users
+- switch between `User`, `Credentials`, `Workspaces`, and `Paseo` tabs for the
+  selected Polaris user
 - inspect Clerk mappings
 - surface mapping-only, profile-only, and missing-user-root integrity states
+- inspect per-workspace Paseo reconnect metadata from the user workspace list
+- run `paseo daemon status --json` on demand for a workspace
+- restart a workspace-local Paseo daemon from the admin surface
 - delete a Polaris user and its stored Clerk mapping together
 - roll back the Polaris-side delete if filesystem cleanup fails partway through
 - show admin role as configured state, not as an in-portal workflow

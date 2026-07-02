@@ -5,16 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "${ROOT_DIR}"
 
-echo "[1/5] typecheck"
+echo "[1/7] typecheck"
 pnpm run check
 
-echo "[2/5] build polaris"
+echo "[2/7] build polaris"
 pnpm --filter polaris run build
 
-echo "[3/5] build polaris-web"
+echo "[3/7] build polaris-web"
 pnpm --filter polaris-web run build
 
-echo "[4/5] shell syntax checks"
+echo "[4/7] shell syntax checks"
 bash -n scripts/run-polaris-local-stack-service.sh
 bash -n scripts/ci-local.sh
 bash -n scripts/provision-remote.sh
@@ -27,10 +27,13 @@ bash -n scripts/rollback-polaris.sh
 bash -n scripts/lib/polaris-bluegreen.sh
 bash -n scripts/lib/paseo-local.sh
 
-echo "[5/5] docker compose config"
+echo "[5/7] local stack regression tests"
+node --test scripts/tests/local-stack-service.test.mjs
+
+echo "[6/7] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
 
-echo "[6/6] paseo artifact verification"
+echo "[7/7] paseo artifact verification"
 bash ./scripts/build-paseo-web-artifact.sh >/dev/null
 
 temp_blue_env="$(mktemp)"

@@ -417,7 +417,7 @@ test("portal provisioning progress persists across reads", () => {
   }
 });
 
-test("portal workspace detail refreshes status before returning", async () => {
+test("portal workspace detail returns cached detail without triggering a backend refresh", async () => {
   await withFakePath(
     {
       docker: "#!/bin/sh\nexit 0\n",
@@ -430,7 +430,7 @@ test("portal workspace detail refreshes status before returning", async () => {
         const detail = await getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
         assert.equal(detail.name, "demo");
         await new Promise((resolve) => setTimeout(resolve, 200));
-        assert.ok(readCommandLog().length > 0);
+        assert.equal(readCommandLog().length, 0);
       } finally {
         if (previousSelection) {
           writeWorkspaceDriverSelection("demo", previousSelection, DEMO_USER_ID);
@@ -453,7 +453,9 @@ test("portal workspace list refreshes status before returning", async () => {
       try {
         writeWorkspaceDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
         const workspaces = await listPortalWorkspaces(DEMO_USER_ID);
-        assert.ok(workspaces.some((workspace) => workspace.name === "demo"));
+        const demoWorkspace = workspaces.find((workspace) => workspace.name === "demo");
+        assert.ok(demoWorkspace);
+        assert.ok(demoWorkspace.status);
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.ok(readCommandLog().length > 0);
       } finally {
@@ -1209,8 +1211,7 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
     assert.equal(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml")), true);
     assert.equal(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml")), true);
 
-    const profileAfter = (yaml.load(fs.readFileSync(profileFile, "utf8")) ?? {}) as { workspaces?: string[] };
-    assert.ok(profileAfter.workspaces?.includes(workspace));
+    assert.ok(listPortalWorkspaces(userId).some((entry) => entry.name === workspace));
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     clearWorkspaceProvisionProgress(userId, workspace);
@@ -1843,21 +1844,9 @@ test("portal service archives a stopped workspace and removes it from the active
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
-  const portalStateRoot = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    userId,
-    ".portal",
-    "workspaces",
-    workspace,
-  );
+  const portalStateRoot = path.join(workspaceRoot, ".portal");
   const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
   const originalProfile = fs.readFileSync(profileFile, "utf8");
-  const profileData = (yaml.load(originalProfile) ?? {}) as Record<string, unknown>;
-  const workspaces = Array.isArray(profileData.workspaces)
-    ? profileData.workspaces.map((value) => String(value)).filter(Boolean)
-    : [];
 
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.mkdirSync(portalStateRoot, { recursive: true });
@@ -1877,8 +1866,6 @@ test("portal service archives a stopped workspace and removes it from the active
     }, null, 2) + "\n",
     "utf8",
   );
-  profileData.workspaces = [...workspaces, workspace].sort();
-  fs.writeFileSync(profileFile, yaml.dump(profileData, { lineWidth: 120, noRefs: true }), "utf8");
 
   try {
     const payload = await deletePortalWorkspace(userId, workspace);
@@ -1887,11 +1874,6 @@ test("portal service archives a stopped workspace and removes it from the active
 
     assert.equal(fs.existsSync(workspaceRoot), false);
     assert.equal(fs.existsSync(portalStateRoot), false);
-    const profileAfter = (yaml.load(fs.readFileSync(profileFile, "utf8")) ?? {}) as Record<string, unknown>;
-    const remaining = Array.isArray(profileAfter.workspaces)
-      ? profileAfter.workspaces.map((value) => String(value))
-      : [];
-    assert.equal(remaining.includes(workspace), false);
     assert.ok(listArchivedWorkspaces(userId).some((entry) => entry.workspaceName === workspace));
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -1901,6 +1883,70 @@ test("portal service archives a stopped workspace and removes it from the active
       force: true,
     });
     fs.writeFileSync(profileFile, originalProfile, "utf8");
+  }
+});
+
+test("portal service refreshes the real status when archive fails for a running workspace", async () => {
+  const userId = uniqueName("portal-archive-running-user");
+  const workspace = uniqueName("portal-archive-running");
+  try {
+    await createUserCommand([userId, "--name", "Portal Archive Running User", "--email", `${userId}@polaris.local`]);
+    await createCommand([workspace, "--user", userId]);
+    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
+    writeWorkspaceStatus({
+      project: workspace,
+      driver: {
+        backend: "docker",
+        baseImage: "ttl.sh/example:24h",
+        runtimeKind: "docker-container",
+        runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
+      },
+      health: {
+        backendLiveness: "archiving",
+        workspaceReadiness: "not-ready",
+        reason: "stale archive status",
+      },
+      details: {},
+    }, userId);
+
+    await withFakePath(
+      {
+        docker: `#!/bin/sh
+if [ "$1" = "compose" ] && [ "$4" = "ps" ]; then
+  printf '%s\n' '{"Name":"${workspaceRuntimeScopeName(userId, workspace)}-docker","State":"running"}'
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  printf '%s\n' '{"State":{"Running":true}}'
+  exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  exit 0
+fi
+exit 0
+`,
+        kubectl: "#!/bin/sh\nexit 0\n",
+      },
+      async () => {
+        await assert.rejects(
+          deletePortalWorkspace(userId, workspace),
+          /Stop it before deleting/,
+        );
+      },
+    );
+
+    const nextStatus = readWorkspaceStatus(userId, workspace);
+    assert.equal(nextStatus?.health?.backendLiveness, "running");
+    assert.equal(nextStatus?.health?.workspaceReadiness, "ready");
+    assert.equal(nextStatus?.health?.reason, undefined);
+  } finally {
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), {
+      force: true,
+    });
   }
 });
 

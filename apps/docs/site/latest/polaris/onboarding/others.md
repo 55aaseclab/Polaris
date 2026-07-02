@@ -25,6 +25,10 @@ pnpm --filter polaris-web exec vite --host 0.0.0.0
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
+That wrapper also starts the Docker bridge proxy for the local executor, so
+workspace containers can report runtime status and Paseo pairing metadata back
+through `host.docker.internal:8788`.
+
 ## Stack Topology
 
 Polaris has four runtime pieces:

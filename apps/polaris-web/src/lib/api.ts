@@ -202,6 +202,30 @@ export interface PortalWorkspaceAgentBindingResult {
   }>;
 }
 
+export interface PortalWorkspacePaseoDiagnostic {
+  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+  reconnectTarget: string | null;
+  liveTarget: string | null;
+  persistedServerId: string | null;
+  pairingServerId: string | null;
+  pairingUrl: string | null;
+  daemonStatusRaw: string | null;
+  daemonStatus: {
+    serverId: string;
+    localDaemon: string;
+    connectedDaemon: string;
+  } | null;
+  daemonObserved: {
+    observed: boolean;
+    detail: string;
+  };
+  pairingObserved: {
+    observed: boolean;
+    detail: string;
+    url?: string;
+  };
+}
+
 export interface PortalCredentialSummary {
   id: string;
   kind: string;
@@ -553,6 +577,18 @@ export async function deleteWorkspace(
   );
 }
 
+export async function deleteArchivedWorkspace(
+  userId: string,
+  archiveId: string,
+): Promise<{ deleted: true; archiveId: string }> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/archives/${encodeURIComponent(archiveId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export async function listAdminUsers(): Promise<PortalAdminUserSummary[]> {
   const payload = await apiFetch<{ users: PortalAdminUserSummary[] }>(
     "/admin/users",
@@ -584,35 +620,23 @@ export async function startWorkspace(
   );
 }
 
-export async function bindWorkspacePaseoCredential(
+export async function getWorkspacePaseoDiagnostic(
   userId: string,
   workspace: string,
-  input: {
-    credentialId: string;
-    driver?: string;
-  },
-): Promise<PortalWorkspaceAgentBindingResult> {
-  return apiFetch<PortalWorkspaceAgentBindingResult>(
-    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/bind`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
+): Promise<PortalWorkspacePaseoDiagnostic> {
+  return apiFetch<PortalWorkspacePaseoDiagnostic>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/status`,
   );
 }
 
-export async function unbindWorkspacePaseoCredential(
+export async function restartWorkspacePaseoDaemon(
   userId: string,
   workspace: string,
-  input?: {
-    driver?: string;
-  },
-): Promise<PortalWorkspaceAgentBindingResult> {
-  return apiFetch<PortalWorkspaceAgentBindingResult>(
-    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/unbind`,
+): Promise<{ restarted: true; diagnostic: PortalWorkspacePaseoDiagnostic }> {
+  return apiFetch<{ restarted: true; diagnostic: PortalWorkspacePaseoDiagnostic }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/restart`,
     {
       method: "POST",
-      body: JSON.stringify(input ?? {}),
     },
   );
 }

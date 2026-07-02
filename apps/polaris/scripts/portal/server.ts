@@ -19,14 +19,15 @@ import {
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
-  bindPortalWorkspaceAgent,
   createPortalCredential,
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
   deletePortalUser,
+  permanentlyDeletePortalArchivedWorkspace,
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalWorkspace,
+  getPortalWorkspacePaseoDiagnostic,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
@@ -34,11 +35,11 @@ import {
   readUserPortalCredentialPreview,
   readUserPortalWorkspaceAssetPreview,
   queueProvisionWorkspace,
+  restartPortalWorkspacePaseoDaemon,
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
-  unbindPortalWorkspaceAgent,
   createPortalUser,
   updatePortalUserProfile,
 } from "./service.js";
@@ -168,6 +169,15 @@ async function handleWorkspaceDelete(
   sendJson(res, 200, result);
 }
 
+async function handleArchivedWorkspaceDelete(
+  res: ServerResponse,
+  userId: string,
+  archiveId: string,
+): Promise<void> {
+  const result = await permanentlyDeletePortalArchivedWorkspace(userId, archiveId);
+  sendJson(res, 200, result);
+}
+
 async function handleWorkspaceStop(
   res: ServerResponse,
   userId: string,
@@ -213,44 +223,26 @@ function handleWorkspacePreview(
   }
 }
 
-async function handleWorkspacePaseoBind(
-  req: IncomingMessage,
+async function handleWorkspacePaseoStatus(
   res: ServerResponse,
   userId: string,
   workspace: string,
 ): Promise<void> {
-  const body = await readBody(req);
-  const credentialId = body.credentialId?.trim();
-  if (!credentialId) {
-    badRequest(res, "credentialId is required");
-    return;
-  }
-  const driver = body.driver?.trim()
-    ? parsePortalDriverTarget(body.driver)
-    : undefined;
-  const result = await bindPortalWorkspaceAgent({
+  const result = await getPortalWorkspacePaseoDiagnostic({
     userId,
     workspace,
-    credentialId,
-    driver,
   });
   sendJson(res, 200, result);
 }
 
-async function handleWorkspacePaseoUnbind(
-  req: IncomingMessage,
+async function handleWorkspacePaseoRestart(
   res: ServerResponse,
   userId: string,
   workspace: string,
 ): Promise<void> {
-  const body = await readBody(req);
-  const driver = body.driver?.trim()
-    ? parsePortalDriverTarget(body.driver)
-    : undefined;
-  const result = await unbindPortalWorkspaceAgent({
+  const result = await restartPortalWorkspacePaseoDaemon({
     userId,
     workspace,
-    driver,
   });
   sendJson(res, 200, result);
 }
@@ -610,6 +602,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           await handleWorkspaceDelete(res, routeUserId, workspace);
           return;
         }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[4] === "archives" && req.method === "DELETE") {
+          await handleArchivedWorkspaceDelete(res, routeUserId, decodeURIComponent(segments[5]));
+          return;
+        }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "switch" && req.method === "POST") {
           await handleWorkspaceSwitch(req, res, routeUserId, workspace);
           return;
@@ -626,12 +622,12 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           await handleWorkspaceRefresh(res, routeUserId, workspace);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "bind" && req.method === "POST") {
-          await handleWorkspacePaseoBind(req, res, routeUserId, workspace);
+        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "status" && req.method === "GET") {
+          await handleWorkspacePaseoStatus(res, routeUserId, workspace);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "unbind" && req.method === "POST") {
-          await handleWorkspacePaseoUnbind(req, res, routeUserId, workspace);
+        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "restart" && req.method === "POST") {
+          await handleWorkspacePaseoRestart(res, routeUserId, workspace);
           return;
         }
         if (

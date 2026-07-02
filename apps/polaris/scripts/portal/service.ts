@@ -42,16 +42,18 @@ import {
 import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
-  bindPortalWorkspaceAgent as bindPortalWorkspaceAgentExecutor,
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
+  getPortalWorkspacePaseoDiagnostic as getPortalWorkspacePaseoDiagnosticExecutor,
+  permanentlyDeletePortalArchivedWorkspace as permanentlyDeletePortalArchivedWorkspaceExecutor,
+  permanentlyDeletePortalWorkspace as permanentlyDeletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
   reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
+  restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
   startPortalWorkspace as startPortalWorkspaceExecutor,
   stopPortalWorkspace as stopPortalWorkspaceExecutor,
   switchPortalWorkspace as switchPortalWorkspaceExecutor,
   switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
-  unbindPortalWorkspaceAgent as unbindPortalWorkspaceAgentExecutor,
 } from "../executor/client.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -83,10 +85,7 @@ async function refreshPortalWorkspaceStatus(
 
 export async function listPortalWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {
   const workspaces = listOwnedWorkspaces(userId);
-  return workspaces.map((workspace) => ({
-    ...loadWorkspaceSummary(userId, workspace),
-    status: null,
-  }));
+  return workspaces.map((workspace) => loadWorkspaceSummary(userId, workspace));
 }
 
 export function listPortalArchivedWorkspaces(
@@ -139,7 +138,7 @@ export function listPortalAdminUsers(): Array<
         id: userId,
         name: "",
         email: "",
-        workspaces: [],
+        workspaces: listOwnedWorkspaces(userId),
       };
       const baseAccess = access ?? {
         polarisUserId: userId,
@@ -165,15 +164,6 @@ export async function getPortalWorkspaceDetail(
   userId: string,
   workspace: string,
 ) : Promise<PortalWorkspaceDetail> {
-  const current = loadWorkspaceSummary(userId, workspace);
-  if (current.status?.health.backendLiveness === "creating") {
-    return loadWorkspaceDetail(userId, workspace);
-  }
-  try {
-    await refreshPortalWorkspaceStatus(userId, workspace);
-  } catch {
-    // Fall back to the last readable detail instead of failing the whole request.
-  }
   return loadWorkspaceDetail(userId, workspace);
 }
 
@@ -312,6 +302,20 @@ export async function deletePortalWorkspace(
   return deletePortalWorkspaceExecutor({ userId, workspace });
 }
 
+export async function permanentlyDeletePortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ deleted: true; workspace: string }> {
+  return permanentlyDeletePortalWorkspaceExecutor({ userId, workspace });
+}
+
+export async function permanentlyDeletePortalArchivedWorkspace(
+  userId: string,
+  archiveId: string,
+): Promise<{ deleted: true; archiveId: string }> {
+  return permanentlyDeletePortalArchivedWorkspaceExecutor({ userId, archiveId });
+}
+
 export async function stopPortalWorkspace(
   userId: string,
   workspace: string,
@@ -371,31 +375,18 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   };
 }
 
-export async function bindPortalWorkspaceAgent(input: {
+export async function getPortalWorkspacePaseoDiagnostic(input: {
   userId: string;
   workspace: string;
-  credentialId: string;
-  driver?: PortalDriverTarget;
-}): Promise<{
-  enabled: true;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
-}> {
-  return bindPortalWorkspaceAgentExecutor(input);
+}) {
+  return getPortalWorkspacePaseoDiagnosticExecutor(input);
 }
 
-export async function unbindPortalWorkspaceAgent(input: {
+export async function restartPortalWorkspacePaseoDaemon(input: {
   userId: string;
   workspace: string;
-  driver?: PortalDriverTarget;
-}): Promise<{
-  enabled: false;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
-}> {
-  return unbindPortalWorkspaceAgentExecutor(input);
+}) {
+  return restartPortalWorkspacePaseoDaemonExecutor(input);
 }
 
 export async function createPortalUser(input: {

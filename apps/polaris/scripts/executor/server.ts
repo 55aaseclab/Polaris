@@ -6,19 +6,22 @@ import {
 } from "node:http";
 import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
+import { parsePortalDriverTarget } from "../core/portal.js";
+import { logError, logInfo, logWarn } from "../utils/log.js";
 import {
-  bindPortalWorkspaceAgent,
   deletePortalWorkspace,
+  getPortalWorkspacePaseoDiagnostic,
+  permanentlyDeletePortalArchivedWorkspace,
+  permanentlyDeletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
+  restartPortalWorkspacePaseoDaemon,
   reportPortalWorkspaceStatus,
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
-  unbindPortalWorkspaceAgent,
 } from "./operations.js";
-import { parsePortalDriverTarget } from "../core/portal.js";
 
 type JsonObject = Record<string, unknown>;
 const EXECUTOR_LOOPBACK_HOST = "127.0.0.1";
@@ -42,6 +45,10 @@ function readHeader(req: IncomingMessage, name: string): string | null {
     return value[0]?.trim() || null;
   }
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isWorkspaceStatusRefreshRequest(req: IncomingMessage, url: URL): boolean {
+  return req.method === "POST" && url.pathname === "/workspaces/status/refresh";
 }
 
 function authenticateExecutorRequest(req: IncomingMessage): boolean {
@@ -109,6 +116,19 @@ export function createExecutorServer(
         return;
       }
       const url = new URL(req.url, `http://${host}:${port}`);
+      const requestId = readHeader(req, "x-polaris-request-id") ?? "";
+      if (isWorkspaceStatusRefreshRequest(req, url)) {
+        logInfo("executor-server", "request-received", {
+          requestId,
+          pathname: url.pathname,
+        });
+        req.on("aborted", () => {
+          logWarn("executor-server", "request-aborted", {
+            requestId,
+            pathname: url.pathname,
+          });
+        });
+      }
 
       if (req.method === "POST" && url.pathname === "/workspaces/provision") {
         const body = await readBody(req);
@@ -129,10 +149,20 @@ export function createExecutorServer(
         url.pathname === "/workspaces/status/refresh"
       ) {
         const body = await readBody(req);
+        logInfo("executor-server", "request-body", {
+          requestId,
+          pathname: url.pathname,
+          userId: typeof body.userId === "string" ? body.userId : null,
+          workspace: typeof body.workspace === "string" ? body.workspace : null,
+        });
         await refreshPortalWorkspaceStatus(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
         );
+        logInfo("executor-server", "request-completed", {
+          requestId,
+          pathname: url.pathname,
+        });
         sendJson(res, 200, { refreshed: true });
         return;
       }
@@ -207,6 +237,26 @@ export function createExecutorServer(
         return;
       }
 
+      if (req.method === "DELETE" && url.pathname === "/workspaces/hard-delete") {
+        const body = await readBody(req);
+        const result = await permanentlyDeletePortalWorkspace(
+          readRequiredString(body, "userId"),
+          readRequiredString(body, "workspace"),
+        );
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "DELETE" && url.pathname === "/workspaces/archives") {
+        const body = await readBody(req);
+        const result = await permanentlyDeletePortalArchivedWorkspace(
+          readRequiredString(body, "userId"),
+          readRequiredString(body, "archiveId"),
+        );
+        sendJson(res, 200, result);
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/workspaces/stop") {
         const body = await readBody(req);
         const result = await stopPortalWorkspace(
@@ -242,17 +292,11 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/paseo/bind") {
+      if (req.method === "POST" && url.pathname === "/workspaces/paseo/status") {
         const body = await readBody(req);
-        const driverValue = body.driver;
-        const result = await bindPortalWorkspaceAgent({
+        const result = await getPortalWorkspacePaseoDiagnostic({
           userId: readRequiredString(body, "userId"),
           workspace: readRequiredString(body, "workspace"),
-          credentialId: readRequiredString(body, "credentialId"),
-          driver:
-            typeof driverValue === "string" && driverValue.trim()
-              ? parsePortalDriverTarget(driverValue)
-              : undefined,
         });
         sendJson(res, 200, result);
         return;
@@ -260,17 +304,12 @@ export function createExecutorServer(
 
       if (
         req.method === "POST" &&
-        url.pathname === "/workspaces/paseo/unbind"
+        url.pathname === "/workspaces/paseo/restart"
       ) {
         const body = await readBody(req);
-        const driverValue = body.driver;
-        const result = await unbindPortalWorkspaceAgent({
+        const result = await restartPortalWorkspacePaseoDaemon({
           userId: readRequiredString(body, "userId"),
           workspace: readRequiredString(body, "workspace"),
-          driver:
-            typeof driverValue === "string" && driverValue.trim()
-              ? parsePortalDriverTarget(driverValue)
-              : undefined,
         });
         sendJson(res, 200, result);
         return;
@@ -278,6 +317,13 @@ export function createExecutorServer(
 
       sendJson(res, 404, { error: "Not found" });
     } catch (error) {
+      if (req.url) {
+        logError("executor-server", "request-failed", {
+          requestId: readHeader(req, "x-polaris-request-id") ?? "",
+          pathname: req.url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       handleError(res, error);
     }
   });

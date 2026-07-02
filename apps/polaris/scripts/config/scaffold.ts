@@ -362,22 +362,6 @@ function requireWorkspaceGitAuth(userProfileId: string, bindings: Array<{
   );
 }
 
-function ensureWorkspaceListedInUserProfile(userProfileId: string, project: string): void {
-  const profilePath = userProfilePath(userProfileId);
-  if (!fs.existsSync(profilePath)) {
-    return;
-  }
-  const data = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
-  const workspaces = Array.isArray(data.workspaces)
-    ? data.workspaces.map((item) => String(item)).filter(Boolean)
-    : [];
-  if (workspaces.includes(project)) {
-    return;
-  }
-  data.workspaces = [...workspaces, project].sort();
-  fs.writeFileSync(profilePath, yaml.dump(data, { lineWidth: 120, noRefs: true }), "utf8");
-}
-
 function writeUserSecretsLayout(userProfileId: string): void {
   const secretsRoot = path.join(USER_SECRETS_ROOT, userProfileId);
   fs.mkdirSync(path.join(secretsRoot, "credentials", "ssh"), { recursive: true });
@@ -408,7 +392,6 @@ export function createScaffoldUserProfile(profile: {
         id: profile.id,
         name: profile.name,
         email: profile.email,
-        workspaces: [],
         github: {
           account: null,
         },
@@ -470,7 +453,6 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
   const outputPath = workspaceConfigPath(project, "docker", userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   ensureWorkspaceDockerfile(userProfileId);
-  ensureWorkspaceListedInUserProfile(userProfileId, project);
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const workspaceServicePort = allocateWorkspaceServicePort();

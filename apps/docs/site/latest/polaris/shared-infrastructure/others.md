@@ -17,6 +17,12 @@ Its role is to:
 For local Docker workspaces, `host.docker.internal` must resolve back to the
 host executor.
 
+The local stack wrapper now starts an executor bridge proxy on the Docker
+bridge IP and forwards it to the host-local executor on `127.0.0.1:8788`.
+
+That bridge is what lets the runtime status observer push persisted Paseo
+`server-id` and `pairing.json` metadata back into the host workspace state.
+
 ## Local Docker Storage Model
 
 For the Docker backend, `netfs.local` is treated specially in local mode.
