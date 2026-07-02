@@ -161,9 +161,31 @@ Expected flow:
 1. run local CI
 2. rsync repo to remote app dir
 3. build and start inactive color
-4. verify health
-5. update host nginx upstream target
-6. reload nginx
+4. restart host executor services only if their runtime fingerprint changed
+5. verify health
+6. update host nginx upstream target
+7. reload nginx
+
+The host-level services are not restarted on every blue/green deploy anymore.
+
+`polaris-executor.service` is restarted only when the deployed executor runtime
+inputs changed, for example:
+
+- `apps/polaris/dist`
+- `apps/polaris/package.json`
+- `package.json`
+- `pnpm-lock.yaml`
+- `pnpm-workspace.yaml`
+- `scripts/run-polaris-executor-host.sh`
+- the remote Polaris env file
+
+`polaris-executor-bridge-proxy.service` is restarted only when its bridge
+script changes:
+
+- `scripts/run-polaris-executor-bridge-proxy.sh`
+
+This avoids tearing down runtime-to-executor callbacks during deploys that only
+change the web portal, docs, nginx, or other container-only surfaces.
 
 ## Remote Rollback
 
@@ -205,6 +227,9 @@ You want to confirm:
 - the portal can serve cached workspace detail immediately
 - explicit refresh still works
 - runtime status observer can reach the executor when the workspace is running
+- deploy output reports the expected executor restart decision:
+  - `restart_executor=true|false`
+  - `restart_bridge=true|false`
 
 ## Debugging
 

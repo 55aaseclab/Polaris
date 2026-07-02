@@ -15,6 +15,21 @@ import { renderAndWriteDockerWorkspace } from "./render.js";
 import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
 
+function sanitizeDockerVolumeToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function resolveDockerVolumeName(args: {
+  fallbackName: string;
+  source: WorkspaceSpec["attachments"]["workspaceData"]["source"];
+}): string {
+  const baseName = args.source.volumeRef?.trim() || args.fallbackName;
+  const suffix = args.source.subPath?.trim()
+    ? `-${args.source.subPath.trim().replace(/[^a-zA-Z0-9_.-]+/g, "-")}`
+    : "";
+  return `${baseName}${suffix}`;
+}
+
 function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   const source = workspace.attachments.workspaceData.source;
   if (!isNetfsSource(source)) {
@@ -67,6 +82,30 @@ function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   }
 }
 
+function ensureDockerUserIdentityVolume(workspace: WorkspaceSpec): void {
+  const userScope = sanitizeDockerVolumeToken(workspace.userProfile.id);
+  const volumeName = resolveDockerVolumeName({
+    fallbackName: `polaris-${userScope}-identity`,
+    source: workspace.attachments.userIdentityState.source,
+  });
+  const inspect = spawnSync("docker", ["volume", "inspect", volumeName], {
+    encoding: "utf8",
+  });
+  if (inspect.status === 0 && inspect.stdout.trim()) {
+    return;
+  }
+  runCommand("docker", ["volume", "create", volumeName]);
+  logInfo("docker-driver", "user-identity-volume-created", {
+    userProfileId: workspace.userProfile.id,
+    volumeName,
+  });
+}
+
+function ensureDockerWorkspacePrerequisites(workspace: WorkspaceSpec): void {
+  ensureDockerWorkspaceDataVolumeConfig(workspace);
+  ensureDockerUserIdentityVolume(workspace);
+}
+
 export class DockerDriver implements BackendDriver {
   readonly kind = "docker" as const;
 
@@ -75,7 +114,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async start(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspaceDataVolumeConfig(workspace);
+    ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
   }
@@ -91,7 +130,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async rebuild(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspaceDataVolumeConfig(workspace);
+    ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d", "--force-recreate"]);
   }
@@ -101,7 +140,7 @@ export class DockerDriver implements BackendDriver {
   }
 
   async apply(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspaceDataVolumeConfig(workspace);
+    ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
     runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
   }
@@ -176,6 +215,7 @@ export class DockerDriver implements BackendDriver {
         continue;
       }
       if (action.kind === "apply") {
+        ensureDockerWorkspacePrerequisites(workspace);
         runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
         continue;
       }

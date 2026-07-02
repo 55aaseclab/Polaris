@@ -168,7 +168,6 @@ type PortalShellContextValue = {
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
   refreshWorkspaces: () => void;
-  sidebarPollingWorkspaceKeys: string[];
   setSidebarWorkspacePolling: (workspaceKey: string, polling: boolean) => void;
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
@@ -1792,7 +1791,6 @@ function PortalShellLayout(props: {
     refreshWorkspaces: () => {
       setWorkspaceRefreshTick((current) => current + 1);
     },
-    sidebarPollingWorkspaceKeys,
     setSidebarWorkspacePolling: (workspaceKey, polling) => {
       setSidebarPollingWorkspaceKeys((current) => {
         const hasKey = current.includes(workspaceKey);
@@ -1936,14 +1934,14 @@ function PortalShellLayout(props: {
                           >
                             <FolderKanban />
                             <span className="truncate">{workspace.name}</span>
+                            {sidebarPolling ? (
+                              <RefreshCw className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            ) : null}
                             <span
-                              className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(backendLiveness)}`}
+                              className={`${sidebarPolling ? "ml-2" : "ml-auto"} h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(backendLiveness)}`}
                               title={sidebarStatusLabel}
                               aria-label={sidebarStatusLabel}
                             />
-                            {sidebarPolling ? (
-                              <RefreshCw className="ml-2 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                            ) : null}
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -2564,6 +2562,10 @@ function AdminPage() {
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [adminActionError, setAdminActionError] = useState<string | null>(null);
   const [workspaceAdminActionError, setWorkspaceAdminActionError] = useState<string | null>(null);
+  const [adminWorkspaceName, setAdminWorkspaceName] = useState("");
+  const [creatingAdminWorkspace, setCreatingAdminWorkspace] = useState(false);
+  const [adminStartAfterCreate, setAdminStartAfterCreate] = useState(true);
+  const [adminDefaultDockerOnly, setAdminDefaultDockerOnly] = useState(true);
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
@@ -2573,13 +2575,19 @@ function AdminPage() {
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
   const [adminTab, setAdminTab] = useState<"user" | "credentials" | "workspaces" | "paseo">("user");
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
+  const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
   const {
     data: selectedProfile,
     error: selectedProfileError,
     loading: selectedProfileLoading,
   } = useAsyncValue(
-    () => selectedAdminUserId ? getUserProfile(selectedAdminUserId) : Promise.resolve(null),
-    [selectedAdminUserId, reloadKey],
+    () => {
+      if (!selectedAdminUserId || selectedAdminUser?.profilePresent === false) {
+        return Promise.resolve(null);
+      }
+      return getUserProfile(selectedAdminUserId);
+    },
+    [selectedAdminUserId, selectedAdminUser?.profilePresent, reloadKey],
   );
   const {
     data: selectedCredentials,
@@ -2626,6 +2634,9 @@ function AdminPage() {
     setPaseoDiagnostics({});
     setPaseoActionState({});
     setAdminTab("user");
+    setAdminWorkspaceName("");
+    setAdminStartAfterCreate(true);
+    setAdminDefaultDockerOnly(true);
   }, [selectedAdminUserId]);
 
   if (mappingLoading) {
@@ -2714,6 +2725,39 @@ function AdminPage() {
     }
   }
 
+  async function handleCreateAdminWorkspace(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event?.preventDefault();
+    if (!selectedAdminUser || creatingAdminWorkspace) {
+      return;
+    }
+    const trimmedName = adminWorkspaceName.trim();
+    if (!trimmedName) {
+      return;
+    }
+    setWorkspaceAdminActionError(null);
+    if (adminWorkspaceNameError) {
+      setWorkspaceAdminActionError(adminWorkspaceNameError);
+      return;
+    }
+    if ((selectedWorkspaces ?? []).some((entry) => entry.name === trimmedName)) {
+      setWorkspaceAdminActionError(t("workspace_name_taken"));
+      return;
+    }
+    setCreatingAdminWorkspace(true);
+    try {
+      await createWorkspace(selectedAdminUser.id, trimmedName, {
+        defaultDockerOnly: adminDefaultDockerOnly,
+        startAfterCreate: adminStartAfterCreate,
+      });
+      setAdminWorkspaceName("");
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setCreatingAdminWorkspace(false);
+    }
+  }
+
   async function handleStopAdminWorkspace(workspaceName: string): Promise<void> {
     if (!selectedAdminUser) {
       return;
@@ -2722,7 +2766,6 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await stopWorkspace(selectedAdminUser.id, workspaceName);
-      await refreshWorkspaceStatus(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
@@ -2739,7 +2782,6 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
-      await refreshWorkspaceStatus(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
@@ -2817,11 +2859,6 @@ function AdminPage() {
             <CardDescription>{t("administration_desc")}</CardDescription>
           </CardHeader>
           <CardContent className="grid max-h-[calc(100vh-10rem)] gap-2 overflow-y-auto">
-            {adminUsersLoading ? (
-              <div className="flex items-center justify-center py-4 text-muted-foreground">
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              </div>
-            ) : null}
             {adminUsersError ? (
               <p className="text-sm text-destructive">{adminUsersError}</p>
             ) : null}
@@ -2991,12 +3028,7 @@ function AdminPage() {
                         </AlertDialogContent>
                       </AlertDialog>
                     </div>
-                    {selectedProfileLoading ? (
-                      <div className="flex items-center justify-center py-2 text-muted-foreground">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : null}
-                      <ErrorPopup title={t("global_error_title")} message={selectedProfileError} />
+                    <ErrorPopup title={t("global_error_title")} message={selectedProfileError} />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -3017,12 +3049,7 @@ function AdminPage() {
                     </Button>
                   </CardHeader>
                   <CardContent className="grid gap-3">
-                    {selectedCredentialsLoading ? (
-                      <div className="flex items-center justify-center py-4 text-muted-foreground">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : null}
-                      <ErrorPopup title={t("global_error_title")} message={selectedCredentialsError} />
+                    <ErrorPopup title={t("global_error_title")} message={selectedCredentialsError} />
                     {!selectedCredentialsLoading && !selectedCredentialsError && (selectedCredentials?.length ?? 0) === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("admin_credentials_empty")}</p>
                     ) : null}
@@ -3061,17 +3088,58 @@ function AdminPage() {
                   />
                   <Card className="border-border/70">
                     <CardHeader>
+                      <CardTitle className="text-base">{t("add_workspace")}</CardTitle>
+                      <CardDescription>{t("add_workspace_desc")}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <form className="grid gap-4" onSubmit={(event) => void handleCreateAdminWorkspace(event)}>
+                        <div className="grid gap-2">
+                          <Input
+                            value={adminWorkspaceName}
+                            onChange={(event) => setAdminWorkspaceName(event.target.value)}
+                            placeholder={t("workspace_name")}
+                            disabled={creatingAdminWorkspace}
+                          />
+                          {adminWorkspaceName.trim() && adminWorkspaceNameError ? (
+                            <p className="text-sm text-destructive">{adminWorkspaceNameError}</p>
+                          ) : null}
+                        </div>
+                        <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-border"
+                            checked={adminStartAfterCreate}
+                            onChange={(event) => setAdminStartAfterCreate(event.target.checked)}
+                            disabled={creatingAdminWorkspace}
+                          />
+                          <span>{t("start_after_create_option")}</span>
+                        </label>
+                        <label className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-border"
+                            checked={adminDefaultDockerOnly}
+                            onChange={(event) => setAdminDefaultDockerOnly(event.target.checked)}
+                            disabled={creatingAdminWorkspace}
+                          />
+                          <span>{t("docker_only_option")}</span>
+                        </label>
+                        <div className="flex items-start">
+                          <Button type="submit" disabled={creatingAdminWorkspace || !adminWorkspaceName.trim() || Boolean(adminWorkspaceNameError)}>
+                            {creatingAdminWorkspace ? t("provisioning") : t("create_workspace")}
+                          </Button>
+                        </div>
+                      </form>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-border/70">
+                    <CardHeader>
                       <div>
                         <CardTitle className="text-base">{t("admin_user_workspace_section")}</CardTitle>
                         <CardDescription>{t("admin_manage_workspaces")}</CardDescription>
                       </div>
                     </CardHeader>
                     <CardContent className="grid gap-3">
-                      {selectedWorkspacesLoading ? (
-                        <div className="flex items-center justify-center py-4 text-muted-foreground">
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                        </div>
-                      ) : null}
                       <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
                       {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
                         <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
@@ -3152,11 +3220,6 @@ function AdminPage() {
                       <CardDescription>{t("admin_user_archives_section")}</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3">
-                      {selectedArchivedWorkspacesLoading ? (
-                        <div className="flex items-center justify-center py-4 text-muted-foreground">
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                        </div>
-                      ) : null}
                       <ErrorPopup title={t("global_error_title")} message={selectedArchivedWorkspacesError} />
                       {!selectedArchivedWorkspacesLoading && !selectedArchivedWorkspacesError && (selectedArchivedWorkspaces?.length ?? 0) === 0 ? (
                         <p className="text-sm text-muted-foreground">{t("admin_archive_empty")}</p>
@@ -3217,11 +3280,6 @@ function AdminPage() {
                     <CardDescription>{t("paseo_info")}</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
-                    {selectedWorkspacesLoading ? (
-                      <div className="flex items-center justify-center py-4 text-muted-foreground">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : null}
                     <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
                     {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
@@ -3651,7 +3709,6 @@ function WorkspaceDetailContent() {
     setWorkspaceAction("stopping");
     try {
       await stopWorkspace(userId, workspaceName);
-      await refreshWorkspaceStatus(userId, workspaceName);
       refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     } catch (error) {
@@ -3665,7 +3722,6 @@ function WorkspaceDetailContent() {
     setWorkspaceAction("starting");
     try {
       await startWorkspace(userId, workspaceName);
-      await refreshWorkspaceStatus(userId, workspaceName);
       refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     } catch (error) {

@@ -25,10 +25,12 @@ bash -n scripts/clean-paseo-web-artifact.sh
 bash -n scripts/deploy-polaris.sh
 bash -n scripts/rollback-polaris.sh
 bash -n scripts/lib/polaris-bluegreen.sh
+bash -n scripts/lib/polaris-deploy-restart.sh
 bash -n scripts/lib/paseo-local.sh
 
 echo "[5/7] local stack regression tests"
 node --test scripts/tests/local-stack-service.test.mjs
+node --test scripts/tests/deploy-polaris-restart.test.mjs
 
 echo "[6/7] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
