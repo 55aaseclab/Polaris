@@ -91,6 +91,10 @@ export function workspaceEvolutionStateDir(project: string, userProfileId?: stri
   return path.join(workspaceStateDir(project, userProfileId), "evolution");
 }
 
+export function workspacePaseoStateDir(project: string, userProfileId?: string): string {
+  return path.join(workspaceStateDir(project, userProfileId), "paseo");
+}
+
 function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -100,31 +104,6 @@ function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
   } catch {
     return null;
   }
-}
-
-function mergeWorkspaceState(
-  current: WorkspaceStatus["state"] | undefined,
-  incoming: WorkspaceStatus["state"] | undefined,
-): WorkspaceStatus["state"] {
-  if (!incoming) {
-    return current ?? "not-applied";
-  }
-  if (!current) {
-    return incoming;
-  }
-  if (current === "creating") {
-    return ["saved", "ready", "degraded", "unsupported"].includes(incoming) ? incoming : current;
-  }
-  if (current === "starting") {
-    return ["ready", "saved", "degraded", "unsupported"].includes(incoming) ? incoming : current;
-  }
-  if (current === "stopping") {
-    return ["saved", "not-applied", "degraded", "unsupported"].includes(incoming) ? incoming : current;
-  }
-  if (current === "archiving") {
-    return current;
-  }
-  return incoming;
 }
 
 function mergeWorkspaceStatus(
@@ -146,6 +125,16 @@ function mergeWorkspaceStatus(
         ...(incoming.credentials?.codex ?? {}),
       }
     : undefined;
+  const sshCredentials = current.credentials?.ssh || incoming.credentials?.ssh
+    ? {
+        ...(current.credentials?.ssh ?? {}),
+        ...(incoming.credentials?.ssh ?? {}),
+        selfCheck: {
+          ...(current.credentials?.ssh?.selfCheck ?? { state: "not-configured", message: "" }),
+          ...(incoming.credentials?.ssh?.selfCheck ?? {}),
+        },
+      }
+    : undefined;
   const liveCredentials = current.credentials?.live || incoming.credentials?.live
     ? {
         ...(current.credentials?.live ?? {}),
@@ -156,10 +145,11 @@ function mergeWorkspaceStatus(
         },
       }
     : undefined;
-  const credentials = codexCredentials || liveCredentials
+  const credentials = codexCredentials || sshCredentials || liveCredentials
     ? {
         ...(current.credentials ?? {}),
         ...(incoming.credentials ?? {}),
+        ...(sshCredentials ? { ssh: sshCredentials } : {}),
         ...(codexCredentials ? { codex: codexCredentials } : {}),
         ...(liveCredentials ? { live: liveCredentials } : {}),
       }
@@ -172,30 +162,14 @@ function mergeWorkspaceStatus(
         latestTitles: incoming.evolution?.latestTitles ?? current.evolution?.latestTitles ?? [],
       }
     : undefined;
-  const ssh = current.ssh || incoming.ssh
-    ? {
-        ...(current.ssh ?? {}),
-        ...(incoming.ssh ?? {}),
-        selfCheck: {
-          ...(current.ssh?.selfCheck ?? { state: "not-configured", message: "" }),
-          ...(incoming.ssh?.selfCheck ?? {}),
-        },
-      }
-    : undefined;
   const merged: WorkspaceStatus = {
     ...current,
     ...incoming,
     project: incoming.project,
-    backend: {
-      ...current.backend,
-      ...incoming.backend,
-    },
     lifecycleAction: incoming.lifecycleAction ?? current.lifecycleAction,
-    state: mergeWorkspaceState(current.state, incoming.state),
     health: {
       backendLiveness: incoming.health.backendLiveness ?? current.health.backendLiveness,
       workspaceReadiness: incoming.health.workspaceReadiness ?? current.health.workspaceReadiness,
-      daemonReadiness: incoming.health.daemonReadiness,
       reason: incoming.health.reason ?? current.health.reason,
     },
     details: {
@@ -203,14 +177,13 @@ function mergeWorkspaceStatus(
       ...incoming.details,
     },
     assets: incoming.assets ?? current.assets,
-    drift: incoming.drift ?? current.drift,
     attachments: incoming.attachments ?? current.attachments,
     runtimeAssembly: incoming.runtimeAssembly ?? current.runtimeAssembly,
   };
-  if (driver?.target && driver.baseImage && driver.runtimeKind && driver.runtimeRef) {
+  if (driver?.backend && driver.baseImage && driver.runtimeKind && driver.runtimeRef) {
     merged.driver = driver as NonNullable<WorkspaceStatus["driver"]>;
   }
-  if (codexCredentials?.state || liveCredentials) {
+  if (sshCredentials?.mode || codexCredentials?.state || liveCredentials) {
     merged.credentials = credentials as NonNullable<WorkspaceStatus["credentials"]>;
   }
   if (
@@ -221,11 +194,10 @@ function mergeWorkspaceStatus(
   ) {
     merged.evolution = evolution as NonNullable<WorkspaceStatus["evolution"]>;
   }
-  if (ssh?.mode && ssh.selfCheck) {
-    merged.ssh = ssh as NonNullable<WorkspaceStatus["ssh"]>;
-  }
   delete ((merged as unknown) as Record<string, unknown>).paseo;
   delete ((merged as unknown) as Record<string, unknown>).daemon;
+  delete ((merged as unknown) as Record<string, unknown>).ssh;
+  delete ((merged as unknown) as Record<string, unknown>).drift;
   return merged;
 }
 
@@ -238,6 +210,34 @@ export function writeWorkspaceStatus(status: WorkspaceStatus, userProfileId?: st
   if (outputPath !== legacyWorkspaceStatusPath(status.project)) {
     fs.rmSync(legacyWorkspaceStatusPath(status.project), { force: true });
   }
+  return outputPath;
+}
+
+export function writeWorkspacePaseoServerId(
+  project: string,
+  serverId: string,
+  userProfileId?: string,
+): string {
+  const outputPath = path.join(
+    workspacePaseoStateDir(project, userProfileId),
+    "server-id",
+  );
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${serverId.trim()}\n`, "utf8");
+  return outputPath;
+}
+
+export function writeWorkspacePaseoPairing(
+  project: string,
+  pairing: { url: string },
+  userProfileId?: string,
+): string {
+  const outputPath = path.join(
+    workspacePaseoStateDir(project, userProfileId),
+    "pairing.json",
+  );
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(pairing, null, 2)}\n`, "utf8");
   return outputPath;
 }
 

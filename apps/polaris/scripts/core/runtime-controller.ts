@@ -24,7 +24,7 @@ function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
 function buildSshSelfCheck(
   workspace: WorkspaceSpec,
   observation: BackendObservation,
-): NonNullable<WorkspaceStatus["ssh"]> {
+): NonNullable<NonNullable<WorkspaceStatus["credentials"]>["ssh"]> {
   const githubAccount = workspace.userProfile.github.account;
   if (!githubAccount) {
     return {
@@ -248,12 +248,6 @@ function liveCredentialSelectionStatus(
   };
 }
 
-function driverTarget(workspace: WorkspaceSpec): string {
-  return workspace.backend.kind === "pod" && workspace.backend.profile
-    ? `pod:${workspace.backend.profile}`
-    : workspace.backend.kind;
-}
-
 function driverRuntimeKind(
   workspace: WorkspaceSpec,
 ): NonNullable<WorkspaceStatus["driver"]>["runtimeKind"] {
@@ -405,24 +399,20 @@ export function synthesizeWorkspaceStatus(
 ): WorkspaceStatus {
   const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
   const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
-  const state: WorkspaceStatus["state"] = !observation.backend.exists
-    ? "not-applied"
-    : !observation.backend.running && !drift.hasErrors
-      ? "saved"
-      : drift.hasErrors
-        ? "degraded"
-        : drift.hasWarnings
-          ? "degraded"
-          : "ready";
+  const backendLiveness = !observation.backend.exists
+    ? "missing"
+    : observation.backend.running
+      ? "running"
+      : "stopped";
+  const workspaceReadiness = observation.backend.exists && observation.backend.running && !drift.hasErrors && !drift.hasWarnings
+    ? "ready"
+    : "not-ready";
 
   return {
     project: workspace.identity.projectName,
-    backend: {
-      kind: workspace.backend.kind,
-      profile: workspace.backend.profile,
-    },
     driver: {
-      target: driverTarget(workspace),
+      backend: workspace.backend.kind,
+      ...(workspace.backend.profile ? { profile: workspace.backend.profile } : {}),
       baseImage: workspace.runtime.baseImage,
       runtimeKind: driverRuntimeKind(workspace),
       runtimeRef: driverRuntimeRef(workspace, observation),
@@ -431,13 +421,13 @@ export function synthesizeWorkspaceStatus(
         : {}),
     },
     lifecycleAction,
-    state,
     health: {
-      backendLiveness: observation.backend.exists ? (observation.backend.running ? "running" : "stopped") : "missing",
-      workspaceReadiness: state === "ready" ? "ready" : "not-ready",
+      backendLiveness,
+      workspaceReadiness,
       reason: drift.items[0]?.message,
     },
     credentials: {
+      ssh: buildSshSelfCheck(workspace, observation),
       codex: codexCredentialStatus(workspace),
       live: liveCredentialSelectionStatus(workspace),
     },
@@ -449,7 +439,6 @@ export function synthesizeWorkspaceStatus(
         : "agent integration disabled",
       userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
     },
-    ssh: buildSshSelfCheck(workspace, observation),
     attachments: {
       workspaceData: attachmentCheck(observation.attachments.workspaceData),
       workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),
@@ -464,7 +453,6 @@ export function synthesizeWorkspaceStatus(
       claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.runtimeAssembly.claude),
       ssh: runtimeCheck(observation.runtimeAssembly.ssh),
     },
-    drift,
   };
 }
 

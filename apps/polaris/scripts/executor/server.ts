@@ -142,6 +142,10 @@ export function createExecutorServer(
         const userId = readRequiredString(body, "userId");
         const workspace = readRequiredString(body, "workspace");
         const status = body.status;
+        const paseo =
+          body.paseo && typeof body.paseo === "object"
+            ? body.paseo as Record<string, unknown>
+            : null;
         if (!status || typeof status !== "object") {
           throw new Error("status is required");
         }
@@ -149,6 +153,14 @@ export function createExecutorServer(
           userId,
           workspace,
           status: status as never,
+          paseo: paseo
+            ? {
+                serverId:
+                  typeof paseo.serverId === "string" ? paseo.serverId : undefined,
+                pairingUrl:
+                  typeof paseo.pairingUrl === "string" ? paseo.pairingUrl : undefined,
+              }
+            : undefined,
         });
         sendJson(res, 200, result);
         return;

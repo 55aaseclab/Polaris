@@ -305,35 +305,29 @@ export interface WorkspaceSpec {
 
 export interface WorkspaceStatus {
   project: string;
-  backend: {
-    kind: string;
-    profile: string;
-  };
   driver?: {
-    target: string;
+    backend: string;
+    profile?: string;
     baseImage: string;
     runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
     runtimeRef: string;
     rootdiskImage?: string;
   };
   lifecycleAction: LifecycleAction;
-  state:
-    | "creating"
-    | "saved"
-    | "not-applied"
-    | "starting"
-    | "stopping"
-    | "archiving"
-    | "degraded"
-    | "ready"
-    | "unsupported";
   health: {
     backendLiveness: string;
     workspaceReadiness: string;
-    daemonReadiness?: string;
     reason?: string;
   };
   credentials?: {
+    ssh?: {
+      mode: "managed-key" | "provided-key";
+      githubAccount?: string;
+      selfCheck: {
+        state: "ready" | "warning" | "error" | "not-configured";
+        message: string;
+      };
+    };
     codex?: {
       state: "selected" | "not-selected";
       credentialId?: string;
@@ -373,14 +367,6 @@ export interface WorkspaceStatus {
     pendingMemoryChanges?: number;
     lastSessionId?: string;
   };
-  ssh?: {
-    mode: "managed-key" | "provided-key";
-    githubAccount?: string;
-    selfCheck: {
-      state: "ready" | "warning" | "error" | "not-configured";
-      message: string;
-    };
-  };
   assets?: {
     dockerfile: {
       file: string;
@@ -417,7 +403,6 @@ export interface WorkspaceStatus {
       durablePaths: string[];
     }>;
   };
-  drift?: WorkspaceDrift;
   attachments?: Record<string, CheckStatus>;
   runtimeAssembly?: Record<string, CheckStatus>;
 }

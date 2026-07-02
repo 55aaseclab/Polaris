@@ -5,18 +5,10 @@ import { enUS, zhCN } from "@clerk/localizations";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import {
-  clerkDomain,
-  clerkProxyUrl,
-  clerkPublishableKey,
-  clerkSignInUrl,
-  clerkSignUpUrl,
+  resolveClerkProviderConfig,
 } from "./lib/clerk";
 import { type Language, readStoredLanguage } from "./lib/language";
 import "./index.css";
-
-const publishableKey = clerkPublishableKey();
-const domain = clerkDomain();
-const proxyUrl = clerkProxyUrl();
 
 function resolveClerkLocalization(language: Language) {
   return language === "zh" ? zhCN : enUS;
@@ -24,18 +16,34 @@ function resolveClerkLocalization(language: Language) {
 
 function Root() {
   const [language, setLanguage] = React.useState<Language>(() => readStoredLanguage());
+  const clerkConfig = resolveClerkProviderConfig({
+    ...(typeof window !== "undefined"
+      ? {
+          location: {
+            origin: window.location.origin,
+            host: window.location.host,
+          },
+        }
+      : {}),
+  });
 
   return (
     <ClerkProvider
-      publishableKey={publishableKey}
+      publishableKey={clerkConfig.publishableKey}
       localization={resolveClerkLocalization(language)}
-      {...(domain ? { domain } : {})}
-      {...(proxyUrl ? { proxyUrl } : {})}
-      signInUrl={clerkSignInUrl()}
-      signUpUrl={clerkSignUpUrl()}
+      {...(clerkConfig.proxyUrl ? { proxyUrl: clerkConfig.proxyUrl } : {})}
+      {...(clerkConfig.isSatellite
+        ? {
+            isSatellite: true,
+            domain: clerkConfig.domain,
+            satelliteAutoSync: false,
+          }
+        : {})}
+      signInUrl={clerkConfig.signInUrl}
+      signUpUrl={clerkConfig.signUpUrl}
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
-      afterSignOutUrl={clerkSignInUrl()}
+      afterSignOutUrl={clerkConfig.signInUrl}
     >
       <BrowserRouter>
         <App language={language} setLanguage={setLanguage} />

@@ -36,7 +36,12 @@ import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js"
 import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
 import { workspaceRuntimeScopeName } from "../core/workspace-name.js";
-import { writeWorkspaceLiveCredentialSelection, writeWorkspaceStatus } from "../output/state-store.js";
+import {
+  writeWorkspaceLiveCredentialSelection,
+  writeWorkspacePaseoPairing,
+  writeWorkspacePaseoServerId,
+  writeWorkspaceStatus,
+} from "../output/state-store.js";
 import { logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
@@ -152,7 +157,8 @@ function writeCachedWorkspaceStatusUpdate(args: {
     userId: args.userId,
     workspace: args.workspace,
     reason: args.reason,
-    state: next.state,
+    backendLiveness: next.health.backendLiveness,
+    workspaceReadiness: next.health.workspaceReadiness,
   });
 }
 
@@ -579,24 +585,17 @@ async function provisionWorkspaceInternal(
       const startAfterCreate = options?.startAfterCreate ?? false;
       writeDirectWorkspaceStatus(userId, workspace, (current) => ({
         project: workspace,
-        backend: current?.backend ?? {
-          kind: "docker",
-          profile: "legacy",
-        },
         driver: current?.driver,
         lifecycleAction: current?.lifecycleAction ?? "status",
-        state: "creating",
         health: {
-          backendLiveness: current?.health.backendLiveness ?? "missing",
+          backendLiveness: "creating",
           workspaceReadiness: "not-ready",
           reason: "workspace creation in progress",
         },
         credentials: current?.credentials,
         details: current?.details ?? {},
         evolution: current?.evolution,
-        ssh: current?.ssh,
         assets: current?.assets,
-        drift: current?.drift,
         attachments: current?.attachments,
         runtimeAssembly: current?.runtimeAssembly,
       }));
@@ -693,17 +692,15 @@ export async function reportPortalWorkspaceStatus(input: {
   userId: string;
   workspace: string;
   status: Partial<WorkspaceStatus>;
+  paseo?: {
+    serverId?: string;
+    pairingUrl?: string;
+  };
 }): Promise<{ reported: true }> {
   const summary = loadWorkspaceSummary(input.userId, input.workspace);
   const next: WorkspaceStatus = {
     project: input.workspace,
-    backend: {
-      kind: summary.status?.backend.kind ?? "docker",
-      profile: summary.status?.backend.profile ?? "legacy",
-      ...(input.status.backend ?? {}),
-    },
     lifecycleAction: input.status.lifecycleAction ?? summary.status?.lifecycleAction ?? "status",
-    state: input.status.state ?? summary.status?.state ?? "not-applied",
     health: {
       backendLiveness: summary.status?.health.backendLiveness ?? "unknown",
       workspaceReadiness: summary.status?.health.workspaceReadiness ?? "unknown",
@@ -716,17 +713,30 @@ export async function reportPortalWorkspaceStatus(input: {
     ...(input.status.driver ? { driver: input.status.driver } : {}),
     ...(input.status.credentials ? { credentials: input.status.credentials } : {}),
     ...(input.status.evolution ? { evolution: input.status.evolution } : {}),
-    ...(input.status.ssh ? { ssh: input.status.ssh } : {}),
     ...(input.status.assets ? { assets: input.status.assets } : {}),
-    ...(input.status.drift ? { drift: input.status.drift } : {}),
     ...(input.status.attachments ? { attachments: input.status.attachments } : {}),
     ...(input.status.runtimeAssembly ? { runtimeAssembly: input.status.runtimeAssembly } : {}),
   };
   writeWorkspaceStatus(next, input.userId);
+  const normalizedServerId = String(input.paseo?.serverId ?? "").trim();
+  if (normalizedServerId) {
+    writeWorkspacePaseoServerId(input.workspace, normalizedServerId, input.userId);
+  }
+  const normalizedPairingUrl = String(input.paseo?.pairingUrl ?? "").trim();
+  if (normalizedPairingUrl) {
+    writeWorkspacePaseoPairing(
+      input.workspace,
+      { url: normalizedPairingUrl },
+      input.userId,
+    );
+  }
   logInfo("executor", "workspace-status-reported", {
     userId: input.userId,
     workspace: input.workspace,
-    state: next.state,
+    backendLiveness: next.health.backendLiveness,
+    workspaceReadiness: next.health.workspaceReadiness,
+    serverId: normalizedServerId || undefined,
+    pairingUrlPersisted: Boolean(normalizedPairingUrl),
   });
   return { reported: true };
 }
@@ -790,13 +800,8 @@ export function startProvisionWorkspace(
       const classified = classifyProvisionError(error);
       writeDirectWorkspaceStatus(userId, workspace, (current) => ({
         project: workspace,
-        backend: current?.backend ?? {
-          kind: "docker",
-          profile: "legacy",
-        },
         driver: current?.driver,
         lifecycleAction: current?.lifecycleAction ?? "status",
-        state: "degraded",
         health: {
           backendLiveness: current?.health.backendLiveness ?? "missing",
           workspaceReadiness: "not-ready",
@@ -805,9 +810,7 @@ export function startProvisionWorkspace(
         credentials: current?.credentials,
         details: current?.details ?? {},
         evolution: current?.evolution,
-        ssh: current?.ssh,
         assets: current?.assets,
-        drift: current?.drift,
         attachments: current?.attachments,
         runtimeAssembly: current?.runtimeAssembly,
       }));
@@ -856,9 +859,9 @@ export async function deletePortalWorkspace(
       }
       return {
         ...current,
-        state: "archiving",
         health: {
           ...current.health,
+          backendLiveness: "archiving",
           workspaceReadiness: "not-ready",
           reason: "workspace archiving",
         },
@@ -893,13 +896,16 @@ export async function stopPortalWorkspace(
         }
         return {
           ...current,
-          backend: {
-            ...current.backend,
-            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          },
-          state: "stopping",
+          driver: current.driver
+            ? {
+                ...current.driver,
+                backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
+                profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+              }
+            : current.driver,
           health: {
             ...current.health,
+            backendLiveness: "stopping",
             workspaceReadiness: "not-ready",
             reason: "workspace stop requested",
           },
@@ -942,11 +948,13 @@ export async function startPortalWorkspace(
         }
         return {
           ...current,
-          backend: {
-            ...current.backend,
-            kind: currentSummary.selectedDriver?.backend ?? current.backend.kind,
-          },
-          state: "starting",
+          driver: current.driver
+            ? {
+                ...current.driver,
+                backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
+                profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+              }
+            : current.driver,
           health: {
             ...current.health,
             backendLiveness: "starting",

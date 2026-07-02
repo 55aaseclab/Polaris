@@ -13,6 +13,41 @@ paseo_local_dist_dir() {
   printf 'apps/paseo/dist-build\n'
 }
 
+paseo_local_prepare_served_layout() {
+  local dist_dir base_dir entry
+
+  dist_dir="$(paseo_local_dist_dir)"
+  base_dir="${dist_dir}/paseo"
+
+  mkdir -p "${base_dir}"
+  rm -rf \
+    "${base_dir}/_expo" \
+    "${base_dir}/assets" \
+    "${base_dir}/index.html" \
+    "${base_dir}/manifest.json" \
+    "${base_dir}/metadata.json" \
+    "${base_dir}/favicon.ico" \
+    "${base_dir}/apple-touch-icon.png" \
+    "${base_dir}/pwa-icon-192.png" \
+    "${base_dir}/pwa-icon-512.png" \
+    "${base_dir}/robots.txt"
+
+  for entry in \
+    "_expo" \
+    "assets" \
+    "index.html" \
+    "manifest.json" \
+    "metadata.json" \
+    "favicon.ico" \
+    "apple-touch-icon.png" \
+    "pwa-icon-192.png" \
+    "pwa-icon-512.png" \
+    "robots.txt"
+  do
+    ln -s "../${entry}" "${base_dir}/${entry}"
+  done
+}
+
 paseo_local_fingerprint_file() {
   printf '%s/inputs.sha256\n' "$(paseo_local_runtime_root)"
 }
@@ -43,7 +78,10 @@ paseo_local_build_dist() {
 
   mkdir -p "${runtime_root}" "${cache_dir}"
 
+  paseo_local_prepare_served_layout >/dev/null 2>&1 || true
+
   if [ -d "${dist_dir}" ] && [ "$(cat "${fingerprint_file}" 2>/dev/null || true)" = "${wanted_fingerprint}" ]; then
+    paseo_local_prepare_served_layout
     printf '%s\n' "${dist_dir}"
     return
   fi
@@ -64,6 +102,7 @@ paseo_local_build_dist() {
   rm -rf "${dist_dir}"
   mkdir -p "${dist_dir}"
   cp -a "${tmp_dir}/dist/." "${dist_dir}/"
+  paseo_local_prepare_served_layout
   printf '%s\n' "${wanted_fingerprint}" > "${fingerprint_file}"
   paseo_local_verify_dist_base_url
   printf '%s\n' "${dist_dir}"
@@ -88,6 +127,9 @@ paseo_local_verify_dist_base_url() {
     grep -q "src=\"${base_url}/_expo/static/js/web/" "${index_file}"
     grep -q "\"start_url\": \"${base_url}/\"" "${manifest_file}"
     grep -q "\"scope\": \"${base_url}/\"" "${manifest_file}"
+    test -f "${dist_dir}/paseo/index.html"
+    test -f "${dist_dir}/paseo/manifest.json"
+    test -f "${dist_dir}/paseo/_expo/static/js/web/$(basename "$(find "${dist_dir}/_expo/static/js/web" -maxdepth 1 -type f -name 'index-*.js' | head -n 1)")"
     if grep -Eq '(href|src)="/(_expo|manifest\.json|favicon\.ico|apple-touch-icon\.png)' "${index_file}"; then
       printf 'paseo artifact verification failed: root-absolute asset path remained in index.html\n' >&2
       return 1

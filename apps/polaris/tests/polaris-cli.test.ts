@@ -347,10 +347,7 @@ test("runCli create allows the same workspace name under a different user", asyn
     ]);
 
     await runCli(["create", workspace, "--user", firstUserId]);
-    await assert.rejects(
-      () => runCli(["create", workspace, "--user", secondUserId]),
-      new RegExp(`Project name '${workspace}' is already in use by user ${firstUserId}`),
-    );
+    await runCli(["create", workspace, "--user", secondUserId]);
     assert.equal(
       fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
       true,
@@ -534,13 +531,11 @@ test("runCli archive moves a workspace into the user archive", async () => {
 });
 
 test("assertProjectNameAvailableForUser rejects names already used by archived workspaces", () => {
-  const dataRoot = process.env.POLARIS_DATA_ROOT;
-  assert.ok(dataRoot, "POLARIS_DATA_ROOT must be set for this test");
-
   const userProfileId = uniqueProjectName("cli-archived-name-user");
   const workspace = uniqueProjectName("cli-archived-name-workspace");
   const archiveId = `20260701T000000Z-${workspace}`;
-  const archiveRoot = path.join(dataRoot, "users", userProfileId, "archives", "workspaces", archiveId);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const archiveRoot = path.join(userRoot, "archives", "workspaces", archiveId);
 
   fs.mkdirSync(archiveRoot, { recursive: true });
   fs.writeFileSync(
@@ -561,7 +556,7 @@ test("assertProjectNameAvailableForUser rejects names already used by archived w
       new RegExp(`Workspace '${workspace}' is already archived for user ${userProfileId}`),
     );
   } finally {
-    fs.rmSync(path.join(dataRoot, "users", userProfileId), { recursive: true, force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
@@ -881,13 +876,17 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
     project,
-    backend: { kind: "pod", profile: "gvisor" },
+    driver: {
+      backend: "pod",
+      profile: "gvisor",
+      baseImage: "ttl.sh/example:24h",
+      runtimeKind: "kubernetes-pod",
+      runtimeRef: "deployment/example",
+    },
     lifecycleAction: "status",
-    state: "saved",
     health: {
       backendLiveness: "unknown",
       workspaceReadiness: "unknown",
-      daemonReadiness: "expected",
     },
     details: {
       driver: "pod",
@@ -895,9 +894,13 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   }, DEMO_USER_PROFILE_ID);
 
   assert.ok(fs.existsSync(statusPath));
-  const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as { project: string; backend: { kind: string } };
+  const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
+    project: string;
+    driver?: { backend?: string; profile?: string };
+  };
   assert.equal(parsed.project, project);
-  assert.equal(parsed.backend.kind, "pod");
+  assert.equal(parsed.driver?.backend, "pod");
+  assert.equal(parsed.driver?.profile, "gvisor");
 
   cleanupStatusFile(project);
 });
@@ -1464,11 +1467,19 @@ exit 0
           const output = await captureStdout(async () => {
             await runCli(["status", `${project}@docker`]);
           });
-          const parsed = parseJsonOutput<{ ssh?: { mode: string; githubAccount?: string; selfCheck?: { state: string; message: string } } }>(output);
-          assert.equal(parsed.ssh?.mode, "managed-key");
-          assert.equal(parsed.ssh?.githubAccount, "example-account");
-          assert.equal(parsed.ssh?.selfCheck?.state, "ready");
-          assert.match(parsed.ssh?.selfCheck?.message || "", /authentication is working/i);
+          const parsed = parseJsonOutput<{
+            credentials?: {
+              ssh?: {
+                mode?: string;
+                githubAccount?: string;
+                selfCheck?: { state?: string; message?: string };
+              };
+            };
+          }>(output);
+          assert.equal(parsed.credentials?.ssh?.mode, "managed-key");
+          assert.equal(parsed.credentials?.ssh?.githubAccount, "example-account");
+          assert.equal(parsed.credentials?.ssh?.selfCheck?.state, "ready");
+          assert.match(parsed.credentials?.ssh?.selfCheck?.message || "", /authentication is working/i);
         },
       );
     } finally {
@@ -2123,11 +2134,11 @@ test("pod backend returns structured observations", async () => {
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -2150,8 +2161,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -2181,11 +2192,11 @@ test("runtime controller computes degraded status and reconcile plan from observ
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -2195,8 +2206,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -2208,12 +2219,12 @@ exit 0
       const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
       const plan = buildReconcilePlan(workspace, drift);
 
-      assert.equal(status.backend.kind, "pod");
+      assert.equal(status.driver?.backend, "pod");
       assert.equal(status.lifecycleAction, "status");
-      assert.equal(status.state, "degraded");
-      assert.equal(status.health.daemonReadiness, "degraded");
-      assert.match(status.health.reason || "", /daemon status unavailable|pairing\.json|paseo/i);
-      assert.deepEqual(plan.actions, [{ kind: "restart-runtime" }]);
+      assert.equal(status.health.backendLiveness, "running");
+      assert.equal(status.health.workspaceReadiness, "not-ready");
+      assert.match(status.health.reason || "", /workspace manager assembly missing|missing|service/i);
+      assert.deepEqual(plan.actions, [{ kind: "repair-runtime-assembly", target: "managerState" }]);
     },
   );
   cleanupSelectionFile("demo");
@@ -2226,11 +2237,11 @@ test("status includes the daemon pairing URL when the runtime exposes one", asyn
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -2253,8 +2264,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -2265,19 +2276,14 @@ exit 0
         await runCli(["status", "demo@pod"]);
       });
       const parsed = parseJsonOutput<{
-        daemon?: { pairing?: { state?: string; url?: string } };
-        paseo?: { daemonAddress?: string; supportedHarnesses?: string[]; liveTarget?: string | null };
+        liveTarget?: string | null;
       }>(output);
-      assert.equal(parsed.daemon?.pairing?.state, "ok");
-      assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
-      assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
-      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
+      assert.equal(parsed.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
     },
   );
 });
 
-test("kubevirt status includes the daemon pairing URL when runtime state exposes one", async () => {
+test("kubevirt status succeeds when runtime state exposes daemon pairing metadata", async () => {
   const project = uniqueProjectName("vm-pair-url");
   await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
     await withFakeCommands(
@@ -2326,14 +2332,13 @@ exit 1
           await runCli(["status", `${project}@kubevirt-vm`]);
         });
         const parsed = parseJsonOutput<{
-          daemon?: { pairing?: { url?: string; state?: string } };
-          paseo?: { daemonAddress?: string; supportedHarnesses?: string[]; liveTarget?: string | null };
+          driver?: { backend?: string; runtimeRef?: string };
+          health?: { backendLiveness?: string; workspaceReadiness?: string };
         }>(output);
-        assert.equal(parsed.daemon?.pairing?.state, "ok");
-        assert.equal(parsed.daemon?.pairing?.url, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
-        assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-        assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
-        assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ");
+        assert.equal(parsed.driver?.backend, "kubevirt-vm");
+        assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
+        assert.equal(parsed.health?.backendLiveness, "running");
+        assert.equal(parsed.health?.workspaceReadiness, "ready");
       },
     );
   });
@@ -2357,11 +2362,11 @@ test("CLI status defaults to the status command and persists ready pod status", 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment demo"* ]]; then
-  printf '{"metadata":{"name":"demo"}}'
+if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -2384,8 +2389,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc demo"* ]]; then
-  printf 'demo'
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -2400,36 +2405,26 @@ exit 0
       const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
         project: string;
         lifecycleAction: string;
-        state: string;
-        backend: { kind: string; instanceState: string };
         driver?: {
-          target: string;
+          backend: string;
+          profile?: string;
           baseImage: string;
           runtimeKind: string;
           runtimeRef: string;
-          runtimeState: string;
         };
-        health: { backendLiveness: string; workspaceReadiness: string; daemonReadiness: string };
-        paseo?: { daemonAddress: string; supportedHarnesses: string[]; liveTarget: string | null };
+        health: { backendLiveness: string; workspaceReadiness: string };
         evolution?: { artifactCount: number };
       };
 
       assert.equal(parsed.project, "demo");
       assert.equal(parsed.lifecycleAction, "status");
-      assert.equal(parsed.state, "ready");
-      assert.equal(parsed.backend.kind, "pod");
-      assert.equal(parsed.backend.instanceState, "running");
-      assert.equal(parsed.driver?.target, "pod:gvisor");
+      assert.equal(parsed.driver?.backend, "pod");
+      assert.equal(parsed.driver?.profile, "gvisor");
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
-      assert.equal(parsed.driver?.runtimeState, "running");
       assert.equal(parsed.driver?.baseImage, "ttl.sh/polaris-demo-debian13-1782126452:24h");
       assert.equal(parsed.health.backendLiveness, "running");
       assert.equal(parsed.health.workspaceReadiness, "ready");
-      assert.equal(parsed.health.daemonReadiness, "ready");
-      assert.equal(parsed.paseo?.daemonAddress, "0.0.0.0:6767");
-      assert.deepEqual(parsed.paseo?.supportedHarnesses, ["codex", "claude", "copilot", "opencode", "pi"]);
-      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
       assert.ok(parsed.evolution);
     },
   );
@@ -2492,8 +2487,8 @@ test("status stays ready when no active codex credential is selected", () => {
   const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
 
   assert.equal(drift.hasWarnings, false);
-  assert.equal(status.state, "ready");
-  assert.equal(status.health.daemonReadiness, "ready");
+  assert.equal(status.health.backendLiveness, "running");
+  assert.equal(status.health.workspaceReadiness, "ready");
   assert.equal(status.credentials?.codex?.state, "not-selected");
   assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
 });
@@ -3316,8 +3311,9 @@ exit 1
 
         const drift = computeWorkspaceDrift(workspace, observation);
         const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
-        assert.equal(status.backend.kind, "kubevirt-vm");
-        assert.equal(status.state, "ready");
+        assert.equal(status.driver?.backend, "kubevirt-vm");
+        assert.equal(status.health.backendLiveness, "running");
+        assert.equal(status.health.workspaceReadiness, "ready");
 
         const plan = { project, backend: "kubevirt-vm", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
         await driver.executeReconcilePlan(workspace, plan as any);
@@ -3357,16 +3353,13 @@ exit 0
         });
 
         const parsed = parseJsonOutput<{
-          backend: { kind: string; instanceState: string };
           driver?: {
-            target: string;
+            backend: string;
             baseImage: string;
             runtimeKind: string;
             runtimeRef: string;
-            runtimeState: string;
           };
-          state: string;
-          health: { daemonReadiness: string };
+          health: { backendLiveness: string; workspaceReadiness: string };
           assets: {
             dockerfile: { file: string; path: string };
             specs: Array<{ driver: string; file: string; path: string }>;
@@ -3376,13 +3369,10 @@ exit 0
           };
         }>(stdout);
 
-        assert.equal(parsed.backend.kind, "docker");
-        assert.equal(parsed.backend.instanceState, "running");
-        assert.equal(parsed.driver?.target, "docker");
+        assert.equal(parsed.driver?.backend, "docker");
         assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
         assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
-        assert.equal(parsed.driver?.runtimeState, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
         assert.equal(parsed.assets.dockerfile.path, `config/users/${DEMO_USER_PROFILE_ID}/docker/workspace-prebuilt.Dockerfile`);
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
@@ -3458,27 +3448,21 @@ exit 1
           await runCli(["status", project]);
         });
         const parsed = parseJsonOutput<{
-          backend: { kind: string; instanceState: string };
           driver?: {
-            target: string;
+            backend: string;
             baseImage: string;
             runtimeKind: string;
             runtimeRef: string;
-            runtimeState: string;
             rootdiskImage?: string;
           };
-          state: string;
-          health: { daemonReadiness: string };
+          health: { backendLiveness: string; workspaceReadiness: string };
         }>(stdout);
 
-        assert.equal(parsed.backend.kind, "kubevirt-vm");
-        assert.equal(parsed.backend.instanceState, "running");
-        assert.equal(parsed.driver?.target, "kubevirt-vm");
+        assert.equal(parsed.driver?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-        assert.equal(parsed.driver?.runtimeState, "running");
-        assert.equal(parsed.state, "ready");
-        assert.equal(parsed.health.daemonReadiness, "ready");
+        assert.equal(parsed.health.backendLiveness, "running");
+        assert.equal(parsed.health.workspaceReadiness, "ready");
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
@@ -3544,7 +3528,7 @@ exit 0
       assert.equal(observation.backend.running, true);
       const drift = computeWorkspaceDrift(workspace, observation);
       const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
-      assert.equal(status.backend.kind, "docker");
+      assert.equal(status.driver?.backend, "docker");
 
       const plan = { project: "demo", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
       await driver.executeReconcilePlan(workspace, plan as any);

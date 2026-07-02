@@ -262,28 +262,16 @@ test("live auth portal API accepts runtime status reports and persists cached wo
   const previous = readWorkspaceStatus(userId, workspace);
   writeWorkspaceStatus({
     project: workspace,
-    state: "saved",
-    backend: {
-      kind: "docker",
-      instanceState: "stopped",
-    },
     driver: {
-      target: "docker",
+      backend: "docker",
       baseImage: "ttl.sh/example:24h",
       runtimeKind: "docker-container",
       runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
-      runtimeState: "stopped",
     },
     health: {
       backendLiveness: "stopped",
       workspaceReadiness: "not-ready",
-      daemonReadiness: "degraded",
       reason: "test setup",
-    },
-    daemon: {
-      manager: {
-        state: "missing",
-      },
     },
     details: {},
   }, userId);
@@ -305,25 +293,17 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       );
       assert.equal(detailBefore.status, 200);
       const parsedBefore = await detailBefore.json() as {
-        status?: { state?: string; daemon?: { manager?: { state?: string } } };
+        status?: { health?: { backendLiveness?: string } };
       };
-      assert.equal(parsedBefore.status?.state, "saved");
+      assert.equal(parsedBefore.status?.health?.backendLiveness, "stopped");
 
       await reportPortalWorkspaceStatus({
         userId,
         workspace,
         status: {
-          state: "ready",
-          backend: {
-            instanceState: "running",
-          },
-          driver: {
-            runtimeState: "running",
-          },
-          daemon: {
-            manager: {
-              state: "ok",
-            },
+          health: {
+            backendLiveness: "running",
+            workspaceReadiness: "ready",
           },
           details: {
             backendDetail: "reported by test",
@@ -337,17 +317,12 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       assert.equal(detailAfter.status, 200);
       const parsedAfter = await detailAfter.json() as {
         status?: {
-          state?: string;
-          backend?: { instanceState?: string };
-          driver?: { runtimeState?: string };
-          daemon?: { manager?: { state?: string } };
+          health?: { backendLiveness?: string; workspaceReadiness?: string };
           details?: { backendDetail?: string };
         };
       };
-      assert.equal(parsedAfter.status?.state, "ready");
-      assert.equal(parsedAfter.status?.backend?.instanceState, "running");
-      assert.equal(parsedAfter.status?.driver?.runtimeState, "running");
-      assert.equal(parsedAfter.status?.daemon?.manager?.state, "ok");
+      assert.equal(parsedAfter.status?.health?.backendLiveness, "running");
+      assert.equal(parsedAfter.status?.health?.workspaceReadiness, "ready");
       assert.equal(parsedAfter.status?.details?.backendDetail, "reported by test");
     });
   } finally {

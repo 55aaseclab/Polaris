@@ -274,14 +274,49 @@ workspace create 仍然属于 agent runtime 体验的一部分，而不是纯控
 现在的原则是：
 
 - workspace 生命周期以 `status.json` 为主
-- `creating`、`starting`、`stopping`、`archiving` 都是 workspace state
+- `creating`、`starting`、`stopping`、`archiving` 由
+  `status.health.backendLiveness` 表达
 - 列表和 header 不依赖额外的 create-progress 语义
 
 这意味着：
 
 - 创建成功后，门户直接切到新 workspace
 - 失败时也不再靠弹窗内局部状态兜底
-- 如果需要解释当前生命周期，优先看 workspace `status.state`
+- 如果需要解释当前生命周期，优先看
+  `status.health.backendLiveness` 和 `status.health.reason`
+
+当前 `status.json` 主结构是：
+
+- `project`
+- `driver`
+  - `backend`
+  - `profile`
+  - `baseImage`
+  - `runtimeKind`
+  - `runtimeRef`
+  - `rootdiskImage`
+- `lifecycleAction`
+- `health`
+  - `backendLiveness`
+  - `workspaceReadiness`
+  - `reason`
+- `credentials`
+  - `ssh`
+  - `codex`
+  - `live`
+- `details`
+- `evolution`
+- `assets`
+- `attachments`
+- `runtimeAssembly`
+
+当前已经去掉：
+
+- `status.state`
+- `status.backend`
+- `health.daemonReadiness`
+- 顶层 `ssh`
+- 顶层 `drift`
 
 ### 5.1 User-scoped workspace identity
 

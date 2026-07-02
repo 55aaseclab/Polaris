@@ -165,3 +165,25 @@ Current expected contents include:
 - `CLERK_SECRET_KEY`
 
 Use `.env.test.example` as the template.
+
+## Frontend Runtime Configuration
+
+Polaris frontend Clerk behavior is now explicit about satellite mode.
+
+Current rules:
+
+- `VITE_CLERK_DOMAIN` points to the Clerk frontend API host
+- `VITE_CLERK_SIGN_IN_URL` and `VITE_CLERK_SIGN_UP_URL` define the auth entry
+  pages
+- cross-origin sign-in alone does not enable satellite mode
+- `VITE_CLERK_SATELLITE_DOMAIN` is the only switch that enables satellite mode
+
+Supported `VITE_CLERK_SATELLITE_DOMAIN` values:
+
+- unset: no satellite mode
+- `auto`: use the current browser host
+- explicit hostname: use that hostname
+
+This prevents Polaris from fabricating invalid Clerk asset URLs such as
+workspace-domain-prefixed Clerk hosts when the deployment is not actually using
+Clerk satellite mode.

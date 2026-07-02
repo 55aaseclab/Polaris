@@ -100,10 +100,5 @@ export function assertProjectNameAvailableForUser(
   if (owners.includes(userProfileId)) {
     return;
   }
-  if (owners.length === 0) {
-    return;
-  }
-  throw new Error(
-    `Project name '${project}' is already in use by user ${owners[0]}. Choose a different project name.`,
-  );
+  return;
 }
