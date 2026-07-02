@@ -81,11 +81,12 @@ export async function waitForWorkspaceReady(
     logDebug("cli", "start-probe", {
       project: workspace.identity.projectName,
       backend: workspace.backend.kind,
-      state: status.state,
+      backendLiveness: status.health.backendLiveness,
+      workspaceReadiness: status.health.workspaceReadiness,
       reason: status.health.reason,
     });
 
-    if (status.state === "ready") {
+    if (status.health.workspaceReadiness === "ready") {
       logInfo("cli", "workspace-ready", {
         project: workspace.identity.projectName,
         backend: workspace.backend.kind,
@@ -99,13 +100,14 @@ export async function waitForWorkspaceReady(
   logWarn("cli", "workspace-not-ready-before-timeout", {
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,
-    state: lastStatus?.state,
+    backendLiveness: lastStatus?.health.backendLiveness,
+    workspaceReadiness: lastStatus?.health.workspaceReadiness,
     reason: lastStatus?.health.reason,
   });
 
   if (lastStatus) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.backend.kind}, state=${lastStatus.state}, reason=${lastStatus.health.reason ?? "unknown"})`,
+      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.backend ?? "unknown"}, backendLiveness=${lastStatus.health.backendLiveness}, workspaceReadiness=${lastStatus.health.workspaceReadiness}, reason=${lastStatus.health.reason ?? "unknown"})`,
     );
   }
   throw new Error(`Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms`);

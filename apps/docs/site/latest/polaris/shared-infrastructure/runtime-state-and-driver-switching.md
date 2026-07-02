@@ -37,32 +37,43 @@ This is the basis for:
 
 ## Portal State Model
 
-The portal should treat workspace state as the primary lifecycle signal.
+The portal should treat persisted workspace status as the primary lifecycle
+signal.
 
-That means the top-level workspace action area is driven by the persisted
-workspace state, not by a separate synthesized driver-runtime label or a
-separate provisioning-progress file.
+That means the top-level workspace action area is driven by `status.json`,
+but not by a separate `status.state` field. The current lifecycle signal is
+mainly:
 
-Current persisted workspace states are:
+- `status.health.backendLiveness`
+- `status.health.workspaceReadiness`
+- `status.health.reason`
 
-- `creating`
-- `not-applied`
-- `starting`
-- `saved`
-- `stopping`
-- `ready`
-- `archiving`
-- `degraded`
-- `unsupported`
+Supporting runtime and configuration facts live in:
+
+- `status.driver`
+- `status.credentials`
+- `status.attachments`
+- `status.runtimeAssembly`
 
 The important operator rule is:
 
-- the workspace status explains the lifecycle of the workspace as a whole
+- workspace lifecycle is explained by `health`
 - driver details are supporting information, not the primary action state
+
+Current commonly-seen `backendLiveness` values include:
+
+- `creating`
+- `starting`
+- `running`
+- `stopping`
+- `archiving`
+- `stopped`
+- `missing`
 
 In practice this means:
 
-- `creating`, `starting`, `stopping`, and `archiving` should survive a page refresh
+- `creating`, `starting`, `stopping`, and `archiving` should survive a page
+  refresh
 - the portal should not rely only on local in-memory UI state for these
   transitions
 - the system should not expose or depend on a separate `provision.json`
@@ -73,6 +84,14 @@ In practice this means:
   blocking on per-workspace status refresh
 - driver-specific facts such as runtime kind or runtime reference belong in
   the driver details area
+
+The current persisted schema no longer exposes:
+
+- `status.state`
+- `status.backend`
+- `health.daemonReadiness`
+- top-level `ssh`
+- top-level `drift`
 
 The portal also avoids presenting a summarized `Paseo status` line because it
 collapses multiple low-level signals into a misleading single conclusion.
@@ -92,6 +111,17 @@ The current rule is:
 - pair link comes only from `~/.paseo/pairing.json`
 - the portal reads those files when it needs reconnect metadata instead of
   trusting a cached status payload
+
+Polaris-generated Paseo runtime config also disables default local voice
+features now.
+
+Current defaults are:
+
+- `"dictation": false`
+- `"voiceMode": "disabled"`
+
+This keeps runtime state smaller and avoids unnecessary voice-related local
+artifacts in normal Polaris workspaces.
 
 ## Embedded Paseo Behavior
 

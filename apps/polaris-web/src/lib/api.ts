@@ -68,19 +68,23 @@ export type ManagedHarness =
   | "pi";
 
 export interface PortalWorkspaceStatus {
-  state?: string;
-  backend: {
-    kind?: string;
-    profile?: string;
-  };
   driver?: {
-    target: string;
+    backend: string;
+    profile?: string;
     baseImage: string;
     runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
     runtimeRef: string;
     rootdiskImage?: string;
   };
   credentials?: {
+    ssh?: {
+      mode: "managed-key" | "provided-key";
+      githubAccount?: string;
+      selfCheck: {
+        state: "ready" | "warning" | "error" | "not-configured";
+        message: string;
+      };
+    };
     codex?: {
       state?: "selected" | "not-selected";
       credentialId?: string;

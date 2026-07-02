@@ -478,22 +478,15 @@ test("portal workspace stop writes cached status before the async refresh comple
     writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
     writeWorkspaceStatus({
       project: workspace,
-      state: "ready",
-      backend: {
-        kind: "docker",
-        instanceState: "running",
-      },
       driver: {
-        target: "docker",
+        backend: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
         runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
-        runtimeState: "running",
       },
       health: {
         backendLiveness: "running",
         workspaceReadiness: "ready",
-        daemonReadiness: "ready",
         reason: "test setup",
       },
       details: {},
@@ -1207,11 +1200,10 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
     const workspaceStatusPath = path.join(workspaceRoot, "state", "status.json");
     assert.equal(fs.existsSync(workspaceStatusPath), true);
     const finalStatus = JSON.parse(fs.readFileSync(workspaceStatusPath, "utf8")) as {
-      state?: string;
-      backend?: { instanceState?: string };
+      health?: { backendLiveness?: string; workspaceReadiness?: string };
     };
-    assert.equal(finalStatus.state, "not-applied");
-    assert.equal(finalStatus.backend?.instanceState, "missing");
+    assert.equal(finalStatus.health?.backendLiveness, "missing");
+    assert.equal(finalStatus.health?.workspaceReadiness, "not-ready");
 
     assert.equal(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml")), true);
     assert.equal(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml")), true);

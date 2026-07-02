@@ -36,6 +36,15 @@ Run local checks before syncing:
 bash ./scripts/ci-local.sh
 ```
 
+This local CI path intentionally avoids the full Polaris integration suite.
+The default Polaris test entry is smoke-only.
+
+Run the heavy suite only when you explicitly need it:
+
+```bash
+pnpm run test:polaris:full
+```
+
 ## Remote Provision
 
 First-time machine setup:
@@ -77,6 +86,24 @@ The host env file should define at least:
 - `VITE_POLARIS_API_BASE`
 
 Keep secrets out of the repo.
+
+If the portal uses Clerk, the deployed web env should also define:
+
+- `VITE_CLERK_PUBLISHABLE_KEY`
+- `VITE_CLERK_DOMAIN`
+- `VITE_CLERK_SIGN_IN_URL`
+- `VITE_CLERK_SIGN_UP_URL`
+
+Set `VITE_CLERK_SATELLITE_DOMAIN` only when you intentionally want Clerk
+satellite mode.
+Polaris no longer auto-enables satellite mode just because the sign-in URL is
+cross-origin.
+
+Current supported values are:
+
+- unset: satellite mode disabled
+- `auto`: use `window.location.host`
+- explicit hostname: use that host as the satellite domain
 
 `POLARIS_DATA_ROOT` is mandatory.
 Do not rely on repo-local fallback paths for deployed or long-running
@@ -203,6 +230,21 @@ Check:
 - `workspace-shared-image-build`
 - `workspace-image-reused`
 - `workspace-image-tag`
+
+### embedded Paseo assets or auth broken
+
+Symptoms:
+
+- embedded Paseo page stays blank
+- browser requests the wrong Clerk asset host
+- `/api/session` returns `401` inside the embedded app
+
+Check:
+
+- deployed web env contains the intended Clerk vars
+- `VITE_CLERK_SATELLITE_DOMAIN` is not set accidentally
+- the deployed Paseo web bundle is built with the correct `/paseo` base path
+- the embedded app can reach `GET /api/session` on the Polaris origin
 
 ### cached status not being updated
 

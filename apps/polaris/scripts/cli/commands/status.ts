@@ -15,7 +15,8 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",
-      state: status.state,
+      backendLiveness: status.health.backendLiveness,
+      workspaceReadiness: status.health.workspaceReadiness,
       reason: status.health.reason,
     });
     await finalizeEvolutionSession(workspace, evolutionSessionId);
@@ -27,8 +28,9 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
   logInfo("cli", "status-synthesized", {
     project: status.project,
-    backend: status.backend.kind,
-    state: status.state,
+    backend: status.driver?.backend,
+    backendLiveness: status.health.backendLiveness,
+    workspaceReadiness: status.health.workspaceReadiness,
     statusFile: outputPath,
   });
   process.stdout.write(`${JSON.stringify({ ...status, statusFile: outputPath }, null, 2)}\n`);

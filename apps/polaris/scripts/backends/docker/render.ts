@@ -248,6 +248,8 @@ function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
     `path = pathlib.Path(${JSON.stringify(`${home}/.paseo/config.json`)})`,
     "data = json.loads(path.read_text()) if path.exists() else {}",
     'data.setdefault("daemon", {})["listen"] = "0.0.0.0:6767"',
+    'data.setdefault("features", {}).setdefault("dictation", {})["enabled"] = False',
+    'data.setdefault("features", {}).setdefault("voiceMode", {})["enabled"] = False',
     ...(paseoAppBaseUrl
       ? [`data.setdefault("app", {})["baseUrl"] = ${JSON.stringify(paseoAppBaseUrl)}`]
       : []),
@@ -256,17 +258,22 @@ function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
   ].join("; ");
   return [
     `python3 -c ${q(configScript)}`,
+    `paseo_sync_pairing() { tmp_pairing=$(mktemp); if PASEO_HOME=${home}/.paseo paseo daemon pair --json > "$tmp_pairing"; then mv "$tmp_pairing" ${home}/.paseo/pairing.json; else rm -f "$tmp_pairing"; return 1; fi; }`,
     `paseo_ready() { test -s ${home}/.paseo/server-id && test -f ${home}/.paseo/pairing.json && grep -q '"url"[[:space:]]*:' ${home}/.paseo/pairing.json; }`,
     `paseo_wait_ready() { for _ in $(seq 1 15); do if paseo_ready; then return 0; fi; sleep 1; done; return 1; }`,
     `paseo_stop_runner() { paseo_pid=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' ${pidFile} 2>/dev/null | head -n 1); if [ -z "$paseo_pid" ]; then paseo_pid=$(cat ${pidFile} 2>/dev/null | tr -cd '0-9'); fi; if [ -n "$paseo_pid" ]; then paseo_args=$(ps -o args= -p "$paseo_pid" 2>/dev/null || true); if printf '%s' "$paseo_args" | grep -Eq 'daemon-runner|Paseo Supervisor|paseo daemon start'; then pkill -TERM -P "$paseo_pid" 2>/dev/null || true; kill "$paseo_pid" 2>/dev/null || true; sleep 1; pkill -KILL -P "$paseo_pid" 2>/dev/null || true; kill -KILL "$paseo_pid" 2>/dev/null || true; fi; fi; rm -f ${pidFile} ${runtimePidFile} ${daemonLog}; }`,
     `if ! paseo_wait_ready; then`,
     `  paseo_stop_runner`,
     `  PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+    `  paseo_sync_pairing || true`,
     `  if ! paseo_wait_ready; then`,
     `    paseo_stop_runner`,
     `    PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
+    `    paseo_sync_pairing || true`,
     `    paseo_wait_ready`,
     `  fi`,
+    `else`,
+    `  paseo_sync_pairing || true`,
     `fi`,
     ...buildRuntimeObserverLines(workspace),
   ];

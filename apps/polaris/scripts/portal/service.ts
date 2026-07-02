@@ -166,7 +166,7 @@ export async function getPortalWorkspaceDetail(
   workspace: string,
 ) : Promise<PortalWorkspaceDetail> {
   const current = loadWorkspaceSummary(userId, workspace);
-  if (current.status?.state === "creating") {
+  if (current.status?.health.backendLiveness === "creating") {
     return loadWorkspaceDetail(userId, workspace);
   }
   try {

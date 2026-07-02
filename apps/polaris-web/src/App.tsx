@@ -1027,37 +1027,6 @@ function translatePairingState(
   }
 }
 
-function translateWorkspaceRuntimeState(
-  value: string | null | undefined,
-  t: (key: string) => string,
-): string {
-  if (!value) {
-    return t("workspace_unknown");
-  }
-  switch (value) {
-    case "creating":
-      return t("workspace_creating");
-    case "not-applied":
-      return t("workspace_not_started");
-    case "starting":
-      return t("workspace_starting");
-    case "stopping":
-      return t("stopping");
-    case "archiving":
-      return t("deleting");
-    case "saved":
-      return t("workspace_stopped");
-    case "ready":
-      return t("workspace_ready");
-    case "degraded":
-      return t("workspace_attention");
-    case "unsupported":
-      return t("workspace_attention");
-    default:
-      return t("workspace_unknown");
-  }
-}
-
 function translateAdminIntegrityStatus(
   value: PortalAdminUserSummary["integrityStatus"],
   t: (key: string) => string,
@@ -1074,45 +1043,6 @@ function translateAdminIntegrityStatus(
     default:
       return value;
   }
-}
-
-function translateWorkspaceSummaryState(
-  summary: PortalWorkspaceSummary,
-  t: (key: string) => string,
-): string {
-  const state = summary.status?.state;
-  return translateWorkspaceRuntimeState(state, t);
-}
-
-function translateWorkspaceDetailState(
-  detail: PortalWorkspaceDetail | null,
-  t: (key: string) => string,
-): string {
-  const state = detail?.status?.state;
-  return translateWorkspaceRuntimeState(state, t);
-}
-
-function workspaceSummaryBadgeVariant(
-  summary: PortalWorkspaceSummary,
-): "default" | "secondary" | "destructive" | "outline" {
-  const state = summary.status?.state;
-  if (state === "ready") {
-    return "secondary";
-  }
-  if (state === "creating" || state === "starting" || state === "stopping" || state === "archiving") {
-    return "default";
-  }
-  if (
-    state === "degraded"
-    || state === "error"
-    || state === "failed"
-  ) {
-    return "destructive";
-  }
-  if (state === "saved" || state === "not-applied") {
-    return "outline";
-  }
-  return "outline";
 }
 
 function extractOfferFragment(input: string): string | null {
@@ -1281,19 +1211,9 @@ function formatBackendValue(
   data: PortalWorkspaceDetail,
   t: (key: string) => string,
 ): string {
-  const kind = data.status?.backend.kind ?? t("status_unknown");
-  const profile = data.status?.backend.profile ?? t("status_unknown");
+  const kind = data.status?.driver?.backend ?? t("status_unknown");
+  const profile = data.status?.driver?.profile ?? t("status_unknown");
   return `${kind} / ${profile}`;
-}
-
-function statusTone(state?: string): "default" | "secondary" | "destructive" {
-  if (state === "ready") {
-    return "default";
-  }
-  if (state === "error" || state === "failed") {
-    return "destructive";
-  }
-  return "secondary";
 }
 
 type AssetRow = {
@@ -1959,10 +1879,10 @@ function PortalShellLayout(props: {
           </header>
           {embeddedPaseoFrames.length > 0 ? (
             <div
-              className={currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame
+              className={currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded
                 ? "-mx-4 -my-4 relative flex min-h-0 flex-1 overflow-hidden p-4 sm:-mx-6 sm:-my-6 sm:p-6"
                 : "pointer-events-none absolute inset-0 overflow-hidden opacity-0"}
-              aria-hidden={currentWorkspacePane === "" && hasActiveEmbeddedPaseoFrame ? undefined : true}
+              aria-hidden={currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded ? undefined : true}
             >
           {embeddedPaseoFrames.map((frame) => {
             return (
@@ -2695,13 +2615,14 @@ function WorkspaceDetailContent() {
   ) ?? null;
   const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
-  const runtimeRunning = workspaceData?.status?.state === "ready";
+  const backendLiveness = workspaceData?.status?.health?.backendLiveness ?? null;
+  const runtimeRunning = backendLiveness === "running";
   const persistedWorkspaceAction =
-    workspaceData?.status?.state === "starting"
+    backendLiveness === "starting" || backendLiveness === "creating"
       ? "starting"
-      : workspaceData?.status?.state === "stopping"
+      : backendLiveness === "stopping"
         ? "stopping"
-        : workspaceData?.status?.state === "archiving"
+        : backendLiveness === "archiving"
           ? "deleting"
           : null;
   const effectiveRuntimeRunning =
@@ -2722,7 +2643,9 @@ function WorkspaceDetailContent() {
       ? t("workspace_starting")
       : stopping
         ? t("stopping")
-        : translateWorkspaceDetailState(workspaceData, t);
+        : effectiveRuntimeRunning
+          ? t("workspace_ready")
+          : t("workspace_not_started");
   const evolutionSections: AssetSection[] = assets?.evolutionFiles
     ? [
         {
@@ -3093,7 +3016,12 @@ function WorkspaceDetailContent() {
             <div className="min-w-0">
               <div className="text-sm font-medium">{t("switch_driver")}</div>
               <div className="text-sm text-muted-foreground">
-                {workspaceData?.status?.driver?.target ?? driverLabel(workspaceData?.selectedDriver ?? null)}
+                {workspaceData?.status?.driver
+                  ? driverLabel({
+                    backend: workspaceData.status.driver.backend,
+                    profile: workspaceData.status.driver.profile,
+                  })
+                  : driverLabel(workspaceData?.selectedDriver ?? null)}
               </div>
             </div>
             {renderDriverSwitchControls()}
@@ -3161,10 +3089,6 @@ function WorkspaceDetailContent() {
   }
 
   function renderPane(): ReactNode {
-    if (workspaceLoading && !workspaceData) {
-      return <PaneSpinner />;
-    }
-
     if (!workspaceData) {
       return (
         <EmptyPane
@@ -3184,19 +3108,7 @@ function WorkspaceDetailContent() {
     }
 
     if (currentPane === "") {
-      const statusState = workspaceData?.status?.state ?? null;
-      const statusPending =
-        statusState === "creating"
-        || statusState === "starting"
-        || statusState === "stopping"
-        || statusState === "archiving";
-      const shouldShowDefaultPaneSpinner =
-        workspaceLoading
-        || statusPending
-        || (effectiveRuntimeRunning
-          && Boolean(embeddedPortalUrl)
-          && (!hasActiveEmbeddedPaseoFrame || !activeEmbeddedPaseoFrameLoaded));
-      return shouldShowDefaultPaneSpinner ? <PaneSpinner /> : null;
+      return null;
     }
 
     if (currentPane === "paseo") {
@@ -3242,7 +3154,12 @@ function WorkspaceDetailContent() {
                     <div className="text-sm font-medium">{t("current_driver")}</div>
                   </div>
                   <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    {driverStatus?.target ?? driverLabel(workspaceData.selectedDriver)}
+                    {driverStatus
+                      ? driverLabel({
+                        backend: driverStatus.backend,
+                        profile: driverStatus.profile,
+                      })
+                      : driverLabel(workspaceData.selectedDriver)}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -3316,10 +3233,6 @@ function WorkspaceDetailContent() {
         description={t("select_submenu")}
       />
     );
-  }
-
-  if (workspaceLoading && !workspaceData) {
-    return <PaneSpinner />;
   }
 
   return (

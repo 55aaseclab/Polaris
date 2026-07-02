@@ -105,6 +105,20 @@ test("docker render persists the configured Paseo app base URL into the runtime 
   }
 });
 
+test("docker render disables default Paseo voice features in the runtime config bootstrap", async () => {
+  const project = `pairing-docker-voice-${process.pid}-${Date.now()}`;
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
+    );
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"voiceMode\\", {})[\\"enabled\\"] = False'),
+    );
+  });
+});
+
 test("pod render persists the configured Paseo app base URL into the runtime config bootstrap", async () => {
   const previous = process.env.POLARIS_PASEO_APP_BASE_URL;
   process.env.POLARIS_PASEO_APP_BASE_URL = "http://portal.example.test:8082";
@@ -124,6 +138,20 @@ test("pod render persists the configured Paseo app base URL into the runtime con
   }
 });
 
+test("pod render disables default Paseo voice features in the runtime config bootstrap", async () => {
+  const project = `pairing-pod-voice-${process.pid}-${Date.now()}`;
+  await withTempWorkspaceSpec(project, "pod", async () => {
+    const workspace = loadWorkspaceFromRefForTest(`${project}@pod`);
+    const rendered = fs.readFileSync(renderAndWritePodWorkspace(workspace), "utf8");
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
+    );
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"voiceMode\\", {})[\\"enabled\\"] = False'),
+    );
+  });
+});
+
 test("kubevirt render persists the configured Paseo app base URL into cloud-init bootstrap", async () => {
   const previous = process.env.POLARIS_PASEO_APP_BASE_URL;
   process.env.POLARIS_PASEO_APP_BASE_URL = "http://portal.example.test:8082";
@@ -141,4 +169,18 @@ test("kubevirt render persists the configured Paseo app base URL into cloud-init
       process.env.POLARIS_PASEO_APP_BASE_URL = previous;
     }
   }
+});
+
+test("kubevirt render disables default Paseo voice features in cloud-init bootstrap", async () => {
+  const project = `pairing-vm-voice-${process.pid}-${Date.now()}`;
+  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
+    const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
+    const rendered = renderKubevirtWorkspace(workspace);
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
+    );
+    assert.ok(
+      rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"voiceMode\\", {})[\\"enabled\\"] = False'),
+    );
+  });
 });
