@@ -386,7 +386,7 @@ const COPY: Record<Language, Record<string, string>> = {
     lang_zh: "中文",
     language: "Language",
     profile: "Profile",
-    empty_pane: "Empty pane",
+    empty_pane: "Select content",
     workspace_header_title: "Workspace",
     workspace_header_empty: "No workspace selected yet.",
     workspace_status_button: "Workspace status",
@@ -641,7 +641,7 @@ const COPY: Record<Language, Record<string, string>> = {
     lang_zh: "中文",
     language: "语言",
     profile: "资料",
-    empty_pane: "空白页",
+    empty_pane: "请选择内容",
     workspace_header_title: "工作空间",
     workspace_header_empty: "未选择工作空间",
     workspace_status_button: "工作空间状态",
@@ -1821,7 +1821,10 @@ function PortalShellLayout(props: {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/credentials`}>
+                      <Link
+                        to={`/users/${encodeURIComponent(activeUser.id)}/credentials`}
+                        onClick={handleSidebarNavigate}
+                      >
                         <Link2 className="mr-2 h-4 w-4" />
                         {t("credentials")}
                       </Link>
@@ -1835,7 +1838,10 @@ function PortalShellLayout(props: {
                       {t("menu_account")}
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link to={`/users/${encodeURIComponent(activeUser.id)}/settings`}>
+                      <Link
+                        to={`/users/${encodeURIComponent(activeUser.id)}/settings`}
+                        onClick={handleSidebarNavigate}
+                      >
                         <Settings2 className="mr-2 h-4 w-4" />
                         {t("settings")}
                       </Link>
@@ -3090,12 +3096,7 @@ function WorkspaceDetailContent() {
 
   function renderPane(): ReactNode {
     if (!workspaceData) {
-      return (
-        <EmptyPane
-          title={t("empty_pane")}
-          description={t("select_submenu")}
-        />
-      );
+      return null;
     }
 
     if (currentPane === "dev-env" || currentPane === "memory") {
@@ -3227,12 +3228,7 @@ function WorkspaceDetailContent() {
       return renderWorkspaceControlsCard();
     }
 
-    return (
-      <EmptyPane
-        title={t("empty_pane")}
-        description={t("select_submenu")}
-      />
-    );
+    return null;
   }
 
   return (
