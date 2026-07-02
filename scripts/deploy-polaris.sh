@@ -10,6 +10,8 @@ COMPOSE_FILE="${ROOT_DIR}/deploy/docker-compose.polaris-bluegreen.yml"
 
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/lib/polaris-bluegreen.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/lib/polaris-deploy-restart.sh"
 
 cd "${ROOT_DIR}"
 
@@ -41,10 +43,32 @@ set +a
 pnpm install --frozen-lockfile
 pnpm --filter polaris run build
 
+executor_fingerprint="$(
+  polaris_deploy_executor_fingerprint "${ROOT_DIR}" "${ENV_FILE}"
+)"
+bridge_fingerprint="$(
+  polaris_deploy_bridge_fingerprint "${ROOT_DIR}"
+)"
+restart_executor=false
+restart_bridge=false
+if polaris_deploy_service_changed "${ROOT_DIR}" "polaris-executor" "${executor_fingerprint}"; then
+  restart_executor=true
+fi
+if polaris_deploy_service_changed "${ROOT_DIR}" "polaris-executor-bridge-proxy" "${bridge_fingerprint}"; then
+  restart_bridge=true
+fi
+
 docker compose -f "${COMPOSE_FILE}" -p "${project_name}" --env-file "${temp_env}" up -d --build
 
-systemctl restart polaris-executor.service
-systemctl restart polaris-executor-bridge-proxy.service
+if [ "${restart_executor}" = true ]; then
+  systemctl restart polaris-executor.service
+fi
+if [ "${restart_bridge}" = true ]; then
+  systemctl restart polaris-executor-bridge-proxy.service
+fi
+
+polaris_deploy_record_fingerprint "${ROOT_DIR}" "polaris-executor" "${executor_fingerprint}"
+polaris_deploy_record_fingerprint "${ROOT_DIR}" "polaris-executor-bridge-proxy" "${bridge_fingerprint}"
 
 polaris_bluegreen_wait_for_stack "${target_port}"
 polaris_bluegreen_switch_upstream "${target_color}" "${UPSTREAM_FILE}" "${ACTIVE_COLOR_FILE}"
@@ -52,3 +76,5 @@ polaris_bluegreen_switch_upstream "${target_color}" "${UPSTREAM_FILE}" "${ACTIVE
 echo "active_color=${target_color}"
 echo "project=${project_name}"
 echo "port=${target_port}"
+echo "restart_executor=${restart_executor}"
+echo "restart_bridge=${restart_bridge}"

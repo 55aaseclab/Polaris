@@ -3550,6 +3550,17 @@ test("docker backend returns structured observations and executes compose action
       profile: "docker",
       dockerRuntimeMode: "legacy" as const,
     },
+    attachments: {
+      ...base.attachments,
+      workspaceData: {
+        ...base.attachments.workspaceData,
+        source: {
+          kind: "persistent-volume" as const,
+          volumeRef: "demo-workspace-data",
+          description: "test workspace data volume",
+        },
+      },
+    },
   };
   const driver = getBackendDriver("docker");
 
@@ -3633,6 +3644,74 @@ exit 0
       await driver.stop(workspace);
       await driver.restart(workspace);
       await driver.rebuild(workspace);
+    },
+  );
+});
+
+test("docker lifecycle actions create missing user identity volume before compose", async () => {
+  const base = loadDefaultDemoWorkspace();
+  const workspace = {
+    ...base,
+    backend: {
+      ...base.backend,
+      kind: "docker" as const,
+      profile: "docker",
+      dockerRuntimeMode: "legacy" as const,
+    },
+    attachments: {
+      ...base.attachments,
+      workspaceData: {
+        ...base.attachments.workspaceData,
+        source: {
+          kind: "persistent-volume" as const,
+          volumeRef: "demo-workspace-data",
+          description: "test workspace data volume",
+        },
+      },
+    },
+  };
+  const driver = getBackendDriver("docker");
+  const expectedIdentityVolume = `polaris-${DEMO_USER_PROFILE_ID}-identity`;
+
+  await withFakeCommands(
+    {
+      docker: `
+if [[ "$1" == "volume" && "$2" == "inspect" && "$3" == "${expectedIdentityVolume}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "volume" && "$2" == "create" && "$3" == "${expectedIdentityVolume}" ]]; then
+  printf '%s' "$3"
+  exit 0
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+    },
+    async ({ readCommandLog }) => {
+      await driver.start(workspace);
+      const commands = readCommandLog();
+      const inspectIndex = commands.findIndex((entry) =>
+        entry === `volume inspect ${expectedIdentityVolume}`
+      );
+      const createIndex = commands.findIndex((entry) =>
+        entry === `volume create ${expectedIdentityVolume}`
+      );
+      const composeIndex = commands.findIndex((entry) =>
+        entry.includes("compose") && entry.includes(" up -d")
+      );
+      assert.ok(inspectIndex >= 0);
+      assert.ok(createIndex > inspectIndex);
+      assert.ok(composeIndex > createIndex);
     },
   );
 });
