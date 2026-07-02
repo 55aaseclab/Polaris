@@ -222,8 +222,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.credentials.registryRoot, `config/users/${userProfileId}/credentials`);
         assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
-        const scaffoldedProfile = yaml.load(fs.readFileSync(profilePath, "utf8")) as { workspaces?: string[] };
-        assert.ok(scaffoldedProfile.workspaces?.includes(project));
+        assert.equal(fs.existsSync(path.join(secretsRoot, "workspaces", project)), true);
         assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
         assert.equal(fs.existsSync(path.join(credentialRoot, "github-ssh.yaml")), true);
       },

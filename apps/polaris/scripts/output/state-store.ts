@@ -170,7 +170,9 @@ function mergeWorkspaceStatus(
     health: {
       backendLiveness: incoming.health.backendLiveness ?? current.health.backendLiveness,
       workspaceReadiness: incoming.health.workspaceReadiness ?? current.health.workspaceReadiness,
-      reason: incoming.health.reason ?? current.health.reason,
+      reason: Object.prototype.hasOwnProperty.call(incoming.health, "reason")
+        ? incoming.health.reason
+        : current.health.reason,
     },
     details: {
       ...current.details,

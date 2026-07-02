@@ -173,6 +173,17 @@ function userCredentialRegistryDir(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
 }
 
+function listUserWorkspaceDirs(userProfileId: string): string[] {
+  const root = path.join(USER_SECRETS_ROOT, userProfileId, "workspaces");
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function sanitizeUserProfileId(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
@@ -572,9 +583,7 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       name: String(data.name ?? ""),
       email: String(data.email ?? ""),
       secretsRoot: path.join("config", "users", profileId),
-      workspaces: Array.isArray(data.workspaces)
-        ? data.workspaces.map((item: unknown) => String(item)).filter(Boolean)
-        : [],
+      workspaces: listUserWorkspaceDirs(profileId),
       github: {
         account: data.github?.account
           ? String(data.github.account)

@@ -31,7 +31,13 @@ LOG_DIR=".tmp/paseo"
 mkdir -p "${LOG_DIR}"
 
 cleanup() {
-  local pids=("${server_pid:-}" "${executor_pid:-}" "${web_pid:-}" "${paseo_pid:-}")
+  local pids=(
+    "${server_pid:-}"
+    "${executor_pid:-}"
+    "${executor_bridge_proxy_pid:-}"
+    "${web_pid:-}"
+    "${paseo_pid:-}"
+  )
   local pid
   for pid in "${pids[@]}"; do
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
@@ -58,6 +64,15 @@ pnpm --filter polaris exec tsx watch scripts/polaris.ts executor "${EXECUTOR_POR
   2> >(tee "${LOG_DIR}/stack.executor.err.log" >&2) &
 executor_pid=$!
 
+if command -v socat >/dev/null 2>&1 && ip -4 addr show docker0 >/dev/null 2>&1; then
+  bash "${ROOT_DIR}/scripts/run-polaris-executor-bridge-proxy.sh" \
+    > >(tee "${LOG_DIR}/stack.executor-bridge.log") \
+    2> >(tee "${LOG_DIR}/stack.executor-bridge.err.log" >&2) &
+  executor_bridge_proxy_pid=$!
+else
+  echo "[polaris-local-stack] executor bridge proxy not started; docker workspaces may not report Paseo pairing metadata back to the host executor" >&2
+fi
+
 POLARIS_WEB_PORT="${WEB_PORT}" \
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
 pnpm --filter polaris-web exec vite --host "${WEB_HOST}" --port "${WEB_PORT}" \
@@ -70,5 +85,10 @@ pnpm dlx serve@14 -s "${paseo_dist_dir}" -l "tcp://${PASEO_HOST}:${PASEO_PORT}" 
   2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
 paseo_pid=$!
 
-wait -n "${server_pid}" "${executor_pid}" "${web_pid}" "${paseo_pid}"
+pids=("${server_pid}" "${executor_pid}" "${web_pid}" "${paseo_pid}")
+if [ -n "${executor_bridge_proxy_pid:-}" ]; then
+  pids+=("${executor_bridge_proxy_pid}")
+fi
+
+wait -n "${pids[@]}"
 exit 1

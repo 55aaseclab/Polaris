@@ -35,20 +35,21 @@ function workspaceRoot(userId: string, workspace: string): string {
 
 function portalWorkspaceStateRoot(userId: string, workspace: string): string {
   return path.join(
-    USER_ROOT,
-    userId,
+    workspaceRoot(userId, workspace),
     ".portal",
-    "workspaces",
-    workspace,
+  );
+}
+
+function archivedPortalWorkspaceStateRoot(userId: string, archiveId: string): string {
+  return path.join(
+    archivedWorkspacesRoot(userId),
+    archiveId,
+    ".portal",
   );
 }
 
 function archivedWorkspacesRoot(userId: string): string {
   return path.join(USER_ROOT, userId, "archives", "workspaces");
-}
-
-function archivedPortalWorkspacesRoot(userId: string): string {
-  return path.join(USER_ROOT, userId, "archives", "portal-workspaces");
 }
 
 function archiveStamp(date = new Date()): string {
@@ -62,10 +63,6 @@ function archiveIdFor(workspace: string, archivedAt: Date): string {
 function moveIntoArchive(source: string, destination: string): void {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.renameSync(source, destination);
-}
-
-function profilePath(userId: string): string {
-  return path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 }
 
 function workspaceProjectRef(workspace: string, target: BackendTarget): string {
@@ -138,25 +135,11 @@ function teardownBackend(workspace: WorkspaceSpec): void {
   runTolerant("kubectl", ["delete", "-f", outputPath, "--ignore-not-found=true", "--wait=true"]);
 }
 
-function removeWorkspaceFromProfile(userId: string, workspace: string): void {
-  const filePath = profilePath(userId);
-  if (!fs.existsSync(filePath)) {
-    return;
-  }
-  const data = (yaml.load(fs.readFileSync(filePath, "utf8")) ?? {}) as Record<string, unknown>;
-  const workspaces = Array.isArray(data.workspaces)
-    ? data.workspaces.map((value) => String(value)).filter(Boolean)
-    : [];
-  data.workspaces = workspaces.filter((value) => value !== workspace);
-  fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: 120, noRefs: true }), "utf8");
-}
-
 async function prepareWorkspaceRemoval(
   userId: string,
   workspace: string,
 ): Promise<{
   root: string;
-  portalStateRoot: string;
 }> {
   const root = workspaceRoot(userId, workspace);
   if (!fs.existsSync(root)) {
@@ -169,7 +152,6 @@ async function prepareWorkspaceRemoval(
   }
   return {
     root,
-    portalStateRoot: portalWorkspaceStateRoot(userId, workspace),
   };
 }
 
@@ -180,18 +162,13 @@ export async function archiveWorkspaceOwnedByUser(userId: string, workspace: str
   workspace: string;
 }> {
   return withWorkspaceMutationLock(import.meta.url, userId, workspace, async () => {
-    const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
+    const { root } = await prepareWorkspaceRemoval(userId, workspace);
     const archivedAt = new Date();
     const archiveId = archiveIdFor(workspace, archivedAt);
     const archiveRoot = path.join(archivedWorkspacesRoot(userId), archiveId);
-    const archivedPortalStateRoot = path.join(
-      archivedPortalWorkspacesRoot(userId),
-      archiveId,
-    );
+    const portalStateRoot = portalWorkspaceStateRoot(userId, workspace);
+    const archivedPortalStateRoot = archivedPortalWorkspaceStateRoot(userId, archiveId);
     moveIntoArchive(root, archiveRoot);
-    if (fs.existsSync(portalStateRoot)) {
-      moveIntoArchive(portalStateRoot, archivedPortalStateRoot);
-    }
     fs.writeFileSync(
       path.join(archiveRoot, ".polaris-archive.json"),
       `${JSON.stringify({
@@ -200,16 +177,15 @@ export async function archiveWorkspaceOwnedByUser(userId: string, workspace: str
         archivedAt: archivedAt.toISOString(),
         originalWorkspaceRoot: `config/users/${userId}/workspaces/${workspace}`,
         originalPortalStateRoot: fs.existsSync(archivedPortalStateRoot)
-          ? `config/users/${userId}/.portal/workspaces/${workspace}`
+          ? `config/users/${userId}/workspaces/${workspace}/.portal`
           : undefined,
         workspaceRoot: `config/users/${userId}/archives/workspaces/${archiveId}`,
         portalStateRoot: fs.existsSync(archivedPortalStateRoot)
-          ? `config/users/${userId}/archives/portal-workspaces/${archiveId}`
+          ? `config/users/${userId}/archives/workspaces/${archiveId}/.portal`
           : undefined,
       }, null, 2)}\n`,
       "utf8",
     );
-    removeWorkspaceFromProfile(userId, workspace);
     logInfo("cli", "workspace-archived", {
       userId,
       workspace,
@@ -229,10 +205,8 @@ export async function deleteWorkspaceOwnedByUser(userId: string, workspace: stri
   workspace: string;
 }> {
   return withWorkspaceMutationLock(import.meta.url, userId, workspace, async () => {
-    const { root, portalStateRoot } = await prepareWorkspaceRemoval(userId, workspace);
+    const { root } = await prepareWorkspaceRemoval(userId, workspace);
     fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(portalStateRoot, { recursive: true, force: true });
-    removeWorkspaceFromProfile(userId, workspace);
     logInfo("cli", "workspace-deleted", {
       userId,
       workspace,
@@ -242,6 +216,25 @@ export async function deleteWorkspaceOwnedByUser(userId: string, workspace: stri
       workspace,
     };
   });
+}
+
+export async function deleteArchivedWorkspaceOwnedByUser(userId: string, archiveId: string): Promise<{
+  deleted: true;
+  archiveId: string;
+}> {
+  const archiveRoot = path.join(archivedWorkspacesRoot(userId), archiveId);
+  if (!fs.existsSync(archiveRoot)) {
+    throw new Error(`Archived workspace '${archiveId}' for user '${userId}' was not found`);
+  }
+  fs.rmSync(archiveRoot, { recursive: true, force: true });
+  logInfo("cli", "workspace-archive-deleted", {
+    userId,
+    archiveId,
+  });
+  return {
+    deleted: true,
+    archiveId,
+  };
 }
 
 export async function deleteCommand(projectArg: string): Promise<void> {

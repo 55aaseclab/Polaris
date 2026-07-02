@@ -116,6 +116,15 @@ export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
   }>;
 }
 
+export interface PortalWorkspacePaseoDiagnostic {
+  daemonStatusRaw: string;
+  daemonStatus: {
+    serverId: string;
+    localDaemon: string;
+    connectedDaemon: string;
+  } | null;
+}
+
 export const PORTAL_DRIVER_TARGETS: PortalDriverTarget[] = [
   { backend: "docker" },
   { backend: "pod", profile: "gvisor" },
@@ -160,10 +169,6 @@ function readPersistedPaseoPairingUrl(userId: string, workspace: string): string
 
 function userArchivedWorkspacesRoot(userId: string): string {
   return path.join(USER_ROOT, userId, "archives", "workspaces");
-}
-
-function userArchivedPortalWorkspacesRoot(userId: string): string {
-  return path.join(USER_ROOT, userId, "archives", "portal-workspaces");
 }
 
 function credentialRegistryPath(userId: string, credentialId: string): string {
@@ -286,9 +291,7 @@ export function listPortalProfiles(): PortalProfileSummary[] {
         id,
         name: String(data.name ?? ""),
         email: String(data.email ?? ""),
-        workspaces: Array.isArray(data.workspaces)
-          ? data.workspaces.map((value) => String(value)).filter(Boolean)
-          : [],
+        workspaces: listOwnedWorkspaces(id),
       };
     })
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -303,9 +306,7 @@ export function readPortalProfile(userId: string): PortalProfileDetail | null {
     id: userId,
     name: String(data.name ?? ""),
     email: String(data.email ?? ""),
-    workspaces: Array.isArray(data.workspaces)
-      ? data.workspaces.map((value) => String(value)).filter(Boolean)
-      : [],
+    workspaces: listOwnedWorkspaces(userId),
     githubAccount: typeof data.github === "object" && data.github
       ? String((data.github as Record<string, unknown>).account ?? "") || undefined
       : undefined,
@@ -393,11 +394,6 @@ export function listOwnedWorkspaces(userId: string): string[] {
   return fs
     .readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .filter((entry) =>
-      PORTAL_DRIVER_TARGETS.some((target) =>
-        fs.existsSync(path.join(root, entry.name, workspaceBackendFile(target)))
-      )
-    )
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
 }
@@ -415,13 +411,28 @@ export function listArchivedWorkspaces(
     .map((entry) => {
       const metadataPath = path.join(root, entry.name, ".polaris-archive.json");
       const metadata = readJson<PortalArchivedWorkspaceSummary>(metadataPath);
-      return metadata ?? {
+      const fallback = metadata ?? {
         archiveId: entry.name,
         workspaceName: entry.name.replace(/^[0-9]{8}T[0-9]{6}Z-/, ""),
         archivedAt: "",
         originalWorkspaceRoot: "",
         workspaceRoot: path.join(root, entry.name),
       };
+      if (
+        !fallback.portalStateRoot
+        && fs.existsSync(path.join(root, entry.name, ".portal"))
+      ) {
+        fallback.portalStateRoot = path.join(
+          "config",
+          "users",
+          userId,
+          "archives",
+          "workspaces",
+          entry.name,
+          ".portal",
+        );
+      }
+      return fallback;
     })
     .sort((left, right) => right.archiveId.localeCompare(left.archiveId));
 }

@@ -19,13 +19,18 @@ import {
   loadWorkspaceSummary,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
+  type PortalWorkspacePaseoDiagnostic,
   updatePortalWorkspaceAgentBinding,
   workspaceRefFromTarget,
 } from "../core/portal.js";
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createWorkspaceForUser } from "../cli/commands/create.js";
 import { performWorkspaceSwitch, type SwitchResult } from "../cli/commands/switch.js";
-import { archiveWorkspaceOwnedByUser } from "../cli/commands/delete.js";
+import {
+  archiveWorkspaceOwnedByUser,
+  deleteArchivedWorkspaceOwnedByUser,
+  deleteWorkspaceOwnedByUser,
+} from "../cli/commands/delete.js";
 import { loadExecutableWorkspaceForCommand } from "../cli/commands/shared.js";
 import { startCommand } from "../cli/commands/start.js";
 import { statusCommand } from "../cli/commands/status.js";
@@ -37,12 +42,15 @@ import { getBackendDriver } from "../backends/index.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
 import { workspaceRuntimeScopeName } from "../core/workspace-name.js";
 import {
+  parsePaseoDaemonStatus,
+} from "../core/paseo.js";
+import {
   writeWorkspaceLiveCredentialSelection,
   writeWorkspacePaseoPairing,
   writeWorkspacePaseoServerId,
   writeWorkspaceStatus,
 } from "../output/state-store.js";
-import { logInfo, logWarn } from "../utils/log.js";
+import { logError, logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
@@ -54,6 +62,11 @@ const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
+const stopJobs = new Map<string, Promise<void>>();
+
+function workspaceJobKey(userId: string, workspace: string): string {
+  return `${userId.trim()}:${workspace.trim()}`;
+}
 
 function provisionStepDelayMs(): number {
   const raw = process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS?.trim();
@@ -246,6 +259,57 @@ function loadUserWorkspace(
     backend,
     profileHint,
   );
+}
+
+function runWorkspaceShell(workspace: WorkspaceSpec, script: string): { stdout: string; stderr: string } {
+  const scope = workspaceRuntimeScopeName(
+    workspace.userProfile.id,
+    workspace.identity.projectName,
+  );
+  switch (workspace.backend.kind) {
+    case "docker":
+      return runChecked("docker", [
+        "exec",
+        `${scope}-docker`,
+        "sh",
+        "-lc",
+        script,
+      ]);
+    case "pod":
+      return runChecked("kubectl", [
+        "-n",
+        scope,
+        "exec",
+        `deployment/${scope}`,
+        "--",
+        "sh",
+        "-lc",
+        script,
+      ]);
+    default:
+      throw new Error(`Paseo daemon diagnostics are not supported for backend '${workspace.backend.kind}' yet`);
+  }
+}
+
+function collectWorkspacePaseoDiagnostic(
+  userId: string,
+  workspace: string,
+): PortalWorkspacePaseoDiagnostic {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  const target = summary.selectedDriver;
+  if (!target) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+  const daemonStatusRaw = runWorkspaceShell(
+    loaded,
+    "PASEO_HOME=/root/.paseo paseo daemon status --json --home /root/.paseo",
+  ).stdout.trim();
+  const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
+  return {
+    daemonStatusRaw,
+    daemonStatus,
+  };
 }
 
 function liveRuntimeCredentialFiles(
@@ -849,78 +913,119 @@ export async function deletePortalWorkspace(
   archivedAt: string;
   workspace: string;
 }> {
-  writeCachedWorkspaceStatusUpdate({
-    userId,
-    workspace,
-    reason: "workspace-archiving",
-    mutate: (current) => {
-      if (!current) {
-        return null;
-      }
-      return {
-        ...current,
-        health: {
-          ...current.health,
-          backendLiveness: "archiving",
-          workspaceReadiness: "not-ready",
-          reason: "workspace archiving",
-        },
-      };
-    },
-  });
-  return archiveWorkspaceOwnedByUser(userId, workspace);
+  try {
+    return await archiveWorkspaceOwnedByUser(userId, workspace);
+  } catch (error) {
+    await refreshPortalWorkspaceStatus(userId, workspace);
+    throw error;
+  }
+}
+
+export async function permanentlyDeletePortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ deleted: true; workspace: string }> {
+  return deleteWorkspaceOwnedByUser(userId, workspace);
+}
+
+export async function permanentlyDeletePortalArchivedWorkspace(
+  userId: string,
+  archiveId: string,
+): Promise<{ deleted: true; archiveId: string }> {
+  return deleteArchivedWorkspaceOwnedByUser(userId, archiveId);
 }
 
 export async function stopPortalWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ stopped: true }> {
-  return withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-    const summary = loadWorkspaceSummary(userId, workspace);
-    if (!summary.selectedDriver) {
-      throw new Error(`Workspace '${workspace}' does not have a selected driver`);
-    }
-    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-    logInfo("executor", "workspace-stop-started", {
-      userId,
-      workspace,
-      ref,
-    });
-    writeCachedWorkspaceStatusUpdate({
-      userId,
-      workspace,
-      reason: "workspace-stopping",
-      mutate: (current, currentSummary) => {
-        if (!current) {
-          return null;
-        }
-        return {
-          ...current,
-          driver: current.driver
-            ? {
-                ...current.driver,
-                backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
-                profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
-              }
-            : current.driver,
-          health: {
-            ...current.health,
-            backendLiveness: "stopping",
-            workspaceReadiness: "not-ready",
-            reason: "workspace stop requested",
-          },
-        };
-      },
-    });
-    await stopCommand(ref, userId);
-    await refreshPortalWorkspaceStatus(userId, workspace);
-    logInfo("executor", "workspace-stop-completed", {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  writeCachedWorkspaceStatusUpdate({
+    userId,
+    workspace,
+    reason: "workspace-stopping",
+    mutate: (current, currentSummary) => {
+      if (!current) {
+        return null;
+      }
+      return {
+        ...current,
+        driver: current.driver
+          ? {
+              ...current.driver,
+              backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
+              profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+            }
+          : current.driver,
+        health: {
+          ...current.health,
+          backendLiveness: "stopping",
+          workspaceReadiness: "not-ready",
+          reason: "workspace stop requested",
+        },
+      };
+    },
+  });
+  const jobKey = workspaceJobKey(userId, workspace);
+  if (stopJobs.has(jobKey)) {
+    logInfo("executor", "workspace-stop-joined", {
       userId,
       workspace,
       ref,
     });
     return { stopped: true };
+  }
+  logInfo("executor", "workspace-stop-queued", {
+    userId,
+    workspace,
+    ref,
   });
+  const job = new Promise<void>((resolve, reject) => {
+    setTimeout(() => {
+      void withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
+        logInfo("executor", "workspace-stop-started", {
+          userId,
+          workspace,
+          ref,
+        });
+        await stopCommand(ref, userId);
+        await refreshPortalWorkspaceStatus(userId, workspace);
+        logInfo("executor", "workspace-stop-completed", {
+          userId,
+          workspace,
+          ref,
+        });
+      }).then(resolve, reject);
+    }, 0);
+  })
+    .catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      logError("executor", "workspace-stop-failed", {
+        userId,
+        workspace,
+        ref,
+        error: message,
+      });
+      try {
+        await refreshPortalWorkspaceStatus(userId, workspace);
+      } catch (refreshError) {
+        logWarn("executor", "workspace-stop-failed-refresh", {
+          userId,
+          workspace,
+          ref,
+          error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+        });
+      }
+    })
+    .finally(() => {
+      stopJobs.delete(jobKey);
+    });
+  stopJobs.set(jobKey, job);
+  return { stopped: true };
 }
 
 export async function startPortalWorkspace(
@@ -1075,66 +1180,21 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   );
 }
 
-export async function bindPortalWorkspaceAgent(input: {
+export async function getPortalWorkspacePaseoDiagnostic(input: {
   userId: string;
   workspace: string;
-  credentialId: string;
-  driver?: PortalDriverTarget;
-}): Promise<{
-  enabled: true;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
-}> {
-  return withWorkspaceLifecycleLock(
-    import.meta.url,
-    input.userId,
-    input.workspace,
-    async () => {
-      const summary = loadWorkspaceSummary(input.userId, input.workspace);
-      const target = input.driver ?? summary.selectedDriver;
-      if (!target) {
-        throw new Error(
-          `Workspace '${input.workspace}' does not have a selected driver`,
-        );
-      }
-      const ref = workspaceRefFromTarget(input.workspace, target);
-      const restarted = await shouldRecycleRunningWorkspace(
-        input.userId,
-        input.workspace,
-        target,
-      );
-      if (restarted) {
-        await stopCommand(ref, input.userId);
-      }
-      const updated = updatePortalWorkspaceAgentBinding({
-        userId: input.userId,
-        workspace: input.workspace,
-        target,
-        credentialId: input.credentialId,
-        enabled: true,
-      });
-      renderWorkspaceTarget(input.userId, input.workspace, target);
-      await startWorkspaceWithoutWait(ref, input.userId);
-      return {
-        enabled: true,
-        driver: ref,
-        credentialBindings: updated.credentialBindings,
-        restarted,
-      };
-    },
+}): Promise<PortalWorkspacePaseoDiagnostic> {
+  return withWorkspaceLifecycleLock(import.meta.url, input.userId, input.workspace, async () =>
+    collectWorkspacePaseoDiagnostic(input.userId, input.workspace)
   );
 }
 
-export async function unbindPortalWorkspaceAgent(input: {
+export async function restartPortalWorkspacePaseoDaemon(input: {
   userId: string;
   workspace: string;
-  driver?: PortalDriverTarget;
 }): Promise<{
-  enabled: false;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
+  restarted: true;
+  diagnostic: PortalWorkspacePaseoDiagnostic;
 }> {
   return withWorkspaceLifecycleLock(
     import.meta.url,
@@ -1142,34 +1202,25 @@ export async function unbindPortalWorkspaceAgent(input: {
     input.workspace,
     async () => {
       const summary = loadWorkspaceSummary(input.userId, input.workspace);
-      const target = input.driver ?? summary.selectedDriver;
+      const target = summary.selectedDriver;
       if (!target) {
-        throw new Error(
-          `Workspace '${input.workspace}' does not have a selected driver`,
-        );
+        throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
       }
-      const ref = workspaceRefFromTarget(input.workspace, target);
-      const restarted = await shouldRecycleRunningWorkspace(
-        input.userId,
-        input.workspace,
-        target,
+      const loaded = loadPortalWorkspaceByTarget(input.userId, input.workspace, target);
+      runWorkspaceShell(
+        loaded,
+        [
+          "paseo_pid=$(sed -n 's/.*\"pid\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' /root/.paseo/paseo.pid 2>/dev/null | head -n 1)",
+          "if [ -z \"$paseo_pid\" ]; then paseo_pid=$(cat /root/.paseo/paseo.pid 2>/dev/null | tr -cd '0-9'); fi",
+          "if [ -n \"$paseo_pid\" ]; then pkill -TERM -P \"$paseo_pid\" 2>/dev/null || true; kill \"$paseo_pid\" 2>/dev/null || true; sleep 1; pkill -KILL -P \"$paseo_pid\" 2>/dev/null || true; kill -KILL \"$paseo_pid\" 2>/dev/null || true; fi",
+          "rm -f /root/.paseo/paseo.pid /root/.paseo/daemon.log",
+          "PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767",
+        ].join("; "),
       );
-      if (restarted) {
-        await stopCommand(ref, input.userId);
-      }
-      const updated = updatePortalWorkspaceAgentBinding({
-        userId: input.userId,
-        workspace: input.workspace,
-        target,
-        enabled: false,
-      });
-      renderWorkspaceTarget(input.userId, input.workspace, target);
-      await startWorkspaceWithoutWait(ref, input.userId);
+      const diagnostic = collectWorkspacePaseoDiagnostic(input.userId, input.workspace);
       return {
-        enabled: false,
-        driver: ref,
-        credentialBindings: updated.credentialBindings,
-        restarted,
+        restarted: true,
+        diagnostic,
       };
     },
   );

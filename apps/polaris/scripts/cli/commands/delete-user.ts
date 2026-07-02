@@ -75,7 +75,10 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
     const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
     const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
-    if (activeWorkspaces.length > 0 || archivedWorkspaces.length > 0) {
+    if (
+      activeWorkspaces.length > 0
+      || archivedWorkspaces.length > 0
+    ) {
       throw new Error(
         [
           `User '${userProfileId}' cannot be deleted while workspace data still exists.`,

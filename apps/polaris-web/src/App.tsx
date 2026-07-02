@@ -32,18 +32,22 @@ import {
   createWorkspace,
   createPortalUser,
   deletePortalUser,
+  deleteArchivedWorkspace,
   deleteCredential,
   deleteWorkspace,
   getCredentialCatalog,
   getCredentialPreview,
   getWorkspaceAssetPreview,
   getWorkspaceDetail,
+  getWorkspacePaseoDiagnostic,
   getPortalSession,
+  getUserProfile,
   listAdminUsers,
   listArchivedWorkspaces,
   listCredentials,
   listUsers,
   refreshWorkspaceStatus,
+  restartWorkspacePaseoDaemon,
   resolvePortalUserMapping,
   setApiAuthTokenProvider,
   listWorkspaces,
@@ -62,12 +66,14 @@ import {
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
+  type PortalWorkspacePaseoDiagnostic,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { mergeEmbeddedPaseoFrames, type EmbeddedPaseoFrame } from "@/lib/paseo-frames";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -116,6 +122,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   buildClerkUrl,
   clerkSignInUrl,
@@ -127,6 +134,25 @@ function basenameForDisplay(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
   const parts = normalized.split("/");
   return parts[parts.length - 1] || filePath;
+}
+
+function workspaceSidebarStatusDotClass(backendLiveness: string | null | undefined): string {
+  switch (backendLiveness) {
+    case "running":
+      return "bg-emerald-500";
+    case "starting":
+    case "creating":
+      return "bg-sky-500";
+    case "stopping":
+    case "archiving":
+      return "bg-amber-500";
+    case "unknown":
+      return "bg-rose-500";
+    case "missing":
+    case "stopped":
+    default:
+      return "bg-muted-foreground/35";
+  }
 }
 
 type LanguageContextValue = {
@@ -142,6 +168,8 @@ type PortalShellContextValue = {
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
   refreshWorkspaces: () => void;
+  sidebarPollingWorkspaceKeys: string[];
+  setSidebarWorkspacePolling: (workspaceKey: string, polling: boolean) => void;
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
@@ -271,6 +299,50 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_credentials: "Credentials",
     admin_user_archives: "Archived",
     admin_user_mappings: "Mappings",
+    admin_user_directory: "User directory",
+    admin_user_overview: "Overview",
+    admin_user_workspace_section: "Workspaces",
+    admin_user_credentials_section: "Credentials",
+    admin_user_tab_user: "User",
+    admin_user_tab_credentials: "Credentials",
+    admin_user_tab_workspaces: "Workspaces",
+    admin_user_tab_paseo: "Paseo",
+    admin_paseo_reconnect_mode: "Reconnect mode",
+    admin_paseo_reconnect_target: "Reconnect target",
+    admin_paseo_live_target: "Live target",
+    admin_paseo_reconnectable: "Reconnectable",
+    admin_paseo_needs_pairing: "Needs pairing",
+    admin_paseo_status_button: "Refresh daemon status",
+    admin_paseo_restart_button: "Restart daemon",
+    admin_paseo_restarting_button: "Restarting daemon...",
+    admin_paseo_status_raw: "paseo daemon status --json",
+    admin_paseo_server_id: "Persisted server ID",
+    admin_paseo_pairing_server_id: "Pairing server ID",
+    admin_paseo_pairing_url: "Pairing URL",
+    admin_paseo_daemon_observed: "Daemon observation",
+    admin_paseo_pairing_observed: "Pairing observation",
+    admin_user_archives_section: "Archived workspaces",
+    admin_user_quick_actions: "Quick actions",
+    admin_user_empty: "No users found.",
+    admin_workspace_empty: "No workspaces yet.",
+    admin_archive_empty: "No archived workspaces.",
+    admin_credentials_empty: "No credentials yet.",
+    admin_open_admin_user: "Open user",
+    admin_manage_credentials: "Manage credentials",
+    admin_manage_workspaces: "Manage workspaces",
+    admin_open_workspace: "Open workspace",
+    admin_open_controls: "Open controls",
+    admin_view_archives: "View archives",
+    admin_user_email: "Email",
+    admin_user_github: "GitHub",
+    admin_user_ssh_mode: "SSH mode",
+    admin_user_recent_mappings: "Mappings",
+    admin_delete_archived_workspace: "Delete archive",
+    admin_delete_archived_workspace_confirm_title: "Delete archived workspace?",
+    admin_delete_archived_workspace_confirm_description: "This permanently removes the archived workspace.",
+    error_user_delete_blocked_workspace: "This user cannot be deleted while workspace data still exists.",
+    error_user_delete_blocked_active: "Active workspaces",
+    error_user_delete_blocked_archived: "Archived workspaces",
     admin_open_scope: "Open scope",
     admin_saving: "Saving...",
     admin_no_mapping: "No Clerk mapping",
@@ -526,6 +598,50 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_credentials: "凭证",
     admin_user_archives: "归档",
     admin_user_mappings: "映射",
+    admin_user_directory: "用户目录",
+    admin_user_overview: "概览",
+    admin_user_workspace_section: "工作空间",
+    admin_user_credentials_section: "凭证",
+    admin_user_tab_user: "用户",
+    admin_user_tab_credentials: "凭证",
+    admin_user_tab_workspaces: "工作空间",
+    admin_user_tab_paseo: "Paseo",
+    admin_paseo_reconnect_mode: "重连模式",
+    admin_paseo_reconnect_target: "重连入口",
+    admin_paseo_live_target: "访问入口",
+    admin_paseo_reconnectable: "可重连",
+    admin_paseo_needs_pairing: "需要重新配对",
+    admin_paseo_status_button: "刷新 daemon 状态",
+    admin_paseo_restart_button: "重启 daemon",
+    admin_paseo_restarting_button: "正在重启 daemon…",
+    admin_paseo_status_raw: "paseo daemon status --json",
+    admin_paseo_server_id: "持久化 server ID",
+    admin_paseo_pairing_server_id: "配对 server ID",
+    admin_paseo_pairing_url: "配对 URL",
+    admin_paseo_daemon_observed: "daemon 观测",
+    admin_paseo_pairing_observed: "配对观测",
+    admin_user_archives_section: "已归档工作空间",
+    admin_user_quick_actions: "快捷操作",
+    admin_user_empty: "暂无用户。",
+    admin_workspace_empty: "还没有工作空间。",
+    admin_archive_empty: "还没有归档工作空间。",
+    admin_credentials_empty: "还没有凭证。",
+    admin_open_admin_user: "打开用户",
+    admin_manage_credentials: "管理凭证",
+    admin_manage_workspaces: "管理工作空间",
+    admin_open_workspace: "打开工作空间",
+    admin_open_controls: "打开控制区",
+    admin_view_archives: "查看归档",
+    admin_user_email: "邮箱",
+    admin_user_github: "GitHub",
+    admin_user_ssh_mode: "SSH 模式",
+    admin_user_recent_mappings: "映射",
+    admin_delete_archived_workspace: "删除归档",
+    admin_delete_archived_workspace_confirm_title: "删除这个已归档工作空间？",
+    admin_delete_archived_workspace_confirm_description: "这会永久删除这个已归档工作空间。",
+    error_user_delete_blocked_workspace: "该用户仍有工作空间数据，无法删除。",
+    error_user_delete_blocked_active: "活跃工作空间",
+    error_user_delete_blocked_archived: "已归档工作空间",
     admin_open_scope: "打开用户范围",
     admin_saving: "保存中…",
     admin_no_mapping: "还没有 Clerk 映射",
@@ -982,6 +1098,20 @@ function formatActionError(
   if (!trimmed) {
     return t("error_generic");
   }
+  if (/cannot be deleted while workspace data still exists/i.test(trimmed)) {
+    const activeMatch = trimmed.match(/Active workspaces:\s*([^.]*(?:\.[^A-Z]|[^.]*)?)(?:Archived workspaces:|Archive or delete|$)/i);
+    const archivedMatch = trimmed.match(/Archived workspaces:\s*([^.]*(?:\.[^A-Z]|[^.]*)?)(?:Archive or delete|$)/i);
+    const parts = [t("error_user_delete_blocked_workspace")];
+    const active = activeMatch?.[1]?.trim().replace(/\s+$/, "");
+    const archived = archivedMatch?.[1]?.trim().replace(/\s+$/, "");
+    if (active) {
+      parts.push(`${t("error_user_delete_blocked_active")}：${active}`);
+    }
+    if (archived) {
+      parts.push(`${t("error_user_delete_blocked_archived")}：${archived}`);
+    }
+    return parts.join(" ");
+  }
   if (
     /already archived for user/i.test(trimmed)
     || /already exists for user/i.test(trimmed)
@@ -1027,6 +1157,20 @@ function translatePairingState(
   }
 }
 
+function translateReconnectMode(
+  value: "reconnectable" | "needs-pairing" | "unknown" | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "reconnectable":
+      return t("admin_paseo_reconnectable");
+    case "needs-pairing":
+      return t("admin_paseo_needs_pairing");
+    default:
+      return t("pairing_unknown");
+  }
+}
+
 function translateAdminIntegrityStatus(
   value: PortalAdminUserSummary["integrityStatus"],
   t: (key: string) => string,
@@ -1042,6 +1186,29 @@ function translateAdminIntegrityStatus(
       return t("admin_status_profile_root_missing");
     default:
       return value;
+  }
+}
+
+function translateWorkspaceLiveness(
+  value: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "creating":
+      return t("workspace_creating");
+    case "starting":
+      return t("workspace_starting");
+    case "running":
+      return t("workspace_ready");
+    case "stopping":
+      return t("stopping");
+    case "archiving":
+      return t("deleting");
+    case "stopped":
+    case "missing":
+      return t("workspace_not_started");
+    default:
+      return t("unknown");
   }
 }
 
@@ -1425,9 +1592,8 @@ function PortalShellLayout(props: {
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
-  const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<
-    Array<{ workspaceKey: string; src: string; loaded: boolean }>
-  >([]);
+  const [sidebarPollingWorkspaceKeys, setSidebarPollingWorkspaceKeys] = useState<string[]>([]);
+  const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
   const isAdmin = mapping?.role === "admin";
   const activeUserId = String(routeUserId ?? "").trim();
   const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
@@ -1439,15 +1605,12 @@ function PortalShellLayout(props: {
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId, workspaceRefreshTick],
   );
-  const {
-    data: sidebarArchivedWorkspaces,
-  } = useAsyncValue(
-    () => activeUserId ? listArchivedWorkspaces(activeUserId) : Promise.resolve<PortalArchivedWorkspaceSummary[]>([]),
-    [activeUserId, workspaceRefreshTick],
-  );
   const pathParts = location.pathname.split("/").filter(Boolean);
-  const currentWorkspaceName = pathParts[3] ? decodeURIComponent(pathParts[3]) : "";
-  const currentWorkspacePane = pathParts[4] ?? "";
+  const isWorkspaceRoute = pathParts[0] === "users" && pathParts[2] === "workspaces";
+  const currentWorkspaceName = isWorkspaceRoute && pathParts[3]
+    ? decodeURIComponent(pathParts[3])
+    : "";
+  const currentWorkspacePane = isWorkspaceRoute ? (pathParts[4] ?? "") : "";
   const activeFrameKey = currentWorkspaceName
     ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
     : "";
@@ -1456,6 +1619,26 @@ function PortalShellLayout(props: {
     : null;
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
   const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
+  const activeSidebarWorkspace = currentWorkspaceName
+    ? (sidebarWorkspaces ?? []).find((workspace) => workspace.name === currentWorkspaceName) ?? null
+    : null;
+  const activeSidebarWorkspaceLiveness = activeSidebarWorkspace?.status?.health?.backendLiveness ?? null;
+  const activeSidebarWorkspaceAllowsEmbeddedPaseo =
+    activeSidebarWorkspaceLiveness === "running"
+    || activeSidebarWorkspaceLiveness === "starting"
+    || activeSidebarWorkspaceLiveness === "creating";
+  const shouldShowEmbeddedPaseoLoading = Boolean(
+    currentWorkspaceName
+    && currentWorkspacePane === ""
+    && activeSidebarWorkspaceAllowsEmbeddedPaseo
+    && !activeEmbeddedPaseoFrameLoaded
+    && (
+      sidebarWorkspacesLoading
+      || hasActiveEmbeddedPaseoFrame
+      || activeSidebarWorkspace?.liveTarget
+      || activeSidebarWorkspace?.reconnectTarget
+    ),
+  );
   const createWorkspaceNameError = validateWorkspaceNameInput(newWorkspaceName, t);
   const canSubmitCreateWorkspace =
     !creatingWorkspace
@@ -1499,6 +1682,35 @@ function PortalShellLayout(props: {
 
   function handleSidebarNavigate(): void {
     closeMobileSidebar();
+  }
+
+  async function handleWorkspaceSelect(
+    event: React.MouseEvent<HTMLAnchorElement>,
+    workspaceName: string,
+  ): Promise<void> {
+    event.preventDefault();
+    handleSidebarNavigate();
+    if (!activeUserId) {
+      return;
+    }
+    try {
+      const nextWorkspaces = await listWorkspaces(activeUserId);
+      setWorkspaceRefreshTick((current) => current + 1);
+      const selectedWorkspace = nextWorkspaces.find((workspace) => workspace.name === workspaceName) ?? null;
+      if (!selectedWorkspace) {
+        const missingWorkspaceFrameKey = `${activeUserId.trim()}:${workspaceName.trim()}`;
+        setEmbeddedPaseoFrames((current) =>
+          current.filter((entry) => entry.workspaceKey !== missingWorkspaceFrameKey)
+        );
+        if (currentWorkspaceName === workspaceName) {
+          navigate(`/users/${encodeURIComponent(activeUserId)}/workspaces`, { replace: true });
+        }
+        return;
+      }
+      navigate(workspaceLink(workspaceName));
+    } catch {
+      navigate(workspaceLink(workspaceName));
+    }
   }
 
   function workspaceLink(workspaceName: string): string {
@@ -1554,12 +1766,7 @@ function PortalShellLayout(props: {
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("manage_users");
-  const workspaceStatusRoute = currentWorkspaceName
-    ? (currentWorkspacePane === "paseo"
-      ? workspaceLink(currentWorkspaceName)
-      : workspacePaneLink(currentWorkspaceName, "paseo"))
-    : "";
-  const isWorkspaceSection = location.pathname.includes("/workspaces");
+  const isWorkspaceSection = isWorkspaceRoute || location.pathname === userWorkspaceIndexLink();
   const workspaceHeaderSubtitle = sidebarWorkspacesLoading
     ? ""
     : currentWorkspaceName
@@ -1584,6 +1791,16 @@ function PortalShellLayout(props: {
     openCreateWorkspaceDialog,
     refreshWorkspaces: () => {
       setWorkspaceRefreshTick((current) => current + 1);
+    },
+    sidebarPollingWorkspaceKeys,
+    setSidebarWorkspacePolling: (workspaceKey, polling) => {
+      setSidebarPollingWorkspaceKeys((current) => {
+        const hasKey = current.includes(workspaceKey);
+        if (polling) {
+          return hasKey ? current : [...current, workspaceKey];
+        }
+        return hasKey ? current.filter((entry) => entry !== workspaceKey) : current;
+      });
     },
     embeddedPaseoFrames,
     cacheEmbeddedPaseoFrame: (workspaceKey, src) => {
@@ -1612,38 +1829,29 @@ function PortalShellLayout(props: {
 
   useEffect(() => {
     setEmbeddedPaseoFrames([]);
+    setSidebarPollingWorkspaceKeys([]);
   }, [activeUserId]);
 
   useEffect(() => {
-    if (!activeUserId || !sidebarWorkspaces?.length) {
+    if (!activeUserId || !sidebarWorkspaces) {
       return;
     }
-    const nextFrames = new Map<string, string>();
+    const knownWorkspaceKeys = sidebarWorkspaces.map(
+      (workspace) => `${activeUserId.trim()}:${workspace.name.trim()}`,
+    );
+    const nextSources: Array<{ workspaceKey: string; src: string }> = [];
     for (const workspace of sidebarWorkspaces) {
       const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
       const scope = workspacePaseoScope(activeUserId, workspace.name);
       const src = workspace.reconnectTarget
         ?? normalizePaseoPortalUrl(workspace.liveTarget, scope);
       if (src) {
-        nextFrames.set(workspaceKey, src);
+        nextSources.push({ workspaceKey, src });
       }
     }
-    setEmbeddedPaseoFrames((current) => {
-      const next = current
-        .filter((entry) => nextFrames.has(entry.workspaceKey))
-        .map((entry) => ({
-          workspaceKey: entry.workspaceKey,
-          src: nextFrames.get(entry.workspaceKey) ?? entry.src,
-          loaded: entry.loaded,
-        }));
-      const seen = new Set(next.map((entry) => entry.workspaceKey));
-      for (const [workspaceKey, src] of nextFrames.entries()) {
-        if (!seen.has(workspaceKey)) {
-          next.push({ workspaceKey, src, loaded: false });
-        }
-      }
-      return next;
-    });
+    setEmbeddedPaseoFrames((current) =>
+      mergeEmbeddedPaseoFrames(current, knownWorkspaceKeys, nextSources)
+    );
   }, [activeUserId, sidebarWorkspaces]);
 
   useEffect(() => {
@@ -1703,7 +1911,7 @@ function PortalShellLayout(props: {
                       <span>{t("add_workspace")}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {sidebarWorkspacesLoading && (
+                  {sidebarWorkspacesLoading && !sidebarWorkspaces && (
                     <div className="flex items-center justify-center px-2 py-3 text-muted-foreground">
                       <RefreshCw className="h-4 w-4 animate-spin" />
                     </div>
@@ -1715,12 +1923,27 @@ function PortalShellLayout(props: {
                   )}
                   {sidebarWorkspaces?.map((workspace) => {
                     const active = currentWorkspaceName === workspace.name;
+                    const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
+                    const sidebarPolling = sidebarPollingWorkspaceKeys.includes(workspaceKey);
+                    const backendLiveness = workspace.status?.health?.backendLiveness ?? null;
+                    const sidebarStatusLabel = translateWorkspaceLiveness(backendLiveness, t);
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
-                          <Link to={workspaceLink(workspace.name)} onClick={handleSidebarNavigate}>
+                          <Link
+                            to={workspaceLink(workspace.name)}
+                            onClick={(event) => void handleWorkspaceSelect(event, workspace.name)}
+                          >
                             <FolderKanban />
                             <span className="truncate">{workspace.name}</span>
+                            <span
+                              className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(backendLiveness)}`}
+                              title={sidebarStatusLabel}
+                              aria-label={sidebarStatusLabel}
+                            />
+                            {sidebarPolling ? (
+                              <RefreshCw className="ml-2 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            ) : null}
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -1734,25 +1957,6 @@ function PortalShellLayout(props: {
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-            {(sidebarArchivedWorkspaces?.length ?? 0) > 0 && (
-              <SidebarGroup>
-                <SidebarGroupLabel>
-                  {t("archived_workspaces")}
-                </SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {sidebarArchivedWorkspaces?.map((entry) => (
-                      <SidebarMenuItem key={entry.archiveId}>
-                        <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-                          <FolderKanban className="h-4 w-4" />
-                          <span className="truncate">{entry.workspaceName}</span>
-                        </div>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            )}
           </div>
           {activeUser && isAdmin && (
             <SidebarGroup className="shrink-0 pt-4">
@@ -1870,25 +2074,13 @@ function PortalShellLayout(props: {
                 {currentPaneTitle}
               </div>
             </div>
-            {currentWorkspaceName ? (
-              <Button
-                asChild
-                variant={currentWorkspacePane === "paseo" ? "default" : "outline"}
-                size="sm"
-                className="shrink-0"
-              >
-                <Link to={workspaceStatusRoute}>
-                  <span>{t("workspace_status_button")}</span>
-                </Link>
-              </Button>
-            ) : null}
           </header>
           {embeddedPaseoFrames.length > 0 ? (
             <div
-              className={currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded
+              className={currentWorkspacePane === "" && activeSidebarWorkspaceAllowsEmbeddedPaseo && activeEmbeddedPaseoFrameLoaded
                 ? "-mx-4 -my-4 relative flex min-h-0 flex-1 overflow-hidden p-4 sm:-mx-6 sm:-my-6 sm:p-6"
                 : "pointer-events-none absolute inset-0 overflow-hidden opacity-0"}
-              aria-hidden={currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded ? undefined : true}
+              aria-hidden={currentWorkspacePane === "" && activeSidebarWorkspaceAllowsEmbeddedPaseo && activeEmbeddedPaseoFrameLoaded ? undefined : true}
             >
           {embeddedPaseoFrames.map((frame) => {
             return (
@@ -1914,11 +2106,18 @@ function PortalShellLayout(props: {
             </div>
           ) : null}
           <div
-            className={currentWorkspaceName && currentWorkspacePane === "" && activeEmbeddedPaseoFrameLoaded
+            className={currentWorkspaceName && currentWorkspacePane === "" && activeSidebarWorkspaceAllowsEmbeddedPaseo && activeEmbeddedPaseoFrameLoaded
               ? "hidden"
               : "flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"}
           >
+            {shouldShowEmbeddedPaseoLoading ? (
+              <div className="flex min-h-[40dvh] w-full items-center justify-center">
+                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : null}
+            <div className={shouldShowEmbeddedPaseoLoading ? "hidden" : "contents"}>
             {props.children}
+            </div>
           </div>
         </SidebarInset>
         {isMobile ? (
@@ -2364,7 +2563,70 @@ function AdminPage() {
   );
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [adminActionError, setAdminActionError] = useState<string | null>(null);
+  const [workspaceAdminActionError, setWorkspaceAdminActionError] = useState<string | null>(null);
+  const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
+  const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
+  const [workspaceActionState, setWorkspaceActionState] = useState<
+    Record<string, "start" | "stop" | "archive" | "delete-archive">
+  >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
+  const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
+  const [adminTab, setAdminTab] = useState<"user" | "credentials" | "workspaces" | "paseo">("user");
+  const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
+  const {
+    data: selectedProfile,
+    error: selectedProfileError,
+    loading: selectedProfileLoading,
+  } = useAsyncValue(
+    () => selectedAdminUserId ? getUserProfile(selectedAdminUserId) : Promise.resolve(null),
+    [selectedAdminUserId, reloadKey],
+  );
+  const {
+    data: selectedCredentials,
+    error: selectedCredentialsError,
+    loading: selectedCredentialsLoading,
+  } = useAsyncValue(
+    () => selectedAdminUserId ? listCredentials(selectedAdminUserId) : Promise.resolve([]),
+    [selectedAdminUserId, reloadKey],
+  );
+  const {
+    data: selectedWorkspaces,
+    error: selectedWorkspacesError,
+    loading: selectedWorkspacesLoading,
+  } = useAsyncValue(
+    () => selectedAdminUserId ? listWorkspaces(selectedAdminUserId) : Promise.resolve([]),
+    [selectedAdminUserId, reloadKey],
+  );
+  const {
+    data: selectedArchivedWorkspaces,
+    error: selectedArchivedWorkspacesError,
+    loading: selectedArchivedWorkspacesLoading,
+  } = useAsyncValue(
+    () => selectedAdminUserId ? listArchivedWorkspaces(selectedAdminUserId) : Promise.resolve([]),
+    [selectedAdminUserId, reloadKey],
+  );
+
+  useEffect(() => {
+    if (!adminUsers?.length) {
+      return;
+    }
+    const hasSelection = adminUsers.some((entry) => entry.id === selectedAdminUserId);
+    if (hasSelection) {
+      return;
+    }
+    const fallbackUserId = adminUsers.some((entry) => entry.id === userId)
+      ? userId
+      : adminUsers[0]?.id;
+    if (fallbackUserId) {
+      setSelectedAdminUserId(fallbackUserId);
+    }
+  }, [adminUsers, selectedAdminUserId, userId]);
+
+  useEffect(() => {
+    setPaseoDiagnostics({});
+    setPaseoActionState({});
+    setAdminTab("user");
+  }, [selectedAdminUserId]);
 
   if (mappingLoading) {
     return (
@@ -2386,6 +2648,27 @@ function AdminPage() {
     return <Navigate to={`/users/${encodeURIComponent(userId)}/workspaces`} replace />;
   }
 
+  function setWorkspaceAction(
+    target: string,
+    kind: "start" | "stop" | "archive" | "delete-archive",
+  ): void {
+    setWorkspaceActionState((current) => ({
+      ...current,
+      [target]: kind,
+    }));
+  }
+
+  function clearWorkspaceAction(target: string): void {
+    setWorkspaceActionState((current) => {
+      if (!(target in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[target];
+      return next;
+    });
+  }
+
   async function handleDeleteUser(targetUserId: string): Promise<void> {
     if (savingUserId) {
       return;
@@ -2396,13 +2679,17 @@ function AdminPage() {
       await deletePortalUser(targetUserId);
       const nextUsers = (users ?? []).filter((entry) => entry.id !== targetUserId);
       setReloadKey((current) => current + 1);
-      if (targetUserId === userId) {
-        const fallbackUserId = nextUsers[0]?.id;
+      if (targetUserId === selectedAdminUserId) {
+        const fallbackUserId = nextUsers.some((entry) => entry.id === userId)
+          ? userId
+          : nextUsers[0]?.id;
         if (fallbackUserId) {
-          navigate(`/users/${encodeURIComponent(fallbackUserId)}/admin`, { replace: true });
-        } else {
+          setSelectedAdminUserId(fallbackUserId);
+        } else if (targetUserId === userId) {
           navigate("/", { replace: true });
         }
+      } else if (targetUserId === userId && nextUsers.length === 0) {
+        navigate("/", { replace: true });
       }
     } catch (error) {
       setAdminActionError(error instanceof Error ? error.message : String(error));
@@ -2411,128 +2698,662 @@ function AdminPage() {
     }
   }
 
+  async function handleArchiveWorkspace(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setWorkspaceAction(workspaceName, "archive");
+    setWorkspaceAdminActionError(null);
+    try {
+      await deleteWorkspace(selectedAdminUser.id, workspaceName);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      clearWorkspaceAction(workspaceName);
+    }
+  }
+
+  async function handleStopAdminWorkspace(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setWorkspaceAction(workspaceName, "stop");
+    setWorkspaceAdminActionError(null);
+    try {
+      await stopWorkspace(selectedAdminUser.id, workspaceName);
+      await refreshWorkspaceStatus(selectedAdminUser.id, workspaceName);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      clearWorkspaceAction(workspaceName);
+    }
+  }
+
+  async function handleStartAdminWorkspace(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setWorkspaceAction(workspaceName, "start");
+    setWorkspaceAdminActionError(null);
+    try {
+      await startWorkspace(selectedAdminUser.id, workspaceName);
+      await refreshWorkspaceStatus(selectedAdminUser.id, workspaceName);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      clearWorkspaceAction(workspaceName);
+    }
+  }
+
+  async function handleDeleteArchivedWorkspace(archiveId: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setWorkspaceAction(archiveId, "delete-archive");
+    setWorkspaceAdminActionError(null);
+    try {
+      await deleteArchivedWorkspace(selectedAdminUser.id, archiveId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      clearWorkspaceAction(archiveId);
+    }
+  }
+
+  async function handleLoadPaseoDiagnostic(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setPaseoActionState((current) => ({ ...current, [workspaceName]: "loading" }));
+    setWorkspaceAdminActionError(null);
+    try {
+      const diagnostic = await getWorkspacePaseoDiagnostic(selectedAdminUser.id, workspaceName);
+      setPaseoDiagnostics((current) => ({ ...current, [workspaceName]: diagnostic }));
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setPaseoActionState((current) => {
+        const next = { ...current };
+        delete next[workspaceName];
+        return next;
+      });
+    }
+  }
+
+  async function handleRestartPaseoDaemon(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setPaseoActionState((current) => ({ ...current, [workspaceName]: "restarting" }));
+    setWorkspaceAdminActionError(null);
+    try {
+      const result = await restartWorkspacePaseoDaemon(selectedAdminUser.id, workspaceName);
+      setPaseoDiagnostics((current) => ({ ...current, [workspaceName]: result.diagnostic }));
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setPaseoActionState((current) => {
+        const next = { ...current };
+        delete next[workspaceName];
+        return next;
+      });
+    }
+  }
+
+  const selectedMappings = selectedAdminUser
+    ? [...selectedAdminUser.clerkUsernames, ...selectedAdminUser.clerkUserIds]
+    : [];
+
   return (
-    <div className="grid w-full gap-6">
+    <div className="grid w-full gap-6 lg:grid-cols-[21rem_minmax(0,1fr)]">
       <div className="grid gap-4">
-          <div className="min-w-0">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t("manage_users")}</div>
-              <div className="text-sm text-muted-foreground">{t("administration_desc")}</div>
-            </div>
-          </div>
-          {adminUsersLoading ? (
-            <div className="flex items-center justify-center py-2 text-muted-foreground">
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            </div>
-          ) : null}
-          {adminUsersError ? (
-            <p className="text-sm text-destructive">{adminUsersError}</p>
-          ) : null}
-          {adminActionError ? (
-            <p className="text-sm text-destructive">{adminActionError}</p>
-          ) : null}
-          <div className="overflow-x-auto rounded-[1.25rem] border border-border bg-white">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-border/60 bg-muted/30">
-                <tr>
-                  <th className="px-4 py-3 font-medium">{t("users")}</th>
-                  <th className="px-4 py-3 font-medium">{t("admin_user_role")}</th>
-                  <th className="px-4 py-3 font-medium">{t("admin_user_status")}</th>
-                  <th className="px-4 py-3 font-medium">{t("admin_user_mappings")}</th>
-                  <th className="px-4 py-3 font-medium">{t("admin_user_credentials")}</th>
-                  <th className="px-4 py-3 font-medium">{t("tracked_workspaces")}</th>
-                  <th className="px-4 py-3 font-medium">{t("admin_user_archives")}</th>
-                  <th className="px-4 py-3 font-medium text-right">{t("asset_action")}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {(adminUsers ?? []).map((entry) => {
-                  const isSaving = savingUserId === entry.id;
-                  const mappingSummary = [
-                    ...entry.clerkUsernames,
-                    ...entry.clerkUserIds,
-                  ];
-                  return (
-                    <tr key={entry.id} className="align-top">
-                      <td className="px-4 py-4">
-                        <div className="grid gap-1">
-                          <span className="font-medium">{entry.name || entry.id}</span>
-                          <span className="text-xs text-muted-foreground">{entry.id}</span>
-                          <span className="text-xs text-muted-foreground">{entry.email || "-"}</span>
+        <Card className="border-border/70 lg:sticky lg:top-4">
+          <CardHeader className="gap-1">
+            <CardTitle className="text-base">{t("admin_user_directory")}</CardTitle>
+            <CardDescription>{t("administration_desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid max-h-[calc(100vh-10rem)] gap-2 overflow-y-auto">
+            {adminUsersLoading ? (
+              <div className="flex items-center justify-center py-4 text-muted-foreground">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              </div>
+            ) : null}
+            {adminUsersError ? (
+              <p className="text-sm text-destructive">{adminUsersError}</p>
+            ) : null}
+            {!adminUsersLoading && !adminUsersError && (adminUsers?.length ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("admin_user_empty")}</p>
+            ) : null}
+            {adminUsers?.map((entry) => {
+              const active = entry.id === selectedAdminUserId;
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => setSelectedAdminUserId(entry.id)}
+                  className={active
+                    ? "box-border grid w-full min-w-0 gap-2 rounded-2xl border border-border bg-muted/40 px-3 py-3 text-left"
+                    : "box-border grid w-full min-w-0 gap-2 rounded-2xl border border-border/60 bg-white px-3 py-3 text-left hover:bg-muted/20"}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {entry.name || entry.id}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {entry.id}
+                      </div>
+                    </div>
+                    <Badge className="shrink-0" variant={entry.role === "admin" ? "default" : "secondary"}>
+                      {entry.role}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>{entry.credentialCount} {t("credentials")}</span>
+                    <span>{entry.workspaces.length} {t("tracked_workspaces")}</span>
+                    <span>{entry.archivedWorkspaceCount} {t("admin_user_archives")}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
+      <div className="grid gap-6">
+        <div className="grid gap-4">
+          <ErrorPopup
+            title={t("global_error_title")}
+            message={adminActionError}
+            onClose={() => setAdminActionError(null)}
+          />
+          {!selectedAdminUser ? (
+            <Card className="border-border/70">
+              <CardContent className="py-10">
+                <p className="text-sm text-muted-foreground">{t("admin_user_empty")}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Tabs
+              key={selectedAdminUserId}
+              value={adminTab}
+              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "workspaces" | "paseo")}
+              className="w-full"
+            >
+              <TabsList className="mb-4 w-full max-w-md justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
+                <TabsTrigger value="user" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_user")}
+                </TabsTrigger>
+                <TabsTrigger value="credentials" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_credentials")}
+                </TabsTrigger>
+                <TabsTrigger value="workspaces" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_workspaces")}
+                </TabsTrigger>
+                <TabsTrigger value="paseo" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_paseo")}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="user">
+                <Card className="border-border/70">
+                  <CardHeader className="gap-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle className="truncate text-xl">
+                          {selectedAdminUser.name || selectedAdminUser.id}
+                        </CardTitle>
+                        <CardDescription className="truncate">
+                          {selectedAdminUser.id}
+                        </CardDescription>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={selectedAdminUser.role === "admin" ? "default" : "secondary"}>
+                          {selectedAdminUser.role}
+                        </Badge>
+                        <Badge
+                          variant={selectedAdminUser.integrityStatus === "ok" ? "secondary" : "outline"}
+                        >
+                          {translateAdminIntegrityStatus(selectedAdminUser.integrityStatus, t)}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="grid gap-6">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                        <div className="text-xs text-muted-foreground">{t("tracked_workspaces")}</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedWorkspaces?.length ?? selectedAdminUser.workspaces.length}
                         </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <Badge variant={entry.role === "admin" ? "default" : "secondary"}>
-                          {entry.role}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-4">
-                        <Badge variant={entry.integrityStatus === "ok" ? "secondary" : "outline"}>
-                          {translateAdminIntegrityStatus(entry.integrityStatus, t)}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-4 text-muted-foreground">
-                        {mappingSummary.length > 0 ? mappingSummary.join(", ") : t("admin_no_mapping")}
-                      </td>
-                      <td className="px-4 py-4 text-muted-foreground">
-                        {entry.credentialCount}
-                      </td>
-                      <td className="px-4 py-4 text-muted-foreground">
-                        {entry.workspaces.length}
-                      </td>
-                      <td className="px-4 py-4 text-muted-foreground">
-                        {entry.archivedWorkspaceCount}
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-wrap justify-end gap-2">
+                      </div>
+                      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                        <div className="text-xs text-muted-foreground">{t("credentials")}</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedCredentials?.length ?? selectedAdminUser.credentialCount}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                        <div className="text-xs text-muted-foreground">{t("admin_user_archives")}</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedArchivedWorkspaces?.length ?? selectedAdminUser.archivedWorkspaceCount}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-1">
+                        <div className="text-xs text-muted-foreground">{t("admin_user_email")}</div>
+                        <div className="text-sm">
+                          {selectedProfile?.email || selectedAdminUser.email || t("none")}
+                        </div>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-xs text-muted-foreground">{t("admin_user_github")}</div>
+                        <div className="text-sm">{selectedProfile?.githubAccount || t("none")}</div>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-xs text-muted-foreground">{t("admin_user_ssh_mode")}</div>
+                        <div className="text-sm">{selectedProfile?.sshMode || t("none")}</div>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-xs text-muted-foreground">{t("admin_user_recent_mappings")}</div>
+                        <div className="text-sm text-muted-foreground break-all">
+                          {selectedMappings.length > 0 ? selectedMappings.join(", ") : t("admin_no_mapping")}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            disabled={savingUserId === selectedAdminUser.id}
+                          >
+                            {savingUserId === selectedAdminUser.id ? t("admin_deleting") : t("admin_delete_user")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("admin_delete_user_confirm_title")}</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {t("admin_delete_user_confirm_description")}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => void handleDeleteUser(selectedAdminUser.id)}>
+                              {savingUserId === selectedAdminUser.id ? t("admin_deleting") : t("admin_delete_user")}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                    {selectedProfileLoading ? (
+                      <div className="flex items-center justify-center py-2 text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      </div>
+                    ) : null}
+                      <ErrorPopup title={t("global_error_title")} message={selectedProfileError} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="credentials">
+                <Card className="border-border/70">
+                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">{t("admin_user_credentials_section")}</CardTitle>
+                      <CardDescription>{t("credentials_for_user")}</CardDescription>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/users/${encodeURIComponent(selectedAdminUser.id)}/credentials`)}
+                    >
+                      {t("admin_manage_credentials")}
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    {selectedCredentialsLoading ? (
+                      <div className="flex items-center justify-center py-4 text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      </div>
+                    ) : null}
+                      <ErrorPopup title={t("global_error_title")} message={selectedCredentialsError} />
+                    {!selectedCredentialsLoading && !selectedCredentialsError && (selectedCredentials?.length ?? 0) === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("admin_credentials_empty")}</p>
+                    ) : null}
+                    {selectedCredentials?.map((credential) => (
+                      <div
+                        key={credential.id}
+                        className="grid gap-2 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{credential.label}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {credential.providerName || credential.kind}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {credential.active ? <Badge>{t("active")}</Badge> : null}
+                            <Badge variant="outline">{credential.harness || credential.kind}</Badge>
+                          </div>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {credential.purposes.join(", ") || t("none")}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="workspaces">
+                <div className="grid gap-6">
+                  <ErrorPopup
+                    title={t("global_error_title")}
+                    message={workspaceAdminActionError}
+                    onClose={() => setWorkspaceAdminActionError(null)}
+                  />
+                  <Card className="border-border/70">
+                    <CardHeader>
+                      <div>
+                        <CardTitle className="text-base">{t("admin_user_workspace_section")}</CardTitle>
+                        <CardDescription>{t("admin_manage_workspaces")}</CardDescription>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      {selectedWorkspacesLoading ? (
+                        <div className="flex items-center justify-center py-4 text-muted-foreground">
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        </div>
+                      ) : null}
+                      <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
+                      {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
+                      ) : null}
+                      {selectedWorkspaces?.map((workspace) => (
+                        <div
+                          key={workspace.name}
+                          className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">{workspace.name}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {translateWorkspaceLiveness(
+                                  workspace.status?.health?.backendLiveness,
+                                  t,
+                                )}
+                              </div>
+                            </div>
+                            <Badge variant="outline">
+                              {driverLabel(workspace.selectedDriver)}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={workspace.name in workspaceActionState}
+                              onClick={() => void (
+                                workspace.status?.health?.backendLiveness === "running"
+                                  ? handleStopAdminWorkspace(workspace.name)
+                                  : handleStartAdminWorkspace(workspace.name)
+                              )}
+                            >
+                              {workspaceActionState[workspace.name] === "stop"
+                                ? t("stopping")
+                                : workspaceActionState[workspace.name] === "start"
+                                  ? t("starting")
+                                  : workspace.status?.health?.backendLiveness === "running"
+                                    ? t("stop_workspace")
+                                    : t("start_workspace")}
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={workspace.name in workspaceActionState}
+                                >
+                                  {workspaceActionState[workspace.name] === "archive"
+                                    ? t("deleting")
+                                    : t("remove_workspace")}
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {t("remove_workspace_confirm_description")}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => void handleArchiveWorkspace(workspace.name)}>
+                                    {t("remove_workspace")}
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                  <Card className="border-border/70">
+                    <CardHeader>
+                      <CardTitle className="text-base">{t("archived_workspaces")}</CardTitle>
+                      <CardDescription>{t("admin_user_archives_section")}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      {selectedArchivedWorkspacesLoading ? (
+                        <div className="flex items-center justify-center py-4 text-muted-foreground">
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        </div>
+                      ) : null}
+                      <ErrorPopup title={t("global_error_title")} message={selectedArchivedWorkspacesError} />
+                      {!selectedArchivedWorkspacesLoading && !selectedArchivedWorkspacesError && (selectedArchivedWorkspaces?.length ?? 0) === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t("admin_archive_empty")}</p>
+                      ) : null}
+                      {selectedArchivedWorkspaces?.map((entry) => (
+                        <div
+                          key={entry.archiveId}
+                          className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium">{entry.workspaceName}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {entry.archivedAt || t("unknown")}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={entry.archiveId in workspaceActionState}
+                                >
+                                  {workspaceActionState[entry.archiveId] === "delete-archive"
+                                    ? t("deleting")
+                                    : t("admin_delete_archived_workspace")}
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>{t("admin_delete_archived_workspace_confirm_title")}</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    {t("admin_delete_archived_workspace_confirm_description")}
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => void handleDeleteArchivedWorkspace(entry.archiveId)}>
+                                    {t("admin_delete_archived_workspace")}
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="paseo">
+                <Card className="border-border/70">
+                  <CardHeader>
+                    <CardTitle className="text-base">{t("admin_user_tab_paseo")}</CardTitle>
+                    <CardDescription>{t("paseo_info")}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    {selectedWorkspacesLoading ? (
+                      <div className="flex items-center justify-center py-4 text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      </div>
+                    ) : null}
+                    <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
+                    {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
+                    ) : null}
+                    {selectedWorkspaces?.map((workspace) => (
+                      <div key={`paseo-${workspace.name}`} className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{workspace.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {translateReconnectMode(workspace.reconnectMode, t)}
+                            </div>
+                          </div>
+                          <Badge variant="outline">
+                            {driverLabel(workspace.selectedDriver)}
+                          </Badge>
+                        </div>
+                        <div className="grid gap-1">
+                          <div className="text-xs text-muted-foreground">
+                            {t("admin_paseo_reconnect_mode")}
+                          </div>
+                          <div className="break-all text-sm">
+                            {translateReconnectMode(workspace.reconnectMode, t)}
+                          </div>
+                        </div>
+                        {workspace.reconnectTarget ? (
+                          <div className="grid gap-1">
+                            <div className="text-xs text-muted-foreground">
+                              {t("admin_paseo_reconnect_target")}
+                            </div>
+                            <div className="break-all text-sm">{workspace.reconnectTarget}</div>
+                          </div>
+                        ) : null}
+                        {workspace.liveTarget && workspace.liveTarget !== workspace.reconnectTarget ? (
+                          <div className="grid gap-1">
+                            <div className="text-xs text-muted-foreground">
+                              {t("admin_paseo_live_target")}
+                            </div>
+                            <div className="break-all text-sm">{workspace.liveTarget}</div>
+                          </div>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={!entry.profilePresent}
-                            onClick={() =>
-                              navigate(`/users/${encodeURIComponent(entry.id)}/workspaces`)}
+                            disabled={Boolean(paseoActionState[workspace.name])}
+                            onClick={() => void handleLoadPaseoDiagnostic(workspace.name)}
                           >
-                            {t("admin_open_scope")}
+                            {paseoActionState[workspace.name] === "loading"
+                              ? t("refreshing")
+                              : t("admin_paseo_status_button")}
                           </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={isSaving}
-                              >
-                                {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  {t("admin_delete_user_confirm_title")}
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  {t("admin_delete_user_confirm_description")}
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => void handleDeleteUser(entry.id)}
-                                >
-                                  {isSaving ? t("admin_deleting") : t("admin_delete_user")}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={Boolean(paseoActionState[workspace.name])}
+                            onClick={() => void handleRestartPaseoDaemon(workspace.name)}
+                          >
+                            {paseoActionState[workspace.name] === "restarting"
+                              ? t("admin_paseo_restarting_button")
+                              : t("admin_paseo_restart_button")}
+                          </Button>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        {paseoDiagnostics[workspace.name] ? (
+                          <>
+                            <details className="rounded-xl border border-border/70 bg-background">
+                              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+                                {t("admin_paseo_status_raw")}
+                              </summary>
+                              <pre className="overflow-x-auto border-t border-border/70 p-3 text-xs leading-5">
+                                {paseoDiagnostics[workspace.name]?.daemonStatusRaw}
+                              </pre>
+                            </details>
+                          </>
+                        ) : null}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function ErrorPopup(props: {
+  title: string;
+  message: string | null;
+  onClose?: () => void;
+}) {
+  const [dismissedMessage, setDismissedMessage] = useState<string | null>(null);
+  const open = Boolean(props.message) && props.message !== dismissedMessage;
+
+  useEffect(() => {
+    if (!props.message) {
+      setDismissedMessage(null);
+    }
+  }, [props.message]);
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen || !props.message) {
+          return;
+        }
+        setDismissedMessage(props.message);
+        props.onClose?.();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{props.title}</AlertDialogTitle>
+          <AlertDialogDescription className="break-words">
+            {props.message}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction
+            onClick={() => {
+              setDismissedMessage(props.message);
+              props.onClose?.();
+            }}
+          >
+            OK
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -2569,6 +3390,7 @@ function WorkspaceDetailContent() {
     embeddedPaseoFrames,
     removeEmbeddedPaseoFrame,
     refreshWorkspaces,
+    setSidebarWorkspacePolling,
   } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
@@ -2643,6 +3465,17 @@ function WorkspaceDetailContent() {
   const stopping = effectiveWorkspaceAction === "stopping";
   const deleting = effectiveWorkspaceAction === "deleting";
   const workspaceActionInFlight = effectiveWorkspaceAction !== null;
+  const backendState = workspaceData?.status?.health?.backendLiveness ?? null;
+  const waitingForEmbeddedPaseo =
+    !deleting
+    && !activeEmbeddedPaseoFrameLoaded
+    && !embeddedPortalUrl
+    && Boolean(workspaceData)
+    && (
+      backendState === "creating"
+      || backendState === "starting"
+      || backendState === "running"
+    );
   const workspaceStateLabel = deleting
     ? t("deleting")
     : starting
@@ -2764,6 +3597,22 @@ function WorkspaceDetailContent() {
       window.clearInterval(timer);
     };
   }, [effectiveWorkspaceAction]);
+
+  useEffect(() => {
+    setSidebarWorkspacePolling(workspaceFrameKey, waitingForEmbeddedPaseo);
+  }, [setSidebarWorkspacePolling, waitingForEmbeddedPaseo, workspaceFrameKey]);
+
+  useEffect(() => {
+    if (!waitingForEmbeddedPaseo) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setRefreshTick((current) => current + 1);
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [waitingForEmbeddedPaseo]);
 
   async function handleSwitch(): Promise<void> {
     if (!driver) {
@@ -3087,9 +3936,11 @@ function WorkspaceDetailContent() {
             </AlertDialog>
           </div>
         </div>
-        {actionError ? (
-          <p className="text-sm text-destructive">{actionError}</p>
-        ) : null}
+        <ErrorPopup
+          title={t("global_error_title")}
+          message={actionError}
+          onClose={() => setActionError(null)}
+        />
       </div>
     );
   }
@@ -3233,8 +4084,12 @@ function WorkspaceDetailContent() {
 
   return (
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+      <ErrorPopup title={t("global_error_title")} message={error} />
+      <ErrorPopup
+        title={t("global_error_title")}
+        message={actionError}
+        onClose={() => setActionError(null)}
+      />
       {currentPane === ""
         ? renderPane()
         : (

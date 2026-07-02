@@ -1,13 +1,14 @@
 import type { SwitchResult } from "../cli/commands/switch.js";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import type {
-  PortalDriverTarget,
-  PortalWorkspaceDetail,
+  PortalWorkspacePaseoDiagnostic,
 } from "../core/portal.js";
+import type { PortalDriverTarget } from "../core/portal.js";
 import type { WorkspaceStatus } from "../core/workspace.js";
 import {
   healthCheckPortalWorkspaceExecutor,
 } from "./operations.js";
+import { logInfo, logWarn } from "../utils/log.js";
 
 const EXECUTOR_HEALTH_TTL_MS = 5000;
 const executorHealthCache = new Map<string, {
@@ -101,10 +102,22 @@ async function executorRequest<T>(
     );
   }
   let response: Response;
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const headers = {
     ...executorHeaders(),
+    "x-polaris-request-id": requestId,
     ...(init.headers ?? {}),
   };
+  const requestBody = typeof init.body === "string"
+    ? init.body
+    : null;
+  if (pathname === "/workspaces/status/refresh") {
+    logInfo("executor-client", "request-started", {
+      requestId,
+      pathname,
+      body: requestBody,
+    });
+  }
   try {
     await ensureExecutorHealthy(baseUrl, headers);
     response = await fetch(`${baseUrl}${pathname}`, {
@@ -117,15 +130,40 @@ async function executorRequest<T>(
       : error instanceof Error
         ? error.message
         : String(error);
+    if (pathname === "/workspaces/status/refresh") {
+      logWarn("executor-client", "request-failed", {
+        requestId,
+        pathname,
+        body: requestBody,
+        error: cause,
+      });
+    }
     throw new Error(
       `Polaris executor request failed for ${baseUrl}${pathname}: ${cause}`,
     );
   }
   if (!response.ok) {
     const responseBody = await response.text();
+    if (pathname === "/workspaces/status/refresh") {
+      logWarn("executor-client", "request-rejected", {
+        requestId,
+        pathname,
+        body: requestBody,
+        status: response.status,
+        responseBody,
+      });
+    }
     throw new Error(
       describeExecutorEndpointFailure(baseUrl, pathname, response, responseBody),
     );
+  }
+  if (pathname === "/workspaces/status/refresh") {
+    logInfo("executor-client", "request-completed", {
+      requestId,
+      pathname,
+      body: requestBody,
+      status: response.status,
+    });
   }
   return (await response.json()) as T;
 }
@@ -204,6 +242,32 @@ export async function deletePortalWorkspace(input: {
   );
 }
 
+export async function permanentlyDeletePortalWorkspace(input: {
+  userId: string;
+  workspace: string;
+}): Promise<{ deleted: true; workspace: string }> {
+  return executorRequest(
+    "/workspaces/hard-delete",
+    {
+      method: "DELETE",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function permanentlyDeletePortalArchivedWorkspace(input: {
+  userId: string;
+  archiveId: string;
+}): Promise<{ deleted: true; archiveId: string }> {
+  return executorRequest(
+    "/workspaces/archives",
+    {
+      method: "DELETE",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export async function stopPortalWorkspace(input: {
   userId: string;
   workspace: string;
@@ -249,19 +313,12 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   );
 }
 
-export async function bindPortalWorkspaceAgent(input: {
+export async function getPortalWorkspacePaseoDiagnostic(input: {
   userId: string;
   workspace: string;
-  credentialId: string;
-  driver?: PortalDriverTarget;
-}): Promise<{
-  enabled: true;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
-}> {
+}): Promise<PortalWorkspacePaseoDiagnostic> {
   return executorRequest(
-    "/workspaces/paseo/bind",
+    "/workspaces/paseo/status",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -269,18 +326,15 @@ export async function bindPortalWorkspaceAgent(input: {
   );
 }
 
-export async function unbindPortalWorkspaceAgent(input: {
+export async function restartPortalWorkspacePaseoDaemon(input: {
   userId: string;
   workspace: string;
-  driver?: PortalDriverTarget;
 }): Promise<{
-  enabled: false;
-  driver: string;
-  credentialBindings: PortalWorkspaceDetail["credentialBindings"];
-  restarted: boolean;
+  restarted: true;
+  diagnostic: PortalWorkspacePaseoDiagnostic;
 }> {
   return executorRequest(
-    "/workspaces/paseo/unbind",
+    "/workspaces/paseo/restart",
     {
       method: "POST",
       body: JSON.stringify(input),

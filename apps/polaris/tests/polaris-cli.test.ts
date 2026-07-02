@@ -62,6 +62,31 @@ function setStdoutCaptureQueue(queue: Promise<void>): void {
   (globalThis as Record<string, unknown>)[STDOUT_CAPTURE_QUEUE_KEY] = queue;
 }
 
+async function cleanupCliTestUser(input: {
+  userId: string;
+  profilePath: string;
+  userRoot: string;
+  userMapPath?: string;
+  originalUserMap?: string | null;
+}): Promise<void> {
+  try {
+    await runCli(["user", "delete", input.userId]);
+  } catch {
+    // Some tests intentionally leave workspace/archive state behind, which
+    // makes the formal delete path reject. Fall back to direct cleanup.
+  } finally {
+    fs.rmSync(input.profilePath, { force: true });
+    fs.rmSync(input.userRoot, { recursive: true, force: true });
+    if (input.userMapPath) {
+      if (input.originalUserMap === null || input.originalUserMap === undefined) {
+        fs.rmSync(input.userMapPath, { force: true });
+      } else {
+        fs.writeFileSync(input.userMapPath, input.originalUserMap, "utf8");
+      }
+    }
+  }
+}
+
 async function withFakeCommands(
   commands: Record<string, string>,
   fn: (ctx: { commandLogPath: string; readCommandLog: () => string[] }) => Promise<void> | void,
@@ -205,7 +230,7 @@ test("loadWorkspace normalizes demo pod config through the TypeScript control pl
   assert.match(workspace.userProfile.id, /^\d{18}$/);
   assert.ok(workspace.userProfile.name.length > 0);
   assert.match(workspace.userProfile.email, /@/);
-  assert.ok(workspace.userProfile.workspaces.includes("demo"));
+  assert.ok(fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", "demo")));
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -353,10 +378,16 @@ test("runCli create allows the same workspace name under a different user", asyn
       true,
     );
   } finally {
-    fs.rmSync(firstProfilePath, { force: true });
-    fs.rmSync(secondProfilePath, { force: true });
-    fs.rmSync(firstUserRoot, { recursive: true, force: true });
-    fs.rmSync(secondUserRoot, { recursive: true, force: true });
+    await cleanupCliTestUser({
+      userId: firstUserId,
+      profilePath: firstProfilePath,
+      userRoot: firstUserRoot,
+    });
+    await cleanupCliTestUser({
+      userId: secondUserId,
+      profilePath: secondProfilePath,
+      userRoot: secondUserRoot,
+    });
   }
 });
 
@@ -395,13 +426,13 @@ test("runCli user delete removes the user profile, secrets root, and Clerk mappi
     assert.equal(fs.existsSync(profilePath), false);
     assert.equal(fs.existsSync(userRoot), false);
   } finally {
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
-    if (originalUserMap === null) {
-      fs.rmSync(userMapPath, { force: true });
-    } else {
-      fs.writeFileSync(userMapPath, originalUserMap, "utf8");
-    }
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+      userMapPath,
+      originalUserMap,
+    });
   }
 });
 
@@ -449,15 +480,20 @@ test("runCli user create rolls back scaffolded state when the Clerk mapping conf
     assert.equal(fs.existsSync(secondProfilePath), false);
     assert.equal(fs.existsSync(secondUserRoot), false);
   } finally {
-    fs.rmSync(firstProfilePath, { force: true });
-    fs.rmSync(secondProfilePath, { force: true });
-    fs.rmSync(firstUserRoot, { recursive: true, force: true });
-    fs.rmSync(secondUserRoot, { recursive: true, force: true });
-    if (originalUserMap === null) {
-      fs.rmSync(userMapPath, { force: true });
-    } else {
-      fs.writeFileSync(userMapPath, originalUserMap, "utf8");
-    }
+    await cleanupCliTestUser({
+      userId: firstUserId,
+      profilePath: firstProfilePath,
+      userRoot: firstUserRoot,
+      userMapPath,
+      originalUserMap,
+    });
+    await cleanupCliTestUser({
+      userId: secondUserId,
+      profilePath: secondProfilePath,
+      userRoot: secondUserRoot,
+      userMapPath,
+      originalUserMap,
+    });
   }
 });
 
@@ -486,8 +522,11 @@ test("runCli user delete rejects users that still have workspace data", async ()
       /cannot be deleted while workspace data still exists/i,
     );
   } finally {
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
   }
 });
 
@@ -525,8 +564,11 @@ test("runCli archive moves a workspace into the user archive", async () => {
       : [];
     assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${workspace}`)), true);
   } finally {
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
   }
 });
 
@@ -594,8 +636,11 @@ test("runCli delete removes a workspace without creating an archive", async () =
       : [];
     assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${workspace}`)), false);
   } finally {
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
   }
 });
 
@@ -686,8 +731,11 @@ test("runCli user credential add, list, and activate manage codex credentials ex
     assert.equal(codexRegistry.metadata?.active, true);
     assert.equal(codexRegistry.metadata?.harness, "codex");
   } finally {
-    fs.rmSync(profilePath, { force: true });
-    fs.rmSync(userRoot, { recursive: true, force: true });
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
   }
 });
 
