@@ -73,6 +73,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { resolveAdminWorkspaceButtonState } from "@/lib/admin-workspace-actions";
 import { mergeEmbeddedPaseoFrames, type EmbeddedPaseoFrame } from "@/lib/paseo-frames";
 import {
   DropdownMenu,
@@ -2553,6 +2554,7 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "" } = useParams();
   const navigate = useNavigate();
+  const { activeUserId, refreshWorkspaces } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
   const { data: users } = useAsyncValue(listUsers, [reloadKey]);
   const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
@@ -2638,6 +2640,30 @@ function AdminPage() {
     setAdminStartAfterCreate(true);
     setAdminDefaultDockerOnly(true);
   }, [selectedAdminUserId]);
+
+  useEffect(() => {
+    const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
+      const liveness = workspace.status?.health?.backendLiveness;
+      return (
+        liveness === "creating"
+        || liveness === "starting"
+        || liveness === "stopping"
+        || liveness === "archiving"
+      );
+    });
+    if (!selectedAdminUserId || !hasTransientWorkspace) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setReloadKey((current) => current + 1);
+      if (selectedAdminUserId === activeUserId) {
+        refreshWorkspaces();
+      }
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeUserId, refreshWorkspaces, selectedAdminUserId, selectedWorkspaces]);
 
   if (mappingLoading) {
     return (
@@ -3144,74 +3170,71 @@ function AdminPage() {
                       {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
                         <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
                       ) : null}
-                      {selectedWorkspaces?.map((workspace) => (
-                        <div
-                          key={workspace.name}
-                          className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium">{workspace.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {translateWorkspaceLiveness(
-                                  workspace.status?.health?.backendLiveness,
-                                  t,
-                                )}
+                      {selectedWorkspaces?.map((workspace) => {
+                        const backendLiveness = workspace.status?.health?.backendLiveness;
+                        const localAction = workspaceActionState[workspace.name] ?? null;
+                        const buttonState = resolveAdminWorkspaceButtonState({
+                          backendLiveness,
+                          localAction,
+                        });
+                        return (
+                          <div
+                            key={workspace.name}
+                            className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium">{workspace.name}</div>
+                                <div className="text-sm text-muted-foreground">
+                                  {translateWorkspaceLiveness(backendLiveness, t)}
+                                </div>
                               </div>
+                              <Badge variant="outline">
+                                {driverLabel(workspace.selectedDriver)}
+                              </Badge>
                             </div>
-                            <Badge variant="outline">
-                              {driverLabel(workspace.selectedDriver)}
-                            </Badge>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={buttonState.primaryDisabled}
+                                onClick={() => void (
+                                  buttonState.running
+                                    ? handleStopAdminWorkspace(workspace.name)
+                                    : handleStartAdminWorkspace(workspace.name)
+                                )}
+                              >
+                                {t(buttonState.primaryLabel)}
+                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    disabled={buttonState.archiveDisabled}
+                                  >
+                                    {t(buttonState.archiveLabel)}
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      {t("remove_workspace_confirm_description")}
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => void handleArchiveWorkspace(workspace.name)}>
+                                      {t("remove_workspace")}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={workspace.name in workspaceActionState}
-                              onClick={() => void (
-                                workspace.status?.health?.backendLiveness === "running"
-                                  ? handleStopAdminWorkspace(workspace.name)
-                                  : handleStartAdminWorkspace(workspace.name)
-                              )}
-                            >
-                              {workspaceActionState[workspace.name] === "stop"
-                                ? t("stopping")
-                                : workspaceActionState[workspace.name] === "start"
-                                  ? t("starting")
-                                  : workspace.status?.health?.backendLiveness === "running"
-                                    ? t("stop_workspace")
-                                    : t("start_workspace")}
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={workspace.name in workspaceActionState}
-                                >
-                                  {workspaceActionState[workspace.name] === "archive"
-                                    ? t("deleting")
-                                    : t("remove_workspace")}
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>{t("remove_workspace_confirm_title")}</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    {t("remove_workspace_confirm_description")}
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => void handleArchiveWorkspace(workspace.name)}>
-                                    {t("remove_workspace")}
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </CardContent>
                   </Card>
                   <Card className="border-border/70">
