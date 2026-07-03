@@ -37,9 +37,20 @@ Current user credential command surface includes:
 ```bash
 pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> ...
 pnpm --dir apps/polaris run polaris -- user credential list <userProfileId>
+pnpm --dir apps/polaris run polaris -- user credential read <userProfileId> <credentialId>
+pnpm --dir apps/polaris run polaris -- user credential write <userProfileId> <credentialId> <fileKey> --content <value>
 pnpm --dir apps/polaris run polaris -- user credential activate <userProfileId> <credentialId>
 pnpm --dir apps/polaris run polaris -- user credential delete <userProfileId> <credentialId>
 ```
+
+The portal mirrors that model.
+
+Current portal behavior:
+
+- credentials are grouped by harness tabs
+- creating a credential starts from the current harness tab
+- reading a credential opens the managed material for that credential record
+- writing a credential updates a named managed file key on that record
 
 ## Runtime Credential Switching
 
@@ -97,13 +108,15 @@ Current semantics:
 The portal also exposes runtime credential switch behavior as part of workspace
 operation.
 
-The portal does not expose a raw file-write credential API anymore.
+For user-owned credential management, the portal now uses typed
+`record`/`file` read-write operations instead of the older preview flow.
 
 That means:
 
 - users create supported credential types through typed credential actions
 - credential file paths can still be listed
-- credential preview responses do not return raw secret content
+- credential reads return managed files for one credential record
+- credential writes target a named managed file key on that record
 
 ## Why This Matters
 

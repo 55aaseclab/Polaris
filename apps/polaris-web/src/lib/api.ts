@@ -260,10 +260,16 @@ export interface PortalCredentialCatalog {
   presetSourceCommit: string;
 }
 
-export interface PortalCredentialPreview {
-  path: string;
+export interface PortalCredentialMaterialFile {
+  key: string;
+  sourcePath: string;
+  mountPath?: string;
   content: string;
-  truncated: boolean;
+}
+
+export interface PortalCredentialRecord {
+  credential: PortalCredentialSummary;
+  files: PortalCredentialMaterialFile[];
 }
 
 export interface PortalWorkspaceAssetPreview {
@@ -430,12 +436,12 @@ export async function getCredentialCatalog(
   );
 }
 
-export async function getCredentialPreview(
+export async function getCredentialRecord(
   userId: string,
-  credentialPath: string,
-): Promise<PortalCredentialPreview> {
-  return apiFetch<PortalCredentialPreview>(
-    `/users/${encodeURIComponent(userId)}/credentials/preview?path=${encodeURIComponent(credentialPath)}`,
+  credentialId: string,
+): Promise<PortalCredentialRecord> {
+  return apiFetch<PortalCredentialRecord>(
+    `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
   );
 }
 
@@ -500,6 +506,21 @@ export async function activateCredential(
     `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}/activate`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function updateCredentialFile(
+  userId: string,
+  credentialId: string,
+  fileKey: string,
+  content: string,
+): Promise<PortalCredentialRecord> {
+  return apiFetch<PortalCredentialRecord>(
+    `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}/files/${encodeURIComponent(fileKey)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ content }),
     },
   );
 }

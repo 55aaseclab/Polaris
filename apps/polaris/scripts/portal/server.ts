@@ -26,13 +26,13 @@ import {
   permanentlyDeletePortalArchivedWorkspace,
   getPortalCredentialCatalog,
   deletePortalCredential,
+  readUserPortalCredentialRecord,
   deletePortalWorkspace,
   getPortalWorkspacePaseoDiagnostic,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
   refreshPortalWorkspace,
-  readUserPortalCredentialPreview,
   readUserPortalWorkspaceAssetPreview,
   queueProvisionWorkspace,
   restartPortalWorkspacePaseoDaemon,
@@ -42,6 +42,7 @@ import {
   switchPortalWorkspaceLiveCredential,
   createPortalUser,
   updatePortalUserProfile,
+  writePortalCredentialFile,
 } from "./service.js";
 
 type ParsedBody = Record<string, string>;
@@ -52,7 +53,7 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type",
   });
   res.end(payload);
@@ -296,6 +297,23 @@ async function handleCredentialActivate(
 ): Promise<void> {
   const activated = await activatePortalCredential(userId, credentialId);
   sendJson(res, 200, activated);
+}
+
+async function handleCredentialWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  credentialId: string,
+  fileKey: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const updated = await writePortalCredentialFile({
+    userId,
+    credentialId,
+    fileKey,
+    content: body.content ?? "",
+  });
+  sendJson(res, 200, updated);
 }
 
 async function handleWorkspaceLiveCredentialSwitch(
@@ -571,18 +589,20 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           await handleCredentialDelete(res, routeUserId, credentialId);
           return;
         }
+        if (segments[3] === "credentials" && segments.length === 5 && req.method === "GET") {
+          const credentialId = decodeURIComponent(segments[4]);
+          sendJson(res, 200, readUserPortalCredentialRecord(routeUserId, credentialId));
+          return;
+        }
         if (segments[3] === "credentials" && segments.length === 6 && segments[5] === "activate" && req.method === "POST") {
           const credentialId = decodeURIComponent(segments[4]);
           await handleCredentialActivate(res, routeUserId, credentialId);
           return;
         }
-        if (segments[3] === "credentials" && segments[4] === "preview" && req.method === "GET") {
-          const credentialPath = url.searchParams.get("path")?.trim() || "";
-          if (!credentialPath) {
-            badRequest(res, "path is required");
-            return;
-          }
-          sendJson(res, 200, readUserPortalCredentialPreview(routeUserId, credentialPath));
+        if (segments[3] === "credentials" && segments.length === 7 && segments[5] === "files" && req.method === "PUT") {
+          const credentialId = decodeURIComponent(segments[4]);
+          const fileKey = decodeURIComponent(segments[6]);
+          await handleCredentialWrite(req, res, routeUserId, credentialId, fileKey);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "GET") {

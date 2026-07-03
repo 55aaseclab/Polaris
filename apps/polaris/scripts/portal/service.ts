@@ -4,6 +4,8 @@ import {
   activateManagedCredential,
   createManagedHarnessCredential,
   deleteManagedCredential,
+  readManagedCredentialRecord,
+  writeManagedCredentialMaterialFile,
 } from "../config/credentials.js";
 import {
   isManagedHarness,
@@ -16,15 +18,14 @@ import {
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
-  readPortalCredentialPreview,
   readPortalWorkspaceAssetPreview,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
   updatePortalProfile,
   type PortalArchivedWorkspaceSummary,
   type PortalCredentialSummary,
-  type PortalCredentialPreview,
   type PortalCredentialCatalog,
+  type PortalCredentialRecord,
   type PortalWorkspaceAssetPreview,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
@@ -177,11 +178,18 @@ export function getPortalCredentialCatalog(): PortalCredentialCatalog {
   return credentialCatalog();
 }
 
-export function readUserPortalCredentialPreview(
+export function readUserPortalCredentialRecord(
   userId: string,
-  credentialPath: string,
-): PortalCredentialPreview {
-  return readPortalCredentialPreview(userId, credentialPath);
+  credentialId: string,
+): PortalCredentialRecord {
+  const record = readManagedCredentialRecord({
+    userProfileId: userId,
+    credentialId,
+  });
+  return {
+    credential: record.summary,
+    files: record.files,
+  };
 }
 
 export function readUserPortalWorkspaceAssetPreview(
@@ -263,6 +271,23 @@ export async function activatePortalCredential(
       throw new Error(`Credential '${activated.id}' could not be loaded after activation`);
     }
     return summary;
+  });
+}
+
+export async function writePortalCredentialFile(input: {
+  userId: string;
+  credentialId: string;
+  fileKey: string;
+  content: string;
+}): Promise<PortalCredentialRecord> {
+  return withUserMutationLock(import.meta.url, input.userId, async () => {
+    writeManagedCredentialMaterialFile({
+      userProfileId: input.userId,
+      credentialId: input.credentialId,
+      fileKey: input.fileKey,
+      content: input.content,
+    });
+    return readUserPortalCredentialRecord(input.userId, input.credentialId);
   });
 }
 

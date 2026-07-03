@@ -35,8 +35,8 @@ import {
   deleteArchivedWorkspace,
   deleteCredential,
   deleteWorkspace,
+  getCredentialRecord,
   getCredentialCatalog,
-  getCredentialPreview,
   getWorkspaceAssetPreview,
   getWorkspaceDetail,
   getWorkspacePaseoDiagnostic,
@@ -55,12 +55,14 @@ import {
   stopWorkspace,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
+  updateCredentialFile,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
+  type PortalCredentialMaterialFile,
+  type PortalCredentialRecord,
   type ManagedHarness,
   type PortalCredentialCatalog,
   type PortalCredentialSummary,
-  type PortalCredentialPreview,
   type PortalProfileSummary,
   type PortalSession,
   type PortalUserMapping,
@@ -289,6 +291,18 @@ const COPY: Record<Language, Record<string, string>> = {
     user_profile_desc: "Edit the active user information.",
     administration: "Administration",
     administration_desc: "Manage portal users and access.",
+    admin_read_credential: "Read",
+    admin_write_credential: "Write",
+    admin_loading_credential: "Loading credential...",
+    admin_saving_credential: "Saving credential...",
+    admin_edit_credential: "Edit credential file",
+    admin_credential_file_content: "Credential file content",
+    read_credential: "Read",
+    write_credential: "Write",
+    loading_credential: "Loading credential...",
+    saving_credential: "Saving credential...",
+    edit_credential: "Edit credential file",
+    credential_file_content: "Credential file content",
     settings_title: "Settings",
     settings_desc: "Choose the language used across the portal.",
     danger_zone: "Danger zone",
@@ -591,6 +605,18 @@ const COPY: Record<Language, Record<string, string>> = {
     user_profile_desc: "编辑当前用户信息。",
     administration: "管理",
     administration_desc: "管理门户用户和访问权限。",
+    admin_read_credential: "读取",
+    admin_write_credential: "写入",
+    admin_loading_credential: "正在读取凭证…",
+    admin_saving_credential: "正在写入凭证…",
+    admin_edit_credential: "编辑凭证文件",
+    admin_credential_file_content: "凭证文件内容",
+    read_credential: "读取",
+    write_credential: "写入",
+    loading_credential: "正在读取凭证…",
+    saving_credential: "正在写入凭证…",
+    edit_credential: "编辑凭证文件",
+    credential_file_content: "凭证文件内容",
     settings_title: "设置",
     settings_desc: "选择整个门户使用的语言。",
     danger_zone: "危险操作",
@@ -1413,7 +1439,6 @@ type AssetRow = {
   detailLines?: string[];
   status?: string;
   previewPath?: string;
-  previewScope?: "credential" | "workspace";
   previewOpen?: boolean;
 };
 
@@ -1514,7 +1539,6 @@ function WorkspaceAssetTable(props: {
                       path={row.displayPath ?? row.path}
                       userId={props.userId}
                       previewPath={row.previewPath}
-                      previewScope={row.previewScope}
                       workspaceName={props.workspaceName}
                     />
                   </td>
@@ -2620,10 +2644,25 @@ function AdminPage() {
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [adminActionError, setAdminActionError] = useState<string | null>(null);
   const [workspaceAdminActionError, setWorkspaceAdminActionError] = useState<string | null>(null);
+  const [credentialAdminActionError, setCredentialAdminActionError] = useState<string | null>(null);
   const [adminWorkspaceName, setAdminWorkspaceName] = useState("");
   const [creatingAdminWorkspace, setCreatingAdminWorkspace] = useState(false);
   const [adminStartAfterCreate, setAdminStartAfterCreate] = useState(true);
   const [adminDefaultDockerOnly, setAdminDefaultDockerOnly] = useState(true);
+  const [adminCredentialSheetOpen, setAdminCredentialSheetOpen] = useState(false);
+  const [adminCredentialCreating, setAdminCredentialCreating] = useState(false);
+  const [adminDeletingCredentialId, setAdminDeletingCredentialId] = useState<string | null>(null);
+  const [adminActivatingCredentialId, setAdminActivatingCredentialId] = useState<string | null>(null);
+  const [adminCredentialTab, setAdminCredentialTab] = useState<ManagedHarness>("codex");
+  const [adminCredentialDraft, setAdminCredentialDraft] = useState<CredentialDraft>(
+    defaultCredentialDraft("codex", null),
+  );
+  const [adminCredentialEditorOpen, setAdminCredentialEditorOpen] = useState(false);
+  const [adminCredentialEditorLoading, setAdminCredentialEditorLoading] = useState(false);
+  const [adminCredentialEditorSaving, setAdminCredentialEditorSaving] = useState(false);
+  const [adminCredentialEditorRecord, setAdminCredentialEditorRecord] = useState<PortalCredentialRecord | null>(null);
+  const [adminCredentialEditorFile, setAdminCredentialEditorFile] = useState<PortalCredentialMaterialFile | null>(null);
+  const [adminCredentialEditorContent, setAdminCredentialEditorContent] = useState("");
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
@@ -2655,6 +2694,17 @@ function AdminPage() {
     () => selectedAdminUserId ? listCredentials(selectedAdminUserId) : Promise.resolve([]),
     [selectedAdminUserId, reloadKey],
   );
+  const { data: selectedCredentialCatalog } = useAsyncValue(
+    () => selectedAdminUserId ? getCredentialCatalog(selectedAdminUserId) : Promise.resolve(null),
+    [selectedAdminUserId, reloadKey],
+  );
+  const adminCredentialGroups = MANAGED_HARNESS_ORDER.map((harness) => ({
+    harness,
+    supportsCreate:
+      selectedCredentialCatalog?.harnesses.find((item) => item.id === harness)
+        ?.supportsCreate ?? harness !== "ssh",
+    credentials: (selectedCredentials ?? []).filter((credential) => credential.harness === harness),
+  }));
   const {
     data: selectedWorkspaces,
     error: selectedWorkspacesError,
@@ -2695,7 +2745,31 @@ function AdminPage() {
     setAdminWorkspaceName("");
     setAdminStartAfterCreate(true);
     setAdminDefaultDockerOnly(true);
+    setAdminCredentialSheetOpen(false);
+    setAdminCredentialCreating(false);
+    setAdminDeletingCredentialId(null);
+    setAdminActivatingCredentialId(null);
+    setAdminCredentialTab("codex");
+    setAdminCredentialDraft(defaultCredentialDraft("codex", null));
+    setAdminCredentialEditorOpen(false);
+    setAdminCredentialEditorLoading(false);
+    setAdminCredentialEditorSaving(false);
+    setAdminCredentialEditorRecord(null);
+    setAdminCredentialEditorFile(null);
+    setAdminCredentialEditorContent("");
   }, [selectedAdminUserId]);
+
+  useEffect(() => {
+    const nextTab = defaultCredentialTab(adminCredentialGroups);
+    if (!adminCredentialGroups.some((group) => group.harness === adminCredentialTab)) {
+      setAdminCredentialTab(nextTab);
+      return;
+    }
+    const activeGroup = adminCredentialGroups.find((group) => group.harness === adminCredentialTab);
+    if (!activeGroup) {
+      setAdminCredentialTab(nextTab);
+    }
+  }, [adminCredentialGroups, adminCredentialTab]);
 
   useEffect(() => {
     const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
@@ -2931,6 +3005,144 @@ function AdminPage() {
   const selectedMappings = selectedAdminUser
     ? [...selectedAdminUser.clerkUsernames, ...selectedAdminUser.clerkUserIds]
     : [];
+  const adminCredentialHarnessPresets = presetsForHarness(
+    selectedCredentialCatalog,
+    adminCredentialDraft.harness,
+  );
+
+  function openAdminCredentialSheet(harness: ManagedHarness): void {
+    setAdminCredentialDraft(defaultCredentialDraft(harness, selectedCredentialCatalog));
+    setCredentialAdminActionError(null);
+    setAdminCredentialSheetOpen(true);
+  }
+
+  async function handleCreateAdminCredential(
+    event?: React.FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event?.preventDefault();
+    if (!selectedAdminUser || adminCredentialCreating) {
+      return;
+    }
+    setAdminCredentialCreating(true);
+    setCredentialAdminActionError(null);
+    try {
+      await createCredential(selectedAdminUser.id, {
+        harness: adminCredentialDraft.harness,
+        label: adminCredentialDraft.label.trim() || undefined,
+        providerName: adminCredentialDraft.providerName.trim() || undefined,
+        baseUrl: adminCredentialDraft.baseUrl.trim() || undefined,
+        apiKey: adminCredentialDraft.apiKey,
+        presetId:
+          adminCredentialDraft.harness !== "ssh"
+            ? adminCredentialDraft.presetId || undefined
+            : undefined,
+        model:
+          adminCredentialDraft.harness === "codex"
+            ? adminCredentialDraft.model.trim() || undefined
+            : undefined,
+      });
+      setAdminCredentialSheetOpen(false);
+      setAdminCredentialDraft(defaultCredentialDraft("codex", selectedCredentialCatalog));
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminCredentialCreating(false);
+    }
+  }
+
+  async function handleDeleteAdminCredential(credentialId: string): Promise<void> {
+    if (!selectedAdminUser || adminDeletingCredentialId) {
+      return;
+    }
+    setAdminDeletingCredentialId(credentialId);
+    setCredentialAdminActionError(null);
+    try {
+      await deleteCredential(selectedAdminUser.id, credentialId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminDeletingCredentialId(null);
+    }
+  }
+
+  async function handleActivateAdminCredential(credentialId: string): Promise<void> {
+    if (!selectedAdminUser || adminActivatingCredentialId) {
+      return;
+    }
+    setAdminActivatingCredentialId(credentialId);
+    setCredentialAdminActionError(null);
+    try {
+      await activateCredential(selectedAdminUser.id, credentialId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminActivatingCredentialId(null);
+    }
+  }
+
+  async function handleOpenAdminCredentialFile(
+    credentialId: string,
+    sourcePath: string,
+  ): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setAdminCredentialEditorOpen(true);
+    setAdminCredentialEditorLoading(true);
+    setCredentialAdminActionError(null);
+    try {
+      const record = await getCredentialRecord(selectedAdminUser.id, credentialId);
+      const file = record.files.find((entry) => entry.sourcePath === sourcePath)
+        ?? record.files.find((entry) => entry.key === basenameForDisplay(sourcePath))
+        ?? null;
+      if (!file) {
+        throw new Error(`Credential file '${sourcePath}' was not found`);
+      }
+      setAdminCredentialEditorRecord(record);
+      setAdminCredentialEditorFile(file);
+      setAdminCredentialEditorContent(file.content);
+    } catch (error) {
+      setCredentialAdminActionError(formatActionError(error, t));
+      setAdminCredentialEditorOpen(false);
+    } finally {
+      setAdminCredentialEditorLoading(false);
+    }
+  }
+
+  async function handleSaveAdminCredentialFile(): Promise<void> {
+    if (
+      !selectedAdminUser
+      || !adminCredentialEditorRecord
+      || !adminCredentialEditorFile
+      || adminCredentialEditorSaving
+    ) {
+      return;
+    }
+    setAdminCredentialEditorSaving(true);
+    setCredentialAdminActionError(null);
+    try {
+      const updated = await updateCredentialFile(
+        selectedAdminUser.id,
+        adminCredentialEditorRecord.credential.id,
+        adminCredentialEditorFile.key,
+        adminCredentialEditorContent,
+      );
+      const updatedFile =
+        updated.files.find((entry) => entry.key === adminCredentialEditorFile.key)
+        ?? adminCredentialEditorFile;
+      setAdminCredentialEditorRecord(updated);
+      setAdminCredentialEditorFile(updatedFile);
+      setAdminCredentialEditorContent(updatedFile.content);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminCredentialEditorSaving(false);
+    }
+  }
 
   return (
     <div className="grid w-full gap-6 lg:grid-cols-[21rem_minmax(0,1fr)]">
@@ -3117,48 +3329,292 @@ function AdminPage() {
 
               <TabsContent value="credentials">
                 <Card className="border-border/70">
-                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                  <CardHeader className="gap-3">
                     <div>
                       <CardTitle className="text-base">{t("admin_user_credentials_section")}</CardTitle>
                       <CardDescription>{t("credentials_for_user")}</CardDescription>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(`/users/${encodeURIComponent(selectedAdminUser.id)}/credentials`)}
-                    >
-                      {t("admin_manage_credentials")}
-                    </Button>
                   </CardHeader>
                   <CardContent className="grid gap-3">
+                    <ErrorPopup
+                      title={t("global_error_title")}
+                      message={credentialAdminActionError}
+                      onClose={() => setCredentialAdminActionError(null)}
+                    />
                     <ErrorPopup title={t("global_error_title")} message={selectedCredentialsError} />
                     {!selectedCredentialsLoading && !selectedCredentialsError && (selectedCredentials?.length ?? 0) === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("admin_credentials_empty")}</p>
                     ) : null}
-                    {selectedCredentials?.map((credential) => (
-                      <div
-                        key={credential.id}
-                        className="grid gap-2 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                    {(selectedCredentials?.length ?? 0) > 0 ? (
+                      <Tabs
+                        value={adminCredentialTab}
+                        onValueChange={(value) => setAdminCredentialTab(value as ManagedHarness)}
+                        className="grid gap-2"
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{credential.label}</div>
-                            <div className="truncate text-xs text-muted-foreground">
-                              {credential.providerName || credential.kind}
+                        <TabsList className="h-auto w-full flex-wrap justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
+                          {adminCredentialGroups.map((group) => (
+                            <TabsTrigger key={group.harness} value={group.harness} className="rounded-xl">
+                              {credentialHarnessLabel(group.harness, t)}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                        {adminCredentialGroups.map((group) => (
+                          <TabsContent key={group.harness} value={group.harness} className="mt-0 space-y-3">
+                            <div className="flex flex-row items-start justify-between gap-4">
+                              <div />
+                              {group.supportsCreate ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openAdminCredentialSheet(group.harness)}
+                                >
+                                  <PlusCircle className="h-4 w-4" />
+                                  {t("add_credential")}
+                                </Button>
+                              ) : null}
                             </div>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {credential.active ? <Badge>{t("active")}</Badge> : null}
-                            <Badge variant="outline">{credential.harness || credential.kind}</Badge>
-                          </div>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {credential.purposes.join(", ") || t("none")}
-                        </div>
-                      </div>
-                    ))}
+                            {group.credentials.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">{t("no_credentials")}</p>
+                            ) : group.credentials.map((credential) => (
+                              <div
+                                key={credential.id}
+                                className="grid gap-2 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-medium">{credential.label}</div>
+                                    <div className="truncate text-xs text-muted-foreground">
+                                      {credential.providerName || credential.kind}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {credential.active ? <Badge>{t("active")}</Badge> : null}
+                                    <Badge variant="outline">{credential.harness || credential.kind}</Badge>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-muted-foreground">
+                                  {credential.purposes.join(", ") || t("none")}
+                                </div>
+                                <div className="grid gap-2">
+                                  {credential.paths.map((item) => {
+                                    const fileKey = basenameForDisplay(item);
+                                    return (
+                                      <div
+                                        key={`${credential.id}:${item}`}
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background px-3 py-2"
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="truncate text-sm">{trimUserAssetPath(item, selectedAdminUser.id)}</div>
+                                          <div className="truncate text-xs text-muted-foreground">{fileKey}</div>
+                                        </div>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => void handleOpenAdminCredentialFile(credential.id, item)}
+                                        >
+                                          {t("admin_read_credential")}
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        disabled={adminDeletingCredentialId === credential.id}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>{t("delete_credential_confirm_title")}</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          {t("delete_credential_confirm_description")}
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => void handleDeleteAdminCredential(credential.id)}>
+                                          {adminDeletingCredentialId === credential.id
+                                            ? t("deleting_credential")
+                                            : t("delete_credential")}
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                  <Button
+                                    variant={credential.active ? "secondary" : "outline"}
+                                    size="sm"
+                                    disabled={
+                                      credential.harness === "ssh"
+                                      || credential.active
+                                      || adminActivatingCredentialId === credential.id
+                                    }
+                                    onClick={() => void handleActivateAdminCredential(credential.id)}
+                                  >
+                                    {adminActivatingCredentialId === credential.id
+                                      ? t("setting_default_credential")
+                                      : credential.active
+                                        ? t("default_credential")
+                                        : t("set_default_credential")}
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </TabsContent>
+                        ))}
+                      </Tabs>
+                    ) : null}
                   </CardContent>
                 </Card>
+                <Sheet open={adminCredentialSheetOpen} onOpenChange={setAdminCredentialSheetOpen}>
+                  <SheetContent side="right" className="w-full sm:max-w-xl">
+                    <SheetHeader>
+                      <SheetTitle>{t("add_credential")}</SheetTitle>
+                      <SheetDescription>
+                        {credentialHarnessLabel(adminCredentialDraft.harness, t)}
+                      </SheetDescription>
+                    </SheetHeader>
+                    <form className="grid gap-4 py-4" onSubmit={(event) => void handleCreateAdminCredential(event)}>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-credential-harness">{t("credential_provider")}</Label>
+                        <Select
+                          value={adminCredentialDraft.harness}
+                          onValueChange={(value) => {
+                            setAdminCredentialDraft(defaultCredentialDraft(value as ManagedHarness, selectedCredentialCatalog));
+                          }}
+                        >
+                          <SelectTrigger id="admin-credential-harness" className="bg-white">
+                            <SelectValue placeholder={t("credential_provider")} />
+                          </SelectTrigger>
+                          <SelectContent className="bg-white">
+                            {MANAGED_HARNESS_ORDER.map((harness) => (
+                              <SelectItem key={harness} value={harness}>
+                                {credentialHarnessLabel(harness, t)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {adminCredentialHarnessPresets.length > 0 ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor="admin-credential-preset">{t("credential_template")}</Label>
+                          <Select
+                            value={adminCredentialDraft.presetId}
+                            onValueChange={(value) => {
+                              const preset = adminCredentialHarnessPresets.find((item) => item.id === value);
+                              if (!preset) {
+                                return;
+                              }
+                              setAdminCredentialDraft((current) => ({
+                                ...current,
+                                presetId: preset.id,
+                                label: preset.label,
+                                providerName: preset.providerName,
+                                baseUrl: preset.baseUrl,
+                                model: preset.model ?? "",
+                              }));
+                            }}
+                          >
+                            <SelectTrigger id="admin-credential-preset" className="bg-white">
+                              <SelectValue placeholder={t("credential_template")} />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              {adminCredentialHarnessPresets.map((preset) => (
+                                <SelectItem key={preset.id} value={preset.id}>
+                                  {preset.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-credential-label">{t("credential_label")}</Label>
+                        <Input
+                          id="admin-credential-label"
+                          value={adminCredentialDraft.label}
+                          onChange={(event) => setAdminCredentialDraft((current) => ({ ...current, label: event.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-credential-provider">{t("credential_provider")}</Label>
+                        <Input
+                          id="admin-credential-provider"
+                          value={adminCredentialDraft.providerName}
+                          onChange={(event) => setAdminCredentialDraft((current) => ({ ...current, providerName: event.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-credential-base-url">{t("credential_base_url")}</Label>
+                        <Input
+                          id="admin-credential-base-url"
+                          value={adminCredentialDraft.baseUrl}
+                          onChange={(event) => setAdminCredentialDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-credential-api-key">{t("credential_api_key")}</Label>
+                        <Input
+                          id="admin-credential-api-key"
+                          value={adminCredentialDraft.apiKey}
+                          onChange={(event) => setAdminCredentialDraft((current) => ({ ...current, apiKey: event.target.value }))}
+                        />
+                      </div>
+                      {adminCredentialDraft.harness === "codex" ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor="admin-credential-model">{t("credential_model")}</Label>
+                          <Input
+                            id="admin-credential-model"
+                            value={adminCredentialDraft.model}
+                            onChange={(event) => setAdminCredentialDraft((current) => ({ ...current, model: event.target.value }))}
+                          />
+                        </div>
+                      ) : null}
+                      <SheetFooter>
+                        <Button type="submit" disabled={adminCredentialCreating}>
+                          {adminCredentialCreating ? t("creating_credential") : t("create_credential")}
+                        </Button>
+                      </SheetFooter>
+                    </form>
+                  </SheetContent>
+                </Sheet>
+                <Sheet open={adminCredentialEditorOpen} onOpenChange={setAdminCredentialEditorOpen}>
+                  <SheetContent side="right" className="w-full sm:max-w-2xl">
+                    <SheetHeader>
+                      <SheetTitle>{t("admin_edit_credential")}</SheetTitle>
+                      <SheetDescription>
+                        {adminCredentialEditorFile?.sourcePath ?? ""}
+                      </SheetDescription>
+                    </SheetHeader>
+                    <div className="grid gap-4 py-4">
+                      {adminCredentialEditorLoading ? (
+                        <div className="text-sm text-muted-foreground">{t("admin_loading_credential")}</div>
+                      ) : (
+                        <>
+                          <div className="grid gap-2">
+                            <Label htmlFor="admin-credential-file-content">{t("admin_credential_file_content")}</Label>
+                            <textarea
+                              id="admin-credential-file-content"
+                              className="min-h-[26rem] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={adminCredentialEditorContent}
+                              onChange={(event) => setAdminCredentialEditorContent(event.target.value)}
+                            />
+                          </div>
+                          <SheetFooter>
+                            <Button onClick={() => void handleSaveAdminCredentialFile()} disabled={adminCredentialEditorSaving}>
+                              {adminCredentialEditorSaving ? t("admin_saving_credential") : t("admin_write_credential")}
+                            </Button>
+                          </SheetFooter>
+                        </>
+                      )}
+                    </div>
+                  </SheetContent>
+                </Sheet>
               </TabsContent>
 
               <TabsContent value="workspaces">
@@ -3661,7 +4117,6 @@ function WorkspaceDetailContent() {
               previewPath: item.path.startsWith(`config/users/${userId}/`) && item.exists !== false
                 ? item.path
                 : undefined,
-              previewScope: "workspace",
             })),
         },
       ]
@@ -4360,10 +4815,19 @@ function defaultCredentialDraft(
   };
 }
 
+function defaultCredentialTab(
+  groups: Array<{ harness: ManagedHarness; credentials: PortalCredentialSummary[] }>,
+): ManagedHarness {
+  return groups.find((group) => group.credentials.length > 0)?.harness
+    ?? groups[0]?.harness
+    ?? "codex";
+}
+
 function credentialPathsCell(
   credential: PortalCredentialSummary,
   userId: string,
   t: (key: string) => string,
+  onOpenFile: (credentialId: string, sourcePath: string) => void,
 ): ReactNode {
   if (credential.paths.length === 0) {
     return <span className="text-sm text-muted-foreground">{t("none")}</span>;
@@ -4371,11 +4835,11 @@ function credentialPathsCell(
   return (
     <div className="grid gap-2">
       {credential.paths.map((item) => (
-        <CredentialPathCell
+        <CredentialFileCell
           key={`${credential.id}:${item}`}
           path={trimUserAssetPath(item, userId)}
-          userId={userId}
-          previewPath={item}
+          onOpen={() => onOpenFile(credential.id, item)}
+          actionLabel={t("read_credential")}
         />
       ))}
     </div>
@@ -4403,6 +4867,13 @@ function CredentialManagerContent() {
   const [credentialActionError, setCredentialActionError] = useState<string | null>(null);
   const [deletingCredentialId, setDeletingCredentialId] = useState<string | null>(null);
   const [activatingCredentialId, setActivatingCredentialId] = useState<string | null>(null);
+  const [credentialTab, setCredentialTab] = useState<ManagedHarness>("codex");
+  const [credentialEditorOpen, setCredentialEditorOpen] = useState(false);
+  const [credentialEditorLoading, setCredentialEditorLoading] = useState(false);
+  const [credentialEditorSaving, setCredentialEditorSaving] = useState(false);
+  const [credentialEditorRecord, setCredentialEditorRecord] = useState<PortalCredentialRecord | null>(null);
+  const [credentialEditorFile, setCredentialEditorFile] = useState<PortalCredentialMaterialFile | null>(null);
+  const [credentialEditorContent, setCredentialEditorContent] = useState("");
   const harnessPresets = presetsForHarness(
     credentialCatalog,
     credentialDraft.harness,
@@ -4417,6 +4888,18 @@ function CredentialManagerContent() {
       (credential) => credential.harness === harness,
     ),
   }));
+
+  useEffect(() => {
+    const nextTab = defaultCredentialTab(groupedCredentials);
+    if (!groupedCredentials.some((group) => group.harness === credentialTab)) {
+      setCredentialTab(nextTab);
+      return;
+    }
+    const activeGroup = groupedCredentials.find((group) => group.harness === credentialTab);
+    if (!activeGroup) {
+      setCredentialTab(nextTab);
+    }
+  }, [groupedCredentials, credentialTab]);
 
   function openCredentialSheet(harness: ManagedHarness): void {
     setCredentialDraft(defaultCredentialDraft(harness, credentialCatalog));
@@ -4491,6 +4974,63 @@ function CredentialManagerContent() {
     }
   }
 
+  async function handleOpenCredentialFile(
+    credentialId: string,
+    sourcePath: string,
+  ): Promise<void> {
+    setCredentialEditorOpen(true);
+    setCredentialEditorLoading(true);
+    setCredentialActionError(null);
+    try {
+      const record = await getCredentialRecord(userId, credentialId);
+      const file = record.files.find((entry) => entry.sourcePath === sourcePath)
+        ?? record.files.find((entry) => entry.key === basenameForDisplay(sourcePath))
+        ?? null;
+      if (!file) {
+        throw new Error(`Credential file '${sourcePath}' was not found`);
+      }
+      setCredentialEditorRecord(record);
+      setCredentialEditorFile(file);
+      setCredentialEditorContent(file.content);
+    } catch (error) {
+      setCredentialActionError(error instanceof Error ? error.message : String(error));
+      setCredentialEditorOpen(false);
+    } finally {
+      setCredentialEditorLoading(false);
+    }
+  }
+
+  async function handleSaveCredentialFile(): Promise<void> {
+    if (
+      !credentialEditorRecord
+      || !credentialEditorFile
+      || credentialEditorSaving
+    ) {
+      return;
+    }
+    setCredentialEditorSaving(true);
+    setCredentialActionError(null);
+    try {
+      const updated = await updateCredentialFile(
+        userId,
+        credentialEditorRecord.credential.id,
+        credentialEditorFile.key,
+        credentialEditorContent,
+      );
+      const updatedFile =
+        updated.files.find((entry) => entry.key === credentialEditorFile.key)
+        ?? credentialEditorFile;
+      setCredentialEditorRecord(updated);
+      setCredentialEditorFile(updatedFile);
+      setCredentialEditorContent(updatedFile.content);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setCredentialActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCredentialEditorSaving(false);
+    }
+  }
+
   return (
     <div className="grid w-full min-w-0 gap-6">
         <div className="grid gap-4">
@@ -4508,15 +5048,22 @@ function CredentialManagerContent() {
           {credentialActionError && (
             <p className="text-sm text-destructive">{credentialActionError}</p>
           )}
-          {groupedCredentials.map((section, index) => (
-            <React.Fragment key={section.harness}>
-              <div className="grid gap-4">
+          <Tabs
+            value={credentialTab}
+            onValueChange={(value) => setCredentialTab(value as ManagedHarness)}
+            className="grid gap-2"
+          >
+            <TabsList className="h-auto w-full flex-wrap justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
+              {groupedCredentials.map((section) => (
+                <TabsTrigger key={section.harness} value={section.harness} className="rounded-xl">
+                  {credentialHarnessLabel(section.harness, t)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {groupedCredentials.map((section) => (
+              <TabsContent key={section.harness} value={section.harness} className="mt-0 space-y-4">
                 <div className="flex flex-row items-start justify-between gap-4">
-                  <div>
-                    <div className="text-base font-semibold">
-                      {credentialHarnessLabel(section.harness, t)}
-                    </div>
-                  </div>
+                  <div />
                   {section.supportsCreate ? (
                     <Button
                       variant="outline"
@@ -4568,7 +5115,14 @@ function CredentialManagerContent() {
                               {credential.providerName ?? "-"}
                             </td>
                             <td className="px-4 py-4">
-                              {credentialPathsCell(credential, userId, t)}
+                              {credentialPathsCell(
+                                credential,
+                                userId,
+                                t,
+                                (credentialId, sourcePath) => {
+                                  void handleOpenCredentialFile(credentialId, sourcePath);
+                                },
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex justify-end gap-2">
@@ -4643,10 +5197,9 @@ function CredentialManagerContent() {
                     </table>
                   </div>
                 )}
-              </div>
-              {index < groupedCredentials.length - 1 ? <Separator /> : null}
-            </React.Fragment>
-          ))}
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetContent side="right" className="w-full sm:max-w-xl">
@@ -4788,6 +5341,38 @@ function CredentialManagerContent() {
             </form>
           </SheetContent>
         </Sheet>
+        <Sheet open={credentialEditorOpen} onOpenChange={setCredentialEditorOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-2xl">
+            <SheetHeader>
+              <SheetTitle>{t("edit_credential")}</SheetTitle>
+              <SheetDescription>
+                {credentialEditorFile?.sourcePath ?? ""}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="grid gap-4 py-4">
+              {credentialEditorLoading ? (
+                <div className="text-sm text-muted-foreground">{t("loading_credential")}</div>
+              ) : (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="credential-file-content">{t("credential_file_content")}</Label>
+                    <textarea
+                      id="credential-file-content"
+                      className="min-h-[26rem] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={credentialEditorContent}
+                      onChange={(event) => setCredentialEditorContent(event.target.value)}
+                    />
+                  </div>
+                  <SheetFooter>
+                    <Button onClick={() => void handleSaveCredentialFile()} disabled={credentialEditorSaving}>
+                      {credentialEditorSaving ? t("saving_credential") : t("write_credential")}
+                    </Button>
+                  </SheetFooter>
+                </>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
   );
 }
@@ -4843,17 +5428,40 @@ function trimUserAssetPath(pathValue: string, userId: string): string {
   return pathValue.startsWith(prefix) ? pathValue.slice(prefix.length) : pathValue;
 }
 
+function CredentialFileCell(props: {
+  path: string;
+  onOpen: () => void;
+  actionLabel: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="block max-w-full truncate text-sm text-muted-foreground" title={props.path}>
+          {props.path}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={props.onOpen}
+        >
+          {props.actionLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function CredentialPathCell(props: {
   path: string;
   userId?: string;
   previewPath?: string;
-  previewScope?: "credential" | "workspace";
   workspaceName?: string;
 }) {
   const showPreview = Boolean(props.userId && props.previewPath);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<PortalCredentialPreview | PortalWorkspaceAssetPreview | null>(null);
+  const [preview, setPreview] = useState<PortalWorkspaceAssetPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -4869,13 +5477,11 @@ function CredentialPathCell(props: {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const loader = props.previewScope === "workspace"
-      ? getWorkspaceAssetPreview(
-          props.userId as string,
-          props.workspaceName as string,
-          props.previewPath as string,
-        )
-      : getCredentialPreview(props.userId as string, props.previewPath as string);
+    const loader = getWorkspaceAssetPreview(
+      props.userId as string,
+      props.workspaceName as string,
+      props.previewPath as string,
+    );
     void loader
       .then((value) => {
         if (!cancelled) {
@@ -4899,7 +5505,6 @@ function CredentialPathCell(props: {
     open,
     preview,
     props.previewPath,
-    props.previewScope,
     props.userId,
     props.workspaceName,
     showPreview,

@@ -84,10 +84,16 @@ export interface PortalCredentialCatalog {
   presetSourceCommit: string;
 }
 
-export interface PortalCredentialPreview {
-  path: string;
+export interface PortalCredentialMaterialFile {
+  key: string;
+  sourcePath: string;
+  mountPath?: string;
   content: string;
-  truncated: boolean;
+}
+
+export interface PortalCredentialRecord {
+  credential: PortalCredentialSummary;
+  files: PortalCredentialMaterialFile[];
 }
 
 export interface PortalWorkspaceAssetPreview {
@@ -649,30 +655,6 @@ function normalizeWorkspaceAssets(
       ...item,
       exists: fs.existsSync(path.resolve(REPO_ROOT, item.path)),
     })),
-  };
-}
-
-export function readPortalCredentialPreview(userId: string, credentialPath: string): PortalCredentialPreview {
-  const trimmed = credentialPath.trim();
-  if (!trimmed) {
-    throw new Error("credential path is required");
-  }
-  const userRoot = path.resolve(USER_ROOT, userId);
-  const absolute = path.resolve(userRoot, trimmed);
-  if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
-    throw new Error("credential path must stay within the user root");
-  }
-  if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
-    return {
-      path: trimmed,
-      content: "[credential asset not found]",
-      truncated: false,
-    };
-  }
-  return {
-    path: trimmed,
-    content: "[credential preview hidden]",
-    truncated: false,
   };
 }
 

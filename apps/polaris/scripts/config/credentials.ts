@@ -56,6 +56,11 @@ export interface ManagedCredentialRecord {
   files: ManagedCredentialMaterialFile[];
 }
 
+export interface ManagedCredentialMaterialWriteResult {
+  credential: ManagedCredentialSummary;
+  file: ManagedCredentialMaterialFile;
+}
+
 type DefaultCredentialPolicy =
   | {
       harness: "ssh";
@@ -796,6 +801,43 @@ export function readManagedCredentialRecord(args: {
     ),
     document,
     files: materialFilesFromDocument(args.userProfileId, document),
+  };
+}
+
+export function writeManagedCredentialMaterialFile(args: {
+  userProfileId: string;
+  credentialId: string;
+  fileKey: string;
+  content: string;
+}): ManagedCredentialMaterialWriteResult {
+  const record = readManagedCredentialRecord({
+    userProfileId: args.userProfileId,
+    credentialId: args.credentialId,
+  });
+  const file = record.files.find((entry) => entry.key === args.fileKey);
+  if (!file) {
+    throw new Error(
+      `Credential '${args.credentialId}' does not contain file key '${args.fileKey}' for user '${args.userProfileId}'`,
+    );
+  }
+  const userRoot = userRootFor(args.userProfileId);
+  const absolutePath = path.resolve(userRoot, file.sourcePath);
+  if (
+    absolutePath !== userRoot &&
+    !absolutePath.startsWith(`${userRoot}${path.sep}`)
+  ) {
+    throw new Error(
+      `Credential file '${file.sourcePath}' escapes user root for '${args.userProfileId}'`,
+    );
+  }
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, args.content, "utf8");
+  return {
+    credential: record.summary,
+    file: {
+      ...file,
+      content: args.content,
+    },
   };
 }
 
