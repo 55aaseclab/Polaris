@@ -11,4 +11,5 @@
 详细文档：
 
 - [customer-segment-analysis.md](./customer-segment-analysis.md)
+- [personal-user-needs-summary.md](./personal-user-needs-summary.md)
 - [product-matrix.md](./product-matrix.md)
