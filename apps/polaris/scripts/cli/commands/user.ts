@@ -6,6 +6,8 @@ import {
   createUserCredentialCommand,
   deleteUserCredentialCommand,
   listUserCredentialCommand,
+  readUserCredentialCommand,
+  writeUserCredentialCommand,
 } from "./user-credential.js";
 
 function usage(): never {
@@ -44,6 +46,14 @@ export async function userCommand(argv: string[]): Promise<void> {
     }
     if (credentialAction === "activate") {
       await activateUserCredentialCommand(credentialRest);
+      return;
+    }
+    if (credentialAction === "read") {
+      await readUserCredentialCommand(credentialRest);
+      return;
+    }
+    if (credentialAction === "write") {
+      await writeUserCredentialCommand(credentialRest);
       return;
     }
   }

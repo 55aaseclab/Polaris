@@ -94,6 +94,8 @@ and user root instead of leaving partial user state behind.
 - show user details
 - manage user-owned credentials
 - create, delete, and activate credentials
+- group credentials by harness tabs
+- read and write managed credential files through the typed credential editor
 
 ### Administration
 
@@ -104,6 +106,9 @@ That admin flow can:
 - review portal users
 - switch between `User`, `Credentials`, `Workspaces`, and `Paseo` tabs for the
   selected Polaris user
+- manage the selected user's credentials from the `Credentials` tab
+- group admin credential management by harness tabs
+- read and write managed credential files for the selected user
 - inspect Clerk mappings
 - surface mapping-only, profile-only, and missing-user-root integrity states
 - inspect per-workspace Paseo reconnect metadata from the user workspace list

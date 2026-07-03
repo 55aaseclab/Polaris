@@ -739,6 +739,111 @@ test("runCli user credential add, list, and activate manage codex credentials ex
   }
 });
 
+test("runCli user credential read and write manage credential material directly", async () => {
+  const userProfileId = uniqueProjectName("cli-user-credential-read-write");
+  const profilePath = path.join(
+    REPO_ROOT,
+    "config",
+    "users",
+    "profiles",
+    `${userProfileId}.yaml`,
+  );
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Credential Read Write User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    await runCli([
+      "user",
+      "credential",
+      "add",
+      userProfileId,
+      "--harness",
+      "codex",
+      "--credential-id",
+      "codex-read-write",
+      "--label",
+      "Read Write",
+      "--provider-name",
+      "rightcode",
+      "--base-url",
+      "https://right.codes/codex/v1",
+      "--api-key",
+      "initial-api-key",
+    ]);
+
+    const readStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "read",
+        userProfileId,
+        "codex-read-write",
+      ]);
+    });
+    const readPayload = parseJsonOutput<{
+      credential: {
+        summary: { id: string };
+        files: Array<{ key: string; content: string }>;
+      };
+    }>(readStdout);
+    assert.equal(readPayload.credential.summary.id, "codex-read-write");
+    assert.ok(
+      readPayload.credential.files.some((file) =>
+        file.key === "codex-auth.json" && file.content.includes("initial-api-key")
+      ),
+    );
+
+    const writeStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "credential",
+        "write",
+        userProfileId,
+        "codex-read-write",
+        "codex-auth.json",
+        "--content",
+        JSON.stringify({
+          OPENAI_API_KEY: "updated-api-key",
+        }, null, 2),
+      ]);
+    });
+    const writePayload = parseJsonOutput<{
+      credential: {
+        credential: { id: string };
+        file: { key: string; content: string };
+      };
+    }>(writeStdout);
+    assert.equal(writePayload.credential.credential.id, "codex-read-write");
+    assert.equal(writePayload.credential.file.key, "codex-auth.json");
+    assert.ok(writePayload.credential.file.content.includes("updated-api-key"));
+
+    const authPath = path.join(
+      userRoot,
+      "credentials",
+      "codex",
+      "codex-read-write",
+      "auth.json",
+    );
+    const authContent = fs.readFileSync(authPath, "utf8");
+    assert.ok(authContent.includes("updated-api-key"));
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
+  }
+});
+
 test("runCli user credential add supports non-codex harness inventory entries", async () => {
   const userProfileId = uniqueProjectName("cli-user-credential-claude");
   const profilePath = path.join(

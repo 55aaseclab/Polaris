@@ -5,7 +5,9 @@ import {
   ensureUniqueCredentialId,
   ensureUserProfileExists,
   listManagedCredentials,
+  readManagedCredentialRecord,
   sanitizeCredentialId,
+  writeManagedCredentialMaterialFile,
 } from "../../config/credentials.js";
 import { isManagedHarness, type ManagedHarness } from "../../config/credential-catalog.js";
 import { logInfo } from "../../utils/log.js";
@@ -99,6 +101,38 @@ function parseActivateCredentialArgs(argv: string[]): {
   return { userProfileId, credentialId };
 }
 
+function parseReadCredentialArgs(argv: string[]): {
+  userProfileId: string;
+  credentialId: string;
+} {
+  const userProfileId = argv[0]?.trim();
+  const credentialId = argv[1]?.trim();
+  if (!userProfileId || !credentialId) {
+    throw new Error(
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential read <userProfileId> <credentialId>",
+    );
+  }
+  return { userProfileId, credentialId };
+}
+
+function parseWriteCredentialArgs(argv: string[]): {
+  userProfileId: string;
+  credentialId: string;
+  fileKey: string;
+  content: string;
+} {
+  const userProfileId = argv[0]?.trim();
+  const credentialId = argv[1]?.trim();
+  const fileKey = argv[2]?.trim();
+  const content = parseFlag(argv, "--content");
+  if (!userProfileId || !credentialId || !fileKey || content === undefined) {
+    throw new Error(
+      "Usage: pnpm --dir apps/polaris run polaris -- user credential write <userProfileId> <credentialId> <fileKey> --content <value>",
+    );
+  }
+  return { userProfileId, credentialId, fileKey, content };
+}
+
 export async function addUserCredentialCommand(argv: string[]): Promise<void> {
   const {
     userProfileId,
@@ -175,6 +209,34 @@ export async function activateUserCredentialCommand(argv: string[]): Promise<voi
     logInfo("cli", "user-credential-activated", {
       userProfileId,
       credentialId,
+    });
+    process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
+  });
+}
+
+export async function readUserCredentialCommand(argv: string[]): Promise<void> {
+  const { userProfileId, credentialId } = parseReadCredentialArgs(argv);
+  ensureUserProfileExists(userProfileId);
+  const credential = readManagedCredentialRecord({
+    userProfileId,
+    credentialId,
+  });
+  process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
+}
+
+export async function writeUserCredentialCommand(argv: string[]): Promise<void> {
+  const { userProfileId, credentialId, fileKey, content } = parseWriteCredentialArgs(argv);
+  await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const credential = writeManagedCredentialMaterialFile({
+      userProfileId,
+      credentialId,
+      fileKey,
+      content,
+    });
+    logInfo("cli", "user-credential-file-written", {
+      userProfileId,
+      credentialId,
+      fileKey,
     });
     process.stdout.write(`${JSON.stringify({ credential }, null, 2)}\n`);
   });

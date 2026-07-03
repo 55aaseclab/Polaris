@@ -367,6 +367,41 @@ test("live auth portal API serves route-scoped workspaces and credentials for an
     assert.equal(credentialsResponse.status, 200);
     const credentialsPayload = await credentialsResponse.json() as { credentials: Array<{ id: string }> };
     assert.ok(credentialsPayload.credentials.some((credential) => credential.id === credentialId));
+
+    const recordResponse = await fetch(
+      `${baseUrl}/api/users/${userId}/credentials/${credentialId}`,
+    );
+    assert.equal(recordResponse.status, 200);
+    const recordPayload = await recordResponse.json() as {
+      credential: { id: string };
+      files: Array<{ key: string; content: string }>;
+    };
+    assert.equal(recordPayload.credential.id, credentialId);
+    assert.ok(recordPayload.files.some((file) => file.key === "codex-auth.json"));
+
+    const writeResponse = await fetch(
+      `${baseUrl}/api/users/${userId}/credentials/${credentialId}/files/codex-auth.json`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          content: JSON.stringify({
+            OPENAI_API_KEY: "portal-updated-api-key",
+          }, null, 2),
+        }),
+      },
+    );
+    assert.equal(writeResponse.status, 200);
+    const updatedPayload = await writeResponse.json() as {
+      credential: { id: string };
+      files: Array<{ key: string; content: string }>;
+    };
+    assert.equal(updatedPayload.credential.id, credentialId);
+    assert.ok(
+      updatedPayload.files.some((file) =>
+        file.key === "codex-auth.json" && file.content.includes("portal-updated-api-key")
+      ),
+    );
   });
 
   fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
