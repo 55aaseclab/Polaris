@@ -74,6 +74,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { resolveAdminWorkspaceButtonState } from "@/lib/admin-workspace-actions";
+import { resolveWorkspaceRouteScope } from "@/lib/admin-scoped-workspace-route";
 import { mergeEmbeddedPaseoFrames, type EmbeddedPaseoFrame } from "@/lib/paseo-frames";
 import {
   DropdownMenu,
@@ -184,6 +185,9 @@ const COPY: Record<Language, Record<string, string>> = {
     workspaces: "Workspaces",
     add_workspace: "Add workspace",
     add_workspace_desc: "Create a new workspace for this user.",
+    enter_workspace: "Open workspace",
+    back_to_user_management: "Back to user management",
+    current_user: "User",
     start_after_create_option: "Create and start",
     docker_only_option: "Default docker only",
     loading_workspaces: "Loading workspaces...",
@@ -483,6 +487,9 @@ const COPY: Record<Language, Record<string, string>> = {
     workspaces: "工作空间",
     add_workspace: "新增工作空间",
     add_workspace_desc: "为当前用户创建一个新的工作空间。",
+    enter_workspace: "进入工作空间",
+    back_to_user_management: "返回用户管理",
+    current_user: "用户",
     start_after_create_option: "创建并启动",
     docker_only_option: "仅默认 docker",
     loading_workspaces: "正在加载工作空间…",
@@ -793,6 +800,21 @@ function usePortalShell(): PortalShellContextValue {
     throw new Error("Portal shell context is not available");
   }
   return context;
+}
+
+function useRouteUserScope(): {
+  routeUserId: string;
+  targetUserId: string;
+  effectiveUserId: string;
+  adminScopedWorkspaceView: boolean;
+} {
+  const { userId = "", targetUserId = "" } = useParams();
+  return {
+    routeUserId: userId,
+    targetUserId,
+    effectiveUserId: targetUserId || userId,
+    adminScopedWorkspaceView: Boolean(targetUserId),
+  };
 }
 
 class AppErrorBoundary extends React.Component<
@@ -1581,7 +1603,11 @@ function PortalShellLayout(props: {
   const { t } = useLanguage();
   const clerk = useClerk();
   const { mapping } = useCurrentUserMapping();
-  const { userId: routeUserId } = useParams();
+  const {
+    userId: routeUserId,
+    targetUserId: scopedTargetUserId,
+    workspaceName: routeWorkspaceName,
+  } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
@@ -1595,7 +1621,22 @@ function PortalShellLayout(props: {
   const [sidebarPollingWorkspaceKeys, setSidebarPollingWorkspaceKeys] = useState<string[]>([]);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
   const isAdmin = mapping?.role === "admin";
-  const activeUserId = String(routeUserId ?? "").trim();
+  const routeScope = resolveWorkspaceRouteScope({
+    pathname: location.pathname,
+    userId: routeUserId,
+    targetUserId: scopedTargetUserId,
+    workspaceName: routeWorkspaceName,
+  });
+  const {
+    adminScopedWorkspaceView,
+    managerUserId,
+    activeUserId,
+    currentWorkspaceName,
+    currentWorkspacePane,
+    isWorkspaceRoute,
+    workspaceLink,
+    workspaceIndexLink: userWorkspaceIndexLink,
+  } = routeScope;
   const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
   const {
     data: sidebarWorkspaces,
@@ -1605,12 +1646,6 @@ function PortalShellLayout(props: {
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId, workspaceRefreshTick],
   );
-  const pathParts = location.pathname.split("/").filter(Boolean);
-  const isWorkspaceRoute = pathParts[0] === "users" && pathParts[2] === "workspaces";
-  const currentWorkspaceName = isWorkspaceRoute && pathParts[3]
-    ? decodeURIComponent(pathParts[3])
-    : "";
-  const currentWorkspacePane = isWorkspaceRoute ? (pathParts[4] ?? "") : "";
   const activeFrameKey = currentWorkspaceName
     ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
     : "";
@@ -1703,7 +1738,7 @@ function PortalShellLayout(props: {
           current.filter((entry) => entry.workspaceKey !== missingWorkspaceFrameKey)
         );
         if (currentWorkspaceName === workspaceName) {
-          navigate(`/users/${encodeURIComponent(activeUserId)}/workspaces`, { replace: true });
+          navigate(userWorkspaceIndexLink(), { replace: true });
         }
         return;
       }
@@ -1713,16 +1748,8 @@ function PortalShellLayout(props: {
     }
   }
 
-  function workspaceLink(workspaceName: string): string {
-    return `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(workspaceName)}`;
-  }
-
   function workspacePaneLink(workspaceName: string, pane?: string): string {
     return pane ? `${workspaceLink(workspaceName)}/${pane}` : workspaceLink(workspaceName);
-  }
-
-  function userWorkspaceIndexLink(): string {
-    return `/users/${encodeURIComponent(activeUserId)}/workspaces`;
   }
 
   async function handleCreateWorkspace(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -1751,9 +1778,7 @@ function PortalShellLayout(props: {
       setCreateWorkspaceOpen(false);
       resetCreateWorkspaceForm();
       setWorkspaceRefreshTick((current) => current + 1);
-      navigate(
-        `/users/${encodeURIComponent(activeUserId)}/workspaces/${encodeURIComponent(trimmedName)}`,
-      );
+      navigate(workspaceLink(trimmedName));
     } catch (error) {
       setCreateWorkspaceError(formatActionError(error, t));
     } finally {
@@ -1766,6 +1791,7 @@ function PortalShellLayout(props: {
     .charAt(0)
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("manage_users");
+  const adminBackLink = `/users/${encodeURIComponent(managerUserId)}/admin`;
   const isWorkspaceSection = isWorkspaceRoute || location.pathname === userWorkspaceIndexLink();
   const workspaceHeaderSubtitle = sidebarWorkspacesLoading
     ? ""
@@ -1774,15 +1800,15 @@ function PortalShellLayout(props: {
       : (sidebarWorkspaces?.length ?? 0) === 0
         ? t("no_workspace_for_user")
         : t("workspace_header_empty");
-  const currentPaneTitle = location.pathname.includes("/admin")
-    ? t("administration")
-    : location.pathname.includes("/credentials")
-      ? t("credentials")
-    : location.pathname.includes("/settings")
-      ? t("settings_title")
-    : isWorkspaceSection
-        ? workspaceHeaderSubtitle
-        : t("app_name");
+  const currentPaneTitle = isWorkspaceSection
+    ? workspaceHeaderSubtitle
+    : location.pathname === adminBackLink
+      ? t("administration")
+      : location.pathname.includes("/credentials")
+        ? t("credentials")
+        : location.pathname.includes("/settings")
+          ? t("settings_title")
+          : t("app_name");
   const shellContextValue: PortalShellContextValue = {
     activeUserId,
     workspaces: sidebarWorkspaces ?? [],
@@ -1868,7 +1894,7 @@ function PortalShellLayout(props: {
     if (workspaceStillExists) {
       return;
     }
-    navigate(`/users/${encodeURIComponent(activeUserId)}/workspaces`, { replace: true });
+    navigate(userWorkspaceIndexLink(), { replace: true });
   }, [
     activeUserId,
     currentWorkspaceName,
@@ -1898,6 +1924,19 @@ function PortalShellLayout(props: {
         </SidebarHeader>
         <SidebarContent className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {adminScopedWorkspaceView && activeUser ? (
+              <SidebarGroup>
+                <SidebarGroupLabel>
+                  {t("current_user")}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-3">
+                    <div className="truncate text-sm font-medium">{activeUserName}</div>
+                    <div className="truncate text-xs text-muted-foreground">{t("workspaces")}</div>
+                  </div>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ) : null}
             <SidebarGroup>
               <SidebarGroupLabel>
                 {t("workspaces")}
@@ -1963,11 +2002,11 @@ function PortalShellLayout(props: {
                 {t("administration")}
               </SidebarGroupLabel>
               <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={location.pathname.includes("/admin")}>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={location.pathname === adminBackLink}>
                       <Link
-                        to={`/users/${encodeURIComponent(activeUser.id)}/admin`}
+                        to={adminBackLink}
                         onClick={handleSidebarNavigate}
                       >
                         <CircleUser />
@@ -2073,6 +2112,13 @@ function PortalShellLayout(props: {
                 {currentPaneTitle}
               </div>
             </div>
+            {adminScopedWorkspaceView ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link to={adminBackLink}>
+                  {t("back_to_user_management")}
+                </Link>
+              </Button>
+            ) : null}
           </header>
           {embeddedPaseoFrames.length > 0 ? (
             <div
@@ -2439,14 +2485,23 @@ function PortalLayout() {
 }
 
 function WorkspaceIndexPage() {
-  const { t } = useLanguage();
+  const {
+    routeUserId,
+    targetUserId,
+    effectiveUserId,
+    adminScopedWorkspaceView,
+  } = useRouteUserScope();
   const navigate = useNavigate();
-  const { userId = "" } = useParams();
   return (
     <WorkspaceIndexContent
-      userId={userId}
+      userId={effectiveUserId}
+      workspaceLink={(workspaceName) =>
+        adminScopedWorkspaceView
+          ? `/users/${encodeURIComponent(routeUserId)}/admin/users/${encodeURIComponent(targetUserId)}/workspaces/${encodeURIComponent(workspaceName)}`
+          : `/users/${encodeURIComponent(effectiveUserId)}/workspaces/${encodeURIComponent(workspaceName)}`
+      }
       onOpenCredentials={() => {
-        navigate(`/users/${encodeURIComponent(userId)}/credentials`);
+        navigate(`/users/${encodeURIComponent(effectiveUserId)}/credentials`);
       }}
     />
   );
@@ -2454,6 +2509,7 @@ function WorkspaceIndexPage() {
 
 function WorkspaceIndexContent(props: {
   userId: string;
+  workspaceLink: (workspaceName: string) => string;
   onOpenCredentials: () => void;
 }) {
   const { t } = useLanguage();
@@ -2474,7 +2530,7 @@ function WorkspaceIndexContent(props: {
   if (workspaces.length > 0) {
     return (
       <Navigate
-        to={`/users/${encodeURIComponent(props.userId)}/workspaces/${encodeURIComponent(workspaces[0].name)}`}
+        to={props.workspaceLink(workspaces[0].name)}
         replace
       />
     );
@@ -3197,6 +3253,17 @@ function AdminPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                asChild
+                              >
+                                <Link
+                                  to={`/users/${encodeURIComponent(userId)}/admin/users/${encodeURIComponent(selectedAdminUser.id)}/workspaces/${encodeURIComponent(workspace.name)}`}
+                                >
+                                  {t("enter_workspace")}
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 disabled={buttonState.primaryDisabled}
                                 onClick={() => void (
                                   buttonState.running
@@ -3463,7 +3530,13 @@ function WorkspaceDetailPage() {
 
 function WorkspaceDetailContent() {
   const { t } = useLanguage();
-  const { userId = "", workspaceName = "" } = useParams();
+  const {
+    routeUserId,
+    targetUserId,
+    effectiveUserId: userId,
+    adminScopedWorkspaceView,
+  } = useRouteUserScope();
+  const { workspaceName = "" } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -3488,6 +3561,14 @@ function WorkspaceDetailContent() {
   );
   const workspaceData = data?.name === workspaceName ? data : null;
   const workspaceLoading = loading || (!!data && !workspaceData);
+  const detailRouteScope = resolveWorkspaceRouteScope({
+    pathname: location.pathname,
+    userId: routeUserId,
+    targetUserId,
+    workspaceName,
+  });
+  const workspaceBaseLink = detailRouteScope.workspaceLink(workspaceName);
+  const workspaceIndexLink = detailRouteScope.workspaceIndexLink();
   const [driver, setDriver] = useState("");
   const [switching, setSwitching] = useState(false);
   const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
@@ -3496,8 +3577,7 @@ function WorkspaceDetailContent() {
     Partial<Record<ManagedHarness, string>>
   >({});
   const [actionError, setActionError] = useState<string | null>(null);
-  const pathParts = location.pathname.split("/").filter(Boolean);
-  const currentPane = pathParts[4] ?? "";
+  const currentPane = detailRouteScope.currentWorkspacePane;
   const assets = workspaceData?.status?.assets;
   const agentCredentials = (credentials ?? []).filter((credential) =>
     credential.purposes.includes("agent-auth")
@@ -3720,7 +3800,7 @@ function WorkspaceDetailContent() {
     try {
       await deleteWorkspace(userId, workspaceName);
       refreshWorkspaces();
-      navigate(`/users/${encodeURIComponent(userId)}/workspaces`);
+      navigate(workspaceIndexLink);
     } catch (error) {
       setWorkspaceAction(null);
       setActionError(formatActionError(error, t));
@@ -4032,7 +4112,7 @@ function WorkspaceDetailContent() {
     if (currentPane === "dev-env" || currentPane === "memory") {
       return (
         <Navigate
-          to={`/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}/paseo`}
+          to={`${workspaceBaseLink}/paseo`}
           replace
         />
       );
@@ -4721,10 +4801,13 @@ function ProfilePage() {
 }
 
 function LegacyWorkspacePaneRedirect() {
-  const { userId = "", workspaceName = "" } = useParams();
+  const { routeUserId, targetUserId, adminScopedWorkspaceView } = useRouteUserScope();
+  const { workspaceName = "" } = useParams();
   return (
     <Navigate
-      to={`/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}/paseo`}
+      to={adminScopedWorkspaceView
+        ? `/users/${encodeURIComponent(routeUserId)}/admin/users/${encodeURIComponent(targetUserId)}/workspaces/${encodeURIComponent(workspaceName)}/paseo`
+        : `/users/${encodeURIComponent(routeUserId)}/workspaces/${encodeURIComponent(workspaceName)}/paseo`}
       replace
     />
   );
@@ -4962,6 +5045,12 @@ export default function App(props: {
                     <Route element={<PortalLayout />}>
                       <Route path="/users/:userId/profile" element={<ProfilePage />} />
                       <Route path="/users/:userId/admin" element={<AdminPage />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces" element={<WorkspaceIndexPage />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName/paseo" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
+                      <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
                       <Route path="/users/:userId/settings" element={<SettingsPage />} />
                       <Route path="/users/:userId/workspaces" element={<WorkspaceIndexPage />} />
                       <Route path="/users/:userId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />
