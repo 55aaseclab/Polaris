@@ -1,7 +1,7 @@
 import { loadExecutableWorkspaceForCommand, runWorkspaceCommandWithEvolution } from "./shared.js";
 
-export async function applyCommand(project: string): Promise<void> {
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand("apply", project);
+export async function applyCommand(project: string, userProfileId?: string): Promise<void> {
+  const { workspace, driver } = await loadExecutableWorkspaceForCommand("apply", project, userProfileId);
   await runWorkspaceCommandWithEvolution({
     workspace,
     command: "apply",

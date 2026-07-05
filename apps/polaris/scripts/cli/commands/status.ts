@@ -2,13 +2,16 @@ import { writeWorkspaceStatus } from "../../output/state-store.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import { buildStatusAssets } from "../../core/status-assets.js";
 import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSession, getEvolutionSummary } from "../../evolution/runtime.js";
-import { loadWorkspaceForCommand } from "./shared.js";
+import { loadWorkspaceForCommand, persistWorkspacePaseoState } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
 
 export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
   const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
   const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
   const observation = await driver.inspect(workspace);
+  if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
+    await persistWorkspacePaseoState(workspace);
+  }
   const drift = computeWorkspaceDrift(workspace, observation);
   const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
   status.assets = buildStatusAssets(workspace);
