@@ -14,6 +14,7 @@ It is one workspace-oriented command surface that covers:
 - start
 - stop
 - restart
+- rebuild
 - status
 - archive
 - delete
@@ -37,6 +38,8 @@ Current semantics:
 - create the workspace saved spec
 - bind the target user
 - initialize the default backend path
+- for Docker-backed provisioning, prepare the current shared base image path
+  for the new workspace
 
 ### Start
 
@@ -48,6 +51,20 @@ Current semantics:
 
 - start the backend runtime
 - wait until backend and runtime assembly are usable
+- do not implicitly rebuild the workspace image foundation
+
+### Rebuild
+
+```bash
+pnpm --dir apps/polaris run polaris -- rebuild <workspaceRef>
+```
+
+Current semantics:
+
+- re-evaluate the provisioned image path for the workspace
+- sync the current shared Docker template into the user-local Dockerfile copy
+- rebuild or reuse the shared base image as needed
+- recreate the backend runtime from that refreshed image path
 
 ### Stop
 

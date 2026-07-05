@@ -40,6 +40,67 @@ The practical flow is:
 5. tag it into the workspace runtime image
 6. continue with render and start
 
+## New Workspaces Versus Existing Workspaces
+
+For a new workspace, Polaris already goes through the shared foundation path
+during create and provision work.
+
+That means:
+
+- a newly created workspace picks up the latest shared template state
+- if the matching shared image already exists, Polaris reuses it
+- if it does not exist yet, Polaris builds it once and then tags the workspace
+  image from it
+
+For an existing workspace, `stop` and `start` are intentionally lighter.
+
+That means:
+
+- `start` brings the existing workspace runtime back up
+- `start` does not implicitly rebuild the shared base image path
+- if the shared template changed and you want the existing workspace to move to
+  that new base, you should run `rebuild`
+
+In short:
+
+- new workspace: automatically picks up the latest shared base
+- existing workspace: use `rebuild` to migrate to a new shared base
+
+## Shared Source Of Truth
+
+The shared Docker foundation now has one repo-level source of truth:
+
+- `config/docker/workspace-prebuilt.Dockerfile`
+
+Shared base tool definitions also live beside it:
+
+- `config/docker/base-tools/README.md`
+- `config/docker/base-tools/apt-packages.txt`
+- `config/docker/base-tools/python-packages.txt`
+- `config/docker/base-tools/node-packages.txt`
+- `config/docker/base-tools/install-base-tools.sh`
+
+This means the common Docker foundation is no longer anchored to a demo user
+directory.
+
+## User-Level Sync Copy
+
+Polaris still materializes a user-local Dockerfile copy at:
+
+- `config/users/<userId>/docker/workspace-prebuilt.Dockerfile`
+
+That file is now a synced working copy, not the canonical template.
+
+Current behavior:
+
+- the repo-level template in `config/docker/` is authoritative
+- scaffold and provision flows sync that template into the selected user root
+- image reuse still hashes the effective user-local Dockerfile that the
+  workspace build actually uses
+
+This keeps one shared maintenance point while preserving per-user build inputs
+inside the normal Polaris data layout.
+
 Useful implementation references:
 
 - `apps/polaris/scripts/config/provision.ts`

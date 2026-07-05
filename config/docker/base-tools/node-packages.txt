@@ -1,0 +1,18 @@
+# 11. General Node and agent CLI
+@anthropic-ai/claude-code
+@earendil-works/pi-coding-agent
+@fission-ai/openspec@latest
+@getpaseo/cli@latest
+@github/copilot
+@openai/codex
+eslint
+http-server
+jsonlint
+markdownlint-cli
+opencode-ai
+pnpm
+prettier
+serve
+tsx
+typescript
+yaml

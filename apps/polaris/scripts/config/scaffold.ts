@@ -6,6 +6,7 @@ import { userIdentityDurablePaths } from "../core/identity-layout.js";
 import { workspaceRuntimeResourceName } from "../core/workspace-name.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import {
+  polarisConfigDockerRoot,
   polarisNetfsLocalExportRoot,
   polarisUsersRoot,
   repoRoot,
@@ -218,11 +219,7 @@ function userDockerfilePath(userProfileId: string): string {
 
 function defaultWorkspaceDockerfileTemplatePath(): string {
   return path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    DEMO_USER_PROFILE_ID,
-    "docker",
+    polarisConfigDockerRoot(import.meta.url),
     "workspace-prebuilt.Dockerfile",
   );
 }

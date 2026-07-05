@@ -641,6 +641,18 @@ export async function startWorkspace(
   );
 }
 
+export async function rebuildWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ rebuilt: true }> {
+  return apiFetch<{ rebuilt: true }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/rebuild`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function getWorkspacePaseoDiagnostic(
   userId: string,
   workspace: string,
