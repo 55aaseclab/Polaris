@@ -69,3 +69,17 @@ export function workspaceHarnessIds(): Array<"codex" | "claude" | "copilot" | "o
 export function workspaceToolPackageSpecs(): string[] {
   return WORKSPACE_TOOL_CATALOG.map((tool) => tool.packageName);
 }
+
+export function workspaceNonPaseoToolPackageSpecs(): string[] {
+  return WORKSPACE_TOOL_CATALOG
+    .filter((tool) => tool.id !== "paseo")
+    .map((tool) => tool.packageName);
+}
+
+export function workspacePaseoPackageSpec(): string {
+  const paseo = WORKSPACE_TOOL_CATALOG.find((tool) => tool.id === "paseo");
+  if (!paseo) {
+    throw new Error("Paseo tool definition is missing.");
+  }
+  return paseo.packageName;
+}

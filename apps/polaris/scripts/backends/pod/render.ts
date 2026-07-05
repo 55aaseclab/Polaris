@@ -5,8 +5,9 @@ import {
   requireNetfsField,
 } from "../../core/netfs.js";
 import {
+  workspaceNonPaseoToolPackageSpecs,
+  workspacePaseoPackageSpec,
   workspaceToolCatalog,
-  workspaceToolPackageSpecs,
 } from "../../core/harness-catalog.js";
 import {
   stateStoragePathForMountPath,
@@ -62,7 +63,7 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
     `          ln -sfn ${identityRoot}/opencode/data ${home}/.local/share/opencode && \\`,
     `          ln -sfn ${paseoRoot} ${home}/.paseo && \\`,
     `          ln -sfn ${sshRoot} ${home}/.ssh && \\`,
-    `          if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${home}/.local/polaris/bin/paseo ] && [ ! -L ${home}/.local/polaris ]; then cp -a ${home}/.local/polaris/. ${toolRoot}/; fi && \\`,
+    `          if [ -x ${home}/.local/polaris/bin/paseo ] && [ ! -L ${home}/.local/polaris ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo && cp -a ${home}/.local/polaris/. ${toolRoot}/; fi && \\`,
     `          ln -sfn ${toolRoot} ${home}/.local/polaris && \\`,
     `          ln -sfn ${projectRoot} ${home}/workspace && \\`,
     ...(workspace.profile.workspaceAlias ? [`          ln -sfn ${projectRoot} ${home}/${workspace.profile.workspaceAlias} && \\`] : []),
@@ -91,7 +92,8 @@ function buildRootProfileFixLine(workspace: WorkspaceSpec): string[] {
 function buildToolInstallLines(workspace: WorkspaceSpec): string[] {
   const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
   return [
-    `          if [ ! -x ${toolRoot}/bin/paseo ] && command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceToolPackageSpecs().join(" ")}; fi && \\`,
+    `          if command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceNonPaseoToolPackageSpecs().join(" ")}; fi && \\`,
+    `          if [ ! -x ${toolRoot}/bin/paseo ] && command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspacePaseoPackageSpec()}; fi && \\`,
   ];
 }
 

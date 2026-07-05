@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22 AS bundle
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update \
+  && apt-get install -y --no-install-recommends git python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/paseo
+
+COPY apps/paseo/source ./
+COPY apps/paseo/patches /tmp/paseo-patches
+
+RUN git init -q \
+  && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-defaults.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-server-file-upload-unicode.patch \
+  && rm -rf .git
+
+RUN --mount=type=cache,target=/root/.npm \
+  --mount=type=cache,target=/root/.cache \
+  npm ci --ignore-scripts --no-audit --prefer-offline \
+  && PATH="/opt/paseo/node_modules/.bin:${PATH}" node scripts/postinstall-patches.mjs
+
+RUN --mount=type=cache,target=/root/.npm \
+  --mount=type=cache,target=/root/.cache \
+  npm run build:highlight \
+  && npm run build:relay \
+  && npm run build:protocol \
+  && npm run build:client \
+  && npm run build --workspace=@getpaseo/server \
+  && npm run build --workspace=@getpaseo/cli
+
+RUN mkdir -p /tmp/packs /bundle \
+  && npm pack --workspace=@getpaseo/highlight --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/relay --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/protocol --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/client --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/server --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/cli --pack-destination /tmp/packs \
+  && npm install -g --prefix /bundle /tmp/packs/*.tgz
+
+FROM scratch AS bundle-export
+
+COPY --from=bundle /bundle /bundle
