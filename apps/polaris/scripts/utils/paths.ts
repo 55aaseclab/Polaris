@@ -1,5 +1,30 @@
+import fs from "node:fs";
 import path from "node:path";
 import { resolveRepoRoot } from "./repo-root.js";
+
+function readEnvFileValue(filePath: string, key: string): string | null {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/u);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const currentKey = trimmed.slice(0, separatorIndex).trim();
+    if (currentKey !== key) {
+      continue;
+    }
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    return rawValue.replace(/^['"]|['"]$/gu, "").trim() || null;
+  }
+  return null;
+}
 
 export function repoRoot(importMetaUrl: string): string {
   return resolveRepoRoot(importMetaUrl);
@@ -7,7 +32,8 @@ export function repoRoot(importMetaUrl: string): string {
 
 export function polarisDataRoot(importMetaUrl: string): string {
   const root = repoRoot(importMetaUrl);
-  const configured = process.env.POLARIS_DATA_ROOT?.trim();
+  const configured = process.env.POLARIS_DATA_ROOT?.trim()
+    || (readEnvFileValue(path.join(root, ".env.test"), "POLARIS_DATA_ROOT") ?? "");
   if (!configured) {
     if (process.env.NODE_ENV === "test") {
       return path.join(root, "config");

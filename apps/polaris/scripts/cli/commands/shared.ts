@@ -27,6 +27,18 @@ function runCheckedCapture(command: string, args: string[]): string {
   return String(result.stdout || "");
 }
 
+function isStoppedContainerExecError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message;
+  return (
+    message.includes("cannot exec in a stopped state") ||
+    message.includes("is not running") ||
+    message.includes("container") && message.includes("not running")
+  );
+}
+
 function readJsonObject(raw: string): (Record<string, unknown> & { url: string }) | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -36,9 +48,11 @@ function readJsonObject(raw: string): (Record<string, unknown> & { url: string }
   }
 }
 
-export async function persistWorkspacePaseoState(workspace: WorkspaceSpec): Promise<void> {
+export async function persistWorkspacePaseoState(
+  workspace: WorkspaceSpec,
+): Promise<"persisted" | "skipped" | "stopped"> {
   if (!workspace.agent.enabled) {
-    return;
+    return "skipped";
   }
   let serverId = "";
   let pairing: (Record<string, unknown> & { url: string }) | null = null;
@@ -47,16 +61,28 @@ export async function persistWorkspacePaseoState(workspace: WorkspaceSpec): Prom
 
   if (workspace.backend.kind === "docker") {
     const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
-    serverId = runCheckedCapture(
-      "docker",
-      ["exec", `${scope}-docker`, "sh", "-lc", `cat ${serverIdPath} 2>/dev/null || true`],
-    ).trim();
-    pairing = readJsonObject(
-      runCheckedCapture(
+    try {
+      serverId = runCheckedCapture(
         "docker",
-        ["exec", `${scope}-docker`, "sh", "-lc", `cat ${pairingPath} 2>/dev/null || true`],
-      ),
-    );
+        ["exec", `${scope}-docker`, "sh", "-lc", `cat ${serverIdPath} 2>/dev/null || true`],
+      ).trim();
+      pairing = readJsonObject(
+        runCheckedCapture(
+          "docker",
+          ["exec", `${scope}-docker`, "sh", "-lc", `cat ${pairingPath} 2>/dev/null || true`],
+        ),
+      );
+    } catch (error) {
+      if (!isStoppedContainerExecError(error)) {
+        throw error;
+      }
+      logWarn("cli", "workspace-paseo-state-persist-skipped", {
+        project: workspace.identity.projectName,
+        backend: workspace.backend.kind,
+        reason: "container-stopped-during-paseo-state-read",
+      });
+      return "stopped";
+    }
   } else if (workspace.backend.kind === "pod") {
     const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
     serverId = runCheckedCapture(
@@ -82,7 +108,7 @@ export async function persistWorkspacePaseoState(workspace: WorkspaceSpec): Prom
       hasServerId: Boolean(serverId),
       hasPairing: Boolean(pairing),
     });
-    return;
+    return "skipped";
   }
 
   writeWorkspacePaseoServerId(workspace.identity.projectName, serverId, workspace.userProfile.id);
@@ -92,6 +118,7 @@ export async function persistWorkspacePaseoState(workspace: WorkspaceSpec): Prom
     backend: workspace.backend.kind,
     serverId,
   });
+  return "persisted";
 }
 
 export function loadWorkspaceForProjectRef(

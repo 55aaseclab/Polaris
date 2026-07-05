@@ -155,6 +155,13 @@ function writeDirectWorkspaceStatus(
   return next;
 }
 
+function isStoppedContainerStatusRefreshError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.message.includes("cannot exec in a stopped state");
+}
+
 function writeCachedWorkspaceStatusUpdate(args: {
   userId: string;
   workspace: string;
@@ -745,6 +752,29 @@ export async function refreshPortalWorkspaceStatus(
         ref,
         reason: error instanceof Error ? error.message : String(error),
       });
+      if (isStoppedContainerStatusRefreshError(error)) {
+        writeDirectWorkspaceStatus(userId, workspace, (current) => ({
+          project: workspace,
+          driver: current?.driver,
+          lifecycleAction: current?.lifecycleAction ?? "status",
+          health: {
+            backendLiveness: "missing",
+            workspaceReadiness: "not-ready",
+            reason: "workspace is stopped",
+          },
+          credentials: current?.credentials,
+          details: current?.details ?? {},
+          evolution: current?.evolution,
+          assets: current?.assets,
+          attachments: current?.attachments,
+          runtimeAssembly: current?.runtimeAssembly,
+        }));
+        logInfo("executor", "workspace-status-refresh-coerced-stopped", {
+          userId,
+          workspace,
+          ref,
+        });
+      }
     } finally {
       statusRefreshJobs.delete(key);
     }
