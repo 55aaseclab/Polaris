@@ -207,7 +207,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_name_taken: "This workspace name already exists for the current user.",
     provisioning: "Provisioning...",
     create_workspace: "Create workspace",
-    rebuild_workspace: "Rebuild",
+    rebuild_workspace: "Rebuild workspace",
     rebuilding_workspace: "Rebuilding...",
     switch_driver: "Switch driver",
     switch_driver_desc: "Reuse the existing Polaris switch workflow.",
@@ -218,6 +218,9 @@ const COPY: Record<Language, Record<string, string>> = {
     remove_workspace: "Archive workspace",
     remove_workspace_confirm_title: "Archive workspace?",
     remove_workspace_confirm_description: "This moves the workspace into the user archive and removes it from the active list. Running workspaces must be stopped before archiving.",
+    live_credential_button: "Live credential",
+    live_credential_sheet_title: "Live credential switch",
+    live_credential_sheet_description: "Change the runtime credential for the selected workspace.",
     deleting: "Deleting...",
     starting: "Starting...",
     stopping: "Stopping...",
@@ -523,7 +526,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_name_taken: "这个工作空间名称已经存在。",
     provisioning: "正在准备…",
     create_workspace: "创建工作空间",
-    rebuild_workspace: "重建",
+    rebuild_workspace: "重建工作空间",
     rebuilding_workspace: "正在重建…",
     switch_driver: "切换驱动",
     switch_driver_desc: "复用现有的 Polaris 切换流程。",
@@ -534,6 +537,9 @@ const COPY: Record<Language, Record<string, string>> = {
     remove_workspace: "归档工作空间",
     remove_workspace_confirm_title: "归档这个工作空间？",
     remove_workspace_confirm_description: "这会把工作空间移入用户归档区，并从当前列表中移除，不可逆。",
+    live_credential_button: "运行时凭证",
+    live_credential_sheet_title: "运行时凭证切换",
+    live_credential_sheet_description: "为当前选中的工作空间切换运行时凭证。",
     deleting: "归档中…",
     starting: "启动中…",
     stopping: "停止中…",
@@ -1431,8 +1437,34 @@ function adminWorkspaceStateKey(userId: string, workspaceName: string): string {
   return `${userId.trim()}:${workspaceName.trim()}`;
 }
 
+function adminWorkspaceCredentialSelectionKey(
+  userId: string,
+  workspaceName: string,
+  harness: ManagedHarness,
+): string {
+  return `${adminWorkspaceStateKey(userId, workspaceName)}:${harness}`;
+}
+
 function adminArchiveStateKey(userId: string, archiveId: string): string {
   return `${userId.trim()}:archive:${archiveId.trim()}`;
+}
+
+function credentialSelectionSourceLabel(
+  source:
+    | "runtime-state"
+    | "workspace-binding"
+    | "user-active"
+    | "compatibility"
+    | undefined,
+  t: (key: string) => string,
+): string {
+  return source === "runtime-state"
+    ? t("credential_selection_runtime")
+    : source === "workspace-binding"
+      ? t("credential_selection_override")
+      : source === "compatibility"
+        ? t("credential_selection_compat")
+        : t("credential_selection_active");
 }
 
 function formatBackendValue(
@@ -2676,6 +2708,11 @@ function AdminPage() {
   const [adminCredentialEditorRecord, setAdminCredentialEditorRecord] = useState<PortalCredentialRecord | null>(null);
   const [adminCredentialEditorFile, setAdminCredentialEditorFile] = useState<PortalCredentialMaterialFile | null>(null);
   const [adminCredentialEditorContent, setAdminCredentialEditorContent] = useState("");
+  const [adminLiveCredentialSelections, setAdminLiveCredentialSelections] = useState<
+    Record<string, string>
+  >({});
+  const [adminLiveSwitchingKey, setAdminLiveSwitchingKey] = useState<string | null>(null);
+  const [adminLiveCredentialWorkspaceName, setAdminLiveCredentialWorkspaceName] = useState<string | null>(null);
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
@@ -2771,6 +2808,9 @@ function AdminPage() {
     setAdminCredentialEditorRecord(null);
     setAdminCredentialEditorFile(null);
     setAdminCredentialEditorContent("");
+    setAdminLiveCredentialSelections({});
+    setAdminLiveSwitchingKey(null);
+    setAdminLiveCredentialWorkspaceName(null);
   }, [selectedAdminUserId]);
 
   useEffect(() => {
@@ -2808,6 +2848,100 @@ function AdminPage() {
       window.clearInterval(timer);
     };
   }, [activeUserId, refreshWorkspaces, selectedAdminUserId, selectedWorkspaces]);
+
+  useEffect(() => {
+    if (!selectedAdminUser || !selectedWorkspaces || !selectedCredentials) {
+      return;
+    }
+    const agentCredentials = selectedCredentials.filter((credential) =>
+      credential.purposes.includes("agent-auth")
+    );
+    setAdminLiveCredentialSelections((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      for (const workspace of selectedWorkspaces) {
+        const liveStatus = workspace.status?.credentials?.live;
+        const liveSelections = liveStatus?.selectedByHarness ?? {};
+        const harnessOptions = Array.from(
+          new Set(
+            [
+              ...(liveStatus?.supportedHarnesses ?? []),
+              ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
+            ],
+          ),
+        );
+        const harnesses = MANAGED_HARNESS_ORDER.filter(
+          (harness) => harness !== "ssh" && harnessOptions.includes(harness),
+        );
+
+        for (const harness of harnesses) {
+          const harnessCredentials = agentCredentials.filter(
+            (credential) => credential.harness === harness,
+          );
+          const runtimeCredentialId = liveSelections[harness]?.credentialId ?? "";
+          const runtimeCredential = runtimeCredentialId
+            ? harnessCredentials.find((credential) => credential.id === runtimeCredentialId) ?? null
+            : null;
+          const activeCredential =
+            harnessCredentials.find((credential) => credential.active) ?? null;
+          const preferredCredentialId =
+            runtimeCredential?.id
+            ?? activeCredential?.id
+            ?? harnessCredentials[0]?.id
+            ?? "";
+          const selectionKey = adminWorkspaceCredentialSelectionKey(
+            selectedAdminUser.id,
+            workspace.name,
+            harness,
+          );
+          const currentCredentialId = next[selectionKey] ?? "";
+          const currentStillValid = harnessCredentials.some(
+            (credential) => credential.id === currentCredentialId,
+          );
+          if (
+            currentCredentialId !== preferredCredentialId
+            && (!currentStillValid || !currentCredentialId)
+          ) {
+            next[selectionKey] = preferredCredentialId;
+            changed = true;
+          }
+        }
+      }
+
+      const validKeys = new Set<string>();
+      for (const workspace of selectedWorkspaces) {
+        const liveStatus = workspace.status?.credentials?.live;
+        const harnessOptions = Array.from(
+          new Set(
+            [
+              ...(liveStatus?.supportedHarnesses ?? []),
+              ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
+            ],
+          ),
+        );
+        for (const harness of MANAGED_HARNESS_ORDER) {
+          if (harness !== "ssh" && harnessOptions.includes(harness)) {
+            validKeys.add(
+              adminWorkspaceCredentialSelectionKey(
+                selectedAdminUser.id,
+                workspace.name,
+                harness,
+              ),
+            );
+          }
+        }
+      }
+      for (const key of Object.keys(next)) {
+        if (!validKeys.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [selectedAdminUser, selectedCredentials, selectedWorkspaces]);
 
   if (mappingLoading) {
     return (
@@ -2980,6 +3114,40 @@ function AdminPage() {
     }
   }
 
+  async function handleAdminLiveCredentialSwitch(
+    workspaceName: string,
+    harness: ManagedHarness,
+  ): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    const selectionKey = adminWorkspaceCredentialSelectionKey(
+      selectedAdminUser.id,
+      workspaceName,
+      harness,
+    );
+    const credentialId = adminLiveCredentialSelections[selectionKey] ?? "";
+    if (!credentialId) {
+      return;
+    }
+    setAdminLiveSwitchingKey(selectionKey);
+    setWorkspaceAdminActionError(null);
+    try {
+      await switchWorkspaceLiveCredential(selectedAdminUser.id, workspaceName, {
+        harness,
+        credentialId,
+      });
+      setReloadKey((current) => current + 1);
+      if (selectedAdminUser.id === activeUserId) {
+        refreshWorkspaces();
+      }
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminLiveSwitchingKey(null);
+    }
+  }
+
   async function handleDeleteArchivedWorkspace(archiveId: string): Promise<void> {
     if (!selectedAdminUser) {
       return;
@@ -3046,6 +3214,28 @@ function AdminPage() {
     selectedCredentialCatalog,
     adminCredentialDraft.harness,
   );
+  const selectedAgentCredentials = (selectedCredentials ?? []).filter((credential) =>
+    credential.purposes.includes("agent-auth")
+  );
+  const adminLiveCredentialWorkspace = adminLiveCredentialWorkspaceName
+    ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminLiveCredentialWorkspaceName) ?? null
+    : null;
+  const adminLiveStatus = adminLiveCredentialWorkspace?.status?.credentials?.live;
+  const adminLiveSelections = adminLiveStatus?.selectedByHarness ?? {};
+  const adminLiveHarnessOptions = Array.from(
+    new Set(
+      [
+        ...(adminLiveStatus?.supportedHarnesses ?? []),
+        ...selectedAgentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
+      ],
+    ),
+  );
+  const adminLiveHarnesses = MANAGED_HARNESS_ORDER.filter(
+    (harness) => harness !== "ssh" && adminLiveHarnessOptions.includes(harness),
+  );
+  const adminSwitchableHarnesses = adminLiveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
+  const adminLiveRuntimeRunning =
+    adminLiveCredentialWorkspace?.status?.health?.backendLiveness === "running";
 
   function openAdminCredentialSheet(harness: ManagedHarness): void {
     setAdminCredentialDraft(defaultCredentialDraft(harness, selectedCredentialCatalog));
@@ -3727,6 +3917,13 @@ function AdminPage() {
                           backendLiveness,
                           localAction,
                         });
+                        const hasLiveCredentialControls = MANAGED_HARNESS_ORDER.some((harness) =>
+                          harness !== "ssh"
+                          && (
+                            workspace.status?.credentials?.live?.supportedHarnesses?.includes(harness)
+                            || selectedAgentCredentials.some((credential) => credential.harness === harness)
+                          )
+                        );
                         return (
                           <div
                             key={workspace.name}
@@ -3800,12 +3997,152 @@ function AdminPage() {
                                   </AlertDialogFooter>
                                 </AlertDialogContent>
                               </AlertDialog>
+                              {hasLiveCredentialControls ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setAdminLiveCredentialWorkspaceName(workspace.name);
+                                    setWorkspaceAdminActionError(null);
+                                  }}
+                                >
+                                  {t("live_credential_button")}
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         );
                       })}
                     </CardContent>
                   </Card>
+                  <Sheet
+                    open={Boolean(adminLiveCredentialWorkspaceName)}
+                    onOpenChange={(open) => {
+                      if (!open) {
+                        setAdminLiveCredentialWorkspaceName(null);
+                      }
+                    }}
+                  >
+                    <SheetContent side="right" className="w-full sm:max-w-xl">
+                      <SheetHeader>
+                        <SheetTitle>{t("live_credential_sheet_title")}</SheetTitle>
+                        <SheetDescription>
+                          {adminLiveCredentialWorkspace
+                            ? `${adminLiveCredentialWorkspace.name} · ${t("live_credential_sheet_description")}`
+                            : t("live_credential_sheet_description")}
+                        </SheetDescription>
+                      </SheetHeader>
+                      <div className="grid gap-4 py-4">
+                        {selectedCredentialsLoading ? (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            {t("loading_credential")}
+                          </div>
+                        ) : selectedCredentialsError ? (
+                          <p className="text-sm text-destructive">{selectedCredentialsError}</p>
+                        ) : adminLiveCredentialWorkspace && adminLiveHarnesses.length > 0 ? (
+                          <>
+                            {adminLiveHarnesses.map((harness) => {
+                              const harnessCredentials = selectedAgentCredentials.filter(
+                                (credential) => credential.harness === harness,
+                              );
+                              const selectionKey = adminWorkspaceCredentialSelectionKey(
+                                selectedAdminUser.id,
+                                adminLiveCredentialWorkspace.name,
+                                harness,
+                              );
+                              const runtimeCredentialSelection = adminLiveSelections[harness];
+                              const currentCredential =
+                                runtimeCredentialSelection?.credentialId
+                                  ? harnessCredentials.find(
+                                    (credential) =>
+                                      credential.id === runtimeCredentialSelection.credentialId,
+                                  ) ?? null
+                                  : null;
+                              const selectedCredentialId =
+                                adminLiveCredentialSelections[selectionKey] ?? "";
+                              const switching = adminLiveSwitchingKey === selectionKey;
+                              const canLiveSwitch =
+                                adminSwitchableHarnesses.includes(harness);
+                              return (
+                                <div
+                                  key={`live-sheet:${adminLiveCredentialWorkspace.name}:${harness}`}
+                                  className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                                >
+                                  <div className="grid gap-1">
+                                    <div className="text-sm font-medium">
+                                      {credentialHarnessLabel(harness, t)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {currentCredential
+                                        ? `${t("credential_selection_current")}：${currentCredential.label} · ${credentialSelectionSourceLabel(runtimeCredentialSelection?.source, t)}`
+                                        : `${t("credential_selection_current")}：${t("credential_selection_none")}`}
+                                    </div>
+                                  </div>
+                                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                                    <div className="grid gap-2">
+                                      <Label>{credentialHarnessLabel(harness, t)}</Label>
+                                      <Select
+                                        value={selectedCredentialId}
+                                        onValueChange={(value) =>
+                                          setAdminLiveCredentialSelections((current) => ({
+                                            ...current,
+                                            [selectionKey]: value,
+                                          }))}
+                                        disabled={harnessCredentials.length === 0}
+                                      >
+                                        <SelectTrigger className="bg-white">
+                                          <SelectValue
+                                            placeholder={harnessCredentials.length === 0
+                                              ? t("no_paseo_credentials")
+                                              : t("select_credential")}
+                                          />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-white">
+                                          {harnessCredentials.map((credential) => (
+                                            <SelectItem key={credential.id} value={credential.id}>
+                                              {credential.label}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <Button
+                                      variant="outline"
+                                      disabled={
+                                        switching
+                                        || !adminLiveRuntimeRunning
+                                        || !selectedCredentialId
+                                        || !canLiveSwitch
+                                      }
+                                      onClick={() =>
+                                        void handleAdminLiveCredentialSwitch(
+                                          adminLiveCredentialWorkspace.name,
+                                          harness,
+                                        )}
+                                    >
+                                      {switching
+                                        ? t("activating_credential")
+                                        : t("switch_credential")}
+                                    </Button>
+                                  </div>
+                                  {!adminLiveRuntimeRunning ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      {t("credential_switch_requires_running")}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            {t("no_paseo_credentials")}
+                          </p>
+                        )}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
                   <Card className="border-border/70">
                     <CardHeader>
                       <CardTitle className="text-base">{t("archived_workspaces")}</CardTitle>
@@ -4402,23 +4739,6 @@ function WorkspaceDetailContent() {
     );
   }
 
-  function credentialSelectionSourceLabel(
-    source:
-      | "runtime-state"
-      | "workspace-binding"
-      | "user-active"
-      | "compatibility"
-      | undefined,
-  ): string {
-    return source === "runtime-state"
-      ? t("credential_selection_runtime")
-      : source === "workspace-binding"
-        ? t("credential_selection_override")
-        : source === "compatibility"
-          ? t("credential_selection_compat")
-          : t("credential_selection_active");
-  }
-
   function renderLiveCredentialControls(): ReactNode {
     if (credentialsLoading) {
       return (
@@ -4465,7 +4785,7 @@ function WorkspaceDetailContent() {
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {currentCredential
-                    ? `${t("credential_selection_current")}：${currentCredential.label} · ${credentialSelectionSourceLabel(currentSource)}`
+                    ? `${t("credential_selection_current")}：${currentCredential.label} · ${credentialSelectionSourceLabel(currentSource, t)}`
                     : `${t("credential_selection_current")}：${t("credential_selection_none")}`}
                 </div>
               </div>
