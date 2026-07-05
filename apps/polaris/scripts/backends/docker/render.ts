@@ -11,8 +11,9 @@ import {
   workspaceDataDockerVolumeName,
 } from "../../core/netfs.js";
 import {
+  workspaceNonPaseoToolPackageSpecs,
+  workspacePaseoPackageSpec,
   workspaceToolCatalog,
-  workspaceToolPackageSpecs,
 } from "../../core/harness-catalog.js";
 import {
   stateStoragePathForMountPath,
@@ -204,12 +205,15 @@ function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
   const home = workspace.runtime.home;
   const toolRoot = persistentPolarisToolRoot(workspace);
   const xdg = codexXdgRoots(workspace);
+  const imageToolRoot = `${home}/.local/polaris`;
   const toolBinaries = workspaceToolCatalog()
     .filter((tool) => !["codex", "claude"].includes(tool.id))
     .map((tool) => tool.binName);
   return [
     `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local ${xdg.config} ${xdg.data} ${xdg.state}`,
-    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceToolPackageSpecs().join(" ")}`,
+    `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
+    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceNonPaseoToolPackageSpecs().join(" ")}`,
+    `if [ ! -x ${toolRoot}/bin/paseo ]; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspacePaseoPackageSpec()}; fi`,
     ...toolBinaries.map((binary) => `ln -sf ${toolRoot}/bin/${binary} /usr/local/bin/${binary}`),
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
@@ -343,7 +347,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     ...(workspace.runtime.user === "root"
       ? [`chown -R root:root ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
       : []),
-    `if [ ! -x ${toolRoot}/bin/paseo ] && [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
+    `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
     `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
     `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,

@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 TOOL_PREFIX="${TOOL_PREFIX:-/root/.local/polaris}"
+PASEO_TOOL_BUNDLE_DIR="${PASEO_TOOL_BUNDLE_DIR:-/tmp/paseo-tool-bundle}"
 
 read_list() {
   local file_path="$1"
@@ -13,6 +14,7 @@ read_list() {
 readarray -t APT_PACKAGES < <(read_list "$ROOT_DIR/apt-packages.txt")
 readarray -t PYTHON_PACKAGES < <(read_list "$ROOT_DIR/python-packages.txt")
 readarray -t NODE_PACKAGES < <(read_list "$ROOT_DIR/node-packages.txt")
+readarray -t NON_PASEO_NODE_PACKAGES < <(printf '%s\n' "${NODE_PACKAGES[@]}" | grep -Fvx '@getpaseo/cli@latest' || true)
 
 apt-get update
 apt-get install -y --no-install-recommends "${APT_PACKAGES[@]}"
@@ -34,7 +36,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
   | sh -s -- -y
 
 mkdir -p "$TOOL_PREFIX" /root/.npm
-npm install -g --prefix "$TOOL_PREFIX" "${NODE_PACKAGES[@]}"
+if [ -x "$PASEO_TOOL_BUNDLE_DIR/bin/paseo" ]; then
+  cp -a "$PASEO_TOOL_BUNDLE_DIR"/. "$TOOL_PREFIX"/
+fi
+npm install -g --prefix "$TOOL_PREFIX" "${NON_PASEO_NODE_PACKAGES[@]}"
+if [ ! -x "$TOOL_PREFIX/bin/paseo" ]; then
+  npm install -g --prefix "$TOOL_PREFIX" @getpaseo/cli@latest
+fi
 
 if command -v fdfind >/dev/null 2>&1; then
   ln -sf "$(command -v fdfind)" /usr/local/bin/fd

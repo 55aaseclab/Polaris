@@ -21,6 +21,7 @@ bash -n scripts/provision-remote.sh
 bash -n scripts/cd-remote.sh
 bash -n scripts/rollback-remote.sh
 bash -n scripts/build-paseo-web-artifact.sh
+bash -n scripts/build-paseo-tool-bundle.sh
 bash -n scripts/clean-paseo-web-artifact.sh
 bash -n scripts/deploy-polaris.sh
 bash -n scripts/rollback-polaris.sh
@@ -36,6 +37,7 @@ echo "[6/7] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
 
 echo "[7/7] paseo artifact verification"
+bash ./scripts/build-paseo-tool-bundle.sh >/dev/null
 bash ./scripts/build-paseo-web-artifact.sh >/dev/null
 
 temp_blue_env="$(mktemp)"

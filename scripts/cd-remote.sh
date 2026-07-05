@@ -18,11 +18,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 bash ./scripts/ci-local.sh
+bash ./scripts/build-paseo-tool-bundle.sh
 bash ./scripts/build-paseo-web-artifact.sh
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 
 rsync -az --delete \
+  --include "apps/paseo/tool-bundle/" \
+  --include "apps/paseo/tool-bundle/bin/***" \
+  --include "apps/paseo/tool-bundle/lib/" \
+  --include "apps/paseo/tool-bundle/lib/node_modules/***" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "dist" \

@@ -50,6 +50,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pnpm install
+paseo_local_build_tool_bundle >/dev/null
 paseo_dist_dir="$(paseo_local_build_dist)"
 
 POLARIS_WEB_PORT="${WEB_PORT}" \
