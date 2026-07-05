@@ -1427,6 +1427,14 @@ function workspacePaseoScope(userId: string, workspaceName: string): string {
   return `${userId.trim()}:${workspaceName.trim()}`;
 }
 
+function adminWorkspaceStateKey(userId: string, workspaceName: string): string {
+  return `${userId.trim()}:${workspaceName.trim()}`;
+}
+
+function adminArchiveStateKey(userId: string, archiveId: string): string {
+  return `${userId.trim()}:archive:${archiveId.trim()}`;
+}
+
 function formatBackendValue(
   data: PortalWorkspaceDetail,
   t: (key: string) => string,
@@ -2744,6 +2752,7 @@ function AdminPage() {
   }, [adminUsers, selectedAdminUserId, userId]);
 
   useEffect(() => {
+    setWorkspaceActionState({});
     setPaseoDiagnostics({});
     setPaseoActionState({});
     setAdminTab("user");
@@ -2874,7 +2883,8 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setWorkspaceAction(workspaceName, "archive");
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setWorkspaceAction(actionKey, "archive");
     setWorkspaceAdminActionError(null);
     try {
       await deleteWorkspace(selectedAdminUser.id, workspaceName);
@@ -2882,7 +2892,7 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
-      clearWorkspaceAction(workspaceName);
+      clearWorkspaceAction(actionKey);
     }
   }
 
@@ -2923,7 +2933,8 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setWorkspaceAction(workspaceName, "stop");
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setWorkspaceAction(actionKey, "stop");
     setWorkspaceAdminActionError(null);
     try {
       await stopWorkspace(selectedAdminUser.id, workspaceName);
@@ -2931,7 +2942,7 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
-      clearWorkspaceAction(workspaceName);
+      clearWorkspaceAction(actionKey);
     }
   }
 
@@ -2939,7 +2950,8 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setWorkspaceAction(workspaceName, "start");
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setWorkspaceAction(actionKey, "start");
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
@@ -2947,7 +2959,7 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
-      clearWorkspaceAction(workspaceName);
+      clearWorkspaceAction(actionKey);
     }
   }
 
@@ -2955,7 +2967,8 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setWorkspaceAction(workspaceName, "rebuild");
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setWorkspaceAction(actionKey, "rebuild");
     setWorkspaceAdminActionError(null);
     try {
       await rebuildWorkspace(selectedAdminUser.id, workspaceName);
@@ -2963,7 +2976,7 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
-      clearWorkspaceAction(workspaceName);
+      clearWorkspaceAction(actionKey);
     }
   }
 
@@ -2971,7 +2984,8 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setWorkspaceAction(archiveId, "delete-archive");
+    const actionKey = adminArchiveStateKey(selectedAdminUser.id, archiveId);
+    setWorkspaceAction(actionKey, "delete-archive");
     setWorkspaceAdminActionError(null);
     try {
       await deleteArchivedWorkspace(selectedAdminUser.id, archiveId);
@@ -2979,7 +2993,7 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
-      clearWorkspaceAction(archiveId);
+      clearWorkspaceAction(actionKey);
     }
   }
 
@@ -2987,17 +3001,18 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setPaseoActionState((current) => ({ ...current, [workspaceName]: "loading" }));
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setPaseoActionState((current) => ({ ...current, [actionKey]: "loading" }));
     setWorkspaceAdminActionError(null);
     try {
       const diagnostic = await getWorkspacePaseoDiagnostic(selectedAdminUser.id, workspaceName);
-      setPaseoDiagnostics((current) => ({ ...current, [workspaceName]: diagnostic }));
+      setPaseoDiagnostics((current) => ({ ...current, [actionKey]: diagnostic }));
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
       setPaseoActionState((current) => {
         const next = { ...current };
-        delete next[workspaceName];
+        delete next[actionKey];
         return next;
       });
     }
@@ -3007,17 +3022,18 @@ function AdminPage() {
     if (!selectedAdminUser) {
       return;
     }
-    setPaseoActionState((current) => ({ ...current, [workspaceName]: "restarting" }));
+    const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
+    setPaseoActionState((current) => ({ ...current, [actionKey]: "restarting" }));
     setWorkspaceAdminActionError(null);
     try {
       const result = await restartWorkspacePaseoDaemon(selectedAdminUser.id, workspaceName);
-      setPaseoDiagnostics((current) => ({ ...current, [workspaceName]: result.diagnostic }));
+      setPaseoDiagnostics((current) => ({ ...current, [actionKey]: result.diagnostic }));
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
       setPaseoActionState((current) => {
         const next = { ...current };
-        delete next[workspaceName];
+        delete next[actionKey];
         return next;
       });
     }
@@ -3705,7 +3721,8 @@ function AdminPage() {
                       ) : null}
                       {selectedWorkspaces?.map((workspace) => {
                         const backendLiveness = workspace.status?.health?.backendLiveness;
-                        const localAction = workspaceActionState[workspace.name] ?? null;
+                        const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
+                        const localAction = workspaceActionState[workspaceStateKey] ?? null;
                         const buttonState = resolveAdminWorkspaceButtonState({
                           backendLiveness,
                           localAction,
@@ -3818,9 +3835,9 @@ function AdminPage() {
                                 <Button
                                   variant="destructive"
                                   size="sm"
-                                  disabled={entry.archiveId in workspaceActionState}
+                                  disabled={adminArchiveStateKey(selectedAdminUser.id, entry.archiveId) in workspaceActionState}
                                 >
-                                  {workspaceActionState[entry.archiveId] === "delete-archive"
+                                  {workspaceActionState[adminArchiveStateKey(selectedAdminUser.id, entry.archiveId)] === "delete-archive"
                                     ? t("deleting")
                                     : t("admin_delete_archived_workspace")}
                                 </Button>
@@ -3859,8 +3876,10 @@ function AdminPage() {
                     {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
                     ) : null}
-                    {selectedWorkspaces?.map((workspace) => (
-                      <div key={`paseo-${workspace.name}`} className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                    {selectedWorkspaces?.map((workspace) => {
+                      const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
+                      return (
+                      <div key={`paseo-${workspaceStateKey}`} className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{workspace.name}</div>
@@ -3900,38 +3919,38 @@ function AdminPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={Boolean(paseoActionState[workspace.name])}
+                            disabled={Boolean(paseoActionState[workspaceStateKey])}
                             onClick={() => void handleLoadPaseoDiagnostic(workspace.name)}
                           >
-                            {paseoActionState[workspace.name] === "loading"
+                            {paseoActionState[workspaceStateKey] === "loading"
                               ? t("refreshing")
                               : t("admin_paseo_status_button")}
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={Boolean(paseoActionState[workspace.name])}
+                            disabled={Boolean(paseoActionState[workspaceStateKey])}
                             onClick={() => void handleRestartPaseoDaemon(workspace.name)}
                           >
-                            {paseoActionState[workspace.name] === "restarting"
+                            {paseoActionState[workspaceStateKey] === "restarting"
                               ? t("admin_paseo_restarting_button")
                               : t("admin_paseo_restart_button")}
                           </Button>
                         </div>
-                        {paseoDiagnostics[workspace.name] ? (
+                        {paseoDiagnostics[workspaceStateKey] ? (
                           <>
                             <details className="rounded-xl border border-border/70 bg-background">
                               <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
                                 {t("admin_paseo_status_raw")}
                               </summary>
                               <pre className="overflow-x-auto border-t border-border/70 p-3 text-xs leading-5">
-                                {paseoDiagnostics[workspace.name]?.daemonStatusRaw}
+                                {paseoDiagnostics[workspaceStateKey]?.daemonStatusRaw}
                               </pre>
                             </details>
                           </>
                         ) : null}
                       </div>
-                    ))}
+                    )})}
                   </CardContent>
                 </Card>
               </TabsContent>
