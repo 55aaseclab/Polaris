@@ -2387,6 +2387,7 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
     assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/codex "\$@"/);
     assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/claude "\$@"/);
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
+    assert.match(rendered, /paseo daemon status --json 2>\/dev\/null \|\| true/);
   });
 });
 
