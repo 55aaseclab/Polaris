@@ -9,11 +9,21 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
   const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
   const observation = await driver.inspect(workspace);
+  let effectiveObservation = observation;
   if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
-    await persistWorkspacePaseoState(workspace);
+    const persistResult = await persistWorkspacePaseoState(workspace);
+    if (persistResult === "stopped") {
+      effectiveObservation = {
+        ...observation,
+        backend: {
+          ...observation.backend,
+          running: false,
+        },
+      };
+    }
   }
-  const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+  const drift = computeWorkspaceDrift(workspace, effectiveObservation);
+  const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift, "status");
   status.assets = buildStatusAssets(workspace);
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
