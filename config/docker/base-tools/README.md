@@ -70,7 +70,6 @@ Preferred CLI:
 - `antiword`
 - `catdoc`
 - `odt2txt`
-- `unoconv`
 
 Python fallback:
 - `python-docx`

@@ -48,7 +48,6 @@ libreoffice-calc
 libreoffice-impress
 libreoffice-writer
 odt2txt
-unoconv
 
 # 5. OCR and image extraction
 imagemagick
