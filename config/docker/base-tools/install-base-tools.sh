@@ -42,9 +42,6 @@ fi
 
 ln -sf "$TOOL_PREFIX/bin/paseo" /usr/local/bin/paseo
 ln -sf "$TOOL_PREFIX/bin/pnpm" /usr/local/bin/pnpm
-ln -sf "$TOOL_PREFIX/bin/copilot" /usr/local/bin/copilot
-ln -sf "$TOOL_PREFIX/bin/opencode" /usr/local/bin/opencode
-ln -sf "$TOOL_PREFIX/bin/pi" /usr/local/bin/pi
 
 cat >/usr/local/bin/codex <<'EOF'
 #!/usr/bin/env bash
