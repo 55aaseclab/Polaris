@@ -25,6 +25,18 @@ function usage(): never {
   throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|archive|delete|portal|server|executor> ...");
 }
 
+function extractUserProfileId(argv: string[]): string | undefined {
+  const userFlagIndex = argv.findIndex((value) => value === "--user");
+  if (userFlagIndex === -1) {
+    return undefined;
+  }
+  const userProfileId = argv[userFlagIndex + 1]?.trim();
+  if (!userProfileId) {
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <command> <project> --user <userProfileId>");
+  }
+  return userProfileId;
+}
+
 export async function runCli(argv: string[]): Promise<void> {
   if (argv.length === 0) {
     usage();
@@ -57,45 +69,46 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   const command = COMMANDS.has(first) ? first : "status";
   const project = COMMANDS.has(first) ? second : first;
+  const userProfileId = extractUserProfileId(argv);
   if (!project) {
     usage();
   }
-  logInfo("cli", "dispatch", { argv, command, project });
+  logInfo("cli", "dispatch", { argv, command, project, userProfileId });
 
   if (command === "start") {
-    await startCommand(project);
+    await startCommand(project, userProfileId);
     return;
   }
   if (command === "stop") {
-    await stopCommand(project);
+    await stopCommand(project, userProfileId);
     return;
   }
   if (command === "restart") {
-    await restartCommand(project);
+    await restartCommand(project, userProfileId);
     return;
   }
   if (command === "rebuild") {
-    await rebuildCommand(project);
+    await rebuildCommand(project, userProfileId);
     return;
   }
   if (command === "apply") {
-    await applyCommand(project);
+    await applyCommand(project, userProfileId);
     return;
   }
   if (command === "render") {
-    await renderCommand(project);
+    await renderCommand(project, userProfileId);
     return;
   }
   if (command === "status") {
-    await statusCommand(project);
+    await statusCommand(project, userProfileId);
     return;
   }
   if (command === "reconcile") {
-    await reconcileCommand(project);
+    await reconcileCommand(project, userProfileId);
     return;
   }
   if (command === "logs") {
-    await logsCommand(project);
+    await logsCommand(project, userProfileId);
     return;
   }
   if (command === "live-switch") {
@@ -107,11 +120,11 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
   if (command === "archive") {
-    await archiveCommand(project);
+    await archiveCommand(project, userProfileId);
     return;
   }
   if (command === "delete") {
-    await deleteCommand(project);
+    await deleteCommand(project, userProfileId);
     return;
   }
 

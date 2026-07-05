@@ -53,7 +53,6 @@ export function buildRuntimeStatusPatch() {
   return {
     health: {
       backendLiveness: "running",
-      workspaceReadiness: "ready",
       reason: "runtime status observer heartbeat",
     },
     details: {

@@ -1033,13 +1033,86 @@ export async function startPortalWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ started: true }> {
-  return withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-    const summary = loadWorkspaceSummary(userId, workspace);
-    if (!summary.selectedDriver) {
-      throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  try {
+    return await withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
+      logInfo("executor", "workspace-start-started", {
+        userId,
+        workspace,
+        ref,
+      });
+      writeCachedWorkspaceStatusUpdate({
+        userId,
+        workspace,
+        reason: "workspace-starting",
+        mutate: (current, currentSummary) => {
+          if (!current) {
+            return null;
+          }
+          return {
+            ...current,
+            driver: current.driver
+              ? {
+                  ...current.driver,
+                  backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
+                  profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+                }
+              : current.driver,
+            health: {
+              ...current.health,
+              backendLiveness: "starting",
+              workspaceReadiness: "not-ready",
+              reason: "workspace start requested",
+            },
+          };
+        },
+      });
+      await startCommand(ref, userId);
+      await refreshPortalWorkspaceStatus(userId, workspace);
+      logInfo("executor", "workspace-start-completed", {
+        userId,
+        workspace,
+        ref,
+      });
+      return { started: true };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logError("executor", "workspace-start-failed", {
+      userId,
+      workspace,
+      ref,
+      error: message,
+    });
+    try {
+      await refreshPortalWorkspaceStatus(userId, workspace);
+    } catch (refreshError) {
+      logWarn("executor", "workspace-start-failed-refresh", {
+        userId,
+        workspace,
+        ref,
+        error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
     }
-    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-    logInfo("executor", "workspace-start-started", {
+    throw error;
+  }
+}
+
+export async function rebuildPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ rebuilt: true }> {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  try {
+    logInfo("executor", "workspace-rebuild-started", {
       userId,
       workspace,
       ref,
@@ -1047,7 +1120,7 @@ export async function startPortalWorkspace(
     writeCachedWorkspaceStatusUpdate({
       userId,
       workspace,
-      reason: "workspace-starting",
+      reason: "workspace-rebuilding",
       mutate: (current, currentSummary) => {
         if (!current) {
           return null;
@@ -1065,70 +1138,39 @@ export async function startPortalWorkspace(
             ...current.health,
             backendLiveness: "starting",
             workspaceReadiness: "not-ready",
-            reason: "workspace start requested",
+            reason: "workspace rebuild requested",
           },
         };
       },
     });
-    await startCommand(ref, userId);
+    await rebuildCommand(ref, userId);
     await refreshPortalWorkspaceStatus(userId, workspace);
-    logInfo("executor", "workspace-start-completed", {
+    logInfo("executor", "workspace-rebuild-completed", {
       userId,
       workspace,
       ref,
     });
-    return { started: true };
-  });
-}
-
-export async function rebuildPortalWorkspace(
-  userId: string,
-  workspace: string,
-): Promise<{ rebuilt: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    return { rebuilt: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logError("executor", "workspace-rebuild-failed", {
+      userId,
+      workspace,
+      ref,
+      error: message,
+    });
+    try {
+      await refreshPortalWorkspaceStatus(userId, workspace);
+    } catch (refreshError) {
+      logWarn("executor", "workspace-rebuild-failed-refresh", {
+        userId,
+        workspace,
+        ref,
+        error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+    }
+    throw error;
   }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-  logInfo("executor", "workspace-rebuild-started", {
-    userId,
-    workspace,
-    ref,
-  });
-  writeCachedWorkspaceStatusUpdate({
-    userId,
-    workspace,
-    reason: "workspace-rebuilding",
-    mutate: (current, currentSummary) => {
-      if (!current) {
-        return null;
-      }
-      return {
-        ...current,
-        driver: current.driver
-          ? {
-              ...current.driver,
-              backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
-              profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
-            }
-          : current.driver,
-        health: {
-          ...current.health,
-          backendLiveness: "starting",
-          workspaceReadiness: "not-ready",
-          reason: "workspace rebuild requested",
-        },
-      };
-    },
-  });
-  await rebuildCommand(ref);
-  await refreshPortalWorkspaceStatus(userId, workspace);
-  logInfo("executor", "workspace-rebuild-completed", {
-    userId,
-    workspace,
-    ref,
-  });
-  return { rebuilt: true };
 }
 
 export async function switchPortalWorkspaceLiveCredential(input: {

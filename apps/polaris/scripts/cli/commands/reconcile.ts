@@ -4,8 +4,8 @@ import { getEvolutionSummary } from "../../evolution/runtime.js";
 import { loadExecutableWorkspaceForCommand, runWorkspaceCommandWithEvolution } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
 
-export async function reconcileCommand(project: string): Promise<void> {
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand("reconcile", project);
+export async function reconcileCommand(project: string, userProfileId?: string): Promise<void> {
+  const { workspace, driver } = await loadExecutableWorkspaceForCommand("reconcile", project, userProfileId);
   const observation = await driver.inspect(workspace);
   const drift = computeWorkspaceDrift(workspace, observation);
   const plan = buildReconcilePlan(workspace, drift);

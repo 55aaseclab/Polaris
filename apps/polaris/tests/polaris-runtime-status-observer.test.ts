@@ -61,7 +61,6 @@ test("status observer reports only workspace lifecycle status", async () => {
   assert.deepEqual(payloads[0].status, {
     health: {
       backendLiveness: "running",
-      workspaceReadiness: "ready",
       reason: "runtime status observer heartbeat",
     },
     details: {

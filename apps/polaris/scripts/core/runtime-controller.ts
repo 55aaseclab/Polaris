@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type {
   BackendObservation,
   CheckStatus,
@@ -9,7 +10,10 @@ import type {
   WorkspaceStatus,
 } from "./workspace.js";
 import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
-import { readWorkspaceLiveCredentialSelections } from "../output/state-store.js";
+import {
+  readWorkspaceLiveCredentialSelections,
+  workspacePaseoStateDir,
+} from "../output/state-store.js";
 import {
   workspaceRuntimeResourceName,
   workspaceRuntimeScopeName,
@@ -309,6 +313,31 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
   }
 
   if (backendRunning) {
+    if (workspace.agent.enabled) {
+      const paseoStateRoot = workspacePaseoStateDir(
+        workspace.identity.projectName,
+        workspace.userProfile.id,
+      );
+      const persistedServerIdPath = `${paseoStateRoot}/server-id`;
+      const persistedPairingPath = `${paseoStateRoot}/pairing.json`;
+      if (!fs.existsSync(persistedServerIdPath)) {
+        items.push({
+          kind: "daemon",
+          target: "persisted-server-id",
+          severity: "warning",
+          message: "persisted Paseo server-id is missing",
+        });
+      }
+      if (!fs.existsSync(persistedPairingPath)) {
+        items.push({
+          kind: "daemon",
+          target: "persisted-pairing",
+          severity: "warning",
+          message: "persisted Paseo pairing metadata is missing",
+        });
+      }
+    }
+
     const attachmentTargets = {
       workspaceData: workspace.attachments.workspaceData,
       workspaceRuntimeState: workspace.attachments.workspaceRuntimeState,

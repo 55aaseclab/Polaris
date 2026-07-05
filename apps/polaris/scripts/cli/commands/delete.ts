@@ -237,8 +237,12 @@ export async function deleteArchivedWorkspaceOwnedByUser(userId: string, archive
   };
 }
 
-export async function deleteCommand(projectArg: string): Promise<void> {
+export async function deleteCommand(projectArg: string, userProfileId?: string): Promise<void> {
   const { project } = parseWorkspaceReference(projectArg);
+  if (userProfileId?.trim()) {
+    await deleteWorkspaceOwnedByUser(userProfileId.trim(), project);
+    return;
+  }
   const owners = projectOwners(project);
   if (owners.length === 0) {
     throw new Error(`Workspace '${project}' was not found`);

@@ -2,8 +2,12 @@ import { projectOwners } from "../../config/project-ownership.js";
 import { parseWorkspaceReference } from "../../config/load.js";
 import { archiveWorkspaceOwnedByUser } from "./delete.js";
 
-export async function archiveCommand(projectArg: string): Promise<void> {
+export async function archiveCommand(projectArg: string, userProfileId?: string): Promise<void> {
   const { project } = parseWorkspaceReference(projectArg);
+  if (userProfileId?.trim()) {
+    await archiveWorkspaceOwnedByUser(userProfileId.trim(), project);
+    return;
+  }
   const owners = projectOwners(project);
   if (owners.length === 0) {
     throw new Error(`Workspace '${project}' was not found`);

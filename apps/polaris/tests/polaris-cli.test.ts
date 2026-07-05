@@ -2755,6 +2755,62 @@ test("status stays ready when no active codex credential is selected", () => {
   assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
 });
 
+test("status is not ready until persisted Paseo metadata exists on the host state root", () => {
+  const workspace = loadDefaultDemoWorkspace();
+  const paseoStateRoot = workspacePaseoStateDir(
+    workspace.identity.projectName,
+    workspace.userProfile.id,
+  );
+  fs.rmSync(paseoStateRoot, { recursive: true, force: true });
+
+  const observation = {
+    backend: {
+      kind: workspace.backend.kind,
+      exists: true,
+      running: true,
+      detail: "pod/pod-1",
+    },
+    attachments: {
+      workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
+      workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
+      userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+    },
+    runtimeAssembly: {
+      home: { observed: true, detail: workspace.runtime.home },
+      projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
+      managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
+      evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
+      codex: { observed: true, detail: `${workspace.runtime.home}/.codex` },
+      claude: { observed: true, detail: `${workspace.runtime.home}/.claude` },
+      ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+    },
+    daemon: {
+      manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+      pairing: {
+        observed: true,
+        detail: "paseo daemon pair",
+        url: "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0",
+      },
+    },
+    services: {
+      declared: 1,
+      observed: 1,
+      detail: "observed 1 service objects",
+    },
+  };
+
+  const drift = computeWorkspaceDrift(workspace, observation);
+  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+
+  assert.equal(drift.hasWarnings, true);
+  assert.match(
+    drift.items.map((item) => item.message).join("\n"),
+    /persisted Paseo (server-id|pairing metadata) is missing/,
+  );
+  assert.equal(status.health.backendLiveness, "running");
+  assert.equal(status.health.workspaceReadiness, "not-ready");
+});
+
 test("status exposes live credential selections per harness", async () => {
   const project = uniqueProjectName("status-live-selections");
   const credentialRoot = path.join(
