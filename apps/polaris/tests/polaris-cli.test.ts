@@ -15,6 +15,7 @@ import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
   workspaceEvolutionStateDir,
   workspaceLiveCredentialsPath,
+  workspacePaseoStateDir,
   workspaceSelectionPath,
   workspaceStatusPath,
   writeWorkspaceDriverSelection,
@@ -1267,6 +1268,14 @@ if [[ "$*" == *"inspect abc123"* ]]; then
   exit 0
 fi
 if [[ "$1" == "exec" ]]; then
+  if [[ "$5" == *"cat /root/.paseo/server-id"* ]]; then
+    printf 'srv_start_test'
+    exit 0
+  fi
+  if [[ "$5" == *"cat /root/.paseo/pairing.json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zdGFydF90ZXN0In0","serverId":"srv_start_test"}'
+    exit 0
+  fi
   exit 0
 fi
 if [[ "$1" == "image" || "$1" == "pull" || "$1" == "tag" || "$1" == "build" ]]; then
@@ -1279,6 +1288,7 @@ exit 0
         async ({ readCommandLog }) => {
           await startCommand(`${project}@docker`, DEMO_USER_PROFILE_ID);
           const commands = readCommandLog();
+          const paseoRoot = workspacePaseoStateDir(project, DEMO_USER_PROFILE_ID);
           assert.equal(
             commands.some((entry) =>
               entry.startsWith("image inspect ")
@@ -1290,6 +1300,17 @@ exit 0
           );
           assert.ok(
             commands.some((entry) => entry.includes("compose") && entry.includes(" up -d")),
+          );
+          assert.equal(
+            fs.readFileSync(path.join(paseoRoot, "server-id"), "utf8").trim(),
+            "srv_start_test",
+          );
+          assert.deepEqual(
+            JSON.parse(fs.readFileSync(path.join(paseoRoot, "pairing.json"), "utf8")) as Record<string, unknown>,
+            {
+              url: "https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zdGFydF90ZXN0In0",
+              serverId: "srv_start_test",
+            },
           );
         },
       );

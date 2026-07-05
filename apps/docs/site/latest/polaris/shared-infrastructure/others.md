@@ -9,8 +9,6 @@ The runtime status observer runs inside the workspace container.
 
 Its role is to:
 
-- observe daemon availability
-- observe pairing availability
 - report status patches back to the executor
 - support future evolution reporting
 
@@ -20,8 +18,14 @@ host executor.
 The local stack wrapper now starts an executor bridge proxy on the Docker
 bridge IP and forwards it to the host-local executor on `127.0.0.1:8788`.
 
-That bridge is what lets the runtime status observer push persisted Paseo
-`server-id` and `pairing.json` metadata back into the host workspace state.
+Paseo reconnect metadata no longer depends on the runtime observer.
+
+Workspace start/bootstrap writes:
+
+- `state/paseo/server-id`
+- `state/paseo/pairing.json`
+
+The observer only reports the workspace lifecycle heartbeat.
 
 ## Local Docker Storage Model
 

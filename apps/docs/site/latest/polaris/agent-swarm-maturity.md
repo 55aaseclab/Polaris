@@ -108,6 +108,8 @@ Polaris 会综合：
 
 - portal detail read 优先读取 `status.json`
 - runtime status observer 只回报 workspace 主生命周期
+- workspace start/bootstrap 负责写入 `state/paseo/server-id` 与
+  `state/paseo/pairing.json`
 - 显式 refresh 仍然保留，但不再是默认读路径
 - start / stop / live switch 可以先写缓存状态，再异步 refresh
 - 用户可见生命周期不再依赖单独的 provisioning progress 文件

@@ -1,15 +1,98 @@
 import { getBackendDriver } from "../../backends/index.js";
+import { spawnSync } from "node:child_process";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../../config/load.js";
 import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
+import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
+import { readKubevirtPersistedPaseoState } from "../../backends/kubevirt/driver.js";
 import {
   appendEvolutionEvent,
   createEvolutionSessionId,
   finalizeEvolutionSession,
   prepareEvolutionMemorySnapshot,
 } from "../../evolution/runtime.js";
+import { writeWorkspacePaseoPairing, writeWorkspacePaseoServerId } from "../../output/state-store.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
+
+function runCheckedCapture(command: string, args: string[]): string {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "").trim();
+    const stdout = String(result.stdout || "").trim();
+    throw new Error(
+      `${command} ${args.join(" ")} failed (${result.status ?? "unknown"})${stderr ? `: ${stderr}` : stdout ? `: ${stdout}` : ""}`,
+    );
+  }
+  return String(result.stdout || "");
+}
+
+function readJsonObject(raw: string): (Record<string, unknown> & { url: string }) | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed.url === "string" && parsed.url.trim() ? { ...parsed, url: parsed.url.trim() } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function persistWorkspacePaseoState(workspace: WorkspaceSpec): Promise<void> {
+  if (!workspace.agent.enabled) {
+    return;
+  }
+  let serverId = "";
+  let pairing: (Record<string, unknown> & { url: string }) | null = null;
+  const serverIdPath = `${workspace.agent.runtime.stateRoot}/server-id`;
+  const pairingPath = workspace.agent.runtime.pairingFile ?? `${workspace.agent.runtime.stateRoot}/pairing.json`;
+
+  if (workspace.backend.kind === "docker") {
+    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+    serverId = runCheckedCapture(
+      "docker",
+      ["exec", `${scope}-docker`, "sh", "-lc", `cat ${serverIdPath} 2>/dev/null || true`],
+    ).trim();
+    pairing = readJsonObject(
+      runCheckedCapture(
+        "docker",
+        ["exec", `${scope}-docker`, "sh", "-lc", `cat ${pairingPath} 2>/dev/null || true`],
+      ),
+    );
+  } else if (workspace.backend.kind === "pod") {
+    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+    serverId = runCheckedCapture(
+      "kubectl",
+      ["-n", scope, "exec", `deployment/${scope}`, "--", "sh", "-lc", `cat ${serverIdPath} 2>/dev/null || true`],
+    ).trim();
+    pairing = readJsonObject(
+      runCheckedCapture(
+        "kubectl",
+        ["-n", scope, "exec", `deployment/${scope}`, "--", "sh", "-lc", `cat ${pairingPath} 2>/dev/null || true`],
+      ),
+    );
+  } else if (workspace.backend.kind === "kubevirt-vm") {
+    const snapshot = await readKubevirtPersistedPaseoState(workspace);
+    serverId = snapshot?.serverId ?? "";
+    pairing = snapshot?.pairing ?? null;
+  }
+
+  if (!serverId || !pairing) {
+    logWarn("cli", "workspace-paseo-state-persist-skipped", {
+      project: workspace.identity.projectName,
+      backend: workspace.backend.kind,
+      hasServerId: Boolean(serverId),
+      hasPairing: Boolean(pairing),
+    });
+    return;
+  }
+
+  writeWorkspacePaseoServerId(workspace.identity.projectName, serverId, workspace.userProfile.id);
+  writeWorkspacePaseoPairing(workspace.identity.projectName, pairing, workspace.userProfile.id);
+  logInfo("cli", "workspace-paseo-state-persisted", {
+    project: workspace.identity.projectName,
+    backend: workspace.backend.kind,
+    serverId,
+  });
+}
 
 export function loadWorkspaceForProjectRef(
   projectRef: string,
