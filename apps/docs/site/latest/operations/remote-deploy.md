@@ -117,6 +117,8 @@ For the current status model, executor reachability is no longer optional.
 Why:
 
 - runtime status observer reports status patches back to the executor
+- workspace start/bootstrap writes `state/paseo/server-id` and
+  `state/paseo/pairing.json`; the observer does not refresh them
 - container-to-host resolution is part of normal status freshness
 - if this path is broken, the UI may look stale even when the runtime is fine
 

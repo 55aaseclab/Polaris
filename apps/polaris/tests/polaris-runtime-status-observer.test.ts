@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isTransientExecutorDisconnect } from "../scripts/runtime/status-observer.mjs";
+import {
+  isTransientExecutorDisconnect,
+} from "../scripts/runtime/status-observer.mjs";
 
 test("status observer treats stop-boundary executor disconnects as transient", () => {
   assert.equal(
@@ -23,4 +25,47 @@ test("status observer treats stop-boundary executor disconnects as transient", (
     isTransientExecutorDisconnect(new Error("status report failed: 500 Internal Server Error")),
     false,
   );
+});
+
+test("status observer reports only workspace lifecycle status", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.POLARIS_RUNTIME_STATUS_REPORT_URL;
+  const originalSecret = process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET;
+  const payloads: Array<Record<string, unknown>> = [];
+  process.env.POLARIS_RUNTIME_STATUS_REPORT_URL = "http://executor.test/workspaces/status/report";
+  process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET = "secret";
+  globalThis.fetch = async (_input, init) => {
+    payloads.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    return new Response(null, { status: 200 });
+  };
+  try {
+    const { reportRuntimeStatus } = await import(
+      `../scripts/runtime/status-observer.mjs?case=${Date.now()}`
+    );
+    await reportRuntimeStatus();
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) {
+      delete process.env.POLARIS_RUNTIME_STATUS_REPORT_URL;
+    } else {
+      process.env.POLARIS_RUNTIME_STATUS_REPORT_URL = originalUrl;
+    }
+    if (originalSecret === undefined) {
+      delete process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET;
+    } else {
+      process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET = originalSecret;
+    }
+  }
+  assert.equal(payloads.length, 1);
+  assert.equal("paseo" in payloads[0], false);
+  assert.deepEqual(payloads[0].status, {
+    health: {
+      backendLiveness: "running",
+      workspaceReadiness: "ready",
+      reason: "runtime status observer heartbeat",
+    },
+    details: {
+      backendDetail: "runtime status observer heartbeat",
+    },
+  });
 });

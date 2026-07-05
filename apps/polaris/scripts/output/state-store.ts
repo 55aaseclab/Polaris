@@ -231,7 +231,7 @@ export function writeWorkspacePaseoServerId(
 
 export function writeWorkspacePaseoPairing(
   project: string,
-  pairing: { url: string },
+  pairing: Record<string, unknown> & { url: string },
   userProfileId?: string,
 ): string {
   const outputPath = path.join(

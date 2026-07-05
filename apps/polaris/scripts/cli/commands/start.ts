@@ -1,4 +1,8 @@
-import { loadPreparedWorkspaceForCommand, waitForWorkspaceReady } from "./shared.js";
+import {
+  loadPreparedWorkspaceForCommand,
+  persistWorkspacePaseoState,
+  waitForWorkspaceReady,
+} from "./shared.js";
 import { runWorkspaceCommandWithEvolution } from "./shared.js";
 
 export async function startCommand(project: string, userProfileId?: string): Promise<void> {
@@ -9,6 +13,7 @@ export async function startCommand(project: string, userProfileId?: string): Pro
     execute: async () => {
       await driver.start(workspace);
       await waitForWorkspaceReady(workspace);
+      await persistWorkspacePaseoState(workspace);
     },
   });
 }

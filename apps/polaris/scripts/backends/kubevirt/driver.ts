@@ -483,6 +483,39 @@ async function collectKubevirtRuntimeSnapshot(
   };
 }
 
+export async function readKubevirtPersistedPaseoState(workspace: WorkspaceSpec): Promise<{
+  serverId: string;
+  pairing: Record<string, unknown> & { url: string };
+} | null> {
+  const service = spawnSync(
+    "kubectl",
+    ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"],
+    { encoding: "utf8" },
+  );
+  const serviceName = String(service.stdout || "").trim();
+  if (service.status !== 0 || !serviceName) {
+    return null;
+  }
+  const snapshot = await collectKubevirtRuntimeSnapshot(workspace, serviceName);
+  if (!snapshot.guestReachable || !snapshot.persistedServerId) {
+    return null;
+  }
+  try {
+    const pairing = JSON.parse(snapshot.pairingRaw) as Record<string, unknown>;
+    return typeof pairing.url === "string" && pairing.url.trim()
+      ? {
+          serverId: snapshot.persistedServerId,
+          pairing: {
+            ...pairing,
+            url: pairing.url.trim(),
+          },
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeKubevirtCommandRef(
   workspace: WorkspaceSpec,
 ): string {
