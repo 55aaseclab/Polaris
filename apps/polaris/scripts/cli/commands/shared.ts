@@ -59,6 +59,19 @@ export async function loadExecutableWorkspaceForCommand(
   return { workspace: preparedWorkspace, driver };
 }
 
+export async function loadPreparedWorkspaceForCommand(
+  command: WorkspaceStatus["lifecycleAction"],
+  projectRef: string,
+  userProfileId?: string,
+): Promise<{
+  workspace: WorkspaceSpec;
+  driver: ReturnType<typeof getBackendDriver>;
+}> {
+  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef, userProfileId);
+  const preparedWorkspace = await prepareEvolutionMemorySnapshot(workspace);
+  return { workspace: preparedWorkspace, driver };
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

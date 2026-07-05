@@ -34,6 +34,7 @@ import {
   deletePortalUser,
   deleteArchivedWorkspace,
   deleteCredential,
+  rebuildWorkspace,
   deleteWorkspace,
   getCredentialRecord,
   getCredentialCatalog,
@@ -206,6 +207,8 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_name_taken: "This workspace name already exists for the current user.",
     provisioning: "Provisioning...",
     create_workspace: "Create workspace",
+    rebuild_workspace: "Rebuild",
+    rebuilding_workspace: "Rebuilding...",
     switch_driver: "Switch driver",
     switch_driver_desc: "Reuse the existing Polaris switch workflow.",
     switching: "Switching...",
@@ -520,6 +523,8 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_name_taken: "这个工作空间名称已经存在。",
     provisioning: "正在准备…",
     create_workspace: "创建工作空间",
+    rebuild_workspace: "重建",
+    rebuilding_workspace: "正在重建…",
     switch_driver: "切换驱动",
     switch_driver_desc: "复用现有的 Polaris 切换流程。",
     switching: "切换中…",
@@ -2666,7 +2671,7 @@ function AdminPage() {
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
-    Record<string, "start" | "stop" | "archive" | "delete-archive">
+    Record<string, "start" | "stop" | "rebuild" | "archive" | "delete-archive">
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
@@ -2817,7 +2822,7 @@ function AdminPage() {
 
   function setWorkspaceAction(
     target: string,
-    kind: "start" | "stop" | "archive" | "delete-archive",
+    kind: "start" | "stop" | "rebuild" | "archive" | "delete-archive",
   ): void {
     setWorkspaceActionState((current) => ({
       ...current,
@@ -2938,6 +2943,22 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      clearWorkspaceAction(workspaceName);
+    }
+  }
+
+  async function handleRebuildAdminWorkspace(workspaceName: string): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    setWorkspaceAction(workspaceName, "rebuild");
+    setWorkspaceAdminActionError(null);
+    try {
+      await rebuildWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
@@ -3716,6 +3737,14 @@ function AdminPage() {
                                 >
                                   {t("enter_workspace")}
                                 </Link>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={localAction !== null}
+                                onClick={() => void handleRebuildAdminWorkspace(workspace.name)}
+                              >
+                                {localAction === "rebuild" ? t("rebuilding_workspace") : t("rebuild_workspace")}
                               </Button>
                               <Button
                                 variant="outline"

@@ -49,6 +49,7 @@ import {
   permanentlyDeletePortalWorkspace as permanentlyDeletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
+  rebuildPortalWorkspace as rebuildPortalWorkspaceExecutor,
   reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
   restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
   startPortalWorkspace as startPortalWorkspaceExecutor,
@@ -353,6 +354,13 @@ export async function startPortalWorkspace(
   workspace: string,
 ): Promise<{ started: true }> {
   return startPortalWorkspaceExecutor({ userId, workspace });
+}
+
+export async function rebuildPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ rebuilt: true }> {
+  return rebuildPortalWorkspaceExecutor({ userId, workspace });
 }
 
 export async function refreshPortalWorkspace(

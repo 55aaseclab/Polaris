@@ -39,3 +39,7 @@ export function polarisNetfsLocalExportRoot(importMetaUrl: string): string {
   }
   return path.join(polarisDataRoot(importMetaUrl), "exports", "workspaces");
 }
+
+export function polarisConfigDockerRoot(importMetaUrl: string): string {
+  return path.join(repoRoot(importMetaUrl), "config", "docker");
+}

@@ -15,6 +15,7 @@ import {
   permanentlyDeletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
+  rebuildPortalWorkspace,
   restartPortalWorkspacePaseoDaemon,
   reportPortalWorkspaceStatus,
   startPortalWorkspace,
@@ -270,6 +271,16 @@ export function createExecutorServer(
       if (req.method === "POST" && url.pathname === "/workspaces/start") {
         const body = await readBody(req);
         const result = await startPortalWorkspace(
+          readRequiredString(body, "userId"),
+          readRequiredString(body, "workspace"),
+        );
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/rebuild") {
+        const body = await readBody(req);
+        const result = await rebuildPortalWorkspace(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
         );

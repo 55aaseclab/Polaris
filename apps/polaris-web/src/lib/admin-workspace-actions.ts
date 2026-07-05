@@ -3,6 +3,7 @@ export type AdminWorkspaceButtonState = {
   creating: boolean;
   starting: boolean;
   stopping: boolean;
+  rebuilding: boolean;
   archiving: boolean;
   transitionActive: boolean;
   primaryLabel:
@@ -19,20 +20,22 @@ export type AdminWorkspaceButtonState = {
 
 export function resolveAdminWorkspaceButtonState(input: {
   backendLiveness: string | null | undefined;
-  localAction: "start" | "stop" | "archive" | "delete-archive" | null | undefined;
+  localAction: "start" | "stop" | "rebuild" | "archive" | "delete-archive" | null | undefined;
 }): AdminWorkspaceButtonState {
   const creating = input.backendLiveness === "creating";
   const starting = input.localAction === "start" || input.backendLiveness === "starting";
   const stopping = input.localAction === "stop" || input.backendLiveness === "stopping";
+  const rebuilding = input.localAction === "rebuild";
   const archiving = input.localAction === "archive" || input.backendLiveness === "archiving";
   const running = input.backendLiveness === "running";
-  const transitionActive = creating || starting || stopping || archiving;
+  const transitionActive = creating || starting || stopping || rebuilding || archiving;
 
   return {
     running,
     creating,
     starting,
     stopping,
+    rebuilding,
     archiving,
     transitionActive,
     primaryLabel: stopping

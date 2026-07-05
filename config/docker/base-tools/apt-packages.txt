@@ -1,0 +1,91 @@
+# 1. Text and code processing
+bash
+bash-completion
+build-essential
+coreutils
+fd-find
+file
+findutils
+gawk
+git
+git-lfs
+grep
+less
+make
+neovim
+ripgrep
+sed
+tar
+tmux
+tree
+which
+zsh
+
+# Shared system basics
+ca-certificates
+curl
+gnupg
+procps
+xdg-utils
+wget
+
+# 2. Structured data and tables
+jq
+sqlite3
+
+# 3. PDF and documents
+ghostscript
+pandoc
+poppler-utils
+qpdf
+xmlstarlet
+
+# 4. Office file conversion
+antiword
+catdoc
+libreoffice
+libreoffice-calc
+libreoffice-impress
+libreoffice-writer
+odt2txt
+unoconv
+
+# 5. OCR and image extraction
+imagemagick
+libimage-exiftool-perl
+tesseract-ocr
+tesseract-ocr-chi-sim
+tesseract-ocr-eng
+
+# 6. Web and APIs
+openssh-client
+
+# 7. Multimedia
+ffmpeg
+mediainfo
+
+# 8. Archives and binary inspection
+binutils
+p7zip-full
+unzip
+xz-utils
+zip
+
+# 9. System debugging and network diagnostics
+dnsutils
+htop
+iproute2
+lsof
+ncdu
+net-tools
+psmisc
+rsync
+screen
+strace
+telnet
+
+# 10. General Python runtime
+python3
+python3-dev
+python3-pip
+python3-venv

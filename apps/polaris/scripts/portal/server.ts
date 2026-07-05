@@ -35,6 +35,7 @@ import {
   refreshPortalWorkspace,
   readUserPortalWorkspaceAssetPreview,
   queueProvisionWorkspace,
+  rebuildPortalWorkspace,
   restartPortalWorkspacePaseoDaemon,
   startPortalWorkspace,
   stopPortalWorkspace,
@@ -194,6 +195,15 @@ async function handleWorkspaceStart(
   workspace: string,
 ): Promise<void> {
   const result = await startPortalWorkspace(userId, workspace);
+  sendJson(res, 200, result);
+}
+
+async function handleWorkspaceRebuild(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  const result = await rebuildPortalWorkspace(userId, workspace);
   sendJson(res, 200, result);
 }
 
@@ -636,6 +646,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "start" && req.method === "POST") {
           await handleWorkspaceStart(res, routeUserId, workspace);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "rebuild" && req.method === "POST") {
+          await handleWorkspaceRebuild(res, routeUserId, workspace);
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "refresh" && req.method === "POST") {

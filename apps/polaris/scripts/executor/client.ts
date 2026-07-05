@@ -294,6 +294,19 @@ export async function startPortalWorkspace(input: {
   );
 }
 
+export async function rebuildPortalWorkspace(input: {
+  userId: string;
+  workspace: string;
+}): Promise<{ rebuilt: true }> {
+  return executorRequest(
+    "/workspaces/rebuild",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export async function switchPortalWorkspaceLiveCredential(input: {
   userId: string;
   workspace: string;

@@ -35,6 +35,7 @@ import { loadExecutableWorkspaceForCommand } from "../cli/commands/shared.js";
 import { startCommand } from "../cli/commands/start.js";
 import { statusCommand } from "../cli/commands/status.js";
 import { stopCommand } from "../cli/commands/stop.js";
+import { rebuildCommand } from "../cli/commands/rebuild.js";
 import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
@@ -1078,6 +1079,56 @@ export async function startPortalWorkspace(
     });
     return { started: true };
   });
+}
+
+export async function rebuildPortalWorkspace(
+  userId: string,
+  workspace: string,
+): Promise<{ rebuilt: true }> {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  if (!summary.selectedDriver) {
+    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+  }
+  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  logInfo("executor", "workspace-rebuild-started", {
+    userId,
+    workspace,
+    ref,
+  });
+  writeCachedWorkspaceStatusUpdate({
+    userId,
+    workspace,
+    reason: "workspace-rebuilding",
+    mutate: (current, currentSummary) => {
+      if (!current) {
+        return null;
+      }
+      return {
+        ...current,
+        driver: current.driver
+          ? {
+              ...current.driver,
+              backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
+              profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+            }
+          : current.driver,
+        health: {
+          ...current.health,
+          backendLiveness: "starting",
+          workspaceReadiness: "not-ready",
+          reason: "workspace rebuild requested",
+        },
+      };
+    },
+  });
+  await rebuildCommand(ref);
+  await refreshPortalWorkspaceStatus(userId, workspace);
+  logInfo("executor", "workspace-rebuild-completed", {
+    userId,
+    workspace,
+    ref,
+  });
+  return { rebuilt: true };
 }
 
 export async function switchPortalWorkspaceLiveCredential(input: {

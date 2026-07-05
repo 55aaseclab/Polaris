@@ -26,6 +26,7 @@ import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render
 import { renderAndWriteKubevirtWorkspace, renderKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
+import { startCommand } from "../scripts/cli/commands/start.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 import {
   workspaceRuntimeResourceName,
@@ -35,6 +36,12 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+const SHARED_WORKSPACE_DOCKERFILE = path.join(
+  REPO_ROOT,
+  "config",
+  "docker",
+  "workspace-prebuilt.Dockerfile",
+);
 
 function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
   const digest = createHash("sha256")
@@ -1176,17 +1183,10 @@ exit 0
   }
 });
 
-test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the demo template", () => {
+test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the shared template", () => {
   const userProfileId = uniqueProjectName("dockerfile-sync");
   const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
-  const templateDockerfile = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    DEMO_USER_PROFILE_ID,
-    "docker",
-    "workspace-prebuilt.Dockerfile",
-  );
+  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.writeFileSync(userDockerfile, "FROM scratch\n", "utf8");
@@ -1210,20 +1210,107 @@ test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the
   }
 });
 
+test("workspace prebuilt Dockerfile delegates shared base tool installation", () => {
+  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
+  const rendered = fs.readFileSync(templateDockerfile, "utf8");
+  assert.match(rendered, /COPY config\/docker\/base-tools \/tmp\/polaris-base-tools/);
+  assert.match(rendered, /RUN bash \/tmp\/polaris-base-tools\/install-base-tools\.sh/);
+  assert.equal(
+    fs.existsSync(path.join(REPO_ROOT, "config", "docker", "base-tools", "apt-packages.txt")),
+    true,
+  );
+  assert.equal(
+    fs.existsSync(path.join(REPO_ROOT, "config", "docker", "base-tools", "python-packages.txt")),
+    true,
+  );
+  assert.equal(
+    fs.existsSync(path.join(REPO_ROOT, "config", "docker", "base-tools", "node-packages.txt")),
+    true,
+  );
+  assert.equal(
+    fs.existsSync(path.join(REPO_ROOT, "config", "docker", "base-tools", "install-base-tools.sh")),
+    true,
+  );
+});
+
+test("startCommand does not provision or rebuild workspace images", async () => {
+  const project = uniqueProjectName("start-no-provision");
+  const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+  const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-start-export-"));
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.attachments["workspace-data"].source.export_path = exportRoot;
+    fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+    const expectedIdentityVolume = `polaris-${DEMO_USER_PROFILE_ID}-identity`;
+    try {
+      process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = exportRoot;
+      await withFakeCommands(
+        {
+          docker: `
+if [[ "$1" == "volume" && "$2" == "inspect" && "$3" == "${expectedIdentityVolume}" ]]; then
+  exit 1
+fi
+if [[ "$1" == "volume" && "$2" == "create" && "$3" == "${expectedIdentityVolume}" ]]; then
+  printf '%s' "$3"
+  exit 0
+fi
+if [[ "$*" == *"compose"* && "$*" == *"up -d"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+if [[ "$1" == "image" || "$1" == "pull" || "$1" == "tag" || "$1" == "build" ]]; then
+  printf 'unexpected image provisioning during start' >&2
+  exit 1
+fi
+exit 0
+`,
+        },
+        async ({ readCommandLog }) => {
+          await startCommand(`${project}@docker`, DEMO_USER_PROFILE_ID);
+          const commands = readCommandLog();
+          assert.equal(
+            commands.some((entry) =>
+              entry.startsWith("image inspect ")
+              || entry.startsWith("pull ")
+              || entry.startsWith("tag ")
+              || entry.startsWith("build ")
+            ),
+            false,
+          );
+          assert.ok(
+            commands.some((entry) => entry.includes("compose") && entry.includes(" up -d")),
+          );
+        },
+      );
+    } finally {
+      if (previousExportRoot === undefined) {
+        delete process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+      } else {
+        process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = previousExportRoot;
+      }
+      fs.rmSync(exportRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 test("ensureCanonicalWorkspaceImage rebuilds when the user Dockerfile is refreshed from the template", async () => {
   const userProfileId = uniqueProjectName("dockerfile-rebuild");
   const project = uniqueProjectName("image-refresh");
   const imageRef = workspaceImageRef(userProfileId, project);
   const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
   const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
-  const templateDockerfile = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    DEMO_USER_PROFILE_ID,
-    "docker",
-    "workspace-prebuilt.Dockerfile",
-  );
+  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
   const sharedImageRef = sharedWorkspaceImageRefForTest(templateDockerfile);
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
@@ -1304,7 +1391,7 @@ test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without m
   fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.copyFileSync(
-    path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile"),
+    SHARED_WORKSPACE_DOCKERFILE,
     userDockerfile,
   );
 
@@ -1367,13 +1454,14 @@ test("ensureCanonicalWorkspaceImage reuses a shared prebuilt image from another 
   fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), targetDockerPath);
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.copyFileSync(
-    path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile"),
+    SHARED_WORKSPACE_DOCKERFILE,
     userDockerfile,
   );
   const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
   const dockerfileDigest = createHash("sha256")
     .update(fs.readFileSync(userDockerfile))
     .digest("hex");
+  fs.mkdirSync(path.join(path.dirname(sourceDockerPath), "state"), { recursive: true });
   fs.writeFileSync(
     path.join(path.dirname(sourceDockerPath), "state", "image-build.json"),
     `${JSON.stringify({
@@ -3527,7 +3615,7 @@ exit 0
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
         assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
-        assert.equal(parsed.assets.dockerfile.path, `config/users/${DEMO_USER_PROFILE_ID}/docker/workspace-prebuilt.Dockerfile`);
+        assert.equal(parsed.assets.dockerfile.path, "config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile");
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
         assert.deepEqual(parsed.assets.generatedManifests.map((item) => item.file), ["docker.yaml", "pod.yaml", "kubevirt.yaml"]);
         assert.equal(parsed.assets.imageTags.find((item) => item.name === "workspace")?.tag, workspaceImageRef(DEMO_USER_PROFILE_ID, project));

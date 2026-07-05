@@ -1,0 +1,47 @@
+# 1. Text and code processing
+pyyaml
+rich
+typer
+
+# 2. Structured data and tables
+csvkit
+duckdb
+numpy
+openpyxl
+pandas
+pyarrow
+tabulate
+visidata
+xlrd
+
+# 3. PDF and documents
+pdfplumber
+pymupdf
+pypdf
+
+# 4. Office file conversion
+odfpy
+python-docx
+python-pptx
+
+# 5. OCR and image extraction
+Pillow
+pytesseract
+
+# 6. Web and APIs
+beautifulsoup4
+httpie
+httpx
+lxml
+markdownify
+requests
+
+# 7. Multimedia
+ffmpeg-python
+
+# 10. General Python runtime
+ipython
+pipx
+pydantic
+uv
+yq
