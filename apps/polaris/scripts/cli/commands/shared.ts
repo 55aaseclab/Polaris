@@ -197,8 +197,21 @@ export async function waitForWorkspaceReady(
 
   while (Date.now() - startedAt < timeoutMs) {
     const observation = await driver.inspect(workspace);
-    const drift = computeWorkspaceDrift(workspace, observation);
-    const status = synthesizeWorkspaceStatus(workspace, observation, drift, "start");
+    let effectiveObservation = observation;
+    if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
+      const persistResult = await persistWorkspacePaseoState(workspace);
+      if (persistResult === "stopped") {
+        effectiveObservation = {
+          ...observation,
+          backend: {
+            ...observation.backend,
+            running: false,
+          },
+        };
+      }
+    }
+    const drift = computeWorkspaceDrift(workspace, effectiveObservation);
+    const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift, "start");
     lastStatus = status;
 
     logDebug("cli", "start-probe", {
