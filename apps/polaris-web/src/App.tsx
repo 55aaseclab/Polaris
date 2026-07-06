@@ -76,7 +76,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { resolveAdminWorkspaceButtonState } from "@/lib/admin-workspace-actions";
+import {
+  resolveAdminWorkspaceButtonState,
+  resolveAdminWorkspaceDisplayState,
+  shouldClearAdminWorkspaceAction,
+  type AdminWorkspaceActionEntry,
+} from "@/lib/admin-workspace-actions";
 import { resolveWorkspaceRouteScope } from "@/lib/admin-scoped-workspace-route";
 import { mergeEmbeddedPaseoFrames, type EmbeddedPaseoFrame } from "@/lib/paseo-frames";
 import {
@@ -1625,15 +1630,17 @@ function useAsyncValue<T>(
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasResolvedDataRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    setLoading((current) => (hasResolvedDataRef.current ? current : true));
     setError(null);
     void factory()
       .then((value) => {
         if (!cancelled) {
           setData(value);
+          hasResolvedDataRef.current = true;
         }
       })
       .catch((cause: unknown) => {
@@ -2716,7 +2723,7 @@ function AdminPage() {
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
-    Record<string, "start" | "stop" | "rebuild" | "archive" | "delete-archive">
+    Record<string, AdminWorkspaceActionEntry>
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
@@ -2827,14 +2834,17 @@ function AdminPage() {
 
   useEffect(() => {
     const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
-      const liveness = workspace.status?.health?.backendLiveness;
-      return (
-        liveness === "creating"
-        || liveness === "starting"
-        || liveness === "stopping"
-        || liveness === "archiving"
-      );
-    });
+      const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
+      return resolveAdminWorkspaceDisplayState({
+        backendLiveness: workspace.status?.health?.backendLiveness,
+        localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
+      }).shouldPoll;
+    }) || Object.values(workspaceActionState).some((entry) =>
+      resolveAdminWorkspaceDisplayState({
+        backendLiveness: null,
+        localAction: entry.kind,
+      }).shouldPoll
+    );
     if (!selectedAdminUserId || !hasTransientWorkspace) {
       return;
     }
@@ -2847,7 +2857,53 @@ function AdminPage() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeUserId, refreshWorkspaces, selectedAdminUserId, selectedWorkspaces]);
+  }, [activeUserId, refreshWorkspaces, selectedAdminUserId, selectedWorkspaces, workspaceActionState]);
+
+  useEffect(() => {
+    if (!selectedAdminUserId) {
+      return;
+    }
+    setWorkspaceActionState((current) => {
+      const next = { ...current };
+      let changed = false;
+      const workspaceByKey = new Map(
+        (selectedWorkspaces ?? []).map((workspace) => [
+          adminWorkspaceStateKey(selectedAdminUserId, workspace.name),
+          workspace,
+        ] as const),
+      );
+      const archivedKeys = new Set(
+        (selectedArchivedWorkspaces ?? []).map((entry) =>
+          adminArchiveStateKey(selectedAdminUserId, entry.archiveId),
+        ),
+      );
+
+      for (const [key, entry] of Object.entries(current)) {
+        if (entry.kind === "delete-archive") {
+          if (!archivedKeys.has(key)) {
+            delete next[key];
+            changed = true;
+          }
+          continue;
+        }
+        const workspace = workspaceByKey.get(key);
+        if (
+          shouldClearAdminWorkspaceAction({
+            localAction: entry.kind,
+            baselineLiveness: entry.baselineLiveness,
+            backendLiveness: workspace?.status?.health?.backendLiveness ?? null,
+            backendReason: workspace?.status?.health?.reason ?? null,
+            workspaceExists: Boolean(workspace),
+          })
+        ) {
+          delete next[key];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [selectedAdminUserId, selectedArchivedWorkspaces, selectedWorkspaces]);
 
   useEffect(() => {
     if (!selectedAdminUser || !selectedWorkspaces || !selectedCredentials) {
@@ -2965,11 +3021,15 @@ function AdminPage() {
 
   function setWorkspaceAction(
     target: string,
-    kind: "start" | "stop" | "rebuild" | "archive" | "delete-archive",
+    kind: AdminWorkspaceActionEntry["kind"],
+    baselineLiveness: string | null = null,
   ): void {
     setWorkspaceActionState((current) => ({
       ...current,
-      [target]: kind,
+      [target]: {
+        kind,
+        baselineLiveness,
+      },
     }));
   }
 
@@ -3018,14 +3078,14 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    setWorkspaceAction(actionKey, "archive");
+    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
+    setWorkspaceAction(actionKey, "archive", baselineLiveness);
     setWorkspaceAdminActionError(null);
     try {
       await deleteWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
-    } finally {
       clearWorkspaceAction(actionKey);
     }
   }
@@ -3068,14 +3128,14 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    setWorkspaceAction(actionKey, "stop");
+    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
+    setWorkspaceAction(actionKey, "stop", baselineLiveness);
     setWorkspaceAdminActionError(null);
     try {
       await stopWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
-    } finally {
       clearWorkspaceAction(actionKey);
     }
   }
@@ -3085,14 +3145,14 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    setWorkspaceAction(actionKey, "start");
+    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
+    setWorkspaceAction(actionKey, "start", baselineLiveness);
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
-    } finally {
       clearWorkspaceAction(actionKey);
     }
   }
@@ -3102,14 +3162,14 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    setWorkspaceAction(actionKey, "rebuild");
+    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
+    setWorkspaceAction(actionKey, "rebuild", baselineLiveness);
     setWorkspaceAdminActionError(null);
     try {
       await rebuildWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
-    } finally {
       clearWorkspaceAction(actionKey);
     }
   }
@@ -3160,7 +3220,6 @@ function AdminPage() {
       setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
-    } finally {
       clearWorkspaceAction(actionKey);
     }
   }
@@ -3912,10 +3971,15 @@ function AdminPage() {
                       {selectedWorkspaces?.map((workspace) => {
                         const backendLiveness = workspace.status?.health?.backendLiveness;
                         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
-                        const localAction = workspaceActionState[workspaceStateKey] ?? null;
+                        const localAction = workspaceActionState[workspaceStateKey]?.kind ?? null;
                         const buttonState = resolveAdminWorkspaceButtonState({
                           backendLiveness,
                           localAction,
+                        });
+                        const displayState = resolveAdminWorkspaceDisplayState({
+                          backendLiveness,
+                          localAction,
+                          backendReason: workspace.status?.health?.reason ?? null,
                         });
                         const hasLiveCredentialControls = MANAGED_HARNESS_ORDER.some((harness) =>
                           harness !== "ssh"
@@ -3933,7 +3997,9 @@ function AdminPage() {
                               <div className="min-w-0">
                                 <div className="truncate text-sm font-medium">{workspace.name}</div>
                                 <div className="text-sm text-muted-foreground">
-                                  {translateWorkspaceLiveness(backendLiveness, t)}
+                                  {displayState.statusLabel
+                                    ? t(displayState.statusLabel)
+                                    : translateWorkspaceLiveness(backendLiveness, t)}
                                 </div>
                               </div>
                               <Badge variant="outline">
@@ -3955,10 +4021,10 @@ function AdminPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={localAction !== null}
+                                disabled={displayState.rebuildDisabled}
                                 onClick={() => void handleRebuildAdminWorkspace(workspace.name)}
                               >
-                                {localAction === "rebuild" ? t("rebuilding_workspace") : t("rebuild_workspace")}
+                                {t(displayState.rebuildLabel)}
                               </Button>
                               <Button
                                 variant="outline"
@@ -4174,7 +4240,7 @@ function AdminPage() {
                                   size="sm"
                                   disabled={adminArchiveStateKey(selectedAdminUser.id, entry.archiveId) in workspaceActionState}
                                 >
-                                  {workspaceActionState[adminArchiveStateKey(selectedAdminUser.id, entry.archiveId)] === "delete-archive"
+                                  {workspaceActionState[adminArchiveStateKey(selectedAdminUser.id, entry.archiveId)]?.kind === "delete-archive"
                                     ? t("deleting")
                                     : t("admin_delete_archived_workspace")}
                                 </Button>
