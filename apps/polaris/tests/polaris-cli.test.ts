@@ -28,6 +28,7 @@ import { renderAndWriteKubevirtWorkspace, renderKubevirtWorkspace } from "../scr
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { startCommand } from "../scripts/cli/commands/start.js";
+import { waitForWorkspaceReady } from "../scripts/cli/commands/shared.js";
 import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
 import {
   workspaceRuntimeResourceName,
@@ -1322,6 +1323,64 @@ exit 0
       }
       fs.rmSync(exportRoot, { recursive: true, force: true });
     }
+  });
+});
+
+test("waitForWorkspaceReady persists Paseo metadata before declaring runtime ready", async () => {
+  const project = uniqueProjectName("wait-ready-paseo-persist");
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    const paseoRoot = workspacePaseoStateDir(project, DEMO_USER_PROFILE_ID);
+    fs.rmSync(paseoRoot, { recursive: true, force: true });
+
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf 'abc123'
+  exit 0
+fi
+if [[ "$*" == *"inspect abc123"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  if [[ "$5" == *"cat /root/.paseo/server-id"* ]]; then
+    printf 'srv_wait_ready'
+    exit 0
+  fi
+  if [[ "$5" == *"cat /root/.paseo/pairing.json"* ]]; then
+    printf '{"url":"https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl93YWl0X3JlYWR5In0","serverId":"srv_wait_ready"}'
+    exit 0
+  fi
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        await waitForWorkspaceReady(workspace, 50, 0);
+
+        const commands = readCommandLog();
+        assert.ok(
+          commands.some((entry) => entry.includes("cat /root/.paseo/server-id")),
+        );
+        assert.ok(
+          commands.some((entry) => entry.includes("cat /root/.paseo/pairing.json")),
+        );
+        assert.equal(
+          fs.readFileSync(path.join(paseoRoot, "server-id"), "utf8").trim(),
+          "srv_wait_ready",
+        );
+        assert.deepEqual(
+          JSON.parse(fs.readFileSync(path.join(paseoRoot, "pairing.json"), "utf8")) as Record<string, unknown>,
+          {
+            url: "https://app.paseo.test/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl93YWl0X3JlYWR5In0",
+            serverId: "srv_wait_ready",
+          },
+        );
+      },
+    );
   });
 });
 
