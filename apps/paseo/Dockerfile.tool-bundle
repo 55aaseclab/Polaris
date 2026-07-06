@@ -14,7 +14,7 @@ COPY apps/paseo/source ./
 COPY apps/paseo/patches /tmp/paseo-patches
 
 RUN git init -q \
-  && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-defaults.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-server-file-upload-unicode.patch \
+  && git apply /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-defaults.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-server-file-upload-unicode.patch /tmp/paseo-patches/paseo-client-rpc-waiter-order.patch \
   && rm -rf .git
 
 RUN --mount=type=cache,target=/root/.npm \

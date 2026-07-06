@@ -56,6 +56,30 @@ paseo_local_buildkit_cache_dir() {
   printf '%s/buildkit-cache\n' "$(paseo_local_runtime_root)"
 }
 
+paseo_local_buildx_with_local_cache() {
+  local cache_dir cache_tmp
+  cache_dir="$1"
+  shift
+  cache_tmp="${cache_dir}.tmp"
+
+  rm -rf "${cache_tmp}"
+  mkdir -p "$(dirname "${cache_dir}")"
+
+  if [ -d "${cache_dir}" ]; then
+    docker buildx build \
+      --cache-from "type=local,src=${cache_dir}" \
+      --cache-to "type=local,dest=${cache_tmp},mode=max" \
+      "$@"
+  else
+    docker buildx build \
+      --cache-to "type=local,dest=${cache_tmp},mode=max" \
+      "$@"
+  fi
+
+  rm -rf "${cache_dir}"
+  mv "${cache_tmp}" "${cache_dir}"
+}
+
 paseo_local_tool_bundle_dir() {
   printf 'apps/paseo/tool-bundle\n'
 }
@@ -106,13 +130,11 @@ paseo_local_build_dist() {
   tmp_dir="$(mktemp -d "${runtime_root}/dist.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
 
-  docker buildx build \
+  paseo_local_buildx_with_local_cache "${cache_dir}" \
     --builder "${POLARIS_PASEO_BUILDER_NAME}" \
     --file apps/paseo/Dockerfile.artifact \
     --target artifact-export \
     --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
-    --cache-from "type=local,src=${cache_dir}" \
-    --cache-to "type=local,dest=${cache_dir},mode=max" \
     --output "type=local,dest=${tmp_dir}" \
     .
 
@@ -144,12 +166,10 @@ paseo_local_build_tool_bundle() {
   tmp_dir="$(mktemp -d "${runtime_root}/bundle.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
 
-  docker buildx build \
+  paseo_local_buildx_with_local_cache "${cache_dir}" \
     --builder "${POLARIS_PASEO_BUILDER_NAME}" \
     --file apps/paseo/Dockerfile.tool-bundle \
     --target bundle-export \
-    --cache-from "type=local,src=${cache_dir}" \
-    --cache-to "type=local,dest=${cache_dir},mode=max" \
     --output "type=local,dest=${tmp_dir}" \
     .
 
