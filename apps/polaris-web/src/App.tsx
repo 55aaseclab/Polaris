@@ -2838,11 +2838,13 @@ function AdminPage() {
       return resolveAdminWorkspaceDisplayState({
         backendLiveness: workspace.status?.health?.backendLiveness,
         localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
+        backendReason: workspace.status?.health?.reason ?? null,
       }).shouldPoll;
     }) || Object.values(workspaceActionState).some((entry) =>
       resolveAdminWorkspaceDisplayState({
         backendLiveness: null,
         localAction: entry.kind,
+        backendReason: null,
       }).shouldPoll
     );
     if (!selectedAdminUserId || !hasTransientWorkspace) {
