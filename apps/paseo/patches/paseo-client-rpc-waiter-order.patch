@@ -1,0 +1,285 @@
+--- a/packages/client/src/daemon-client.ts
++++ b/packages/client/src/daemon-client.ts
+@@ -776,6 +776,22 @@
+   return error instanceof Error && error.message.startsWith("Timeout waiting for message");
+ }
+ 
++function isTransientTerminalRpcError(error: unknown): boolean {
++  if (!(error instanceof Error)) {
++    return false;
++  }
++  if (isWaiterTimeoutError(error)) {
++    return true;
++  }
++  const message = error.message.toLowerCase();
++  return (
++    message.includes("connection lost") ||
++    message.includes("connection timed out") ||
++    message.includes("transport disconnected") ||
++    message.includes("transport unavailable")
++  );
++}
++
+ function normalizeClientId(value: unknown): string | null {
+   if (typeof value !== "string") {
+     return null;
+@@ -1470,28 +1486,45 @@
+     timeout: number;
+     responseType: TResponseType;
+     options?: { skipQueue?: boolean };
++    retryTransientDisconnect?: boolean;
+     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
+   }): Promise<TResult> {
+-    return this.sendRequest({
+-      requestId: params.requestId,
+-      message: params.message,
+-      timeout: params.timeout,
+-      options: params.options,
+-      select: (msg) => {
+-        const correlated = msg as CorrelatedResponseMessage;
+-        if (correlated.type !== params.responseType) {
+-          return null;
+-        }
+-        const payload = correlated.payload as unknown as CorrelatedResponsePayload<TResponseType>;
+-        if (payload.requestId !== params.requestId) {
+-          return null;
+-        }
+-        if (!params.selectPayload) {
+-          return payload as TResult;
+-        }
+-        return params.selectPayload(payload);
+-      },
+-    });
++    let lastError: unknown;
++    for (let attempt = 0; attempt < 2; attempt += 1) {
++      try {
++        return await this.sendRequest({
++          requestId: params.requestId,
++          message: params.message,
++          timeout: params.timeout,
++          options: params.options,
++          select: (msg) => {
++            const correlated = msg as CorrelatedResponseMessage;
++            if (correlated.type !== params.responseType) {
++              return null;
++            }
++            const payload = correlated.payload as unknown as CorrelatedResponsePayload<TResponseType>;
++            if (payload.requestId !== params.requestId) {
++              return null;
++            }
++            if (!params.selectPayload) {
++              return payload as TResult;
++            }
++            return params.selectPayload(payload);
++          },
++        });
++      } catch (error) {
++        lastError = error;
++        if (
++          !params.retryTransientDisconnect ||
++          attempt > 0 ||
++          !isTransientTerminalRpcError(error)
++        ) {
++          throw error;
++        }
++        await this.waitForConnectedState(5000);
++      }
++    }
++    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+   }
+ 
+   private sendCorrelatedSessionRequest<
+@@ -1502,6 +1535,7 @@
+     message: { type: SessionInboundMessage["type"] } & Record<string, unknown>;
+     responseType: TResponseType;
+     timeout: number;
++    retryTransientDisconnect?: boolean;
+     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
+   }): Promise<TResult> {
+     const resolvedRequestId = this.createRequestId(params.requestId);
+@@ -1515,6 +1549,7 @@
+       responseType: params.responseType,
+       timeout: params.timeout,
+       options: { skipQueue: true },
++      ...(params.retryTransientDisconnect ? { retryTransientDisconnect: true } : {}),
+       ...(params.selectPayload ? { selectPayload: params.selectPayload } : {}),
+     });
+   }
+@@ -3512,6 +3547,7 @@
+       },
+       responseType: "file_explorer_response",
+       timeout: 10000,
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -3573,6 +3609,7 @@
+       responseType: "file.upload.response",
+       timeout: 60000,
+       options: { skipQueue: true },
++      retryTransientDisconnect: true,
+     });
+ 
+     this.sendBinaryFrame(
+@@ -3624,6 +3661,7 @@
+       },
+       responseType: "file_download_token_response",
+       timeout: 10000,
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -3639,6 +3677,7 @@
+       },
+       responseType: "project_icon_response",
+       timeout: 10000,
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -4098,6 +4137,7 @@
+       responseType: "list_terminals_response",
+       timeout: 10000,
+       options: { skipQueue: true },
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -4124,6 +4164,7 @@
+       responseType: "create_terminal_response",
+       timeout: 10000,
+       options: { skipQueue: true },
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -4143,30 +4184,43 @@
+   async subscribeTerminal(
+     terminalId: string,
+     optionsOrRequestId?:
+-      | { restore?: SubscribeTerminalRequest["restore"]; requestId?: string }
+-      | string,
++        | { restore?: SubscribeTerminalRequest["restore"]; requestId?: string }
++        | string,
+   ): Promise<SubscribeTerminalPayload> {
+     const restore = typeof optionsOrRequestId === "object" ? optionsOrRequestId.restore : undefined;
+     const requestId =
+       typeof optionsOrRequestId === "object" ? optionsOrRequestId.requestId : optionsOrRequestId;
+     const resolvedRequestId = this.createRequestId(requestId);
+-    const message = SessionInboundMessageSchema.parse({
+-      type: "subscribe_terminal_request",
+-      terminalId,
+-      requestId: resolvedRequestId,
+-      ...(restore ? { restore } : {}),
+-    });
+-    const payload = await this.sendCorrelatedRequest({
+-      requestId: resolvedRequestId,
+-      message,
+-      responseType: "subscribe_terminal_response",
+-      timeout: 10000,
+-      options: { skipQueue: true },
+-    });
+-    if (payload.error === null) {
+-      this.terminalStreams.setSlot(terminalId, payload.slot);
+-    }
+-    return payload;
++    let lastError: unknown;
++    for (let attempt = 0; attempt < 2; attempt += 1) {
++      const message = SessionInboundMessageSchema.parse({
++        type: "subscribe_terminal_request",
++        terminalId,
++        requestId: resolvedRequestId,
++        ...(restore ? { restore } : {}),
++      });
++      try {
++        const payload = await this.sendCorrelatedRequest({
++          requestId: resolvedRequestId,
++          message,
++          responseType: "subscribe_terminal_response",
++          timeout: 10000,
++          options: { skipQueue: true },
++          retryTransientDisconnect: true,
++        });
++        if (payload.error === null) {
++          this.terminalStreams.setSlot(terminalId, payload.slot);
++        }
++        return payload;
++      } catch (error) {
++        lastError = error;
++        if (attempt > 0 || !isTransientTerminalRpcError(error)) {
++          throw error;
++        }
++        await this.waitForConnectedState(5000);
++      }
++    }
++    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+   }
+ 
+   unsubscribeTerminal(terminalId: string): void {
+@@ -4246,6 +4300,7 @@
+       responseType: "capture_terminal_response",
+       timeout: 10000,
+       options: { skipQueue: true },
++      retryTransientDisconnect: true,
+     });
+   }
+ 
+@@ -4571,6 +4626,32 @@
+ 
+   private createRequestId(requestId?: string): string {
+     return requestId ?? crypto.randomUUID();
++  }
++
++  private waitForConnectedState(timeoutMs: number): Promise<boolean> {
++    if (this.connectionState.status === "connected") {
++      return Promise.resolve(true);
++    }
++    return new Promise<boolean>((resolve) => {
++      let settled = false;
++      const finish = (value: boolean) => {
++        if (settled) {
++          return;
++        }
++        settled = true;
++        clearTimeout(timeoutHandle);
++        unsubscribe();
++        resolve(value);
++      };
++      const unsubscribe = this.subscribeConnectionStatus((status) => {
++        if (status.status === "connected") {
++          finish(true);
++        }
++      });
++      const timeoutHandle = setTimeout(() => {
++        finish(this.connectionState.status === "connected");
++      }, timeoutMs);
++    });
+   }
+ 
+   getLastServerInfoMessage(): ServerInfoStatusPayload | null {
+@@ -4959,6 +5040,8 @@
+   }
+ 
+   private handleSessionMessage(msg: SessionOutboundMessage): void {
++    this.resolveWaiters(msg);
++
+     if (msg.type === "status") {
+       const serverInfo = parseServerInfoStatusPayload(msg.payload);
+       if (serverInfo) {
+@@ -5004,11 +5087,13 @@
+     const event = this.toEvent(msg);
+     if (event) {
+       for (const handler of this.eventListeners) {
+-        handler(event);
++        try {
++          handler(event);
++        } catch {
++          // no-op
++        }
+       }
+     }
+-
+-    this.resolveWaiters(msg);
+   }
+ 
+   private resolveWaiters(msg: SessionOutboundMessage): void {

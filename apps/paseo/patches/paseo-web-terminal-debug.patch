@@ -1,0 +1,210 @@
+--- a/packages/app/src/screens/workspace/terminals/use-workspace-terminals.ts
++++ b/packages/app/src/screens/workspace/terminals/use-workspace-terminals.ts
+@@ -124,6 +124,12 @@
+       if (!client || !workspaceDirectory) {
+         throw new Error(t("workspace.terminal.hostDisconnected"));
+       }
++      console.info("[Paseo][TerminalCreate] request", {
++        serverId: normalizedServerId,
++        workspaceId: normalizedWorkspaceId || null,
++        workspaceDirectory,
++        profileName: _input?.profile?.name ?? null,
++      });
+       const payload = _input?.profile
+         ? await client.createTerminal(workspaceDirectory, _input.profile.name, undefined, {
+             command: _input.profile.command,
+@@ -139,6 +145,12 @@
+       if (!payload.terminal && payload.error) {
+         throw new Error(payload.error);
+       }
++      console.info("[Paseo][TerminalCreate] response", {
++        serverId: normalizedServerId,
++        workspaceId: normalizedWorkspaceId || null,
++        terminalId: payload.terminal?.id ?? null,
++        error: payload.error ?? null,
++      });
+       return payload;
+     },
+     onSuccess: (payload, createInput) => {
+@@ -162,6 +174,11 @@
+       }
+     },
+     onError: (error: unknown) => {
++      console.warn("[Paseo][TerminalCreate] error", {
++        serverId: normalizedServerId,
++        workspaceId: normalizedWorkspaceId || null,
++        error: error instanceof Error ? error.message : String(error),
++      });
+       onTerminalCreateFailed(error instanceof Error ? error.message : String(error));
+     },
+   });
+--- a/packages/app/src/terminal/runtime/terminal-stream-controller.ts
++++ b/packages/app/src/terminal/runtime/terminal-stream-controller.ts
+@@ -85,10 +85,17 @@
+       this.options.client.unsubscribeTerminal(previousTerminalId);
+     }
+     if (!nextTerminalId) {
++      console.info("[Paseo][TerminalAttach] clear", {
++        previousTerminalId,
++      });
+       this.options.onStatusChange?.({ terminalId: null, isAttaching: false, error: null });
+       return;
+     }
+     const restore = this.options.getRestoreOptions?.();
++    console.info("[Paseo][TerminalAttach] subscribe start", {
++      terminalId: nextTerminalId,
++      restore: restore ?? null,
++    });
+     this.options.onStatusChange?.({ terminalId: nextTerminalId, isAttaching: true, error: null });
+     void this.options.client
+       .subscribeTerminal(nextTerminalId, restore ? { restore } : undefined)
+@@ -97,6 +104,10 @@
+           return;
+         }
+         if (payload.error) {
++          console.warn("[Paseo][TerminalAttach] subscribe payload error", {
++            terminalId: nextTerminalId,
++            error: payload.error,
++          });
+           this.terminalId = null;
+           this.options.onStatusChange?.({
+             terminalId: nextTerminalId,
+@@ -113,6 +124,10 @@
+             cols: preferredSize.cols,
+           });
+         }
++        console.info("[Paseo][TerminalAttach] subscribe success", {
++          terminalId: nextTerminalId,
++          resized: Boolean(preferredSize),
++        });
+         this.options.onStatusChange?.({
+           terminalId: nextTerminalId,
+           isAttaching: false,
+@@ -124,6 +139,10 @@
+         if (this.disposed || this.terminalId !== nextTerminalId) {
+           return;
+         }
++        console.warn("[Paseo][TerminalAttach] subscribe exception", {
++          terminalId: nextTerminalId,
++          error: error instanceof Error ? error.message : String(error),
++        });
+         this.terminalId = null;
+         this.options.onStatusChange?.({
+           terminalId: nextTerminalId,
+--- a/packages/app/src/components/terminal-pane.tsx
++++ b/packages/app/src/components/terminal-pane.tsx
+@@ -206,6 +206,7 @@
+     () => getWorkspaceTerminalSession({ scopeKey }),
+     [scopeKey],
+   );
++  const needsRendererReadyAttachGate = typeof document !== "undefined";
+   const [isAttaching, setIsAttaching] = useState(false);
+   const [streamError, setStreamError] = useState<string | null>(null);
+   const [rendererReadyStreamKey, setRendererReadyStreamKey] = useState<string | null>(null);
+@@ -246,6 +247,11 @@
+   }, [isMobile, isWorkspaceFocused, mobileView]);
+   const handleRendererReadyChange = useCallback(
+     (change: TerminalRendererReadyChange) => {
++      console.info("[Paseo][TerminalPane] renderer ready change", {
++        streamKey: change.streamKey,
++        isReady: change.isReady,
++        terminalStreamKey,
++      });
+       setRendererReadyStreamKey((current) => applyTerminalRendererReadyChange(current, change));
+       if (!shouldReplayTerminalSnapshotForRenderer({ change, terminalStreamKey })) {
+         return;
+@@ -258,6 +264,32 @@
+     },
+     [terminalId, terminalStreamKey, workspaceTerminalSession.snapshots],
+   );
++  const canAttachTerminal = useMemo(
++    () =>
++      !needsRendererReadyAttachGate || rendererReadyStreamKey === terminalStreamKey,
++    [needsRendererReadyAttachGate, rendererReadyStreamKey, terminalStreamKey],
++  );
++
++  useEffect(() => {
++    console.info("[Paseo][TerminalPane] attach gate", {
++      terminalId,
++      terminalStreamKey,
++      rendererReadyStreamKey,
++      needsRendererReadyAttachGate,
++      canAttachTerminal,
++      isWorkspaceFocused,
++      isPaneFocused,
++    });
++  }, [
++    canAttachTerminal,
++    isPaneFocused,
++    isWorkspaceFocused,
++    needsRendererReadyAttachGate,
++    rendererReadyStreamKey,
++    terminalId,
++    terminalStreamKey,
++  ]);
++
+   useEffect(() => {
+     if (isMobile || !isPaneFocused || !terminalId) {
+       lastAutoFocusKeyRef.current = null;
+@@ -378,9 +410,16 @@
+   }, [scopeKey]);
+ 
+   const handleStreamControllerStatus = useCallback((status: TerminalStreamControllerStatus) => {
++    console.info("[Paseo][TerminalPane] stream status", {
++      terminalId: status.terminalId,
++      isAttaching: status.isAttaching,
++      error: status.error,
++      paneTerminalId: terminalId,
++      terminalStreamKey,
++    });
+     setIsAttaching(status.isAttaching);
+     setStreamError(status.error);
+-  }, [isPaneFocused, isWorkspaceFocused, terminalId]);
++  }, [terminalId, terminalStreamKey]);
+ 
+   useEffect(() => {
+     streamControllerRef.current?.dispose();
+@@ -425,8 +464,13 @@
+     });
+ 
+     streamControllerRef.current = controller;
++    console.info("[Paseo][TerminalPane] controller setTerminal initial", {
++      paneTerminalId: terminalIdRef.current,
++      canAttachTerminal,
++      isWorkspaceFocused,
++    });
+     controller.setTerminal({
+-      terminalId: isWorkspaceFocused ? terminalIdRef.current : null,
++      terminalId: isWorkspaceFocused && canAttachTerminal ? terminalIdRef.current : null,
+     });
+ 
+     return () => {
+@@ -437,6 +481,7 @@
+     };
+   }, [
+     client,
++    canAttachTerminal,
+     handleStreamControllerStatus,
+     isConnected,
+     isWorkspaceFocused,
+@@ -446,11 +491,18 @@
+ 
+   useEffect(() => {
+     pendingTerminalInputRef.current = [];
+-    const nextTerminalId = isWorkspaceFocused ? terminalId : null;
++    const nextTerminalId = isWorkspaceFocused && canAttachTerminal ? terminalId : null;
++    console.info("[Paseo][TerminalPane] controller setTerminal update", {
++      paneTerminalId: terminalId,
++      nextTerminalId,
++      canAttachTerminal,
++      isWorkspaceFocused,
++      isPaneFocused,
++    });
+     streamControllerRef.current?.setTerminal({
+       terminalId: nextTerminalId,
+     });
+-  }, [isPaneFocused, isWorkspaceFocused, terminalId]);
++  }, [canAttachTerminal, isPaneFocused, isWorkspaceFocused, terminalId]);
+ 
+   const enqueuePendingTerminalInput = useCallback((entry: PendingTerminalInput) => {
+     const queue = pendingTerminalInputRef.current;
