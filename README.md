@@ -23,6 +23,19 @@ bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 
 You can also start it through the `stack` service in `paseo.json`.
 
+When you start `polaris server` or `polaris executor` outside the local stack
+wrapper, keep the same runtime data root in every process. In local
+development that usually means exporting:
+
+```bash
+POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
+POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
+POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
+```
+
+If the server and executor point at different `POLARIS_DATA_ROOT` values, the
+portal can show workspace state that the executor cannot resolve.
+
 Local development requires `.env.dev`.
 
 Live-auth tests use `.env.test`.
@@ -57,6 +70,34 @@ VITE_CLERK_SIGN_IN_URL=http://127.0.0.1:8000/sign-in/
 VITE_CLERK_SIGN_UP_URL=http://127.0.0.1:8000/sign-up/
 CLERK_SECRET_KEY=sk_test_xxx
 ```
+
+## Workspace Skills
+
+Polaris splits skills into two layers:
+
+- user registry: declarative skill descriptors only
+- workspace runtime: materialized installs inside the running workspace
+
+Current CLI surface:
+
+```bash
+pnpm --dir apps/polaris run polaris -- user skill list <user>
+pnpm --dir apps/polaris run polaris -- user skill add <user> --source <repo-or-source> --skill <skillName> [--harness codex|claude]
+pnpm --dir apps/polaris run polaris -- user skill remove <user> <skillId>
+
+pnpm --dir apps/polaris run polaris -- skill-list <workspace> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- skill-install <workspace> <skillId> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- skill-uninstall <workspace> <skillId> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- skill-sync <workspace> --user <user> --harness codex
+```
+
+Current runtime behavior:
+
+- `codex`: Polaris uses `skills` as a downloader, then copies the installed
+  skill into `/identity/codex/skills`
+- `claude`: Polaris installs directly into `CLAUDE_HOME/skills`
+- runtime skill listing is resolved from the running backend with `docker exec`
+  or `kubectl exec`, not from host-side path inspection
 
 ## Local CI
 

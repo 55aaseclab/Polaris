@@ -10,6 +10,7 @@ import {
   type ManagedHarness,
 } from "../config/credential-catalog.js";
 import {
+  SKILL_HARNESSES,
   isSkillHarness,
   listInstalledWorkspaceSkills,
   listUserSkills,
@@ -209,9 +210,21 @@ function runChecked(
     );
   }
   if (result.status !== 0) {
+    const stdout = stripAnsi(String(result.stdout || "")).trim();
+    const stderr = stripAnsi(String(result.stderr || "")).trim();
+    const significantStderr = stderr
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^npm notice\b/ui.test(line))
+      .filter((line) => !/^npm warn Unknown project config "store-dir"/ui.test(line))
+      .join("\n");
+    const details = [
+      stdout ? `stdout:\n${stdout}` : "",
+      significantStderr ? `stderr:\n${significantStderr}` : "",
+    ].filter(Boolean).join("\n\n");
     throw new Error(
-      (result.stderr || result.stdout || "")
-        .trim() || `Command failed (${result.status ?? 1}): ${command} ${args.join(" ")}`,
+      details || `Command failed (${result.status ?? 1}): ${command} ${args.join(" ")}`,
     );
   }
   return {
@@ -222,6 +235,10 @@ function runChecked(
 
 function q(value: string): string {
   return JSON.stringify(value);
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/gu, "");
 }
 
 async function captureStdout<T>(
@@ -315,6 +332,109 @@ function runWorkspaceShell(workspace: WorkspaceSpec, script: string): { stdout: 
   }
 }
 
+function listWorkspaceSkillsScript(root: string): string {
+  return [
+    "set -euo pipefail",
+    `if [ ! -d ${q(root)} ]; then exit 0; fi`,
+    `find ${q(root)} -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort`,
+  ].join("\n");
+}
+
+async function listInstalledWorkspaceSkillsResolved(args: {
+  workspace: WorkspaceSpec;
+  harness?: SkillHarness;
+}): Promise<Array<{ harness: SkillHarness; skills: string[] }>> {
+  const harnesses = args.harness ? [args.harness] : [...SKILL_HARNESSES];
+  const runningSupported =
+    (args.workspace.backend.kind === "docker" || args.workspace.backend.kind === "pod");
+  if (!runningSupported) {
+    const installed = listInstalledWorkspaceSkills(args);
+    logInfo("executor", "workspace-skill-list-resolved", {
+      userId: args.workspace.userProfile.id,
+      workspace: args.workspace.identity.projectName,
+      backend: args.workspace.backend.kind,
+      mode: "host-fallback-unsupported-backend",
+      installed,
+    });
+    return installed;
+  }
+  const observation = await getBackendDriver(args.workspace.backend.kind).inspect(args.workspace);
+  if (!observation.backend.exists || !observation.backend.running) {
+    const installed = listInstalledWorkspaceSkills(args);
+    logInfo("executor", "workspace-skill-list-resolved", {
+      userId: args.workspace.userProfile.id,
+      workspace: args.workspace.identity.projectName,
+      backend: args.workspace.backend.kind,
+      mode: "host-fallback-not-running",
+      backendExists: observation.backend.exists,
+      backendRunning: observation.backend.running,
+      installed,
+    });
+    return installed;
+  }
+  const installed = harnesses.map((harness) => {
+    const root = resolveWorkspaceSkillInstallRoot(args.workspace, harness);
+    const output = runWorkspaceShell(
+      args.workspace,
+      listWorkspaceSkillsScript(root),
+    ).stdout;
+    const skills = output
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !line.startsWith("."))
+      .sort((left, right) => left.localeCompare(right));
+    return { harness, skills };
+  });
+  logInfo("executor", "workspace-skill-list-resolved", {
+    userId: args.workspace.userProfile.id,
+    workspace: args.workspace.identity.projectName,
+    backend: args.workspace.backend.kind,
+    mode: "runtime-exec",
+    installed,
+  });
+  return installed;
+}
+
+function removeWorkspaceSkillScript(root: string, skillId: string): string {
+  const target = path.posix.join(root, skillId);
+  return [
+    "set -euo pipefail",
+    `if [ -d ${q(target)} ]; then`,
+    `  rm -rf ${q(target)}`,
+    "  printf 'true\\n'",
+    "else",
+    "  printf 'false\\n'",
+    "fi",
+  ].join("\n");
+}
+
+async function removeInstalledWorkspaceSkillResolved(args: {
+  workspace: WorkspaceSpec;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{ harness: SkillHarness; skillId: string; removed: boolean }> {
+  const runningSupported =
+    (args.workspace.backend.kind === "docker" || args.workspace.backend.kind === "pod");
+  if (!runningSupported) {
+    return removeInstalledWorkspaceSkill(args);
+  }
+  const observation = await getBackendDriver(args.workspace.backend.kind).inspect(args.workspace);
+  if (!observation.backend.exists || !observation.backend.running) {
+    return removeInstalledWorkspaceSkill(args);
+  }
+  const root = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
+  const output = runWorkspaceShell(
+    args.workspace,
+    removeWorkspaceSkillScript(root, args.skillId),
+  ).stdout.trim();
+  return {
+    harness: args.harness,
+    skillId: args.skillId,
+    removed: output === "true",
+  };
+}
+
 function workspaceSkillInstallScript(args: {
   workspace: WorkspaceSpec;
   harness: SkillHarness;
@@ -325,23 +445,108 @@ function workspaceSkillInstallScript(args: {
   const installRoot = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
   const assistantHome = path.posix.dirname(installRoot);
   const installTarget = path.posix.join(installRoot, args.skillId);
+  const scratchHome = path.posix.join(
+    args.workspace.attachments.workspaceData.mountRoot,
+    ".runtime",
+    "skills",
+    args.workspace.identity.projectName,
+    args.harness,
+  );
+  const commandArgs = materializedSkillCommandArgs(
+    args.packageName,
+    args.commandArgs,
+    args.harness,
+  );
   const command = [
     "npx",
     "-y",
     args.packageName,
-    ...args.commandArgs,
+    ...commandArgs,
   ].map((part) => q(part)).join(" ");
+  const directInstall = args.harness === "claude";
   return [
     "set -euo pipefail",
     ...(args.harness === "codex"
       ? [`export CODEX_HOME=${q(assistantHome)}`]
       : [`export CLAUDE_HOME=${q(assistantHome)}`]),
+    `export HOME=${q(scratchHome)}`,
     "export npm_config_cache=/tmp/npm-cache",
-    `mkdir -p ${q(assistantHome)} ${q(installRoot)} /tmp/npm-cache`,
+    `mkdir -p ${q(assistantHome)} ${q(installRoot)} ${q(scratchHome)} /tmp/npm-cache`,
+    `cd ${q(scratchHome)}`,
+    `rm -f ${q(path.posix.join(scratchHome, "skills-lock.json"))}`,
+    `rm -rf ${q(path.posix.join(scratchHome, ".agents", "skills", args.skillId))}`,
+    `rm -rf ${q(path.posix.join(scratchHome, ".claude", "skills", args.skillId))}`,
     `rm -rf ${q(installTarget)}`,
     command,
-    `test -d ${q(installTarget)}`,
+    `rm -f ${q(path.posix.join(scratchHome, "skills-lock.json"))}`,
+    ...(directInstall
+      ? [`test -d ${q(installTarget)}`]
+      : [
+        `if [ -d ${q(installTarget)} ]; then exit 0; fi`,
+        `for candidate in ${q(path.posix.join(scratchHome, ".agents", "skills", args.skillId))} ${q(path.posix.join(scratchHome, ".claude", "skills", args.skillId))}; do`,
+        "  if [ -d \"$candidate\" ]; then",
+        `    mkdir -p ${q(installRoot)}`,
+        `    cp -a "$candidate" ${q(installTarget)}`,
+        "    exit 0",
+        "  fi",
+        "done",
+        `echo "skill install completed but no materialized directory was found for ${args.skillId}" >&2`,
+        "exit 1",
+      ]),
   ].join("\n");
+}
+
+function materializedSkillCommandArgs(
+  packageName: string,
+  commandArgs: string[],
+  harness: SkillHarness,
+): string[] {
+  if (packageName !== "skills" || commandArgs[0] !== "add") {
+    return commandArgs;
+  }
+  const filtered = commandArgs.filter((arg) => arg !== "--global");
+  if (harness !== "claude") {
+    return filtered;
+  }
+  if (filtered.includes("--global")) {
+    return filtered;
+  }
+  return [
+    filtered[0] ?? "",
+    filtered[1] ?? "",
+    "--global",
+    ...filtered.slice(2),
+  ].filter(Boolean);
+}
+
+function workspaceSkillInstallDebug(args: {
+  workspace: WorkspaceSpec;
+  harness: SkillHarness;
+  packageName: string;
+  commandArgs: string[];
+  skillId: string;
+}): {
+  installRoot: string;
+  assistantHome: string;
+  installTarget: string;
+  finalCommandArgs: string[];
+  materializationMode: "direct" | "download-copy";
+} {
+  const installRoot = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
+  const assistantHome = path.posix.dirname(installRoot);
+  const installTarget = path.posix.join(installRoot, args.skillId);
+  const finalCommandArgs = materializedSkillCommandArgs(
+    args.packageName,
+    args.commandArgs,
+    args.harness,
+  );
+  return {
+    installRoot,
+    assistantHome,
+    installTarget,
+    finalCommandArgs,
+    materializationMode: args.harness === "claude" ? "direct" : "download-copy",
+  };
 }
 
 function assertWorkspaceSkillRuntimeSupported(workspace: WorkspaceSpec): void {
@@ -650,7 +855,7 @@ export async function listWorkspaceSkills(input: {
     input.workspaceRef,
     input.userProfileId,
   );
-  const installed = listInstalledWorkspaceSkills({
+  const installed = await listInstalledWorkspaceSkillsResolved({
     workspace,
     ...(input.harness ? { harness: input.harness } : {}),
   });
@@ -681,6 +886,28 @@ export async function skillInstallWorkspace(input: {
       `Skill '${input.skillId}' belongs to harness '${skill.harness}', not '${input.harness}'`,
     );
   }
+  const debug = workspaceSkillInstallDebug({
+    workspace,
+    harness: input.harness,
+    packageName: skill.packageName,
+    commandArgs: skill.args,
+    skillId: skill.id,
+  });
+  logInfo("executor", "workspace-skill-install-command", {
+    userId: workspace.userProfile.id,
+    workspace: workspace.identity.projectName,
+    harness: input.harness,
+    skillId: skill.id,
+    packageName: skill.packageName,
+    source: skill.source,
+    selectedSkillName: skill.selectedSkillName,
+    originalArgs: skill.args,
+    finalArgs: debug.finalCommandArgs,
+    materializationMode: debug.materializationMode,
+    assistantHome: debug.assistantHome,
+    installRoot: debug.installRoot,
+    installTarget: debug.installTarget,
+  });
   runWorkspaceShell(
     workspace,
     workspaceSkillInstallScript({
@@ -691,7 +918,7 @@ export async function skillInstallWorkspace(input: {
       skillId: skill.id,
     }),
   );
-  const installed = listInstalledWorkspaceSkills({
+  const installed = await listInstalledWorkspaceSkillsResolved({
     workspace,
     harness: input.harness,
   });
@@ -725,12 +952,12 @@ export async function skillUninstallWorkspace(input: {
   removed: boolean;
 }> {
   const workspace = await loadRunningWorkspaceForSkillAction(input);
-  const removed = removeInstalledWorkspaceSkill({
+  const removed = await removeInstalledWorkspaceSkillResolved({
     workspace,
     harness: input.harness,
     skillId: input.skillId,
   });
-  const installed = listInstalledWorkspaceSkills({
+  const installed = await listInstalledWorkspaceSkillsResolved({
     workspace,
     harness: input.harness,
   });
@@ -765,10 +992,10 @@ export async function skillSyncWorkspace(input: {
   const workspace = await loadRunningWorkspaceForSkillAction(input);
   const declared = listUserSkills(workspace.userProfile.id)
     .filter((skill) => skill.harness === input.harness);
-  const installedState = listInstalledWorkspaceSkills({
+  const installedState = (await listInstalledWorkspaceSkillsResolved({
     workspace,
     harness: input.harness,
-  })[0];
+  }))[0];
   const installedIds = new Set(installedState?.skills ?? []);
   const declaredIds = new Set(declared.map((skill) => skill.id));
   const installedNow: string[] = [];
@@ -778,6 +1005,28 @@ export async function skillSyncWorkspace(input: {
     if (installedIds.has(skill.id)) {
       continue;
     }
+    const debug = workspaceSkillInstallDebug({
+      workspace,
+      harness: input.harness,
+      packageName: skill.packageName,
+      commandArgs: skill.args,
+      skillId: skill.id,
+    });
+    logInfo("executor", "workspace-skill-sync-install-command", {
+      userId: workspace.userProfile.id,
+      workspace: workspace.identity.projectName,
+      harness: input.harness,
+      skillId: skill.id,
+      packageName: skill.packageName,
+      source: skill.source,
+      selectedSkillName: skill.selectedSkillName,
+      originalArgs: skill.args,
+      finalArgs: debug.finalCommandArgs,
+      materializationMode: debug.materializationMode,
+      assistantHome: debug.assistantHome,
+      installRoot: debug.installRoot,
+      installTarget: debug.installTarget,
+    });
     runWorkspaceShell(
       workspace,
       workspaceSkillInstallScript({
@@ -795,7 +1044,7 @@ export async function skillSyncWorkspace(input: {
     if (declaredIds.has(skillId)) {
       continue;
     }
-    removeInstalledWorkspaceSkill({
+    await removeInstalledWorkspaceSkillResolved({
       workspace,
       harness: input.harness,
       skillId,
@@ -803,7 +1052,7 @@ export async function skillSyncWorkspace(input: {
     removedNow.push(skillId);
   }
 
-  const installed = listInstalledWorkspaceSkills({
+  const installed = await listInstalledWorkspaceSkillsResolved({
     workspace,
     harness: input.harness,
   });

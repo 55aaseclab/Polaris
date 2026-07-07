@@ -451,6 +451,11 @@ export function listOwnedWorkspaces(userId: string): string[] {
   return fs
     .readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) =>
+      PORTAL_DRIVER_TARGETS.some((target) =>
+        fs.existsSync(path.join(root, entry.name, workspaceBackendFile(target))),
+      ),
+    )
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
 }
