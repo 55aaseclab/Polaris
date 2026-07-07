@@ -38,30 +38,12 @@
 
 影响因素至少包括：
 
-- 不要缺基础工具
-- 网络访问是否稳定
-- CPU 性能是否足够
-- 工作空间是否已经预热
-- 文件挂载和 I/O 是否拖慢操作
-- 首次启动时间是否过长
-
-### 我们已经实现的部分
-
-- 已有 workspace lifecycle
-- 已有 backend driver 路径
-- 已有状态刷新和运行状态报告链路
-- 已有默认 Docker-only 创建路径，降低首次路径复杂度
-
-### 我们还没有实现的部分
-
-- 面向 non-CS 用户的极速任务入口
-- 面向 non-CS 用户的速度指标体系
-- 明确可感知的启动时间优化承诺
-- 工具齐全度的产品化默认说明
-- 面向用户的性能反馈闭环
-
-当前可以说我们有底层运行能力。
-还不能说我们已经交付了稳定的 non-CS 用户“快感”。
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 不要缺基础工具
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> 网络访问是否稳定
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> CPU 性能是否足够
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 工作空间是否已经预热
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> 文件挂载和 I/O 是否拖慢操作
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> 首次启动时间是否过长
 
 ## 需求主题二：对标 GPT 网页版
 
@@ -78,9 +60,10 @@
 严格按仓库当前能力说，我们已经有：
 
 - 认证和用户范围控制
+- 一个明显可对标 GPT 网页版的聊天主入口
 - workspace 连续环境
-- 文件预览接口
-- runtime 侧的工作空间承载能力
+- 文件上传和部分文件预览
+- 后端已经能支撑工作空间持续运行
 
 这些能力最多只能支撑下面这类潜在优势：
 
@@ -91,20 +74,35 @@
 
 从个人用户视角看，当前还没有直接实现：
 
-- 一个明显可对标 GPT 网页版的聊天主入口
-- 一个对个人用户友好的统一多轮对话产品面，
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> `search chats`，也就是可搜索历史对话的能力
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> `library`，也就是可回看、复用、管理历史内容和资产的入口
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> 一个对个人用户友好的统一多轮对话产品面，
   并覆盖语音沟通、图片生成
-- 文件上传后立即交互的极简主路径
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> `MCP apps` 和 `skills` 的产品化入口与安装使用路径
 
 所以现在还不能把 Polaris 直接包装成
 “面向 non-CS 用户的 GPT 网页版替代品”。
 
-## 需求主题三：文件处理与可视化
+同时这里也已经有一个可成立的差异点：
+
+- `ChatGPT` 不支持安装 `skills`
+- Polaris 已经能支持 `skills` 的安装和使用路径
+- 所以这部分已经可以作为对标 GPT 网页版时的差异化能力
+
+## 需求主题三：文件处理和可视化
 
 最新用户情报说明，这一类用户也会拿 Polaris 和 `VS Code` 比。
 
 但他们比较的不是写代码体验。
-他们比较的是文件处理范围和文件工作流。
+他们比较的是文件处理范围、可视化能力、内容工作流和结果交付能力。
+
+这里的文件范围主要包括：
+
+- 文本
+- 表格
+- 幻灯片
+- 图片
+- 视频
 
 他们会直接比较：
 
@@ -113,26 +111,6 @@
 - 谁更适合导出和分享结果
 - 谁更少在 IDE、聊天页、Office、网盘之间来回切换
 - 谁能把前端直接做成 `Word`、`Slides`、`Sheets`、`PS`、视频制作插件
-
-### 我们已经实现的部分
-
-- 已有工作空间模型
-- 已有受控的文件预览接口
-
-### 我们还没有实现的部分
-
-- 面向 Office 文件的可用展示体验
-- 面向非代码材料的产品化处理能力
-- 一个明确强于 `VS Code` 和通用 AI 助手的文档和表格工作流
-- 一套可直接挂到 `Word`、`Slides`、`Sheets`、`PS`、视频制作流程里的前端插件形态
-
-所以当前这部分只能说有底层预览入口。
-还不能说已经形成面向 non-CS 用户的文件优势。
-
-## 需求主题四：视频制作
-
-### 用户关心什么
-
 - 能不能把文字或图片直接变成视频
 - 能不能快速做出短视频、讲解视频、演示视频
 - 能不能和文档、图片、脚本材料串起来形成内容工作流
@@ -140,11 +118,17 @@
 
 ### 我们已经实现的部分
 
+- 已有工作空间模型
+- 已有受控的文件上传和部分文件预览
 - 有连续 workspace 环境
 - 有文件预览和资产承载基础
 
 ### 我们还没有实现的部分
 
+- 面向 Office 文件的可用展示体验
+- 面向非代码材料的产品化处理能力
+- 一个明确强于 `VS Code` 和通用 AI 助手的文档和表格工作流
+- 一套可直接挂到 `Word`、`Slides`、`Sheets`、`PS`、视频制作流程里的前端插件形态
 - 面向个人用户的视频生成产品入口
 - 文本、图片、脚本到视频的任务编排
 - 视频预览、导出、交付链路
@@ -152,10 +136,10 @@
 
 当前这一块更准确的状态是：
 
-- 有运行底座
-- 没有成型的视频制作产品能力
+- 有底层文件和资产能力
+- 还没有形成面向 non-CS 用户的文件优势和视频制作产品能力
 
-## 需求主题五：多文件传输与下载
+## 需求主题四：多文件传输与下载
 
 ### 用户关心什么
 
