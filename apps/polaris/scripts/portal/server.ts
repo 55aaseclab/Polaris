@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
+import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import {
   listPortalProfiles,
@@ -20,27 +21,34 @@ import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   createPortalCredential,
+  createPortalSkill,
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
   deletePortalUser,
   permanentlyDeletePortalArchivedWorkspace,
   getPortalCredentialCatalog,
   deletePortalCredential,
+  deletePortalSkill,
+  installPortalWorkspaceSkill,
+  listPortalWorkspaceSkills,
   readUserPortalCredentialRecord,
   deletePortalWorkspace,
   getPortalWorkspacePaseoDiagnostic,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
   listUserPortalCredentials,
+  listUserPortalSkills,
   refreshPortalWorkspace,
   readUserPortalWorkspaceAssetPreview,
   queueProvisionWorkspace,
   rebuildPortalWorkspace,
   restartPortalWorkspacePaseoDaemon,
+  syncPortalWorkspaceSkills,
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
+  uninstallPortalWorkspaceSkill,
   createPortalUser,
   updatePortalUserProfile,
   writePortalCredentialFile,
@@ -348,6 +356,88 @@ async function handleWorkspaceLiveCredentialSwitch(
   sendJson(res, 200, switched);
 }
 
+async function handleSkillCreate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const harness = (body.harness?.trim() || "codex").toLowerCase();
+  if (!isSkillHarness(harness)) {
+    badRequest(res, `unsupported skill harness '${harness}'`);
+    return;
+  }
+  const source = body.source?.trim() || "";
+  if (!source) {
+    badRequest(res, "source is required");
+    return;
+  }
+  const skillName = body.skillName?.trim() || "";
+  if (!skillName) {
+    badRequest(res, "skillName is required");
+    return;
+  }
+  const created = await createPortalSkill({
+    userId,
+    harness: harness as SkillHarness,
+    source,
+    skillName,
+    ...(body.skillId?.trim() ? { skillId: body.skillId.trim() } : {}),
+  });
+  sendJson(res, 201, created);
+}
+
+async function handleWorkspaceSkillAction(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+  action: "list" | "install" | "uninstall" | "sync",
+): Promise<void> {
+  const body = await readBody(req);
+  const harness = (body.harness?.trim() || "codex").toLowerCase();
+  if (!isSkillHarness(harness)) {
+    badRequest(res, `unsupported skill harness '${harness}'`);
+    return;
+  }
+  if (action === "list") {
+    sendJson(res, 200, await listPortalWorkspaceSkills({
+      userId,
+      workspace,
+      harness: harness as SkillHarness,
+    }));
+    return;
+  }
+  if (action === "sync") {
+    sendJson(res, 200, await syncPortalWorkspaceSkills({
+      userId,
+      workspace,
+      harness: harness as SkillHarness,
+    }));
+    return;
+  }
+  const skillId = body.skillId?.trim() || "";
+  if (!skillId) {
+    badRequest(res, "skillId is required");
+    return;
+  }
+  if (action === "install") {
+    sendJson(res, 200, await installPortalWorkspaceSkill({
+      userId,
+      workspace,
+      harness: harness as SkillHarness,
+      skillId,
+    }));
+    return;
+  }
+  sendJson(res, 200, await uninstallPortalWorkspaceSkill({
+    userId,
+    workspace,
+    harness: harness as SkillHarness,
+    skillId,
+  }));
+}
+
 async function handleProfileUpdate(
   req: IncomingMessage,
   res: ServerResponse,
@@ -590,6 +680,22 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           });
           return;
         }
+        if (segments[3] === "skills" && segments.length === 4) {
+          if (req.method === "POST") {
+            await handleSkillCreate(req, res, routeUserId);
+            return;
+          }
+          sendJson(res, 200, {
+            user: profile,
+            skills: listUserPortalSkills(routeUserId),
+          });
+          return;
+        }
+        if (segments[3] === "skills" && segments.length === 5 && req.method === "DELETE") {
+          const skillId = decodeURIComponent(segments[4]);
+          sendJson(res, 200, await deletePortalSkill(routeUserId, skillId));
+          return;
+        }
         if (segments[3] === "credentials" && segments.length === 5 && segments[4] === "catalog" && req.method === "GET") {
           sendJson(res, 200, getPortalCredentialCatalog());
           return;
@@ -674,6 +780,28 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         ) {
           await handleWorkspaceLiveCredentialSwitch(req, res, routeUserId, workspace);
           return;
+        }
+        if (
+          segments[3] === "workspaces" &&
+          segments.length === 7 &&
+          segments[5] === "skills"
+        ) {
+          if (segments[6] === "list" && req.method === "POST") {
+            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "list");
+            return;
+          }
+          if (segments[6] === "install" && req.method === "POST") {
+            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "install");
+            return;
+          }
+          if (segments[6] === "uninstall" && req.method === "POST") {
+            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "uninstall");
+            return;
+          }
+          if (segments[6] === "sync" && req.method === "POST") {
+            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "sync");
+            return;
+          }
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
           await handleWorkspaceProvision(req, res, routeUserId, workspace);

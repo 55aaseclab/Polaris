@@ -8,25 +8,38 @@ import {
   writeManagedCredentialMaterialFile,
 } from "../config/credentials.js";
 import {
+  addUserSkill,
+  createSkillsCliDescriptor,
+  listUserSkills,
+  removeUserSkill,
+  type SkillHarness,
+} from "../config/skills.js";
+import {
   isManagedHarness,
   type ManagedHarness,
 } from "../config/credential-catalog.js";
 import {
   credentialCatalog,
+  clearWorkspaceProvisionProgress,
   listArchivedWorkspaces,
   listPortalProfiles,
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
+  writeWorkspaceProvisionProgress,
   readPortalWorkspaceAssetPreview,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
   updatePortalProfile,
+  updatePortalWorkspaceAgentBinding,
+  workspaceRefFromTarget,
   type PortalArchivedWorkspaceSummary,
   type PortalCredentialSummary,
   type PortalCredentialCatalog,
   type PortalCredentialRecord,
+  type PortalSkillSummary,
   type PortalWorkspaceAssetPreview,
+  type PortalWorkspaceAgentBindingResult,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
   type PortalProfileSummary,
@@ -52,10 +65,14 @@ import {
   rebuildPortalWorkspace as rebuildPortalWorkspaceExecutor,
   reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
   restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
+  installPortalWorkspaceSkill as installPortalWorkspaceSkillExecutor,
+  listPortalWorkspaceSkills as listPortalWorkspaceSkillsExecutor,
   startPortalWorkspace as startPortalWorkspaceExecutor,
   stopPortalWorkspace as stopPortalWorkspaceExecutor,
   switchPortalWorkspace as switchPortalWorkspaceExecutor,
   switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
+  syncPortalWorkspaceSkills as syncPortalWorkspaceSkillsExecutor,
+  uninstallPortalWorkspaceSkill as uninstallPortalWorkspaceSkillExecutor,
 } from "../executor/client.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -175,6 +192,12 @@ export function listUserPortalCredentials(
   return listPortalCredentials(userId);
 }
 
+export function listUserPortalSkills(
+  userId: string,
+): PortalSkillSummary[] {
+  return listUserSkills(userId);
+}
+
 export function getPortalCredentialCatalog(): PortalCredentialCatalog {
   return credentialCatalog();
 }
@@ -199,6 +222,65 @@ export function readUserPortalWorkspaceAssetPreview(
   assetPath: string,
 ): PortalWorkspaceAssetPreview {
   return readPortalWorkspaceAssetPreview(userId, workspace, assetPath);
+}
+
+export function readUserPortalCredentialPreview(
+  userId: string,
+  assetPath: string,
+): PortalWorkspaceAssetPreview {
+  const normalized = assetPath.replace(/\\/g, "/").trim();
+  if (!normalized.startsWith("credentials/")) {
+    throw new Error("credential preview path must stay under credentials/");
+  }
+  return {
+    path: normalized,
+    content: "[credential preview hidden]",
+    truncated: false,
+  };
+}
+
+export async function createPortalSkill(input: {
+  userId: string;
+  harness: SkillHarness;
+  source: string;
+  skillId?: string;
+  skillName: string;
+}): Promise<PortalSkillSummary> {
+  const descriptor = createSkillsCliDescriptor({
+    source: input.source,
+    harness: input.harness,
+    selectedSkillName: input.skillName,
+  });
+  return withUserMutationLock(import.meta.url, input.userId, async () =>
+    addUserSkill({
+      userProfileId: input.userId,
+      skillId: input.skillId?.trim() || descriptor.suggestedSkillId,
+      harness: input.harness,
+      packageName: descriptor.packageName,
+      args: descriptor.args,
+      source: descriptor.source,
+      selectedSkillName: descriptor.selectedSkillName,
+    })
+  );
+}
+
+export async function deletePortalSkill(
+  userId: string,
+  skillId: string,
+): Promise<{
+  skill: {
+    id: string;
+    userId: string;
+    removed: boolean;
+    registryPath: string;
+  };
+}> {
+  return withUserMutationLock(import.meta.url, userId, async () => ({
+    skill: removeUserSkill({
+      userProfileId: userId,
+      skillId,
+    }),
+  }));
 }
 
 export async function createPortalCredential(input: {
@@ -236,6 +318,107 @@ export async function createPortalCredential(input: {
     }
     return summary;
   });
+}
+
+export async function listPortalWorkspaceSkills(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+}): Promise<{
+  workspace: string;
+  userId: string;
+  installed: Array<{ harness: SkillHarness; skills: string[] }>;
+}> {
+  return listPortalWorkspaceSkillsExecutor(input);
+}
+
+export async function installPortalWorkspaceSkill(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  installed: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  packageName: string;
+}> {
+  return installPortalWorkspaceSkillExecutor(input);
+}
+
+export async function uninstallPortalWorkspaceSkill(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  uninstalled: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  removed: boolean;
+}> {
+  return uninstallPortalWorkspaceSkillExecutor(input);
+}
+
+export async function syncPortalWorkspaceSkills(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+}): Promise<{
+  synced: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  installed: string[];
+  removed: string[];
+}> {
+  return syncPortalWorkspaceSkillsExecutor(input);
+}
+
+export async function bindPortalWorkspaceAgent(input: {
+  userId: string;
+  workspace: string;
+  driver: PortalDriverTarget;
+  credentialId: string;
+}): Promise<PortalWorkspaceAgentBindingResult> {
+  const updated = updatePortalWorkspaceAgentBinding({
+    userId: input.userId,
+    workspace: input.workspace,
+    target: input.driver,
+    credentialId: input.credentialId,
+    enabled: true,
+  });
+  await refreshPortalWorkspaceStatus(input.userId, input.workspace);
+  return {
+    enabled: true,
+    driver: workspaceRefFromTarget(input.workspace, input.driver),
+    restarted: true,
+    credentialBindings: updated.credentialBindings,
+  };
+}
+
+export async function unbindPortalWorkspaceAgent(input: {
+  userId: string;
+  workspace: string;
+  driver: PortalDriverTarget;
+}): Promise<PortalWorkspaceAgentBindingResult> {
+  const updated = updatePortalWorkspaceAgentBinding({
+    userId: input.userId,
+    workspace: input.workspace,
+    target: input.driver,
+    enabled: false,
+  });
+  await refreshPortalWorkspaceStatus(input.userId, input.workspace);
+  return {
+    enabled: false,
+    driver: workspaceRefFromTarget(input.workspace, input.driver),
+    restarted: true,
+    credentialBindings: updated.credentialBindings,
+  };
 }
 
 export async function deletePortalCredential(
@@ -306,6 +489,27 @@ export async function queueProvisionWorkspace(
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
   });
+}
+
+export async function cancelPortalWorkspaceProvision(
+  userId: string,
+  workspace: string,
+): Promise<{ cancelled: true; workspace: string }> {
+  writeWorkspaceProvisionProgress(userId, workspace, {
+    userId,
+    workspace,
+    phase: "cancelled",
+    status: "cancelled",
+    message: "workspace provision cancelled",
+    errorCode: "workspace-provision-cancelled",
+    retryable: true,
+    done: true,
+    updatedAt: new Date().toISOString(),
+  });
+  return {
+    cancelled: true,
+    workspace,
+  };
 }
 
 export async function switchPortalWorkspace(

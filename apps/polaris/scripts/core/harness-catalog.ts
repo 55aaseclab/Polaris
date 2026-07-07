@@ -1,5 +1,5 @@
 export interface HarnessToolDefinition {
-  id: "paseo" | "codex" | "claude" | "copilot" | "opencode" | "pi" | "openspec" | "pnpm";
+  id: "paseo" | "codex" | "claude" | "copilot" | "opencode" | "pi" | "openspec" | "pnpm" | "skills";
   packageName: string;
   binName: string;
   harness: boolean;
@@ -52,6 +52,12 @@ const WORKSPACE_TOOL_CATALOG: HarnessToolDefinition[] = [
     id: "pnpm",
     packageName: "pnpm",
     binName: "pnpm",
+    harness: false,
+  },
+  {
+    id: "skills",
+    packageName: "skills",
+    binName: "skills",
     harness: false,
   },
 ];

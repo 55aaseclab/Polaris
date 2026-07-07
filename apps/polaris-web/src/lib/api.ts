@@ -105,6 +105,10 @@ export interface PortalWorkspaceStatus {
       }>;
     };
   };
+  skills?: {
+    installedByHarness?: Record<string, string[]>;
+    source?: string;
+  };
   health?: {
     backendLiveness?: string;
     workspaceReadiness?: string;
@@ -272,6 +276,20 @@ export interface PortalCredentialRecord {
   files: PortalCredentialMaterialFile[];
 }
 
+export interface PortalSkillSummary {
+  id: string;
+  userId: string;
+  harness: "codex" | "claude";
+  packageName: string;
+  args: string[];
+  command: string[];
+  label: string;
+  source?: string;
+  selectedSkillName: string;
+  registryPath: string;
+  createdAt?: string;
+}
+
 export interface PortalWorkspaceAssetPreview {
   path: string;
   content: string;
@@ -426,6 +444,50 @@ export async function listCredentials(userId: string): Promise<PortalCredentialS
     `/users/${encodeURIComponent(userId)}/credentials`,
   );
   return payload.credentials;
+}
+
+export async function listSkills(userId: string): Promise<PortalSkillSummary[]> {
+  const payload = await apiFetch<{ skills: PortalSkillSummary[] }>(
+    `/users/${encodeURIComponent(userId)}/skills`,
+  );
+  return payload.skills;
+}
+
+export async function createSkill(
+  userId: string,
+  input: {
+    harness: "codex" | "claude";
+    source: string;
+    skillId?: string;
+    skillName: string;
+  },
+): Promise<PortalSkillSummary> {
+  return apiFetch<PortalSkillSummary>(
+    `/users/${encodeURIComponent(userId)}/skills`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function deleteSkill(
+  userId: string,
+  skillId: string,
+): Promise<{
+  skill: {
+    id: string;
+    userId: string;
+    removed: boolean;
+    registryPath: string;
+  };
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/skills/${encodeURIComponent(skillId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function getCredentialCatalog(
@@ -670,6 +732,89 @@ export async function restartWorkspacePaseoDaemon(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/paseo/restart`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function listWorkspaceSkills(
+  userId: string,
+  workspace: string,
+  harness: "codex" | "claude" = "codex",
+): Promise<{
+  workspace: string;
+  userId: string;
+  installed: Array<{ harness: "codex" | "claude"; skills: string[] }>;
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/skills/list`,
+    {
+      method: "POST",
+      body: JSON.stringify({ harness }),
+    },
+  );
+}
+
+export async function installWorkspaceSkill(
+  userId: string,
+  workspace: string,
+  skillId: string,
+  harness: "codex" | "claude" = "codex",
+): Promise<{
+  installed: true;
+  workspace: string;
+  userId: string;
+  harness: "codex" | "claude";
+  skillId: string;
+  packageName: string;
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/skills/install`,
+    {
+      method: "POST",
+      body: JSON.stringify({ harness, skillId }),
+    },
+  );
+}
+
+export async function uninstallWorkspaceSkill(
+  userId: string,
+  workspace: string,
+  skillId: string,
+  harness: "codex" | "claude" = "codex",
+): Promise<{
+  uninstalled: true;
+  workspace: string;
+  userId: string;
+  harness: "codex" | "claude";
+  skillId: string;
+  removed: boolean;
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/skills/uninstall`,
+    {
+      method: "POST",
+      body: JSON.stringify({ harness, skillId }),
+    },
+  );
+}
+
+export async function syncWorkspaceSkills(
+  userId: string,
+  workspace: string,
+  harness: "codex" | "claude" = "codex",
+): Promise<{
+  synced: true;
+  workspace: string;
+  userId: string;
+  harness: "codex" | "claude";
+  installed: string[];
+  removed: string[];
+}> {
+  return apiFetch(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/skills/sync`,
+    {
+      method: "POST",
+      body: JSON.stringify({ harness }),
     },
   );
 }

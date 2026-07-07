@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
+import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { parsePortalDriverTarget } from "../core/portal.js";
 import { logError, logInfo, logWarn } from "../utils/log.js";
 import {
@@ -18,10 +19,14 @@ import {
   rebuildPortalWorkspace,
   restartPortalWorkspacePaseoDaemon,
   reportPortalWorkspaceStatus,
+  skillInstallWorkspace,
+  skillSyncWorkspace,
+  skillUninstallWorkspace,
   startPortalWorkspace,
   stopPortalWorkspace,
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
+  listWorkspaceSkills,
 } from "./operations.js";
 
 type JsonObject = Record<string, unknown>;
@@ -298,6 +303,68 @@ export function createExecutorServer(
           workspace: readRequiredString(body, "workspace"),
           harness: readRequiredString(body, "harness") as ManagedHarness,
           credentialId: readRequiredString(body, "credentialId"),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/skills/list") {
+        const body = await readBody(req);
+        const harness = readRequiredString(body, "harness");
+        if (!isSkillHarness(harness)) {
+          throw new Error(`Unsupported skill harness '${harness}'`);
+        }
+        const result = await listWorkspaceSkills({
+          workspaceRef: readRequiredString(body, "workspace"),
+          userProfileId: readRequiredString(body, "userId"),
+          harness: harness as SkillHarness,
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/skills/install") {
+        const body = await readBody(req);
+        const harness = readRequiredString(body, "harness");
+        if (!isSkillHarness(harness)) {
+          throw new Error(`Unsupported skill harness '${harness}'`);
+        }
+        const result = await skillInstallWorkspace({
+          workspaceRef: readRequiredString(body, "workspace"),
+          userProfileId: readRequiredString(body, "userId"),
+          harness: harness as SkillHarness,
+          skillId: readRequiredString(body, "skillId"),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/skills/uninstall") {
+        const body = await readBody(req);
+        const harness = readRequiredString(body, "harness");
+        if (!isSkillHarness(harness)) {
+          throw new Error(`Unsupported skill harness '${harness}'`);
+        }
+        const result = await skillUninstallWorkspace({
+          workspaceRef: readRequiredString(body, "workspace"),
+          userProfileId: readRequiredString(body, "userId"),
+          harness: harness as SkillHarness,
+          skillId: readRequiredString(body, "skillId"),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/skills/sync") {
+        const body = await readBody(req);
+        const harness = readRequiredString(body, "harness");
+        if (!isSkillHarness(harness)) {
+          throw new Error(`Unsupported skill harness '${harness}'`);
+        }
+        const result = await skillSyncWorkspace({
+          workspaceRef: readRequiredString(body, "workspace"),
+          userProfileId: readRequiredString(body, "userId"),
+          harness: harness as SkillHarness,
         });
         sendJson(res, 200, result);
         return;

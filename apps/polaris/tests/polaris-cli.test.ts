@@ -935,6 +935,106 @@ test("runCli user credential add supports non-codex harness inventory entries", 
   }
 });
 
+test("runCli user skill add, list, and remove manage declarative skill registry entries", async () => {
+  const userProfileId = uniqueProjectName("cli-user-skill");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Skill User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    const addStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "skill",
+        "add",
+        userProfileId,
+        "--source",
+        "vercel-labs/agent-skills",
+        "--skill",
+        "use-polaris",
+      ]);
+    });
+    const added = parseJsonOutput<{
+      skill: { id: string; packageName: string; args: string[]; harness: string };
+    }>(addStdout);
+    assert.equal(added.skill.id, "use-polaris");
+    assert.equal(added.skill.packageName, "skills");
+    assert.deepEqual(added.skill.args, [
+      "add",
+      "vercel-labs/agent-skills",
+      "--copy",
+      "-y",
+      "--agent",
+      "codex",
+      "--skill",
+      "use-polaris",
+    ]);
+    assert.equal(added.skill.harness, "codex");
+
+    const listStdout = await captureStdout(async () => {
+      await runCli(["user", "skill", "list", userProfileId]);
+    });
+    const listed = parseJsonOutput<{
+      skills: Array<{ id: string; command: string[] }>;
+    }>(listStdout);
+    assert.deepEqual(listed.skills[0]?.command, [
+      "npx",
+      "-y",
+      "skills",
+      "add",
+      "vercel-labs/agent-skills",
+      "--copy",
+      "-y",
+      "--agent",
+      "codex",
+      "--skill",
+      "use-polaris",
+    ]);
+
+    const registry = (yaml.load(
+      fs.readFileSync(path.join(userRoot, "skills", "use-polaris.yaml"), "utf8"),
+    ) ?? {}) as { packageName?: string; args?: string[]; source?: string; selectedSkillName?: string };
+    assert.equal(registry.packageName, "skills");
+    assert.deepEqual(registry.args, [
+      "add",
+      "vercel-labs/agent-skills",
+      "--copy",
+      "-y",
+      "--agent",
+      "codex",
+      "--skill",
+      "use-polaris",
+    ]);
+    assert.equal(registry.source, "vercel-labs/agent-skills");
+    assert.equal(registry.selectedSkillName, "use-polaris");
+
+    const removeStdout = await captureStdout(async () => {
+      await runCli(["user", "skill", "remove", userProfileId, "use-polaris"]);
+    });
+    const removed = parseJsonOutput<{
+      skill: { id: string; removed: boolean };
+    }>(removeStdout);
+    assert.equal(removed.skill.id, "use-polaris");
+    assert.equal(removed.skill.removed, true);
+    assert.equal(fs.existsSync(path.join(userRoot, "skills", "use-polaris.yaml")), false);
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
+  }
+});
+
 test("runCli live-switch stages non-codex material into user identity state", async () => {
   const project = uniqueProjectName("cli-live-switch");
   const scriptLogPath = path.join(os.tmpdir(), `${project}-live-switch-script.log`);

@@ -9,10 +9,15 @@ import {
   readUserCredentialCommand,
   writeUserCredentialCommand,
 } from "./user-credential.js";
+import {
+  addUserSkillCommand,
+  listUserSkillCommand,
+  removeUserSkillCommand,
+} from "./user-skill.js";
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- user <create|delete|credential> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- user <create|delete|credential|skill> ...",
   );
 }
 
@@ -54,6 +59,21 @@ export async function userCommand(argv: string[]): Promise<void> {
     }
     if (credentialAction === "write") {
       await writeUserCredentialCommand(credentialRest);
+      return;
+    }
+  }
+  if (subcommand === "skill") {
+    const [skillAction, ...skillRest] = rest;
+    if (skillAction === "add") {
+      await addUserSkillCommand(skillRest);
+      return;
+    }
+    if (skillAction === "list") {
+      await listUserSkillCommand(skillRest);
+      return;
+    }
+    if (skillAction === "remove") {
+      await removeUserSkillCommand(skillRest);
       return;
     }
   }

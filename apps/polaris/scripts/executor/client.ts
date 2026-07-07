@@ -1,5 +1,6 @@
 import type { SwitchResult } from "../cli/commands/switch.js";
 import type { ManagedHarness } from "../config/credential-catalog.js";
+import type { SkillHarness } from "../config/skills.js";
 import type {
   PortalWorkspacePaseoDiagnostic,
 } from "../core/portal.js";
@@ -348,6 +349,89 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
 }> {
   return executorRequest(
     "/workspaces/paseo/restart",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function listPortalWorkspaceSkills(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+}): Promise<{
+  workspace: string;
+  userId: string;
+  installed: Array<{ harness: SkillHarness; skills: string[] }>;
+}> {
+  return executorRequest(
+    "/workspaces/skills/list",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function installPortalWorkspaceSkill(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  installed: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  packageName: string;
+}> {
+  return executorRequest(
+    "/workspaces/skills/install",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function uninstallPortalWorkspaceSkill(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  uninstalled: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  removed: boolean;
+}> {
+  return executorRequest(
+    "/workspaces/skills/uninstall",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function syncPortalWorkspaceSkills(input: {
+  userId: string;
+  workspace: string;
+  harness: SkillHarness;
+}): Promise<{
+  synced: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  installed: string[];
+  removed: string[];
+}> {
+  return executorRequest(
+    "/workspaces/skills/sync",
     {
       method: "POST",
       body: JSON.stringify(input),
