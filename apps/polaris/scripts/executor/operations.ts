@@ -10,6 +10,15 @@ import {
   type ManagedHarness,
 } from "../config/credential-catalog.js";
 import {
+  isSkillHarness,
+  listInstalledWorkspaceSkills,
+  listUserSkills,
+  readUserSkill,
+  removeInstalledWorkspaceSkill,
+  resolveWorkspaceSkillInstallRoot,
+  type SkillHarness,
+} from "../config/skills.js";
+import {
   defaultMountPathForCredentialFile,
   stateStoragePathForMountPath,
 } from "../core/identity-layout.js";
@@ -31,7 +40,10 @@ import {
   deleteArchivedWorkspaceOwnedByUser,
   deleteWorkspaceOwnedByUser,
 } from "../cli/commands/delete.js";
-import { loadExecutableWorkspaceForCommand } from "../cli/commands/shared.js";
+import {
+  loadExecutableWorkspaceForCommand,
+  loadWorkspaceForCommand,
+} from "../cli/commands/shared.js";
 import { startCommand } from "../cli/commands/start.js";
 import { statusCommand } from "../cli/commands/status.js";
 import { stopCommand } from "../cli/commands/stop.js";
@@ -208,6 +220,10 @@ function runChecked(
   };
 }
 
+function q(value: string): string {
+  return JSON.stringify(value);
+}
+
 async function captureStdout<T>(
   fn: () => Promise<T>,
 ): Promise<{ result: T; stdout: string }> {
@@ -297,6 +313,94 @@ function runWorkspaceShell(workspace: WorkspaceSpec, script: string): { stdout: 
     default:
       throw new Error(`Paseo daemon diagnostics are not supported for backend '${workspace.backend.kind}' yet`);
   }
+}
+
+function workspaceSkillInstallScript(args: {
+  workspace: WorkspaceSpec;
+  harness: SkillHarness;
+  packageName: string;
+  commandArgs: string[];
+  skillId: string;
+}): string {
+  const installRoot = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
+  const assistantHome = path.posix.dirname(installRoot);
+  const installTarget = path.posix.join(installRoot, args.skillId);
+  const command = [
+    "npx",
+    "-y",
+    args.packageName,
+    ...args.commandArgs,
+  ].map((part) => q(part)).join(" ");
+  return [
+    "set -euo pipefail",
+    ...(args.harness === "codex"
+      ? [`export CODEX_HOME=${q(assistantHome)}`]
+      : [`export CLAUDE_HOME=${q(assistantHome)}`]),
+    "export npm_config_cache=/tmp/npm-cache",
+    `mkdir -p ${q(assistantHome)} ${q(installRoot)} /tmp/npm-cache`,
+    `rm -rf ${q(installTarget)}`,
+    command,
+    `test -d ${q(installTarget)}`,
+  ].join("\n");
+}
+
+function assertWorkspaceSkillRuntimeSupported(workspace: WorkspaceSpec): void {
+  if (workspace.backend.kind !== "docker" && workspace.backend.kind !== "pod") {
+    throw new Error(
+      `Workspace skill operations are not supported for backend '${workspace.backend.kind}'`,
+    );
+  }
+}
+
+async function loadRunningWorkspaceForSkillAction(args: {
+  workspaceRef: string;
+  userProfileId?: string;
+}): Promise<WorkspaceSpec> {
+  const { workspace } = loadWorkspaceForCommand(
+    "status",
+    args.workspaceRef,
+    args.userProfileId,
+  );
+  assertWorkspaceSkillRuntimeSupported(workspace);
+  const observation = await getBackendDriver(workspace.backend.kind).inspect(workspace);
+  if (!observation.backend.exists || !observation.backend.running) {
+    throw new Error(
+      `Workspace '${workspace.identity.projectName}' is not running on ${workspace.backend.kind}`,
+    );
+  }
+  return workspace;
+}
+
+function mutateWorkspaceSkillStatus(args: {
+  userId: string;
+  workspace: string;
+  reason: string;
+  installed: Array<{ harness: SkillHarness; skills: string[] }>;
+}): void {
+  writeCachedWorkspaceStatusUpdate({
+    userId: args.userId,
+    workspace: args.workspace,
+    reason: args.reason,
+    mutate: (current, summary) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        skills: {
+          installedByHarness: Object.fromEntries(
+            args.installed.map((entry) => [entry.harness, entry.skills]),
+          ),
+          source: "workspace-runtime-state",
+        },
+      } as WorkspaceStatus & {
+        skills: {
+          installedByHarness: Record<string, string[]>;
+          source: string;
+        };
+      };
+    },
+  });
 }
 
 function collectWorkspacePaseoDiagnostic(
@@ -529,6 +633,193 @@ export function switchWorkspaceLiveCredentialMaterial(input: {
   return {
     harness: resolved.harness,
     credentialId: input.credentialId,
+  };
+}
+
+export async function listWorkspaceSkills(input: {
+  workspaceRef: string;
+  userProfileId?: string;
+  harness?: SkillHarness;
+}): Promise<{
+  workspace: string;
+  userId: string;
+  installed: Array<{ harness: SkillHarness; skills: string[] }>;
+}> {
+  const { workspace } = loadWorkspaceForCommand(
+    "status",
+    input.workspaceRef,
+    input.userProfileId,
+  );
+  const installed = listInstalledWorkspaceSkills({
+    workspace,
+    ...(input.harness ? { harness: input.harness } : {}),
+  });
+  return {
+    workspace: workspace.identity.projectName,
+    userId: workspace.userProfile.id,
+    installed,
+  };
+}
+
+export async function skillInstallWorkspace(input: {
+  workspaceRef: string;
+  userProfileId?: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  installed: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  packageName: string;
+}> {
+  const workspace = await loadRunningWorkspaceForSkillAction(input);
+  const skill = readUserSkill(workspace.userProfile.id, input.skillId);
+  if (skill.harness !== input.harness) {
+    throw new Error(
+      `Skill '${input.skillId}' belongs to harness '${skill.harness}', not '${input.harness}'`,
+    );
+  }
+  runWorkspaceShell(
+    workspace,
+    workspaceSkillInstallScript({
+      workspace,
+      harness: input.harness,
+      packageName: skill.packageName,
+      commandArgs: skill.args,
+      skillId: skill.id,
+    }),
+  );
+  const installed = listInstalledWorkspaceSkills({
+    workspace,
+    harness: input.harness,
+  });
+  mutateWorkspaceSkillStatus({
+    userId: workspace.userProfile.id,
+    workspace: workspace.identity.projectName,
+    reason: "workspace-skill-installed",
+    installed,
+  });
+  return {
+    installed: true,
+    workspace: workspace.identity.projectName,
+    userId: workspace.userProfile.id,
+    harness: input.harness,
+    skillId: skill.id,
+    packageName: skill.packageName,
+  };
+}
+
+export async function skillUninstallWorkspace(input: {
+  workspaceRef: string;
+  userProfileId?: string;
+  harness: SkillHarness;
+  skillId: string;
+}): Promise<{
+  uninstalled: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  skillId: string;
+  removed: boolean;
+}> {
+  const workspace = await loadRunningWorkspaceForSkillAction(input);
+  const removed = removeInstalledWorkspaceSkill({
+    workspace,
+    harness: input.harness,
+    skillId: input.skillId,
+  });
+  const installed = listInstalledWorkspaceSkills({
+    workspace,
+    harness: input.harness,
+  });
+  mutateWorkspaceSkillStatus({
+    userId: workspace.userProfile.id,
+    workspace: workspace.identity.projectName,
+    reason: "workspace-skill-uninstalled",
+    installed,
+  });
+  return {
+    uninstalled: true,
+    workspace: workspace.identity.projectName,
+    userId: workspace.userProfile.id,
+    harness: input.harness,
+    skillId: input.skillId,
+    removed: removed.removed,
+  };
+}
+
+export async function skillSyncWorkspace(input: {
+  workspaceRef: string;
+  userProfileId?: string;
+  harness: SkillHarness;
+}): Promise<{
+  synced: true;
+  workspace: string;
+  userId: string;
+  harness: SkillHarness;
+  installed: string[];
+  removed: string[];
+}> {
+  const workspace = await loadRunningWorkspaceForSkillAction(input);
+  const declared = listUserSkills(workspace.userProfile.id)
+    .filter((skill) => skill.harness === input.harness);
+  const installedState = listInstalledWorkspaceSkills({
+    workspace,
+    harness: input.harness,
+  })[0];
+  const installedIds = new Set(installedState?.skills ?? []);
+  const declaredIds = new Set(declared.map((skill) => skill.id));
+  const installedNow: string[] = [];
+  const removedNow: string[] = [];
+
+  for (const skill of declared) {
+    if (installedIds.has(skill.id)) {
+      continue;
+    }
+    runWorkspaceShell(
+      workspace,
+      workspaceSkillInstallScript({
+        workspace,
+        harness: input.harness,
+        packageName: skill.packageName,
+        commandArgs: skill.args,
+        skillId: skill.id,
+      }),
+    );
+    installedNow.push(skill.id);
+  }
+
+  for (const skillId of installedIds) {
+    if (declaredIds.has(skillId)) {
+      continue;
+    }
+    removeInstalledWorkspaceSkill({
+      workspace,
+      harness: input.harness,
+      skillId,
+    });
+    removedNow.push(skillId);
+  }
+
+  const installed = listInstalledWorkspaceSkills({
+    workspace,
+    harness: input.harness,
+  });
+  mutateWorkspaceSkillStatus({
+    userId: workspace.userProfile.id,
+    workspace: workspace.identity.projectName,
+    reason: "workspace-skill-synced",
+    installed,
+  });
+  return {
+    synced: true,
+    workspace: workspace.identity.projectName,
+    userId: workspace.userProfile.id,
+    harness: input.harness,
+    installed: installedNow,
+    removed: removedNow,
   };
 }
 

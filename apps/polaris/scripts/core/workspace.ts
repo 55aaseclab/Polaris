@@ -348,6 +348,10 @@ export interface WorkspaceStatus {
       }>;
     };
   };
+  skills?: {
+    installedByHarness?: Record<string, string[]>;
+    source?: string;
+  };
   details: Record<string, string | undefined>;
   evolution?: {
     artifactCount: number;

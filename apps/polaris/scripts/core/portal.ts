@@ -96,6 +96,20 @@ export interface PortalCredentialRecord {
   files: PortalCredentialMaterialFile[];
 }
 
+export interface PortalSkillSummary {
+  id: string;
+  userId: string;
+  harness: "codex" | "claude";
+  packageName: string;
+  args: string[];
+  command: string[];
+  label: string;
+  source?: string;
+  selectedSkillName: string;
+  registryPath: string;
+  createdAt?: string;
+}
+
 export interface PortalWorkspaceAssetPreview {
   path: string;
   content: string;
@@ -115,6 +129,17 @@ export interface PortalWorkspaceSummary {
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
   resolvedWorkspace: WorkspaceStatus | null;
   availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
+  credentialBindings: Array<{
+    purpose: string;
+    credentialId: string;
+    required: boolean;
+  }>;
+}
+
+export interface PortalWorkspaceAgentBindingResult {
+  enabled: boolean;
+  driver: string;
+  restarted: boolean;
   credentialBindings: Array<{
     purpose: string;
     credentialId: string;
@@ -148,6 +173,10 @@ function workspaceRoot(userId: string, workspace: string): string {
 
 function workspacePaseoStateRoot(userId: string, workspace: string): string {
   return path.join(workspaceStateDir(workspace, userId), "paseo");
+}
+
+function workspaceProvisionProgressPath(userId: string, workspace: string): string {
+  return path.join(workspaceRoot(userId, workspace), "state", "provision.json");
 }
 
 function readPersistedPaseoServerId(userId: string, workspace: string): string | null {
@@ -230,6 +259,28 @@ function readJson<T>(filePath: string): T | null {
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+export function readWorkspaceProvisionProgress(
+  userId: string,
+  workspace: string,
+): Record<string, unknown> | null {
+  return readJson<Record<string, unknown>>(workspaceProvisionProgressPath(userId, workspace));
+}
+
+export function writeWorkspaceProvisionProgress(
+  userId: string,
+  workspace: string,
+  value: Record<string, unknown>,
+): void {
+  writeJson(workspaceProvisionProgressPath(userId, workspace), value);
+}
+
+export function clearWorkspaceProvisionProgress(
+  userId: string,
+  workspace: string,
+): void {
+  fs.rmSync(workspaceProvisionProgressPath(userId, workspace), { force: true });
 }
 
 function readYAML(filePath: string): Record<string, unknown> | null {

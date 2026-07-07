@@ -29,8 +29,10 @@ import {
 import {
   activateCredential,
   createCredential,
+  createSkill,
   createWorkspace,
   createPortalUser,
+  deleteSkill,
   deletePortalUser,
   deleteArchivedWorkspace,
   deleteCredential,
@@ -46,7 +48,10 @@ import {
   listAdminUsers,
   listArchivedWorkspaces,
   listCredentials,
+  listSkills,
+  listWorkspaceSkills,
   listUsers,
+  installWorkspaceSkill,
   refreshWorkspaceStatus,
   restartWorkspacePaseoDaemon,
   resolvePortalUserMapping,
@@ -54,8 +59,10 @@ import {
   listWorkspaces,
   startWorkspace,
   stopWorkspace,
+  syncWorkspaceSkills,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
+  uninstallWorkspaceSkill,
   updateCredentialFile,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
@@ -65,6 +72,7 @@ import {
   type PortalCredentialCatalog,
   type PortalCredentialSummary,
   type PortalProfileSummary,
+  type PortalSkillSummary,
   type PortalSession,
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
@@ -146,6 +154,18 @@ function basenameForDisplay(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+function defaultSkillDraft(): SkillDraft {
+  return {
+    source: "",
+    skillName: "",
+    harness: "codex",
+  };
+}
+
+function skillDisplayName(skill: Pick<PortalSkillSummary, "id" | "selectedSkillName">): string {
+  return skill.selectedSkillName.trim() || skill.id;
+}
+
 function workspaceSidebarStatusDotClass(backendLiveness: string | null | undefined): string {
   switch (backendLiveness) {
     case "running":
@@ -182,6 +202,12 @@ type PortalShellContextValue = {
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
+};
+
+type SkillDraft = {
+  source: string;
+  skillName: string;
+  harness: "codex" | "claude";
 };
 
 const COPY: Record<Language, Record<string, string>> = {
@@ -224,6 +250,9 @@ const COPY: Record<Language, Record<string, string>> = {
     remove_workspace_confirm_title: "Archive workspace?",
     remove_workspace_confirm_description: "This moves the workspace into the user archive and removes it from the active list. Running workspaces must be stopped before archiving.",
     live_credential_button: "Live credential",
+    runtime_skill_button: "Runtime skills",
+    runtime_skill_sheet_title: "Runtime skills",
+    runtime_skill_sheet_description: "Install or remove workspace skills for the selected runtime.",
     live_credential_sheet_title: "Live credential switch",
     live_credential_sheet_description: "Change the runtime credential for the selected workspace.",
     deleting: "Deleting...",
@@ -334,6 +363,7 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_credentials_section: "Credentials",
     admin_user_tab_user: "User",
     admin_user_tab_credentials: "Credentials",
+    admin_user_tab_skills: "Skills",
     admin_user_tab_workspaces: "Workspaces",
     admin_user_tab_paseo: "Paseo",
     admin_paseo_reconnect_mode: "Reconnect mode",
@@ -343,6 +373,27 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_paseo_needs_pairing: "Needs pairing",
     admin_paseo_status_button: "Refresh daemon status",
     admin_paseo_restart_button: "Restart daemon",
+    skills: "Skills",
+    skills_header_desc: "Manage user skill registry entries and workspace installs.",
+    no_skills: "No skills found.",
+    add_skill: "Add skill",
+    skill_id: "Skill id",
+    skill_label: "Label",
+    skill_source: "Source",
+    skill_name: "Skill",
+    skill_source_help: "Examples: vercel-labs/agent-skills or github:owner/repo. Local paths are not supported.",
+    create_skill: "Create skill",
+    creating_skill: "Creating skill...",
+    delete_skill: "Delete skill",
+    deleting_skill: "Deleting skill...",
+    admin_skill_package: "Package",
+    admin_skill_command: "Install command",
+    workspace_skills: "Workspace skills",
+    skill_install: "Install skill",
+    skill_uninstall: "Uninstall skill",
+    skill_sync: "Sync skills",
+    installed_skills: "Installed skills",
+    no_installed_skills: "No installed skills.",
     admin_paseo_restarting_button: "Restarting daemon...",
     admin_paseo_status_raw: "paseo daemon status --json",
     admin_paseo_server_id: "Persisted server ID",
@@ -543,6 +594,9 @@ const COPY: Record<Language, Record<string, string>> = {
     remove_workspace_confirm_title: "归档这个工作空间？",
     remove_workspace_confirm_description: "这会把工作空间移入用户归档区，并从当前列表中移除，不可逆。",
     live_credential_button: "运行时凭证",
+    runtime_skill_button: "运行时 skills",
+    runtime_skill_sheet_title: "运行时 skills",
+    runtime_skill_sheet_description: "为当前运行时安装或移除工作空间 skills。",
     live_credential_sheet_title: "运行时凭证切换",
     live_credential_sheet_description: "为当前选中的工作空间切换运行时凭证。",
     deleting: "归档中…",
@@ -653,6 +707,7 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_credentials_section: "凭证",
     admin_user_tab_user: "用户",
     admin_user_tab_credentials: "凭证",
+    admin_user_tab_skills: "Skills",
     admin_user_tab_workspaces: "工作空间",
     admin_user_tab_paseo: "Paseo",
     admin_paseo_reconnect_mode: "重连模式",
@@ -662,6 +717,27 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_paseo_needs_pairing: "需要重新配对",
     admin_paseo_status_button: "刷新 daemon 状态",
     admin_paseo_restart_button: "重启 daemon",
+    skills: "Skills",
+    skills_header_desc: "管理用户 skill registry 和工作空间安装。",
+    no_skills: "没有 skills。",
+    add_skill: "添加 skill",
+    skill_id: "Skill id",
+    skill_label: "Label",
+    skill_source: "Source",
+    skill_name: "Skill",
+    skill_source_help: "示例：vercel-labs/agent-skills 或 github:owner/repo。不支持本地路径。",
+    create_skill: "创建 skill",
+    creating_skill: "创建中...",
+    delete_skill: "删除 skill",
+    deleting_skill: "删除中...",
+    admin_skill_package: "Package",
+    admin_skill_command: "Install command",
+    workspace_skills: "Workspace skills",
+    skill_install: "安装 skill",
+    skill_uninstall: "卸载 skill",
+    skill_sync: "同步 skills",
+    installed_skills: "已安装 skills",
+    no_installed_skills: "没有已安装 skills。",
     admin_paseo_restarting_button: "正在重启 daemon…",
     admin_paseo_status_raw: "paseo daemon status --json",
     admin_paseo_server_id: "持久化 server ID",
@@ -2715,11 +2791,21 @@ function AdminPage() {
   const [adminCredentialEditorRecord, setAdminCredentialEditorRecord] = useState<PortalCredentialRecord | null>(null);
   const [adminCredentialEditorFile, setAdminCredentialEditorFile] = useState<PortalCredentialMaterialFile | null>(null);
   const [adminCredentialEditorContent, setAdminCredentialEditorContent] = useState("");
+  const [adminSkillCreating, setAdminSkillCreating] = useState(false);
+  const [adminDeletingSkillId, setAdminDeletingSkillId] = useState<string | null>(null);
+  const [adminSkillSheetOpen, setAdminSkillSheetOpen] = useState(false);
+  const [adminSkillDraft, setAdminSkillDraft] = useState<SkillDraft>(defaultSkillDraft());
+  const [skillAdminActionError, setSkillAdminActionError] = useState<string | null>(null);
   const [adminLiveCredentialSelections, setAdminLiveCredentialSelections] = useState<
     Record<string, string>
   >({});
   const [adminLiveSwitchingKey, setAdminLiveSwitchingKey] = useState<string | null>(null);
   const [adminLiveCredentialWorkspaceName, setAdminLiveCredentialWorkspaceName] = useState<string | null>(null);
+  const [adminRuntimeSkillWorkspaceName, setAdminRuntimeSkillWorkspaceName] = useState<string | null>(null);
+  const [adminRuntimeSkillSelection, setAdminRuntimeSkillSelection] = useState("");
+  const [adminRuntimeSkillHarness, setAdminRuntimeSkillHarness] = useState<"codex" | "claude">("codex");
+  const [adminRuntimeSkillAction, setAdminRuntimeSkillAction] = useState<"install" | "sync" | `uninstall:${string}` | null>(null);
+  const [adminRuntimeSkillRefreshTick, setAdminRuntimeSkillRefreshTick] = useState(0);
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
@@ -2727,7 +2813,7 @@ function AdminPage() {
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
-  const [adminTab, setAdminTab] = useState<"user" | "credentials" | "workspaces" | "paseo">("user");
+  const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo">("user");
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
   const {
@@ -2778,6 +2864,34 @@ function AdminPage() {
     () => selectedAdminUserId ? listArchivedWorkspaces(selectedAdminUserId) : Promise.resolve([]),
     [selectedAdminUserId, reloadKey],
   );
+  const {
+    data: adminInstalledWorkspaceSkills,
+    error: adminInstalledWorkspaceSkillsError,
+    loading: adminInstalledWorkspaceSkillsLoading,
+  } = useAsyncValue(
+    () =>
+      selectedAdminUserId && adminRuntimeSkillWorkspaceName
+        ? listWorkspaceSkills(
+          selectedAdminUserId,
+          adminRuntimeSkillWorkspaceName,
+          adminRuntimeSkillHarness,
+        )
+        : Promise.resolve(null),
+    [
+      selectedAdminUserId,
+      adminRuntimeSkillWorkspaceName,
+      adminRuntimeSkillHarness,
+      adminRuntimeSkillRefreshTick,
+    ],
+  );
+  const {
+    data: selectedSkills,
+    error: selectedSkillsError,
+    loading: selectedSkillsLoading,
+  } = useAsyncValue(
+    () => selectedAdminUserId ? listSkills(selectedAdminUserId) : Promise.resolve([]),
+    [selectedAdminUserId, reloadKey],
+  );
 
   useEffect(() => {
     if (!adminUsers?.length) {
@@ -2815,9 +2929,18 @@ function AdminPage() {
     setAdminCredentialEditorRecord(null);
     setAdminCredentialEditorFile(null);
     setAdminCredentialEditorContent("");
+    setAdminSkillCreating(false);
+    setAdminDeletingSkillId(null);
+    setAdminSkillDraft(defaultSkillDraft());
+    setSkillAdminActionError(null);
     setAdminLiveCredentialSelections({});
     setAdminLiveSwitchingKey(null);
     setAdminLiveCredentialWorkspaceName(null);
+    setAdminRuntimeSkillWorkspaceName(null);
+    setAdminRuntimeSkillSelection("");
+    setAdminRuntimeSkillHarness("codex");
+    setAdminRuntimeSkillAction(null);
+    setAdminRuntimeSkillRefreshTick(0);
   }, [selectedAdminUserId]);
 
   useEffect(() => {
@@ -3000,6 +3123,23 @@ function AdminPage() {
       return changed ? next : current;
     });
   }, [selectedAdminUser, selectedCredentials, selectedWorkspaces]);
+
+  useEffect(() => {
+    if (adminRuntimeSkillSelection || selectedSkills === null) {
+      return;
+    }
+    const nextSkills = selectedSkills.filter(
+      (skill) => skill.harness === adminRuntimeSkillHarness,
+    );
+    if (nextSkills.length === 0) {
+      return;
+    }
+    setAdminRuntimeSkillSelection(nextSkills[0]?.id ?? "");
+  }, [
+    adminRuntimeSkillHarness,
+    adminRuntimeSkillSelection,
+    selectedSkills,
+  ]);
 
   if (mappingLoading) {
     return (
@@ -3278,6 +3418,9 @@ function AdminPage() {
   const selectedAgentCredentials = (selectedCredentials ?? []).filter((credential) =>
     credential.purposes.includes("agent-auth")
   );
+  const selectedHarnessSkills = (selectedSkills ?? []).filter(
+    (skill) => skill.harness === adminRuntimeSkillHarness,
+  );
   const adminLiveCredentialWorkspace = adminLiveCredentialWorkspaceName
     ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminLiveCredentialWorkspaceName) ?? null
     : null;
@@ -3297,6 +3440,11 @@ function AdminPage() {
   const adminSwitchableHarnesses = adminLiveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const adminLiveRuntimeRunning =
     adminLiveCredentialWorkspace?.status?.health?.backendLiveness === "running";
+  const adminRuntimeSkillWorkspace = adminRuntimeSkillWorkspaceName
+    ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminRuntimeSkillWorkspaceName) ?? null
+    : null;
+  const adminInstalledHarnessSkills =
+    adminInstalledWorkspaceSkills?.installed.find((entry) => entry.harness === adminRuntimeSkillHarness)?.skills ?? [];
 
   function openAdminCredentialSheet(harness: ManagedHarness): void {
     setAdminCredentialDraft(defaultCredentialDraft(harness, selectedCredentialCatalog));
@@ -3432,6 +3580,112 @@ function AdminPage() {
     }
   }
 
+  async function handleCreateAdminSkill(
+    event?: React.FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event?.preventDefault();
+    if (!selectedAdminUser || adminSkillCreating) {
+      return;
+    }
+    setAdminSkillCreating(true);
+    setSkillAdminActionError(null);
+    try {
+      await createSkill(selectedAdminUser.id, {
+        harness: adminSkillDraft.harness,
+        source: adminSkillDraft.source.trim(),
+        skillName: adminSkillDraft.skillName.trim(),
+      });
+      setAdminSkillSheetOpen(false);
+      setAdminSkillDraft(defaultSkillDraft());
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setSkillAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminSkillCreating(false);
+    }
+  }
+
+  async function handleDeleteAdminSkill(skillId: string): Promise<void> {
+    if (!selectedAdminUser || adminDeletingSkillId) {
+      return;
+    }
+    setAdminDeletingSkillId(skillId);
+    setSkillAdminActionError(null);
+    try {
+      await deleteSkill(selectedAdminUser.id, skillId);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setSkillAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminDeletingSkillId(null);
+    }
+  }
+
+  async function handleInstallAdminRuntimeSkill(): Promise<void> {
+    if (!selectedAdminUser || !adminRuntimeSkillWorkspaceName || !adminRuntimeSkillSelection) {
+      return;
+    }
+    setAdminRuntimeSkillAction("install");
+    setWorkspaceAdminActionError(null);
+    try {
+      await installWorkspaceSkill(
+        selectedAdminUser.id,
+        adminRuntimeSkillWorkspaceName,
+        adminRuntimeSkillSelection,
+        adminRuntimeSkillHarness,
+      );
+      setAdminRuntimeSkillRefreshTick((current) => current + 1);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminRuntimeSkillAction(null);
+    }
+  }
+
+  async function handleUninstallAdminRuntimeSkill(skillId: string): Promise<void> {
+    if (!selectedAdminUser || !adminRuntimeSkillWorkspaceName) {
+      return;
+    }
+    setAdminRuntimeSkillAction(`uninstall:${skillId}`);
+    setWorkspaceAdminActionError(null);
+    try {
+      await uninstallWorkspaceSkill(
+        selectedAdminUser.id,
+        adminRuntimeSkillWorkspaceName,
+        skillId,
+        adminRuntimeSkillHarness,
+      );
+      setAdminRuntimeSkillRefreshTick((current) => current + 1);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminRuntimeSkillAction(null);
+    }
+  }
+
+  async function handleSyncAdminRuntimeSkills(): Promise<void> {
+    if (!selectedAdminUser || !adminRuntimeSkillWorkspaceName) {
+      return;
+    }
+    setAdminRuntimeSkillAction("sync");
+    setWorkspaceAdminActionError(null);
+    try {
+      await syncWorkspaceSkills(
+        selectedAdminUser.id,
+        adminRuntimeSkillWorkspaceName,
+        adminRuntimeSkillHarness,
+      );
+      setAdminRuntimeSkillRefreshTick((current) => current + 1);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminRuntimeSkillAction(null);
+    }
+  }
+
   return (
     <div className="grid w-full gap-6 lg:grid-cols-[21rem_minmax(0,1fr)]">
       <div className="grid gap-4">
@@ -3499,7 +3753,7 @@ function AdminPage() {
             <Tabs
               key={selectedAdminUserId}
               value={adminTab}
-              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "workspaces" | "paseo")}
+              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "skills" | "workspaces" | "paseo")}
               className="w-full"
             >
               <TabsList className="mb-4 w-full max-w-md justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
@@ -3508,6 +3762,9 @@ function AdminPage() {
                 </TabsTrigger>
                 <TabsTrigger value="credentials" className="flex-1 rounded-xl">
                   {t("admin_user_tab_credentials")}
+                </TabsTrigger>
+                <TabsTrigger value="skills" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_skills")}
                 </TabsTrigger>
                 <TabsTrigger value="workspaces" className="flex-1 rounded-xl">
                   {t("admin_user_tab_workspaces")}
@@ -3905,6 +4162,144 @@ function AdminPage() {
                 </Sheet>
               </TabsContent>
 
+              <TabsContent value="skills">
+                <Card className="border-border/70">
+                  <CardHeader className="gap-3">
+                    <div>
+                      <CardTitle className="text-base">{t("skills")}</CardTitle>
+                      <CardDescription>{t("skills_header_desc")}</CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="grid gap-4">
+                    <ErrorPopup
+                      title={t("global_error_title")}
+                      message={skillAdminActionError}
+                      onClose={() => setSkillAdminActionError(null)}
+                    />
+                    <ErrorPopup title={t("global_error_title")} message={selectedSkillsError} />
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSkillAdminActionError(null);
+                          setAdminSkillSheetOpen(true);
+                        }}
+                      >
+                        <PlusCircle className="h-4 w-4" />
+                        {t("add_skill")}
+                      </Button>
+                    </div>
+                    {selectedSkillsLoading ? (
+                      <div className="flex items-center justify-center py-2 text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      </div>
+                    ) : null}
+                    {!selectedSkillsLoading && !selectedSkillsError && (selectedSkills?.length ?? 0) === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("no_skills")}</p>
+                    ) : null}
+                    <div className="grid gap-3">
+                      {(selectedSkills ?? []).map((skill) => (
+                        <div
+                          key={skill.id}
+                          className="grid gap-2 rounded-2xl border border-border/70 bg-muted/20 p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">
+                                {skillDisplayName(skill)}
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground">{skill.id}</div>
+                            </div>
+                            <Badge variant="outline">{skill.harness}</Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {t("skill_source")}: {skill.source ?? skill.packageName}
+                          </div>
+                          {skill.selectedSkillName ? (
+                            <div className="text-sm text-muted-foreground">
+                              {t("skill_name")}: {skill.selectedSkillName}
+                            </div>
+                          ) : null}
+                          <div className="break-all text-xs text-muted-foreground">
+                            {t("admin_skill_command")}: {skill.command.join(" ")}
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={adminDeletingSkillId === skill.id}
+                              onClick={() => void handleDeleteAdminSkill(skill.id)}
+                            >
+                              {adminDeletingSkillId === skill.id ? t("deleting_skill") : t("delete_skill")}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Sheet open={adminSkillSheetOpen} onOpenChange={setAdminSkillSheetOpen}>
+                  <SheetContent side="right" className="w-full sm:max-w-xl">
+                    <SheetHeader>
+                      <SheetTitle>{t("add_skill")}</SheetTitle>
+                      <SheetDescription>{t("skills_header_desc")}</SheetDescription>
+                    </SheetHeader>
+                    <form className="grid gap-4 py-4" onSubmit={(event) => void handleCreateAdminSkill(event)}>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-skill-harness">{t("credential_provider")}</Label>
+                        <Select
+                          value={adminSkillDraft.harness}
+                          onValueChange={(value) => setAdminSkillDraft((current) => ({
+                            ...current,
+                            harness: value as "codex" | "claude",
+                          }))}
+                        >
+                          <SelectTrigger id="admin-skill-harness" className="bg-white">
+                            <SelectValue placeholder={t("credential_provider")} />
+                          </SelectTrigger>
+                          <SelectContent className="bg-white">
+                            <SelectItem value="codex">{t("credential_harness_codex")}</SelectItem>
+                            <SelectItem value="claude">{t("credential_harness_claude")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-skill-source">{t("skill_source")}</Label>
+                        <Input
+                          id="admin-skill-source"
+                          value={adminSkillDraft.source}
+                          onChange={(event) => setAdminSkillDraft((current) => ({ ...current, source: event.target.value }))}
+                          placeholder="vercel-labs/agent-skills"
+                        />
+                        <p className="text-xs text-muted-foreground">{t("skill_source_help")}</p>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="admin-skill-name">{t("skill_name")}</Label>
+                        <Input
+                          id="admin-skill-name"
+                          value={adminSkillDraft.skillName}
+                          onChange={(event) => setAdminSkillDraft((current) => ({ ...current, skillName: event.target.value }))}
+                          placeholder="use-polaris"
+                        />
+                      </div>
+                      <SheetFooter>
+                        <Button
+                          type="submit"
+                          disabled={
+                            adminSkillCreating
+                            || !adminSkillDraft.source.trim()
+                            || !adminSkillDraft.skillName.trim()
+                          }
+                        >
+                          {adminSkillCreating ? t("creating_skill") : t("create_skill")}
+                        </Button>
+                      </SheetFooter>
+                    </form>
+                  </SheetContent>
+                </Sheet>
+              </TabsContent>
+
               <TabsContent value="workspaces">
                 <div className="grid gap-6">
                   <ErrorPopup
@@ -4077,12 +4472,127 @@ function AdminPage() {
                                   {t("live_credential_button")}
                                 </Button>
                               ) : null}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setAdminRuntimeSkillWorkspaceName(workspace.name);
+                                  setWorkspaceAdminActionError(null);
+                                  setAdminRuntimeSkillRefreshTick((current) => current + 1);
+                                }}
+                              >
+                                {t("runtime_skill_button")}
+                              </Button>
                             </div>
                           </div>
                         );
                       })}
                     </CardContent>
                   </Card>
+                  <Sheet
+                    open={Boolean(adminRuntimeSkillWorkspaceName)}
+                    onOpenChange={(open) => {
+                      if (!open) {
+                        setAdminRuntimeSkillWorkspaceName(null);
+                      }
+                    }}
+                  >
+                    <SheetContent side="right" className="w-full sm:max-w-xl">
+                      <SheetHeader>
+                        <SheetTitle>{t("runtime_skill_sheet_title")}</SheetTitle>
+                        <SheetDescription>
+                          {adminRuntimeSkillWorkspace
+                            ? `${adminRuntimeSkillWorkspace.name} · ${t("runtime_skill_sheet_description")}`
+                            : t("runtime_skill_sheet_description")}
+                        </SheetDescription>
+                      </SheetHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="admin-runtime-skill-harness">{t("credential_provider")}</Label>
+                          <Select
+                            value={adminRuntimeSkillHarness}
+                            onValueChange={(value) => {
+                              setAdminRuntimeSkillHarness(value as "codex" | "claude");
+                              setAdminRuntimeSkillSelection("");
+                            }}
+                          >
+                            <SelectTrigger id="admin-runtime-skill-harness" className="bg-white">
+                              <SelectValue placeholder={t("credential_provider")} />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              <SelectItem value="codex">{t("credential_harness_codex")}</SelectItem>
+                              <SelectItem value="claude">{t("credential_harness_claude")}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div className="grid min-w-0 flex-1 gap-2">
+                            <Label htmlFor="admin-runtime-skill-select">{t("skills")}</Label>
+                            <Select
+                              value={adminRuntimeSkillSelection}
+                              onValueChange={setAdminRuntimeSkillSelection}
+                            >
+                              <SelectTrigger id="admin-runtime-skill-select" className="bg-white">
+                                <SelectValue placeholder={t("add_skill")} />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white">
+                                {selectedHarnessSkills.map((skill) => (
+                                  <SelectItem key={skill.id} value={skill.id}>
+                                    {skill.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button
+                            variant="outline"
+                            disabled={!adminRuntimeSkillSelection || adminRuntimeSkillAction !== null}
+                            onClick={() => void handleInstallAdminRuntimeSkill()}
+                          >
+                            {adminRuntimeSkillAction === "install" ? t("switching") : t("skill_install")}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            disabled={adminRuntimeSkillAction !== null}
+                            onClick={() => void handleSyncAdminRuntimeSkills()}
+                          >
+                            {adminRuntimeSkillAction === "sync" ? t("switching") : t("skill_sync")}
+                          </Button>
+                        </div>
+                        {adminInstalledWorkspaceSkillsLoading ? (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            {t("loading_workspaces")}
+                          </div>
+                        ) : adminInstalledWorkspaceSkillsError ? (
+                          <p className="text-sm text-destructive">{adminInstalledWorkspaceSkillsError}</p>
+                        ) : adminInstalledHarnessSkills.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{t("no_installed_skills")}</p>
+                        ) : (
+                          <div className="grid gap-2">
+                            {adminInstalledHarnessSkills.map((skillId) => (
+                              <div
+                                key={skillId}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2"
+                              >
+                                <div className="text-sm">{skillId}</div>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={adminRuntimeSkillAction !== null}
+                                  onClick={() => void handleUninstallAdminRuntimeSkill(skillId)}
+                                >
+                                  {adminRuntimeSkillAction === `uninstall:${skillId}`
+                                    ? t("switching")
+                                    : t("skill_uninstall")}
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
                   <Sheet
                     open={Boolean(adminLiveCredentialWorkspaceName)}
                     onOpenChange={(open) => {
@@ -4456,6 +4966,7 @@ function WorkspaceDetailContent() {
     setSidebarWorkspacePolling,
   } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
+  const [selectedSkillHarness, setSelectedSkillHarness] = useState<"codex" | "claude">("codex");
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
     [refreshTick, userId, workspaceName],
@@ -4467,6 +4978,18 @@ function WorkspaceDetailContent() {
   } = useAsyncValue(
     () => listCredentials(userId),
     [userId],
+  );
+  const { data: userSkills, error: userSkillsError } = useAsyncValue(
+    () => listSkills(userId),
+    [userId],
+  );
+  const {
+    data: installedSkills,
+    error: installedSkillsError,
+    loading: installedSkillsLoading,
+  } = useAsyncValue(
+    () => listWorkspaceSkills(userId, workspaceName, selectedSkillHarness),
+    [refreshTick, selectedSkillHarness, userId, workspaceName],
   );
   const workspaceData = data?.name === workspaceName ? data : null;
   const workspaceLoading = loading || (!!data && !workspaceData);
@@ -4482,6 +5005,8 @@ function WorkspaceDetailContent() {
   const [switching, setSwitching] = useState(false);
   const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedSkillId, setSelectedSkillId] = useState("");
+  const [skillActionRunning, setSkillActionRunning] = useState<"install" | "uninstall" | "sync" | null>(null);
   const [paseoCredentialSelections, setPaseoCredentialSelections] = useState<
     Partial<Record<ManagedHarness, string>>
   >({});
@@ -4574,12 +5099,30 @@ function WorkspaceDetailContent() {
         },
       ]
     : [];
+  const availableUserSkills = (userSkills ?? []).filter(
+    (skill) => skill.harness === selectedSkillHarness,
+  );
+  const installedHarnessSkills = installedSkills?.installed.find(
+    (entry) => entry.harness === selectedSkillHarness,
+  )?.skills ?? [];
 
   useEffect(() => {
     if (workspaceData?.selectedDriver) {
       setDriver(driverLabel(workspaceData.selectedDriver));
     }
   }, [workspaceData]);
+
+  useEffect(() => {
+    if (selectedSkillId) {
+      return;
+    }
+    const nextSkillId = availableUserSkills[0]?.id ?? "";
+    if (nextSkillId) {
+      setSelectedSkillId(nextSkillId);
+      return;
+    }
+    setSelectedSkillId("");
+  }, [availableUserSkills, selectedSkillHarness, selectedSkillId]);
 
   useEffect(() => {
     if (workspaceLoading && !workspaceData) {
@@ -4779,6 +5322,51 @@ function WorkspaceDetailContent() {
     }
   }
 
+  async function handleWorkspaceSkillInstall(): Promise<void> {
+    if (!selectedSkillId) {
+      return;
+    }
+    setActionError(null);
+    setSkillActionRunning("install");
+    try {
+      await installWorkspaceSkill(userId, workspaceName, selectedSkillId, selectedSkillHarness);
+      setRefreshTick((current) => current + 1);
+      refreshWorkspaces();
+    } catch (error) {
+      setActionError(formatActionError(error, t));
+    } finally {
+      setSkillActionRunning(null);
+    }
+  }
+
+  async function handleWorkspaceSkillUninstall(skillId: string): Promise<void> {
+    setActionError(null);
+    setSkillActionRunning("uninstall");
+    try {
+      await uninstallWorkspaceSkill(userId, workspaceName, skillId, selectedSkillHarness);
+      setRefreshTick((current) => current + 1);
+      refreshWorkspaces();
+    } catch (error) {
+      setActionError(formatActionError(error, t));
+    } finally {
+      setSkillActionRunning(null);
+    }
+  }
+
+  async function handleWorkspaceSkillSync(): Promise<void> {
+    setActionError(null);
+    setSkillActionRunning("sync");
+    try {
+      await syncWorkspaceSkills(userId, workspaceName, selectedSkillHarness);
+      setRefreshTick((current) => current + 1);
+      refreshWorkspaces();
+    } catch (error) {
+      setActionError(formatActionError(error, t));
+    } finally {
+      setSkillActionRunning(null);
+    }
+  }
+
   function renderDriverSwitchControls(): ReactNode {
     return (
       <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
@@ -4912,8 +5500,95 @@ function WorkspaceDetailContent() {
 
   function renderWorkspaceControlsCard(): ReactNode {
     return (
-      <div className="grid gap-6">
         <div className="grid gap-6">
+          <div className="grid gap-4 rounded-2xl border border-border/70 bg-muted/20 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t("workspace_skills")}</div>
+                <div className="text-sm text-muted-foreground">{t("skills_header_desc")}</div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void handleWorkspaceSkillSync()}
+                disabled={skillActionRunning !== null}
+              >
+                {skillActionRunning === "sync" ? t("switching") : t("skill_sync")}
+              </Button>
+            </div>
+            {userSkillsError || installedSkillsError ? (
+              <p className="text-sm text-destructive">{userSkillsError ?? installedSkillsError}</p>
+            ) : null}
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-full min-w-0 sm:w-[12rem]">
+                <Label htmlFor="workspace-skill-harness">{t("credential_provider")}</Label>
+                <Select
+                  value={selectedSkillHarness}
+                  onValueChange={(value) => {
+                    setSelectedSkillHarness(value as "codex" | "claude");
+                    setSelectedSkillId("");
+                  }}
+                >
+                  <SelectTrigger id="workspace-skill-harness" className="bg-white">
+                    <SelectValue placeholder={t("credential_provider")} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value="codex">{t("credential_harness_codex")}</SelectItem>
+                    <SelectItem value="claude">{t("credential_harness_claude")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-full min-w-0 sm:w-[18rem]">
+                <Label htmlFor="workspace-skill-select">{t("skills")}</Label>
+                <Select value={selectedSkillId} onValueChange={setSelectedSkillId}>
+                  <SelectTrigger id="workspace-skill-select" className="bg-white">
+                    <SelectValue placeholder={t("add_skill")} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    {availableUserSkills.map((skill) => (
+                      <SelectItem key={skill.id} value={skill.id}>
+                        {skillDisplayName(skill)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void handleWorkspaceSkillInstall()}
+                disabled={!selectedSkillId || skillActionRunning !== null}
+              >
+                {skillActionRunning === "install" ? t("switching") : t("skill_install")}
+              </Button>
+            </div>
+            <div className="grid gap-2">
+              <div className="text-sm font-medium">{t("installed_skills")}</div>
+              {installedSkillsLoading ? (
+                <div className="flex items-center justify-center py-2 text-muted-foreground">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                </div>
+              ) : installedHarnessSkills.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t("no_installed_skills")}</p>
+              ) : (
+                installedHarnessSkills.map((skillId) => (
+                  <div
+                    key={skillId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background px-3 py-2"
+                  >
+                    <div className="text-sm">{skillId}</div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={skillActionRunning !== null}
+                      onClick={() => void handleWorkspaceSkillUninstall(skillId)}
+                    >
+                      {skillActionRunning === "uninstall" ? t("switching") : t("skill_uninstall")}
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="grid gap-6">
           <div className="min-w-0">
             <div className="text-base font-semibold">{t("workspace_header_title")}</div>
           </div>

@@ -20,14 +20,17 @@ import {
   bindPortalWorkspaceAgent,
   cancelPortalWorkspaceProvision,
   createPortalCredential,
+  createPortalSkill,
   deletePortalWorkspace,
   deletePortalCredential,
+  deletePortalSkill,
   deletePortalUser,
   getPortalCredentialCatalog,
   getPortalWorkspaceDetail,
   listPortalAdminUsers,
   listPortalWorkspaces,
   listUserPortalCredentials,
+  listUserPortalSkills,
   queueProvisionWorkspace,
   readUserPortalCredentialPreview,
   readUserPortalWorkspaceAssetPreview,
@@ -36,7 +39,11 @@ import {
   stopPortalWorkspace,
   switchPortalWorkspace,
   switchPortalWorkspaceLiveCredential,
+  syncPortalWorkspaceSkills,
   unbindPortalWorkspaceAgent,
+  installPortalWorkspaceSkill,
+  listPortalWorkspaceSkills,
+  uninstallPortalWorkspaceSkill,
 } from "../scripts/portal/service.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
@@ -894,6 +901,39 @@ test("portal service creates and deletes a codex credential for demo user 001", 
     fs.rmSync(authPath, { force: true });
     fs.rmSync(configPath, { force: true });
     fs.rmSync(path.dirname(authPath), { recursive: true, force: true });
+  }
+});
+
+test("portal service lists, creates, and deletes user skill registry entries", async () => {
+  const userId = uniqueName("portal-skill-user");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Skill User", "--email", `${userId}@polaris.local`]);
+
+    const created = await createPortalSkill({
+      userId,
+      skillId: "use-polaris",
+      harness: "codex",
+      source: "vercel-labs/agent-skills",
+      skillName: "use-polaris",
+    });
+    assert.equal(created.id, "use-polaris");
+    assert.equal(created.packageName, "skills");
+    assert.equal(created.source, "vercel-labs/agent-skills");
+    assert.equal(created.selectedSkillName, "use-polaris");
+
+    const listed = listUserPortalSkills(userId);
+    assert.ok(listed.some((skill) => skill.id === "use-polaris"));
+
+    const deleted = await deletePortalSkill(userId, "use-polaris");
+    assert.equal(deleted.skill.id, "use-polaris");
+    assert.equal(deleted.skill.removed, true);
+    assert.equal(fs.existsSync(path.join(userRoot, "skills", "use-polaris.yaml")), false);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
