@@ -18,6 +18,10 @@ It is one workspace-oriented command surface that covers:
 - status
 - archive
 - delete
+- skill-list
+- skill-install
+- skill-uninstall
+- skill-sync
 
 ## Root Entry
 
@@ -115,3 +119,65 @@ Current semantics:
 - remove the backend realization
 - remove workspace-owned state
 - do not create an archive copy
+
+### User Skill Registry
+
+```bash
+pnpm --dir apps/polaris run polaris -- user skill list <userProfileId>
+pnpm --dir apps/polaris run polaris -- user skill add <userProfileId> --source <repo-or-source> --skill <skillName> [--harness <codex|claude>]
+pnpm --dir apps/polaris run polaris -- user skill remove <userProfileId> <skillId>
+```
+
+Current semantics:
+
+- keep user-owned skills declarative
+- store source plus concrete skill selection
+- do not install into the user home at registry write time
+
+### Workspace Skill List
+
+```bash
+pnpm --dir apps/polaris run polaris -- skill-list <workspaceRef> --user <userProfileId> --harness <codex|claude>
+```
+
+Current semantics:
+
+- read installed runtime skills for the selected harness
+- prefer runtime backend inspection for running docker and pod workspaces
+- hide internal directories such as `.system`
+
+### Workspace Skill Install
+
+```bash
+pnpm --dir apps/polaris run polaris -- skill-install <workspaceRef> <skillId> --user <userProfileId> --harness <codex|claude>
+```
+
+Current semantics:
+
+- resolve the selected user skill registry entry
+- materialize it into the running workspace only
+- for `codex`, download via `skills` and then copy into `/identity/codex/skills`
+- for `claude`, install directly into `CLAUDE_HOME/skills`
+
+### Workspace Skill Uninstall
+
+```bash
+pnpm --dir apps/polaris run polaris -- skill-uninstall <workspaceRef> <skillId> --user <userProfileId> --harness <codex|claude>
+```
+
+Current semantics:
+
+- remove the installed runtime skill for the selected harness
+- keep the user registry entry intact
+
+### Workspace Skill Sync
+
+```bash
+pnpm --dir apps/polaris run polaris -- skill-sync <workspaceRef> --user <userProfileId> --harness <codex|claude>
+```
+
+Current semantics:
+
+- reconcile runtime installs against the user registry
+- install missing declared skills
+- remove unmanaged installed skills

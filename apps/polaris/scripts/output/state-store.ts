@@ -20,12 +20,13 @@ export interface WorkspaceLiveCredentialSelectionState {
 
 function projectRoot(project: string, userProfileId?: string): string | null {
   if (userProfileId?.trim()) {
-    return path.join(
+    const candidate = path.join(
       USER_ROOT,
       userProfileId.trim(),
       "workspaces",
       project,
     );
+    return fs.existsSync(candidate) ? candidate : null;
   }
 
   if (!fs.existsSync(USER_ROOT)) {

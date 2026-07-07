@@ -107,6 +107,18 @@ Useful implementation references:
 - `apps/polaris/scripts/config/scaffold.ts`
 - `apps/polaris/scripts/executor/operations.ts`
 
+## Executor Data Root
+
+Polaris runtime services do not read workspace data from the repo checkout by
+default.
+
+They read from `POLARIS_DATA_ROOT`.
+
+For local development, the server and executor must agree on the same data
+root. If one process points at `config/` while another points at a separate
+runtime data directory, workspace state and workspace config resolution will
+drift.
+
 Useful log events:
 
 - `workspace-shared-image-build`
