@@ -433,7 +433,7 @@ exit 0
       const output = await captureStdout(async () => {
         await runCli(["demo"]);
       });
-      assert.match(output, /"lifecycleAction": "status"/);
+      assert.doesNotMatch(output, /"lifecycleAction":/);
       assert.match(output, /"statusFile":/);
     },
   );
@@ -461,7 +461,7 @@ exit 0
       const output = await captureStdout(async () => {
         await runCli(["status", "demo@docker"]);
       });
-      assert.match(output, /"kind": "docker"/);
+      assert.match(output, /"backend": "docker"/);
       assert.match(output, /"project": "demo"/);
     },
   );
@@ -1015,8 +1015,14 @@ exit 0
     );
 
     const trace = fs.readFileSync(traceFile, "utf8");
-    assert.match(trace, new RegExp(`logs ${podProject}-pod --tail=200`));
-    assert.match(trace, new RegExp(`compose -f .*/workspaces/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${dockerProject}`));
+    assert.match(
+      trace,
+      new RegExp(`logs deployment/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, podProject)} --tail=200`),
+    );
+    assert.match(
+      trace,
+      new RegExp(`compose -f .*/workspaces/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, dockerProject)}`),
+    );
     assert.match(trace, new RegExp(`logs ${vmProject}-launcher --tail=200`));
   } finally {
     removeIfExists(podSpec);

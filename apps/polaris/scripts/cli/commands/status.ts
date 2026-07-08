@@ -4,11 +4,21 @@ import { buildStatusAssets } from "../../core/status-assets.js";
 import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSession, getEvolutionSummary } from "../../evolution/runtime.js";
 import { loadWorkspaceForCommand, persistWorkspacePaseoState } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
+import { measureWorkspacePhase } from "../../utils/workspace-log.js";
 
 export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
   const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
   const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
-  const observation = await driver.inspect(workspace);
+  const observation = await measureWorkspacePhase({
+    context: {
+      userId: workspace.userProfile.id,
+      workspace: workspace.identity.projectName,
+      backend: workspace.backend.kind,
+      profile: workspace.backend.profile,
+    },
+    phase: "inspect-workspace",
+    execute: () => driver.inspect(workspace),
+  });
   let effectiveObservation = observation;
   if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
     const persistResult = await persistWorkspacePaseoState(workspace);
@@ -23,7 +33,7 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
     }
   }
   const drift = computeWorkspaceDrift(workspace, effectiveObservation);
-  const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift, "status");
+  const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift);
   status.assets = buildStatusAssets(workspace);
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {

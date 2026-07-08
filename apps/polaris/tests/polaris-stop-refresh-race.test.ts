@@ -69,8 +69,12 @@ test("status refresh converges stopped docker workspace when docker exec races a
           runtimeKind: "docker-container",
           runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
         },
+        operation: {
+          kind: "stop",
+          updatedAt: new Date().toISOString(),
+        },
         health: {
-          backendLiveness: "stopping",
+          backendLiveness: "running",
           workspaceReadiness: "not-ready",
           reason: "test setup",
         },
@@ -109,10 +113,12 @@ exit 0
     const status = JSON.parse(
       fs.readFileSync(workspaceStatusPath(workspace, userId), "utf8"),
     ) as {
+      operation?: { kind: string };
       health: { backendLiveness: string; workspaceReadiness: string; reason?: string };
     };
     assert.equal(status.health.backendLiveness, "stopped");
     assert.equal(status.health.workspaceReadiness, "not-ready");
+    assert.equal(status.operation, undefined);
   } finally {
     fs.rmSync(workspaceSelectionPath(workspace, userId), { force: true });
     fs.rmSync(profilePath, { force: true });

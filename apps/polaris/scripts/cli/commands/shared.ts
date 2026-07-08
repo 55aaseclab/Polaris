@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../../config/load.js";
 import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
-import type { WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
+import type { WorkspaceCommandKind, WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
 import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import { readKubevirtPersistedPaseoState } from "../../backends/kubevirt/driver.js";
 import {
@@ -135,7 +135,7 @@ export function loadWorkspaceForProjectRef(
 }
 
 export function loadWorkspaceForCommand(
-  command: WorkspaceStatus["lifecycleAction"],
+  command: WorkspaceCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): {
@@ -156,7 +156,7 @@ export function loadWorkspaceForCommand(
 }
 
 export async function loadExecutableWorkspaceForCommand(
-  command: WorkspaceStatus["lifecycleAction"],
+  command: WorkspaceCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): Promise<{
@@ -170,7 +170,7 @@ export async function loadExecutableWorkspaceForCommand(
 }
 
 export async function loadPreparedWorkspaceForCommand(
-  command: WorkspaceStatus["lifecycleAction"],
+  command: WorkspaceCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): Promise<{
@@ -211,7 +211,7 @@ export async function waitForWorkspaceReady(
       }
     }
     const drift = computeWorkspaceDrift(workspace, effectiveObservation);
-    const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift, "start");
+    const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift);
     lastStatus = status;
 
     logDebug("cli", "start-probe", {
@@ -251,7 +251,7 @@ export async function waitForWorkspaceReady(
 
 export async function runWorkspaceCommandWithEvolution<T>(params: {
   workspace: WorkspaceSpec;
-  command: WorkspaceStatus["lifecycleAction"];
+  command: WorkspaceCommandKind;
   execute: () => Promise<T>;
   onSuccessPayload?: (result: T) => Record<string, unknown>;
 }): Promise<{ result: T; evolutionSessionId?: string }> {

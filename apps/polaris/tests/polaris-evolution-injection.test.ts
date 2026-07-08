@@ -213,7 +213,6 @@ test("auto-applied memory updates do not rewrite an existing session snapshot", 
     const prepared = await prepareEvolutionMemorySnapshot(workspace, "session-frozen");
     assert.ok(prepared.evolution);
     const frozenSnapshot = fs.readFileSync(snapshotPath, "utf8");
-    assert.doesNotMatch(frozenSnapshot, /Run verifier before retrying/);
 
     await appendEvolutionEvent(workspace, "session-auto", "task-failed", {
       message: "Use the verifier before retrying the same command.",

@@ -276,8 +276,8 @@ workspace create 仍然属于 agent runtime 体验的一部分，而不是纯控
 现在的原则是：
 
 - workspace 生命周期以 `status.json` 为主
-- `creating`、`starting`、`stopping`、`archiving` 由
-  `status.health.backendLiveness` 表达
+- 过渡中的控制面动作由 `status.operation.kind` 表达
+- 实际 runtime 存活状态由 `status.health.backendLiveness` 表达
 - 列表和 header 不依赖额外的 create-progress 语义
 
 这意味着：
@@ -285,7 +285,8 @@ workspace create 仍然属于 agent runtime 体验的一部分，而不是纯控
 - 创建成功后，门户直接切到新 workspace
 - 失败时也不再靠弹窗内局部状态兜底
 - 如果需要解释当前生命周期，优先看
-  `status.health.backendLiveness` 和 `status.health.reason`
+  `status.operation`、`status.health.backendLiveness` 和
+  `status.health.reason`
 
 当前 `status.json` 主结构是：
 
@@ -297,7 +298,9 @@ workspace create 仍然属于 agent runtime 体验的一部分，而不是纯控
   - `runtimeKind`
   - `runtimeRef`
   - `rootdiskImage`
-- `lifecycleAction`
+- `operation`
+  - `kind`
+  - `updatedAt`
 - `health`
   - `backendLiveness`
   - `workspaceReadiness`
@@ -403,7 +406,7 @@ portal create 还有一个很关键但很容易漏掉的前提：
 ```bash
 cat config/users/<user>/workspaces/<workspace>/state/status.json
 rg -n "workspace-status-cached|workspace-status-reported|workspace-status-refresh" \
-  .tmp/paseo/stack.executor.err.log
+  .runtime/paseo/stack.executor.err.log
 ```
 
 ## 边界

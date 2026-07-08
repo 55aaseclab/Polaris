@@ -53,7 +53,7 @@ import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
 import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
 import { getBackendDriver } from "../backends/index.js";
-import type { WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
+import type { WorkspaceCommandKind, WorkspaceSpec, WorkspaceStatus } from "../core/workspace.js";
 import { workspaceRuntimeScopeName } from "../core/workspace-name.js";
 import {
   parsePaseoDaemonStatus,
@@ -66,6 +66,7 @@ import {
 } from "../output/state-store.js";
 import { logError, logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import { logWorkspaceEvent, measureWorkspacePhase } from "../utils/workspace-log.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   withWorkspaceLifecycleLock,
@@ -77,6 +78,8 @@ const USER_ROOT = polarisUsersRoot(import.meta.url);
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
+
+type WorkspaceOperationKind = NonNullable<WorkspaceStatus["operation"]>["kind"];
 
 function workspaceJobKey(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
@@ -111,6 +114,52 @@ async function maybeDelayProvisionStep(
 
 function rootKey(userId: string, workspace: string): string {
   return `${userId}:${workspace}`;
+}
+
+function pendingWorkspaceOperation(kind: WorkspaceOperationKind): NonNullable<WorkspaceStatus["operation"]> {
+  return {
+    kind,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildWorkspaceStatusFromCurrent(args: {
+  workspace: string;
+  current: WorkspaceStatus | null;
+  health?: Partial<WorkspaceStatus["health"]>;
+  driver?: WorkspaceStatus["driver"];
+  operation?: WorkspaceStatus["operation"] | null;
+  credentials?: WorkspaceStatus["credentials"];
+  details?: WorkspaceStatus["details"];
+  evolution?: WorkspaceStatus["evolution"];
+  assets?: WorkspaceStatus["assets"];
+  attachments?: WorkspaceStatus["attachments"];
+  runtimeAssembly?: WorkspaceStatus["runtimeAssembly"];
+}): WorkspaceStatus {
+  return {
+    project: args.workspace,
+    ...(args.driver ?? args.current?.driver ? { driver: args.driver ?? args.current?.driver } : {}),
+    ...(args.operation === null
+      ? {}
+      : args.operation ?? args.current?.operation
+        ? { operation: args.operation ?? args.current?.operation }
+        : {}),
+    health: {
+      backendLiveness: args.health?.backendLiveness ?? args.current?.health.backendLiveness ?? "unknown",
+      workspaceReadiness: args.health?.workspaceReadiness ?? args.current?.health.workspaceReadiness ?? "unknown",
+      ...(Object.prototype.hasOwnProperty.call(args.health ?? {}, "reason")
+        ? { reason: args.health?.reason }
+        : args.current?.health.reason
+          ? { reason: args.current.health.reason }
+          : {}),
+    },
+    credentials: args.credentials ?? args.current?.credentials,
+    details: args.details ?? args.current?.details ?? {},
+    evolution: args.evolution ?? args.current?.evolution,
+    assets: args.assets ?? args.current?.assets,
+    attachments: args.attachments ?? args.current?.attachments,
+    runtimeAssembly: args.runtimeAssembly ?? args.current?.runtimeAssembly,
+  };
 }
 
 function portalRoot(userId: string, workspace: string): string {
@@ -1195,21 +1244,15 @@ async function provisionWorkspaceInternal(
     async () => {
       const defaultDockerOnly = options?.defaultDockerOnly ?? false;
       const startAfterCreate = options?.startAfterCreate ?? false;
-      writeDirectWorkspaceStatus(userId, workspace, (current) => ({
-        project: workspace,
-        driver: current?.driver,
-        lifecycleAction: current?.lifecycleAction ?? "status",
+      writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+        workspace,
+        current,
+        operation: pendingWorkspaceOperation("create"),
         health: {
-          backendLiveness: "creating",
+          backendLiveness: "missing",
           workspaceReadiness: "not-ready",
           reason: "workspace creation in progress",
         },
-        credentials: current?.credentials,
-        details: current?.details ?? {},
-        evolution: current?.evolution,
-        assets: current?.assets,
-        attachments: current?.attachments,
-        runtimeAssembly: current?.runtimeAssembly,
       }));
       if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
         await createWorkspaceForUser(workspace, userId);
@@ -1265,51 +1308,51 @@ export async function refreshPortalWorkspaceStatus(
   const job = (async () => {
     const summary = loadWorkspaceSummary(userId, workspace);
     if (!summary.selectedDriver) {
-      logWarn("executor", "workspace-status-refresh-skipped", {
+      logWorkspaceEvent("warn", "status-refresh-skipped", {
         userId,
         workspace,
+      }, {
         reason: "no-selected-driver",
       });
       return;
     }
     const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
-    logInfo("executor", "workspace-status-refresh-started", {
+    logWorkspaceEvent("info", "status-refresh-requested", {
       userId,
       workspace,
       ref,
     });
     try {
-      await captureStdout(() => statusCommand(ref, userId));
-      logInfo("executor", "workspace-status-refresh-completed", {
+      await measureWorkspacePhase({
+        context: { userId, workspace, ref, backend: summary.selectedDriver.backend, profile: summary.selectedDriver.profile },
+        phase: "status-refresh",
+        execute: () => captureStdout(() => statusCommand(ref, userId)),
+      });
+      logWorkspaceEvent("info", "status-refresh-completed", {
         userId,
         workspace,
         ref,
       });
     } catch (error) {
-      logWarn("executor", "workspace-status-refresh-failed", {
+      logWorkspaceEvent("warn", "status-refresh-failed", {
         userId,
         workspace,
         ref,
+      }, {
         reason: error instanceof Error ? error.message : String(error),
       });
       if (isStoppedContainerStatusRefreshError(error)) {
-        writeDirectWorkspaceStatus(userId, workspace, (current) => ({
-          project: workspace,
-          driver: current?.driver,
-          lifecycleAction: current?.lifecycleAction ?? "status",
+        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+          workspace,
+          current,
+          operation: null,
           health: {
-            backendLiveness: "missing",
+            backendLiveness: "stopped",
             workspaceReadiness: "not-ready",
             reason: "workspace is stopped",
           },
-          credentials: current?.credentials,
-          details: current?.details ?? {},
-          evolution: current?.evolution,
-          assets: current?.assets,
-          attachments: current?.attachments,
-          runtimeAssembly: current?.runtimeAssembly,
         }));
-        logInfo("executor", "workspace-status-refresh-coerced-stopped", {
+        logWorkspaceEvent("info", "status-refresh-coerced-stopped", {
           userId,
           workspace,
           ref,
@@ -1333,25 +1376,22 @@ export async function reportPortalWorkspaceStatus(input: {
   };
 }): Promise<{ reported: true }> {
   const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const next: WorkspaceStatus = {
-    project: input.workspace,
-    lifecycleAction: input.status.lifecycleAction ?? summary.status?.lifecycleAction ?? "status",
-    health: {
-      backendLiveness: summary.status?.health.backendLiveness ?? "unknown",
-      workspaceReadiness: summary.status?.health.workspaceReadiness ?? "unknown",
-      ...(input.status.health ?? {}),
-    },
+  const next: WorkspaceStatus = buildWorkspaceStatusFromCurrent({
+    workspace: input.workspace,
+    current: summary.status,
+    driver: input.status.driver,
+    operation: input.status.operation ?? summary.status?.operation,
+    health: input.status.health,
     details: {
       ...(summary.status?.details ?? {}),
       ...(input.status.details ?? {}),
     },
-    ...(input.status.driver ? { driver: input.status.driver } : {}),
-    ...(input.status.credentials ? { credentials: input.status.credentials } : {}),
-    ...(input.status.evolution ? { evolution: input.status.evolution } : {}),
-    ...(input.status.assets ? { assets: input.status.assets } : {}),
-    ...(input.status.attachments ? { attachments: input.status.attachments } : {}),
-    ...(input.status.runtimeAssembly ? { runtimeAssembly: input.status.runtimeAssembly } : {}),
-  };
+    credentials: input.status.credentials ?? summary.status?.credentials,
+    evolution: input.status.evolution ?? summary.status?.evolution,
+    assets: input.status.assets ?? summary.status?.assets,
+    attachments: input.status.attachments ?? summary.status?.attachments,
+    runtimeAssembly: input.status.runtimeAssembly ?? summary.status?.runtimeAssembly,
+  });
   writeWorkspaceStatus(next, input.userId);
   const normalizedServerId = String(input.paseo?.serverId ?? "").trim();
   if (normalizedServerId) {
@@ -1365,9 +1405,10 @@ export async function reportPortalWorkspaceStatus(input: {
       input.userId,
     );
   }
-  logInfo("executor", "workspace-status-reported", {
+  logWorkspaceEvent("info", "status-reported", {
     userId: input.userId,
     workspace: input.workspace,
+  }, {
     backendLiveness: next.health.backendLiveness,
     workspaceReadiness: next.health.workspaceReadiness,
     serverId: normalizedServerId || undefined,
@@ -1433,25 +1474,20 @@ export function startProvisionWorkspace(
       await provisionWorkspaceInternal(userId, workspace, options);
     } catch (error) {
       const classified = classifyProvisionError(error);
-      writeDirectWorkspaceStatus(userId, workspace, (current) => ({
-        project: workspace,
-        driver: current?.driver,
-        lifecycleAction: current?.lifecycleAction ?? "status",
+      writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+        workspace,
+        current,
+        operation: null,
         health: {
           backendLiveness: current?.health.backendLiveness ?? "missing",
           workspaceReadiness: "not-ready",
           reason: classified.message,
         },
-        credentials: current?.credentials,
-        details: current?.details ?? {},
-        evolution: current?.evolution,
-        assets: current?.assets,
-        attachments: current?.attachments,
-        runtimeAssembly: current?.runtimeAssembly,
       }));
-      logWarn("executor", "workspace-provision-failed", {
+      logWorkspaceEvent("warn", "provision-failed", {
         userId,
         workspace,
+      }, {
         errorCode: classified.errorCode,
         reason: classified.message,
       });
@@ -1485,6 +1521,16 @@ export async function deletePortalWorkspace(
   workspace: string;
 }> {
   try {
+    writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+      workspace,
+      current,
+      operation: pendingWorkspaceOperation("archive"),
+      health: {
+        backendLiveness: current?.health.backendLiveness ?? "unknown",
+        workspaceReadiness: "not-ready",
+        reason: "workspace archive requested",
+      },
+    }));
     return await archiveWorkspaceOwnedByUser(userId, workspace);
   } catch (error) {
     await refreshPortalWorkspaceStatus(userId, workspace);
@@ -1496,6 +1542,16 @@ export async function permanentlyDeletePortalWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ deleted: true; workspace: string }> {
+  writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+    workspace,
+    current,
+    operation: pendingWorkspaceOperation("delete"),
+    health: {
+      backendLiveness: current?.health.backendLiveness ?? "unknown",
+      workspaceReadiness: "not-ready",
+      reason: "workspace delete requested",
+    },
+  }));
   return deleteWorkspaceOwnedByUser(userId, workspace);
 }
 
@@ -1511,10 +1567,11 @@ export async function stopPortalWorkspace(
   workspace: string,
 ): Promise<{ stopped: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
+  const selectedDriver = summary.selectedDriver;
+  if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  const ref = workspaceRefFromTarget(workspace, selectedDriver);
   writeCachedWorkspaceStatusUpdate({
     userId,
     workspace,
@@ -1523,8 +1580,9 @@ export async function stopPortalWorkspace(
       if (!current) {
         return null;
       }
-      return {
-        ...current,
+      return buildWorkspaceStatusFromCurrent({
+        workspace,
+        current,
         driver: current.driver
           ? {
               ...current.driver,
@@ -1532,13 +1590,13 @@ export async function stopPortalWorkspace(
               profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
             }
           : current.driver,
+        operation: pendingWorkspaceOperation("stop"),
         health: {
-          ...current.health,
-          backendLiveness: "stopping",
+          backendLiveness: current.health.backendLiveness,
           workspaceReadiness: "not-ready",
           reason: "workspace stop requested",
         },
-      };
+      });
     },
   });
   const jobKey = workspaceJobKey(userId, workspace);
@@ -1550,44 +1608,42 @@ export async function stopPortalWorkspace(
     });
     return { stopped: true };
   }
-  logInfo("executor", "workspace-stop-queued", {
-    userId,
-    workspace,
-    ref,
+    logWorkspaceEvent("info", "stop-queued", {
+      userId,
+      workspace,
+      ref,
   });
   const job = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
       void withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-        logInfo("executor", "workspace-stop-started", {
-          userId,
-          workspace,
-          ref,
-        });
-        await stopCommand(ref, userId);
-        await refreshPortalWorkspaceStatus(userId, workspace);
-        logInfo("executor", "workspace-stop-completed", {
-          userId,
-          workspace,
-          ref,
+        await measureWorkspacePhase({
+          context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+          phase: "stop-workspace",
+          execute: async () => {
+            await stopCommand(ref, userId);
+            await refreshPortalWorkspaceStatus(userId, workspace);
+          },
         });
       }).then(resolve, reject);
     }, 0);
   })
     .catch(async (error) => {
       const message = error instanceof Error ? error.message : String(error);
-      logError("executor", "workspace-stop-failed", {
+      logWorkspaceEvent("error", "stop-failed", {
         userId,
         workspace,
         ref,
+      }, {
         error: message,
       });
       try {
         await refreshPortalWorkspaceStatus(userId, workspace);
       } catch (refreshError) {
-        logWarn("executor", "workspace-stop-failed-refresh", {
+        logWorkspaceEvent("warn", "stop-failed-refresh", {
           userId,
           workspace,
           ref,
+        }, {
           error: refreshError instanceof Error ? refreshError.message : String(refreshError),
         });
       }
@@ -1604,17 +1660,13 @@ export async function startPortalWorkspace(
   workspace: string,
 ): Promise<{ started: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
+  const selectedDriver = summary.selectedDriver;
+  if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  const ref = workspaceRefFromTarget(workspace, selectedDriver);
   try {
     return await withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-      logInfo("executor", "workspace-start-started", {
-        userId,
-        workspace,
-        ref,
-      });
       writeCachedWorkspaceStatusUpdate({
         userId,
         workspace,
@@ -1623,8 +1675,9 @@ export async function startPortalWorkspace(
           if (!current) {
             return null;
           }
-          return {
-            ...current,
+          return buildWorkspaceStatusFromCurrent({
+            workspace,
+            current,
             driver: current.driver
               ? {
                   ...current.driver,
@@ -1632,39 +1685,42 @@ export async function startPortalWorkspace(
                   profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
                 }
               : current.driver,
+            operation: pendingWorkspaceOperation("start"),
             health: {
-              ...current.health,
-              backendLiveness: "starting",
+              backendLiveness: current.health.backendLiveness,
               workspaceReadiness: "not-ready",
               reason: "workspace start requested",
             },
-          };
+          });
         },
       });
-      await startCommand(ref, userId);
-      await refreshPortalWorkspaceStatus(userId, workspace);
-      logInfo("executor", "workspace-start-completed", {
-        userId,
-        workspace,
-        ref,
+      await measureWorkspacePhase({
+        context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+        phase: "start-workspace",
+        execute: async () => {
+          await startCommand(ref, userId);
+          await refreshPortalWorkspaceStatus(userId, workspace);
+        },
       });
       return { started: true };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logError("executor", "workspace-start-failed", {
+    logWorkspaceEvent("error", "start-failed", {
       userId,
       workspace,
       ref,
+    }, {
       error: message,
     });
     try {
       await refreshPortalWorkspaceStatus(userId, workspace);
     } catch (refreshError) {
-      logWarn("executor", "workspace-start-failed-refresh", {
+      logWorkspaceEvent("warn", "start-failed-refresh", {
         userId,
         workspace,
         ref,
+      }, {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
       });
     }
@@ -1677,16 +1733,12 @@ export async function rebuildPortalWorkspace(
   workspace: string,
 ): Promise<{ rebuilt: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  if (!summary.selectedDriver) {
+  const selectedDriver = summary.selectedDriver;
+  if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+  const ref = workspaceRefFromTarget(workspace, selectedDriver);
   try {
-    logInfo("executor", "workspace-rebuild-started", {
-      userId,
-      workspace,
-      ref,
-    });
     writeCachedWorkspaceStatusUpdate({
       userId,
       workspace,
@@ -1695,8 +1747,9 @@ export async function rebuildPortalWorkspace(
         if (!current) {
           return null;
         }
-        return {
-          ...current,
+        return buildWorkspaceStatusFromCurrent({
+          workspace,
+          current,
           driver: current.driver
             ? {
                 ...current.driver,
@@ -1704,38 +1757,41 @@ export async function rebuildPortalWorkspace(
                 profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
               }
             : current.driver,
+          operation: pendingWorkspaceOperation("rebuild"),
           health: {
-            ...current.health,
-            backendLiveness: "starting",
+            backendLiveness: current.health.backendLiveness,
             workspaceReadiness: "not-ready",
             reason: "workspace rebuild requested",
           },
-        };
+        });
       },
     });
-    await rebuildCommand(ref, userId);
-    await refreshPortalWorkspaceStatus(userId, workspace);
-    logInfo("executor", "workspace-rebuild-completed", {
-      userId,
-      workspace,
-      ref,
+    await measureWorkspacePhase({
+      context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+      phase: "rebuild-workspace",
+      execute: async () => {
+        await rebuildCommand(ref, userId);
+        await refreshPortalWorkspaceStatus(userId, workspace);
+      },
     });
     return { rebuilt: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logError("executor", "workspace-rebuild-failed", {
+    logWorkspaceEvent("error", "rebuild-failed", {
       userId,
       workspace,
       ref,
+    }, {
       error: message,
     });
     try {
       await refreshPortalWorkspaceStatus(userId, workspace);
     } catch (refreshError) {
-      logWarn("executor", "workspace-rebuild-failed-refresh", {
+      logWorkspaceEvent("warn", "rebuild-failed-refresh", {
         userId,
         workspace,
         ref,
+      }, {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
       });
     }

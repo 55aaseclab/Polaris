@@ -76,6 +76,10 @@ export interface PortalWorkspaceStatus {
     runtimeRef: string;
     rootdiskImage?: string;
   };
+  operation?: {
+    kind: "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
+    updatedAt: string;
+  };
   credentials?: {
     ssh?: {
       mode: "managed-key" | "provided-key";

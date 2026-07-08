@@ -8,7 +8,8 @@ import {
 
 test("admin workspace buttons disable while creating", () => {
   const state = resolveAdminWorkspaceButtonState({
-    backendLiveness: "creating",
+    backendLiveness: "missing",
+    operation: "create",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "starting");
@@ -18,7 +19,8 @@ test("admin workspace buttons disable while creating", () => {
 
 test("admin workspace buttons disable while starting", () => {
   const state = resolveAdminWorkspaceButtonState({
-    backendLiveness: "starting",
+    backendLiveness: "missing",
+    operation: "start",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "starting");
@@ -28,7 +30,8 @@ test("admin workspace buttons disable while starting", () => {
 
 test("admin workspace buttons disable while stopping", () => {
   const state = resolveAdminWorkspaceButtonState({
-    backendLiveness: "stopping",
+    backendLiveness: "running",
+    operation: "stop",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "stopping");
@@ -38,7 +41,8 @@ test("admin workspace buttons disable while stopping", () => {
 
 test("admin workspace buttons disable while archiving", () => {
   const state = resolveAdminWorkspaceButtonState({
-    backendLiveness: "archiving",
+    backendLiveness: "missing",
+    operation: "archive",
     localAction: null,
   });
   assert.equal(state.archiveLabel, "deleting");
@@ -49,6 +53,7 @@ test("admin workspace buttons disable while archiving", () => {
 test("admin workspace buttons stay enabled for stable running state", () => {
   const state = resolveAdminWorkspaceButtonState({
     backendLiveness: "running",
+    operation: null,
     localAction: null,
   });
   assert.equal(state.primaryLabel, "stop_workspace");
@@ -59,6 +64,7 @@ test("admin workspace buttons stay enabled for stable running state", () => {
 test("admin workspace buttons stay enabled for stable stopped state", () => {
   const state = resolveAdminWorkspaceButtonState({
     backendLiveness: "missing",
+    operation: null,
     localAction: null,
   });
   assert.equal(state.primaryLabel, "start_workspace");
@@ -72,6 +78,7 @@ test("admin workspace stop action stays latched until queried state enters stopp
       localAction: "stop",
       baselineLiveness: "running",
       backendLiveness: "running",
+      operation: null,
       backendReason: "workspace is healthy",
       workspaceExists: true,
     }),
@@ -81,7 +88,8 @@ test("admin workspace stop action stays latched until queried state enters stopp
     shouldClearAdminWorkspaceAction({
       localAction: "stop",
       baselineLiveness: "running",
-      backendLiveness: "stopping",
+      backendLiveness: "running",
+      operation: "stop",
       backendReason: "workspace stop requested",
       workspaceExists: true,
     }),
@@ -95,6 +103,7 @@ test("admin workspace start action stays latched until queried state enters star
       localAction: "start",
       baselineLiveness: "missing",
       backendLiveness: "missing",
+      operation: null,
       backendReason: "workspace is stopped",
       workspaceExists: true,
     }),
@@ -104,7 +113,8 @@ test("admin workspace start action stays latched until queried state enters star
     shouldClearAdminWorkspaceAction({
       localAction: "start",
       baselineLiveness: "missing",
-      backendLiveness: "starting",
+      backendLiveness: "missing",
+      operation: "start",
       backendReason: "workspace start requested",
       workspaceExists: true,
     }),
@@ -118,6 +128,7 @@ test("admin workspace rebuild action stays latched until queried state enters st
       localAction: "rebuild",
       baselineLiveness: "running",
       backendLiveness: "running",
+      operation: null,
       backendReason: "workspace is healthy",
       workspaceExists: true,
     }),
@@ -127,7 +138,8 @@ test("admin workspace rebuild action stays latched until queried state enters st
     shouldClearAdminWorkspaceAction({
       localAction: "rebuild",
       baselineLiveness: "running",
-      backendLiveness: "starting",
+      backendLiveness: "running",
+      operation: "rebuild",
       backendReason: "workspace rebuild requested",
       workspaceExists: true,
     }),
@@ -141,6 +153,7 @@ test("admin workspace archive action stays latched until workspace disappears", 
       localAction: "archive",
       baselineLiveness: "missing",
       backendLiveness: "missing",
+      operation: null,
       backendReason: "workspace is stopped",
       workspaceExists: true,
     }),
@@ -151,6 +164,7 @@ test("admin workspace archive action stays latched until workspace disappears", 
       localAction: "archive",
       baselineLiveness: "missing",
       backendLiveness: null,
+      operation: null,
       backendReason: null,
       workspaceExists: false,
     }),
@@ -164,6 +178,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
       localAction: "delete-archive",
       baselineLiveness: null,
       backendLiveness: null,
+      operation: null,
       backendReason: null,
       workspaceExists: true,
     }),
@@ -174,6 +189,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
       localAction: "delete-archive",
       baselineLiveness: null,
       backendLiveness: null,
+      operation: null,
       backendReason: null,
       workspaceExists: false,
     }),
@@ -184,6 +200,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
 test("admin display state shows starting and polls for local start action", () => {
   const state = resolveAdminWorkspaceDisplayState({
     backendLiveness: "missing",
+    operation: null,
     localAction: "start",
   });
   assert.equal(state.statusLabel, "workspace_starting");
@@ -193,6 +210,7 @@ test("admin display state shows starting and polls for local start action", () =
 test("admin display state shows stopping and polls for local stop action", () => {
   const state = resolveAdminWorkspaceDisplayState({
     backendLiveness: "running",
+    operation: null,
     localAction: "stop",
   });
   assert.equal(state.statusLabel, "stopping");
@@ -202,6 +220,7 @@ test("admin display state shows stopping and polls for local stop action", () =>
 test("admin display state shows starting and polls for rebuild action", () => {
   const state = resolveAdminWorkspaceDisplayState({
     backendLiveness: "running",
+    operation: null,
     localAction: "rebuild",
     backendReason: null,
   });
@@ -213,6 +232,7 @@ test("admin display state shows starting and polls for rebuild action", () => {
 test("admin display state shows deleting and polls for archive action", () => {
   const state = resolveAdminWorkspaceDisplayState({
     backendLiveness: "missing",
+    operation: null,
     localAction: "archive",
     backendReason: null,
   });
@@ -220,9 +240,10 @@ test("admin display state shows deleting and polls for archive action", () => {
   assert.equal(state.shouldPoll, true);
 });
 
-test("admin display state keeps rebuild label while backend is starting from rebuild", () => {
+test("admin display state keeps rebuild label while status operation shows rebuild", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    backendLiveness: "starting",
+    backendLiveness: "running",
+    operation: "rebuild",
     localAction: null,
     backendReason: "workspace rebuild requested",
   });
@@ -234,7 +255,8 @@ test("admin display state keeps rebuild label while backend is starting from reb
 
 test("admin display state leaves rebuild label idle for ordinary start", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    backendLiveness: "starting",
+    backendLiveness: "missing",
+    operation: "start",
     localAction: "start",
     backendReason: "workspace start requested",
   });
@@ -247,6 +269,7 @@ test("admin display state leaves rebuild label idle for ordinary start", () => {
 test("admin display state re-enables rebuild only after workspace leaves transitional states", () => {
   const state = resolveAdminWorkspaceDisplayState({
     backendLiveness: "running",
+    operation: null,
     localAction: null,
     backendReason: "workspace is healthy",
   });

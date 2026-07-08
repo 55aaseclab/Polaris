@@ -44,6 +44,7 @@ That means the top-level workspace action area is driven by `status.json`,
 but not by a separate `status.state` field. The current lifecycle signal is
 mainly:
 
+- `status.operation`
 - `status.health.backendLiveness`
 - `status.health.workspaceReadiness`
 - `status.health.reason`
@@ -57,29 +58,28 @@ Supporting runtime and configuration facts live in:
 
 The important operator rule is:
 
-- workspace lifecycle is explained by `health`
+- in-flight lifecycle intent is explained by `operation`
+- live runtime truth is explained by `health`
 - driver details are supporting information, not the primary action state
 
 Current commonly-seen `backendLiveness` values include:
 
-- `creating`
-- `starting`
 - `running`
-- `stopping`
-- `archiving`
 - `stopped`
 - `missing`
 
 In practice this means:
 
-- `creating`, `starting`, `stopping`, and `archiving` should survive a page
-  refresh
+- `status.operation.kind` should survive a page refresh while an executor
+  action is still in flight
+- `status.health.backendLiveness` should stay a live runtime fact instead of a
+  synthetic UI transition label
 - the portal should not rely only on local in-memory UI state for these
   transitions
 - the system should not expose or depend on a separate `provision.json`
   progress model for user-visible lifecycle state
-- portal detail reads may refresh runtime observations, but they should merge
-  with existing lifecycle state instead of blindly overwriting it
+- portal detail reads may refresh runtime observations, but they should
+  rewrite canonical status instead of doing field-by-field stale merges
 - portal list reads should return the workspace list immediately instead of
   blocking on per-workspace status refresh
 - driver-specific facts such as runtime kind or runtime reference belong in
@@ -89,6 +89,7 @@ The current persisted schema no longer exposes:
 
 - `status.state`
 - `status.backend`
+- `lifecycleAction`
 - `health.daemonReadiness`
 - top-level `ssh`
 - top-level `drift`

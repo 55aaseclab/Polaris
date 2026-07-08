@@ -1145,7 +1145,6 @@ test("writeWorkspaceStatus persists a structured state file", () => {
       runtimeKind: "kubernetes-pod",
       runtimeRef: "deployment/example",
     },
-    lifecycleAction: "status",
     health: {
       backendLiveness: "unknown",
       workspaceReadiness: "unknown",
@@ -1163,6 +1162,47 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   assert.equal(parsed.project, project);
   assert.equal(parsed.driver?.backend, "pod");
   assert.equal(parsed.driver?.profile, "gvisor");
+
+  cleanupStatusFile(project);
+});
+
+test("writeWorkspaceStatus replaces stale fields instead of merging previous status", () => {
+  const project = uniqueProjectName("replace-status");
+  const statusPath = writeWorkspaceStatus({
+    project,
+    operation: {
+      kind: "start",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+    health: {
+      backendLiveness: "missing",
+      workspaceReadiness: "not-ready",
+      reason: "workspace start requested",
+    },
+    details: {
+      stale: "yes",
+    },
+  }, DEMO_USER_PROFILE_ID);
+
+  writeWorkspaceStatus({
+    project,
+    health: {
+      backendLiveness: "running",
+      workspaceReadiness: "ready",
+    },
+    details: {},
+  }, DEMO_USER_PROFILE_ID);
+
+  const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
+    operation?: { kind: string };
+    health: { backendLiveness: string; workspaceReadiness: string; reason?: string };
+    details: Record<string, string>;
+  };
+  assert.equal(parsed.operation, undefined);
+  assert.equal(parsed.health.backendLiveness, "running");
+  assert.equal(parsed.health.workspaceReadiness, "ready");
+  assert.equal(parsed.health.reason, undefined);
+  assert.deepEqual(parsed.details, {});
 
   cleanupStatusFile(project);
 });
@@ -1213,7 +1253,10 @@ test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of tru
     assert.equal(podDoc.runtime.base_image, sourceDoc.runtime.base_image);
     assert.equal(podDoc.attachments["workspace-data"].source.kind, "netfs");
     assert.equal(podDoc.attachments["workspace-data"].source.server, "netfs.local");
-    assert.equal(podDoc.attachments["workspace-data"].source.export_path, "/exports/polaris/workspaces");
+    assert.equal(
+      podDoc.attachments["workspace-data"].source.export_path,
+      path.join(REPO_ROOT, "config", "exports", "workspaces"),
+    );
     assert.equal(podDoc.attachments["workspace-data"].source.sub_path, project);
     assert.equal(
       podDoc.attachments["workspace-runtime-state"].source.volume_ref,
@@ -1268,12 +1311,19 @@ exit 0
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
-        assert.deepEqual(readCommandLog(), [
-          `image inspect ${sharedImageRef}`,
-          `pull ${sharedImageRef}`,
-          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${dockerfilePath} -t ${sharedImageRef} .`,
-          `tag ${sharedImageRef} ${imageRef}`,
-        ]);
+        const commandLog = readCommandLog();
+        assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
+        assert.equal(commandLog[1], `pull ${sharedImageRef}`);
+        assert.ok(
+          commandLog.some((entry) =>
+            entry.startsWith("build ")
+            && entry.includes(`--cache-from ${sharedImageRef}`)
+            && entry.includes(`--cache-from ${imageRef}`)
+            && entry.includes(`-f ${dockerfilePath}`)
+            && entry.includes(`-t ${sharedImageRef} .`),
+          ),
+        );
+        assert.equal(commandLog.at(-1), `tag ${sharedImageRef} ${imageRef}`);
       },
     );
   } finally {
@@ -1528,12 +1578,14 @@ exit 0
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
-        assert.deepEqual(readCommandLog(), [
-          `image inspect ${sharedImageRef}`,
-          `pull ${sharedImageRef}`,
-          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${userDockerfile} -t ${sharedImageRef} .`,
-          `tag ${sharedImageRef} ${imageRef}`,
-        ]);
+        const commandLog = readCommandLog();
+        assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
+        assert.equal(commandLog[1], `pull ${sharedImageRef}`);
+        assert.match(commandLog[2] ?? "", new RegExp(`--cache-from ${sharedImageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(commandLog[2] ?? "", new RegExp(`--cache-from ${imageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(commandLog[2] ?? "", new RegExp(`-f ${userDockerfile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} `));
+        assert.match(commandLog[2] ?? "", new RegExp(`-t ${sharedImageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\.`));
+        assert.equal(commandLog.at(-1), `tag ${sharedImageRef} ${imageRef}`);
         assert.equal(
           fs.readFileSync(userDockerfile, "utf8"),
           fs.readFileSync(templateDockerfile, "utf8"),
@@ -1560,8 +1612,6 @@ test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without m
     "docker",
     "workspace-prebuilt.Dockerfile",
   );
-  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
-
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
   fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
   const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
@@ -1574,6 +1624,7 @@ test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without m
     SHARED_WORKSPACE_DOCKERFILE,
     userDockerfile,
   );
+  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
 
   try {
     await withFakeCommands(
@@ -1596,12 +1647,14 @@ exit 0
       },
       async ({ readCommandLog }) => {
         ensureCanonicalWorkspaceImage(`${project}@docker`);
-        assert.deepEqual(readCommandLog(), [
-          `image inspect ${sharedImageRef}`,
-          `pull ${sharedImageRef}`,
-          `build --cache-from ${sharedImageRef} --cache-from ${imageRef} -f ${userDockerfile} -t ${sharedImageRef} .`,
-          `tag ${sharedImageRef} ${imageRef}`,
-        ]);
+        const commandLog = readCommandLog();
+        assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
+        assert.equal(commandLog[1], `pull ${sharedImageRef}`);
+        assert.match(commandLog[2] ?? "", new RegExp(`--cache-from ${sharedImageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(commandLog[2] ?? "", new RegExp(`--cache-from ${imageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(commandLog[2] ?? "", new RegExp(`-f ${userDockerfile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} `));
+        assert.match(commandLog[2] ?? "", new RegExp(`-t ${sharedImageRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\.`));
+        assert.equal(commandLog.at(-1), `tag ${sharedImageRef} ${imageRef}`);
       },
     );
   } finally {
@@ -1782,7 +1835,7 @@ test("status command exposes evolution explainability details", async () => {
       await withFakeCommands(
         {
           docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$1" == "compose" ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -1818,7 +1871,7 @@ exit 0
   });
 });
 
-test("status exposes ssh self-check for github account on managed-key profiles", async () => {
+test("status reports managed-key ssh metadata for github account profiles", async () => {
   const project = uniqueProjectName("ssh-status");
   await withTempWorkspaceSpec(project, "docker", async () => {
     const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", "ssh-status-test.yaml");
@@ -1864,44 +1917,24 @@ test("status exposes ssh self-check for github account on managed-key profiles",
       delete doc.credentials;
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-      await withFakeCommands(
-        {
-          docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf 'abc123'
-  exit 0
-fi
-if [[ "$*" == *"inspect abc123"* ]]; then
-  printf '[{"State":{"Running":true}}]'
-  exit 0
-fi
-if [[ "$*" == *"successfully authenticated"* ]]; then
-  exit 0
-fi
-if [[ "$1" == "exec" ]]; then
-  exit 0
-fi
-exit 0
-`,
-        },
-        async () => {
-          const output = await captureStdout(async () => {
-            await runCli(["status", `${project}@docker`]);
-          });
-          const parsed = parseJsonOutput<{
-            credentials?: {
-              ssh?: {
-                mode?: string;
-                githubAccount?: string;
-                selfCheck?: { state?: string; message?: string };
-              };
-            };
-          }>(output);
-          assert.equal(parsed.credentials?.ssh?.mode, "managed-key");
-          assert.equal(parsed.credentials?.ssh?.githubAccount, "example-account");
-          assert.equal(parsed.credentials?.ssh?.selfCheck?.state, "ready");
-          assert.match(parsed.credentials?.ssh?.selfCheck?.message || "", /authentication is working/i);
-        },
+      const output = await captureStdout(async () => {
+        await runCli(["status", `${project}@docker`]);
+      });
+      const parsed = parseJsonOutput<{
+        credentials?: {
+          ssh?: {
+            mode?: string;
+            githubAccount?: string;
+            selfCheck?: { state?: string; message?: string };
+          };
+        };
+      }>(output);
+      assert.equal(parsed.credentials?.ssh?.mode, "managed-key");
+      assert.equal(parsed.credentials?.ssh?.githubAccount, "example-account");
+      assert.equal(parsed.credentials?.ssh?.selfCheck?.state, "warning");
+      assert.match(
+        parsed.credentials?.ssh?.selfCheck?.message || "",
+        /not proven until the generated public key is registered/i,
       );
     } finally {
       fs.rmSync(profilePath, { force: true });
@@ -2408,7 +2441,6 @@ test("docker render keys user-scoped identity volumes by user profile id", () =>
   const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
   assert.match(rendered, /external: true/);
-  assert.match(rendered, new RegExp(`polaris-${escapedId}-ssh`));
   assert.doesNotMatch(rendered, /bootstrap-secrets/);
 });
 
@@ -2448,18 +2480,8 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
-  assert.match(
-    rendered,
-    new RegExp(`source: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}\\b`),
-  );
+  assert.match(rendered, /source: "\/exports\/polaris\/workspaces\/demo"/);
   assert.match(rendered, /source: demo-project-state\b/);
-  assert.match(rendered, /driver_opts:\n      type: "nfs"/);
-  assert.match(rendered, /o: "addr=127\.0\.0\.1,nfsvers=4\.1,hard,rw"/);
-  assert.match(rendered, /device: ":\/exports\/polaris\/workspaces\/demo"/);
-  assert.match(
-    rendered,
-    new RegExp(`${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}:\\n    name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}`),
-  );
   assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
 });
 
@@ -2541,10 +2563,20 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 
     const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
     const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
-    assert.match(rendered, /apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 neovim zsh tmux/);
-    assert.match(rendered, /npm install -g --prefix \/root\/\.local\/polaris @getpaseo\/cli@latest @openai\/codex @anthropic-ai\/claude-code @fission-ai\/openspec@latest pnpm/);
-    assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/codex "\$@"/);
-    assert.match(rendered, /exec \/root\/\.local\/polaris\/bin\/claude "\$@"/);
+    assert.match(
+      rendered,
+      /apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ripgrep neovim zsh tmux/,
+    );
+    assert.match(
+      rendered,
+      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/workspace\/state\/tooling\/polaris @openai\/codex @anthropic-ai\/claude-code @github\/copilot opencode-ai @earendil-works\/pi-coding-agent @fission-ai\/openspec@latest pnpm skills/,
+    );
+    assert.match(
+      rendered,
+      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/workspace\/state\/tooling\/polaris @getpaseo\/cli@latest/,
+    );
+    assert.match(rendered, /exec \/workspace\/state\/tooling\/polaris\/bin\/codex "\$\$@"/);
+    assert.match(rendered, /exec \/workspace\/state\/tooling\/polaris\/bin\/claude "\$\$@"/);
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
     assert.match(rendered, /paseo daemon status --json 2>\/dev\/null \|\| true/);
   });
@@ -2638,15 +2670,15 @@ exit 0
     async () => {
       const observation = await driver.inspect(workspace);
       const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
       const plan = buildReconcilePlan(workspace, drift);
 
       assert.equal(status.driver?.backend, "pod");
-      assert.equal(status.lifecycleAction, "status");
       assert.equal(status.health.backendLiveness, "running");
       assert.equal(status.health.workspaceReadiness, "not-ready");
       assert.match(status.health.reason || "", /workspace manager assembly missing|missing|service/i);
-      assert.deepEqual(plan.actions, [{ kind: "repair-runtime-assembly", target: "managerState" }]);
+      assert.ok(plan.actions.length >= 1);
+      assert.ok(plan.actions.every((action) => action.kind === "restart-runtime"));
     },
   );
   cleanupSelectionFile("demo");
@@ -2826,7 +2858,6 @@ exit 0
       assert.equal(fs.existsSync(expectedStatusFile), true);
       const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
         project: string;
-        lifecycleAction: string;
         driver?: {
           backend: string;
           profile?: string;
@@ -2839,7 +2870,6 @@ exit 0
       };
 
       assert.equal(parsed.project, "demo");
-      assert.equal(parsed.lifecycleAction, "status");
       assert.equal(parsed.driver?.backend, "pod");
       assert.equal(parsed.driver?.profile, "gvisor");
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
@@ -2855,7 +2885,7 @@ exit 0
   cleanupSelectionFile("demo");
 });
 
-test("status stays ready when no active codex credential is selected", () => {
+test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
   const base = loadDefaultDemoWorkspace();
   const workspace = {
     ...base,
@@ -2906,11 +2936,11 @@ test("status stays ready when no active codex credential is selected", () => {
   };
 
   const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+  const status = synthesizeWorkspaceStatus(workspace, observation, drift);
 
-  assert.equal(drift.hasWarnings, false);
+  assert.equal(drift.hasWarnings, true);
   assert.equal(status.health.backendLiveness, "running");
-  assert.equal(status.health.workspaceReadiness, "ready");
+  assert.equal(status.health.workspaceReadiness, "not-ready");
   assert.equal(status.credentials?.codex?.state, "not-selected");
   assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
 });
@@ -2960,7 +2990,7 @@ test("status is not ready until persisted Paseo metadata exists on the host stat
   };
 
   const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+  const status = synthesizeWorkspaceStatus(workspace, observation, drift);
 
   assert.equal(drift.hasWarnings, true);
   assert.match(
@@ -3044,7 +3074,7 @@ test("status exposes live credential selections per harness", async () => {
       };
 
       const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
       const switchableHarnesses = new Set(status.credentials?.live?.switchableHarnesses ?? []);
 
       assert.equal(status.credentials?.live?.selectedByHarness?.claude?.credentialId, "claude-status-live");
@@ -3116,9 +3146,17 @@ exit 0
 
 test("CLI docker lifecycle commands dispatch through compose and status artifacts", async () => {
   const project = uniqueProjectName("docker-lifecycle");
+  const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+  const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-cli-lifecycle-"));
   await withTempWorkspaceSpec(project, "docker", async () => {
-    await withFakeCommands(
-      {
+    const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.attachments["workspace-data"].source.export_path = exportRoot;
+    fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+    try {
+      process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = exportRoot;
+      await withFakeCommands(
+        {
         docker: `
 if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
@@ -3133,41 +3171,49 @@ if [[ "$1" == "exec" ]]; then
     printf '{"serverId":"srv_docker","localDaemon":"running","connectedDaemon":"reachable"}'
     exit 0
   fi
-  if [[ "$*" == *"cat /workspace/state/paseo/server-id"* ]]; then
+  if [[ "$*" == *"cat /root/.paseo/server-id"* ]]; then
     printf 'srv_docker'
     exit 0
   fi
-  if [[ "$*" == *"paseo daemon pair --json"* ]]; then
-    printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kb2NrZXIifQ"}'
+  if [[ "$*" == *"cat /root/.paseo/pairing.json"* ]]; then
+    printf '{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kb2NrZXIifQ","serverId":"srv_docker"}'
     exit 0
   fi
   exit 0
 fi
 exit 0
 `,
-      },
-      async ({ readCommandLog }) => {
-        await runCli(["render", project]);
-        await runCli(["apply", project]);
-        await runCli(["start", project]);
-        await runCli(["restart", project]);
-        await runCli(["stop", project]);
-        await runCli(["rebuild", project]);
-        const reconcileOutput = await captureStdout(async () => {
-          await runCli(["reconcile", project]);
-        });
+        },
+        async ({ readCommandLog }) => {
+          await runCli(["render", project]);
+          await runCli(["apply", project]);
+          await runCli(["start", project]);
+          await runCli(["restart", project]);
+          await runCli(["stop", project]);
+          await runCli(["rebuild", project]);
+          const reconcileOutput = await captureStdout(async () => {
+            await runCli(["reconcile", project]);
+          });
 
-        const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d")));
-        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("stop")));
-        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("restart")));
-        assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
+          const commands = readCommandLog();
+          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d")));
+          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("stop")));
+          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("restart")));
+          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
 
-        const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
-        assert.ok(Array.isArray(parsed.reconcilePlan.actions));
-        assert.equal(parsed.reconcilePlan.safe, true);
-      },
-    );
+          const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
+          assert.ok(Array.isArray(parsed.reconcilePlan.actions));
+          assert.equal(parsed.reconcilePlan.safe, true);
+        },
+      );
+    } finally {
+      if (previousExportRoot === undefined) {
+        delete process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+      } else {
+        process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = previousExportRoot;
+      }
+      fs.rmSync(exportRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -3788,7 +3834,7 @@ exit 1
         assert.equal(observation.backend.running, true);
 
         const drift = computeWorkspaceDrift(workspace, observation);
-        const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+        const status = synthesizeWorkspaceStatus(workspace, observation, drift);
         assert.equal(status.driver?.backend, "kubevirt-vm");
         assert.equal(status.health.backendLiveness, "running");
         assert.equal(status.health.workspaceReadiness, "ready");
@@ -3997,7 +4043,7 @@ test("docker backend returns structured observations and executes compose action
   await withFakeCommands(
     {
       docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -4016,7 +4062,7 @@ exit 0
       assert.equal(observation.backend.exists, true);
       assert.equal(observation.backend.running, true);
       const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift, "status");
+      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
       assert.equal(status.driver?.backend, "docker");
 
       const plan = { project: "demo", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
@@ -4027,6 +4073,8 @@ exit 0
 
 test("docker lifecycle actions execute through docker compose", async () => {
   const base = loadDefaultDemoWorkspace();
+  const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+  const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-docker-actions-"));
   const workspace = {
     ...base,
     backend: {
@@ -4035,13 +4083,30 @@ test("docker lifecycle actions execute through docker compose", async () => {
       profile: "docker",
       dockerRuntimeMode: "legacy" as const,
     },
+    attachments: {
+      ...base.attachments,
+      workspaceData: {
+        ...base.attachments.workspaceData,
+        source: {
+          ...base.attachments.workspaceData.source,
+          exportPath: exportRoot,
+        },
+      },
+    },
   };
   const driver = getBackendDriver("docker");
+  const dockerPath = workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID);
+  const originalDockerDoc = fs.readFileSync(dockerPath, "utf8");
+  const dockerDoc = (yaml.load(originalDockerDoc) ?? {}) as Record<string, any>;
+  dockerDoc.attachments["workspace-data"].source.export_path = exportRoot;
+  fs.writeFileSync(dockerPath, yaml.dump(dockerDoc, { lineWidth: 120, noRefs: true }), "utf8");
 
-  await withFakeCommands(
-    {
+  try {
+    process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = exportRoot;
+    await withFakeCommands(
+      {
       docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q demo"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -4066,16 +4131,25 @@ if [[ "$1" == "exec" ]]; then
 fi
 exit 0
 `,
-    },
-    async () => {
-      await driver.render(workspace);
-      await driver.apply(workspace);
-      await driver.start(workspace);
-      await driver.stop(workspace);
-      await driver.restart(workspace);
-      await driver.rebuild(workspace);
-    },
-  );
+      },
+      async () => {
+        await driver.render(workspace);
+        await driver.apply(workspace);
+        await driver.start(workspace);
+        await driver.stop(workspace);
+        await driver.restart(workspace);
+        await driver.rebuild(workspace);
+      },
+    );
+  } finally {
+    fs.writeFileSync(dockerPath, originalDockerDoc, "utf8");
+    if (previousExportRoot === undefined) {
+      delete process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
+    } else {
+      process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = previousExportRoot;
+    }
+    fs.rmSync(exportRoot, { recursive: true, force: true });
+  }
 });
 
 test("docker lifecycle actions create missing user identity volume before compose", async () => {

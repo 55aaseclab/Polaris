@@ -101,113 +101,29 @@ function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
     return null;
   }
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceStatus;
+    return normalizeWorkspaceStatus(
+      JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceStatus,
+    );
   } catch {
     return null;
   }
 }
 
-function mergeWorkspaceStatus(
-  current: WorkspaceStatus | null,
-  incoming: WorkspaceStatus,
-): WorkspaceStatus {
-  if (!current) {
-    return incoming;
-  }
-  const driver = current.driver || incoming.driver
-    ? {
-        ...(current.driver ?? {}),
-        ...(incoming.driver ?? {}),
-      }
-    : undefined;
-  const codexCredentials = current.credentials?.codex || incoming.credentials?.codex
-    ? {
-        ...(current.credentials?.codex ?? {}),
-        ...(incoming.credentials?.codex ?? {}),
-      }
-    : undefined;
-  const sshCredentials = current.credentials?.ssh || incoming.credentials?.ssh
-    ? {
-        ...(current.credentials?.ssh ?? {}),
-        ...(incoming.credentials?.ssh ?? {}),
-        selfCheck: {
-          ...(current.credentials?.ssh?.selfCheck ?? { state: "not-configured", message: "" }),
-          ...(incoming.credentials?.ssh?.selfCheck ?? {}),
-        },
-      }
-    : undefined;
-  const liveCredentials = current.credentials?.live || incoming.credentials?.live
-    ? {
-        ...(current.credentials?.live ?? {}),
-        ...(incoming.credentials?.live ?? {}),
-        selectedByHarness: {
-          ...(current.credentials?.live?.selectedByHarness ?? {}),
-          ...(incoming.credentials?.live?.selectedByHarness ?? {}),
-        },
-      }
-    : undefined;
-  const credentials = codexCredentials || sshCredentials || liveCredentials
-    ? {
-        ...(current.credentials ?? {}),
-        ...(incoming.credentials ?? {}),
-        ...(sshCredentials ? { ssh: sshCredentials } : {}),
-        ...(codexCredentials ? { codex: codexCredentials } : {}),
-        ...(liveCredentials ? { live: liveCredentials } : {}),
-      }
-    : undefined;
-  const evolution = current.evolution || incoming.evolution
-    ? {
-        ...(current.evolution ?? {}),
-        ...(incoming.evolution ?? {}),
-        latestArtifacts: incoming.evolution?.latestArtifacts ?? current.evolution?.latestArtifacts,
-        latestTitles: incoming.evolution?.latestTitles ?? current.evolution?.latestTitles ?? [],
-      }
-    : undefined;
-  const merged: WorkspaceStatus = {
-    ...current,
-    ...incoming,
-    project: incoming.project,
-    lifecycleAction: incoming.lifecycleAction ?? current.lifecycleAction,
-    health: {
-      backendLiveness: incoming.health.backendLiveness ?? current.health.backendLiveness,
-      workspaceReadiness: incoming.health.workspaceReadiness ?? current.health.workspaceReadiness,
-      reason: Object.prototype.hasOwnProperty.call(incoming.health, "reason")
-        ? incoming.health.reason
-        : current.health.reason,
-    },
-    details: {
-      ...current.details,
-      ...incoming.details,
-    },
-    assets: incoming.assets ?? current.assets,
-    attachments: incoming.attachments ?? current.attachments,
-    runtimeAssembly: incoming.runtimeAssembly ?? current.runtimeAssembly,
-  };
-  if (driver?.backend && driver.baseImage && driver.runtimeKind && driver.runtimeRef) {
-    merged.driver = driver as NonNullable<WorkspaceStatus["driver"]>;
-  }
-  if (sshCredentials?.mode || codexCredentials?.state || liveCredentials) {
-    merged.credentials = credentials as NonNullable<WorkspaceStatus["credentials"]>;
-  }
-  if (
-    typeof evolution?.artifactCount === "number"
-    && typeof evolution.activeWorkspaceArtifacts === "number"
-    && typeof evolution.activeUserArtifacts === "number"
-    && Array.isArray(evolution.latestTitles)
-  ) {
-    merged.evolution = evolution as NonNullable<WorkspaceStatus["evolution"]>;
-  }
-  delete ((merged as unknown) as Record<string, unknown>).paseo;
-  delete ((merged as unknown) as Record<string, unknown>).daemon;
-  delete ((merged as unknown) as Record<string, unknown>).ssh;
-  delete ((merged as unknown) as Record<string, unknown>).drift;
-  return merged;
+function normalizeWorkspaceStatus(status: WorkspaceStatus): WorkspaceStatus {
+  const next = {
+    ...status,
+    details: status.details ?? {},
+  } as WorkspaceStatus & Record<string, unknown>;
+  delete next.paseo;
+  delete next.daemon;
+  delete next.ssh;
+  delete next.drift;
+  return next;
 }
 
 export function writeWorkspaceStatus(status: WorkspaceStatus, userProfileId?: string): string {
   const outputPath = workspaceStatusPath(status.project, userProfileId);
-  const current = readWorkspaceStatusFile(outputPath);
-  const next = mergeWorkspaceStatus(current, status);
+  const next = normalizeWorkspaceStatus(status);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   if (outputPath !== legacyWorkspaceStatusPath(status.project)) {

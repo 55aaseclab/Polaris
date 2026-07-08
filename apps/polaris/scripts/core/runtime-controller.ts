@@ -424,7 +424,6 @@ export function synthesizeWorkspaceStatus(
   workspace: WorkspaceSpec,
   observation: BackendObservation,
   drift: WorkspaceDrift,
-  lifecycleAction: WorkspaceStatus["lifecycleAction"],
 ): WorkspaceStatus {
   const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
   const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
@@ -449,7 +448,6 @@ export function synthesizeWorkspaceStatus(
         ? { rootdiskImage: workspace.runtime.rootdiskImage }
         : {}),
     },
-    lifecycleAction,
     health: {
       backendLiveness,
       workspaceReadiness,
