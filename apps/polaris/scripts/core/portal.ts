@@ -725,7 +725,7 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
   const summary = loadWorkspaceSummary(userId, workspace);
   let resolvedWorkspace: WorkspaceStatus | null = summary.status;
   let bindings: PortalWorkspaceDetail["credentialBindings"] = [];
-  const selectedDriver = summary.status?.runtime.selectedDriver ?? null;
+  const selectedDriver = summary.status?.runtime?.selectedDriver ?? null;
   const preferredTargets = [
     selectedDriver,
     { backend: "docker" as const },
