@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-07-08
+
+Expanded Polaris workspace skill management, tightened runtime status handling,
+and refined portal workspace UX around admin-scoped navigation and sidebar
+responsiveness.
+
+### Added
+
+- Added user skill registry and workspace runtime skill install, uninstall,
+  list, and sync flows.
+- Added a frozen `0.2.6` docs snapshot.
+- Added regression coverage for admin-pane workspace entry and sidebar refresh
+  behavior.
+
+### Changed
+
+- Unified workspace runtime status semantics and narrowed portal lifecycle
+  handling around cached runtime and Paseo state.
+- Updated admin-scoped workspace routing and sidebar behavior to react faster
+  when entering a workspace from the admin pane.
+- Updated docs release metadata and changelog baseline to use `0.2.6` as the
+  current release snapshot.
+
 ## [0.2.5] - 2026-06-30
 
 Hardened Polaris user and workspace control-plane mutation handling around
