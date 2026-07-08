@@ -126,7 +126,8 @@ function pendingWorkspaceOperation(kind: WorkspaceOperationKind): NonNullable<Wo
 function buildWorkspaceStatusFromCurrent(args: {
   workspace: string;
   current: WorkspaceStatus | null;
-  health?: Partial<WorkspaceStatus["health"]>;
+  runtime?: Partial<WorkspaceStatus["runtime"]>;
+  paseo?: Partial<WorkspaceStatus["paseo"]>;
   driver?: WorkspaceStatus["driver"];
   operation?: WorkspaceStatus["operation"] | null;
   credentials?: WorkspaceStatus["credentials"];
@@ -144,13 +145,32 @@ function buildWorkspaceStatusFromCurrent(args: {
       : args.operation ?? args.current?.operation
         ? { operation: args.operation ?? args.current?.operation }
         : {}),
-    health: {
-      backendLiveness: args.health?.backendLiveness ?? args.current?.health.backendLiveness ?? "unknown",
-      workspaceReadiness: args.health?.workspaceReadiness ?? args.current?.health.workspaceReadiness ?? "unknown",
-      ...(Object.prototype.hasOwnProperty.call(args.health ?? {}, "reason")
-        ? { reason: args.health?.reason }
-        : args.current?.health.reason
-          ? { reason: args.current.health.reason }
+    runtime: {
+      selectedDriver:
+        Object.prototype.hasOwnProperty.call(args.runtime ?? {}, "selectedDriver")
+          ? args.runtime?.selectedDriver ?? null
+          : args.current?.runtime.selectedDriver ?? null,
+      lifecycle: args.runtime?.lifecycle ?? args.current?.runtime.lifecycle ?? "unknown",
+      ...(Object.prototype.hasOwnProperty.call(args.runtime ?? {}, "reason")
+        ? { reason: args.runtime?.reason }
+        : args.current?.runtime.reason
+          ? { reason: args.current.runtime.reason }
+          : {}),
+    },
+    paseo: {
+      daemon: args.paseo?.daemon ?? args.current?.paseo.daemon ?? "unknown",
+      web: args.paseo?.web ?? args.current?.paseo.web ?? "unavailable",
+      reconnectMode: args.paseo?.reconnectMode ?? args.current?.paseo.reconnectMode ?? "unknown",
+      ...(Object.prototype.hasOwnProperty.call(args.paseo ?? {}, "liveTarget")
+        ? { liveTarget: args.paseo?.liveTarget ?? null }
+        : { liveTarget: args.current?.paseo.liveTarget ?? null }),
+      ...(Object.prototype.hasOwnProperty.call(args.paseo ?? {}, "reconnectTarget")
+        ? { reconnectTarget: args.paseo?.reconnectTarget ?? null }
+        : { reconnectTarget: args.current?.paseo.reconnectTarget ?? null }),
+      ...(Object.prototype.hasOwnProperty.call(args.paseo ?? {}, "reason")
+        ? { reason: args.paseo?.reason }
+        : args.current?.paseo.reason
+          ? { reason: args.current.paseo.reason }
           : {}),
     },
     credentials: args.credentials ?? args.current?.credentials,
@@ -240,8 +260,7 @@ function writeCachedWorkspaceStatusUpdate(args: {
     userId: args.userId,
     workspace: args.workspace,
     reason: args.reason,
-    backendLiveness: next.health.backendLiveness,
-    workspaceReadiness: next.health.workspaceReadiness,
+    runtimeLifecycle: next.runtime.lifecycle,
   });
 }
 
@@ -662,7 +681,7 @@ function collectWorkspacePaseoDiagnostic(
   workspace: string,
 ): PortalWorkspacePaseoDiagnostic {
   const summary = loadWorkspaceSummary(userId, workspace);
-  const target = summary.selectedDriver;
+  const target = summary.status?.runtime.selectedDriver ?? null;
   if (!target) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
@@ -1248,9 +1267,9 @@ async function provisionWorkspaceInternal(
         workspace,
         current,
         operation: pendingWorkspaceOperation("create"),
-        health: {
-          backendLiveness: "missing",
-          workspaceReadiness: "not-ready",
+        runtime: {
+          selectedDriver: null,
+          lifecycle: "absent",
           reason: "workspace creation in progress",
         },
       }));
@@ -1266,7 +1285,7 @@ async function provisionWorkspaceInternal(
       await maybeDelayProvisionStep(userId, workspace, "status");
       await captureStdout(() => statusCommand(`${workspace}@docker`, userId));
       const summary = loadWorkspaceSummary(userId, workspace);
-      if (summary.selectedDriver === null) {
+      if (summary.status?.runtime.selectedDriver === null) {
         await maybeDelayProvisionStep(userId, workspace, "selection");
       }
 
@@ -1277,7 +1296,7 @@ async function provisionWorkspaceInternal(
       await maybeDelayProvisionStep(userId, workspace, "finalize");
       const finalRef = workspaceRefFromTarget(
         workspace,
-        summary.selectedDriver ?? { backend: "docker" },
+        summary.status?.runtime.selectedDriver ?? { backend: "docker" },
       );
       await captureStdout(() => statusCommand(finalRef, userId));
     },
@@ -1307,7 +1326,7 @@ export async function refreshPortalWorkspaceStatus(
   }
   const job = (async () => {
     const summary = loadWorkspaceSummary(userId, workspace);
-    if (!summary.selectedDriver) {
+    if (!summary.status?.runtime.selectedDriver) {
       logWorkspaceEvent("warn", "status-refresh-skipped", {
         userId,
         workspace,
@@ -1316,7 +1335,7 @@ export async function refreshPortalWorkspaceStatus(
       });
       return;
     }
-    const ref = workspaceRefFromTarget(workspace, summary.selectedDriver);
+    const ref = workspaceRefFromTarget(workspace, summary.status.runtime.selectedDriver);
     logWorkspaceEvent("info", "status-refresh-requested", {
       userId,
       workspace,
@@ -1324,7 +1343,7 @@ export async function refreshPortalWorkspaceStatus(
     });
     try {
       await measureWorkspacePhase({
-        context: { userId, workspace, ref, backend: summary.selectedDriver.backend, profile: summary.selectedDriver.profile },
+        context: { userId, workspace, ref, backend: summary.status.runtime.selectedDriver.backend, profile: summary.status.runtime.selectedDriver.profile },
         phase: "status-refresh",
         execute: () => captureStdout(() => statusCommand(ref, userId)),
       });
@@ -1346,9 +1365,9 @@ export async function refreshPortalWorkspaceStatus(
           workspace,
           current,
           operation: null,
-          health: {
-            backendLiveness: "stopped",
-            workspaceReadiness: "not-ready",
+          runtime: {
+            selectedDriver: current?.runtime.selectedDriver ?? null,
+            lifecycle: "stopped",
             reason: "workspace is stopped",
           },
         }));
@@ -1381,7 +1400,8 @@ export async function reportPortalWorkspaceStatus(input: {
     current: summary.status,
     driver: input.status.driver,
     operation: input.status.operation ?? summary.status?.operation,
-    health: input.status.health,
+    runtime: input.status.runtime,
+    paseo: input.status.paseo,
     details: {
       ...(summary.status?.details ?? {}),
       ...(input.status.details ?? {}),
@@ -1409,8 +1429,7 @@ export async function reportPortalWorkspaceStatus(input: {
     userId: input.userId,
     workspace: input.workspace,
   }, {
-    backendLiveness: next.health.backendLiveness,
-    workspaceReadiness: next.health.workspaceReadiness,
+    runtimeLifecycle: next.runtime.lifecycle,
     serverId: normalizedServerId || undefined,
     pairingUrlPersisted: Boolean(normalizedPairingUrl),
   });
@@ -1478,9 +1497,9 @@ export function startProvisionWorkspace(
         workspace,
         current,
         operation: null,
-        health: {
-          backendLiveness: current?.health.backendLiveness ?? "missing",
-          workspaceReadiness: "not-ready",
+        runtime: {
+          selectedDriver: current?.runtime.selectedDriver ?? null,
+          lifecycle: current?.runtime.lifecycle ?? "absent",
           reason: classified.message,
         },
       }));
@@ -1525,9 +1544,9 @@ export async function deletePortalWorkspace(
       workspace,
       current,
       operation: pendingWorkspaceOperation("archive"),
-      health: {
-        backendLiveness: current?.health.backendLiveness ?? "unknown",
-        workspaceReadiness: "not-ready",
+      runtime: {
+        selectedDriver: current?.runtime.selectedDriver ?? null,
+        lifecycle: current?.runtime.lifecycle ?? "unknown",
         reason: "workspace archive requested",
       },
     }));
@@ -1546,9 +1565,9 @@ export async function permanentlyDeletePortalWorkspace(
     workspace,
     current,
     operation: pendingWorkspaceOperation("delete"),
-    health: {
-      backendLiveness: current?.health.backendLiveness ?? "unknown",
-      workspaceReadiness: "not-ready",
+    runtime: {
+      selectedDriver: current?.runtime.selectedDriver ?? null,
+      lifecycle: current?.runtime.lifecycle ?? "unknown",
       reason: "workspace delete requested",
     },
   }));
@@ -1567,7 +1586,7 @@ export async function stopPortalWorkspace(
   workspace: string,
 ): Promise<{ stopped: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  const selectedDriver = summary.selectedDriver;
+  const selectedDriver = summary.status?.runtime.selectedDriver ?? null;
   if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
@@ -1586,14 +1605,14 @@ export async function stopPortalWorkspace(
         driver: current.driver
           ? {
               ...current.driver,
-              backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
-              profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+              backend: currentSummary.status?.runtime.selectedDriver?.backend ?? current.driver.backend,
+              profile: currentSummary.status?.runtime.selectedDriver?.profile ?? current.driver.profile,
             }
           : current.driver,
         operation: pendingWorkspaceOperation("stop"),
-        health: {
-          backendLiveness: current.health.backendLiveness,
-          workspaceReadiness: "not-ready",
+        runtime: {
+          selectedDriver: current.runtime.selectedDriver,
+          lifecycle: current.runtime.lifecycle,
           reason: "workspace stop requested",
         },
       });
@@ -1660,7 +1679,7 @@ export async function startPortalWorkspace(
   workspace: string,
 ): Promise<{ started: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  const selectedDriver = summary.selectedDriver;
+  const selectedDriver = summary.status?.runtime.selectedDriver ?? null;
   if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
@@ -1681,14 +1700,14 @@ export async function startPortalWorkspace(
             driver: current.driver
               ? {
                   ...current.driver,
-                  backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
-                  profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+                  backend: currentSummary.status?.runtime.selectedDriver?.backend ?? current.driver.backend,
+                  profile: currentSummary.status?.runtime.selectedDriver?.profile ?? current.driver.profile,
                 }
               : current.driver,
             operation: pendingWorkspaceOperation("start"),
-            health: {
-              backendLiveness: current.health.backendLiveness,
-              workspaceReadiness: "not-ready",
+            runtime: {
+              selectedDriver: current.runtime.selectedDriver,
+              lifecycle: current.runtime.lifecycle,
               reason: "workspace start requested",
             },
           });
@@ -1733,7 +1752,7 @@ export async function rebuildPortalWorkspace(
   workspace: string,
 ): Promise<{ rebuilt: true }> {
   const summary = loadWorkspaceSummary(userId, workspace);
-  const selectedDriver = summary.selectedDriver;
+  const selectedDriver = summary.status?.runtime.selectedDriver ?? null;
   if (!selectedDriver) {
     throw new Error(`Workspace '${workspace}' does not have a selected driver`);
   }
@@ -1753,14 +1772,14 @@ export async function rebuildPortalWorkspace(
           driver: current.driver
             ? {
                 ...current.driver,
-                backend: currentSummary.selectedDriver?.backend ?? current.driver.backend,
-                profile: currentSummary.selectedDriver?.profile ?? current.driver.profile,
+                backend: currentSummary.status?.runtime.selectedDriver?.backend ?? current.driver.backend,
+                profile: currentSummary.status?.runtime.selectedDriver?.profile ?? current.driver.profile,
               }
             : current.driver,
           operation: pendingWorkspaceOperation("rebuild"),
-          health: {
-            backendLiveness: current.health.backendLiveness,
-            workspaceReadiness: "not-ready",
+          runtime: {
+            selectedDriver: current.runtime.selectedDriver,
+            lifecycle: current.runtime.lifecycle,
             reason: "workspace rebuild requested",
           },
         });
@@ -1820,7 +1839,7 @@ export async function switchPortalWorkspaceLiveCredential(input: {
         );
       }
       const summary = loadWorkspaceSummary(input.userId, input.workspace);
-      const target = summary.selectedDriver;
+      const target = summary.status?.runtime.selectedDriver ?? null;
       if (!target) {
         throw new Error(
           `Workspace '${input.workspace}' does not have a selected driver`,
@@ -1921,7 +1940,7 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
     input.workspace,
     async () => {
       const summary = loadWorkspaceSummary(input.userId, input.workspace);
-      const target = summary.selectedDriver;
+      const target = summary.status?.runtime.selectedDriver ?? null;
       if (!target) {
         throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
       }

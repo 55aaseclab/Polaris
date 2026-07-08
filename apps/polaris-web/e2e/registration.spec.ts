@@ -208,6 +208,59 @@ function ensureUser001PolarisMapping(clerkUserId: string): () => void {
   };
 }
 
+async function createPortalUserByApi(
+  input: {
+    clerkUsername: string;
+    clerkUserId: string;
+    polarisUserId: string;
+    role: "admin" | "user";
+    plan?: "free" | "pro";
+  },
+): Promise<void> {
+  const result = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "polaris",
+      "run",
+      "polaris",
+      "--",
+      "user",
+      "create",
+      input.polarisUserId,
+      "--name",
+      input.polarisUserId,
+      "--email",
+      `${input.polarisUserId}@example.test`,
+      "--clerk",
+      input.clerkUsername,
+      "--clerk-user-id",
+      input.clerkUserId,
+      "--role",
+      input.role,
+      "--plan",
+      input.plan ?? "free",
+    ],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        POLARIS_DATA_ROOT: process.env.POLARIS_DATA_ROOT ?? "./config",
+      },
+    },
+  );
+  expect(
+    {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    },
+  ).toMatchObject({
+    status: 0,
+  });
+}
+
 function ensureUser001GitAuthFixture(): () => void {
   const credentialRoot = path.join(REPO_ROOT, "config", "users", USER001_POLARIS_ID, "credentials");
   const sshRoot = path.join(credentialRoot, "ssh", "github-ssh");
@@ -478,6 +531,109 @@ test("user001 lands in their own Polaris workspace route after sign in", async (
     ).toBeVisible();
   } finally {
     restoreUser001Mapping();
+  }
+});
+
+test("creating a workspace from the user workspace route switches sidebar selection to the new workspace", async ({ page }) => {
+  test.setTimeout(180_000);
+  const username = uniqueUsername();
+  const password = uniquePassword();
+  const workspaceName = `e2e-switch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  let clerkUserId: string | null = null;
+  try {
+    const created = await createClerkUser(username, password);
+    clerkUserId = created.id;
+    await createPortalUserByApi({
+      clerkUsername: username,
+      clerkUserId: created.id,
+      polarisUserId: username,
+      role: "user",
+    });
+    try {
+      await signInAsClerkUser(page, created.id);
+      await page.goto(`/users/${encodeURIComponent(username)}/workspaces`);
+
+      await page
+        .getByRole("main")
+        .getByRole("button", { name: /Create now|立即创建/ })
+        .click();
+      await page.getByLabel(/Workspace name|工作空间名称/).fill(workspaceName);
+      await page.getByRole("button", { name: /Create workspace|创建工作空间/ }).click();
+
+      await expect(page).toHaveURL(
+        new RegExp(`/users/${encodeURIComponent(username)}/workspaces/${encodeURIComponent(workspaceName)}$`),
+        { timeout: 120_000 },
+      );
+      await expect(
+        page.getByRole("link", { name: new RegExp(workspaceName, "i") }),
+      ).toHaveAttribute("data-active", "true");
+      await expect(
+        page.locator(`iframe[title="${username}:${workspaceName} paseo"]`),
+      ).toBeVisible({ timeout: 60_000 });
+    } finally {
+      await deleteWorkspaceByApi(page.request, username, workspaceName, {
+        bestEffort: true,
+      });
+    }
+  } finally {
+    cleanupPolarisRegistration(username, username);
+    await deleteClerkUser(clerkUserId);
+  }
+});
+
+test("creating a workspace from the admin pane stays in the admin pane", async ({ page }) => {
+  test.setTimeout(180_000);
+  const adminUsername = uniqueUsername();
+  const adminPassword = uniquePassword();
+  const targetUsername = uniqueUsername();
+  const targetPassword = uniquePassword();
+  const workspaceName = `e2e-admin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  let adminClerkUserId: string | null = null;
+  let targetClerkUserId: string | null = null;
+  try {
+    const admin = await createClerkUser(adminUsername, adminPassword);
+    adminClerkUserId = admin.id;
+    const target = await createClerkUser(targetUsername, targetPassword);
+    targetClerkUserId = target.id;
+    await createPortalUserByApi({
+      clerkUsername: adminUsername,
+      clerkUserId: admin.id,
+      polarisUserId: adminUsername,
+      role: "admin",
+    });
+    await createPortalUserByApi({
+      clerkUsername: targetUsername,
+      clerkUserId: target.id,
+      polarisUserId: targetUsername,
+      role: "user",
+    });
+    try {
+      await signInAsClerkUser(page, admin.id);
+      await expect(page).toHaveURL(
+        new RegExp(`/users/${encodeURIComponent(adminUsername)}/workspaces$`),
+      );
+      await page.goto(`/users/${encodeURIComponent(adminUsername)}/admin`);
+
+      await page.getByRole("button", { name: new RegExp(targetUsername, "i") }).click();
+      await page.getByRole("tab", { name: /Workspaces|工作空间/ }).click();
+      await page.getByPlaceholder(/Workspace name|工作空间名称/).fill(workspaceName);
+      await page.getByRole("button", { name: /Create workspace|创建工作空间/ }).click();
+
+      await expect(page).toHaveURL(
+        new RegExp(`/users/${encodeURIComponent(adminUsername)}/admin$`),
+        { timeout: 120_000 },
+      );
+      await expect(page.getByText(workspaceName)).toBeVisible({ timeout: 120_000 });
+    } finally {
+      await deleteWorkspaceByApi(page.request, targetUsername, workspaceName, {
+        bestEffort: true,
+      });
+    }
+  } finally {
+    cleanupPolarisRegistration(targetUsername, targetUsername);
+    cleanupPolarisRegistration(adminUsername, adminUsername);
+    await deleteClerkUser(targetClerkUserId);
+    await deleteClerkUser(adminClerkUserId);
   }
 });
 

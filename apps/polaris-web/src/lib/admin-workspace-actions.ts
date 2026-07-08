@@ -7,7 +7,7 @@ export type AdminWorkspaceLocalAction =
 
 export type AdminWorkspaceActionEntry = {
   kind: AdminWorkspaceLocalAction;
-  baselineLiveness: string | null;
+  baselineRuntimeLifecycle: string | null;
 };
 
 export type AdminWorkspaceButtonState = {
@@ -43,7 +43,7 @@ export type AdminWorkspaceDisplayState = {
 };
 
 export function resolveAdminWorkspaceButtonState(input: {
-  backendLiveness: string | null | undefined;
+  runtimeLifecycle: string | null | undefined;
   operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
 }): AdminWorkspaceButtonState {
@@ -53,7 +53,7 @@ export function resolveAdminWorkspaceButtonState(input: {
   const stopping = effectiveOperation === "stop";
   const rebuilding = effectiveOperation === "rebuild";
   const archiving = effectiveOperation === "archive" || effectiveOperation === "delete";
-  const running = input.backendLiveness === "running";
+  const running = input.runtimeLifecycle === "running";
   const transitionActive = creating || starting || stopping || rebuilding || archiving;
 
   return {
@@ -78,10 +78,8 @@ export function resolveAdminWorkspaceButtonState(input: {
 }
 
 export function resolveAdminWorkspaceDisplayState(input: {
-  backendLiveness: string | null | undefined;
   operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
-  backendReason: string | null | undefined;
 }): AdminWorkspaceDisplayState {
   const effectiveOperation = input.localAction ?? input.operation ?? null;
 
@@ -126,26 +124,25 @@ export function resolveAdminWorkspaceDisplayState(input: {
 
 export function shouldClearAdminWorkspaceAction(input: {
   localAction: AdminWorkspaceLocalAction;
-  baselineLiveness: string | null | undefined;
-  backendLiveness: string | null | undefined;
+  baselineRuntimeLifecycle: string | null | undefined;
+  runtimeLifecycle: string | null | undefined;
   operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
-  backendReason: string | null | undefined;
   workspaceExists: boolean;
 }): boolean {
-  const baselineLiveness = input.baselineLiveness ?? null;
-  const backendLiveness = input.backendLiveness ?? null;
+  const baselineRuntimeLifecycle = input.baselineRuntimeLifecycle ?? null;
+  const runtimeLifecycle = input.runtimeLifecycle ?? null;
   const operation = input.operation ?? null;
 
   switch (input.localAction) {
     case "start":
       return (
         operation === "start"
-        || (baselineLiveness !== "running" && backendLiveness === "running")
+        || (baselineRuntimeLifecycle !== "running" && runtimeLifecycle === "running")
       );
     case "stop":
       return (
         operation === "stop"
-        || (baselineLiveness === "running" && backendLiveness !== "running")
+        || (baselineRuntimeLifecycle === "running" && runtimeLifecycle !== "running")
       );
     case "rebuild":
       return (

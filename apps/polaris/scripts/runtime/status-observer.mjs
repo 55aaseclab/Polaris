@@ -51,8 +51,8 @@ export function isTransientExecutorDisconnect(error) {
 
 export function buildRuntimeStatusPatch() {
   return {
-    health: {
-      backendLiveness: "running",
+    runtime: {
+      lifecycle: "running",
       reason: "runtime status observer heartbeat",
     },
     details: {

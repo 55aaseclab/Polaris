@@ -101,9 +101,17 @@ test("portal workspace stop returns quickly for nearby requests on different wor
         runtimeKind: "docker-container",
         runtimeRef: `container/${workspaceRuntimeScopeName(userId, firstWorkspace)}-docker`,
       },
-      health: {
-        backendLiveness: "running",
-        workspaceReadiness: "ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
+        reason: "test setup",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=a",
+        reconnectTarget: "https://app.paseo.test/h/srv_a?scope=test",
         reason: "test setup",
       },
       details: {},
@@ -116,9 +124,17 @@ test("portal workspace stop returns quickly for nearby requests on different wor
         runtimeKind: "docker-container",
         runtimeRef: `container/${workspaceRuntimeScopeName(userId, secondWorkspace)}-docker`,
       },
-      health: {
-        backendLiveness: "running",
-        workspaceReadiness: "ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
+        reason: "test setup",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=b",
+        reconnectTarget: "https://app.paseo.test/h/srv_b?scope=test",
         reason: "test setup",
       },
       details: {},

@@ -73,9 +73,17 @@ test("status refresh converges stopped docker workspace when docker exec races a
           kind: "stop",
           updatedAt: new Date().toISOString(),
         },
-        health: {
-          backendLiveness: "running",
-          workspaceReadiness: "not-ready",
+        runtime: {
+          selectedDriver: { backend: "docker" },
+          lifecycle: "running",
+          reason: "test setup",
+        },
+        paseo: {
+          daemon: "pending",
+          web: "pairing-required",
+          reconnectMode: "needs-pairing",
+          liveTarget: "https://app.paseo.test/#offer=stop-refresh",
+          reconnectTarget: "https://app.paseo.test/#offer=stop-refresh",
           reason: "test setup",
         },
         details: {},
@@ -114,10 +122,9 @@ exit 0
       fs.readFileSync(workspaceStatusPath(workspace, userId), "utf8"),
     ) as {
       operation?: { kind: string };
-      health: { backendLiveness: string; workspaceReadiness: string; reason?: string };
+      runtime: { lifecycle: string; reason?: string };
     };
-    assert.equal(status.health.backendLiveness, "stopped");
-    assert.equal(status.health.workspaceReadiness, "not-ready");
+    assert.equal(status.runtime.lifecycle, "stopped");
     assert.equal(status.operation, undefined);
   } finally {
     fs.rmSync(workspaceSelectionPath(workspace, userId), { force: true });

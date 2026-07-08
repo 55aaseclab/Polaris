@@ -38,9 +38,8 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",
-      backendLiveness: status.health.backendLiveness,
-      workspaceReadiness: status.health.workspaceReadiness,
-      reason: status.health.reason,
+      runtimeLifecycle: status.runtime.lifecycle,
+      reason: status.runtime.reason,
     });
     await finalizeEvolutionSession(workspace, evolutionSessionId);
     status.evolution = {
@@ -52,8 +51,7 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   logInfo("cli", "status-synthesized", {
     project: status.project,
     backend: status.driver?.backend,
-    backendLiveness: status.health.backendLiveness,
-    workspaceReadiness: status.health.workspaceReadiness,
+    runtimeLifecycle: status.runtime.lifecycle,
     statusFile: outputPath,
   });
   process.stdout.write(`${JSON.stringify({ ...status, statusFile: outputPath }, null, 2)}\n`);
