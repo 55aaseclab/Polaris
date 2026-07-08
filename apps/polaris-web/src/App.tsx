@@ -4540,7 +4540,7 @@ function AdminPage() {
                                 </div>
                               </div>
                               <Badge variant="outline">
-                                {driverLabel(workspace.status?.runtime.selectedDriver ?? null)}
+                                {driverLabel(workspace.status?.runtime?.selectedDriver ?? null)}
                               </Badge>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -4933,7 +4933,7 @@ function AdminPage() {
                             </div>
                           </div>
                           <Badge variant="outline">
-                            {driverLabel(workspace.status?.runtime.selectedDriver ?? null)}
+                            {driverLabel(workspace.status?.runtime?.selectedDriver ?? null)}
                           </Badge>
                         </div>
                         <div className="grid gap-1">
@@ -5259,7 +5259,7 @@ function WorkspaceDetailContent() {
   }, [activeEmbeddedPaseoFrameLoaded, embeddedPortalUrl]);
 
   useEffect(() => {
-    if (workspaceData?.status?.runtime.selectedDriver) {
+    if (workspaceData?.status?.runtime?.selectedDriver) {
       setDriver(driverLabel(workspaceData.status.runtime.selectedDriver));
     }
   }, [workspaceData]);
@@ -5828,7 +5828,7 @@ function WorkspaceDetailContent() {
                     backend: workspaceData.status.driver.backend,
                     profile: workspaceData.status.driver.profile,
                   })
-                  : driverLabel(workspaceData?.status?.runtime.selectedDriver ?? null)}
+                  : driverLabel(workspaceData?.status?.runtime?.selectedDriver ?? null)}
               </div>
             </div>
             {renderDriverSwitchControls()}
@@ -5962,7 +5962,7 @@ function WorkspaceDetailContent() {
                         backend: driverStatus.backend,
                         profile: driverStatus.profile,
                       })
-                      : driverLabel(workspaceData.status?.runtime.selectedDriver ?? null)}
+                      : driverLabel(workspaceData.status?.runtime?.selectedDriver ?? null)}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-start justify-between gap-4">
