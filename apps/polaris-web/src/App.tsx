@@ -4929,7 +4929,7 @@ function AdminPage() {
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{workspace.name}</div>
                             <div className="text-sm text-muted-foreground">
-                              {translatePaseoWebState(workspace.status?.paseo.web, t)}
+                              {translatePaseoWebState(workspace.status?.paseo?.web, t)}
                             </div>
                           </div>
                           <Badge variant="outline">
@@ -4941,7 +4941,7 @@ function AdminPage() {
                             {t("admin_paseo_web")}
                           </div>
                           <div className="break-all text-sm">
-                            {translatePaseoWebState(workspace.status?.paseo.web, t)}
+                            {translatePaseoWebState(workspace.status?.paseo?.web, t)}
                           </div>
                         </div>
                         <div className="grid gap-1">
@@ -4949,7 +4949,7 @@ function AdminPage() {
                             {t("admin_paseo_daemon")}
                           </div>
                           <div className="break-all text-sm">
-                            {translatePaseoDaemonState(workspace.status?.paseo.daemon, t)}
+                            {translatePaseoDaemonState(workspace.status?.paseo?.daemon, t)}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
