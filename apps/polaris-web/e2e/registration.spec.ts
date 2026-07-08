@@ -637,6 +637,83 @@ test("creating a workspace from the admin pane stays in the admin pane", async (
   }
 });
 
+test("entering a workspace from the admin pane updates the sidebar immediately", async ({ page }) => {
+  test.setTimeout(180_000);
+  const adminUsername = uniqueUsername();
+  const adminPassword = uniquePassword();
+  const targetUsername = uniqueUsername();
+  const targetPassword = uniquePassword();
+  const workspaceName = `e2e-admin-open-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  let adminClerkUserId: string | null = null;
+  let targetClerkUserId: string | null = null;
+  try {
+    const admin = await createClerkUser(adminUsername, adminPassword);
+    adminClerkUserId = admin.id;
+    const target = await createClerkUser(targetUsername, targetPassword);
+    targetClerkUserId = target.id;
+    await createPortalUserByApi({
+      clerkUsername: adminUsername,
+      clerkUserId: admin.id,
+      polarisUserId: adminUsername,
+      role: "admin",
+    });
+    await createPortalUserByApi({
+      clerkUsername: targetUsername,
+      clerkUserId: target.id,
+      polarisUserId: targetUsername,
+      role: "user",
+    });
+    try {
+      await signInAsClerkUser(page, admin.id);
+      await expect(page).toHaveURL(
+        new RegExp(`/users/${encodeURIComponent(adminUsername)}/workspaces$`),
+      );
+      await page.goto(`/users/${encodeURIComponent(adminUsername)}/admin`);
+
+      await page.getByRole("button", { name: new RegExp(targetUsername, "i") }).click();
+      await page.getByRole("tab", { name: /Workspaces|工作空间/ }).click();
+      await page.getByPlaceholder(/Workspace name|工作空间名称/).fill(workspaceName);
+      await page.getByRole("button", { name: /Create workspace|创建工作空间/ }).click();
+
+      await expect(page.getByText(workspaceName)).toBeVisible({ timeout: 120_000 });
+
+      await page.getByRole("link", { name: /Open workspace|进入工作空间/ }).click();
+
+      await expect(page).toHaveURL(
+        new RegExp(
+          `/users/${encodeURIComponent(adminUsername)}/admin/users/${encodeURIComponent(targetUsername)}/workspaces/${encodeURIComponent(workspaceName)}$`,
+        ),
+        { timeout: 15_000 },
+      );
+
+      const sidebarWorkspaceButton = page
+        .locator('[data-sidebar="menu-button"]')
+        .filter({
+          has: page.locator(
+            `a[href="/users/${encodeURIComponent(adminUsername)}/admin/users/${encodeURIComponent(targetUsername)}/workspaces/${encodeURIComponent(workspaceName)}"]`,
+          ),
+        })
+        .first();
+
+      await expect(sidebarWorkspaceButton).toHaveAttribute("data-active", "true", {
+        timeout: 15_000,
+      });
+      await expect(sidebarWorkspaceButton.locator("svg.animate-spin")).toBeVisible({
+        timeout: 15_000,
+      });
+    } finally {
+      await deleteWorkspaceByApi(page.request, targetUsername, workspaceName, {
+        bestEffort: true,
+      });
+    }
+  } finally {
+    cleanupPolarisRegistration(targetUsername, targetUsername);
+    cleanupPolarisRegistration(adminUsername, adminUsername);
+    await deleteClerkUser(targetClerkUserId);
+    await deleteClerkUser(adminClerkUserId);
+  }
+});
+
 test("user001 cannot access the admin page", async ({ page }) => {
   const ensured = await ensureClerkUser(USER001_CLERK_USERNAME, USER001_PASSWORD);
   const restoreUser001Mapping = ensureUser001PolarisMapping(ensured.user.id);

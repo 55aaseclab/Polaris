@@ -2854,7 +2854,7 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "", targetUserId = "" } = useParams();
   const navigate = useNavigate();
-  const { activeUserId, refreshWorkspaces } = usePortalShell();
+  const { activeUserId, refreshWorkspaces, setSidebarWorkspacePolling } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
   const { data: users } = useAsyncValue(listUsers, [reloadKey]);
   const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
@@ -2908,6 +2908,17 @@ function AdminPage() {
   const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo">("user");
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
+
+  function primeSidebarWorkspace(workspaceName: string): void {
+    if (!selectedAdminUserId) {
+      return;
+    }
+    const workspaceKey = adminWorkspaceStateKey(selectedAdminUserId, workspaceName);
+    setSidebarWorkspacePolling(workspaceKey, true);
+    if (selectedAdminUserId === activeUserId) {
+      refreshWorkspaces();
+    }
+  }
   const {
     data: selectedProfile,
     error: selectedProfileError,
@@ -4520,6 +4531,7 @@ function AdminPage() {
                               >
                                 <Link
                                   to={`/users/${encodeURIComponent(userId)}/admin/users/${encodeURIComponent(selectedAdminUser.id)}/workspaces/${encodeURIComponent(workspace.name)}`}
+                                  onClick={() => primeSidebarWorkspace(workspace.name)}
                                 >
                                   {t("enter_workspace")}
                                 </Link>
