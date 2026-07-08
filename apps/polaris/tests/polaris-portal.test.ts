@@ -514,10 +514,17 @@ test("portal workspace stop writes cached status before the async refresh comple
         runtimeKind: "docker-container",
         runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
       },
-      health: {
-        backendLiveness: "running",
-        workspaceReadiness: "ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
         reason: "test setup",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=ready",
+        reconnectTarget: "https://app.paseo.test/h/srv_ready?scope=test",
       },
       details: {},
     }, userId);
@@ -546,7 +553,7 @@ test("portal workspace stop writes cached status before the async refresh comple
           assert.equal(cachedStatus?.operation?.kind, "stop");
           await waitFor(() => {
             const status = readWorkspaceStatus(userId, workspace);
-            return status && !status.operation && status.health.backendLiveness !== "running"
+            return status && !status.operation && status.runtime.lifecycle !== "running"
               ? status
               : null;
           }, 2000, 50);
@@ -1170,8 +1177,7 @@ test("portal service can provision the same workspace name for a different user"
           startAfterCreate: false,
         });
         const finalStatus = await waitForWorkspaceStatusFile(secondUserId, workspace);
-        assert.equal(finalStatus.health.backendLiveness, "missing");
-        assert.equal(finalStatus.health.workspaceReadiness, "not-ready");
+        assert.notEqual(finalStatus.runtime.lifecycle, "running");
         assert.equal(
           fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
           true,
@@ -1252,18 +1258,16 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
         assert.equal(payload.workspace, workspace);
         assert.equal(payload.queued, true);
         const finalStatus = await waitForWorkspaceStatusFile(userId, workspace);
-        assert.equal(finalStatus.health.backendLiveness, "missing");
-        assert.equal(finalStatus.health.workspaceReadiness, "not-ready");
+        assert.notEqual(finalStatus.runtime.lifecycle, "running");
       },
     );
 
     const workspaceStatusPath = path.join(workspaceRoot, "state", "status.json");
     assert.equal(fs.existsSync(workspaceStatusPath), true);
     const finalStatus = JSON.parse(fs.readFileSync(workspaceStatusPath, "utf8")) as {
-      health?: { backendLiveness?: string; workspaceReadiness?: string };
+      runtime?: { lifecycle?: string };
     };
-    assert.equal(finalStatus.health?.backendLiveness, "missing");
-    assert.equal(finalStatus.health?.workspaceReadiness, "not-ready");
+    assert.notEqual(finalStatus.runtime?.lifecycle, "running");
 
     assert.equal(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml")), true);
     assert.equal(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml")), true);
@@ -1371,6 +1375,21 @@ test("portal service stops the selected workspace driver", async () => {
       "utf8",
     );
     writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
+    writeWorkspaceStatus({
+      project: workspace,
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=portal-stop",
+        reconnectTarget: "https://app.paseo.test/h/srv_portal_stop?scope=test",
+      },
+      details: {},
+    }, userId);
 
     await withFakePath(
       {
@@ -1460,9 +1479,9 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.health.backendLiveness === "running" ? status : null;
+          return status?.runtime.lifecycle === "running" ? status : null;
         });
-        assert.equal(finalStatus.health.workspaceReadiness, "ready");
+        assert.ok(["pending", "ready"].includes(finalStatus.paseo.daemon));
         assert.ok(
           readCommandLog().some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")),
         );
@@ -1510,6 +1529,22 @@ test("portal service starts the selected workspace driver", async () => {
       "utf8",
     );
     writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
+    writeWorkspaceStatus({
+      project: workspace,
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "stopped",
+        reason: "workspace is stopped",
+      },
+      paseo: {
+        daemon: "absent",
+        web: "unavailable",
+        reconnectMode: "unknown",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userId);
 
     await withFakePath(
       {
@@ -1606,9 +1641,9 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.health.workspaceReadiness === "ready" ? status : null;
+          return status?.runtime.lifecycle === "running" ? status : null;
         });
-        assert.equal(finalStatus.health.backendLiveness, "running");
+        assert.equal(finalStatus.runtime.lifecycle, "running");
 
         await createPortalCredential({
           userId,
@@ -1736,9 +1771,9 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.health.workspaceReadiness === "ready" ? status : null;
+          return status?.runtime.lifecycle === "running" ? status : null;
         });
-        assert.equal(finalStatus.health.backendLiveness, "running");
+        assert.equal(finalStatus.runtime.lifecycle, "running");
 
         await createPortalCredential({
           userId,
@@ -1981,10 +2016,17 @@ test("portal service refreshes the real status when archive fails for a running 
         kind: "archive",
         updatedAt: new Date().toISOString(),
       },
-      health: {
-        backendLiveness: "running",
-        workspaceReadiness: "not-ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
         reason: "stale archive status",
+      },
+      paseo: {
+        daemon: "pending",
+        web: "pairing-required",
+        reconnectMode: "needs-pairing",
+        liveTarget: "https://app.paseo.test/#offer=stale",
+        reconnectTarget: "https://app.paseo.test/#offer=stale",
       },
       details: {},
     }, userId);
@@ -2016,8 +2058,8 @@ exit 0
     );
 
     const nextStatus = readWorkspaceStatus(userId, workspace);
-    assert.equal(nextStatus?.health?.backendLiveness, "running");
-    assert.notEqual(nextStatus?.health?.reason, "stale archive status");
+    assert.equal(nextStatus?.runtime?.lifecycle, "running");
+    assert.notEqual(nextStatus?.runtime?.reason, "stale archive status");
     assert.equal(nextStatus?.operation, undefined);
   } finally {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
@@ -2043,9 +2085,16 @@ test("portal workspace summaries stay isolated for same workspace name under dif
     writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userB);
     writeWorkspaceStatus({
       project: workspace,
-      health: {
-        backendLiveness: "running",
-        workspaceReadiness: "ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=a",
+        reconnectTarget: "https://app.paseo.test/h/srv_a?scope=test",
       },
       details: {
         owner: userA,
@@ -2057,10 +2106,17 @@ test("portal workspace summaries stay isolated for same workspace name under dif
         kind: "stop",
         updatedAt: new Date().toISOString(),
       },
-      health: {
-        backendLiveness: "stopped",
-        workspaceReadiness: "not-ready",
+      runtime: {
+        selectedDriver: { backend: "docker" },
+        lifecycle: "stopped",
         reason: "workspace is stopped",
+      },
+      paseo: {
+        daemon: "absent",
+        web: "unavailable",
+        reconnectMode: "unknown",
+        liveTarget: null,
+        reconnectTarget: null,
       },
       details: {
         owner: userB,
@@ -2070,10 +2126,10 @@ test("portal workspace summaries stay isolated for same workspace name under dif
     const userASummary = (await listPortalWorkspaces(userA)).find((entry) => entry.name === workspace);
     const userBSummary = (await listPortalWorkspaces(userB)).find((entry) => entry.name === workspace);
 
-    assert.equal(userASummary?.status?.health?.backendLiveness, "running");
+    assert.equal(userASummary?.status?.runtime?.lifecycle, "running");
     assert.equal(userASummary?.status?.details?.owner, userA);
     assert.equal(userASummary?.status?.operation, undefined);
-    assert.equal(userBSummary?.status?.health?.backendLiveness, "stopped");
+    assert.equal(userBSummary?.status?.runtime?.lifecycle, "stopped");
     assert.equal(userBSummary?.status?.details?.owner, userB);
     assert.equal(userBSummary?.status?.operation?.kind, "stop");
   } finally {

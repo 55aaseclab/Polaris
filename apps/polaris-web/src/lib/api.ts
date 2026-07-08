@@ -80,6 +80,22 @@ export interface PortalWorkspaceStatus {
     kind: "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
     updatedAt: string;
   };
+  runtime: {
+    selectedDriver: {
+      backend: "docker" | "pod" | "kubevirt-vm";
+      profile?: string;
+    } | null;
+    lifecycle: "absent" | "running" | "stopped" | "unknown";
+    reason?: string;
+  };
+  paseo: {
+    daemon: "absent" | "pending" | "ready" | "unknown";
+    web: "unavailable" | "pairing-required" | "connectable";
+    reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+    liveTarget: string | null;
+    reconnectTarget: string | null;
+    reason?: string;
+  };
   credentials?: {
     ssh?: {
       mode: "managed-key" | "provided-key";
@@ -112,11 +128,6 @@ export interface PortalWorkspaceStatus {
   skills?: {
     installedByHarness?: Record<string, string[]>;
     source?: string;
-  };
-  health?: {
-    backendLiveness?: string;
-    workspaceReadiness?: string;
-    reason?: string;
   };
   evolution?: {
     artifactCount: number;
@@ -182,11 +193,7 @@ export interface PortalWorkspaceStatus {
 export interface PortalWorkspaceSummary {
   name: string;
   drivers: PortalDriverTarget[];
-  selectedDriver: PortalDriverTarget | null;
   status: PortalWorkspaceStatus | null;
-  liveTarget: string | null;
-  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
-  reconnectTarget: string | null;
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {

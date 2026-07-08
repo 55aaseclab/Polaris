@@ -114,10 +114,9 @@ function normalizeWorkspaceStatus(status: WorkspaceStatus): WorkspaceStatus {
     ...status,
     details: status.details ?? {},
   } as WorkspaceStatus & Record<string, unknown>;
-  delete next.paseo;
-  delete next.daemon;
-  delete next.ssh;
-  delete next.drift;
+  delete (next as Record<string, unknown>).daemon;
+  delete (next as Record<string, unknown>).ssh;
+  delete (next as Record<string, unknown>).drift;
   return next;
 }
 

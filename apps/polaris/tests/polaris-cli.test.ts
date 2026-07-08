@@ -1145,9 +1145,16 @@ test("writeWorkspaceStatus persists a structured state file", () => {
       runtimeKind: "kubernetes-pod",
       runtimeRef: "deployment/example",
     },
-    health: {
-      backendLiveness: "unknown",
-      workspaceReadiness: "unknown",
+    runtime: {
+      selectedDriver: { backend: "pod", profile: "gvisor" },
+      lifecycle: "unknown",
+    },
+    paseo: {
+      daemon: "unknown",
+      web: "unavailable",
+      reconnectMode: "unknown",
+      liveTarget: null,
+      reconnectTarget: null,
     },
     details: {
       driver: "pod",
@@ -1174,10 +1181,17 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
       kind: "start",
       updatedAt: "2026-07-07T00:00:00.000Z",
     },
-    health: {
-      backendLiveness: "missing",
-      workspaceReadiness: "not-ready",
+    runtime: {
+      selectedDriver: null,
+      lifecycle: "stopped",
       reason: "workspace start requested",
+    },
+    paseo: {
+      daemon: "absent",
+      web: "unavailable",
+      reconnectMode: "unknown",
+      liveTarget: null,
+      reconnectTarget: null,
     },
     details: {
       stale: "yes",
@@ -1186,22 +1200,31 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
 
   writeWorkspaceStatus({
     project,
-    health: {
-      backendLiveness: "running",
-      workspaceReadiness: "ready",
+    runtime: {
+      selectedDriver: null,
+      lifecycle: "running",
+    },
+    paseo: {
+      daemon: "ready",
+      web: "connectable",
+      reconnectMode: "reconnectable",
+      liveTarget: "https://app.paseo.sh/#offer=test",
+      reconnectTarget: "https://app.paseo.sh/h/srv_test?scope=demo",
     },
     details: {},
   }, DEMO_USER_PROFILE_ID);
 
   const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
     operation?: { kind: string };
-    health: { backendLiveness: string; workspaceReadiness: string; reason?: string };
+    runtime: { lifecycle: string; reason?: string };
+    paseo: { daemon: string; web: string };
     details: Record<string, string>;
   };
   assert.equal(parsed.operation, undefined);
-  assert.equal(parsed.health.backendLiveness, "running");
-  assert.equal(parsed.health.workspaceReadiness, "ready");
-  assert.equal(parsed.health.reason, undefined);
+  assert.equal(parsed.runtime.lifecycle, "running");
+  assert.equal(parsed.runtime.reason, undefined);
+  assert.equal(parsed.paseo.daemon, "ready");
+  assert.equal(parsed.paseo.web, "connectable");
   assert.deepEqual(parsed.details, {});
 
   cleanupStatusFile(project);
@@ -2674,9 +2697,10 @@ exit 0
       const plan = buildReconcilePlan(workspace, drift);
 
       assert.equal(status.driver?.backend, "pod");
-      assert.equal(status.health.backendLiveness, "running");
-      assert.equal(status.health.workspaceReadiness, "not-ready");
-      assert.match(status.health.reason || "", /workspace manager assembly missing|missing|service/i);
+      assert.equal(status.runtime.lifecycle, "running");
+      assert.equal(status.paseo.daemon, "unknown");
+      assert.equal(status.paseo.web, "unavailable");
+      assert.match(status.runtime.reason || "", /workspace manager assembly missing|missing|service/i);
       assert.ok(plan.actions.length >= 1);
       assert.ok(plan.actions.every((action) => action.kind === "restart-runtime"));
     },
@@ -2730,9 +2754,9 @@ exit 0
         await runCli(["status", "demo@pod"]);
       });
       const parsed = parseJsonOutput<{
-        liveTarget?: string | null;
+        paseo?: { liveTarget?: string | null };
       }>(output);
-      assert.equal(parsed.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
+      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
     },
   );
 });
@@ -2787,12 +2811,14 @@ exit 1
         });
         const parsed = parseJsonOutput<{
           driver?: { backend?: string; runtimeRef?: string };
-          health?: { backendLiveness?: string; workspaceReadiness?: string };
+          runtime?: { lifecycle?: string };
+          paseo?: { daemon?: string; web?: string };
         }>(output);
         assert.equal(parsed.driver?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-        assert.equal(parsed.health?.backendLiveness, "running");
-        assert.equal(parsed.health?.workspaceReadiness, "ready");
+        assert.equal(parsed.runtime?.lifecycle, "running");
+        assert.equal(parsed.paseo?.daemon, "pending");
+        assert.equal(parsed.paseo?.web, "pairing-required");
       },
     );
   });
@@ -2865,7 +2891,8 @@ exit 0
           runtimeKind: string;
           runtimeRef: string;
         };
-        health: { backendLiveness: string; workspaceReadiness: string };
+        runtime: { lifecycle: string };
+        paseo: { daemon: string; web: string };
         evolution?: { artifactCount: number };
       };
 
@@ -2875,8 +2902,9 @@ exit 0
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
       assert.equal(parsed.driver?.baseImage, "ttl.sh/polaris-demo-debian13-1782126452:24h");
-      assert.equal(parsed.health.backendLiveness, "running");
-      assert.equal(parsed.health.workspaceReadiness, "ready");
+      assert.equal(parsed.runtime.lifecycle, "running");
+      assert.equal(parsed.paseo.daemon, "pending");
+      assert.equal(parsed.paseo.web, "pairing-required");
       assert.ok(parsed.evolution);
     },
   );
@@ -2887,6 +2915,11 @@ exit 0
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
   const base = loadDefaultDemoWorkspace();
+  const paseoStateRoot = workspacePaseoStateDir(
+    base.identity.projectName,
+    base.userProfile.id,
+  );
+  fs.rmSync(paseoStateRoot, { recursive: true, force: true });
   const workspace = {
     ...base,
     credentialBindings: base.credentialBindings.filter((binding) => binding.purpose !== "agent-auth"),
@@ -2939,8 +2972,13 @@ test("status stays not-ready when no active codex credential is selected and per
   const status = synthesizeWorkspaceStatus(workspace, observation, drift);
 
   assert.equal(drift.hasWarnings, true);
-  assert.equal(status.health.backendLiveness, "running");
-  assert.equal(status.health.workspaceReadiness, "not-ready");
+  assert.match(
+    drift.items.map((item) => item.message).join("\n"),
+    /persisted Paseo (server-id|pairing metadata) is missing/,
+  );
+  assert.equal(status.runtime.lifecycle, "running");
+  assert.equal(status.paseo.daemon, "unknown");
+  assert.equal(status.paseo.web, "unavailable");
   assert.equal(status.credentials?.codex?.state, "not-selected");
   assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
 });
@@ -2997,8 +3035,9 @@ test("status is not ready until persisted Paseo metadata exists on the host stat
     drift.items.map((item) => item.message).join("\n"),
     /persisted Paseo (server-id|pairing metadata) is missing/,
   );
-  assert.equal(status.health.backendLiveness, "running");
-  assert.equal(status.health.workspaceReadiness, "not-ready");
+  assert.equal(status.runtime.lifecycle, "running");
+  assert.equal(status.paseo.daemon, "unknown");
+  assert.equal(status.paseo.web, "unavailable");
 });
 
 test("status exposes live credential selections per harness", async () => {
@@ -3836,8 +3875,7 @@ exit 1
         const drift = computeWorkspaceDrift(workspace, observation);
         const status = synthesizeWorkspaceStatus(workspace, observation, drift);
         assert.equal(status.driver?.backend, "kubevirt-vm");
-        assert.equal(status.health.backendLiveness, "running");
-        assert.equal(status.health.workspaceReadiness, "ready");
+        assert.equal(status.runtime.lifecycle, "running");
 
         const plan = { project, backend: "kubevirt-vm", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
         await driver.executeReconcilePlan(workspace, plan as any);
@@ -3883,7 +3921,7 @@ exit 0
             runtimeKind: string;
             runtimeRef: string;
           };
-          health: { backendLiveness: string; workspaceReadiness: string };
+          runtime: { lifecycle: string };
           assets: {
             dockerfile: { file: string; path: string };
             specs: Array<{ driver: string; file: string; path: string }>;
@@ -3897,6 +3935,7 @@ exit 0
         assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
         assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
+        assert.equal(parsed.runtime.lifecycle, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
         assert.equal(parsed.assets.dockerfile.path, "config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile");
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
@@ -3979,14 +4018,15 @@ exit 1
             runtimeRef: string;
             rootdiskImage?: string;
           };
-          health: { backendLiveness: string; workspaceReadiness: string };
+          runtime: { lifecycle: string };
+          paseo: { daemon: string; web: string };
         }>(stdout);
 
         assert.equal(parsed.driver?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-        assert.equal(parsed.health.backendLiveness, "running");
-        assert.equal(parsed.health.workspaceReadiness, "ready");
+        assert.equal(parsed.runtime.lifecycle, "running");
+        assert.ok(["pending", "ready"].includes(parsed.paseo.daemon));
 
         await runCli(["logs", project]);
         const commands = readCommandLog();

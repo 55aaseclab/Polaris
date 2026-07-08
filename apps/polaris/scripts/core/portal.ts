@@ -11,9 +11,7 @@ import {
 } from "../config/credential-catalog.js";
 import { buildStatusAssets } from "./status-assets.js";
 import {
-  extractOfferFragment,
   normalizePairingUrl,
-  resolveConfiguredPaseoAppBaseUrl,
 } from "./pairing-url.js";
 import {
   readWorkspaceDriverSelection,
@@ -119,11 +117,7 @@ export interface PortalWorkspaceAssetPreview {
 export interface PortalWorkspaceSummary {
   name: string;
   drivers: PortalDriverTarget[];
-  selectedDriver: PortalDriverTarget | null;
   status: WorkspaceStatus | null;
-  liveTarget: string | null;
-  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
-  reconnectTarget: string | null;
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
@@ -519,76 +513,6 @@ export function readWorkspaceStatus(userId: string, workspace: string): Workspac
   return readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
 }
 
-export function resolveLiveTarget(
-  userId: string,
-  workspace: string,
-): string | null {
-  return readPersistedPaseoPairingUrl(userId, workspace);
-}
-
-function buildReconnectTarget(
-  serverId: string | null | undefined,
-  pairingTarget: string | null | undefined,
-  scope?: string,
-): string | null {
-  const normalizedServerId = String(serverId ?? "").trim();
-  if (!normalizedServerId) {
-    return null;
-  }
-  const appBaseUrl = resolveConfiguredPaseoAppBaseUrl(process.env);
-  if (!appBaseUrl) {
-    return null;
-  }
-  try {
-    const url = new URL(`${appBaseUrl.replace(/\/$/, "")}/h/${encodeURIComponent(normalizedServerId)}`);
-    const normalizedScope = String(scope ?? "").trim();
-    if (normalizedScope) {
-      url.searchParams.set("scope", normalizedScope);
-    }
-    const offer = extractOfferFragment(String(pairingTarget ?? ""));
-    if (offer) {
-      url.hash = `offer=${offer}`;
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function resolveReconnectState(
-  userId: string,
-  workspace: string,
-  scope?: string,
-): {
-  reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
-  reconnectTarget: string | null;
-  liveTarget: string | null;
-} {
-  const liveTarget = resolveLiveTarget(userId, workspace);
-  const serverId = readPersistedPaseoServerId(userId, workspace) ?? "";
-  const reconnectTarget = buildReconnectTarget(serverId, liveTarget, scope);
-
-  if (reconnectTarget && serverId) {
-    return {
-      reconnectMode: "reconnectable",
-      reconnectTarget,
-      liveTarget,
-    };
-  }
-  if (liveTarget) {
-    return {
-      reconnectMode: "needs-pairing",
-      reconnectTarget: liveTarget,
-      liveTarget,
-    };
-  }
-  return {
-    reconnectMode: "unknown",
-    reconnectTarget: null,
-    liveTarget: null,
-  };
-}
-
 function workspacePaseoScope(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
 }
@@ -756,7 +680,6 @@ export function readPortalWorkspaceAssetPreview(
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
   const selectedDriver = readWorkspaceSelection(userId, workspace);
-  const paseoScope = workspacePaseoScope(userId, workspace);
   let status = readWorkspaceStatus(userId, workspace);
   const assets = status?.assets as
     | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
@@ -791,15 +714,10 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
       assets: normalizeWorkspaceAssets(status.assets),
     };
   }
-  const reconnect = resolveReconnectState(userId, workspace, paseoScope);
   return {
     name: workspace,
     drivers: PORTAL_DRIVER_TARGETS,
-    selectedDriver,
     status,
-    liveTarget: reconnect.liveTarget,
-    reconnectMode: reconnect.reconnectMode,
-    reconnectTarget: reconnect.reconnectTarget,
   };
 }
 
@@ -807,7 +725,7 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
   const summary = loadWorkspaceSummary(userId, workspace);
   let resolvedWorkspace: WorkspaceStatus | null = summary.status;
   let bindings: PortalWorkspaceDetail["credentialBindings"] = [];
-  const selectedDriver = summary.selectedDriver;
+  const selectedDriver = summary.status?.runtime.selectedDriver ?? null;
   const preferredTargets = [
     selectedDriver,
     { backend: "docker" as const },

@@ -8,6 +8,7 @@ It focuses on three customer-facing outcomes:
 - clear workspace isolation
 - persistent workspace runtime state
 - safe backend and driver switching
+- runtime status and credential switching semantics
 
 Detailed docs:
 

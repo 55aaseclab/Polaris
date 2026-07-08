@@ -106,6 +106,21 @@ function ensureDockerWorkspacePrerequisites(workspace: WorkspaceSpec): void {
   ensureDockerUserIdentityVolume(workspace);
 }
 
+function runDockerComposeTimed(
+  workspace: WorkspaceSpec,
+  outputPath: string,
+  args: string[],
+): void {
+  const startedAt = Date.now();
+  runCommand("docker", ["compose", "-f", outputPath, ...args]);
+  logInfo("docker-driver", "compose-command-completed", {
+    project: workspace.identity.projectName,
+    userProfileId: workspace.userProfile.id,
+    args,
+    elapsedMs: Date.now() - startedAt,
+  });
+}
+
 export class DockerDriver implements BackendDriver {
   readonly kind = "docker" as const;
 
@@ -116,23 +131,23 @@ export class DockerDriver implements BackendDriver {
   async start(workspace: WorkspaceSpec): Promise<void> {
     ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
+    runDockerComposeTimed(workspace, outputPath, ["up", "-d"]);
   }
 
   async stop(workspace: WorkspaceSpec): Promise<void> {
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "stop"]);
+    runDockerComposeTimed(workspace, outputPath, ["stop"]);
   }
 
   async restart(workspace: WorkspaceSpec): Promise<void> {
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "restart"]);
+    runDockerComposeTimed(workspace, outputPath, ["restart"]);
   }
 
   async rebuild(workspace: WorkspaceSpec): Promise<void> {
     ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "up", "-d", "--force-recreate"]);
+    runDockerComposeTimed(workspace, outputPath, ["up", "-d", "--force-recreate"]);
   }
 
   async render(workspace: WorkspaceSpec): Promise<void> {
@@ -142,7 +157,7 @@ export class DockerDriver implements BackendDriver {
   async apply(workspace: WorkspaceSpec): Promise<void> {
     ensureDockerWorkspacePrerequisites(workspace);
     const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
+    runDockerComposeTimed(workspace, outputPath, ["up", "-d"]);
   }
 
   async logs(workspace: WorkspaceSpec): Promise<void> {

@@ -186,6 +186,45 @@ function workspaceSidebarStatusDotClass(backendLiveness: string | null | undefin
   }
 }
 
+function resolveWorkspaceRuntimeLifecycle(
+  workspace:
+    | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceDetail, "status">
+    | null
+    | undefined,
+): string | null {
+  if (!workspace) {
+    return null;
+  }
+  return workspace.status?.runtime?.lifecycle ?? null;
+}
+
+function resolveWorkspacePaseoTargets(
+  workspace:
+    | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceDetail, "status">
+    | null
+    | undefined,
+): {
+  liveTarget: string | null;
+  reconnectTarget: string | null;
+} {
+  return {
+    liveTarget: workspace?.status?.paseo?.liveTarget ?? null,
+    reconnectTarget: workspace?.status?.paseo?.reconnectTarget ?? null,
+  };
+}
+
+function resolveWorkspacePaseoWebState(
+  workspace:
+    | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceDetail, "status">
+    | null
+    | undefined,
+): "unavailable" | "pairing-required" | "connectable" {
+  return workspace?.status?.paseo?.web ?? "unavailable";
+}
+
 type LanguageContextValue = {
   language: Language;
   setLanguage: (value: Language) => void;
@@ -372,6 +411,15 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_paseo_live_target: "Live target",
     admin_paseo_reconnectable: "Reconnectable",
     admin_paseo_needs_pairing: "Needs pairing",
+    admin_paseo_web: "Web",
+    admin_paseo_daemon: "Daemon",
+    admin_paseo_web_connectable: "Connectable",
+    admin_paseo_web_pairing_required: "Pairing required",
+    admin_paseo_web_unavailable: "Unavailable",
+    admin_paseo_daemon_absent: "Absent",
+    admin_paseo_daemon_pending: "Pending",
+    admin_paseo_daemon_ready: "Ready",
+    admin_paseo_daemon_unknown: "Unknown",
     admin_paseo_status_button: "Refresh daemon status",
     admin_paseo_restart_button: "Restart daemon",
     skills: "Skills",
@@ -716,6 +764,15 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_paseo_live_target: "访问入口",
     admin_paseo_reconnectable: "可重连",
     admin_paseo_needs_pairing: "需要重新配对",
+    admin_paseo_web: "Web",
+    admin_paseo_daemon: "Daemon",
+    admin_paseo_web_connectable: "可连接",
+    admin_paseo_web_pairing_required: "需要配对",
+    admin_paseo_web_unavailable: "不可用",
+    admin_paseo_daemon_absent: "未出现",
+    admin_paseo_daemon_pending: "等待中",
+    admin_paseo_daemon_ready: "就绪",
+    admin_paseo_daemon_unknown: "未知",
     admin_paseo_status_button: "刷新 daemon 状态",
     admin_paseo_restart_button: "重启 daemon",
     skills: "Skills",
@@ -1078,7 +1135,10 @@ function resolvePolarisProfileIdCandidate(user: {
 
 function useCurrentUserMapping() {
   const { user } = useUser();
-  const { data: backendSession } = useAsyncValue<PortalSession | null>(
+  const {
+    data: backendSession,
+    loading: backendSessionLoading,
+  } = useAsyncValue<PortalSession | null>(
     () => getPortalSession(),
     [],
   );
@@ -1090,8 +1150,6 @@ function useCurrentUserMapping() {
       : Promise.resolve(null),
     [clerkUserId, clerkUsername],
   );
-  const useBackendSessionIdentity =
-    !clerkUsername && !clerkUserId && Boolean(backendSession?.authenticated);
   const sessionMapping = backendSession?.polarisUserId && backendSession.role
     ? {
       polarisUserId: backendSession.polarisUserId,
@@ -1100,11 +1158,11 @@ function useCurrentUserMapping() {
     }
     : null;
   return {
-    clerkUsername: useBackendSessionIdentity ? (backendSession?.clerkUsername ?? "") : clerkUsername,
-    clerkUserId: useBackendSessionIdentity ? backendSession?.clerkUserId ?? "" : clerkUserId,
-    mapping: useBackendSessionIdentity ? sessionMapping : data,
-    mappingError: useBackendSessionIdentity ? null : error,
-    mappingLoading: useBackendSessionIdentity ? false : loading,
+    clerkUsername: clerkUsername || backendSession?.clerkUsername || "",
+    clerkUserId: clerkUserId || backendSession?.clerkUserId || "",
+    mapping: sessionMapping ?? data,
+    mappingError: sessionMapping ? null : error,
+    mappingLoading: backendSessionLoading || (!sessionMapping && loading),
   };
 }
 
@@ -1309,6 +1367,36 @@ function translateReconnectMode(
       return t("admin_paseo_needs_pairing");
     default:
       return t("pairing_unknown");
+  }
+}
+
+function translatePaseoWebState(
+  value: "unavailable" | "pairing-required" | "connectable" | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "connectable":
+      return t("admin_paseo_web_connectable");
+    case "pairing-required":
+      return t("admin_paseo_web_pairing_required");
+    default:
+      return t("admin_paseo_web_unavailable");
+  }
+}
+
+function translatePaseoDaemonState(
+  value: "absent" | "pending" | "ready" | "unknown" | null | undefined,
+  t: (key: string) => string,
+): string {
+  switch (value) {
+    case "absent":
+      return t("admin_paseo_daemon_absent");
+    case "pending":
+      return t("admin_paseo_daemon_pending");
+    case "ready":
+      return t("admin_paseo_daemon_ready");
+    default:
+      return t("admin_paseo_daemon_unknown");
   }
 }
 
@@ -1792,6 +1880,7 @@ function PortalShellLayout(props: {
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
   const [sidebarPollingWorkspaceKeys, setSidebarPollingWorkspaceKeys] = useState<string[]>([]);
+  const [pendingSidebarWorkspaceName, setPendingSidebarWorkspaceName] = useState<string | null>(null);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
   const isAdmin = mapping?.role === "admin";
   const routeScope = resolveWorkspaceRouteScope({
@@ -1819,6 +1908,31 @@ function PortalShellLayout(props: {
     () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
     [activeUserId, workspaceRefreshTick],
   );
+  const visibleSidebarWorkspaces = pendingSidebarWorkspaceName
+    && !sidebarWorkspaces?.some((workspace) => workspace.name === pendingSidebarWorkspaceName)
+    ? [
+        ...(sidebarWorkspaces ?? []),
+        {
+          name: pendingSidebarWorkspaceName,
+          drivers: [],
+          status: {
+            runtime: {
+              selectedDriver: null,
+              lifecycle: "unknown",
+            },
+            paseo: {
+              daemon: "unknown",
+              web: "unavailable",
+              reconnectMode: "unknown",
+              liveTarget: null,
+              reconnectTarget: null,
+            },
+            operation: undefined,
+            details: {},
+          },
+        } satisfies PortalWorkspaceSummary,
+      ]
+    : (sidebarWorkspaces ?? []);
   const activeFrameKey = currentWorkspaceName
     ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
     : "";
@@ -1828,15 +1942,18 @@ function PortalShellLayout(props: {
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
   const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
   const activeSidebarWorkspace = currentWorkspaceName
-    ? (sidebarWorkspaces ?? []).find((workspace) => workspace.name === currentWorkspaceName) ?? null
+    ? visibleSidebarWorkspaces.find((workspace) => workspace.name === currentWorkspaceName) ?? null
     : null;
-  const activeSidebarWorkspaceLiveness = activeSidebarWorkspace?.status?.health?.backendLiveness ?? null;
+  const activeSidebarWorkspaceLiveness = resolveWorkspaceRuntimeLifecycle(activeSidebarWorkspace);
   const activeSidebarWorkspaceOperation = activeSidebarWorkspace?.status?.operation ?? null;
+  const activeSidebarWorkspacePaseoWebState = resolveWorkspacePaseoWebState(activeSidebarWorkspace);
+  const activeSidebarWorkspacePaseoTargets = resolveWorkspacePaseoTargets(activeSidebarWorkspace);
   const activeSidebarWorkspaceAllowsEmbeddedPaseo =
     activeSidebarWorkspaceLiveness === "running"
     || activeSidebarWorkspaceOperation?.kind === "create"
     || activeSidebarWorkspaceOperation?.kind === "start"
-    || activeSidebarWorkspaceOperation?.kind === "rebuild";
+    || activeSidebarWorkspaceOperation?.kind === "rebuild"
+    || hasActiveEmbeddedPaseoFrame;
   const shouldShowEmbeddedPaseoLoading = Boolean(
     currentWorkspaceName
     && currentWorkspacePane === ""
@@ -1845,8 +1962,8 @@ function PortalShellLayout(props: {
     && (
       sidebarWorkspacesLoading
       || hasActiveEmbeddedPaseoFrame
-      || activeSidebarWorkspace?.liveTarget
-      || activeSidebarWorkspace?.reconnectTarget
+      || activeSidebarWorkspacePaseoTargets.liveTarget
+      || activeSidebarWorkspacePaseoTargets.reconnectTarget
     ),
   );
   const createWorkspaceNameError = validateWorkspaceNameInput(newWorkspaceName, t);
@@ -1854,6 +1971,19 @@ function PortalShellLayout(props: {
     !creatingWorkspace
     && newWorkspaceName.trim().length > 0
     && !createWorkspaceNameError;
+
+  useEffect(() => {
+    setPendingSidebarWorkspaceName(null);
+  }, [activeUserId]);
+
+  useEffect(() => {
+    if (!pendingSidebarWorkspaceName) {
+      return;
+    }
+    if (sidebarWorkspaces?.some((workspace) => workspace.name === pendingSidebarWorkspaceName)) {
+      setPendingSidebarWorkspaceName(null);
+    }
+  }, [pendingSidebarWorkspaceName, sidebarWorkspaces]);
 
   function resetCreateWorkspaceForm(): void {
     setNewWorkspaceName("");
@@ -1952,8 +2082,13 @@ function PortalShellLayout(props: {
       });
       setCreateWorkspaceOpen(false);
       resetCreateWorkspaceForm();
+      if (!adminScopedWorkspaceView) {
+        setPendingSidebarWorkspaceName(trimmedName);
+      }
       setWorkspaceRefreshTick((current) => current + 1);
-      navigate(workspaceLink(trimmedName));
+      if (!adminScopedWorkspaceView) {
+        navigate(workspaceLink(trimmedName));
+      }
     } catch (error) {
       setCreateWorkspaceError(formatActionError(error, t));
     } finally {
@@ -1972,7 +2107,7 @@ function PortalShellLayout(props: {
     ? ""
     : currentWorkspaceName
       ? currentWorkspaceName
-      : (sidebarWorkspaces?.length ?? 0) === 0
+      : visibleSidebarWorkspaces.length === 0
         ? t("no_workspace_for_user")
         : t("workspace_header_empty");
   const currentPaneTitle = isWorkspaceSection
@@ -1986,7 +2121,7 @@ function PortalShellLayout(props: {
           : t("app_name");
   const shellContextValue: PortalShellContextValue = {
     activeUserId,
-    workspaces: sidebarWorkspaces ?? [],
+    workspaces: visibleSidebarWorkspaces,
     workspacesLoading: sidebarWorkspacesLoading,
     workspacesError: sidebarWorkspacesError,
     openCreateWorkspaceDialog,
@@ -2033,18 +2168,19 @@ function PortalShellLayout(props: {
   }, [activeUserId]);
 
   useEffect(() => {
-    if (!activeUserId || !sidebarWorkspaces) {
+    if (!activeUserId) {
       return;
     }
-    const knownWorkspaceKeys = sidebarWorkspaces.map(
+    const knownWorkspaceKeys = visibleSidebarWorkspaces.map(
       (workspace) => `${activeUserId.trim()}:${workspace.name.trim()}`,
     );
     const nextSources: Array<{ workspaceKey: string; src: string }> = [];
-    for (const workspace of sidebarWorkspaces) {
+    for (const workspace of visibleSidebarWorkspaces) {
       const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
       const scope = workspacePaseoScope(activeUserId, workspace.name);
-      const src = workspace.reconnectTarget
-        ?? normalizePaseoPortalUrl(workspace.liveTarget, scope);
+      const paseoTargets = resolveWorkspacePaseoTargets(workspace);
+      const src = paseoTargets.reconnectTarget
+        ?? normalizePaseoPortalUrl(paseoTargets.liveTarget, scope);
       if (src) {
         nextSources.push({ workspaceKey, src });
       }
@@ -2052,18 +2188,18 @@ function PortalShellLayout(props: {
     setEmbeddedPaseoFrames((current) =>
       mergeEmbeddedPaseoFrames(current, knownWorkspaceKeys, nextSources)
     );
-  }, [activeUserId, sidebarWorkspaces]);
+  }, [activeUserId, visibleSidebarWorkspaces]);
 
   useEffect(() => {
     if (
       !activeUserId
       || !currentWorkspaceName
       || sidebarWorkspacesLoading
-      || !sidebarWorkspaces
+      || visibleSidebarWorkspaces.length === 0
     ) {
       return;
     }
-    const workspaceStillExists = sidebarWorkspaces.some(
+    const workspaceStillExists = visibleSidebarWorkspaces.some(
       (workspace) => workspace.name === currentWorkspaceName,
     );
     if (workspaceStillExists) {
@@ -2074,8 +2210,8 @@ function PortalShellLayout(props: {
     activeUserId,
     currentWorkspaceName,
     navigate,
-    sidebarWorkspaces,
     sidebarWorkspacesLoading,
+    visibleSidebarWorkspaces,
   ]);
 
   return (
@@ -2124,22 +2260,17 @@ function PortalShellLayout(props: {
                       <span>{t("add_workspace")}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {sidebarWorkspacesLoading && !sidebarWorkspaces && (
-                    <div className="flex items-center justify-center px-2 py-3 text-muted-foreground">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    </div>
-                  )}
                   {!sidebarWorkspacesLoading && sidebarWorkspacesError && (
                     <div className="px-2 py-3 text-sm text-destructive">
                       {sidebarWorkspacesError}
                     </div>
                   )}
-                  {sidebarWorkspaces?.map((workspace) => {
+                  {visibleSidebarWorkspaces.map((workspace) => {
                     const active = currentWorkspaceName === workspace.name;
                     const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
                     const sidebarPolling = sidebarPollingWorkspaceKeys.includes(workspaceKey);
-                    const backendLiveness = workspace.status?.health?.backendLiveness ?? null;
-                    const sidebarStatusLabel = translateWorkspaceLiveness(backendLiveness, t);
+                    const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
+                    const sidebarStatusLabel = translateWorkspaceLiveness(runtimeLifecycle, t);
                     return (
                       <SidebarMenuItem key={workspace.name}>
                         <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
@@ -2153,7 +2284,7 @@ function PortalShellLayout(props: {
                               <RefreshCw className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                             ) : null}
                             <span
-                              className={`${sidebarPolling ? "ml-2" : "ml-auto"} h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(backendLiveness)}`}
+                              className={`${sidebarPolling ? "ml-2" : "ml-auto"} h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(runtimeLifecycle)}`}
                               title={sidebarStatusLabel}
                               aria-label={sidebarStatusLabel}
                             />
@@ -2162,7 +2293,7 @@ function PortalShellLayout(props: {
                       </SidebarMenuItem>
                     );
                   })}
-                  {!sidebarWorkspacesLoading && sidebarWorkspaces?.length === 0 && (
+                  {!sidebarWorkspacesLoading && visibleSidebarWorkspaces.length === 0 && (
                     <div className="px-2 py-3 text-sm text-muted-foreground">
                       {t("no_workspaces")}
                     </div>
@@ -2316,6 +2447,7 @@ function PortalShellLayout(props: {
                         : entry
                     )
                   );
+                  setWorkspaceRefreshTick((current) => current + 1);
                 }}
                 className={frame.workspaceKey === activeFrameKey
                   ? "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"
@@ -2330,11 +2462,6 @@ function PortalShellLayout(props: {
               ? "hidden"
               : "flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"}
           >
-            {shouldShowEmbeddedPaseoLoading ? (
-              <div className="flex min-h-[40dvh] w-full items-center justify-center">
-                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : null}
             <div className={shouldShowEmbeddedPaseoLoading ? "hidden" : "contents"}>
             {props.children}
             </div>
@@ -2546,7 +2673,7 @@ function OverviewPage() {
   const canSelfRegister =
     Boolean(clerkUsername || clerkUserId || backendSession?.clerkUsername || backendSession?.clerkUserId);
 
-  const explicitMappedUserId = mapping?.polarisUserId ?? null;
+  const explicitMappedUserId = mapping?.polarisUserId ?? backendSession?.polarisUserId ?? null;
   const nextPolarisUserId = resolvePolarisProfileIdCandidate(user)
     || backendSession?.clerkUsername
     || backendSession?.clerkUserId
@@ -2626,11 +2753,7 @@ function OverviewPage() {
   }
 
   if (resolvingAccess) {
-    return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
-        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <div className="min-h-screen w-full bg-background px-4 py-8" />;
   }
 
   return (
@@ -2738,11 +2861,7 @@ function WorkspaceEmptyState(props: {
   } = usePortalShell();
 
   if (workspacesLoading) {
-    return (
-      <div className="flex min-h-[40dvh] w-full items-center justify-center">
-        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <div className="min-h-[40dvh] w-full" />;
   }
 
   if (workspaces.length > 0) {
@@ -2982,17 +3101,13 @@ function AdminPage() {
       const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
         return resolveAdminWorkspaceDisplayState({
-          backendLiveness: workspace.status?.health?.backendLiveness,
           operation: workspace.status?.operation?.kind ?? null,
           localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
-          backendReason: workspace.status?.health?.reason ?? null,
         }).shouldPoll;
     }) || Object.values(workspaceActionState).some((entry) =>
       resolveAdminWorkspaceDisplayState({
-        backendLiveness: null,
         operation: null,
         localAction: entry.kind,
-        backendReason: null,
       }).shouldPoll
     );
     if (!selectedAdminUserId || !hasTransientWorkspace) {
@@ -3040,10 +3155,9 @@ function AdminPage() {
         if (
           shouldClearAdminWorkspaceAction({
             localAction: entry.kind,
-            baselineLiveness: entry.baselineLiveness,
-            backendLiveness: workspace?.status?.health?.backendLiveness ?? null,
+            baselineRuntimeLifecycle: entry.baselineRuntimeLifecycle,
+            runtimeLifecycle: resolveWorkspaceRuntimeLifecycle(workspace),
             operation: workspace?.status?.operation?.kind ?? null,
-            backendReason: workspace?.status?.health?.reason ?? null,
             workspaceExists: Boolean(workspace),
           })
         ) {
@@ -3168,11 +3282,7 @@ function AdminPage() {
   ]);
 
   if (mappingLoading) {
-    return (
-      <div className="flex w-full items-center justify-center py-6">
-        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <div className="w-full py-6" />;
   }
 
   if (mappingError) {
@@ -3190,13 +3300,13 @@ function AdminPage() {
   function setWorkspaceAction(
     target: string,
     kind: AdminWorkspaceActionEntry["kind"],
-    baselineLiveness: string | null = null,
+    baselineRuntimeLifecycle: string | null = null,
   ): void {
     setWorkspaceActionState((current) => ({
       ...current,
       [target]: {
         kind,
-        baselineLiveness,
+        baselineRuntimeLifecycle,
       },
     }));
   }
@@ -3246,8 +3356,10 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
-    setWorkspaceAction(actionKey, "archive", baselineLiveness);
+    const baselineRuntimeLifecycle = resolveWorkspaceRuntimeLifecycle(
+      selectedWorkspaces?.find((entry) => entry.name === workspaceName) ?? null,
+    );
+    setWorkspaceAction(actionKey, "archive", baselineRuntimeLifecycle);
     setWorkspaceAdminActionError(null);
     try {
       await deleteWorkspace(selectedAdminUser.id, workspaceName);
@@ -3296,8 +3408,10 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
-    setWorkspaceAction(actionKey, "stop", baselineLiveness);
+    const baselineRuntimeLifecycle = resolveWorkspaceRuntimeLifecycle(
+      selectedWorkspaces?.find((entry) => entry.name === workspaceName) ?? null,
+    );
+    setWorkspaceAction(actionKey, "stop", baselineRuntimeLifecycle);
     setWorkspaceAdminActionError(null);
     try {
       await stopWorkspace(selectedAdminUser.id, workspaceName);
@@ -3313,8 +3427,10 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
-    setWorkspaceAction(actionKey, "start", baselineLiveness);
+    const baselineRuntimeLifecycle = resolveWorkspaceRuntimeLifecycle(
+      selectedWorkspaces?.find((entry) => entry.name === workspaceName) ?? null,
+    );
+    setWorkspaceAction(actionKey, "start", baselineRuntimeLifecycle);
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
@@ -3330,8 +3446,10 @@ function AdminPage() {
       return;
     }
     const actionKey = adminWorkspaceStateKey(selectedAdminUser.id, workspaceName);
-    const baselineLiveness = selectedWorkspaces?.find((entry) => entry.name === workspaceName)?.status?.health?.backendLiveness ?? null;
-    setWorkspaceAction(actionKey, "rebuild", baselineLiveness);
+    const baselineRuntimeLifecycle = resolveWorkspaceRuntimeLifecycle(
+      selectedWorkspaces?.find((entry) => entry.name === workspaceName) ?? null,
+    );
+    setWorkspaceAction(actionKey, "rebuild", baselineRuntimeLifecycle);
     setWorkspaceAdminActionError(null);
     try {
       await rebuildWorkspace(selectedAdminUser.id, workspaceName);
@@ -3465,7 +3583,7 @@ function AdminPage() {
   );
   const adminSwitchableHarnesses = adminLiveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const adminLiveRuntimeRunning =
-    adminLiveCredentialWorkspace?.status?.health?.backendLiveness === "running";
+    resolveWorkspaceRuntimeLifecycle(adminLiveCredentialWorkspace) === "running";
   const adminRuntimeSkillWorkspace = adminRuntimeSkillWorkspaceName
     ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminRuntimeSkillWorkspaceName) ?? null
     : null;
@@ -4216,11 +4334,6 @@ function AdminPage() {
                         {t("add_skill")}
                       </Button>
                     </div>
-                    {selectedSkillsLoading ? (
-                      <div className="flex items-center justify-center py-2 text-muted-foreground">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : null}
                     {!selectedSkillsLoading && !selectedSkillsError && (selectedSkills?.length ?? 0) === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("no_skills")}</p>
                     ) : null}
@@ -4392,20 +4505,18 @@ function AdminPage() {
                         <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
                       ) : null}
                       {selectedWorkspaces?.map((workspace) => {
-                        const backendLiveness = workspace.status?.health?.backendLiveness;
+                        const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
                         const operation = workspace.status?.operation?.kind ?? null;
                         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
                         const localAction = workspaceActionState[workspaceStateKey]?.kind ?? null;
                         const buttonState = resolveAdminWorkspaceButtonState({
-                          backendLiveness,
+                          runtimeLifecycle,
                           operation,
                           localAction,
                         });
                         const displayState = resolveAdminWorkspaceDisplayState({
-                          backendLiveness,
                           operation,
                           localAction,
-                          backendReason: workspace.status?.health?.reason ?? null,
                         });
                         const hasLiveCredentialControls = MANAGED_HARNESS_ORDER.some((harness) =>
                           harness !== "ssh"
@@ -4425,11 +4536,11 @@ function AdminPage() {
                                 <div className="text-sm text-muted-foreground">
                                   {displayState.statusLabel
                                     ? t(displayState.statusLabel)
-                                    : translateWorkspaceLiveness(backendLiveness, t)}
+                                    : translateWorkspaceLiveness(runtimeLifecycle, t)}
                                 </div>
                               </div>
                               <Badge variant="outline">
-                                {driverLabel(workspace.selectedDriver)}
+                                {driverLabel(workspace.status?.runtime.selectedDriver ?? null)}
                               </Badge>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -4588,12 +4699,7 @@ function AdminPage() {
                             {adminRuntimeSkillAction === "sync" ? t("switching") : t("skill_sync")}
                           </Button>
                         </div>
-                        {adminInstalledWorkspaceSkillsLoading ? (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                            {t("loading_workspaces")}
-                          </div>
-                        ) : adminInstalledWorkspaceSkillsError ? (
+                        {adminInstalledWorkspaceSkillsError ? (
                           <p className="text-sm text-destructive">{adminInstalledWorkspaceSkillsError}</p>
                         ) : adminInstalledHarnessSkills.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{t("no_installed_skills")}</p>
@@ -4640,12 +4746,7 @@ function AdminPage() {
                         </SheetDescription>
                       </SheetHeader>
                       <div className="grid gap-4 py-4">
-                        {selectedCredentialsLoading ? (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                            {t("loading_credential")}
-                          </div>
-                        ) : selectedCredentialsError ? (
+                        {selectedCredentialsError ? (
                           <p className="text-sm text-destructive">{selectedCredentialsError}</p>
                         ) : adminLiveCredentialWorkspace && adminLiveHarnesses.length > 0 ? (
                           <>
@@ -4828,37 +4929,29 @@ function AdminPage() {
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{workspace.name}</div>
                             <div className="text-sm text-muted-foreground">
-                              {translateReconnectMode(workspace.reconnectMode, t)}
+                              {translatePaseoWebState(workspace.status?.paseo.web, t)}
                             </div>
                           </div>
                           <Badge variant="outline">
-                            {driverLabel(workspace.selectedDriver)}
+                            {driverLabel(workspace.status?.runtime.selectedDriver ?? null)}
                           </Badge>
                         </div>
                         <div className="grid gap-1">
                           <div className="text-xs text-muted-foreground">
-                            {t("admin_paseo_reconnect_mode")}
+                            {t("admin_paseo_web")}
                           </div>
                           <div className="break-all text-sm">
-                            {translateReconnectMode(workspace.reconnectMode, t)}
+                            {translatePaseoWebState(workspace.status?.paseo.web, t)}
                           </div>
                         </div>
-                        {workspace.reconnectTarget ? (
-                          <div className="grid gap-1">
-                            <div className="text-xs text-muted-foreground">
-                              {t("admin_paseo_reconnect_target")}
-                            </div>
-                            <div className="break-all text-sm">{workspace.reconnectTarget}</div>
+                        <div className="grid gap-1">
+                          <div className="text-xs text-muted-foreground">
+                            {t("admin_paseo_daemon")}
                           </div>
-                        ) : null}
-                        {workspace.liveTarget && workspace.liveTarget !== workspace.reconnectTarget ? (
-                          <div className="grid gap-1">
-                            <div className="text-xs text-muted-foreground">
-                              {t("admin_paseo_live_target")}
-                            </div>
-                            <div className="break-all text-sm">{workspace.liveTarget}</div>
+                          <div className="break-all text-sm">
+                            {translatePaseoDaemonState(workspace.status?.paseo.daemon, t)}
                           </div>
-                        ) : null}
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           <Button
                             variant="outline"
@@ -4964,14 +5057,6 @@ function EmptyPane(props: { title: string; description: string }) {
   );
 }
 
-function PaneSpinner() {
-  return (
-    <div className="flex min-h-[40dvh] w-full items-center justify-center">
-      <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
-    </div>
-  );
-}
-
 function WorkspaceDetailPage() {
   return <WorkspaceDetailContent />;
 }
@@ -4993,6 +5078,7 @@ function WorkspaceDetailContent() {
     removeEmbeddedPaseoFrame,
     refreshWorkspaces,
     setSidebarWorkspacePolling,
+    workspaces,
   } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
   const [selectedSkillHarness, setSelectedSkillHarness] = useState<"codex" | "claude">("codex");
@@ -5060,15 +5146,31 @@ function WorkspaceDetailContent() {
   );
   const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
-  const embeddedPortalUrl = workspaceData?.reconnectTarget ?? workspaceData?.liveTarget ?? null;
+  const embeddedPortalTargets = resolveWorkspacePaseoTargets(workspaceData);
+  const embeddedPortalUrl = embeddedPortalTargets.reconnectTarget ?? embeddedPortalTargets.liveTarget;
   const workspaceFrameKey = `${userId.trim()}:${workspaceName.trim()}`;
   const activeEmbeddedPaseoFrame = embeddedPaseoFrames.find(
     (frame) => frame.workspaceKey === workspaceFrameKey,
   ) ?? null;
   const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
-  const backendLiveness = workspaceData?.status?.health?.backendLiveness ?? null;
+  const backendLiveness = resolveWorkspaceRuntimeLifecycle(workspaceData);
   const runtimeRunning = backendLiveness === "running";
+  const selectedWorkspaceSummary = workspaces.find(
+    (workspace) => workspace.name === workspaceName,
+  ) ?? null;
+  const summaryBackendLiveness = resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary);
+  const summaryOperationKind = selectedWorkspaceSummary?.status?.operation?.kind ?? null;
+  const summarySuggestsEmbeddedPaseoPending =
+    selectedWorkspaceSummary !== null
+    && (
+      selectedWorkspaceSummary.status === null
+      || summaryBackendLiveness === "running"
+      || summaryOperationKind === "create"
+      || summaryOperationKind === "start"
+      || summaryOperationKind === "rebuild"
+    );
+  const keepEmbeddedPaseoPollingUntilRef = useRef<number>(0);
   const persistedWorkspaceAction = workspaceStatusOperationToUiAction(
     workspaceData?.status?.operation,
   );
@@ -5084,13 +5186,16 @@ function WorkspaceDetailContent() {
   const stopping = effectiveWorkspaceAction === "stopping";
   const deleting = effectiveWorkspaceAction === "deleting";
   const workspaceActionInFlight = effectiveWorkspaceAction !== null;
-  const backendState = workspaceData?.status?.health?.backendLiveness ?? null;
+  const backendState = resolveWorkspaceRuntimeLifecycle(workspaceData);
   const waitingForEmbeddedPaseo =
     !deleting
     && !activeEmbeddedPaseoFrameLoaded
     && !embeddedPortalUrl
     && Boolean(workspaceData)
     && (
+      Date.now() < keepEmbeddedPaseoPollingUntilRef.current
+      || summarySuggestsEmbeddedPaseoPending
+      ||
       workspaceData?.status?.operation?.kind === "create"
       || workspaceData?.status?.operation?.kind === "start"
       || workspaceData?.status?.operation?.kind === "rebuild"
@@ -5130,12 +5235,116 @@ function WorkspaceDetailContent() {
   const installedHarnessSkills = installedSkills?.installed.find(
     (entry) => entry.harness === selectedSkillHarness,
   )?.skills ?? [];
+  const selectedWorkspaceSummarySignature = selectedWorkspaceSummary
+    ? JSON.stringify({
+        name: selectedWorkspaceSummary.name,
+        liveTarget: selectedWorkspaceSummary.status?.paseo?.liveTarget ?? null,
+        reconnectTarget: selectedWorkspaceSummary.status?.paseo?.reconnectTarget ?? null,
+        operation: selectedWorkspaceSummary.status?.operation?.kind ?? null,
+        runtimeLifecycle: selectedWorkspaceSummary.status?.runtime?.lifecycle ?? null,
+        paseoWeb: selectedWorkspaceSummary.status?.paseo?.web ?? "unknown",
+      })
+    : null;
+  const lastAutoRefreshSummarySignatureRef = useRef<string | null>(null);
+  const lastSidebarReadySyncRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (workspaceData?.selectedDriver) {
-      setDriver(driverLabel(workspaceData.selectedDriver));
+    keepEmbeddedPaseoPollingUntilRef.current = Date.now() + 60_000;
+  }, [workspaceName]);
+
+  useEffect(() => {
+    if (embeddedPortalUrl || activeEmbeddedPaseoFrameLoaded) {
+      keepEmbeddedPaseoPollingUntilRef.current = 0;
+    }
+  }, [activeEmbeddedPaseoFrameLoaded, embeddedPortalUrl]);
+
+  useEffect(() => {
+    if (workspaceData?.status?.runtime.selectedDriver) {
+      setDriver(driverLabel(workspaceData.status.runtime.selectedDriver));
     }
   }, [workspaceData]);
+
+  useEffect(() => {
+    if (!selectedWorkspaceSummary || !selectedWorkspaceSummarySignature) {
+      lastAutoRefreshSummarySignatureRef.current = null;
+      return;
+    }
+    const summaryReady =
+      resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary) === "running"
+      && resolveWorkspacePaseoWebState(selectedWorkspaceSummary) !== "unavailable";
+    const detailReady =
+      resolveWorkspaceRuntimeLifecycle(workspaceData) === "running"
+      && resolveWorkspacePaseoWebState(workspaceData) !== "unavailable";
+    const summaryTargets = resolveWorkspacePaseoTargets(selectedWorkspaceSummary);
+    const detailTargets = resolveWorkspacePaseoTargets(workspaceData);
+    const summaryTarget =
+      summaryTargets.reconnectTarget
+      ?? summaryTargets.liveTarget
+      ?? null;
+    const detailTarget =
+      detailTargets.reconnectTarget
+      ?? detailTargets.liveTarget
+      ?? null;
+    if (!summaryReady) {
+      return;
+    }
+    if (detailReady && summaryTarget === detailTarget) {
+      lastAutoRefreshSummarySignatureRef.current = selectedWorkspaceSummarySignature;
+      return;
+    }
+    if (lastAutoRefreshSummarySignatureRef.current === selectedWorkspaceSummarySignature) {
+      return;
+    }
+    lastAutoRefreshSummarySignatureRef.current = selectedWorkspaceSummarySignature;
+    setRefreshTick((current) => current + 1);
+  }, [
+    selectedWorkspaceSummary,
+    selectedWorkspaceSummarySignature,
+    workspaceData?.status?.paseo?.liveTarget,
+    workspaceData?.status?.paseo?.reconnectTarget,
+    workspaceData?.status?.paseo?.web,
+    workspaceData?.status?.runtime?.lifecycle,
+  ]);
+
+  useEffect(() => {
+    const detailReady =
+      resolveWorkspaceRuntimeLifecycle(workspaceData) === "running"
+      && resolveWorkspacePaseoWebState(workspaceData) !== "unavailable";
+    const summaryReady =
+      resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary) === "running"
+      && resolveWorkspacePaseoWebState(selectedWorkspaceSummary) !== "unavailable";
+    const detailSignature = detailReady
+      ? JSON.stringify({
+          workspaceName,
+          liveTarget: workspaceData?.status?.paseo?.liveTarget ?? null,
+          reconnectTarget: workspaceData?.status?.paseo?.reconnectTarget ?? null,
+        })
+      : null;
+    if (!detailSignature) {
+      lastSidebarReadySyncRef.current = null;
+      return;
+    }
+    if (summaryReady) {
+      lastSidebarReadySyncRef.current = detailSignature;
+      return;
+    }
+    if (lastSidebarReadySyncRef.current === detailSignature) {
+      return;
+    }
+    lastSidebarReadySyncRef.current = detailSignature;
+    refreshWorkspaces();
+  }, [
+    refreshWorkspaces,
+    selectedWorkspaceSummary?.status?.paseo?.liveTarget,
+    selectedWorkspaceSummary?.status?.paseo?.reconnectTarget,
+    selectedWorkspaceSummary?.status?.paseo?.web,
+    selectedWorkspaceSummary?.status?.runtime?.lifecycle,
+    workspaceData?.status?.paseo?.liveTarget,
+    workspaceData?.status?.paseo?.reconnectTarget,
+    workspaceData?.status?.paseo?.web,
+    workspaceData?.status?.runtime?.lifecycle,
+    workspaceName,
+  ]);
 
   useEffect(() => {
     if (selectedSkillId) {
@@ -5244,12 +5453,13 @@ function WorkspaceDetailContent() {
       return;
     }
     const timer = window.setInterval(() => {
+      refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [waitingForEmbeddedPaseo]);
+  }, [refreshWorkspaces, waitingForEmbeddedPaseo]);
 
   async function handleSwitch(): Promise<void> {
     if (!driver) {
@@ -5422,11 +5632,7 @@ function WorkspaceDetailContent() {
 
   function renderLiveCredentialControls(): ReactNode {
     if (credentialsLoading) {
-      return (
-        <div className="flex items-center justify-center py-2 text-muted-foreground">
-          <RefreshCw className="h-4 w-4 animate-spin" />
-        </div>
-      );
+      return null;
     }
     if (credentialsError) {
       return <p className="text-sm text-destructive">{credentialsError}</p>;
@@ -5587,11 +5793,7 @@ function WorkspaceDetailContent() {
             </div>
             <div className="grid gap-2">
               <div className="text-sm font-medium">{t("installed_skills")}</div>
-              {installedSkillsLoading ? (
-                <div className="flex items-center justify-center py-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                </div>
-              ) : installedHarnessSkills.length === 0 ? (
+              {installedSkillsLoading ? null : installedHarnessSkills.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t("no_installed_skills")}</p>
               ) : (
                 installedHarnessSkills.map((skillId) => (
@@ -5626,7 +5828,7 @@ function WorkspaceDetailContent() {
                     backend: workspaceData.status.driver.backend,
                     profile: workspaceData.status.driver.profile,
                   })
-                  : driverLabel(workspaceData?.selectedDriver ?? null)}
+                  : driverLabel(workspaceData?.status?.runtime.selectedDriver ?? null)}
               </div>
             </div>
             {renderDriverSwitchControls()}
@@ -5715,7 +5917,7 @@ function WorkspaceDetailContent() {
 
     if (currentPane === "paseo") {
       const liveTarget =
-        workspaceData.reconnectTarget ?? workspaceData.liveTarget;
+        workspaceData.status?.paseo?.reconnectTarget ?? workspaceData.status?.paseo?.liveTarget;
       const driverStatus = workspaceData.status?.driver;
       return (
         <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
@@ -5729,7 +5931,6 @@ function WorkspaceDetailContent() {
                   onClick={() => void handleRefreshStatus()}
                   disabled={loading || refreshing || switching || starting || stopping || deleting}
                 >
-                  <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                   {refreshing ? t("refreshing") : t("refresh")}
                 </Button>
               </div>
@@ -5761,7 +5962,7 @@ function WorkspaceDetailContent() {
                         backend: driverStatus.backend,
                         profile: driverStatus.profile,
                       })
-                      : driverLabel(workspaceData.selectedDriver)}
+                      : driverLabel(workspaceData.status?.runtime.selectedDriver ?? null)}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -6170,11 +6371,6 @@ function CredentialManagerContent() {
   return (
     <div className="grid w-full min-w-0 gap-6">
         <div className="grid gap-4">
-          {(credentialsLoading || !credentialCatalog) && (
-            <div className="flex items-center justify-center py-2 text-muted-foreground">
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            </div>
-          )}
           {credentialsError && (
             <p className="text-sm text-destructive">{credentialsError}</p>
           )}

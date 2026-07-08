@@ -14,6 +14,7 @@ import {
 } from "../../evolution/runtime.js";
 import { writeWorkspacePaseoPairing, writeWorkspacePaseoServerId } from "../../output/state-store.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
+import { logWorkspaceEvent } from "../../utils/workspace-log.js";
 
 function runCheckedCapture(command: string, args: string[]): string {
   const result = spawnSync(command, args, { encoding: "utf8" });
@@ -54,6 +55,7 @@ export async function persistWorkspacePaseoState(
   if (!workspace.agent.enabled) {
     return "skipped";
   }
+  const startedAt = Date.now();
   let serverId = "";
   let pairing: (Record<string, unknown> & { url: string }) | null = null;
   const serverIdPath = `${workspace.agent.runtime.stateRoot}/server-id`;
@@ -107,6 +109,7 @@ export async function persistWorkspacePaseoState(
       backend: workspace.backend.kind,
       hasServerId: Boolean(serverId),
       hasPairing: Boolean(pairing),
+      elapsedMs: Date.now() - startedAt,
     });
     return "skipped";
   }
@@ -117,6 +120,7 @@ export async function persistWorkspacePaseoState(
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,
     serverId,
+    elapsedMs: Date.now() - startedAt,
   });
   return "persisted";
 }
@@ -194,12 +198,20 @@ export async function waitForWorkspaceReady(
   const driver = getBackendDriver(workspace.backend.kind);
   const startedAt = Date.now();
   let lastStatus: WorkspaceStatus | null = null;
+  let probe = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
+    probe += 1;
+    const inspectStartedAt = Date.now();
     const observation = await driver.inspect(workspace);
+    const inspectElapsedMs = Date.now() - inspectStartedAt;
     let effectiveObservation = observation;
+    let persistResult: "persisted" | "skipped" | "stopped" | "not-needed" = "not-needed";
+    let persistElapsedMs = 0;
     if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
-      const persistResult = await persistWorkspacePaseoState(workspace);
+      const persistStartedAt = Date.now();
+      persistResult = await persistWorkspacePaseoState(workspace);
+      persistElapsedMs = Date.now() - persistStartedAt;
       if (persistResult === "stopped") {
         effectiveObservation = {
           ...observation,
@@ -217,12 +229,34 @@ export async function waitForWorkspaceReady(
     logDebug("cli", "start-probe", {
       project: workspace.identity.projectName,
       backend: workspace.backend.kind,
-      backendLiveness: status.health.backendLiveness,
-      workspaceReadiness: status.health.workspaceReadiness,
-      reason: status.health.reason,
+      runtimeLifecycle: status.runtime.lifecycle,
+      paseoState: workspace.agent.enabled ? persistResult : "disabled",
+      reason: status.runtime.reason,
     });
 
-    if (status.health.workspaceReadiness === "ready") {
+    logWorkspaceEvent("info", "readiness-probe", {
+      userId: workspace.userProfile.id,
+      workspace: workspace.identity.projectName,
+      ref: `${workspace.identity.projectName}@${workspace.backend.kind}`,
+      backend: workspace.backend.kind,
+      profile: workspace.backend.profile,
+    }, {
+      probe,
+      elapsedMs: Date.now() - startedAt,
+      inspectElapsedMs,
+      persistElapsedMs,
+      persistResult,
+      backendExists: effectiveObservation.backend.exists,
+      backendRunning: effectiveObservation.backend.running,
+      runtimeLifecycle: status.runtime.lifecycle,
+      paseoState: workspace.agent.enabled ? persistResult : "disabled",
+      reason: status.runtime.reason,
+    });
+
+    if (
+      status.runtime.lifecycle === "running"
+      && (!workspace.agent.enabled || persistResult === "persisted")
+    ) {
       logInfo("cli", "workspace-ready", {
         project: workspace.identity.projectName,
         backend: workspace.backend.kind,
@@ -236,14 +270,13 @@ export async function waitForWorkspaceReady(
   logWarn("cli", "workspace-not-ready-before-timeout", {
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,
-    backendLiveness: lastStatus?.health.backendLiveness,
-    workspaceReadiness: lastStatus?.health.workspaceReadiness,
-    reason: lastStatus?.health.reason,
+    runtimeLifecycle: lastStatus?.runtime.lifecycle,
+    reason: lastStatus?.runtime.reason,
   });
 
   if (lastStatus) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.backend ?? "unknown"}, backendLiveness=${lastStatus.health.backendLiveness}, workspaceReadiness=${lastStatus.health.workspaceReadiness}, reason=${lastStatus.health.reason ?? "unknown"})`,
+      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.backend ?? "unknown"}, runtimeLifecycle=${lastStatus.runtime.lifecycle}, reason=${lastStatus.runtime.reason ?? "unknown"})`,
     );
   }
   throw new Error(`Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms`);

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import type {
   BackendObservation,
   CheckStatus,
@@ -15,6 +16,11 @@ import {
   workspacePaseoStateDir,
 } from "../output/state-store.js";
 import {
+  extractOfferFragment,
+  normalizePairingUrl,
+  resolveConfiguredPaseoAppBaseUrl,
+} from "./pairing-url.js";
+import {
   workspaceRuntimeResourceName,
   workspaceRuntimeScopeName,
 } from "./workspace-name.js";
@@ -23,6 +29,106 @@ function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
   return workspace.runtime.authFiles.some((entry) => {
     return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
   });
+}
+
+function readPersistedPaseoServerId(workspace: WorkspaceSpec): string | null {
+  const filePath = path.join(workspacePaseoStateDir(workspace.identity.projectName, workspace.userProfile.id), "server-id");
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  const value = fs.readFileSync(filePath, "utf8").trim();
+  return value || null;
+}
+
+function workspacePaseoScope(workspace: WorkspaceSpec): string {
+  return `${workspace.userProfile.id.trim()}:${workspace.identity.projectName.trim()}`;
+}
+
+function readPersistedPaseoPairingUrl(workspace: WorkspaceSpec): string | null {
+  const filePath = path.join(workspacePaseoStateDir(workspace.identity.projectName, workspace.userProfile.id), "pairing.json");
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { url?: unknown };
+    const raw = typeof parsed.url === "string" ? parsed.url.trim() : "";
+    return normalizePairingUrl(raw, process.env, workspacePaseoScope(workspace)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildReconnectTarget(
+  serverId: string | null | undefined,
+  pairingTarget: string | null | undefined,
+  scope: string,
+): string | null {
+  const normalizedServerId = String(serverId ?? "").trim();
+  if (!normalizedServerId) {
+    return null;
+  }
+  const appBaseUrl = resolveConfiguredPaseoAppBaseUrl(process.env);
+  if (!appBaseUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(`${appBaseUrl.replace(/\/$/, "")}/h/${encodeURIComponent(normalizedServerId)}`);
+    if (scope) {
+      url.searchParams.set("scope", scope);
+    }
+    const offer = extractOfferFragment(String(pairingTarget ?? ""));
+    if (offer) {
+      url.hash = `offer=${offer}`;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function synthesizeWorkspacePaseoStatus(
+  workspace: WorkspaceSpec,
+  runtime: WorkspaceStatus["runtime"],
+): WorkspaceStatus["paseo"] {
+  const liveTarget = readPersistedPaseoPairingUrl(workspace);
+  const serverId = readPersistedPaseoServerId(workspace);
+  const reconnectTarget = buildReconnectTarget(serverId, liveTarget, workspacePaseoScope(workspace));
+  const reconnectMode =
+    reconnectTarget && serverId
+      ? "reconnectable"
+      : liveTarget
+        ? "needs-pairing"
+        : "unknown";
+
+  if (runtime.lifecycle !== "running") {
+    return {
+      daemon: "absent",
+      web: "unavailable",
+      reconnectMode,
+      liveTarget,
+      reconnectTarget,
+      reason: runtime.reason,
+    };
+  }
+
+  return {
+    daemon:
+      reconnectMode === "reconnectable"
+        ? "ready"
+        : liveTarget
+          ? "pending"
+          : "unknown",
+    web:
+      reconnectMode === "reconnectable"
+        ? "connectable"
+        : reconnectMode === "needs-pairing"
+          ? "pairing-required"
+          : "unavailable",
+    reconnectMode,
+    liveTarget,
+    reconnectTarget,
+    reason: runtime.reason,
+  };
 }
 
 function buildSshSelfCheck(
@@ -432,9 +538,20 @@ export function synthesizeWorkspaceStatus(
     : observation.backend.running
       ? "running"
       : "stopped";
-  const workspaceReadiness = observation.backend.exists && observation.backend.running && !drift.hasErrors && !drift.hasWarnings
-    ? "ready"
-    : "not-ready";
+  const runtime: WorkspaceStatus["runtime"] = {
+    selectedDriver: {
+      backend: workspace.backend.kind,
+      ...(workspace.backend.profile ? { profile: workspace.backend.profile } : {}),
+    },
+    lifecycle:
+      backendLiveness === "running"
+        ? "running"
+        : backendLiveness === "stopped" || backendLiveness === "missing"
+          ? "stopped"
+          : "unknown",
+    reason: drift.items[0]?.message,
+  };
+  const paseo = synthesizeWorkspacePaseoStatus(workspace, runtime);
 
   return {
     project: workspace.identity.projectName,
@@ -448,11 +565,8 @@ export function synthesizeWorkspaceStatus(
         ? { rootdiskImage: workspace.runtime.rootdiskImage }
         : {}),
     },
-    health: {
-      backendLiveness,
-      workspaceReadiness,
-      reason: drift.items[0]?.message,
-    },
+    runtime,
+    paseo,
     credentials: {
       ssh: buildSshSelfCheck(workspace, observation),
       codex: codexCredentialStatus(workspace),

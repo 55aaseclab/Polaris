@@ -2,30 +2,24 @@
 
 本文档描述 Polaris 当前的 agent / manager 模型。
 
-重点是把四件事拆开：
+重点是把两件事拆开：
 
 - Paseo daemon
 - Paseo server / pairing offer
-- 工作空间状态面
-- 运行时凭证切换
 
-这四者相关，但不是同一个开关。
+这两者相关，但不是同一个开关。
 
 ## 一句话原则
 
 - Polaris 负责把 manager 运行面装配进工作空间。
 - Paseo daemon 是工作空间内的 manager 进程。
 - Paseo server / pairing offer 是连接面，不等于 daemon 进程本身。
-- harness 凭证选择和 live switch 属于身份物料切换，不负责创建或销毁
-  daemon。
 
 ## 核心对象
 
 - 工作空间：agent 运行的隔离环境。
 - Paseo daemon：工作空间内的 manager daemon。
 - pairing offer：daemon 暴露出的连接地址和 server identity。
-- 工作空间状态：Polaris 合成出的 agent 运行视图。
-- live credential selection：运行中的 harness 凭证选择状态。
 
 ## 文件落点
 
@@ -51,7 +45,6 @@ Paseo daemon 是 Polaris 当前接入的 manager 进程。
 - daemon 运行在工作空间内部
 - daemon 默认监听 `0.0.0.0:6767`
 - Polaris 在 render / start 阶段负责装配 daemon 运行环境
-- Polaris 当前不再把 `paseo daemon status` 作为工作空间状态面的主探针
 
 当前 Polaris 不把 daemon 状态和凭证状态混为一谈。
 
@@ -76,133 +69,6 @@ Polaris 当前不是直接控制远端 Paseo server。
 - `server-id` 提供的 server identity
 - `pairing.json` 提供的 live target / pairing URL
 
-### 工作空间状态面
-
-Polaris 当前已经把 agent 运行相关状态合成为统一状态面。
-
-当前重点包括：
-
-- backend 是否存在、是否运行
-- 用户级默认凭证是否已解析
-- 各 harness 的 live credential 选择结果
-
-这部分状态不会只依赖某一个后端本地返回值。
-
-Polaris 会综合：
-
-- backend observation
-- runtime assembly 检查
-- 持久化 runtime selection
-
-最近一轮性能优化把这部分从“同步重探测优先”改成了“缓存状态面优先”。
-
-最近一轮进一步收口后：
-
-- `status.json` 不再缓存 `paseo` / `daemon` 细节
-- portal 需要 reconnect 元数据时，直接读取 `server-id` 与
-  `pairing.json`
-- workspace ready gate 也改成文件级探测，不再依赖
-  `paseo daemon status`
-
-当前语义是：
-
-- portal detail read 优先读取 `status.json`
-- runtime status observer 只回报 workspace 主生命周期
-- workspace start/bootstrap 负责写入 `state/paseo/server-id` 与
-  `state/paseo/pairing.json`
-- 显式 refresh 仍然保留，但不再是默认读路径
-- start / stop / live switch 可以先写缓存状态，再异步 refresh
-- 用户可见生命周期不再依赖单独的 provisioning progress 文件
-
-当前关键文件：
-
-- `apps/polaris/scripts/executor/operations.ts`
-- `apps/polaris/scripts/runtime/status-observer.mjs`
-- `apps/polaris-web/src/App.tsx`
-
-### 运行时凭证切换
-
-Polaris 当前已经支持运行时凭证切换。
-
-这不是修改 daemon 类型。
-
-这也不是重建用户资料。
-
-当前语义是：
-
-- 读取目标用户凭证
-- 校验该凭证属于对应 harness
-- 把凭证物料写入 `user-identity-state`
-- 记录工作空间当前 harness 的 live selection
-- 刷新状态面，反映当前运行时选择
-
-当前支持 live switch 的 harness 包括：
-
-- `ssh`
-- `codex`
-- `claude`
-- `copilot`
-- `opencode`
-- `pi`
-
-最近一轮优化还让 live switch 的状态反馈更快：
-
-- 先写当前 harness 的 cached live selection
-- 再触发异步状态 refresh
-
-因此用户不需要等待一次完整深探测，页面就能先反映“当前选择已经切换”。
-
-验收时要看两个层面：
-
-- UI 是否立刻切到新 selection
-- 后续 refresh 是否把状态面稳定下来
-
-## 当前状态语义
-
-### live target
-
-`liveTarget` 表示当前工作空间暴露出的 pairing URL。
-
-它描述的是连接入口。
-
-它不表示：
-
-- 当前用了哪个 harness
-- 当前选中了哪个 credential
-
-### supported harnesses
-
-`supportedHarnesses` 表示当前 manager / runtime 允许工作的 harness 集合。
-
-它描述能力面。
-
-它不表示：
-
-- 所有 harness 都已配置好凭证
-- 所有 harness 都已有 live selection
-
-### credential status
-
-当前凭证状态分成两层：
-
-1. 用户级默认或工作空间绑定的解析结果
-2. 运行时 live switch 后的按 harness 选择结果
-
-当前状态面里会表达：
-
-- `codex.state`
-- `codex.source`
-- `live.switchableHarnesses`
-- `live.supportedHarnesses`
-- `live.selectedHarness`
-- `live.selectedCredentialId`
-- `live.selectedCredentialLabel`
-- `live.selectedByHarness`
-
-这意味着 Polaris 当前已经不是只表达一个“当前 agent credential”。
-
-它已经表达成按 harness 维度的运行时选择视图。
-
 ## 主流程
 
 ### 1. 工作空间启动
@@ -211,13 +77,13 @@ Polaris 当前已经支持运行时凭证切换。
 2. Polaris 装配 `~/.paseo`。
 3. Polaris 启动或拉起 Paseo daemon。
 4. Polaris 等待 `server-id` 和 `pairing.json` 到位。
-5. Polaris 读取 reconnect 元数据并进入状态面。
+5. Polaris 读取 reconnect 元数据并暴露连接入口。
 
 ### 2. 查看状态
 
 1. Polaris 检查 backend 是否存在和运行。
 2. Polaris 检查 runtime assembly 是否完整。
-3. Polaris 合成 `status.json` 和门户状态响应。
+3. Polaris 读取 `server-id` / `pairing.json` 并组合门户连接信息。
 
 如果门户需要 reconnect 元数据，则单独读取：
 

@@ -268,9 +268,17 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       runtimeKind: "docker-container",
       runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
     },
-    health: {
-      backendLiveness: "stopped",
-      workspaceReadiness: "not-ready",
+    runtime: {
+      selectedDriver: { backend: "docker" },
+      lifecycle: "stopped",
+      reason: "test setup",
+    },
+    paseo: {
+      daemon: "absent",
+      web: "unavailable",
+      reconnectMode: "unknown",
+      liveTarget: null,
+      reconnectTarget: null,
       reason: "test setup",
     },
     details: {},
@@ -293,17 +301,24 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       );
       assert.equal(detailBefore.status, 200);
       const parsedBefore = await detailBefore.json() as {
-        status?: { health?: { backendLiveness?: string } };
+        status?: { runtime?: { lifecycle?: string } };
       };
-      assert.equal(parsedBefore.status?.health?.backendLiveness, "stopped");
+      assert.equal(parsedBefore.status?.runtime?.lifecycle, "stopped");
 
       await reportPortalWorkspaceStatus({
         userId,
         workspace,
         status: {
-          health: {
-            backendLiveness: "running",
-            workspaceReadiness: "ready",
+          runtime: {
+            selectedDriver: { backend: "docker" },
+            lifecycle: "running",
+          },
+          paseo: {
+            daemon: "ready",
+            web: "connectable",
+            reconnectMode: "reconnectable",
+            liveTarget: "https://app.paseo.sh/#offer=test",
+            reconnectTarget: "https://example.invalid/h/srv_test?scope=demo",
           },
           details: {
             backendDetail: "reported by test",
@@ -317,12 +332,14 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       assert.equal(detailAfter.status, 200);
       const parsedAfter = await detailAfter.json() as {
         status?: {
-          health?: { backendLiveness?: string; workspaceReadiness?: string };
+          runtime?: { lifecycle?: string };
+          paseo?: { daemon?: string; web?: string };
           details?: { backendDetail?: string };
         };
       };
-      assert.equal(parsedAfter.status?.health?.backendLiveness, "running");
-      assert.equal(parsedAfter.status?.health?.workspaceReadiness, "ready");
+      assert.equal(parsedAfter.status?.runtime?.lifecycle, "running");
+      assert.equal(parsedAfter.status?.paseo?.daemon, "ready");
+      assert.equal(parsedAfter.status?.paseo?.web, "connectable");
       assert.equal(parsedAfter.status?.details?.backendDetail, "reported by test");
     });
   } finally {

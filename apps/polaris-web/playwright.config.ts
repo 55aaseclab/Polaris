@@ -6,6 +6,8 @@ import { defineConfig } from "@playwright/test";
 const DIRNAME = path.dirname(fileURLToPath(import.meta.url));
 const PLAYWRIGHT_WEB_PORT = 14174;
 const PLAYWRIGHT_API_PORT = 18798;
+const PLAYWRIGHT_EXECUTOR_PORT = 18799;
+const PLAYWRIGHT_EXECUTOR_SECRET = "playwright-executor-shared-secret";
 
 loadEnv({ path: path.resolve(DIRNAME, ".env.local") });
 
@@ -18,9 +20,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `pnpm --filter polaris run polaris -- portal ${PLAYWRIGHT_API_PORT} 0.0.0.0`,
+      command: `POLARIS_EXECUTOR_SHARED_SECRET=${PLAYWRIGHT_EXECUTOR_SECRET} pnpm --filter polaris run polaris -- executor ${PLAYWRIGHT_EXECUTOR_PORT}`,
+      url: `http://127.0.0.1:${PLAYWRIGHT_EXECUTOR_PORT}/health`,
+      reuseExistingServer: false,
+      cwd: path.resolve(DIRNAME, "../.."),
+    },
+    {
+      command: `POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:${PLAYWRIGHT_EXECUTOR_PORT} POLARIS_EXECUTOR_SHARED_SECRET=${PLAYWRIGHT_EXECUTOR_SECRET} pnpm --filter polaris run polaris -- portal ${PLAYWRIGHT_API_PORT} 0.0.0.0`,
       url: `http://127.0.0.1:${PLAYWRIGHT_API_PORT}`,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       cwd: path.resolve(DIRNAME, "../.."),
     },
     {

@@ -334,9 +334,20 @@ export interface WorkspaceStatus {
     kind: WorkspaceOperationKind;
     updatedAt: string;
   };
-  health: {
-    backendLiveness: string;
-    workspaceReadiness: string;
+  runtime: {
+    selectedDriver: {
+      backend: "docker" | "pod" | "kubevirt-vm";
+      profile?: string;
+    } | null;
+    lifecycle: "absent" | "running" | "stopped" | "unknown";
+    reason?: string;
+  };
+  paseo: {
+    daemon: "absent" | "pending" | "ready" | "unknown";
+    web: "unavailable" | "pairing-required" | "connectable";
+    reconnectMode: "reconnectable" | "needs-pairing" | "unknown";
+    liveTarget: string | null;
+    reconnectTarget: string | null;
     reason?: string;
   };
   credentials?: {
