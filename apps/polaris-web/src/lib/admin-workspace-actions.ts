@@ -44,13 +44,15 @@ export type AdminWorkspaceDisplayState = {
 
 export function resolveAdminWorkspaceButtonState(input: {
   backendLiveness: string | null | undefined;
+  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
 }): AdminWorkspaceButtonState {
-  const creating = input.backendLiveness === "creating";
-  const starting = input.localAction === "start" || input.backendLiveness === "starting";
-  const stopping = input.localAction === "stop" || input.backendLiveness === "stopping";
-  const rebuilding = input.localAction === "rebuild";
-  const archiving = input.localAction === "archive" || input.backendLiveness === "archiving";
+  const effectiveOperation = input.localAction ?? input.operation ?? null;
+  const creating = effectiveOperation === "create";
+  const starting = effectiveOperation === "start";
+  const stopping = effectiveOperation === "stop";
+  const rebuilding = effectiveOperation === "rebuild";
+  const archiving = effectiveOperation === "archive" || effectiveOperation === "delete";
   const running = input.backendLiveness === "running";
   const transitionActive = creating || starting || stopping || rebuilding || archiving;
 
@@ -77,14 +79,13 @@ export function resolveAdminWorkspaceButtonState(input: {
 
 export function resolveAdminWorkspaceDisplayState(input: {
   backendLiveness: string | null | undefined;
+  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
   backendReason: string | null | undefined;
 }): AdminWorkspaceDisplayState {
-  const backendLiveness = input.backendLiveness ?? null;
-  const localAction = input.localAction ?? null;
-  const backendReason = input.backendReason ?? null;
+  const effectiveOperation = input.localAction ?? input.operation ?? null;
 
-  if (localAction === "archive" || backendLiveness === "archiving") {
+  if (effectiveOperation === "archive" || effectiveOperation === "delete") {
     return {
       statusLabel: "deleting",
       shouldPoll: true,
@@ -92,7 +93,7 @@ export function resolveAdminWorkspaceDisplayState(input: {
       rebuildDisabled: true,
     };
   }
-  if (localAction === "stop" || backendLiveness === "stopping") {
+  if (effectiveOperation === "stop") {
     return {
       statusLabel: "stopping",
       shouldPoll: true,
@@ -101,15 +102,14 @@ export function resolveAdminWorkspaceDisplayState(input: {
     };
   }
   if (
-    localAction === "start"
-    || localAction === "rebuild"
-    || backendLiveness === "creating"
-    || backendLiveness === "starting"
+    effectiveOperation === "create"
+    || effectiveOperation === "start"
+    || effectiveOperation === "rebuild"
   ) {
     return {
-      statusLabel: backendLiveness === "creating" ? "workspace_creating" : "workspace_starting",
+      statusLabel: effectiveOperation === "create" ? "workspace_creating" : "workspace_starting",
       shouldPoll: true,
-      rebuildLabel: localAction === "rebuild" || backendReason === "workspace rebuild requested"
+      rebuildLabel: effectiveOperation === "rebuild"
         ? "rebuilding_workspace"
         : "rebuild_workspace",
       rebuildDisabled: true,
@@ -128,33 +128,31 @@ export function shouldClearAdminWorkspaceAction(input: {
   localAction: AdminWorkspaceLocalAction;
   baselineLiveness: string | null | undefined;
   backendLiveness: string | null | undefined;
+  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
   backendReason: string | null | undefined;
   workspaceExists: boolean;
 }): boolean {
   const baselineLiveness = input.baselineLiveness ?? null;
   const backendLiveness = input.backendLiveness ?? null;
-  const backendReason = input.backendReason ?? null;
+  const operation = input.operation ?? null;
 
   switch (input.localAction) {
     case "start":
       return (
-        backendLiveness === "starting"
-        || backendReason === "workspace start requested"
+        operation === "start"
         || (baselineLiveness !== "running" && backendLiveness === "running")
       );
     case "stop":
       return (
-        backendLiveness === "stopping"
-        || backendReason === "workspace stop requested"
+        operation === "stop"
         || (baselineLiveness === "running" && backendLiveness !== "running")
       );
     case "rebuild":
       return (
-        backendLiveness === "starting"
-        || backendReason === "workspace rebuild requested"
+        operation === "rebuild"
       );
     case "archive":
-      return !input.workspaceExists || backendLiveness === "archiving";
+      return !input.workspaceExists || operation === "archive" || operation === "delete";
     case "delete-archive":
       return !input.workspaceExists;
     default:

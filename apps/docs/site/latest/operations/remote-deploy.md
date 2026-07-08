@@ -42,7 +42,7 @@ The default Polaris test entry is smoke-only.
 Run the heavy suite only when you explicitly need it:
 
 ```bash
-pnpm run test:polaris:full
+pnpm run test:polaris:full-minus-infra
 ```
 
 ## Remote Provision

@@ -44,9 +44,9 @@ This avoids:
 
 If a lifecycle path is wrong, inspect logs in this order:
 
-1. `.tmp/paseo/stack.server.err.log`
-2. `.tmp/paseo/stack.executor.err.log`
-3. `.tmp/paseo/stack.web.err.log`
+1. `.runtime/paseo/stack.server.err.log`
+2. `.runtime/paseo/stack.executor.err.log`
+3. `.runtime/paseo/stack.web.err.log`
 4. workspace `status.json`
 5. runtime `status-observer.log`
 6. runtime `runtime-memory-observer.log`

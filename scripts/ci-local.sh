@@ -11,13 +11,16 @@ pnpm run check
 echo "[2/8] polaris skill tests"
 pnpm run test:polaris:skills
 
-echo "[3/8] build polaris"
+echo "[3/9] polaris non-infra regression tests"
+pnpm --filter polaris run test:full-minus-infra
+
+echo "[4/9] build polaris"
 pnpm --filter polaris run build
 
-echo "[4/8] build polaris-web"
+echo "[5/9] build polaris-web"
 pnpm --filter polaris-web run build
 
-echo "[5/8] shell syntax checks"
+echo "[6/9] shell syntax checks"
 bash -n scripts/run-polaris-local-stack-service.sh
 bash -n scripts/ci-local.sh
 bash -n scripts/provision-remote.sh
@@ -32,14 +35,14 @@ bash -n scripts/lib/polaris-bluegreen.sh
 bash -n scripts/lib/polaris-deploy-restart.sh
 bash -n scripts/lib/paseo-local.sh
 
-echo "[6/8] local stack regression tests"
+echo "[7/9] local stack regression tests"
 node --test scripts/tests/local-stack-service.test.mjs
 node --test scripts/tests/deploy-polaris-restart.test.mjs
 
-echo "[7/8] docker compose config"
+echo "[8/9] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
 
-echo "[8/8] paseo artifact verification"
+echo "[9/9] paseo artifact verification"
 bash ./scripts/build-paseo-tool-bundle.sh >/dev/null
 bash ./scripts/build-paseo-web-artifact.sh >/dev/null
 

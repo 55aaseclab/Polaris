@@ -13,7 +13,7 @@
     "check": "pnpm --filter polaris run check && pnpm --filter polaris-web run check",
     "test:polaris": "pnpm --filter polaris run test",
     "test:polaris:skills": "pnpm --filter polaris run test:skills",
-    "test:polaris:full": "pnpm --filter polaris run test:full",
+    "test:polaris:full-minus-infra": "pnpm --filter polaris run test:full-minus-infra",
     "test:live-auth": "pnpm --filter polaris run test:live-auth && pnpm --filter polaris-web run test:live-auth",
     "test:polaris:coverage": "pnpm --filter polaris run test:coverage"
   }

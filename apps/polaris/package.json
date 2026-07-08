@@ -11,7 +11,8 @@
     "test": "pnpm run test:smoke",
     "test:skills": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test || true; set +a; NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-skills.test.ts'",
     "test:smoke": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-pairing-url.test.ts tests/polaris-runtime-observer.test.ts tests/polaris-web-clerk-config.test.ts'",
-    "test:full": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 $(find tests -type f -name \"*.test.ts\" ! -path \"tests/live-auth/*\" | sort)'",
+    "test:full-minus-infra": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test node scripts/test-groups.mjs default'",
+    "test:infra": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test node scripts/test-groups.mjs infra'",
     "test:live-auth": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/live-auth/polaris-portal.test.ts'",
     "test:coverage": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; node scripts/test-coverage.mjs'"
   },

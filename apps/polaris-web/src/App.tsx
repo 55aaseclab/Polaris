@@ -78,6 +78,7 @@ import {
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
   type PortalWorkspacePaseoDiagnostic,
+  type PortalWorkspaceStatus,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -1352,6 +1353,26 @@ function translateWorkspaceLiveness(
   }
 }
 
+type WorkspaceUiAction = "starting" | "stopping" | "deleting" | null;
+
+function workspaceStatusOperationToUiAction(
+  operation: PortalWorkspaceStatus["operation"] | null | undefined,
+): WorkspaceUiAction {
+  switch (operation?.kind) {
+    case "create":
+    case "start":
+    case "rebuild":
+      return "starting";
+    case "stop":
+      return "stopping";
+    case "archive":
+    case "delete":
+      return "deleting";
+    default:
+      return null;
+  }
+}
+
 function extractOfferFragment(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -1810,10 +1831,12 @@ function PortalShellLayout(props: {
     ? (sidebarWorkspaces ?? []).find((workspace) => workspace.name === currentWorkspaceName) ?? null
     : null;
   const activeSidebarWorkspaceLiveness = activeSidebarWorkspace?.status?.health?.backendLiveness ?? null;
+  const activeSidebarWorkspaceOperation = activeSidebarWorkspace?.status?.operation ?? null;
   const activeSidebarWorkspaceAllowsEmbeddedPaseo =
     activeSidebarWorkspaceLiveness === "running"
-    || activeSidebarWorkspaceLiveness === "starting"
-    || activeSidebarWorkspaceLiveness === "creating";
+    || activeSidebarWorkspaceOperation?.kind === "create"
+    || activeSidebarWorkspaceOperation?.kind === "start"
+    || activeSidebarWorkspaceOperation?.kind === "rebuild";
   const shouldShowEmbeddedPaseoLoading = Boolean(
     currentWorkspaceName
     && currentWorkspacePane === ""
@@ -2956,16 +2979,18 @@ function AdminPage() {
   }, [adminCredentialGroups, adminCredentialTab]);
 
   useEffect(() => {
-    const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
-      const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
-      return resolveAdminWorkspaceDisplayState({
-        backendLiveness: workspace.status?.health?.backendLiveness,
-        localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
-        backendReason: workspace.status?.health?.reason ?? null,
-      }).shouldPoll;
+      const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
+        const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
+        return resolveAdminWorkspaceDisplayState({
+          backendLiveness: workspace.status?.health?.backendLiveness,
+          operation: workspace.status?.operation?.kind ?? null,
+          localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
+          backendReason: workspace.status?.health?.reason ?? null,
+        }).shouldPoll;
     }) || Object.values(workspaceActionState).some((entry) =>
       resolveAdminWorkspaceDisplayState({
         backendLiveness: null,
+        operation: null,
         localAction: entry.kind,
         backendReason: null,
       }).shouldPoll
@@ -3017,6 +3042,7 @@ function AdminPage() {
             localAction: entry.kind,
             baselineLiveness: entry.baselineLiveness,
             backendLiveness: workspace?.status?.health?.backendLiveness ?? null,
+            operation: workspace?.status?.operation?.kind ?? null,
             backendReason: workspace?.status?.health?.reason ?? null,
             workspaceExists: Boolean(workspace),
           })
@@ -4367,14 +4393,17 @@ function AdminPage() {
                       ) : null}
                       {selectedWorkspaces?.map((workspace) => {
                         const backendLiveness = workspace.status?.health?.backendLiveness;
+                        const operation = workspace.status?.operation?.kind ?? null;
                         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
                         const localAction = workspaceActionState[workspaceStateKey]?.kind ?? null;
                         const buttonState = resolveAdminWorkspaceButtonState({
                           backendLiveness,
+                          operation,
                           localAction,
                         });
                         const displayState = resolveAdminWorkspaceDisplayState({
                           backendLiveness,
+                          operation,
                           localAction,
                           backendReason: workspace.status?.health?.reason ?? null,
                         });
@@ -5040,14 +5069,9 @@ function WorkspaceDetailContent() {
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
   const backendLiveness = workspaceData?.status?.health?.backendLiveness ?? null;
   const runtimeRunning = backendLiveness === "running";
-  const persistedWorkspaceAction =
-    backendLiveness === "starting" || backendLiveness === "creating"
-      ? "starting"
-      : backendLiveness === "stopping"
-        ? "stopping"
-        : backendLiveness === "archiving"
-          ? "deleting"
-          : null;
+  const persistedWorkspaceAction = workspaceStatusOperationToUiAction(
+    workspaceData?.status?.operation,
+  );
   const effectiveRuntimeRunning =
     (workspaceAction ?? persistedWorkspaceAction) === "starting"
       ? true
@@ -5067,8 +5091,9 @@ function WorkspaceDetailContent() {
     && !embeddedPortalUrl
     && Boolean(workspaceData)
     && (
-      backendState === "creating"
-      || backendState === "starting"
+      workspaceData?.status?.operation?.kind === "create"
+      || workspaceData?.status?.operation?.kind === "start"
+      || workspaceData?.status?.operation?.kind === "rebuild"
       || backendState === "running"
     );
   const workspaceStateLabel = deleting

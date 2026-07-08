@@ -1,6 +1,23 @@
 export type BackendKind = "pod" | "kubevirt-vm" | "docker";
 export type PodProfile = "gvisor" | "kata-qemu" | "kata-clh" | "kata-qemu-tdx";
-export type LifecycleAction = "create" | "start" | "stop" | "restart" | "rebuild" | "status" | "reconcile" | "render" | "apply" | "logs";
+export type WorkspaceCommandKind =
+  | "create"
+  | "start"
+  | "stop"
+  | "restart"
+  | "rebuild"
+  | "status"
+  | "reconcile"
+  | "render"
+  | "apply"
+  | "logs";
+export type WorkspaceOperationKind =
+  | "create"
+  | "start"
+  | "stop"
+  | "rebuild"
+  | "archive"
+  | "delete";
 export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
 export type AttachmentScope = "workspace" | "user";
 export type AttachmentSharing = "exclusive" | "cross-workspace";
@@ -268,7 +285,7 @@ export interface WorkspaceHealthPolicy {
 }
 
 export interface WorkspaceLifecycle {
-  actions: LifecycleAction[];
+  actions: WorkspaceCommandKind[];
 }
 
 export interface WorkspaceSpec {
@@ -313,7 +330,10 @@ export interface WorkspaceStatus {
     runtimeRef: string;
     rootdiskImage?: string;
   };
-  lifecycleAction: LifecycleAction;
+  operation?: {
+    kind: WorkspaceOperationKind;
+    updatedAt: string;
+  };
   health: {
     backendLiveness: string;
     workspaceReadiness: string;

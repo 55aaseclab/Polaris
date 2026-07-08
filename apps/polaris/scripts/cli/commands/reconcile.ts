@@ -27,7 +27,7 @@ export async function reconcileCommand(project: string, userProfileId?: string):
   });
   const postObservation = await driver.inspect(workspace);
   const postDrift = computeWorkspaceDrift(workspace, postObservation);
-  const status = synthesizeWorkspaceStatus(workspace, postObservation, postDrift, "reconcile");
+  const status = synthesizeWorkspaceStatus(workspace, postObservation, postDrift);
   status.evolution = {
     ...(await getEvolutionSummary(workspace)),
     ...(evolutionSessionId ? { lastSessionId: evolutionSessionId } : {}),
