@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:analyze": "ANALYZE=true tsc -b && vite build",
     "check": "tsc -b",
     "preview": "vite preview",
     "test:e2e": "playwright test",
@@ -41,6 +42,7 @@
     "autoprefixer": "^10.4.21",
     "dotenv": "^17.4.2",
     "postcss": "^8.5.6",
+    "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.9.2",

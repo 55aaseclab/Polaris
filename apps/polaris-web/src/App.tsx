@@ -143,11 +143,15 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  buildClerkUrl,
   clerkSignInUrl,
-  clerkSignUpUrl,
 } from "@/lib/clerk";
 import { type Language, writeStoredLanguage } from "@/lib/language";
+import { portalSignInUrl } from "@/lib/portal-auth";
+
+const SignInPage = React.lazy(() => import("@/routes/sign-in-page"));
+const SignUpPage = React.lazy(() => import("@/routes/sign-up-page"));
+const AdminPaseoTab = React.lazy(() => import("@/features/admin-paseo-tab"));
+const WorkspacePaseoPane = React.lazy(() => import("@/features/workspace-paseo-pane"));
 
 function basenameForDisplay(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -1014,31 +1018,6 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
-function portalSignInUrl(): string {
-  if (typeof window === "undefined") {
-    return clerkSignInUrl();
-  }
-  const redirectTarget = normalizePath(window.location.pathname) === "/sign-in"
-    || normalizePath(window.location.pathname) === "/sign-up"
-    ? new URL("/", window.location.origin).toString()
-    : window.location.href;
-  return buildClerkUrl(clerkSignInUrl(), redirectTarget);
-}
-
-function portalSignUpUrl(): string {
-  if (typeof window === "undefined") {
-    return clerkSignUpUrl();
-  }
-  return buildClerkUrl(
-    clerkSignUpUrl(),
-    new URL("/", window.location.origin).toString(),
-  );
-}
-
-function normalizePath(pathname: string): string {
-  return pathname.replace(/\/+$/, "") || "/";
-}
-
 function AuthGate(props: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
   const [backendSession, setBackendSession] = useState<PortalSession | null>(null);
@@ -1164,35 +1143,6 @@ function useCurrentUserMapping() {
     mappingError: sessionMapping ? null : error,
     mappingLoading: backendSessionLoading || (!sessionMapping && loading),
   };
-}
-
-function SignInPage() {
-  const { isLoaded, userId } = useAuth();
-  useEffect(() => {
-    if (isLoaded && userId) {
-      return;
-    }
-    window.location.assign(portalSignInUrl());
-  }, [isLoaded, userId]);
-  if (isLoaded && userId) {
-    return <Navigate to="/" replace />;
-  }
-  return null;
-}
-
-function SignUpPage() {
-  const { isLoaded, userId } = useAuth();
-  useEffect(() => {
-    if (isLoaded && userId) {
-      return;
-    }
-    window.location.assign(portalSignUpUrl());
-  }, [isLoaded, userId]);
-
-  if (isLoaded && userId) {
-    return <Navigate to="/" replace />;
-  }
-  return null;
 }
 
 function driverLabel(driver: { backend: string; profile?: string } | null): string {
@@ -4930,85 +4880,27 @@ function AdminPage() {
               </TabsContent>
 
               <TabsContent value="paseo">
-                <Card className="border-border/70">
-                  <CardHeader>
-                    <CardTitle className="text-base">{t("admin_user_tab_paseo")}</CardTitle>
-                    <CardDescription>{t("paseo_info")}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
-                    {!selectedWorkspacesLoading && !selectedWorkspacesError && visibleSelectedWorkspaces.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
-                    ) : null}
-                    {visibleSelectedWorkspaces.map((workspace) => {
-                      const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
-                      return (
-                      <div key={`paseo-${workspaceStateKey}`} className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{workspace.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {translatePaseoWebState(workspace.status?.paseo?.web, t)}
-                            </div>
-                          </div>
-                          <Badge variant="outline">
-                            {driverLabel(workspace.status?.runtime?.selectedDriver ?? null)}
-                          </Badge>
-                        </div>
-                        <div className="grid gap-1">
-                          <div className="text-xs text-muted-foreground">
-                            {t("admin_paseo_web")}
-                          </div>
-                          <div className="break-all text-sm">
-                            {translatePaseoWebState(workspace.status?.paseo?.web, t)}
-                          </div>
-                        </div>
-                        <div className="grid gap-1">
-                          <div className="text-xs text-muted-foreground">
-                            {t("admin_paseo_daemon")}
-                          </div>
-                          <div className="break-all text-sm">
-                            {translatePaseoDaemonState(workspace.status?.paseo?.daemon, t)}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={Boolean(paseoActionState[workspaceStateKey])}
-                            onClick={() => void handleLoadPaseoDiagnostic(workspace.name)}
-                          >
-                            {paseoActionState[workspaceStateKey] === "loading"
-                              ? t("refreshing")
-                              : t("admin_paseo_status_button")}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={Boolean(paseoActionState[workspaceStateKey])}
-                            onClick={() => void handleRestartPaseoDaemon(workspace.name)}
-                          >
-                            {paseoActionState[workspaceStateKey] === "restarting"
-                              ? t("admin_paseo_restarting_button")
-                              : t("admin_paseo_restart_button")}
-                          </Button>
-                        </div>
-                        {paseoDiagnostics[workspaceStateKey] ? (
-                          <>
-                            <details className="rounded-xl border border-border/70 bg-background">
-                              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
-                                {t("admin_paseo_status_raw")}
-                              </summary>
-                              <pre className="overflow-x-auto border-t border-border/70 p-3 text-xs leading-5">
-                                {paseoDiagnostics[workspaceStateKey]?.daemonStatusRaw}
-                              </pre>
-                            </details>
-                          </>
-                        ) : null}
-                      </div>
-                    )})}
-                  </CardContent>
-                </Card>
+                <React.Suspense fallback={null}>
+                  <AdminPaseoTab
+                    t={t}
+                    selectedWorkspacesError={selectedWorkspacesError}
+                    selectedWorkspacesLoading={selectedWorkspacesLoading}
+                    visibleSelectedWorkspaces={visibleSelectedWorkspaces}
+                    selectedAdminUserId={selectedAdminUser.id}
+                    paseoActionState={paseoActionState}
+                    paseoDiagnostics={paseoDiagnostics}
+                    adminWorkspaceStateKey={adminWorkspaceStateKey}
+                    driverLabel={driverLabel}
+                    translatePaseoWebState={translatePaseoWebState}
+                    translatePaseoDaemonState={translatePaseoDaemonState}
+                    onLoadPaseoDiagnostic={(workspaceName) => {
+                      void handleLoadPaseoDiagnostic(workspaceName);
+                    }}
+                    onRestartPaseoDaemon={(workspaceName) => {
+                      void handleRestartPaseoDaemon(workspaceName);
+                    }}
+                  />
+                </React.Suspense>
               </TabsContent>
             </Tabs>
           )}
@@ -5939,97 +5831,29 @@ function WorkspaceDetailContent() {
         workspaceData.status?.paseo?.reconnectTarget ?? workspaceData.status?.paseo?.liveTarget;
       const driverStatus = workspaceData.status?.driver;
       return (
-        <div className="flex min-h-[75dvh] w-full min-w-0 flex-col gap-6">
-          <div className="grid gap-6">
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-base font-semibold">{t("paseo_info")}</div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleRefreshStatus()}
-                  disabled={loading || refreshing || switching || starting || stopping || deleting}
-                >
-                  {refreshing ? t("refreshing") : t("refresh")}
-                </Button>
-              </div>
-              {liveTarget ? (
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("live_target")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <span className="break-all">{liveTarget}</span>
-                  </div>
-                </div>
-              ) : null}
-              {renderLiveCredentialControls()}
-            </div>
-            <Separator />
-            {renderWorkspaceControlsCard()}
-            <Separator />
-            <div className="grid gap-4">
-              <div className="text-base font-semibold">{t("driver_info")}</div>
-              <div className="grid gap-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("current_driver")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    {driverStatus
-                      ? driverLabel({
-                        backend: driverStatus.backend,
-                        profile: driverStatus.profile,
-                      })
-                      : driverLabel(workspaceData.status?.runtime?.selectedDriver ?? null)}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("base_image")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <span className="break-all">
-                      {driverStatus?.baseImage ?? t("unknown")}
-                    </span>
-                  </div>
-                </div>
-                {driverStatus?.rootdiskImage ? (
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{t("rootdisk_image")}</div>
-                      <div className="text-sm text-muted-foreground">{t("driver_info")}</div>
-                    </div>
-                    <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                      <span className="break-all">
-                        {driverStatus.rootdiskImage}
-                      </span>
-                    </div>
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{t("driver_runtime")}</div>
-                  </div>
-                  <div className="w-full min-w-0 text-sm text-muted-foreground sm:w-[28rem] sm:text-right">
-                    <div>{translateDriverRuntimeKind(driverStatus?.runtimeKind, t)}</div>
-                    <div className="break-all">{driverStatus?.runtimeRef ?? t("unknown")}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <Separator />
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-base font-semibold">
-                  {t("evolution_memory")}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {workspaceData.status?.evolution
-                    ? `${workspaceData.status.evolution.artifactCount} ${t("evolution_assets")}`
-                    : t("no_assets")}
-                </div>
-              </div>
+        <React.Suspense fallback={null}>
+          <WorkspacePaseoPane
+            t={t}
+            liveTarget={liveTarget ?? null}
+            refreshing={refreshing}
+            refreshDisabled={loading || refreshing || switching || starting || stopping || deleting}
+            onRefreshStatus={() => void handleRefreshStatus()}
+            liveCredentialControls={renderLiveCredentialControls()}
+            workspaceControlsCard={renderWorkspaceControlsCard()}
+            driverLabel={driverStatus
+              ? driverLabel({
+                  backend: driverStatus.backend,
+                  profile: driverStatus.profile,
+                })
+              : driverLabel(workspaceData.status?.runtime?.selectedDriver ?? null)}
+            baseImage={driverStatus?.baseImage ?? null}
+            rootdiskImage={driverStatus?.rootdiskImage ?? null}
+            runtimeKindLabel={translateDriverRuntimeKind(driverStatus?.runtimeKind, t)}
+            runtimeRef={driverStatus?.runtimeRef ?? null}
+            assetCountLabel={workspaceData.status?.evolution
+              ? `${workspaceData.status.evolution.artifactCount} ${t("evolution_assets")}`
+              : t("no_assets")}
+            assetTable={(
               <WorkspaceAssetTable
                 t={t}
                 sections={evolutionSections}
@@ -6038,10 +5862,9 @@ function WorkspaceDetailContent() {
                 workspaceName={workspaceName}
                 hideDetailsColumn
               />
-            </div>
-            <Separator />
-          </div>
-        </div>
+            )}
+          />
+        </React.Suspense>
       );
     }
 
@@ -6988,8 +6811,22 @@ export default function App(props: {
     <AppErrorBoundary>
       <LanguageContext.Provider value={value}>
         <Routes>
-          <Route path="/sign-in/*" element={<SignInPage />} />
-          <Route path="/sign-up/*" element={<SignUpPage />} />
+          <Route
+            path="/sign-in/*"
+            element={(
+              <React.Suspense fallback={null}>
+                <SignInPage />
+              </React.Suspense>
+            )}
+          />
+          <Route
+            path="/sign-up/*"
+            element={(
+              <React.Suspense fallback={null}>
+                <SignUpPage />
+              </React.Suspense>
+            )}
+          />
           <Route
             path="*"
             element={(
