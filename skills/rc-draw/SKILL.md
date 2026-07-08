@@ -66,7 +66,6 @@ Resolution order:
 
 1. Harness-specific environment variables
 2. Harness-specific config files
-3. Fallback override variables such as `RIGHT_CODES_API_KEY`
 
 Harness expectations:
 

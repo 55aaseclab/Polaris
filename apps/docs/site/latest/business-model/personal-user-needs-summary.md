@@ -76,8 +76,8 @@
 
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> `search chats`，也就是可搜索历史对话的能力
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> `library`，也就是可回看、复用、管理历史内容和资产的入口
-- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> 一个对个人用户友好的统一多轮对话产品面，
-  并覆盖语音沟通、图片生成
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 一个对个人用户友好的统一多轮对话产品面，
+  并覆盖图片生成；语音沟通推迟支持
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> `MCP apps` 和 `skills` 的产品化入口与安装使用路径
 
 所以现在还不能把 Polaris 直接包装成
