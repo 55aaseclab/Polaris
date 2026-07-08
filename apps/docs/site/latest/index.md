@@ -11,7 +11,8 @@ how to operate it, and how to debug it when behavior diverges from expectation.
 - `0.2.2`: earlier frozen snapshot
 - `0.2.3`: earlier release snapshot
 - `0.2.4`: earlier release snapshot
-- `0.2.5`: current release snapshot
+- `0.2.5`: earlier release snapshot
+- `0.2.6`: current release snapshot
 - `latest`: current maintained docs
 
 ## Reading Order
