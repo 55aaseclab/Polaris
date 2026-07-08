@@ -43,7 +43,7 @@
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> CPU 性能是否足够
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 工作空间是否已经预热
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> 文件挂载和 I/O 是否拖慢操作
-- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> 首次启动时间是否过长
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 首次启动时间是否过长
 
 ## 需求主题二：对标 GPT 网页版
 
