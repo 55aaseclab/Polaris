@@ -2902,7 +2902,7 @@ function WorkspaceEmptyState(props: {
 
 function AdminPage() {
   const { t } = useLanguage();
-  const { userId = "" } = useParams();
+  const { userId = "", targetUserId = "" } = useParams();
   const navigate = useNavigate();
   const { activeUserId, refreshWorkspaces } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
@@ -3034,6 +3034,12 @@ function AdminPage() {
     () => selectedAdminUserId ? listSkills(selectedAdminUserId) : Promise.resolve([]),
     [selectedAdminUserId, reloadKey],
   );
+  const visibleSelectedWorkspaces = selectedWorkspacesLoading
+    ? []
+    : (selectedWorkspaces ?? []);
+  const visibleSelectedArchivedWorkspaces = selectedArchivedWorkspacesLoading
+    ? []
+    : (selectedArchivedWorkspaces ?? []);
 
   useEffect(() => {
     if (!adminUsers?.length) {
@@ -3050,6 +3056,19 @@ function AdminPage() {
       setSelectedAdminUserId(fallbackUserId);
     }
   }, [adminUsers, selectedAdminUserId, userId]);
+
+  useEffect(() => {
+    if (!targetUserId || !selectedAdminUserId) {
+      return;
+    }
+    if (targetUserId === selectedAdminUserId) {
+      return;
+    }
+    navigate(
+      `/users/${encodeURIComponent(userId)}/admin/users/${encodeURIComponent(selectedAdminUserId)}/workspaces`,
+      { replace: true },
+    );
+  }, [navigate, selectedAdminUserId, targetUserId, userId]);
 
   useEffect(() => {
     setWorkspaceActionState({});
@@ -3566,7 +3585,7 @@ function AdminPage() {
     (skill) => skill.harness === adminRuntimeSkillHarness,
   );
   const adminLiveCredentialWorkspace = adminLiveCredentialWorkspaceName
-    ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminLiveCredentialWorkspaceName) ?? null
+    ? visibleSelectedWorkspaces.find((workspace) => workspace.name === adminLiveCredentialWorkspaceName) ?? null
     : null;
   const adminLiveStatus = adminLiveCredentialWorkspace?.status?.credentials?.live;
   const adminLiveSelections = adminLiveStatus?.selectedByHarness ?? {};
@@ -3585,7 +3604,7 @@ function AdminPage() {
   const adminLiveRuntimeRunning =
     resolveWorkspaceRuntimeLifecycle(adminLiveCredentialWorkspace) === "running";
   const adminRuntimeSkillWorkspace = adminRuntimeSkillWorkspaceName
-    ? (selectedWorkspaces ?? []).find((workspace) => workspace.name === adminRuntimeSkillWorkspaceName) ?? null
+    ? visibleSelectedWorkspaces.find((workspace) => workspace.name === adminRuntimeSkillWorkspaceName) ?? null
     : null;
   const adminInstalledHarnessSkills =
     adminInstalledWorkspaceSkills?.installed.find((entry) => entry.harness === adminRuntimeSkillHarness)?.skills ?? [];
@@ -4501,10 +4520,10 @@ function AdminPage() {
                     </CardHeader>
                     <CardContent className="grid gap-3">
                       <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
-                      {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
+                      {!selectedWorkspacesLoading && !selectedWorkspacesError && visibleSelectedWorkspaces.length === 0 ? (
                         <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
                       ) : null}
-                      {selectedWorkspaces?.map((workspace) => {
+                      {visibleSelectedWorkspaces.map((workspace) => {
                         const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
                         const operation = workspace.status?.operation?.kind ?? null;
                         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
@@ -4858,10 +4877,10 @@ function AdminPage() {
                     </CardHeader>
                     <CardContent className="grid gap-3">
                       <ErrorPopup title={t("global_error_title")} message={selectedArchivedWorkspacesError} />
-                      {!selectedArchivedWorkspacesLoading && !selectedArchivedWorkspacesError && (selectedArchivedWorkspaces?.length ?? 0) === 0 ? (
+                      {!selectedArchivedWorkspacesLoading && !selectedArchivedWorkspacesError && visibleSelectedArchivedWorkspaces.length === 0 ? (
                         <p className="text-sm text-muted-foreground">{t("admin_archive_empty")}</p>
                       ) : null}
-                      {selectedArchivedWorkspaces?.map((entry) => (
+                      {visibleSelectedArchivedWorkspaces.map((entry) => (
                         <div
                           key={entry.archiveId}
                           className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4"
@@ -4918,10 +4937,10 @@ function AdminPage() {
                   </CardHeader>
                   <CardContent className="grid gap-3">
                     <ErrorPopup title={t("global_error_title")} message={selectedWorkspacesError} />
-                    {!selectedWorkspacesLoading && !selectedWorkspacesError && (selectedWorkspaces?.length ?? 0) === 0 ? (
+                    {!selectedWorkspacesLoading && !selectedWorkspacesError && visibleSelectedWorkspaces.length === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("admin_workspace_empty")}</p>
                     ) : null}
-                    {selectedWorkspaces?.map((workspace) => {
+                    {visibleSelectedWorkspaces.map((workspace) => {
                       const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
                       return (
                       <div key={`paseo-${workspaceStateKey}`} className="grid gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
