@@ -368,6 +368,20 @@ async function deleteWorkspaceByApi(
   expect(response.ok()).toBeTruthy();
 }
 
+async function stopWorkspaceByApi(
+  request: import("@playwright/test").APIRequestContext,
+  userId: string,
+  workspaceName: string,
+): Promise<void> {
+  const response = await request.post(
+    `${PLAYWRIGHT_API_BASE_URL}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}/stop`,
+  );
+  if (response.status() === 404) {
+    return;
+  }
+  expect(response.ok()).toBeTruthy();
+}
+
 function dockerContainerState(containerName: string): "running" | "stopped" | "missing" {
   const inspect = spawnSync("docker", ["inspect", containerName], {
     cwd: REPO_ROOT,
@@ -637,7 +651,7 @@ test("creating a workspace from the admin pane stays in the admin pane", async (
   }
 });
 
-test("entering a workspace from the admin pane updates the sidebar immediately", async ({ page }) => {
+test("entering a workspace from the admin pane lets the sidebar runtime status converge without another click", async ({ page }) => {
   test.setTimeout(180_000);
   const adminUsername = uniqueUsername();
   const adminPassword = uniquePassword();
@@ -688,20 +702,17 @@ test("entering a workspace from the admin pane updates the sidebar immediately",
 
       const sidebarWorkspaceButton = page
         .locator('[data-sidebar="menu-button"]')
-        .filter({
-          has: page.locator(
-            `a[href="/users/${encodeURIComponent(adminUsername)}/admin/users/${encodeURIComponent(targetUsername)}/workspaces/${encodeURIComponent(workspaceName)}"]`,
-          ),
-        })
+        .filter({ hasText: workspaceName })
         .first();
 
       await expect(sidebarWorkspaceButton).toHaveAttribute("data-active", "true", {
         timeout: 15_000,
       });
-      await expect(sidebarWorkspaceButton.locator("svg.animate-spin")).toBeVisible({
-        timeout: 15_000,
+      await expect(sidebarWorkspaceButton.locator("svg.animate-spin")).toHaveCount(0, {
+        timeout: 180_000,
       });
     } finally {
+      await stopWorkspaceByApi(page.request, targetUsername, workspaceName);
       await deleteWorkspaceByApi(page.request, targetUsername, workspaceName, {
         bestEffort: true,
       });

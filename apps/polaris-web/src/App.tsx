@@ -177,10 +177,10 @@ function workspaceSidebarStatusDotClass(backendLiveness: string | null | undefin
       return "bg-emerald-500";
     case "starting":
     case "creating":
-      return "bg-sky-500";
+      return "animate-pulse bg-sky-500";
     case "stopping":
     case "archiving":
-      return "bg-amber-500";
+      return "animate-pulse bg-amber-500";
     case "unknown":
       return "bg-rose-500";
     case "missing":
@@ -242,7 +242,6 @@ type PortalShellContextValue = {
   workspacesError: string | null;
   openCreateWorkspaceDialog: () => void;
   refreshWorkspaces: () => void;
-  setSidebarWorkspacePolling: (workspaceKey: string, polling: boolean) => void;
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
@@ -1829,7 +1828,6 @@ function PortalShellLayout(props: {
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
-  const [sidebarPollingWorkspaceKeys, setSidebarPollingWorkspaceKeys] = useState<string[]>([]);
   const [pendingSidebarWorkspaceName, setPendingSidebarWorkspaceName] = useState<string | null>(null);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
   const isAdmin = mapping?.role === "admin";
@@ -2078,15 +2076,6 @@ function PortalShellLayout(props: {
     refreshWorkspaces: () => {
       setWorkspaceRefreshTick((current) => current + 1);
     },
-    setSidebarWorkspacePolling: (workspaceKey, polling) => {
-      setSidebarPollingWorkspaceKeys((current) => {
-        const hasKey = current.includes(workspaceKey);
-        if (polling) {
-          return hasKey ? current : [...current, workspaceKey];
-        }
-        return hasKey ? current.filter((entry) => entry !== workspaceKey) : current;
-      });
-    },
     embeddedPaseoFrames,
     cacheEmbeddedPaseoFrame: (workspaceKey, src) => {
       setEmbeddedPaseoFrames((current) => {
@@ -2114,7 +2103,18 @@ function PortalShellLayout(props: {
 
   useEffect(() => {
     setEmbeddedPaseoFrames([]);
-    setSidebarPollingWorkspaceKeys([]);
+  }, [activeUserId]);
+
+  useEffect(() => {
+    if (!activeUserId) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setWorkspaceRefreshTick((current) => current + 1);
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [activeUserId]);
 
   useEffect(() => {
@@ -2217,8 +2217,6 @@ function PortalShellLayout(props: {
                   )}
                   {visibleSidebarWorkspaces.map((workspace) => {
                     const active = currentWorkspaceName === workspace.name;
-                    const workspaceKey = `${activeUserId.trim()}:${workspace.name.trim()}`;
-                    const sidebarPolling = sidebarPollingWorkspaceKeys.includes(workspaceKey);
                     const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
                     const sidebarStatusLabel = translateWorkspaceLiveness(runtimeLifecycle, t);
                     return (
@@ -2230,11 +2228,8 @@ function PortalShellLayout(props: {
                           >
                             <FolderKanban />
                             <span className="truncate">{workspace.name}</span>
-                            {sidebarPolling ? (
-                              <RefreshCw className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                            ) : null}
                             <span
-                              className={`${sidebarPolling ? "ml-2" : "ml-auto"} h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(runtimeLifecycle)}`}
+                              className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(runtimeLifecycle)}`}
                               title={sidebarStatusLabel}
                               aria-label={sidebarStatusLabel}
                             />
@@ -2854,7 +2849,7 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "", targetUserId = "" } = useParams();
   const navigate = useNavigate();
-  const { activeUserId, refreshWorkspaces, setSidebarWorkspacePolling } = usePortalShell();
+  const { activeUserId, refreshWorkspaces } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
   const { data: users } = useAsyncValue(listUsers, [reloadKey]);
   const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
@@ -2909,16 +2904,6 @@ function AdminPage() {
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
 
-  function primeSidebarWorkspace(workspaceName: string): void {
-    if (!selectedAdminUserId) {
-      return;
-    }
-    const workspaceKey = adminWorkspaceStateKey(selectedAdminUserId, workspaceName);
-    setSidebarWorkspacePolling(workspaceKey, true);
-    if (selectedAdminUserId === activeUserId) {
-      refreshWorkspaces();
-    }
-  }
   const {
     data: selectedProfile,
     error: selectedProfileError,
@@ -4531,7 +4516,11 @@ function AdminPage() {
                               >
                                 <Link
                                   to={`/users/${encodeURIComponent(userId)}/admin/users/${encodeURIComponent(selectedAdminUser.id)}/workspaces/${encodeURIComponent(workspace.name)}`}
-                                  onClick={() => primeSidebarWorkspace(workspace.name)}
+                                  onClick={() => {
+                                    if (selectedAdminUserId === activeUserId) {
+                                      refreshWorkspaces();
+                                    }
+                                  }}
                                 >
                                   {t("enter_workspace")}
                                 </Link>
@@ -5000,7 +4989,6 @@ function WorkspaceDetailContent() {
     embeddedPaseoFrames,
     removeEmbeddedPaseoFrame,
     refreshWorkspaces,
-    setSidebarWorkspacePolling,
     workspaces,
   } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
@@ -5084,15 +5072,6 @@ function WorkspaceDetailContent() {
   ) ?? null;
   const summaryBackendLiveness = resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary);
   const summaryOperationKind = selectedWorkspaceSummary?.status?.operation?.kind ?? null;
-  const summarySuggestsEmbeddedPaseoPending =
-    selectedWorkspaceSummary !== null
-    && (
-      selectedWorkspaceSummary.status === null
-      || summaryBackendLiveness === "running"
-      || summaryOperationKind === "create"
-      || summaryOperationKind === "start"
-      || summaryOperationKind === "rebuild"
-    );
   const keepEmbeddedPaseoPollingUntilRef = useRef<number>(0);
   const persistedWorkspaceAction = workspaceStatusOperationToUiAction(
     workspaceData?.status?.operation,
@@ -5110,6 +5089,14 @@ function WorkspaceDetailContent() {
   const deleting = effectiveWorkspaceAction === "deleting";
   const workspaceActionInFlight = effectiveWorkspaceAction !== null;
   const backendState = resolveWorkspaceRuntimeLifecycle(workspaceData);
+  const runtimeOperationPending =
+    summaryOperationKind === "create"
+    || summaryOperationKind === "start"
+    || summaryOperationKind === "rebuild"
+    || workspaceData?.status?.operation?.kind === "create"
+    || workspaceData?.status?.operation?.kind === "start"
+    || workspaceData?.status?.operation?.kind === "rebuild"
+    || workspaceAction === "starting";
   const waitingForEmbeddedPaseo =
     !deleting
     && !activeEmbeddedPaseoFrameLoaded
@@ -5117,12 +5104,11 @@ function WorkspaceDetailContent() {
     && Boolean(workspaceData)
     && (
       Date.now() < keepEmbeddedPaseoPollingUntilRef.current
-      || summarySuggestsEmbeddedPaseoPending
-      ||
-      workspaceData?.status?.operation?.kind === "create"
+      || workspaceData?.status?.operation?.kind === "create"
       || workspaceData?.status?.operation?.kind === "start"
       || workspaceData?.status?.operation?.kind === "rebuild"
       || backendState === "running"
+      || resolveWorkspacePaseoWebState(workspaceData) !== "connectable"
     );
   const workspaceStateLabel = deleting
     ? t("deleting")
@@ -5368,21 +5354,16 @@ function WorkspaceDetailContent() {
   }, [effectiveWorkspaceAction]);
 
   useEffect(() => {
-    setSidebarWorkspacePolling(workspaceFrameKey, waitingForEmbeddedPaseo);
-  }, [setSidebarWorkspacePolling, waitingForEmbeddedPaseo, workspaceFrameKey]);
-
-  useEffect(() => {
     if (!waitingForEmbeddedPaseo) {
       return;
     }
     const timer = window.setInterval(() => {
-      refreshWorkspaces();
       setRefreshTick((current) => current + 1);
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [refreshWorkspaces, waitingForEmbeddedPaseo]);
+  }, [waitingForEmbeddedPaseo]);
 
   async function handleSwitch(): Promise<void> {
     if (!driver) {
