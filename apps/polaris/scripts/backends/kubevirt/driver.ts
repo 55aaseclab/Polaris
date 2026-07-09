@@ -710,7 +710,7 @@ export class KubevirtDriver implements BackendDriver {
           ? { observed: runtimeSnapshot?.userIdentityObserved ?? false, detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
           : undefined,
       },
-      runtimeAssembly: exists && running
+      workspaceAssembly: exists && running
         ? {
             home: { observed: runtimeSnapshot?.homeObserved ?? false, detail: workspace.runtime.home },
             projectRoot: { observed: runtimeSnapshot?.projectRootObserved ?? false, detail: `${workspace.runtime.home}/workspace` },

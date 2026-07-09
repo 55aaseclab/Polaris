@@ -51,8 +51,8 @@ export function isTransientExecutorDisconnect(error) {
 
 export function buildRuntimeStatusPatch() {
   return {
-    runtime: {
-      lifecycle: "running",
+    driver: {
+      status: "running",
       reason: "runtime status observer heartbeat",
     },
     details: {

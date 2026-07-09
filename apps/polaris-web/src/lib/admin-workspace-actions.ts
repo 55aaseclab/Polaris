@@ -44,10 +44,24 @@ export type AdminWorkspaceDisplayState = {
 
 export function resolveAdminWorkspaceButtonState(input: {
   runtimeLifecycle: string | null | undefined;
-  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
+  driverStatus: string | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
 }): AdminWorkspaceButtonState {
-  const effectiveOperation = input.localAction ?? input.operation ?? null;
+  const derivedOperation =
+    input.driverStatus === "creating"
+      ? "create"
+      : input.driverStatus === "starting"
+        ? "start"
+        : input.driverStatus === "stopping"
+          ? "stop"
+          : input.driverStatus === "rebuilding"
+            ? "rebuild"
+            : input.driverStatus === "archiving"
+              ? "archive"
+              : input.driverStatus === "deleting"
+                ? "delete"
+                : null;
+  const effectiveOperation = input.localAction ?? derivedOperation;
   const creating = effectiveOperation === "create";
   const starting = effectiveOperation === "start";
   const stopping = effectiveOperation === "stop";
@@ -78,10 +92,24 @@ export function resolveAdminWorkspaceButtonState(input: {
 }
 
 export function resolveAdminWorkspaceDisplayState(input: {
-  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
+  driverStatus: string | null | undefined;
   localAction: AdminWorkspaceLocalAction | null | undefined;
 }): AdminWorkspaceDisplayState {
-  const effectiveOperation = input.localAction ?? input.operation ?? null;
+  const derivedOperation =
+    input.driverStatus === "creating"
+      ? "create"
+      : input.driverStatus === "starting"
+        ? "start"
+        : input.driverStatus === "stopping"
+          ? "stop"
+          : input.driverStatus === "rebuilding"
+            ? "rebuild"
+            : input.driverStatus === "archiving"
+              ? "archive"
+              : input.driverStatus === "deleting"
+                ? "delete"
+                : null;
+  const effectiveOperation = input.localAction ?? derivedOperation;
 
   if (effectiveOperation === "archive" || effectiveOperation === "delete") {
     return {
@@ -126,12 +154,25 @@ export function shouldClearAdminWorkspaceAction(input: {
   localAction: AdminWorkspaceLocalAction;
   baselineRuntimeLifecycle: string | null | undefined;
   runtimeLifecycle: string | null | undefined;
-  operation: AdminWorkspaceLocalAction | "create" | "delete" | null | undefined;
+  driverStatus: string | null | undefined;
   workspaceExists: boolean;
 }): boolean {
   const baselineRuntimeLifecycle = input.baselineRuntimeLifecycle ?? null;
   const runtimeLifecycle = input.runtimeLifecycle ?? null;
-  const operation = input.operation ?? null;
+  const operation =
+    input.driverStatus === "creating"
+      ? "create"
+      : input.driverStatus === "starting"
+        ? "start"
+        : input.driverStatus === "stopping"
+          ? "stop"
+          : input.driverStatus === "rebuilding"
+            ? "rebuild"
+            : input.driverStatus === "archiving"
+              ? "archive"
+              : input.driverStatus === "deleting"
+                ? "delete"
+                : null;
 
   switch (input.localAction) {
     case "start":

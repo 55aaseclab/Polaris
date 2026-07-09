@@ -4,15 +4,19 @@ import { spawnSync } from "node:child_process";
 import { getBackendDriver } from "../../backends/index.js";
 import { parseWorkspaceReference } from "../../config/load.js";
 import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
-import type { WorkspaceSpec } from "../../core/workspace.js";
+import {
+  WORKSPACE_STATUS_SCHEMA_VERSION,
+  type WorkspaceSpec,
+} from "../../core/workspace.js";
 import {
   workspaceRuntimeResourceName,
   workspaceRuntimeScopeName,
 } from "../../core/workspace-name.js";
-import { readWorkspaceDriverSelection, writeWorkspaceDriverSelection } from "../../output/state-store.js";
+import { writeWorkspaceStatus } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
 import { withWorkspaceLifecycleLock } from "../../utils/workspace-lifecycle-lock.js";
 import { loadExecutableWorkspaceForCommand, loadWorkspaceForProjectRef, waitForWorkspaceReady } from "./shared.js";
+import { loadWorkspaceSummary } from "../../core/portal.js";
 
 const SUPPORTED_BACKENDS: Array<WorkspaceSpec["backend"]["kind"]> = [
   "docker",
@@ -777,7 +781,7 @@ export async function performWorkspaceSwitch(
     const previewWorkspace = loadWorkspaceForProjectRef(targetRef, userProfileId);
     await getBackendDriver(previewWorkspace.backend.kind).render(previewWorkspace);
 
-    const previousSelection = readWorkspaceDriverSelection(project, userProfileId);
+    const previousSelection = loadWorkspaceSummary(userProfileId ?? "", project).status?.driver?.selected ?? null;
     const previousBackend = previousSelection?.backend;
     const previousSelectionWorkspace = previousBackend
       ? loadWorkspaceForBackend(project, previousBackend, userProfileId)
@@ -829,7 +833,6 @@ export async function performWorkspaceSwitch(
       : workspace.backend.kind === "docker"
         ? 120000
         : 45000;
-    let selectionFile: string | undefined;
     try {
       if (
         exportedSwitchState &&
@@ -855,14 +858,32 @@ export async function performWorkspaceSwitch(
         await importSwitchState(workspace, exportedSwitchState, POST_RESTART_ATTACHMENTS);
       }
       await waitForWorkspaceReady(workspace, readyTimeoutMs);
-      selectionFile = writeWorkspaceDriverSelection(
+      const summary = loadWorkspaceSummary(userProfileId ?? "", project);
+      const currentStatus = summary.status;
+      const selectedDriver = {
+        backend: backendHint,
+        ...(backendHint === "pod" && (profileHint ?? workspace.backend.profile)
+          ? { profile: profileHint ?? workspace.backend.profile }
+          : {}),
+      };
+      writeWorkspaceStatus({
+        schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
         project,
-        {
-          backend: backendHint,
-          profile: backendHint === "pod" ? profileHint : undefined,
+        paseo: currentStatus?.paseo ?? {
+          daemon: "unknown",
+          web: "unavailable",
+          reconnectMode: "unknown",
+          liveTarget: null,
+          reconnectTarget: null,
         },
-        userProfileId,
-      );
+        details: currentStatus?.details ?? {},
+        driver: {
+          ...(currentStatus?.driver ?? {
+            status: "running",
+          }),
+          selected: selectedDriver,
+        },
+      }, userProfileId);
     } finally {
       if (exportedSwitchState) {
         fs.rmSync(exportedSwitchState, { recursive: true, force: true });
@@ -876,7 +897,7 @@ export async function performWorkspaceSwitch(
       selectedBackend: backendHint,
       selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
       stoppedBackends: finalizedStoppedBackends,
-      selectionFile: selectionFile ?? null,
+      selectionFile: null,
     };
   };
   if (!userProfileId?.trim()) {

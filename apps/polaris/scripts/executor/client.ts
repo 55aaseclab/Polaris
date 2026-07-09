@@ -225,6 +225,20 @@ export async function switchPortalWorkspace(input: {
   );
 }
 
+export async function updatePortalWorkspaceSelectedDriver(input: {
+  userId: string;
+  workspace: string;
+  target: PortalDriverTarget;
+}): Promise<{ updated: true }> {
+  return executorRequest(
+    "/workspaces/driver",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export async function deletePortalWorkspace(input: {
   userId: string;
   workspace: string;

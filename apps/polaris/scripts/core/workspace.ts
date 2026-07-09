@@ -320,30 +320,42 @@ export interface WorkspaceSpec {
   };
 }
 
-export const WORKSPACE_STATUS_SCHEMA_VERSION = 1 as const;
+export const WORKSPACE_STATUS_SCHEMA_VERSION_V1 = 1 as const;
+export const WORKSPACE_STATUS_SCHEMA_VERSION_V1_1 = 1.1 as const;
+export const WORKSPACE_STATUS_SCHEMA_VERSION = WORKSPACE_STATUS_SCHEMA_VERSION_V1_1;
+export type WorkspaceStatusSchemaVersion =
+  | typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1
+  | typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1_1;
+
+export interface WorkspaceStatusDriverTarget {
+  backend: "docker" | "pod" | "kubevirt-vm";
+  profile?: string;
+}
+
+export type WorkspaceDriverStatus =
+  | "absent"
+  | "creating"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "rebuilding"
+  | "archiving"
+  | "deleting"
+  | "failed"
+  | "unknown";
 
 export interface WorkspaceStatus {
-  schemaVersion?: typeof WORKSPACE_STATUS_SCHEMA_VERSION;
+  schemaVersion?: WorkspaceStatusSchemaVersion;
   project: string;
   driver?: {
-    backend: string;
-    profile?: string;
-    baseImage: string;
-    runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
-    runtimeRef: string;
-    rootdiskImage?: string;
-  };
-  operation?: {
-    kind: WorkspaceOperationKind;
-    updatedAt: string;
-  };
-  runtime: {
-    selectedDriver: {
-      backend: "docker" | "pod" | "kubevirt-vm";
-      profile?: string;
-    } | null;
-    lifecycle: "absent" | "running" | "stopped" | "unknown";
+    selected: WorkspaceStatusDriverTarget | null;
+    status: WorkspaceDriverStatus;
     reason?: string;
+    baseImage?: string;
+    runtimeKind?: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
+    runtimeRef?: string;
+    rootdiskImage?: string;
   };
   paseo: {
     daemon: "absent" | "pending" | "ready" | "unknown";
@@ -442,7 +454,7 @@ export interface WorkspaceStatus {
     }>;
   };
   attachments?: Record<string, CheckStatus>;
-  runtimeAssembly?: Record<string, CheckStatus>;
+  workspaceAssembly?: Record<string, CheckStatus>;
 }
 
 export interface ObservationItem {
@@ -469,7 +481,7 @@ export interface BackendObservation {
     workspaceRuntimeState?: ObservationItem;
     userIdentityState?: ObservationItem;
   };
-  runtimeAssembly: {
+  workspaceAssembly: {
     home?: ObservationItem;
     projectRoot?: ObservationItem;
     managerState?: ObservationItem;

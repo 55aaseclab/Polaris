@@ -10,6 +10,7 @@ import type {
   WorkspaceSpec,
   WorkspaceStatus,
 } from "./workspace.js";
+import { WORKSPACE_STATUS_SCHEMA_VERSION } from "./workspace.js";
 import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
 import {
   readWorkspaceLiveCredentialSelections,
@@ -88,7 +89,7 @@ function buildReconnectTarget(
 
 function synthesizeWorkspacePaseoStatus(
   workspace: WorkspaceSpec,
-  runtime: WorkspaceStatus["runtime"],
+  driver: Pick<NonNullable<WorkspaceStatus["driver"]>, "selected" | "status" | "reason">,
 ): WorkspaceStatus["paseo"] {
   const liveTarget = readPersistedPaseoPairingUrl(workspace);
   const serverId = readPersistedPaseoServerId(workspace);
@@ -100,14 +101,14 @@ function synthesizeWorkspacePaseoStatus(
         ? "needs-pairing"
         : "unknown";
 
-  if (runtime.lifecycle !== "running") {
+  if (driver.status !== "running") {
     return {
       daemon: "absent",
       web: "unavailable",
       reconnectMode,
       liveTarget,
       reconnectTarget,
-      reason: runtime.reason,
+      reason: driver.reason,
     };
   }
 
@@ -127,7 +128,7 @@ function synthesizeWorkspacePaseoStatus(
     reconnectMode,
     liveTarget,
     reconnectTarget,
-    reason: runtime.reason,
+    reason: driver.reason,
   };
 }
 
@@ -145,7 +146,7 @@ function buildSshSelfCheck(
       },
     };
   }
-  const githubAuthObserved = observation.runtimeAssembly.githubAuth?.observed === true;
+  const githubAuthObserved = observation.workspaceAssembly.githubAuth?.observed === true;
   if (githubAuthObserved) {
     return {
       mode: workspace.userProfile.ssh.mode,
@@ -193,7 +194,7 @@ function attachmentCheck(observed: BackendObservation["attachments"][keyof Backe
   return observed.observed ? { state: "ok", detail: observed.detail } : { state: "missing", detail: observed.detail };
 }
 
-function runtimeCheck(observed: BackendObservation["runtimeAssembly"][keyof BackendObservation["runtimeAssembly"]]): CheckStatus {
+function runtimeCheck(observed: BackendObservation["workspaceAssembly"][keyof BackendObservation["workspaceAssembly"]]): CheckStatus {
   if (!observed) {
     return { state: "unknown" };
   }
@@ -388,7 +389,7 @@ function driverRuntimeRef(
 
 function runtimeAssemblyCheck(
   expected: boolean,
-  observed: BackendObservation["runtimeAssembly"][keyof BackendObservation["runtimeAssembly"]],
+  observed: BackendObservation["workspaceAssembly"][keyof BackendObservation["workspaceAssembly"]],
 ): CheckStatus {
   if (!expected) {
     return { state: "unknown" };
@@ -470,7 +471,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
       { key: "ssh", message: "user SSH assembly missing" },
     ] as const;
     for (const target of runtimeTargets) {
-      const observed = observation.runtimeAssembly[target.key];
+      const observed = observation.workspaceAssembly[target.key];
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -482,7 +483,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (expectsCodexAssembly) {
-      const observed = observation.runtimeAssembly.codex;
+      const observed = observation.workspaceAssembly.codex;
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -494,7 +495,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (expectsClaudeAssembly) {
-      const observed = observation.runtimeAssembly.claude;
+      const observed = observation.workspaceAssembly.claude;
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -538,12 +539,12 @@ export function synthesizeWorkspaceStatus(
     : observation.backend.running
       ? "running"
       : "stopped";
-  const runtime: WorkspaceStatus["runtime"] = {
-    selectedDriver: {
+  const driverState: Pick<NonNullable<WorkspaceStatus["driver"]>, "selected" | "status" | "reason"> = {
+    selected: {
       backend: workspace.backend.kind,
       ...(workspace.backend.profile ? { profile: workspace.backend.profile } : {}),
     },
-    lifecycle:
+    status:
       backendLiveness === "running"
         ? "running"
         : backendLiveness === "stopped" || backendLiveness === "missing"
@@ -551,13 +552,15 @@ export function synthesizeWorkspaceStatus(
           : "unknown",
     reason: drift.items[0]?.message,
   };
-  const paseo = synthesizeWorkspacePaseoStatus(workspace, runtime);
+  const paseo = synthesizeWorkspacePaseoStatus(workspace, driverState);
 
   return {
+    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
     project: workspace.identity.projectName,
     driver: {
-      backend: workspace.backend.kind,
-      ...(workspace.backend.profile ? { profile: workspace.backend.profile } : {}),
+      selected: driverState.selected,
+      status: driverState.status,
+      ...(driverState.reason ? { reason: driverState.reason } : {}),
       baseImage: workspace.runtime.baseImage,
       runtimeKind: driverRuntimeKind(workspace),
       runtimeRef: driverRuntimeRef(workspace, observation),
@@ -565,7 +568,6 @@ export function synthesizeWorkspaceStatus(
         ? { rootdiskImage: workspace.runtime.rootdiskImage }
         : {}),
     },
-    runtime,
     paseo,
     credentials: {
       ssh: buildSshSelfCheck(workspace, observation),
@@ -585,14 +587,14 @@ export function synthesizeWorkspaceStatus(
       workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),
       userIdentityState: attachmentCheck(observation.attachments.userIdentityState),
     },
-    runtimeAssembly: {
-      home: runtimeCheck(observation.runtimeAssembly.home),
-      projectRoot: runtimeCheck(observation.runtimeAssembly.projectRoot),
-      managerState: runtimeCheck(observation.runtimeAssembly.managerState),
-      evolutionState: runtimeCheck(observation.runtimeAssembly.evolutionState),
-      codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.runtimeAssembly.codex),
-      claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.runtimeAssembly.claude),
-      ssh: runtimeCheck(observation.runtimeAssembly.ssh),
+    workspaceAssembly: {
+      home: runtimeCheck(observation.workspaceAssembly.home),
+      projectRoot: runtimeCheck(observation.workspaceAssembly.projectRoot),
+      managerState: runtimeCheck(observation.workspaceAssembly.managerState),
+      evolutionState: runtimeCheck(observation.workspaceAssembly.evolutionState),
+      codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.workspaceAssembly.codex),
+      claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.workspaceAssembly.claude),
+      ssh: runtimeCheck(observation.workspaceAssembly.ssh),
     },
   };
 }

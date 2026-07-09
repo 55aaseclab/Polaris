@@ -70,24 +70,27 @@ export type ManagedHarness =
 export interface PortalWorkspaceStatus {
   schemaVersion: number;
   driver?: {
-    backend: string;
-    profile?: string;
-    baseImage: string;
-    runtimeKind: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
-    runtimeRef: string;
-    rootdiskImage?: string;
-  };
-  operation?: {
-    kind: "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
-    updatedAt: string;
-  };
-  runtime: {
-    selectedDriver: {
+    selected: {
       backend: "docker" | "pod" | "kubevirt-vm";
       profile?: string;
     } | null;
-    lifecycle: "absent" | "running" | "stopped" | "unknown";
+    status:
+      | "absent"
+      | "creating"
+      | "starting"
+      | "running"
+      | "stopping"
+      | "stopped"
+      | "rebuilding"
+      | "archiving"
+      | "deleting"
+      | "failed"
+      | "unknown";
     reason?: string;
+    baseImage?: string;
+    runtimeKind?: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
+    runtimeRef?: string;
+    rootdiskImage?: string;
   };
   paseo: {
     daemon: "absent" | "pending" | "ready" | "unknown";
@@ -648,6 +651,20 @@ export async function switchWorkspaceDriver(
 ): Promise<unknown> {
   return apiFetch(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/switch`,
+    {
+      method: "POST",
+      body: JSON.stringify({ driver }),
+    },
+  );
+}
+
+export async function updateWorkspaceSelectedDriver(
+  userId: string,
+  workspace: string,
+  driver: string,
+): Promise<{ updated: true }> {
+  return apiFetch<{ updated: true }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/driver`,
     {
       method: "POST",
       body: JSON.stringify({ driver }),

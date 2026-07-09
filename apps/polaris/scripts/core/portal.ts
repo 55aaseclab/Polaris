@@ -15,8 +15,6 @@ import {
 } from "./pairing-url.js";
 import {
   normalizeWorkspaceStatus,
-  readWorkspaceDriverSelection,
-  workspaceSelectionPath,
   workspaceStateDir,
   workspaceStatusPath,
 } from "../output/state-store.js";
@@ -502,14 +500,6 @@ export function listWorkspaceDriverTargets(userId: string, workspace: string): A
   }));
 }
 
-export function readWorkspaceSelection(userId: string, workspace: string): PortalDriverTarget | null {
-  const selection = readWorkspaceDriverSelection(workspace, userId);
-  if (!selection) {
-    return null;
-  }
-  return parseDriverTarget(selection.backend, selection.profile);
-}
-
 export function readWorkspaceStatus(userId: string, workspace: string): WorkspaceStatus | null {
   const status = readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
   return status ? normalizeWorkspaceStatus(status) : null;
@@ -681,14 +671,13 @@ export function readPortalWorkspaceAssetPreview(
 }
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
-  const selectedDriver = readWorkspaceSelection(userId, workspace);
   let status = readWorkspaceStatus(userId, workspace);
   const assets = status?.assets as
     | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
     | undefined;
   if (status && (!assets || !Array.isArray(assets.evolutionFiles) || assets.evolutionFiles.length === 0)) {
     const preferredTargets = [
-      selectedDriver,
+      status.driver?.selected ?? null,
       { backend: "docker" as const },
       { backend: "pod" as const, profile: "gvisor" },
       { backend: "kubevirt-vm" as const },
@@ -727,7 +716,7 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
   const summary = loadWorkspaceSummary(userId, workspace);
   let resolvedWorkspace: WorkspaceStatus | null = summary.status;
   let bindings: PortalWorkspaceDetail["credentialBindings"] = [];
-  const selectedDriver = summary.status?.runtime?.selectedDriver ?? null;
+  const selectedDriver = summary.status?.driver?.selected ?? null;
   const preferredTargets = [
     selectedDriver,
     { backend: "docker" as const },

@@ -229,9 +229,9 @@ export async function waitForWorkspaceReady(
     logDebug("cli", "start-probe", {
       project: workspace.identity.projectName,
       backend: workspace.backend.kind,
-      runtimeLifecycle: status.runtime.lifecycle,
+      runtimeLifecycle: status.driver?.status,
       paseoState: workspace.agent.enabled ? persistResult : "disabled",
-      reason: status.runtime.reason,
+      reason: status.driver?.reason,
     });
 
     logWorkspaceEvent("info", "readiness-probe", {
@@ -248,13 +248,13 @@ export async function waitForWorkspaceReady(
       persistResult,
       backendExists: effectiveObservation.backend.exists,
       backendRunning: effectiveObservation.backend.running,
-      runtimeLifecycle: status.runtime.lifecycle,
+      runtimeLifecycle: status.driver?.status,
       paseoState: workspace.agent.enabled ? persistResult : "disabled",
-      reason: status.runtime.reason,
+      reason: status.driver?.reason,
     });
 
     if (
-      status.runtime.lifecycle === "running"
+      status.driver?.status === "running"
       && (!workspace.agent.enabled || persistResult === "persisted")
     ) {
       logInfo("cli", "workspace-ready", {
@@ -270,13 +270,13 @@ export async function waitForWorkspaceReady(
   logWarn("cli", "workspace-not-ready-before-timeout", {
     project: workspace.identity.projectName,
     backend: workspace.backend.kind,
-    runtimeLifecycle: lastStatus?.runtime.lifecycle,
-    reason: lastStatus?.runtime.reason,
+    runtimeLifecycle: lastStatus?.driver?.status,
+    reason: lastStatus?.driver?.reason,
   });
 
   if (lastStatus) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.backend ?? "unknown"}, runtimeLifecycle=${lastStatus.runtime.lifecycle}, reason=${lastStatus.runtime.reason ?? "unknown"})`,
+      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.selected?.backend ?? "unknown"}, runtimeLifecycle=${lastStatus.driver?.status ?? "unknown"}, reason=${lastStatus.driver?.reason ?? "unknown"})`,
     );
   }
   throw new Error(`Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms`);

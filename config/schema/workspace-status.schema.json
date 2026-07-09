@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geek-env.local/schema/workspace-status.schema.json",
+  "title": "Workspace Status",
+  "description": "Schema for persisted workspace status files. Runtime data moved into driver in schema 1.1.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/workspaceStatusV1"
+    },
+    {
+      "$ref": "#/$defs/workspaceStatusV1_1"
+    }
+  ],
+  "$defs": {
+    "driverTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend"
+      ],
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "pod",
+            "kubevirt-vm"
+          ]
+        },
+        "profile": {
+          "type": "string"
+        }
+      }
+    },
+    "driverMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseImage",
+        "runtimeKind",
+        "runtimeRef"
+      ],
+      "properties": {
+        "baseImage": {
+          "type": "string"
+        },
+        "runtimeKind": {
+          "type": "string",
+          "enum": [
+            "docker-container",
+            "kubernetes-pod",
+            "kubevirt-vm"
+          ]
+        },
+        "runtimeRef": {
+          "type": "string"
+        },
+        "rootdiskImage": {
+          "type": "string"
+        }
+      }
+    },
+    "driverState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected",
+        "status"
+      ],
+      "properties": {
+        "selected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/driverTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "creating",
+            "starting",
+            "running",
+            "stopping",
+            "stopped",
+            "rebuilding",
+            "archiving",
+            "deleting",
+            "failed",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "baseImage": {
+          "type": "string"
+        },
+        "runtimeKind": {
+          "type": "string",
+          "enum": [
+            "docker-container",
+            "kubernetes-pod",
+            "kubevirt-vm"
+          ]
+        },
+        "runtimeRef": {
+          "type": "string"
+        },
+        "rootdiskImage": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimeStateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selectedDriver",
+        "lifecycle"
+      ],
+      "properties": {
+        "selectedDriver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/driverTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "running",
+            "stopped",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "paseo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "daemon",
+        "web",
+        "reconnectMode",
+        "liveTarget",
+        "reconnectTarget"
+      ],
+      "properties": {
+        "daemon": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "pending",
+            "ready",
+            "unknown"
+          ]
+        },
+        "web": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "pairing-required",
+            "connectable"
+          ]
+        },
+        "reconnectMode": {
+          "type": "string",
+          "enum": [
+            "reconnectable",
+            "needs-pairing",
+            "unknown"
+          ]
+        },
+        "liveTarget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reconnectTarget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "workspaceStatusCore": {
+      "type": "object",
+      "required": [
+        "project",
+        "paseo",
+        "details"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "paseo": {
+          "$ref": "#/$defs/paseo"
+        },
+        "details": {
+          "$ref": "#/$defs/details"
+        },
+        "credentials": {
+          "type": "object"
+        },
+        "skills": {
+          "type": "object"
+        },
+        "evolution": {
+          "type": "object"
+        },
+        "assets": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "object"
+        },
+        "workspaceAssembly": {
+          "type": "object"
+        }
+      }
+    },
+    "workspaceStatusV1": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/workspaceStatusCore"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runtime"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "driver": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/driverMaterial"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "backend": {
+                      "type": "string",
+                      "enum": [
+                        "docker",
+                        "pod",
+                        "kubevirt-vm"
+                      ]
+                    },
+                    "profile": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "runtime": {
+              "$ref": "#/$defs/runtimeStateV1"
+            }
+          }
+        }
+      ]
+    },
+    "workspaceStatusV1_1": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/workspaceStatusCore"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1.1
+            },
+            "driver": {
+              "$ref": "#/$defs/driverState"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

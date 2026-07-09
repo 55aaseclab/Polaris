@@ -75,7 +75,7 @@ export default function AdminPaseoTab(props: Props) {
                   </div>
                 </div>
                 <Badge variant="outline">
-                  {driverLabel(workspace.status?.runtime?.selectedDriver ?? null)}
+                  {driverLabel(workspace.status?.driver?.selected ?? workspace.status?.runtime?.selectedDriver ?? null)}
                 </Badge>
               </div>
               <div className="grid gap-1">
