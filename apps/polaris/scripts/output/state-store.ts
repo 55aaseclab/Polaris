@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkspaceStatus } from "../core/workspace.js";
+import {
+  WORKSPACE_STATUS_SCHEMA_VERSION,
+  type WorkspaceStatus,
+} from "../core/workspace.js";
 import { assertNoProjectNameCollision } from "../config/project-ownership.js";
 import { polarisStateRoot, polarisUsersRoot } from "../utils/paths.js";
 
@@ -109,9 +112,10 @@ function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
   }
 }
 
-function normalizeWorkspaceStatus(status: WorkspaceStatus): WorkspaceStatus {
+export function normalizeWorkspaceStatus(status: WorkspaceStatus): WorkspaceStatus {
   const next = {
     ...status,
+    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
     details: status.details ?? {},
   } as WorkspaceStatus & Record<string, unknown>;
   delete (next as Record<string, unknown>).daemon;

@@ -320,7 +320,10 @@ export interface WorkspaceSpec {
   };
 }
 
+export const WORKSPACE_STATUS_SCHEMA_VERSION = 1 as const;
+
 export interface WorkspaceStatus {
+  schemaVersion?: typeof WORKSPACE_STATUS_SCHEMA_VERSION;
   project: string;
   driver?: {
     backend: string;
