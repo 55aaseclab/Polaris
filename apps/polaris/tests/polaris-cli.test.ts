@@ -182,7 +182,8 @@ function cleanupStatusFile(project: string): void {
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.status.json`), { force: true });
 }
 
-function cleanupSelectionFile(project: string): void {
+function cleanupDriverSelectionState(project: string): void {
+  cleanupStatusFile(project);
   fs.rmSync(workspaceSelectionPath(project, DEMO_USER_PROFILE_ID), { force: true });
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`), { force: true });
 }
@@ -193,7 +194,7 @@ function cleanupLiveCredentialsFile(project: string): void {
 }
 
 function loadDefaultDemoWorkspace() {
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
   return loadWorkspaceFromRefForTest("demo");
 }
 
@@ -1793,7 +1794,7 @@ test("stored pod driver selection influences default workspace loading", () => {
     assert.equal(workspace.backend.kind, "pod");
     assert.equal(workspace.backend.profile, "kata-qemu");
   } finally {
-    cleanupSelectionFile(project);
+    cleanupDriverSelectionState(project);
   }
 });
 
@@ -1804,7 +1805,7 @@ test("stored docker driver selection influences default workspace loading", () =
     const workspace = loadWorkspaceFromRefForTest(project);
     assert.equal(workspace.backend.kind, "docker");
   } finally {
-    cleanupSelectionFile(project);
+    cleanupDriverSelectionState(project);
   }
 });
 
@@ -2653,7 +2654,7 @@ exit 0
 });
 
 test("runtime controller computes degraded status and reconcile plan from observations when daemon is missing", async () => {
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
   const workspace = {
     ...loadDefaultDemoWorkspace(),
     backend: {
@@ -2707,11 +2708,11 @@ exit 0
       assert.equal(plan.requiresRestart, true);
     },
   );
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
 });
 
 test("status includes the daemon pairing URL when the runtime exposes one", async () => {
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
 
   await withFakeCommands(
@@ -2840,7 +2841,7 @@ test("kubevirt render reuses persisted daemon pairing metadata", async () => {
 });
 
 test("CLI status defaults to the status command and persists ready pod status", async () => {
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
   const expectedStatusFile = workspaceStatusPath("demo", DEMO_USER_PROFILE_ID);
 
@@ -2917,7 +2918,7 @@ exit 0
   );
 
   cleanupStatusFile("demo");
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
 });
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
@@ -3144,7 +3145,7 @@ test("status exposes live credential selections per harness", async () => {
 });
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
   await withFakeCommands(
     {
       kubectl: `
@@ -3187,7 +3188,7 @@ exit 0
       assert.ok(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")));
     },
   );
-  cleanupSelectionFile("demo");
+  cleanupDriverSelectionState("demo");
 });
 
 test("CLI docker lifecycle commands dispatch through compose and status artifacts", async () => {
@@ -3266,7 +3267,7 @@ exit 0
 test("switch migrates only small durable attachments when workspace-data is netfs", async () => {
   const project = uniqueProjectName("switch-netfs");
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
-  cleanupSelectionFile(project);
+  cleanupDriverSelectionState(project);
 
   await withTempWorkspaceSpec(project, "docker", async () => {
     const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
@@ -3365,7 +3366,7 @@ exit 0
         },
       );
     } finally {
-      cleanupSelectionFile(project);
+      cleanupDriverSelectionState(project);
       fs.rmSync(podPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
     }
@@ -3375,7 +3376,7 @@ exit 0
 test("switch exports durable state from the actually running backend when selection is stale", async () => {
   const project = uniqueProjectName("switch-stale-selection");
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
-  cleanupSelectionFile(project);
+  cleanupDriverSelectionState(project);
 
   await withTempWorkspaceSpec(project, "docker", async () => {
     const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
@@ -3480,7 +3481,7 @@ exit 0
         },
       );
     } finally {
-      cleanupSelectionFile(project);
+      cleanupDriverSelectionState(project);
       fs.rmSync(podPath, { force: true });
       fs.rmSync(vmPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
@@ -3491,7 +3492,7 @@ exit 0
 test("switch imports runtime state into kubevirt before first boot without a restart sync-out", async () => {
   const project = uniqueProjectName("switch-vm-serverid");
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
-  cleanupSelectionFile(project);
+  cleanupDriverSelectionState(project);
 
   await withTempWorkspaceSpec(project, "docker", async () => {
     const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
@@ -3628,7 +3629,7 @@ exit 1
         },
       );
     } finally {
-      cleanupSelectionFile(project);
+      cleanupDriverSelectionState(project);
       fs.rmSync(vmPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
     }
@@ -3638,7 +3639,7 @@ exit 1
 test("switch keeps the previous selection when the target backend start fails", async () => {
   const project = uniqueProjectName("switch-selection-failure");
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
-  cleanupSelectionFile(project);
+  cleanupDriverSelectionState(project);
 
   await withTempWorkspaceSpec(project, "docker", async () => {
     const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
@@ -3710,7 +3711,7 @@ exit 0
       assert.equal(parsed.driver?.selected?.backend, "docker");
       assert.equal(parsed.driver?.selected?.profile, undefined);
     } finally {
-      cleanupSelectionFile(project);
+      cleanupDriverSelectionState(project);
       fs.rmSync(podPath, { force: true });
       fs.rmSync(dockerStateFile, { force: true });
     }
@@ -3719,7 +3720,7 @@ exit 0
 
 test("switch exports from the selected kubevirt pvc even when the vm is already stopped", async () => {
   const project = uniqueProjectName("switch-stopped-vm-source");
-  cleanupSelectionFile(project);
+  cleanupDriverSelectionState(project);
 
   await withTempWorkspaceSpec(project, "docker", async () => {
     const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
@@ -3822,7 +3823,7 @@ exit 0
         },
       );
     } finally {
-      cleanupSelectionFile(project);
+      cleanupDriverSelectionState(project);
       fs.rmSync(vmPath, { force: true });
     }
   });
