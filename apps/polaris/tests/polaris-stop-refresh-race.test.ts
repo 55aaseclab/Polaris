@@ -121,11 +121,9 @@ exit 0
     const status = JSON.parse(
       fs.readFileSync(workspaceStatusPath(workspace, userId), "utf8"),
     ) as {
-      operation?: { kind: string };
-      runtime: { lifecycle: string; reason?: string };
+      driver?: { status?: string; reason?: string };
     };
-    assert.equal(status.runtime.lifecycle, "stopped");
-    assert.equal(status.operation, undefined);
+    assert.equal(status.driver?.status, "stopped");
   } finally {
     fs.rmSync(workspaceSelectionPath(workspace, userId), { force: true });
     fs.rmSync(profilePath, { force: true });

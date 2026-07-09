@@ -1137,17 +1137,14 @@ exit 0
 test("writeWorkspaceStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
   const statusPath = writeWorkspaceStatus({
+    schemaVersion: 1.1,
     project,
     driver: {
-      backend: "pod",
-      profile: "gvisor",
+      selected: { backend: "pod", profile: "gvisor" },
+      status: "unknown",
       baseImage: "ttl.sh/example:24h",
       runtimeKind: "kubernetes-pod",
       runtimeRef: "deployment/example",
-    },
-    runtime: {
-      selectedDriver: { backend: "pod", profile: "gvisor" },
-      lifecycle: "unknown",
     },
     paseo: {
       daemon: "unknown",
@@ -1164,11 +1161,13 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   assert.ok(fs.existsSync(statusPath));
   const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
     project: string;
-    driver?: { backend?: string; profile?: string };
+    schemaVersion?: number;
+    driver?: { selected?: { backend?: string; profile?: string } };
   };
   assert.equal(parsed.project, project);
-  assert.equal(parsed.driver?.backend, "pod");
-  assert.equal(parsed.driver?.profile, "gvisor");
+  assert.equal(parsed.schemaVersion, 1.1);
+  assert.equal(parsed.driver?.selected?.backend, "pod");
+  assert.equal(parsed.driver?.selected?.profile, "gvisor");
 
   cleanupStatusFile(project);
 });
@@ -1176,14 +1175,11 @@ test("writeWorkspaceStatus persists a structured state file", () => {
 test("writeWorkspaceStatus replaces stale fields instead of merging previous status", () => {
   const project = uniqueProjectName("replace-status");
   const statusPath = writeWorkspaceStatus({
+    schemaVersion: 1.1,
     project,
-    operation: {
-      kind: "start",
-      updatedAt: "2026-07-07T00:00:00.000Z",
-    },
-    runtime: {
-      selectedDriver: null,
-      lifecycle: "stopped",
+    driver: {
+      selected: null,
+      status: "starting",
       reason: "workspace start requested",
     },
     paseo: {
@@ -1199,10 +1195,11 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
   }, DEMO_USER_PROFILE_ID);
 
   writeWorkspaceStatus({
+    schemaVersion: 1.1,
     project,
-    runtime: {
-      selectedDriver: null,
-      lifecycle: "running",
+    driver: {
+      selected: null,
+      status: "running",
     },
     paseo: {
       daemon: "ready",
@@ -1215,14 +1212,12 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
   }, DEMO_USER_PROFILE_ID);
 
   const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
-    operation?: { kind: string };
-    runtime: { lifecycle: string; reason?: string };
+    driver?: { status?: string; reason?: string };
     paseo: { daemon: string; web: string };
     details: Record<string, string>;
   };
-  assert.equal(parsed.operation, undefined);
-  assert.equal(parsed.runtime.lifecycle, "running");
-  assert.equal(parsed.runtime.reason, undefined);
+  assert.equal(parsed.driver?.status, "running");
+  assert.equal(parsed.driver?.reason, undefined);
   assert.equal(parsed.paseo.daemon, "ready");
   assert.equal(parsed.paseo.web, "connectable");
   assert.deepEqual(parsed.details, {});
@@ -1232,16 +1227,18 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
 
 test("driver selection persists a default backend control", () => {
   const project = uniqueProjectName("driver-selection");
-  const selectionPath = writeWorkspaceDriverSelection(
+  const statusPath = writeWorkspaceDriverSelection(
     project,
     { backend: "pod", profile: "gvisor" },
     DEMO_USER_PROFILE_ID,
   );
-  assert.equal(fs.existsSync(selectionPath), true);
-  const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
-  assert.equal(parsed.backend, "pod");
-  assert.equal(parsed.profile, "gvisor");
-  cleanupSelectionFile(project);
+  assert.equal(fs.existsSync(statusPath), true);
+  const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
+    driver?: { selected?: { backend?: string; profile?: string } };
+  };
+  assert.equal(parsed.driver?.selected?.backend, "pod");
+  assert.equal(parsed.driver?.selected?.profile, "gvisor");
+  cleanupStatusFile(project);
 });
 
 test("workspaceImageRef derives a neutral deterministic ttl.sh reference", () => {
@@ -2649,7 +2646,7 @@ exit 0
       const observation = await driver.inspect(workspace);
       assert.equal(observation.backend.kind, "pod");
       assert.ok("workspaceData" in observation.attachments);
-      assert.ok("projectRoot" in observation.runtimeAssembly);
+      assert.ok("projectRoot" in observation.workspaceAssembly);
       assert.ok("manager" in observation.daemon);
     },
   );
@@ -2659,6 +2656,10 @@ test("runtime controller computes degraded status and reconcile plan from observ
   cleanupSelectionFile("demo");
   const workspace = {
     ...loadDefaultDemoWorkspace(),
+    backend: {
+      kind: "pod",
+      profile: "gvisor",
+    },
     agent: {
       ...loadDefaultDemoWorkspace().agent,
       pairingFile: "/root/.paseo/pairing.json",
@@ -2696,13 +2697,14 @@ exit 0
       const status = synthesizeWorkspaceStatus(workspace, observation, drift);
       const plan = buildReconcilePlan(workspace, drift);
 
-      assert.equal(status.driver?.backend, "pod");
-      assert.equal(status.runtime.lifecycle, "running");
+      assert.equal(status.driver?.selected?.backend, "pod");
+      assert.equal(status.driver?.status, "running");
       assert.equal(status.paseo.daemon, "unknown");
       assert.equal(status.paseo.web, "unavailable");
-      assert.match(status.runtime.reason || "", /workspace manager assembly missing|missing|service/i);
+      assert.match(status.driver?.reason || "", /workspace manager assembly missing|missing|service/i);
       assert.ok(plan.actions.length >= 1);
-      assert.ok(plan.actions.every((action) => action.kind === "restart-runtime"));
+      assert.ok(plan.actions.some((action) => action.kind === "restart-runtime"));
+      assert.equal(plan.requiresRestart, true);
     },
   );
   cleanupSelectionFile("demo");
@@ -2809,14 +2811,17 @@ exit 1
         const output = await captureStdout(async () => {
           await runCli(["status", `${project}@kubevirt-vm`]);
         });
-        const parsed = parseJsonOutput<{
-          driver?: { backend?: string; runtimeRef?: string };
-          runtime?: { lifecycle?: string };
-          paseo?: { daemon?: string; web?: string };
-        }>(output);
-        assert.equal(parsed.driver?.backend, "kubevirt-vm");
-        assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-        assert.equal(parsed.runtime?.lifecycle, "running");
+      const parsed = parseJsonOutput<{
+        driver?: {
+          selected?: { backend?: string };
+          runtimeRef?: string;
+          status?: string;
+        };
+        paseo?: { daemon?: string; web?: string };
+      }>(output);
+      assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
+      assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
+      assert.equal(parsed.driver?.status, "running");
         assert.equal(parsed.paseo?.daemon, "pending");
         assert.equal(parsed.paseo?.web, "pairing-required");
       },
@@ -2885,24 +2890,26 @@ exit 0
       const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
         project: string;
         driver?: {
-          backend: string;
-          profile?: string;
+          selected?: {
+            backend: string;
+            profile?: string;
+          };
+          status?: string;
           baseImage: string;
           runtimeKind: string;
           runtimeRef: string;
         };
-        runtime: { lifecycle: string };
         paseo: { daemon: string; web: string };
         evolution?: { artifactCount: number };
       };
 
       assert.equal(parsed.project, "demo");
-      assert.equal(parsed.driver?.backend, "pod");
-      assert.equal(parsed.driver?.profile, "gvisor");
+      assert.equal(parsed.driver?.selected?.backend, "pod");
+      assert.equal(parsed.driver?.selected?.profile, "gvisor");
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
       assert.equal(parsed.driver?.baseImage, "ttl.sh/polaris-demo-debian13-1782126452:24h");
-      assert.equal(parsed.runtime.lifecycle, "running");
+      assert.equal(parsed.driver?.status, "running");
       assert.equal(parsed.paseo.daemon, "pending");
       assert.equal(parsed.paseo.web, "pairing-required");
       assert.ok(parsed.evolution);
@@ -2944,7 +2951,7 @@ test("status stays not-ready when no active codex credential is selected and per
       workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
       userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
     },
-    runtimeAssembly: {
+    workspaceAssembly: {
       home: { observed: true, detail: workspace.runtime.home },
       projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
       managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
@@ -2976,11 +2983,11 @@ test("status stays not-ready when no active codex credential is selected and per
     drift.items.map((item) => item.message).join("\n"),
     /persisted Paseo (server-id|pairing metadata) is missing/,
   );
-  assert.equal(status.runtime.lifecycle, "running");
+  assert.equal(status.driver?.status, "running");
   assert.equal(status.paseo.daemon, "unknown");
   assert.equal(status.paseo.web, "unavailable");
   assert.equal(status.credentials?.codex?.state, "not-selected");
-  assert.equal(status.runtimeAssembly?.codex?.state, "unknown");
+  assert.equal(status.workspaceAssembly?.codex?.state, "unknown");
 });
 
 test("status is not ready until persisted Paseo metadata exists on the host state root", () => {
@@ -3003,7 +3010,7 @@ test("status is not ready until persisted Paseo metadata exists on the host stat
       workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
       userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
     },
-    runtimeAssembly: {
+    workspaceAssembly: {
       home: { observed: true, detail: workspace.runtime.home },
       projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
       managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
@@ -3035,7 +3042,7 @@ test("status is not ready until persisted Paseo metadata exists on the host stat
     drift.items.map((item) => item.message).join("\n"),
     /persisted Paseo (server-id|pairing metadata) is missing/,
   );
-  assert.equal(status.runtime.lifecycle, "running");
+  assert.equal(status.driver?.status, "running");
   assert.equal(status.paseo.daemon, "unknown");
   assert.equal(status.paseo.web, "unavailable");
 });
@@ -3088,7 +3095,7 @@ test("status exposes live credential selections per harness", async () => {
           workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
           userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
         },
-        runtimeAssembly: {
+        workspaceAssembly: {
           home: { observed: true, detail: workspace.runtime.home },
           projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
           managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
@@ -3696,10 +3703,12 @@ exit 0
         },
       );
 
-      const selectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
-      const parsed = JSON.parse(fs.readFileSync(selectionPath, "utf8")) as { backend: string; profile?: string };
-      assert.equal(parsed.backend, "docker");
-      assert.equal(parsed.profile, undefined);
+      const statusPath = workspaceStatusPath(project, DEMO_USER_PROFILE_ID);
+      const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
+        driver?: { selected?: { backend?: string; profile?: string } };
+      };
+      assert.equal(parsed.driver?.selected?.backend, "docker");
+      assert.equal(parsed.driver?.selected?.profile, undefined);
     } finally {
       cleanupSelectionFile(project);
       fs.rmSync(podPath, { force: true });
@@ -3874,8 +3883,8 @@ exit 1
 
         const drift = computeWorkspaceDrift(workspace, observation);
         const status = synthesizeWorkspaceStatus(workspace, observation, drift);
-        assert.equal(status.driver?.backend, "kubevirt-vm");
-        assert.equal(status.runtime.lifecycle, "running");
+        assert.equal(status.driver?.selected?.backend, "kubevirt-vm");
+        assert.equal(status.driver?.status, "running");
 
         const plan = { project, backend: "kubevirt-vm", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
         await driver.executeReconcilePlan(workspace, plan as any);
@@ -3916,12 +3925,12 @@ exit 0
 
         const parsed = parseJsonOutput<{
           driver?: {
-            backend: string;
+            selected?: { backend: string };
+            status?: string;
             baseImage: string;
             runtimeKind: string;
             runtimeRef: string;
           };
-          runtime: { lifecycle: string };
           assets: {
             dockerfile: { file: string; path: string };
             specs: Array<{ driver: string; file: string; path: string }>;
@@ -3931,11 +3940,11 @@ exit 0
           };
         }>(stdout);
 
-        assert.equal(parsed.driver?.backend, "docker");
+        assert.equal(parsed.driver?.selected?.backend, "docker");
         assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
         assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
-        assert.equal(parsed.runtime.lifecycle, "running");
+        assert.equal(parsed.driver?.status, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
         assert.equal(parsed.assets.dockerfile.path, "config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile");
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
@@ -4012,20 +4021,20 @@ exit 1
         });
         const parsed = parseJsonOutput<{
           driver?: {
-            backend: string;
+            selected?: { backend: string };
+            status?: string;
             baseImage: string;
             runtimeKind: string;
             runtimeRef: string;
             rootdiskImage?: string;
           };
-          runtime: { lifecycle: string };
           paseo: { daemon: string; web: string };
         }>(stdout);
 
-        assert.equal(parsed.driver?.backend, "kubevirt-vm");
+        assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-        assert.equal(parsed.runtime.lifecycle, "running");
+        assert.equal(parsed.driver?.status, "running");
         assert.ok(["pending", "ready"].includes(parsed.paseo.daemon));
 
         await runCli(["logs", project]);
@@ -4103,7 +4112,7 @@ exit 0
       assert.equal(observation.backend.running, true);
       const drift = computeWorkspaceDrift(workspace, observation);
       const status = synthesizeWorkspaceStatus(workspace, observation, drift);
-      assert.equal(status.driver?.backend, "docker");
+      assert.equal(status.driver?.selected?.backend, "docker");
 
       const plan = { project: "demo", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
       await driver.executeReconcilePlan(workspace, plan as any);

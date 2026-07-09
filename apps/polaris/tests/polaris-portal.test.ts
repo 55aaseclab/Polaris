@@ -550,16 +550,66 @@ test("portal workspace stop writes cached status before the async refresh comple
         try {
           await stopPortalWorkspace(userId, workspace);
           const cachedStatus = readWorkspaceStatus(userId, workspace);
-          assert.equal(cachedStatus?.operation?.kind, "stop");
-          await waitFor(() => {
-            const status = readWorkspaceStatus(userId, workspace);
-            return status && !status.operation && status.runtime.lifecycle !== "running"
-              ? status
-              : null;
-          }, 2000, 50);
+          assert.equal(cachedStatus?.driver?.status, "stopped");
         } finally {
           process.stderr.write = originalWrite;
         }
+      },
+    );
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test("portal workspace stop surfaces backend stop failures instead of reporting success", async () => {
+  const userId = uniqueName("portal-stop-failure-user");
+  const workspace = uniqueName("portal-stop-failure");
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+
+  try {
+    await createUserCommand([userId, "--name", "Portal Stop Failure User", "--email", `${userId}@polaris.local`]);
+    await createCommand([workspace, "--user", userId]);
+    writeWorkspaceStatus({
+      project: workspace,
+      schemaVersion: 1.1,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+        reason: "test setup",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "https://app.paseo.test/#offer=ready",
+        reconnectTarget: "https://app.paseo.test/h/srv_ready?scope=test",
+      },
+      details: {},
+    }, userId);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "compose" && "$4" == "stop" ]]; then
+  echo "stop failed" >&2
+  exit 1
+fi
+exit 0
+`,
+        kubectl: "#!/bin/sh\nexit 0\n",
+      },
+      async () => {
+        await assert.rejects(
+          stopPortalWorkspace(userId, workspace),
+          /stop failed|docker compose/i,
+        );
       },
     );
   } finally {
@@ -1177,7 +1227,7 @@ test("portal service can provision the same workspace name for a different user"
           startAfterCreate: false,
         });
         const finalStatus = await waitForWorkspaceStatusFile(secondUserId, workspace);
-        assert.notEqual(finalStatus.runtime.lifecycle, "running");
+        assert.notEqual(finalStatus.driver?.status, "running");
         assert.equal(
           fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
           true,
@@ -1258,7 +1308,7 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
         assert.equal(payload.workspace, workspace);
         assert.equal(payload.queued, true);
         const finalStatus = await waitForWorkspaceStatusFile(userId, workspace);
-        assert.notEqual(finalStatus.runtime.lifecycle, "running");
+        assert.notEqual(finalStatus.driver?.status, "running");
       },
     );
 
@@ -1479,7 +1529,7 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.runtime.lifecycle === "running" ? status : null;
+          return status?.driver?.status === "running" ? status : null;
         });
         assert.ok(["pending", "ready"].includes(finalStatus.paseo.daemon));
         assert.ok(
@@ -1641,9 +1691,9 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.runtime.lifecycle === "running" ? status : null;
+          return status?.driver?.status === "running" ? status : null;
         });
-        assert.equal(finalStatus.runtime.lifecycle, "running");
+        assert.equal(finalStatus.driver?.status, "running");
 
         await createPortalCredential({
           userId,
@@ -1771,9 +1821,9 @@ exit 0
         });
         const finalStatus = await waitFor(() => {
           const status = readWorkspaceStatus(userId, workspace);
-          return status?.runtime.lifecycle === "running" ? status : null;
+          return status?.driver?.status === "running" ? status : null;
         });
-        assert.equal(finalStatus.runtime.lifecycle, "running");
+        assert.equal(finalStatus.driver?.status, "running");
 
         await createPortalCredential({
           userId,
@@ -1922,11 +1972,11 @@ exit 0
         assert.equal(result.selectedBackend, "pod");
         assert.equal(result.selectedProfile, "gvisor");
         assert.deepEqual(
-          readWorkspaceDriverSelection(workspace, secondUserId),
+          readWorkspaceStatus(secondUserId, workspace)?.driver?.selected,
           { backend: "pod", profile: "gvisor" },
         );
         assert.deepEqual(
-          readWorkspaceDriverSelection(workspace, firstUserId),
+          readWorkspaceStatus(firstUserId, workspace)?.driver?.selected,
           { backend: "docker" },
         );
       },
@@ -2058,9 +2108,8 @@ exit 0
     );
 
     const nextStatus = readWorkspaceStatus(userId, workspace);
-    assert.equal(nextStatus?.runtime?.lifecycle, "running");
-    assert.notEqual(nextStatus?.runtime?.reason, "stale archive status");
-    assert.equal(nextStatus?.operation, undefined);
+    assert.equal(nextStatus?.driver?.status, "running");
+    assert.notEqual(nextStatus?.driver?.reason, "stale archive status");
   } finally {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
       recursive: true,
@@ -2126,12 +2175,10 @@ test("portal workspace summaries stay isolated for same workspace name under dif
     const userASummary = (await listPortalWorkspaces(userA)).find((entry) => entry.name === workspace);
     const userBSummary = (await listPortalWorkspaces(userB)).find((entry) => entry.name === workspace);
 
-    assert.equal(userASummary?.status?.runtime?.lifecycle, "running");
+    assert.equal(userASummary?.status?.driver?.status, "running");
     assert.equal(userASummary?.status?.details?.owner, userA);
-    assert.equal(userASummary?.status?.operation, undefined);
-    assert.equal(userBSummary?.status?.runtime?.lifecycle, "stopped");
+    assert.equal(userBSummary?.status?.driver?.status, "stopping");
     assert.equal(userBSummary?.status?.details?.owner, userB);
-    assert.equal(userBSummary?.status?.operation?.kind, "stop");
   } finally {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userA), {
       recursive: true,

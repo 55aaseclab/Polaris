@@ -10,6 +10,7 @@ import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
   workspaceSelectionPath,
+  workspaceStatusPath,
   writeWorkspaceDriverSelection,
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
@@ -81,7 +82,7 @@ test.after(async () => {
   }
 });
 
-test("portal workspace stop returns quickly for nearby requests on different workspaces", async () => {
+test("portal workspace stop waits for backend completion and converges both workspaces", async () => {
   const userId = uniqueName("portal-stop-concurrent-user");
   const firstWorkspace = uniqueName("portal-stop-concurrent-a");
   const secondWorkspace = uniqueName("portal-stop-concurrent-b");
@@ -153,10 +154,17 @@ test("portal workspace stop returns quickly for nearby requests on different wor
         ]);
         const elapsedMs = Date.now() - startedAt;
         assert.ok(
-          elapsedMs < 450,
-          `expected both stop requests to return before docker stop finished, received ${elapsedMs}ms`,
+          elapsedMs >= 550,
+          `expected stop requests to wait for backend stop completion, received ${elapsedMs}ms`,
         );
-        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        const firstStatus = JSON.parse(
+          fs.readFileSync(workspaceStatusPath(firstWorkspace, userId), "utf8"),
+        ) as { driver?: { status?: string } };
+        const secondStatus = JSON.parse(
+          fs.readFileSync(workspaceStatusPath(secondWorkspace, userId), "utf8"),
+        ) as { driver?: { status?: string } };
+        assert.equal(firstStatus.driver?.status, "stopped");
+        assert.equal(secondStatus.driver?.status, "stopped");
       },
     );
   } finally {

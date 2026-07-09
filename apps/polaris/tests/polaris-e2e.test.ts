@@ -893,10 +893,10 @@ exit 0
         const dockerToGvisor = await captureOutput(async () => {
           await runCli(["switch", "demo@pod"]);
         });
-        const gvisorStatus = parseJsonOutput<{ runtime: { lifecycle: string } }>(
+        const gvisorStatus = parseJsonOutput<{ driver: { status: string } }>(
           (await captureOutput(async () => runCli(["status", "demo@pod"]))).stdout,
         );
-        assert.equal(gvisorStatus.runtime.lifecycle, "running");
+        assert.equal(gvisorStatus.driver.status, "running");
         const gvisorDurations = parseSwitchDurations(dockerToGvisor.stderr);
         assert.ok(gvisorDurations.stopToStartMs >= 0);
         assert.ok(gvisorDurations.startToReadyMs >= 0);
@@ -909,10 +909,10 @@ exit 0
         const gvisorToKata = await captureOutput(async () => {
           await runCli(["switch", "demo@pod:kata-container"]);
         });
-        const kataStatus = parseJsonOutput<{ runtime: { lifecycle: string } }>(
+        const kataStatus = parseJsonOutput<{ driver: { status: string } }>(
           (await captureOutput(async () => runCli(["status", "demo@pod:kata-container"]))).stdout,
         );
-        assert.equal(kataStatus.runtime.lifecycle, "running");
+        assert.equal(kataStatus.driver.status, "running");
         const kataDurations = parseSwitchDurations(gvisorToKata.stderr);
         assert.ok(kataDurations.stopToStartMs >= 0);
         assert.ok(kataDurations.startToReadyMs >= 0);
@@ -925,10 +925,10 @@ exit 0
         const kataToVm = await captureOutput(async () => {
           await runCli(["switch", "demo@kubevirt-vm"]);
         });
-        const vmStatus = parseJsonOutput<{ runtime: { lifecycle: string } }>(
+        const vmStatus = parseJsonOutput<{ driver: { status: string } }>(
           (await captureOutput(async () => runCli(["status", "demo@kubevirt-vm"]))).stdout,
         );
-        assert.equal(vmStatus.runtime.lifecycle, "running");
+        assert.equal(vmStatus.driver.status, "running");
         const vmDurations = parseSwitchDurations(kataToVm.stderr);
         assert.ok(vmDurations.stopToStartMs >= 0);
         assert.ok(vmDurations.startToReadyMs >= 0);
@@ -941,10 +941,10 @@ exit 0
         const vmToDocker = await captureOutput(async () => {
           await runCli(["switch", "demo@docker"]);
         });
-        const dockerStatus = parseJsonOutput<{ runtime: { lifecycle: string } }>(
+        const dockerStatus = parseJsonOutput<{ driver: { status: string } }>(
           (await captureOutput(async () => runCli(["status", "demo@docker"]))).stdout,
         );
-        assert.equal(dockerStatus.runtime.lifecycle, "running");
+        assert.equal(dockerStatus.driver.status, "running");
         const dockerDurations = parseSwitchDurations(vmToDocker.stderr);
         assert.ok(dockerDurations.stopToStartMs >= 0);
         assert.ok(dockerDurations.startToReadyMs >= 0);

@@ -61,6 +61,7 @@ import {
   syncWorkspaceSkills,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
+  updateWorkspaceSelectedDriver,
   uninstallWorkspaceSkill,
   updateCredentialFile,
   type PortalAdminUserSummary,
@@ -199,7 +200,22 @@ function resolveWorkspaceRuntimeLifecycle(
   if (!workspace) {
     return null;
   }
-  return workspace.status?.runtime?.lifecycle ?? null;
+  return workspace.status?.driver?.status ?? null;
+}
+
+function resolveWorkspaceSelectedDriver(
+  workspace:
+    | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceDetail, "status">
+    | null
+    | undefined,
+): { backend: string; profile?: string } | null {
+  if (!workspace) {
+    return null;
+  }
+  return workspace.status?.driver?.selected
+    ?? workspace.status?.runtime?.selectedDriver
+    ?? null;
 }
 
 function resolveWorkspacePaseoTargets(
@@ -286,6 +302,8 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver_desc: "Reuse the existing Polaris switch workflow.",
     switching: "Switching...",
     switch_workspace_action: "Switch driver",
+    update_driver_selected: "Update driver",
+    updating_driver_selected: "Updating driver",
     start_workspace: "Start workspace",
     stop_workspace: "Stop workspace",
     remove_workspace: "Archive workspace",
@@ -639,6 +657,8 @@ const COPY: Record<Language, Record<string, string>> = {
     switch_driver_desc: "复用现有的 Polaris 切换流程。",
     switching: "切换中…",
     switch_workspace_action: "切换驱动",
+    update_driver_selected: "更新驱动",
+    updating_driver_selected: "正在更新驱动",
     start_workspace: "启动工作空间",
     stop_workspace: "停止工作空间",
     remove_workspace: "归档工作空间",
@@ -1392,17 +1412,17 @@ function translateWorkspaceLiveness(
 type WorkspaceUiAction = "starting" | "stopping" | "deleting" | null;
 
 function workspaceStatusOperationToUiAction(
-  operation: PortalWorkspaceStatus["operation"] | null | undefined,
+  driverStatus: PortalWorkspaceStatus["driver"]["status"] | null | undefined,
 ): WorkspaceUiAction {
-  switch (operation?.kind) {
-    case "create":
-    case "start":
-    case "rebuild":
+  switch (driverStatus) {
+    case "creating":
+    case "starting":
+    case "rebuilding":
       return "starting";
-    case "stop":
+    case "stopping":
       return "stopping";
-    case "archive":
-    case "delete":
+    case "archiving":
+    case "deleting":
       return "deleting";
     default:
       return null;
@@ -1609,8 +1629,9 @@ function formatBackendValue(
   data: PortalWorkspaceDetail,
   t: (key: string) => string,
 ): string {
-  const kind = data.status?.driver?.backend ?? t("status_unknown");
-  const profile = data.status?.driver?.profile ?? t("status_unknown");
+  const selectedDriver = resolveWorkspaceSelectedDriver(data);
+  const kind = selectedDriver?.backend ?? t("status_unknown");
+  const profile = selectedDriver?.profile ?? t("status_unknown");
   return `${kind} / ${profile}`;
 }
 
@@ -1892,14 +1913,13 @@ function PortalShellLayout(props: {
     ? visibleSidebarWorkspaces.find((workspace) => workspace.name === currentWorkspaceName) ?? null
     : null;
   const activeSidebarWorkspaceLiveness = resolveWorkspaceRuntimeLifecycle(activeSidebarWorkspace);
-  const activeSidebarWorkspaceOperation = activeSidebarWorkspace?.status?.operation ?? null;
   const activeSidebarWorkspacePaseoWebState = resolveWorkspacePaseoWebState(activeSidebarWorkspace);
   const activeSidebarWorkspacePaseoTargets = resolveWorkspacePaseoTargets(activeSidebarWorkspace);
   const activeSidebarWorkspaceAllowsEmbeddedPaseo =
     activeSidebarWorkspaceLiveness === "running"
-    || activeSidebarWorkspaceOperation?.kind === "create"
-    || activeSidebarWorkspaceOperation?.kind === "start"
-    || activeSidebarWorkspaceOperation?.kind === "rebuild"
+    || activeSidebarWorkspaceLiveness === "creating"
+    || activeSidebarWorkspaceLiveness === "starting"
+    || activeSidebarWorkspaceLiveness === "rebuilding"
     || hasActiveEmbeddedPaseoFrame;
   const shouldShowEmbeddedPaseoLoading = Boolean(
     currentWorkspaceName
@@ -2873,6 +2893,8 @@ function AdminPage() {
   const [adminRuntimeSkillHarness, setAdminRuntimeSkillHarness] = useState<"codex" | "claude">("codex");
   const [adminRuntimeSkillAction, setAdminRuntimeSkillAction] = useState<"install" | "sync" | `uninstall:${string}` | null>(null);
   const [adminRuntimeSkillRefreshTick, setAdminRuntimeSkillRefreshTick] = useState(0);
+  const [adminWorkspaceDriverSelections, setAdminWorkspaceDriverSelections] = useState<Record<string, string>>({});
+  const [adminUpdatingWorkspaceDriverKey, setAdminUpdatingWorkspaceDriverKey] = useState<string | null>(null);
   const [paseoDiagnostics, setPaseoDiagnostics] = useState<Record<string, PortalWorkspacePaseoDiagnostic | undefined>>({});
   const [paseoActionState, setPaseoActionState] = useState<Record<string, "loading" | "restarting">>({});
   const [workspaceActionState, setWorkspaceActionState] = useState<
@@ -3046,7 +3068,7 @@ function AdminPage() {
       const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
         return resolveAdminWorkspaceDisplayState({
-          operation: workspace.status?.operation?.kind ?? null,
+          driverStatus: workspace.status?.driver?.status ?? null,
           localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
         }).shouldPoll;
     }) || Object.values(workspaceActionState).some((entry) =>
@@ -3102,7 +3124,7 @@ function AdminPage() {
             localAction: entry.kind,
             baselineRuntimeLifecycle: entry.baselineRuntimeLifecycle,
             runtimeLifecycle: resolveWorkspaceRuntimeLifecycle(workspace),
-            operation: workspace?.status?.operation?.kind ?? null,
+            driverStatus: workspace?.status?.driver?.status ?? null,
             workspaceExists: Boolean(workspace),
           })
         ) {
@@ -3208,6 +3230,27 @@ function AdminPage() {
       return changed ? next : current;
     });
   }, [selectedAdminUser, selectedCredentials, selectedWorkspaces]);
+
+  useEffect(() => {
+    if (!selectedAdminUserId || !selectedWorkspaces) {
+      return;
+    }
+    setAdminWorkspaceDriverSelections((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const workspace of selectedWorkspaces) {
+        const key = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
+        const currentDriverLabel = driverLabel(resolveWorkspaceSelectedDriver(workspace));
+        if (!next[key] || !workspaceActionState[key]) {
+          if (next[key] !== currentDriverLabel) {
+            next[key] = currentDriverLabel;
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [selectedAdminUserId, selectedWorkspaces, workspaceActionState]);
 
   useEffect(() => {
     if (adminRuntimeSkillSelection || selectedSkills === null) {
@@ -3402,6 +3445,30 @@ function AdminPage() {
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
       clearWorkspaceAction(actionKey);
+    }
+  }
+
+  async function handleUpdateAdminWorkspaceDriver(workspace: PortalWorkspaceSummary): Promise<void> {
+    if (!selectedAdminUser) {
+      return;
+    }
+    const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
+    const nextDriver = adminWorkspaceDriverSelections[workspaceStateKey]?.trim();
+    if (!nextDriver) {
+      return;
+    }
+    if (nextDriver === driverLabel(resolveWorkspaceSelectedDriver(workspace))) {
+      return;
+    }
+    setAdminUpdatingWorkspaceDriverKey(workspaceStateKey);
+    setWorkspaceAdminActionError(null);
+    try {
+      await updateWorkspaceSelectedDriver(selectedAdminUser.id, workspace.name, nextDriver);
+      setReloadKey((current) => current + 1);
+    } catch (error) {
+      setWorkspaceAdminActionError(formatActionError(error, t));
+    } finally {
+      setAdminUpdatingWorkspaceDriverKey(null);
     }
   }
 
@@ -4451,16 +4518,19 @@ function AdminPage() {
                       ) : null}
                       {visibleSelectedWorkspaces.map((workspace) => {
                         const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
-                        const operation = workspace.status?.operation?.kind ?? null;
+                        const driverStatus = workspace.status?.driver?.status ?? null;
                         const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUser.id, workspace.name);
+                        const selectedDriverValue = adminWorkspaceDriverSelections[workspaceStateKey]
+                          ?? driverLabel(resolveWorkspaceSelectedDriver(workspace));
+                        const updatingDriver = adminUpdatingWorkspaceDriverKey === workspaceStateKey;
                         const localAction = workspaceActionState[workspaceStateKey]?.kind ?? null;
                         const buttonState = resolveAdminWorkspaceButtonState({
                           runtimeLifecycle,
-                          operation,
+                          driverStatus,
                           localAction,
                         });
                         const displayState = resolveAdminWorkspaceDisplayState({
-                          operation,
+                          driverStatus,
                           localAction,
                         });
                         const hasLiveCredentialControls = MANAGED_HARNESS_ORDER.some((harness) =>
@@ -4484,9 +4554,44 @@ function AdminPage() {
                                     : translateWorkspaceLiveness(runtimeLifecycle, t)}
                                 </div>
                               </div>
-                              <Badge variant="outline">
-                                {driverLabel(workspace.status?.runtime?.selectedDriver ?? null)}
-                              </Badge>
+                              <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                                <Badge variant="outline">
+                                  {driverLabel(resolveWorkspaceSelectedDriver(workspace))}
+                                </Badge>
+                                <div className="w-[12rem]">
+                                  <Select
+                                    value={selectedDriverValue}
+                                    onValueChange={(value) => {
+                                      setAdminWorkspaceDriverSelections((current) => ({
+                                        ...current,
+                                        [workspaceStateKey]: value,
+                                      }));
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder={t("select_driver")} />
+                                    </SelectTrigger>
+                                    <SelectContent className="bg-white">
+                                      {workspace.drivers.map((item) => {
+                                        const label = driverLabel(item);
+                                        return (
+                                          <SelectItem key={label} value={label}>
+                                            {label}
+                                          </SelectItem>
+                                        );
+                                      })}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={updatingDriver || selectedDriverValue === driverLabel(resolveWorkspaceSelectedDriver(workspace))}
+                                  onClick={() => void handleUpdateAdminWorkspaceDriver(workspace)}
+                                >
+                                  {updatingDriver ? t("updating_driver_selected") : t("update_driver_selected")}
+                                </Button>
+                              </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               <Button
@@ -5007,10 +5112,9 @@ function WorkspaceDetailContent() {
     (workspace) => workspace.name === workspaceName,
   ) ?? null;
   const summaryBackendLiveness = resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary);
-  const summaryOperationKind = selectedWorkspaceSummary?.status?.operation?.kind ?? null;
   const keepEmbeddedPaseoPollingUntilRef = useRef<number>(0);
   const persistedWorkspaceAction = workspaceStatusOperationToUiAction(
-    workspaceData?.status?.operation,
+    workspaceData?.status?.driver?.status,
   );
   const effectiveRuntimeRunning =
     (workspaceAction ?? persistedWorkspaceAction) === "starting"
@@ -5026,12 +5130,9 @@ function WorkspaceDetailContent() {
   const workspaceActionInFlight = effectiveWorkspaceAction !== null;
   const backendState = resolveWorkspaceRuntimeLifecycle(workspaceData);
   const runtimeOperationPending =
-    summaryOperationKind === "create"
-    || summaryOperationKind === "start"
-    || summaryOperationKind === "rebuild"
-    || workspaceData?.status?.operation?.kind === "create"
-    || workspaceData?.status?.operation?.kind === "start"
-    || workspaceData?.status?.operation?.kind === "rebuild"
+    backendState === "creating"
+    || backendState === "starting"
+    || backendState === "rebuilding"
     || workspaceAction === "starting";
   const waitingForEmbeddedPaseo =
     !deleting
@@ -5040,9 +5141,9 @@ function WorkspaceDetailContent() {
     && Boolean(workspaceData)
     && (
       Date.now() < keepEmbeddedPaseoPollingUntilRef.current
-      || workspaceData?.status?.operation?.kind === "create"
-      || workspaceData?.status?.operation?.kind === "start"
-      || workspaceData?.status?.operation?.kind === "rebuild"
+      || backendState === "creating"
+      || backendState === "starting"
+      || backendState === "rebuilding"
       || backendState === "running"
       || resolveWorkspacePaseoWebState(workspaceData) !== "connectable"
     );
@@ -5079,8 +5180,7 @@ function WorkspaceDetailContent() {
         name: selectedWorkspaceSummary.name,
         liveTarget: selectedWorkspaceSummary.status?.paseo?.liveTarget ?? null,
         reconnectTarget: selectedWorkspaceSummary.status?.paseo?.reconnectTarget ?? null,
-        operation: selectedWorkspaceSummary.status?.operation?.kind ?? null,
-        runtimeLifecycle: selectedWorkspaceSummary.status?.runtime?.lifecycle ?? null,
+        driverStatus: selectedWorkspaceSummary.status?.driver?.status ?? null,
         paseoWeb: selectedWorkspaceSummary.status?.paseo?.web ?? "unknown",
       })
     : null;
@@ -5096,8 +5196,11 @@ function WorkspaceDetailContent() {
   }, [activeEmbeddedPaseoFrameLoaded, embeddedPortalUrl]);
 
   useEffect(() => {
-    if (workspaceData?.status?.runtime?.selectedDriver) {
-      setDriver(driverLabel(workspaceData.status.runtime.selectedDriver));
+    const selectedDriver =
+      workspaceData?.status?.driver?.selected
+      ?? workspaceData?.status?.runtime?.selectedDriver;
+    if (selectedDriver) {
+      setDriver(driverLabel(selectedDriver));
     }
   }, [workspaceData]);
 
@@ -5301,12 +5404,11 @@ function WorkspaceDetailContent() {
             <div className="min-w-0">
               <div className="text-sm font-medium">{t("switch_driver")}</div>
               <div className="text-sm text-muted-foreground">
-                {workspaceData?.status?.driver
-                  ? driverLabel({
-                    backend: workspaceData.status.driver.backend,
-                    profile: workspaceData.status.driver.profile,
-                  })
-                  : driverLabel(workspaceData?.status?.runtime?.selectedDriver ?? null)}
+                {driverLabel(
+                  workspaceData?.status?.driver?.selected
+                  ?? workspaceData?.status?.runtime?.selectedDriver
+                  ?? null,
+                )}
               </div>
             </div>
             {renderDriverSwitchControls()}
@@ -5408,10 +5510,7 @@ function WorkspaceDetailContent() {
             liveCredentialControls={null}
             workspaceControlsCard={renderWorkspaceControlsCard()}
             driverLabel={driverStatus
-              ? driverLabel({
-                  backend: driverStatus.backend,
-                  profile: driverStatus.profile,
-                })
+              ? driverLabel(driverStatus.selected)
               : driverLabel(workspaceData.status?.runtime?.selectedDriver ?? null)}
             baseImage={driverStatus?.baseImage ?? null}
             rootdiskImage={driverStatus?.rootdiskImage ?? null}

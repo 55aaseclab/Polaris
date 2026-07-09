@@ -38,8 +38,8 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   if (evolutionSessionId) {
     await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
       command: "status",
-      runtimeLifecycle: status.runtime.lifecycle,
-      reason: status.runtime.reason,
+      runtimeLifecycle: status.driver?.status,
+      reason: status.driver?.reason,
     });
     await finalizeEvolutionSession(workspace, evolutionSessionId);
     status.evolution = {
@@ -50,8 +50,8 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
   const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
   logInfo("cli", "status-synthesized", {
     project: status.project,
-    backend: status.driver?.backend,
-    runtimeLifecycle: status.runtime.lifecycle,
+    backend: status.driver?.selected?.backend,
+    runtimeLifecycle: status.driver?.status,
     statusFile: outputPath,
   });
   process.stdout.write(`${JSON.stringify({ ...status, statusFile: outputPath }, null, 2)}\n`);

@@ -301,9 +301,9 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       );
       assert.equal(detailBefore.status, 200);
       const parsedBefore = await detailBefore.json() as {
-        status?: { runtime?: { lifecycle?: string } };
+        status?: { driver?: { status?: string } };
       };
-      assert.equal(parsedBefore.status?.runtime?.lifecycle, "stopped");
+      assert.equal(parsedBefore.status?.driver?.status, "stopped");
 
       await reportPortalWorkspaceStatus({
         userId,
@@ -332,12 +332,12 @@ test("live auth portal API accepts runtime status reports and persists cached wo
       assert.equal(detailAfter.status, 200);
       const parsedAfter = await detailAfter.json() as {
         status?: {
-          runtime?: { lifecycle?: string };
+          driver?: { status?: string };
           paseo?: { daemon?: string; web?: string };
           details?: { backendDetail?: string };
         };
       };
-      assert.equal(parsedAfter.status?.runtime?.lifecycle, "running");
+      assert.equal(parsedAfter.status?.driver?.status, "running");
       assert.equal(parsedAfter.status?.paseo?.daemon, "ready");
       assert.equal(parsedAfter.status?.paseo?.web, "connectable");
       assert.equal(parsedAfter.status?.details?.backendDetail, "reported by test");

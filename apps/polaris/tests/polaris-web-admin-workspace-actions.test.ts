@@ -9,7 +9,7 @@ import {
 test("admin workspace buttons disable while creating", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "stopped",
-    operation: "create",
+    driverStatus: "creating",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "starting");
@@ -20,7 +20,7 @@ test("admin workspace buttons disable while creating", () => {
 test("admin workspace buttons disable while starting", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "stopped",
-    operation: "start",
+    driverStatus: "starting",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "starting");
@@ -31,7 +31,7 @@ test("admin workspace buttons disable while starting", () => {
 test("admin workspace buttons disable while stopping", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "running",
-    operation: "stop",
+    driverStatus: "stopping",
     localAction: null,
   });
   assert.equal(state.primaryLabel, "stopping");
@@ -42,7 +42,7 @@ test("admin workspace buttons disable while stopping", () => {
 test("admin workspace buttons disable while archiving", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "stopped",
-    operation: "archive",
+    driverStatus: "archiving",
     localAction: null,
   });
   assert.equal(state.archiveLabel, "deleting");
@@ -53,7 +53,7 @@ test("admin workspace buttons disable while archiving", () => {
 test("admin workspace buttons stay enabled for stable running state", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "running",
-    operation: null,
+    driverStatus: null,
     localAction: null,
   });
   assert.equal(state.primaryLabel, "stop_workspace");
@@ -64,7 +64,7 @@ test("admin workspace buttons stay enabled for stable running state", () => {
 test("admin workspace buttons stay enabled for stable stopped state", () => {
   const state = resolveAdminWorkspaceButtonState({
     runtimeLifecycle: "stopped",
-    operation: null,
+    driverStatus: null,
     localAction: null,
   });
   assert.equal(state.primaryLabel, "start_workspace");
@@ -78,7 +78,7 @@ test("admin workspace stop action stays latched until queried state enters stopp
       localAction: "stop",
       baselineRuntimeLifecycle: "running",
       runtimeLifecycle: "running",
-      operation: null,
+      driverStatus: null,
       workspaceExists: true,
     }),
     false,
@@ -88,7 +88,7 @@ test("admin workspace stop action stays latched until queried state enters stopp
       localAction: "stop",
       baselineRuntimeLifecycle: "running",
       runtimeLifecycle: "running",
-      operation: "stop",
+      driverStatus: "stopping",
       workspaceExists: true,
     }),
     true,
@@ -101,7 +101,7 @@ test("admin workspace start action stays latched until queried state enters star
       localAction: "start",
       baselineRuntimeLifecycle: "stopped",
       runtimeLifecycle: "stopped",
-      operation: null,
+      driverStatus: null,
       workspaceExists: true,
     }),
     false,
@@ -111,7 +111,7 @@ test("admin workspace start action stays latched until queried state enters star
       localAction: "start",
       baselineRuntimeLifecycle: "stopped",
       runtimeLifecycle: "stopped",
-      operation: "start",
+      driverStatus: "starting",
       workspaceExists: true,
     }),
     true,
@@ -124,7 +124,7 @@ test("admin workspace rebuild action stays latched until queried state enters st
       localAction: "rebuild",
       baselineRuntimeLifecycle: "running",
       runtimeLifecycle: "running",
-      operation: null,
+      driverStatus: null,
       workspaceExists: true,
     }),
     false,
@@ -134,7 +134,7 @@ test("admin workspace rebuild action stays latched until queried state enters st
       localAction: "rebuild",
       baselineRuntimeLifecycle: "running",
       runtimeLifecycle: "running",
-      operation: "rebuild",
+      driverStatus: "rebuilding",
       workspaceExists: true,
     }),
     true,
@@ -147,7 +147,7 @@ test("admin workspace archive action stays latched until workspace disappears", 
       localAction: "archive",
       baselineRuntimeLifecycle: "stopped",
       runtimeLifecycle: "stopped",
-      operation: null,
+      driverStatus: null,
       workspaceExists: true,
     }),
     false,
@@ -157,7 +157,7 @@ test("admin workspace archive action stays latched until workspace disappears", 
       localAction: "archive",
       baselineRuntimeLifecycle: "stopped",
       runtimeLifecycle: null,
-      operation: null,
+      driverStatus: null,
       workspaceExists: false,
     }),
     true,
@@ -170,7 +170,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
       localAction: "delete-archive",
       baselineRuntimeLifecycle: null,
       runtimeLifecycle: null,
-      operation: null,
+      driverStatus: null,
       workspaceExists: true,
     }),
     false,
@@ -180,7 +180,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
       localAction: "delete-archive",
       baselineRuntimeLifecycle: null,
       runtimeLifecycle: null,
-      operation: null,
+      driverStatus: null,
       workspaceExists: false,
     }),
     true,
@@ -189,7 +189,7 @@ test("admin archived workspace delete action clears when archive disappears", ()
 
 test("admin display state shows starting and polls for local start action", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: null,
+    driverStatus: null,
     localAction: "start",
   });
   assert.equal(state.statusLabel, "workspace_starting");
@@ -198,7 +198,7 @@ test("admin display state shows starting and polls for local start action", () =
 
 test("admin display state shows stopping and polls for local stop action", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: null,
+    driverStatus: null,
     localAction: "stop",
   });
   assert.equal(state.statusLabel, "stopping");
@@ -207,7 +207,7 @@ test("admin display state shows stopping and polls for local stop action", () =>
 
 test("admin display state shows starting and polls for rebuild action", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: null,
+    driverStatus: null,
     localAction: "rebuild",
   });
   assert.equal(state.statusLabel, "workspace_starting");
@@ -217,7 +217,7 @@ test("admin display state shows starting and polls for rebuild action", () => {
 
 test("admin display state shows deleting and polls for archive action", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: null,
+    driverStatus: null,
     localAction: "archive",
   });
   assert.equal(state.statusLabel, "deleting");
@@ -226,7 +226,7 @@ test("admin display state shows deleting and polls for archive action", () => {
 
 test("admin display state keeps rebuild label while status operation shows rebuild", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: "rebuild",
+    driverStatus: "rebuilding",
     localAction: null,
   });
   assert.equal(state.statusLabel, "workspace_starting");
@@ -237,7 +237,7 @@ test("admin display state keeps rebuild label while status operation shows rebui
 
 test("admin display state leaves rebuild label idle for ordinary start", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: "start",
+    driverStatus: "starting",
     localAction: "start",
   });
   assert.equal(state.statusLabel, "workspace_starting");
@@ -248,7 +248,7 @@ test("admin display state leaves rebuild label idle for ordinary start", () => {
 
 test("admin display state re-enables rebuild only after workspace leaves transitional states", () => {
   const state = resolveAdminWorkspaceDisplayState({
-    operation: null,
+    driverStatus: null,
     localAction: null,
   });
   assert.equal(state.rebuildLabel, "rebuild_workspace");

@@ -201,7 +201,7 @@ export class DockerDriver implements BackendDriver {
         workspaceRuntimeState: { observed: execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: workspace.attachments.workspaceRuntimeState.mountRoot },
         userIdentityState: { observed: execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: workspace.attachments.userIdentityState.mountRoot },
       } : {},
-      runtimeAssembly: exists && running ? {
+      workspaceAssembly: exists && running ? {
         home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
         projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
         managerState: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },

@@ -19,6 +19,7 @@ import {
   rebuildPortalWorkspace,
   restartPortalWorkspacePaseoDaemon,
   reportPortalWorkspaceStatus,
+  updatePortalWorkspaceSelectedDriver,
   skillInstallWorkspace,
   skillSyncWorkspace,
   skillUninstallWorkspace,
@@ -229,6 +230,37 @@ export function createExecutorServer(
           readRequiredString(body, "workspace"),
           target,
         );
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/workspaces/driver") {
+        const body = await readBody(req);
+        const targetValue = body.target;
+        const target =
+          typeof targetValue === "string"
+            ? parsePortalDriverTarget(targetValue)
+            : parsePortalDriverTarget(
+              [
+                typeof targetValue === "object" &&
+                targetValue &&
+                typeof (targetValue as Record<string, unknown>).backend === "string"
+                  ? String((targetValue as Record<string, unknown>).backend)
+                  : "",
+                typeof targetValue === "object" &&
+                targetValue &&
+                typeof (targetValue as Record<string, unknown>).profile === "string"
+                  ? String((targetValue as Record<string, unknown>).profile)
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(":"),
+            );
+        const result = await updatePortalWorkspaceSelectedDriver({
+          userId: readRequiredString(body, "userId"),
+          workspace: readRequiredString(body, "workspace"),
+          target,
+        });
         sendJson(res, 200, result);
         return;
       }

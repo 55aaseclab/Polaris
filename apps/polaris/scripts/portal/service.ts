@@ -65,6 +65,7 @@ import {
   rebuildPortalWorkspace as rebuildPortalWorkspaceExecutor,
   reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
   restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
+  updatePortalWorkspaceSelectedDriver as updatePortalWorkspaceSelectedDriverExecutor,
   installPortalWorkspaceSkill as installPortalWorkspaceSkillExecutor,
   listPortalWorkspaceSkills as listPortalWorkspaceSkillsExecutor,
   startPortalWorkspace as startPortalWorkspaceExecutor,
@@ -565,6 +566,14 @@ export async function rebuildPortalWorkspace(
   workspace: string,
 ): Promise<{ rebuilt: true }> {
   return rebuildPortalWorkspaceExecutor({ userId, workspace });
+}
+
+export async function updatePortalWorkspaceSelectedDriver(input: {
+  userId: string;
+  workspace: string;
+  target: PortalDriverTarget;
+}): Promise<{ updated: true }> {
+  return updatePortalWorkspaceSelectedDriverExecutor(input);
 }
 
 export async function refreshPortalWorkspace(
