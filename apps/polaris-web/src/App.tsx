@@ -21,7 +21,6 @@ import {
   Info,
   PlusCircle,
   RefreshCw,
-  Link2,
   LogOut,
   Settings2,
   Trash2,
@@ -2313,15 +2312,6 @@ function PortalShellLayout(props: {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link
-                        to={`/users/${encodeURIComponent(activeUser.id)}/credentials`}
-                        onClick={handleSidebarNavigate}
-                      >
-                        <Link2 className="mr-2 h-4 w-4" />
-                        {t("credentials")}
-                      </Link>
-                    </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => {
                         clerk.openUserProfile();
@@ -2743,9 +2733,6 @@ function WorkspaceIndexPage() {
           ? `/users/${encodeURIComponent(routeUserId)}/admin/users/${encodeURIComponent(targetUserId)}/workspaces/${encodeURIComponent(workspaceName)}`
           : `/users/${encodeURIComponent(effectiveUserId)}/workspaces/${encodeURIComponent(workspaceName)}`
       }
-      onOpenCredentials={() => {
-        navigate(`/users/${encodeURIComponent(effectiveUserId)}/credentials`);
-      }}
     />
   );
 }
@@ -2753,7 +2740,6 @@ function WorkspaceIndexPage() {
 function WorkspaceIndexContent(props: {
   userId: string;
   workspaceLink: (workspaceName: string) => string;
-  onOpenCredentials: () => void;
 }) {
   const { t } = useLanguage();
   const { workspaces, workspacesLoading, workspacesError } = usePortalShell();
@@ -2785,9 +2771,7 @@ function WorkspaceIndexContent(props: {
       descriptionLines={[
         t("workspace_empty_description_line_1"),
         t("workspace_empty_description_line_2"),
-        t("workspace_empty_description_line_3"),
       ]}
-      onOpenCredentials={props.onOpenCredentials}
     />
   );
 }
@@ -2795,7 +2779,6 @@ function WorkspaceIndexContent(props: {
 function WorkspaceEmptyState(props: {
   title: string;
   descriptionLines: string[];
-  onOpenCredentials: () => void;
 }) {
   const { t } = useLanguage();
   const {
@@ -2835,9 +2818,6 @@ function WorkspaceEmptyState(props: {
         <div className="flex flex-wrap gap-3">
           <Button onClick={openCreateWorkspaceDialog}>
             {t("workspace_empty_create")}
-          </Button>
-          <Button variant="outline" onClick={props.onOpenCredentials}>
-            {t("workspace_empty_credentials")}
           </Button>
         </div>
       </div>
@@ -4988,34 +4968,12 @@ function WorkspaceDetailContent() {
     cacheEmbeddedPaseoFrame,
     embeddedPaseoFrames,
     removeEmbeddedPaseoFrame,
-    refreshWorkspaces,
     workspaces,
   } = usePortalShell();
   const [refreshTick, setRefreshTick] = useState(0);
-  const [selectedSkillHarness, setSelectedSkillHarness] = useState<"codex" | "claude">("codex");
   const { data, error, loading } = useAsyncValue(
     () => getWorkspaceDetail(userId, workspaceName),
     [refreshTick, userId, workspaceName],
-  );
-  const {
-    data: credentials,
-    error: credentialsError,
-    loading: credentialsLoading,
-  } = useAsyncValue(
-    () => listCredentials(userId),
-    [userId],
-  );
-  const { data: userSkills, error: userSkillsError } = useAsyncValue(
-    () => listSkills(userId),
-    [userId],
-  );
-  const {
-    data: installedSkills,
-    error: installedSkillsError,
-    loading: installedSkillsLoading,
-  } = useAsyncValue(
-    () => listWorkspaceSkills(userId, workspaceName, selectedSkillHarness),
-    [refreshTick, selectedSkillHarness, userId, workspaceName],
   );
   const workspaceData = data?.name === workspaceName ? data : null;
   const workspaceLoading = loading || (!!data && !workspaceData);
@@ -5031,31 +4989,9 @@ function WorkspaceDetailContent() {
   const [switching, setSwitching] = useState(false);
   const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedSkillId, setSelectedSkillId] = useState("");
-  const [skillActionRunning, setSkillActionRunning] = useState<"install" | "uninstall" | "sync" | null>(null);
-  const [paseoCredentialSelections, setPaseoCredentialSelections] = useState<
-    Partial<Record<ManagedHarness, string>>
-  >({});
   const [actionError, setActionError] = useState<string | null>(null);
   const currentPane = detailRouteScope.currentWorkspacePane;
   const assets = workspaceData?.status?.assets;
-  const agentCredentials = (credentials ?? []).filter((credential) =>
-    credential.purposes.includes("agent-auth")
-  );
-  const liveStatus = workspaceData?.status?.credentials?.live;
-  const liveSelections = liveStatus?.selectedByHarness ?? {};
-  const harnessOptions = Array.from(
-    new Set(
-      [
-        ...(liveStatus?.supportedHarnesses ?? []),
-        ...agentCredentials.map((credential) => credential.harness ?? "").filter(Boolean),
-      ],
-    ),
-  );
-  const paseoHarnesses = MANAGED_HARNESS_ORDER.filter(
-    (harness) => harness !== "ssh" && harnessOptions.includes(harness),
-  );
-  const switchableHarnesses = liveStatus?.switchableHarnesses ?? MANAGED_HARNESS_ORDER;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
   const embeddedPortalTargets = resolveWorkspacePaseoTargets(workspaceData);
   const embeddedPortalUrl = embeddedPortalTargets.reconnectTarget ?? embeddedPortalTargets.liveTarget;
@@ -5138,12 +5074,6 @@ function WorkspaceDetailContent() {
         },
       ]
     : [];
-  const availableUserSkills = (userSkills ?? []).filter(
-    (skill) => skill.harness === selectedSkillHarness,
-  );
-  const installedHarnessSkills = installedSkills?.installed.find(
-    (entry) => entry.harness === selectedSkillHarness,
-  )?.skills ?? [];
   const selectedWorkspaceSummarySignature = selectedWorkspaceSummary
     ? JSON.stringify({
         name: selectedWorkspaceSummary.name,
@@ -5155,8 +5085,6 @@ function WorkspaceDetailContent() {
       })
     : null;
   const lastAutoRefreshSummarySignatureRef = useRef<string | null>(null);
-  const lastSidebarReadySyncRef = useRef<string | null>(null);
-
   useEffect(() => {
     keepEmbeddedPaseoPollingUntilRef.current = Date.now() + 60_000;
   }, [workspaceName]);
@@ -5216,58 +5144,6 @@ function WorkspaceDetailContent() {
   ]);
 
   useEffect(() => {
-    const detailReady =
-      resolveWorkspaceRuntimeLifecycle(workspaceData) === "running"
-      && resolveWorkspacePaseoWebState(workspaceData) !== "unavailable";
-    const summaryReady =
-      resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary) === "running"
-      && resolveWorkspacePaseoWebState(selectedWorkspaceSummary) !== "unavailable";
-    const detailSignature = detailReady
-      ? JSON.stringify({
-          workspaceName,
-          liveTarget: workspaceData?.status?.paseo?.liveTarget ?? null,
-          reconnectTarget: workspaceData?.status?.paseo?.reconnectTarget ?? null,
-        })
-      : null;
-    if (!detailSignature) {
-      lastSidebarReadySyncRef.current = null;
-      return;
-    }
-    if (summaryReady) {
-      lastSidebarReadySyncRef.current = detailSignature;
-      return;
-    }
-    if (lastSidebarReadySyncRef.current === detailSignature) {
-      return;
-    }
-    lastSidebarReadySyncRef.current = detailSignature;
-    refreshWorkspaces();
-  }, [
-    refreshWorkspaces,
-    selectedWorkspaceSummary?.status?.paseo?.liveTarget,
-    selectedWorkspaceSummary?.status?.paseo?.reconnectTarget,
-    selectedWorkspaceSummary?.status?.paseo?.web,
-    selectedWorkspaceSummary?.status?.runtime?.lifecycle,
-    workspaceData?.status?.paseo?.liveTarget,
-    workspaceData?.status?.paseo?.reconnectTarget,
-    workspaceData?.status?.paseo?.web,
-    workspaceData?.status?.runtime?.lifecycle,
-    workspaceName,
-  ]);
-
-  useEffect(() => {
-    if (selectedSkillId) {
-      return;
-    }
-    const nextSkillId = availableUserSkills[0]?.id ?? "";
-    if (nextSkillId) {
-      setSelectedSkillId(nextSkillId);
-      return;
-    }
-    setSelectedSkillId("");
-  }, [availableUserSkills, selectedSkillHarness, selectedSkillId]);
-
-  useEffect(() => {
     if (workspaceLoading && !workspaceData) {
       return;
     }
@@ -5277,56 +5153,6 @@ function WorkspaceDetailContent() {
     }
     cacheEmbeddedPaseoFrame(workspaceFrameKey, embeddedPortalUrl);
   }, [effectiveRuntimeRunning, embeddedPortalUrl, workspaceData, workspaceFrameKey, workspaceLoading]);
-
-  useEffect(() => {
-    setPaseoCredentialSelections((current) => {
-      const next: Partial<Record<ManagedHarness, string>> = { ...current };
-      let changed = false;
-
-      for (const harness of paseoHarnesses) {
-        const harnessCredentials = agentCredentials.filter(
-          (credential) => credential.harness === harness,
-        );
-        const runtimeCredentialId = liveSelections[harness]?.credentialId ?? "";
-        const runtimeCredential = runtimeCredentialId
-          ? harnessCredentials.find(
-              (credential) => credential.id === runtimeCredentialId,
-            ) ?? null
-          : null;
-        const activeCredential =
-          harnessCredentials.find((credential) => credential.active) ?? null;
-        const preferredCredentialId =
-          runtimeCredential?.id
-          ?? activeCredential?.id
-          ?? harnessCredentials[0]?.id
-          ?? "";
-        const currentCredentialId = next[harness] ?? "";
-        const currentStillValid = harnessCredentials.some(
-          (credential) => credential.id === currentCredentialId,
-        );
-        if (
-          currentCredentialId !== preferredCredentialId
-          && (!currentStillValid || !currentCredentialId)
-        ) {
-          next[harness] = preferredCredentialId;
-          changed = true;
-        }
-      }
-
-      for (const harness of MANAGED_HARNESS_ORDER) {
-        if (harness !== "ssh" && !paseoHarnesses.includes(harness) && next[harness]) {
-          delete next[harness];
-          changed = true;
-        }
-      }
-
-      return changed ? next : current;
-    });
-  }, [
-    agentCredentials,
-    liveStatus?.selectedByHarness,
-    paseoHarnesses,
-  ]);
 
   useEffect(() => {
     if (!workspaceAction) {
@@ -5436,76 +5262,6 @@ function WorkspaceDetailContent() {
     }
   }
 
-  async function handleSwitchLiveCredential(harness: ManagedHarness): Promise<void> {
-    const credentialId = paseoCredentialSelections[harness] ?? "";
-    if (
-      !harness ||
-      !credentialId ||
-      !runtimeRunning
-    ) {
-      return;
-    }
-    setActionError(null);
-    setSwitching(true);
-    try {
-      await switchWorkspaceLiveCredential(userId, workspaceName, {
-        harness,
-        credentialId,
-      });
-      await refreshWorkspaceStatus(userId, workspaceName);
-      setRefreshTick((current) => current + 1);
-    } catch (error) {
-      setActionError(formatActionError(error, t));
-    } finally {
-      setSwitching(false);
-    }
-  }
-
-  async function handleWorkspaceSkillInstall(): Promise<void> {
-    if (!selectedSkillId) {
-      return;
-    }
-    setActionError(null);
-    setSkillActionRunning("install");
-    try {
-      await installWorkspaceSkill(userId, workspaceName, selectedSkillId, selectedSkillHarness);
-      setRefreshTick((current) => current + 1);
-      refreshWorkspaces();
-    } catch (error) {
-      setActionError(formatActionError(error, t));
-    } finally {
-      setSkillActionRunning(null);
-    }
-  }
-
-  async function handleWorkspaceSkillUninstall(skillId: string): Promise<void> {
-    setActionError(null);
-    setSkillActionRunning("uninstall");
-    try {
-      await uninstallWorkspaceSkill(userId, workspaceName, skillId, selectedSkillHarness);
-      setRefreshTick((current) => current + 1);
-      refreshWorkspaces();
-    } catch (error) {
-      setActionError(formatActionError(error, t));
-    } finally {
-      setSkillActionRunning(null);
-    }
-  }
-
-  async function handleWorkspaceSkillSync(): Promise<void> {
-    setActionError(null);
-    setSkillActionRunning("sync");
-    try {
-      await syncWorkspaceSkills(userId, workspaceName, selectedSkillHarness);
-      setRefreshTick((current) => current + 1);
-      refreshWorkspaces();
-    } catch (error) {
-      setActionError(formatActionError(error, t));
-    } finally {
-      setSkillActionRunning(null);
-    }
-  }
-
   function renderDriverSwitchControls(): ReactNode {
     return (
       <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto sm:justify-end">
@@ -5534,192 +5290,10 @@ function WorkspaceDetailContent() {
     );
   }
 
-  function renderLiveCredentialControls(): ReactNode {
-    if (credentialsLoading) {
-      return null;
-    }
-    if (credentialsError) {
-      return <p className="text-sm text-destructive">{credentialsError}</p>;
-    }
-    if (paseoHarnesses.length === 0) {
-      return (
-        <p className="text-sm text-muted-foreground">
-          {t("no_paseo_credentials")}
-        </p>
-      );
-    }
-    return (
-      <div className="grid w-full gap-3">
-        {paseoHarnesses.map((harness) => {
-          const harnessCredentials = agentCredentials.filter(
-            (credential) => credential.harness === harness,
-          );
-          const runtimeCredentialSelection = liveSelections[harness];
-          const currentCredential = runtimeCredentialSelection?.credentialId
-            ? harnessCredentials.find(
-                (credential) => credential.id === runtimeCredentialSelection.credentialId,
-              ) ?? null
-            : null;
-          const currentSource = runtimeCredentialSelection?.source;
-          const selectedCredentialId =
-            paseoCredentialSelections[harness] ?? "";
-          const canLiveSwitch = switchableHarnesses.includes(harness);
-
-          return (
-            <div
-              key={harness}
-              className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 p-3"
-            >
-              <div className="min-w-0">
-                <div className="text-sm font-medium">
-                  {credentialHarnessLabel(harness, t)}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {currentCredential
-                    ? `${t("credential_selection_current")}：${currentCredential.label} · ${credentialSelectionSourceLabel(currentSource, t)}`
-                    : `${t("credential_selection_current")}：${t("credential_selection_none")}`}
-                </div>
-              </div>
-              <div className="flex w-full min-w-0 flex-wrap items-end justify-start gap-3 sm:w-auto sm:justify-end">
-                <div className="w-full min-w-0 sm:w-[16rem]">
-                  <Select
-                    value={selectedCredentialId}
-                    onValueChange={(value) =>
-                      setPaseoCredentialSelections((current) => ({
-                        ...current,
-                        [harness]: value,
-                      }))}
-                    disabled={harnessCredentials.length === 0}
-                  >
-                    <SelectTrigger className="bg-white">
-                      <SelectValue
-                        placeholder={harnessCredentials.length === 0
-                          ? t("no_paseo_credentials")
-                          : t("select_credential")}
-                      />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white">
-                      {harnessCredentials.map((credential) => (
-                        <SelectItem key={credential.id} value={credential.id}>
-                          {credential.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  variant="outline"
-                  disabled={
-                    switching
-                    || !effectiveRuntimeRunning
-                    || !selectedCredentialId
-                    || !canLiveSwitch
-                  }
-                  onClick={() =>
-                    void handleSwitchLiveCredential(harness)}
-                >
-                  {switching ? t("activating_credential") : t("switch_credential")}
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-        {!effectiveRuntimeRunning ? (
-          <p className="text-sm text-muted-foreground">
-            {t("credential_switch_requires_running")}
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
   function renderWorkspaceControlsCard(): ReactNode {
     return (
+      <div className="grid gap-6">
         <div className="grid gap-6">
-          <div className="grid gap-4 rounded-2xl border border-border/70 bg-muted/20 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-medium">{t("workspace_skills")}</div>
-                <div className="text-sm text-muted-foreground">{t("skills_header_desc")}</div>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => void handleWorkspaceSkillSync()}
-                disabled={skillActionRunning !== null}
-              >
-                {skillActionRunning === "sync" ? t("switching") : t("skill_sync")}
-              </Button>
-            </div>
-            {userSkillsError || installedSkillsError ? (
-              <p className="text-sm text-destructive">{userSkillsError ?? installedSkillsError}</p>
-            ) : null}
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-full min-w-0 sm:w-[12rem]">
-                <Label htmlFor="workspace-skill-harness">{t("credential_provider")}</Label>
-                <Select
-                  value={selectedSkillHarness}
-                  onValueChange={(value) => {
-                    setSelectedSkillHarness(value as "codex" | "claude");
-                    setSelectedSkillId("");
-                  }}
-                >
-                  <SelectTrigger id="workspace-skill-harness" className="bg-white">
-                    <SelectValue placeholder={t("credential_provider")} />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white">
-                    <SelectItem value="codex">{t("credential_harness_codex")}</SelectItem>
-                    <SelectItem value="claude">{t("credential_harness_claude")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-full min-w-0 sm:w-[18rem]">
-                <Label htmlFor="workspace-skill-select">{t("skills")}</Label>
-                <Select value={selectedSkillId} onValueChange={setSelectedSkillId}>
-                  <SelectTrigger id="workspace-skill-select" className="bg-white">
-                    <SelectValue placeholder={t("add_skill")} />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white">
-                    {availableUserSkills.map((skill) => (
-                      <SelectItem key={skill.id} value={skill.id}>
-                        {skillDisplayName(skill)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => void handleWorkspaceSkillInstall()}
-                disabled={!selectedSkillId || skillActionRunning !== null}
-              >
-                {skillActionRunning === "install" ? t("switching") : t("skill_install")}
-              </Button>
-            </div>
-            <div className="grid gap-2">
-              <div className="text-sm font-medium">{t("installed_skills")}</div>
-              {installedSkillsLoading ? null : installedHarnessSkills.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("no_installed_skills")}</p>
-              ) : (
-                installedHarnessSkills.map((skillId) => (
-                  <div
-                    key={skillId}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background px-3 py-2"
-                  >
-                    <div className="text-sm">{skillId}</div>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={skillActionRunning !== null}
-                      onClick={() => void handleWorkspaceSkillUninstall(skillId)}
-                    >
-                      {skillActionRunning === "uninstall" ? t("switching") : t("skill_uninstall")}
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="grid gap-6">
           <div className="min-w-0">
             <div className="text-base font-semibold">{t("workspace_header_title")}</div>
           </div>
@@ -5831,7 +5405,7 @@ function WorkspaceDetailContent() {
             refreshing={refreshing}
             refreshDisabled={loading || refreshing || switching || starting || stopping || deleting}
             onRefreshStatus={() => void handleRefreshStatus()}
-            liveCredentialControls={renderLiveCredentialControls()}
+            liveCredentialControls={null}
             workspaceControlsCard={renderWorkspaceControlsCard()}
             driverLabel={driverStatus
               ? driverLabel({
@@ -6844,7 +6418,6 @@ export default function App(props: {
                       <Route path="/users/:userId/workspaces/:workspaceName/controls" element={<WorkspaceDetailPage />} />
                       <Route path="/users/:userId/workspaces/:workspaceName/dev-env" element={<LegacyWorkspacePaneRedirect />} />
                       <Route path="/users/:userId/workspaces/:workspaceName/memory" element={<LegacyWorkspacePaneRedirect />} />
-                      <Route path="/users/:userId/credentials" element={<CredentialsPage />} />
                     </Route>
                   </Routes>
                 </>
