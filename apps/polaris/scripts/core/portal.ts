@@ -14,6 +14,7 @@ import {
   normalizePairingUrl,
 } from "./pairing-url.js";
 import {
+  normalizeWorkspaceStatus,
   readWorkspaceDriverSelection,
   workspaceSelectionPath,
   workspaceStateDir,
@@ -510,7 +511,8 @@ export function readWorkspaceSelection(userId: string, workspace: string): Porta
 }
 
 export function readWorkspaceStatus(userId: string, workspace: string): WorkspaceStatus | null {
-  return readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
+  const status = readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
+  return status ? normalizeWorkspaceStatus(status) : null;
 }
 
 function workspacePaseoScope(userId: string, workspace: string): string {

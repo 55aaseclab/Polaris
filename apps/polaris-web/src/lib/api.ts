@@ -68,6 +68,7 @@ export type ManagedHarness =
   | "pi";
 
 export interface PortalWorkspaceStatus {
+  schemaVersion: number;
   driver?: {
     backend: string;
     profile?: string;
