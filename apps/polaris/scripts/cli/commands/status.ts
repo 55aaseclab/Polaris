@@ -1,12 +1,26 @@
-import { writeWorkspaceStatus } from "../../output/state-store.js";
+import {
+  normalizeWorkspaceStatus,
+  workspaceStatusPath,
+  writeWorkspaceStatus,
+} from "../../output/state-store.js";
 import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
 import { buildStatusAssets } from "../../core/status-assets.js";
+import type { WorkspaceStatus } from "../../core/workspace.js";
 import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSession, getEvolutionSummary } from "../../evolution/runtime.js";
 import { loadWorkspaceForCommand, persistWorkspacePaseoState } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
 import { measureWorkspacePhase } from "../../utils/workspace-log.js";
 
-export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
+export async function synthesizeAndWriteWorkspaceStatus(
+  project: string,
+  userProfileId?: string,
+  options?: {
+    write?: boolean;
+  },
+): Promise<{
+  outputPath: string;
+  status: WorkspaceStatus;
+}> {
   const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
   const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
   const observation = await measureWorkspacePhase({
@@ -47,7 +61,22 @@ export async function statusCommand(project: string, userProfileId?: string): Pr
       lastSessionId: evolutionSessionId,
     };
   }
-  const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
+  const outputPath = workspaceStatusPath(status.project, workspace.userProfile.id);
+  if (options?.write === false) {
+    return {
+      outputPath,
+      status: normalizeWorkspaceStatus(status),
+    };
+  }
+  writeWorkspaceStatus(status, workspace.userProfile.id);
+  return {
+    outputPath,
+    status: normalizeWorkspaceStatus(status),
+  };
+}
+
+export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
+  const { outputPath, status } = await synthesizeAndWriteWorkspaceStatus(project, userProfileId);
   logInfo("cli", "status-synthesized", {
     project: status.project,
     backend: status.driver?.selected?.backend,
