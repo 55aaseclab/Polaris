@@ -35,6 +35,7 @@ import {
   deletePortalUser,
   deleteArchivedWorkspace,
   deleteCredential,
+  getAiAccess,
   rebuildWorkspace,
   deleteWorkspace,
   getCredentialRecord,
@@ -57,12 +58,15 @@ import {
   setApiAuthTokenProvider,
   startWorkspace,
   stopWorkspace,
+  performAiAccessAction,
   syncWorkspaceSkills,
   switchWorkspaceLiveCredential,
   switchWorkspaceDriver,
   updateWorkspaceSelectedDriver,
   uninstallWorkspaceSkill,
   updateCredentialFile,
+  type PortalAiAccessActionKind,
+  type PortalAiAccessView,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
   type PortalCredentialMaterialFile,
@@ -157,6 +161,7 @@ import { resolveAuthGateState } from "@/lib/auth-gate-state";
 
 const SignInPage = React.lazy(() => import("@/routes/sign-in-page"));
 const SignUpPage = React.lazy(() => import("@/routes/sign-up-page"));
+const AdminAiAccessTab = React.lazy(() => import("@/features/admin-ai-access-tab"));
 const AdminPaseoTab = React.lazy(() => import("@/features/admin-paseo-tab"));
 const WorkspacePaseoPane = React.lazy(() => import("@/features/workspace-paseo-pane"));
 
@@ -442,6 +447,48 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_tab_skills: "Skills",
     admin_user_tab_workspaces: "Workspaces",
     admin_user_tab_paseo: "Paseo",
+    admin_user_tab_ai_access: "AI Access",
+    ai_access_description: "Review user AI access, pay-as-you-go funding, and readiness.",
+    ai_access_summary_access: "Access",
+    ai_access_summary_mode: "Mode",
+    ai_access_summary_balance: "Balance",
+    ai_access_summary_referral: "Referral",
+    ai_access_action_provision: "Provision Access",
+    ai_access_action_top_up: "Top Up",
+    ai_access_action_refresh: "Refresh",
+    ai_access_action_retry: "Retry",
+    ai_access_state_not_provisioned: "Not provisioned",
+    ai_access_state_funding_needed: "Needs funding",
+    ai_access_state_ready: "Ready",
+    ai_access_state_error: "Error",
+    ai_access_referral_enabled: "Enabled",
+    ai_access_referral_disabled: "Disabled",
+    ai_access_referral_error: "Error",
+    ai_access_referral_unavailable: "Unavailable",
+    ai_access_balance_billing: "Balance & Billing",
+    ai_access_referral: "Referral",
+    ai_access_last_topup: "Last top-up",
+    ai_access_invite_code: "Invite code",
+    ai_access_invite_link: "Invite link",
+    ai_access_rebate_summary: "Rebate summary",
+    ai_access_status: "Access Status",
+    ai_access_access_state: "Access state",
+    ai_access_account_linked: "Account linked",
+    ai_access_runtime_ready: "Runtime ready",
+    ai_access_last_sync: "Last sync",
+    ai_access_status_message: "Status message",
+    ai_access_advanced: "Advanced",
+    ai_access_provider_backend: "Provider backend",
+    ai_access_provider_account: "Provider account",
+    ai_access_provider_token: "Provider token",
+    ai_access_credential_sync: "Credential sync",
+    ai_access_default_credential: "Default credential",
+    ai_access_last_error: "Last error",
+    loading: "Loading...",
+    working: "Working...",
+    yes: "Yes",
+    no: "No",
+    present: "Present",
     admin_paseo_reconnect_mode: "Reconnect mode",
     admin_paseo_reconnect_target: "Reconnect target",
     admin_paseo_live_target: "Live target",
@@ -797,6 +844,48 @@ const COPY: Record<Language, Record<string, string>> = {
     admin_user_tab_skills: "Skills",
     admin_user_tab_workspaces: "工作空间",
     admin_user_tab_paseo: "Paseo",
+    admin_user_tab_ai_access: "AI Access",
+    ai_access_description: "查看用户 AI 访问、按量充值和可用状态。",
+    ai_access_summary_access: "访问",
+    ai_access_summary_mode: "模式",
+    ai_access_summary_balance: "余额",
+    ai_access_summary_referral: "返利",
+    ai_access_action_provision: "开通访问",
+    ai_access_action_top_up: "充值",
+    ai_access_action_refresh: "刷新",
+    ai_access_action_retry: "重试",
+    ai_access_state_not_provisioned: "未开通",
+    ai_access_state_funding_needed: "需要充值",
+    ai_access_state_ready: "就绪",
+    ai_access_state_error: "异常",
+    ai_access_referral_enabled: "已启用",
+    ai_access_referral_disabled: "未启用",
+    ai_access_referral_error: "异常",
+    ai_access_referral_unavailable: "不可用",
+    ai_access_balance_billing: "余额与计费",
+    ai_access_referral: "返利",
+    ai_access_last_topup: "最近充值",
+    ai_access_invite_code: "邀请码",
+    ai_access_invite_link: "邀请链接",
+    ai_access_rebate_summary: "返利摘要",
+    ai_access_status: "访问状态",
+    ai_access_access_state: "访问状态",
+    ai_access_account_linked: "账号已关联",
+    ai_access_runtime_ready: "运行时已就绪",
+    ai_access_last_sync: "最近同步",
+    ai_access_status_message: "状态说明",
+    ai_access_advanced: "高级信息",
+    ai_access_provider_backend: "后端类型",
+    ai_access_provider_account: "后端账号",
+    ai_access_provider_token: "后端令牌",
+    ai_access_credential_sync: "凭证同步",
+    ai_access_default_credential: "默认凭证",
+    ai_access_last_error: "最近错误",
+    loading: "加载中...",
+    working: "处理中...",
+    yes: "是",
+    no: "否",
+    present: "已存在",
     admin_paseo_reconnect_mode: "重连模式",
     admin_paseo_reconnect_target: "重连入口",
     admin_paseo_live_target: "访问入口",
@@ -1813,6 +1902,47 @@ function useAsyncValue<T>(
       cancelled = true;
     };
   }, deps);
+
+  return { data, error, loading };
+}
+
+function useConditionalAsyncValue<T>(
+  enabled: boolean,
+  factory: () => Promise<T>,
+  deps: unknown[],
+): { data: T | null; error: string | null; loading: boolean } {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void factory()
+      .then((value) => {
+        if (!cancelled) {
+          setData(value);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, ...deps]);
 
   return { data, error, loading };
 }
@@ -2848,7 +2978,10 @@ function AdminPage() {
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
   const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
-  const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo">("user");
+  const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access">("user");
+  const [adminAiAccessRefreshTick, setAdminAiAccessRefreshTick] = useState(0);
+  const [adminAiAccessAction, setAdminAiAccessAction] = useState<PortalAiAccessActionKind | null>(null);
+  const [adminAiAccessActionError, setAdminAiAccessActionError] = useState<string | null>(null);
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
 
@@ -2876,6 +3009,15 @@ function AdminPage() {
   const { data: selectedCredentialCatalog } = useAsyncValue(
     () => selectedAdminUserId ? getCredentialCatalog(selectedAdminUserId) : Promise.resolve(null),
     [selectedAdminUserId, reloadKey],
+  );
+  const {
+    data: selectedAiAccess,
+    error: selectedAiAccessError,
+    loading: selectedAiAccessLoading,
+  } = useConditionalAsyncValue(
+    adminTab === "ai-access" && Boolean(selectedAdminUserId),
+    () => selectedAdminUserId ? getAiAccess(selectedAdminUserId) : Promise.resolve(null),
+    [selectedAdminUserId, adminAiAccessRefreshTick],
   );
   const adminCredentialGroups = MANAGED_HARNESS_ORDER.map((harness) => ({
     harness,
@@ -2997,6 +3139,9 @@ function AdminPage() {
     setAdminRuntimeSkillHarness("codex");
     setAdminRuntimeSkillAction(null);
     setAdminRuntimeSkillRefreshTick(0);
+    setAdminAiAccessRefreshTick(0);
+    setAdminAiAccessAction(null);
+    setAdminAiAccessActionError(null);
   }, [selectedAdminUserId]);
 
   useEffect(() => {
@@ -3536,6 +3681,27 @@ function AdminPage() {
   const adminInstalledHarnessSkills =
     adminInstalledWorkspaceSkills?.installed.find((entry) => entry.harness === adminRuntimeSkillHarness)?.skills ?? [];
 
+  async function handleAdminAiAccessAction(
+    action: PortalAiAccessActionKind,
+  ): Promise<void> {
+    if (!selectedAdminUser || adminAiAccessAction) {
+      return;
+    }
+    setAdminAiAccessAction(action);
+    setAdminAiAccessActionError(null);
+    try {
+      await performAiAccessAction(selectedAdminUser.id, action);
+      setAdminAiAccessRefreshTick((current) => current + 1);
+      if (action === "provision_access" || action === "retry") {
+        setReloadKey((current) => current + 1);
+      }
+    } catch (error) {
+      setAdminAiAccessActionError(formatActionError(error, t));
+    } finally {
+      setAdminAiAccessAction(null);
+    }
+  }
+
   function openAdminCredentialSheet(harness: ManagedHarness): void {
     setAdminCredentialDraft(defaultCredentialDraft(harness, selectedCredentialCatalog));
     setCredentialAdminActionError(null);
@@ -3843,10 +4009,10 @@ function AdminPage() {
             <Tabs
               key={selectedAdminUserId}
               value={adminTab}
-              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "skills" | "workspaces" | "paseo")}
+              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access")}
               className="w-full"
             >
-              <TabsList className="mb-4 w-full max-w-md justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
+              <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
                 <TabsTrigger value="user" className="flex-1 rounded-xl">
                   {t("admin_user_tab_user")}
                 </TabsTrigger>
@@ -3861,6 +4027,9 @@ function AdminPage() {
                 </TabsTrigger>
                 <TabsTrigger value="paseo" className="flex-1 rounded-xl">
                   {t("admin_user_tab_paseo")}
+                </TabsTrigger>
+                <TabsTrigger value="ai-access" className="flex-1 rounded-xl">
+                  {t("admin_user_tab_ai_access")}
                 </TabsTrigger>
               </TabsList>
 
@@ -4918,6 +5087,21 @@ function AdminPage() {
                     }}
                     onRestartPaseoDaemon={(workspaceName) => {
                       void handleRestartPaseoDaemon(workspaceName);
+                    }}
+                  />
+                </React.Suspense>
+              </TabsContent>
+
+              <TabsContent value="ai-access">
+                <React.Suspense fallback={null}>
+                  <AdminAiAccessTab
+                    t={t}
+                    view={selectedAiAccess}
+                    error={adminAiAccessActionError ?? selectedAiAccessError}
+                    loading={selectedAiAccessLoading}
+                    actionInFlight={adminAiAccessAction}
+                    onRunAction={(action) => {
+                      void handleAdminAiAccessAction(action);
                     }}
                   />
                 </React.Suspense>

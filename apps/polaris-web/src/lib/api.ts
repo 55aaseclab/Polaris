@@ -377,6 +377,78 @@ export interface PortalWorkspaceAssetPreview {
   truncated: boolean;
 }
 
+export type PortalAiAccessState =
+  | "not_provisioned"
+  | "funding_needed"
+  | "ready"
+  | "error";
+
+export type PortalAiAccessActionKind =
+  | "provision_access"
+  | "top_up"
+  | "refresh_status"
+  | "retry";
+
+export interface PortalAiAccessAction {
+  kind: PortalAiAccessActionKind;
+  enabled: boolean;
+  reason?: string;
+}
+
+export interface PortalAiAccessView {
+  state: PortalAiAccessState;
+  summary: {
+    accessState: PortalAiAccessState;
+    billingMode: "payg" | "monthly" | "hybrid" | "unknown";
+    availableBalance: number | null;
+    balanceUnit: string | null;
+    referralState: "unavailable" | "enabled" | "disabled" | "error";
+  };
+  mainAction: {
+    headline: string;
+    description: string;
+    primaryAction: PortalAiAccessAction;
+    secondaryAction?: PortalAiAccessAction;
+    stateReason?: string;
+  };
+  accessStatus: {
+    provisioningStatus: "not-provisioned" | "provisioned";
+    accountLinked: boolean;
+    runtimeReady: boolean;
+    lastSyncAt: string | null;
+    statusMessage: string | null;
+  };
+  billing: {
+    billingMode: "payg" | "monthly" | "hybrid" | "unknown";
+    subscriptionStatus: "none" | "active" | "paused" | "expired" | "unknown";
+    subscriptionName: string | null;
+    balanceAmount: number | null;
+    balanceUnit: string | null;
+    lastTopupAt: string | null;
+  };
+  referral: {
+    referralEnabled: boolean;
+    inviteCode: string | null;
+    inviteLink: string | null;
+    rebateSummary: string | null;
+  };
+  advanced: {
+    providerBackend: string;
+    providerAccountId: string | null;
+    providerTokenPresent: boolean;
+    credentialSyncStatus: "idle" | "ready" | "error";
+    defaultCredentialId: string | null;
+    lastInternalSyncAt: string | null;
+    lastErrorMessage: string | null;
+  };
+  capabilities: {
+    provisionAccess: boolean;
+    topUp: boolean;
+    referral: boolean;
+    subscription: boolean;
+  };
+}
+
 function apiBase(): string {
   return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_POLARIS_API_BASE?.replace(/\/$/, "") ?? "";
 }
@@ -764,6 +836,24 @@ export async function updateCredentialFile(
     {
       method: "PUT",
       body: JSON.stringify({ content }),
+    },
+  );
+}
+
+export async function getAiAccess(userId: string): Promise<PortalAiAccessView> {
+  return apiFetch<PortalAiAccessView>(
+    `/users/${encodeURIComponent(userId)}/ai-access`,
+  );
+}
+
+export async function performAiAccessAction(
+  userId: string,
+  action: PortalAiAccessActionKind,
+): Promise<PortalAiAccessView> {
+  return apiFetch<PortalAiAccessView>(
+    `/users/${encodeURIComponent(userId)}/ai-access/actions/${encodeURIComponent(action)}`,
+    {
+      method: "POST",
     },
   );
 }
