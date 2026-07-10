@@ -78,6 +78,12 @@ import {
   syncPortalWorkspaceSkills as syncPortalWorkspaceSkillsExecutor,
   uninstallPortalWorkspaceSkill as uninstallPortalWorkspaceSkillExecutor,
 } from "../executor/client.js";
+import {
+  getPortalAiAccess as getPortalAiAccessView,
+  performPortalAiAccessAction as performPortalAiAccessActionView,
+  type PortalAiAccessActionKind,
+  type PortalAiAccessView,
+} from "./ai-access.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
@@ -254,6 +260,23 @@ export function readUserPortalCredentialPreview(
     content: "[credential preview hidden]",
     truncated: false,
   };
+}
+
+export async function getPortalAiAccess(
+  userId: string,
+): Promise<PortalAiAccessView> {
+  return withUserMutationLock(import.meta.url, userId, async () =>
+    getPortalAiAccessView(userId),
+  );
+}
+
+export async function performPortalAiAccessAction(input: {
+  userId: string;
+  action: PortalAiAccessActionKind;
+}): Promise<PortalAiAccessView> {
+  return withUserMutationLock(import.meta.url, input.userId, async () =>
+    performPortalAiAccessActionView(input.userId, input.action),
+  );
 }
 
 export async function createPortalSkill(input: {
