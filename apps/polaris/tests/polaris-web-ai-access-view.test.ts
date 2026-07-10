@@ -90,7 +90,6 @@ test("AI access panel model renders summary cards from the normalized view", () 
   assert.deepEqual(
     model.summaryCards.map((entry) => [entry.label, entry.value]),
     [
-      ["Access", "Needs funding"],
       ["Mode", "PAYG"],
       ["Balance", "0 credits"],
       ["Referral", "Enabled"],

@@ -284,6 +284,13 @@ type PortalShellContextValue = {
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
+  adminSelectedUserId: string;
+  setAdminSelectedUserId: React.Dispatch<React.SetStateAction<string>>;
+  adminUsers: PortalAdminUserSummary[];
+  adminUsersLoading: boolean;
+  adminUsersError: string | null;
+  adminBackLink: string;
+  showingAdminDirectorySidebar: boolean;
 };
 
 type SkillDraft = {
@@ -297,6 +304,7 @@ const COPY: Record<Language, Record<string, string>> = {
     app_name: "Polaris",
     select_user: "Select a user",
     manage_users: "Manage users",
+    back_to_workspaces: "Back to workspaces",
     switch_workspace: "Select workspace",
     workspaces: "Workspaces",
     add_workspace: "Add workspace",
@@ -343,6 +351,7 @@ const COPY: Record<Language, Record<string, string>> = {
     starting: "Starting...",
     stopping: "Stopping...",
     cancel: "Cancel",
+    ok: "OK",
     current_driver: "Current driver",
     driver_info: "Driver",
     base_image: "Base image",
@@ -470,6 +479,10 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_referral_unavailable: "Unavailable",
     ai_access_copy_link: "Copy link",
     ai_access_copied: "Copied",
+    ai_access_copy_success_title: "Link copied",
+    ai_access_copy_success_hint: "Link copied. Paste it anywhere to share.",
+    ai_access_copy_failed_title: "Copy failed",
+    ai_access_copy_failed: "Copy failed. Copy the link manually.",
     ai_access_topup_title: "Recharge AI Access",
     ai_access_topup_description: "Create a real payment session for this user's AI Access wallet.",
     ai_access_topup_no_methods: "No online payment methods are enabled in new-api yet.",
@@ -714,6 +727,7 @@ const COPY: Record<Language, Record<string, string>> = {
     app_name: "Polaris",
     select_user: "选择用户",
     manage_users: "管理用户",
+    back_to_workspaces: "返回工作空间",
     switch_workspace: "选择工作空间",
     workspaces: "工作空间",
     add_workspace: "新增工作空间",
@@ -760,6 +774,7 @@ const COPY: Record<Language, Record<string, string>> = {
     starting: "启动中…",
     stopping: "停止中…",
     cancel: "取消",
+    ok: "确定",
     current_driver: "当前驱动",
     driver_info: "驱动",
     base_image: "基础镜像",
@@ -887,6 +902,10 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_referral_unavailable: "不可用",
     ai_access_copy_link: "复制链接",
     ai_access_copied: "已复制",
+    ai_access_copy_success_title: "链接已复制",
+    ai_access_copy_success_hint: "链接已复制，可以直接粘贴分享。",
+    ai_access_copy_failed_title: "复制失败",
+    ai_access_copy_failed: "复制失败，请手动复制链接。",
     ai_access_topup_title: "充值 AI 访问",
     ai_access_topup_description: "为该用户的 AI Access 钱包创建真实支付会话。",
     ai_access_topup_no_methods: "new-api 当前还没有启用在线支付方式。",
@@ -2023,6 +2042,7 @@ function PortalShellLayout(props: {
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
+  const [adminSelectedUserId, setAdminSelectedUserId] = useState(routeUserId || "");
   const isAdmin = mapping?.role === "admin";
   const routeScope = resolveWorkspaceRouteScope({
     pathname: location.pathname,
@@ -2201,6 +2221,18 @@ function PortalShellLayout(props: {
     .toUpperCase();
   const activeUserName = activeUser?.name || activeUser?.id || t("manage_users");
   const adminBackLink = `/users/${encodeURIComponent(managerUserId)}/admin`;
+  const isAdminRoute = isAdmin && location.pathname.startsWith(adminBackLink);
+  const showingAdminDirectorySidebar = isAdminRoute;
+  const {
+    data: shellAdminUsers,
+    error: shellAdminUsersError,
+    loading: shellAdminUsersLoading,
+  } = useConditionalAsyncValue(
+    showingAdminDirectorySidebar,
+    listAdminUsers,
+    [managerUserId, location.pathname],
+  );
+  const visibleShellAdminUsers = shellAdminUsers ?? [];
   const isWorkspaceSection = isWorkspaceRoute || location.pathname === userWorkspaceIndexLink();
   const workspaceHeaderSubtitle = sidebarWorkspacesLoading
     ? ""
@@ -2250,11 +2282,35 @@ function PortalShellLayout(props: {
         current.filter((entry) => entry.workspaceKey !== workspaceKey)
       );
     },
+    adminSelectedUserId,
+    setAdminSelectedUserId,
+    adminUsers: shellAdminUsers ?? [],
+    adminUsersLoading: shellAdminUsersLoading,
+    adminUsersError: shellAdminUsersError,
+    adminBackLink,
+    showingAdminDirectorySidebar,
   };
 
   useEffect(() => {
     setEmbeddedPaseoFrames([]);
   }, [activeUserId]);
+
+  useEffect(() => {
+    setAdminSelectedUserId(routeUserId || "");
+  }, [routeUserId]);
+
+  useEffect(() => {
+    if (!showingAdminDirectorySidebar) {
+      return;
+    }
+    if (!shellAdminUsers || shellAdminUsers.length === 0) {
+      return;
+    }
+    if (shellAdminUsers.some((entry) => entry.id === adminSelectedUserId)) {
+      return;
+    }
+    setAdminSelectedUserId(shellAdminUsers[0]?.id ?? routeUserId);
+  }, [adminSelectedUserId, routeUserId, shellAdminUsers, showingAdminDirectorySidebar]);
 
   useEffect(() => {
     if (!activeUserId) {
@@ -2337,54 +2393,89 @@ function PortalShellLayout(props: {
                 </SidebarGroupContent>
               </SidebarGroup>
             ) : null}
-            <SidebarGroup>
-              <SidebarGroupLabel>
-                {t("workspaces")}
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton onClick={openCreateWorkspaceDialog}>
-                      <PlusCircle />
-                      <span>{t("add_workspace")}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  {!sidebarWorkspacesLoading && sidebarWorkspacesError && (
-                    <div className="px-2 py-3 text-sm text-destructive">
-                      {sidebarWorkspacesError}
-                    </div>
-                  )}
-                  {visibleSidebarWorkspaces.map((workspace) => {
-                    const active = currentWorkspaceName === workspace.name;
-                    const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
-                    const sidebarStatusLabel = translateWorkspaceLiveness(runtimeLifecycle, t);
-                    return (
-                      <SidebarMenuItem key={workspace.name}>
-                        <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
-                          <Link
-                            to={workspaceLink(workspace.name)}
-                            onClick={(event) => void handleWorkspaceSelect(event, workspace.name)}
-                          >
-                            <FolderKanban />
-                            <span className="truncate">{workspace.name}</span>
-                            <span
-                              className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(runtimeLifecycle)}`}
-                              title={sidebarStatusLabel}
-                              aria-label={sidebarStatusLabel}
-                            />
-                          </Link>
+            {showingAdminDirectorySidebar ? (
+              <SidebarGroup>
+                <SidebarGroupLabel>
+                  {t("admin_user_directory")}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {shellAdminUsersError ? (
+                      <div className="px-2 py-3 text-sm text-destructive">
+                        {shellAdminUsersError}
+                      </div>
+                    ) : null}
+                    {!shellAdminUsersLoading && !shellAdminUsersError && visibleShellAdminUsers.length === 0 ? (
+                      <div className="px-2 py-3 text-sm text-muted-foreground">
+                        {t("admin_user_empty")}
+                      </div>
+                    ) : null}
+                    {visibleShellAdminUsers.map((entry) => (
+                      <SidebarMenuItem key={entry.id}>
+                        <SidebarMenuButton
+                          isActive={entry.id === adminSelectedUserId}
+                          onClick={() => setAdminSelectedUserId(entry.id)}
+                        >
+                          <span className="truncate">{entry.id}</span>
+                          <Badge className="ml-auto shrink-0" variant={entry.role === "admin" ? "default" : "secondary"}>
+                            {entry.role}
+                          </Badge>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
-                    );
-                  })}
-                  {!sidebarWorkspacesLoading && visibleSidebarWorkspaces.length === 0 && (
-                    <div className="px-2 py-3 text-sm text-muted-foreground">
-                      {t("no_workspaces")}
-                    </div>
-                  )}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ) : (
+              <SidebarGroup>
+                <SidebarGroupLabel>
+                  {t("workspaces")}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton onClick={openCreateWorkspaceDialog}>
+                        <PlusCircle />
+                        <span>{t("add_workspace")}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    {!sidebarWorkspacesLoading && sidebarWorkspacesError && (
+                      <div className="px-2 py-3 text-sm text-destructive">
+                        {sidebarWorkspacesError}
+                      </div>
+                    )}
+                    {visibleSidebarWorkspaces.map((workspace) => {
+                      const active = currentWorkspaceName === workspace.name;
+                      const runtimeLifecycle = resolveWorkspaceRuntimeLifecycle(workspace);
+                      const sidebarStatusLabel = translateWorkspaceLiveness(runtimeLifecycle, t);
+                      return (
+                        <SidebarMenuItem key={workspace.name}>
+                          <SidebarMenuButton asChild isActive={active} tooltip={workspace.name}>
+                            <Link
+                              to={workspaceLink(workspace.name)}
+                              onClick={(event) => void handleWorkspaceSelect(event, workspace.name)}
+                            >
+                              <FolderKanban />
+                              <span className="truncate">{workspace.name}</span>
+                              <span
+                                className={`ml-auto h-2.5 w-2.5 shrink-0 rounded-full ${workspaceSidebarStatusDotClass(runtimeLifecycle)}`}
+                                title={sidebarStatusLabel}
+                                aria-label={sidebarStatusLabel}
+                              />
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                    {!sidebarWorkspacesLoading && visibleSidebarWorkspaces.length === 0 && (
+                      <div className="px-2 py-3 text-sm text-muted-foreground">
+                        {t("no_workspaces")}
+                      </div>
+                    )}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
           </div>
           {activeUser && isAdmin && (
             <SidebarGroup className="shrink-0 pt-4">
@@ -2394,13 +2485,16 @@ function PortalShellLayout(props: {
               <SidebarGroupContent>
                   <SidebarMenu>
                     <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={location.pathname === adminBackLink}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={!showingAdminDirectorySidebar && isAdminRoute}
+                    >
                       <Link
-                        to={adminBackLink}
+                        to={showingAdminDirectorySidebar ? userWorkspaceIndexLink() : adminBackLink}
                         onClick={handleSidebarNavigate}
                       >
                         <CircleUser />
-                        <span>{t("manage_users")}</span>
+                        <span>{showingAdminDirectorySidebar ? t("back_to_workspaces") : t("manage_users")}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -2968,13 +3062,17 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "", targetUserId = "" } = useParams();
   const navigate = useNavigate();
-  const { activeUserId, refreshWorkspaceStatic: refreshShellWorkspaceStatic } = usePortalShell();
+  const {
+    activeUserId,
+    refreshWorkspaceStatic: refreshShellWorkspaceStatic,
+    adminSelectedUserId: selectedAdminUserId,
+    setAdminSelectedUserId,
+    adminUsers,
+    adminUsersError,
+    adminUsersLoading,
+  } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
   const { data: users } = useAsyncValue(listUsers, [reloadKey]);
-  const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
-    listAdminUsers,
-    [reloadKey],
-  );
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [adminActionError, setAdminActionError] = useState<string | null>(null);
   const [workspaceAdminActionError, setWorkspaceAdminActionError] = useState<string | null>(null);
@@ -3020,7 +3118,6 @@ function AdminPage() {
     Record<string, AdminWorkspaceActionEntry>
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
-  const [selectedAdminUserId, setSelectedAdminUserId] = useState(userId);
   const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access">("user");
   const [adminAiAccessRefreshTick, setAdminAiAccessRefreshTick] = useState(0);
   const [adminAiAccessAction, setAdminAiAccessAction] = useState<PortalAiAccessActionKind | null>(null);
@@ -3147,7 +3244,7 @@ function AdminPage() {
       ? userId
       : adminUsers[0]?.id;
     if (fallbackUserId) {
-      setSelectedAdminUserId(fallbackUserId);
+      setAdminSelectedUserId(fallbackUserId);
     }
   }, [adminUsers, selectedAdminUserId, userId]);
 
@@ -3474,7 +3571,7 @@ function AdminPage() {
           ? userId
           : nextUsers[0]?.id;
         if (fallbackUserId) {
-          setSelectedAdminUserId(fallbackUserId);
+          setAdminSelectedUserId(fallbackUserId);
         } else if (targetUserId === userId) {
           navigate("/", { replace: true });
         }
@@ -4055,75 +4152,26 @@ function AdminPage() {
   }
 
   return (
-    <div className="grid w-full gap-6 lg:grid-cols-[21rem_minmax(0,1fr)]">
+    <div className="grid w-full gap-6">
       <div className="grid gap-4">
-        <Card className="border-border/70 lg:sticky lg:top-4">
-          <CardHeader className="gap-1">
-            <CardTitle className="text-base">{t("admin_user_directory")}</CardTitle>
-            <CardDescription>{t("administration_desc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid max-h-[calc(100vh-10rem)] gap-2 overflow-y-auto">
-            {adminUsersError ? (
-              <p className="text-sm text-destructive">{adminUsersError}</p>
-            ) : null}
-            {!adminUsersLoading && !adminUsersError && (adminUsers?.length ?? 0) === 0 ? (
+        <ErrorPopup
+          title={t("global_error_title")}
+          message={adminActionError}
+          onClose={() => setAdminActionError(null)}
+        />
+        {!selectedAdminUser ? (
+          <Card className="border-border/70">
+            <CardContent className="py-10">
               <p className="text-sm text-muted-foreground">{t("admin_user_empty")}</p>
-            ) : null}
-            {adminUsers?.map((entry) => {
-              const active = entry.id === selectedAdminUserId;
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setSelectedAdminUserId(entry.id)}
-                  className={active
-                    ? "box-border grid w-full min-w-0 gap-2 rounded-2xl border border-border bg-muted/40 px-3 py-3 text-left"
-                    : "box-border grid w-full min-w-0 gap-2 rounded-2xl border border-border/60 bg-white px-3 py-3 text-left hover:bg-muted/20"}
-                >
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
-                        {entry.name || entry.id}
-                      </div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {entry.id}
-                      </div>
-                    </div>
-                    <Badge className="shrink-0" variant={entry.role === "admin" ? "default" : "secondary"}>
-                      {entry.role}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>{entry.credentialCount} {t("credentials")}</span>
-                    <span>{entry.workspaces.length} {t("tracked_workspaces")}</span>
-                    <span>{entry.archivedWorkspaceCount} {t("admin_user_archives")}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-6">
-        <div className="grid gap-4">
-          <ErrorPopup
-            title={t("global_error_title")}
-            message={adminActionError}
-            onClose={() => setAdminActionError(null)}
-          />
-          {!selectedAdminUser ? (
-            <Card className="border-border/70">
-              <CardContent className="py-10">
-                <p className="text-sm text-muted-foreground">{t("admin_user_empty")}</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Tabs
-              key={selectedAdminUserId}
-              value={adminTab}
-              onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access")}
-              className="w-full"
-            >
+            </CardContent>
+          </Card>
+        ) : (
+          <Tabs
+            key={selectedAdminUserId}
+            value={adminTab}
+            onValueChange={(value) => setAdminTab(value as "user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access")}
+            className="w-full"
+          >
               <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start rounded-2xl border border-border/70 bg-muted/20 p-1">
                 <TabsTrigger value="user" className="flex-1 rounded-xl">
                   {t("admin_user_tab_user")}
@@ -5300,9 +5348,8 @@ function AdminPage() {
                   </>
                 </React.Suspense>
               </TabsContent>
-            </Tabs>
-          )}
-        </div>
+          </Tabs>
+        )}
       </div>
     </div>
   );
