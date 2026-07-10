@@ -84,16 +84,11 @@ const USER_ROOT = polarisUsersRoot(import.meta.url);
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
-const STOP_REQUEST_EARLY_RETURN_MS = 50;
 
 type WorkspaceOperationKind = "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
 
 function workspaceJobKey(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
-}
-
-function delayMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function provisionStepDelayMs(): number {
@@ -1420,66 +1415,6 @@ export async function refreshPortalWorkspaceStatus(
   return job;
 }
 
-export async function reportPortalWorkspaceStatus(input: {
-  userId: string;
-  workspace: string;
-  status: Partial<WorkspaceStatus>;
-  paseo?: {
-    serverId?: string;
-    pairingUrl?: string;
-  };
-}): Promise<{ reported: true }> {
-  const summary = loadWorkspaceSummary(input.userId, input.workspace);
-  const next: WorkspaceStatus = buildWorkspaceStatusFromCurrent({
-    workspace: input.workspace,
-    current: summary.status,
-    driver: input.status.driver,
-    driverState: input.status.driver
-      ? {
-          ...(Object.prototype.hasOwnProperty.call(input.status.driver, "selected")
-            ? { selected: input.status.driver.selected }
-            : {}),
-          status: input.status.driver.status,
-          ...(Object.prototype.hasOwnProperty.call(input.status.driver, "reason")
-            ? { reason: input.status.driver.reason }
-            : {}),
-        }
-      : undefined,
-    paseo: input.status.paseo,
-    details: {
-      ...(summary.status?.details ?? {}),
-      ...(input.status.details ?? {}),
-    },
-    credentials: input.status.credentials ?? summary.status?.credentials,
-    evolution: input.status.evolution ?? summary.status?.evolution,
-    assets: input.status.assets ?? summary.status?.assets,
-    attachments: input.status.attachments ?? summary.status?.attachments,
-    workspaceAssembly: input.status.workspaceAssembly ?? summary.status?.workspaceAssembly,
-  });
-  writeWorkspaceStatus(next, input.userId);
-  const normalizedServerId = String(input.paseo?.serverId ?? "").trim();
-  if (normalizedServerId) {
-    writeWorkspacePaseoServerId(input.workspace, normalizedServerId, input.userId);
-  }
-  const normalizedPairingUrl = String(input.paseo?.pairingUrl ?? "").trim();
-  if (normalizedPairingUrl) {
-    writeWorkspacePaseoPairing(
-      input.workspace,
-      { url: normalizedPairingUrl },
-      input.userId,
-    );
-  }
-  logWorkspaceEvent("info", "status-reported", {
-    userId: input.userId,
-    workspace: input.workspace,
-  }, {
-    runtimeLifecycle: next.driver?.status,
-    serverId: normalizedServerId || undefined,
-    pairingUrlPersisted: Boolean(normalizedPairingUrl),
-  });
-  return { reported: true };
-}
-
 export async function updatePortalWorkspaceSelectedDriver(input: {
   userId: string;
   workspace: string;
@@ -1742,13 +1677,7 @@ export async function stopPortalWorkspace(
       stopJobs.delete(jobKey);
     });
   stopJobs.set(jobKey, job);
-  const outcome = await Promise.race([
-    job.then(() => "completed" as const),
-    delayMs(STOP_REQUEST_EARLY_RETURN_MS).then(() => "pending" as const),
-  ]);
-  if (outcome === "completed") {
-    await job;
-  }
+  await job;
   return { stopped: true };
 }
 

@@ -197,20 +197,6 @@ export async function refreshPortalWorkspaceStatus(input: {
   );
 }
 
-export async function reportPortalWorkspaceStatus(input: {
-  userId: string;
-  workspace: string;
-  status: Partial<WorkspaceStatus>;
-}): Promise<{ reported: true }> {
-  return executorRequest(
-    "/workspaces/status/report",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
 export async function switchPortalWorkspace(input: {
   userId: string;
   workspace: string;

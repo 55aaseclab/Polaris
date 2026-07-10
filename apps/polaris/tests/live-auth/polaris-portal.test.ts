@@ -15,18 +15,14 @@ import {
 import {
   listPortalAdminUsers,
   queueProvisionWorkspace,
-  reportPortalWorkspaceStatus,
   createPortalCredential,
   deletePortalUser,
 } from "../../scripts/portal/service.js";
 import { createUserCommand } from "../../scripts/cli/commands/create-user.js";
 import {
-  readWorkspaceStatus,
   writeWorkspaceProvisionProgress,
   clearWorkspaceProvisionProgress,
 } from "../../scripts/core/portal.js";
-import { writeWorkspaceStatus } from "../../scripts/output/state-store.js";
-import { workspaceRuntimeScopeName } from "../../scripts/core/workspace-name.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
 const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
@@ -255,99 +251,6 @@ async function withEnv(
     }
   }
 }
-
-test("live auth portal API accepts runtime status reports and persists cached workspace state", async () => {
-  const userId = DEMO_USER_ID;
-  const workspace = "demo";
-  const previous = readWorkspaceStatus(userId, workspace);
-  writeWorkspaceStatus({
-    project: workspace,
-    driver: {
-      backend: "docker",
-      baseImage: "ttl.sh/example:24h",
-      runtimeKind: "docker-container",
-      runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
-    },
-    runtime: {
-      selectedDriver: { backend: "docker" },
-      lifecycle: "stopped",
-      reason: "test setup",
-    },
-    paseo: {
-      daemon: "absent",
-      web: "unavailable",
-      reconnectMode: "unknown",
-      liveTarget: null,
-      reconnectTarget: null,
-      reason: "test setup",
-    },
-    details: {},
-  }, userId);
-  try {
-    await withPortalServer(async (baseUrl) => {
-      const response = await fetch(
-        `${baseUrl}/api/users/${userId}/workspaces/${workspace}/refresh`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({}),
-        },
-      );
-      assert.equal(response.status, 200);
-    });
-    await withPortalServer(async (baseUrl) => {
-      const detailBefore = await fetch(
-        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
-      );
-      assert.equal(detailBefore.status, 200);
-      const parsedBefore = await detailBefore.json() as {
-        status?: { driver?: { status?: string } };
-      };
-      assert.equal(parsedBefore.status?.driver?.status, "stopped");
-
-      await reportPortalWorkspaceStatus({
-        userId,
-        workspace,
-        status: {
-          runtime: {
-            selectedDriver: { backend: "docker" },
-            lifecycle: "running",
-          },
-          paseo: {
-            daemon: "ready",
-            web: "connectable",
-            reconnectMode: "reconnectable",
-            liveTarget: "https://app.paseo.sh/#offer=test",
-            reconnectTarget: "https://example.invalid/h/srv_test?scope=demo",
-          },
-          details: {
-            backendDetail: "reported by test",
-          },
-        },
-      });
-
-      const detailAfter = await fetch(
-        `${baseUrl}/api/users/${userId}/workspaces/${workspace}`,
-      );
-      assert.equal(detailAfter.status, 200);
-      const parsedAfter = await detailAfter.json() as {
-        status?: {
-          driver?: { status?: string };
-          paseo?: { daemon?: string; web?: string };
-          details?: { backendDetail?: string };
-        };
-      };
-      assert.equal(parsedAfter.status?.driver?.status, "running");
-      assert.equal(parsedAfter.status?.paseo?.daemon, "ready");
-      assert.equal(parsedAfter.status?.paseo?.web, "connectable");
-      assert.equal(parsedAfter.status?.details?.backendDetail, "reported by test");
-    });
-  } finally {
-    if (previous) {
-      writeWorkspaceStatus(previous, userId);
-    }
-  }
-});
 
 test("live auth portal API serves route-scoped workspaces and credentials for an authenticated scope", async () => {
   const credentialId = uniqueName("portal-cred");
