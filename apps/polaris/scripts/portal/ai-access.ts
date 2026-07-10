@@ -57,6 +57,24 @@ export interface PortalAiAccessCapabilities {
   subscription: boolean;
 }
 
+export interface PortalAiAccessTopUpMethod {
+  id: string;
+  label: string;
+  kind: "epay" | "waffo" | "waffo-pancake" | "creem";
+  minAmount: number;
+  fixedAmount: number | null;
+}
+
+export interface PortalAiAccessTopUpInfo {
+  currencySymbol: string;
+  amountOptions: number[];
+  methods: PortalAiAccessTopUpMethod[];
+}
+
+export interface PortalAiAccessTopUpSession {
+  redirectUrl: string;
+}
+
 
 export interface PortalAiAccessProviderFacts {
   providerBackend: string;
@@ -245,6 +263,32 @@ type NewApiCachedAuth = {
   expiresAt: number;
 };
 
+type NewApiTopUpInfoResponse = {
+  enable_online_topup?: boolean;
+  enable_stripe_topup?: boolean;
+  enable_creem_topup?: boolean;
+  enable_waffo_topup?: boolean;
+  enable_waffo_pancake_topup?: boolean;
+  min_topup?: number;
+  stripe_min_topup?: number;
+  waffo_min_topup?: number;
+  waffo_pancake_min_topup?: number;
+  amount_options?: number[];
+  pay_methods?: Array<{
+    name?: string;
+    type?: string;
+    min_topup?: string | number;
+  }>;
+  waffo_pay_methods?: Array<{
+    name?: string;
+  }>;
+  creem_products?: Array<{
+    name?: string;
+    productId?: string;
+    price?: number;
+  }>;
+};
+
 let cachedNewApiAdminAuth: NewApiCachedAuth | null = null;
 
 
@@ -257,6 +301,14 @@ function normalizeNewApiTopUpQuota(): number {
 
 function convertNewApiQuotaToDisplayAmount(quota: number): number {
   return quota / normalizeNewApiTopUpQuota();
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+  const numberValue = Number(value);
+  if (Number.isFinite(numberValue) && numberValue > 0) {
+    return numberValue;
+  }
+  return fallback;
 }
 
 async function newApiRequest<T>(
@@ -526,6 +578,114 @@ async function newApiReadAffCodeWithToken(
     accessToken: providerToken,
     userIdHeader: providerUserId,
   });
+}
+
+async function newApiProvisionedToken(
+  userId: string,
+): Promise<{
+  state: PersistedAiAccessState;
+  providerUserId: number;
+  providerToken: string;
+}> {
+  const normalizedState = normalizeNewApiState(userId, readPersistedState(userId));
+  if (!normalizedState?.provisionedAt || !normalizedState.providerAccountId) {
+    throw new Error("AI access is not provisioned yet");
+  }
+  const providerUserId = Number(normalizedState.providerAccountId);
+  if (!Number.isFinite(providerUserId) || providerUserId <= 0) {
+    throw new Error("AI access provider user id is missing");
+  }
+  let providerToken = normalizedState.providerToken?.trim() || "";
+  if (!providerToken) {
+    const refreshed = await newApiReadFacts(userId, normalizedState);
+    const nextState = readPersistedState(userId);
+    providerToken = nextState?.providerToken?.trim() || "";
+    if (!providerToken) {
+      throw new Error(
+        refreshed.errorMessage || "AI access provider token is unavailable",
+      );
+    }
+    return {
+      state: nextState as PersistedAiAccessState,
+      providerUserId,
+      providerToken,
+    };
+  }
+  return {
+    state: normalizedState,
+    providerUserId,
+    providerToken,
+  };
+}
+
+function buildNewApiTopUpMethods(
+  payload: NewApiTopUpInfoResponse,
+): PortalAiAccessTopUpMethod[] {
+  const methods: PortalAiAccessTopUpMethod[] = [];
+  for (const method of payload.pay_methods ?? []) {
+    const type = method.type?.trim();
+    if (!type) {
+      continue;
+    }
+    methods.push({
+      id: `epay:${type}`,
+      label: method.name?.trim() || type,
+      kind: "epay",
+      minAmount: normalizePositiveNumber(method.min_topup, payload.min_topup ?? 1),
+      fixedAmount: null,
+    });
+  }
+  (payload.waffo_pay_methods ?? []).forEach((method, index) => {
+    methods.push({
+      id: `waffo:${index}`,
+      label: method.name?.trim() || `Waffo ${index + 1}`,
+      kind: "waffo",
+      minAmount: normalizePositiveNumber(payload.waffo_min_topup, 1),
+      fixedAmount: null,
+    });
+  });
+  if (payload.enable_waffo_pancake_topup) {
+    methods.push({
+      id: "waffo-pancake",
+      label: "Waffo Pancake",
+      kind: "waffo-pancake",
+      minAmount: normalizePositiveNumber(payload.waffo_pancake_min_topup, 1),
+      fixedAmount: null,
+    });
+  }
+  for (const product of payload.creem_products ?? []) {
+    if (!product.productId) {
+      continue;
+    }
+    const fixedAmount = normalizePositiveNumber(product.price, 0);
+    methods.push({
+      id: `creem:${product.productId}`,
+      label: product.name?.trim() || `Creem ${product.productId}`,
+      kind: "creem",
+      minAmount: fixedAmount,
+      fixedAmount,
+    });
+  }
+  return methods;
+}
+
+function extractPaymentRedirectUrl(raw: unknown): string {
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Payment session did not return a redirect URL");
+  }
+  const record = raw as Record<string, unknown>;
+  const url =
+    record.url
+    ?? record.pay_link
+    ?? record.checkout_url
+    ?? record.payment_url;
+  if (typeof url === "string" && url.trim()) {
+    return url.trim();
+  }
+  throw new Error("Payment session did not return a redirect URL");
 }
 
 function isMissingProviderUserError(error: unknown): boolean {
@@ -1096,6 +1256,85 @@ export async function performPortalAiAccessAction(
           : await adapter.refresh(userId);
   const runtime = await ensureRuntimeReadiness(userId, facts);
   return buildView(facts, runtime);
+}
+
+export async function getPortalAiAccessTopUpInfo(
+  userId: string,
+): Promise<PortalAiAccessTopUpInfo> {
+  if (DEFAULT_PROVIDER_BACKEND !== "new-api") {
+    throw new Error("Real top-up is only supported with the new-api backend");
+  }
+  const { providerToken, providerUserId } = await newApiProvisionedToken(userId);
+  const payload = await newApiRequest<NewApiTopUpInfoResponse>("/api/user/topup/info", {
+    accessToken: providerToken,
+    userIdHeader: providerUserId,
+  });
+  return {
+    currencySymbol: "$",
+    amountOptions: (payload.amount_options ?? [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0),
+    methods: buildNewApiTopUpMethods(payload),
+  };
+}
+
+export async function createPortalAiAccessTopUpSession(input: {
+  userId: string;
+  methodId: string;
+  amount: number;
+}): Promise<PortalAiAccessTopUpSession> {
+  if (DEFAULT_PROVIDER_BACKEND !== "new-api") {
+    throw new Error("Real top-up is only supported with the new-api backend");
+  }
+  const { providerToken, providerUserId } = await newApiProvisionedToken(input.userId);
+  const amount = Math.floor(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Top-up amount must be greater than 0");
+  }
+  let response: unknown;
+  if (input.methodId.startsWith("epay:")) {
+    response = await newApiRequest<unknown>("/api/user/pay", {
+      method: "POST",
+      accessToken: providerToken,
+      userIdHeader: providerUserId,
+      body: {
+        amount,
+        payment_method: input.methodId.slice("epay:".length),
+      },
+    });
+  } else if (input.methodId.startsWith("waffo:")) {
+    response = await newApiRequest<unknown>("/api/user/waffo/pay", {
+      method: "POST",
+      accessToken: providerToken,
+      userIdHeader: providerUserId,
+      body: {
+        amount,
+        pay_method_index: Number(input.methodId.slice("waffo:".length)),
+      },
+    });
+  } else if (input.methodId === "waffo-pancake") {
+    response = await newApiRequest<unknown>("/api/user/waffo-pancake/pay", {
+      method: "POST",
+      accessToken: providerToken,
+      userIdHeader: providerUserId,
+      body: { amount },
+    });
+  } else if (input.methodId.startsWith("creem:")) {
+    response = await newApiRequest<unknown>("/api/user/creem/pay", {
+      method: "POST",
+      accessToken: providerToken,
+      userIdHeader: providerUserId,
+      body: {
+        product_id: input.methodId.slice("creem:".length),
+        payment_method: "creem",
+      },
+    });
+  } else {
+    throw new Error(`Unsupported top-up method '${input.methodId}'`);
+  }
+  return {
+    redirectUrl: extractPaymentRedirectUrl(response),
+  };
 }
 
 

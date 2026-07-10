@@ -21,7 +21,9 @@ import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   createPortalCredential,
+  createPortalAiAccessTopUpSession,
   getPortalAiAccess,
+  getPortalAiAccessTopUpInfo,
   createPortalSkill,
   listPortalAdminUsers,
   listPortalArchivedWorkspaces,
@@ -421,6 +423,32 @@ async function handleAiAccessAction(
   }));
 }
 
+async function handleAiAccessTopUpInfo(
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  sendJson(res, 200, await getPortalAiAccessTopUpInfo(userId));
+}
+
+async function handleAiAccessTopUpSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const methodId = body.methodId?.trim() || "";
+  const amount = Number(body.amount ?? 0);
+  if (!methodId || !Number.isFinite(amount)) {
+    badRequest(res, "AI access top-up methodId and amount are required");
+    return;
+  }
+  sendJson(res, 200, await createPortalAiAccessTopUpSession({
+    userId,
+    methodId,
+    amount,
+  }));
+}
+
 async function handleWorkspaceLiveCredentialSwitch(
   req: IncomingMessage,
   res: ServerResponse,
@@ -782,6 +810,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "ai-access" && segments.length === 4 && req.method === "GET") {
           await handleAiAccessRead(res, routeUserId);
+          return;
+        }
+        if (segments[3] === "ai-access" && segments.length === 5 && segments[4] === "topup-info" && req.method === "GET") {
+          await handleAiAccessTopUpInfo(res, routeUserId);
+          return;
+        }
+        if (segments[3] === "ai-access" && segments.length === 5 && segments[4] === "topup-session" && req.method === "POST") {
+          await handleAiAccessTopUpSession(req, res, routeUserId);
           return;
         }
         if (

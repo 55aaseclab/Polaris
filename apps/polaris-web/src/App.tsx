@@ -58,6 +58,8 @@ import {
   setApiAuthTokenProvider,
   startWorkspace,
   stopWorkspace,
+  createAiAccessTopUpSession,
+  getAiAccessTopUpInfo,
   performAiAccessAction,
   syncWorkspaceSkills,
   switchWorkspaceLiveCredential,
@@ -66,6 +68,7 @@ import {
   uninstallWorkspaceSkill,
   updateCredentialFile,
   type PortalAiAccessActionKind,
+  type PortalAiAccessTopUpInfo,
   type PortalAiAccessView,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
@@ -467,6 +470,15 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_referral_unavailable: "Unavailable",
     ai_access_copy_link: "Copy link",
     ai_access_copied: "Copied",
+    ai_access_topup_title: "Recharge AI Access",
+    ai_access_topup_description: "Create a real payment session for this user's AI Access wallet.",
+    ai_access_topup_no_methods: "No online payment methods are enabled in new-api yet.",
+    ai_access_topup_method: "Payment method",
+    ai_access_topup_method_placeholder: "Select a payment method",
+    ai_access_topup_amount: "Amount",
+    ai_access_topup_minimum: "Minimum",
+    ai_access_topup_continue: "Continue to payment",
+    ai_access_topup_invalid_amount: "Top-up amount must be greater than 0",
     ai_access_headline_not_provisioned: "AI access is not provisioned",
     ai_access_headline_funding_needed: "AI access needs funding",
     ai_access_headline_ready: "AI access is ready",
@@ -875,6 +887,15 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_referral_unavailable: "不可用",
     ai_access_copy_link: "复制链接",
     ai_access_copied: "已复制",
+    ai_access_topup_title: "充值 AI 访问",
+    ai_access_topup_description: "为该用户的 AI Access 钱包创建真实支付会话。",
+    ai_access_topup_no_methods: "new-api 当前还没有启用在线支付方式。",
+    ai_access_topup_method: "支付方式",
+    ai_access_topup_method_placeholder: "请选择支付方式",
+    ai_access_topup_amount: "金额",
+    ai_access_topup_minimum: "最低金额",
+    ai_access_topup_continue: "继续支付",
+    ai_access_topup_invalid_amount: "充值金额必须大于 0",
     ai_access_headline_not_provisioned: "AI 访问尚未开通",
     ai_access_headline_funding_needed: "AI 访问需要充值",
     ai_access_headline_ready: "AI 访问已就绪",
@@ -3004,6 +3025,11 @@ function AdminPage() {
   const [adminAiAccessRefreshTick, setAdminAiAccessRefreshTick] = useState(0);
   const [adminAiAccessAction, setAdminAiAccessAction] = useState<PortalAiAccessActionKind | null>(null);
   const [adminAiAccessActionError, setAdminAiAccessActionError] = useState<string | null>(null);
+  const [adminAiAccessTopUpOpen, setAdminAiAccessTopUpOpen] = useState(false);
+  const [adminAiAccessTopUpMethodId, setAdminAiAccessTopUpMethodId] = useState("");
+  const [adminAiAccessTopUpAmount, setAdminAiAccessTopUpAmount] = useState("10");
+  const [adminAiAccessTopUpSubmitting, setAdminAiAccessTopUpSubmitting] = useState(false);
+  const [adminAiAccessTopUpError, setAdminAiAccessTopUpError] = useState<string | null>(null);
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
 
@@ -3040,6 +3066,15 @@ function AdminPage() {
     adminTab === "ai-access" && Boolean(selectedAdminUserId),
     () => selectedAdminUserId ? getAiAccess(selectedAdminUserId) : Promise.resolve(null),
     [selectedAdminUserId, adminAiAccessRefreshTick],
+  );
+  const {
+    data: adminAiAccessTopUpInfo,
+    error: adminAiAccessTopUpInfoError,
+    loading: adminAiAccessTopUpInfoLoading,
+  } = useConditionalAsyncValue(
+    adminAiAccessTopUpOpen && Boolean(selectedAdminUserId),
+    () => selectedAdminUserId ? getAiAccessTopUpInfo(selectedAdminUserId) : Promise.resolve(null),
+    [selectedAdminUserId, adminAiAccessTopUpOpen],
   );
   const adminCredentialGroups = MANAGED_HARNESS_ORDER.map((harness) => ({
     harness,
@@ -3361,6 +3396,27 @@ function AdminPage() {
     adminRuntimeSkillSelection,
     selectedSkills,
   ]);
+
+  useEffect(() => {
+    if (!adminAiAccessTopUpOpen || !adminAiAccessTopUpInfo) {
+      return;
+    }
+    const firstMethod = adminAiAccessTopUpInfo.methods[0] ?? null;
+    if (
+      firstMethod
+      && !adminAiAccessTopUpInfo.methods.some((method) => method.id === adminAiAccessTopUpMethodId)
+    ) {
+      setAdminAiAccessTopUpMethodId(firstMethod.id);
+    }
+    if (!firstMethod) {
+      return;
+    }
+    const nextAmount =
+      firstMethod.fixedAmount
+      ?? adminAiAccessTopUpInfo.amountOptions[0]
+      ?? Math.max(firstMethod.minAmount, 1);
+    setAdminAiAccessTopUpAmount(String(nextAmount));
+  }, [adminAiAccessTopUpOpen, adminAiAccessTopUpInfo, adminAiAccessTopUpMethodId]);
 
   if (mappingLoading) {
     return <div className="w-full py-6" />;
@@ -3702,10 +3758,19 @@ function AdminPage() {
     : null;
   const adminInstalledHarnessSkills =
     adminInstalledWorkspaceSkills?.installed.find((entry) => entry.harness === adminRuntimeSkillHarness)?.skills ?? [];
+  const selectedAiAccessTopUpMethod =
+    adminAiAccessTopUpInfo?.methods.find((method) => method.id === adminAiAccessTopUpMethodId)
+    ?? adminAiAccessTopUpInfo?.methods[0]
+    ?? null;
 
   async function handleAdminAiAccessAction(
     action: PortalAiAccessActionKind,
   ): Promise<void> {
+    if (action === "top_up") {
+      setAdminAiAccessTopUpError(null);
+      setAdminAiAccessTopUpOpen(true);
+      return;
+    }
     if (!selectedAdminUser || adminAiAccessAction) {
       return;
     }
@@ -3721,6 +3786,31 @@ function AdminPage() {
       setAdminAiAccessActionError(formatActionError(error, t));
     } finally {
       setAdminAiAccessAction(null);
+    }
+  }
+
+  async function handleAdminAiAccessTopUpSubmit(): Promise<void> {
+    if (!selectedAdminUser || !selectedAiAccessTopUpMethod || adminAiAccessTopUpSubmitting) {
+      return;
+    }
+    const amount = selectedAiAccessTopUpMethod.fixedAmount ?? Number(adminAiAccessTopUpAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setAdminAiAccessTopUpError(t("ai_access_topup_invalid_amount"));
+      return;
+    }
+    setAdminAiAccessTopUpSubmitting(true);
+    setAdminAiAccessTopUpError(null);
+    try {
+      const session = await createAiAccessTopUpSession(selectedAdminUser.id, {
+        methodId: selectedAiAccessTopUpMethod.id,
+        amount,
+      });
+      window.open(session.redirectUrl, "_blank", "noopener,noreferrer");
+      setAdminAiAccessTopUpOpen(false);
+    } catch (error) {
+      setAdminAiAccessTopUpError(formatActionError(error, t));
+    } finally {
+      setAdminAiAccessTopUpSubmitting(false);
     }
   }
 
@@ -5116,16 +5206,98 @@ function AdminPage() {
 
               <TabsContent value="ai-access">
                 <React.Suspense fallback={null}>
-                  <AdminAiAccessTab
-                    t={t}
-                    view={selectedAiAccess}
-                    error={adminAiAccessActionError ?? selectedAiAccessError}
-                    loading={selectedAiAccessLoading}
-                    actionInFlight={adminAiAccessAction}
-                    onRunAction={(action) => {
-                      void handleAdminAiAccessAction(action);
-                    }}
-                  />
+                  <>
+                    <AdminAiAccessTab
+                      t={t}
+                      view={selectedAiAccess}
+                      error={adminAiAccessActionError ?? selectedAiAccessError}
+                      loading={selectedAiAccessLoading}
+                      actionInFlight={adminAiAccessAction}
+                      onRunAction={(action) => {
+                        void handleAdminAiAccessAction(action);
+                      }}
+                    />
+                    <Sheet open={adminAiAccessTopUpOpen} onOpenChange={setAdminAiAccessTopUpOpen}>
+                      <SheetContent side="right" className="w-full sm:max-w-xl">
+                        <SheetHeader>
+                          <SheetTitle>{t("ai_access_topup_title")}</SheetTitle>
+                          <SheetDescription>{t("ai_access_topup_description")}</SheetDescription>
+                        </SheetHeader>
+                        <div className="grid gap-4 py-4">
+                          {adminAiAccessTopUpError || adminAiAccessTopUpInfoError ? (
+                            <p className="text-sm text-destructive">
+                              {adminAiAccessTopUpError ?? adminAiAccessTopUpInfoError}
+                            </p>
+                          ) : null}
+                          {adminAiAccessTopUpInfoLoading ? (
+                            <p className="text-sm text-muted-foreground">{t("loading")}</p>
+                          ) : null}
+                          {!adminAiAccessTopUpInfoLoading && (adminAiAccessTopUpInfo?.methods.length ?? 0) === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              {t("ai_access_topup_no_methods")}
+                            </p>
+                          ) : null}
+                          {adminAiAccessTopUpInfo && adminAiAccessTopUpInfo.methods.length > 0 ? (
+                            <>
+                              <div className="grid gap-2">
+                                <Label htmlFor="ai-access-topup-method">{t("ai_access_topup_method")}</Label>
+                                <Select
+                                  value={selectedAiAccessTopUpMethod?.id ?? ""}
+                                  onValueChange={setAdminAiAccessTopUpMethodId}
+                                >
+                                  <SelectTrigger id="ai-access-topup-method">
+                                    <SelectValue placeholder={t("ai_access_topup_method_placeholder")} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {adminAiAccessTopUpInfo.methods.map((method) => (
+                                      <SelectItem key={method.id} value={method.id}>
+                                        {method.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="grid gap-2">
+                                <Label htmlFor="ai-access-topup-amount">{t("ai_access_topup_amount")}</Label>
+                                <Input
+                                  id="ai-access-topup-amount"
+                                  type="number"
+                                  min={selectedAiAccessTopUpMethod?.minAmount ?? 1}
+                                  step="1"
+                                  value={selectedAiAccessTopUpMethod?.fixedAmount ?? adminAiAccessTopUpAmount}
+                                  disabled={selectedAiAccessTopUpMethod?.fixedAmount !== null}
+                                  onChange={(event) => setAdminAiAccessTopUpAmount(event.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  {t("ai_access_topup_minimum")}: {adminAiAccessTopUpInfo.currencySymbol}
+                                  {selectedAiAccessTopUpMethod?.minAmount ?? 1}
+                                </p>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                        <SheetFooter>
+                          <Button variant="outline" onClick={() => setAdminAiAccessTopUpOpen(false)}>
+                            {t("cancel")}
+                          </Button>
+                          <Button
+                            disabled={
+                              adminAiAccessTopUpSubmitting
+                              || !selectedAiAccessTopUpMethod
+                              || (adminAiAccessTopUpInfo?.methods.length ?? 0) === 0
+                            }
+                            onClick={() => {
+                              void handleAdminAiAccessTopUpSubmit();
+                            }}
+                          >
+                            {adminAiAccessTopUpSubmitting
+                              ? t("working")
+                              : t("ai_access_topup_continue")}
+                          </Button>
+                        </SheetFooter>
+                      </SheetContent>
+                    </Sheet>
+                  </>
                 </React.Suspense>
               </TabsContent>
             </Tabs>

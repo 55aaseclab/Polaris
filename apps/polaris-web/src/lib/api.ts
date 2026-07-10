@@ -395,6 +395,24 @@ export interface PortalAiAccessAction {
   reason?: string;
 }
 
+export interface PortalAiAccessTopUpMethod {
+  id: string;
+  label: string;
+  kind: "epay" | "waffo" | "waffo-pancake" | "creem";
+  minAmount: number;
+  fixedAmount: number | null;
+}
+
+export interface PortalAiAccessTopUpInfo {
+  currencySymbol: string;
+  amountOptions: number[];
+  methods: PortalAiAccessTopUpMethod[];
+}
+
+export interface PortalAiAccessTopUpSession {
+  redirectUrl: string;
+}
+
 export interface PortalAiAccessView {
   state: PortalAiAccessState;
   summary: {
@@ -854,6 +872,30 @@ export async function performAiAccessAction(
     `/users/${encodeURIComponent(userId)}/ai-access/actions/${encodeURIComponent(action)}`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function getAiAccessTopUpInfo(
+  userId: string,
+): Promise<PortalAiAccessTopUpInfo> {
+  return apiFetch<PortalAiAccessTopUpInfo>(
+    `/users/${encodeURIComponent(userId)}/ai-access/topup-info`,
+  );
+}
+
+export async function createAiAccessTopUpSession(
+  userId: string,
+  input: {
+    methodId: string;
+    amount: number;
+  },
+): Promise<PortalAiAccessTopUpSession> {
+  return apiFetch<PortalAiAccessTopUpSession>(
+    `/users/${encodeURIComponent(userId)}/ai-access/topup-session`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
     },
   );
 }
