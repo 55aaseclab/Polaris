@@ -18,14 +18,25 @@ import {
   writeWorkspaceDriverSelection,
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
-import { updatePortalWorkspaceSelectedDriver } from "../scripts/executor/operations.js";
-import { queueProvisionWorkspace } from "../scripts/executor/operations.js";
+import {
+  queueProvisionWorkspace,
+  stopPortalWorkspace,
+  updatePortalWorkspaceSelectedDriver,
+} from "../scripts/executor/operations.js";
 import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
+}
+
+async function cleanupStartedWorkspace(userId: string, workspace: string): Promise<void> {
+  try {
+    await stopPortalWorkspace(userId, workspace);
+  } catch {
+    // Ignore cleanup failures so file cleanup still runs.
+  }
 }
 
 async function withTempPortalWorkspace(
@@ -276,6 +287,7 @@ test("workspace live stream emits starting during create-and-start flow", async 
       unsubscribe();
     }
   } finally {
+    await cleanupStartedWorkspace(userId, workspace);
     if (previousDelay === undefined) {
       delete process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS;
     } else {
