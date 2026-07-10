@@ -61,14 +61,15 @@ export function resolveAdminWorkspaceButtonState(input: {
               : input.driverStatus === "deleting"
                 ? "delete"
                 : null;
-  const effectiveOperation = input.localAction ?? derivedOperation;
-  const creating = effectiveOperation === "create";
-  const starting = effectiveOperation === "start";
-  const stopping = effectiveOperation === "stop";
-  const rebuilding = effectiveOperation === "rebuild";
-  const archiving = effectiveOperation === "archive" || effectiveOperation === "delete";
+  const creating = derivedOperation === "create";
+  const starting = derivedOperation === "start" || derivedOperation === "rebuild";
+  const stopping = derivedOperation === "stop";
+  const rebuilding = derivedOperation === "rebuild";
+  const archiving = derivedOperation === "archive" || derivedOperation === "delete";
   const running = input.runtimeLifecycle === "running";
-  const transitionActive = creating || starting || stopping || rebuilding || archiving;
+  const liveTransitionActive = creating || starting || stopping || rebuilding || archiving;
+  const requestPending = Boolean(input.localAction) && !liveTransitionActive;
+  const transitionActive = liveTransitionActive || requestPending;
 
   return {
     running,
@@ -109,33 +110,31 @@ export function resolveAdminWorkspaceDisplayState(input: {
               : input.driverStatus === "deleting"
                 ? "delete"
                 : null;
-  const effectiveOperation = input.localAction ?? derivedOperation;
-
-  if (effectiveOperation === "archive" || effectiveOperation === "delete") {
+  if (derivedOperation === "archive" || derivedOperation === "delete") {
     return {
       statusLabel: "deleting",
-      shouldPoll: true,
+      shouldPoll: false,
       rebuildLabel: "rebuild_workspace",
       rebuildDisabled: true,
     };
   }
-  if (effectiveOperation === "stop") {
+  if (derivedOperation === "stop") {
     return {
       statusLabel: "stopping",
-      shouldPoll: true,
+      shouldPoll: false,
       rebuildLabel: "rebuild_workspace",
       rebuildDisabled: true,
     };
   }
   if (
-    effectiveOperation === "create"
-    || effectiveOperation === "start"
-    || effectiveOperation === "rebuild"
+    derivedOperation === "create"
+    || derivedOperation === "start"
+    || derivedOperation === "rebuild"
   ) {
     return {
-      statusLabel: effectiveOperation === "create" ? "workspace_creating" : "workspace_starting",
-      shouldPoll: true,
-      rebuildLabel: effectiveOperation === "rebuild"
+      statusLabel: derivedOperation === "create" ? "workspace_creating" : "workspace_starting",
+      shouldPoll: false,
+      rebuildLabel: derivedOperation === "rebuild"
         ? "rebuilding_workspace"
         : "rebuild_workspace",
       rebuildDisabled: true,

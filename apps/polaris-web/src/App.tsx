@@ -40,7 +40,7 @@ import {
   getCredentialRecord,
   getCredentialCatalog,
   getWorkspaceAssetPreview,
-  getWorkspaceDetail,
+  getWorkspaceDetailStatic,
   getWorkspacePaseoDiagnostic,
   getPortalSession,
   getUserProfile,
@@ -55,7 +55,6 @@ import {
   restartWorkspacePaseoDaemon,
   resolvePortalUserMapping,
   setApiAuthTokenProvider,
-  listWorkspaces,
   startWorkspace,
   stopWorkspace,
   syncWorkspaceSkills,
@@ -77,7 +76,9 @@ import {
   type PortalUserMapping,
   type PortalWorkspaceAssetPreview,
   type PortalWorkspaceDetail,
+  type PortalWorkspaceLiveSummary,
   type PortalWorkspacePaseoDiagnostic,
+  type PortalWorkspaceStaticSummary,
   type PortalWorkspaceStatus,
   type PortalWorkspaceSummary,
 } from "@/lib/api";
@@ -93,6 +94,11 @@ import {
 } from "@/lib/admin-workspace-actions";
 import { resolveWorkspaceRouteScope } from "@/lib/admin-scoped-workspace-route";
 import { mergeEmbeddedPaseoFrames, type EmbeddedPaseoFrame } from "@/lib/paseo-frames";
+import { useUserWorkspaceStore } from "@/lib/user-workspace-store";
+import {
+  mergeWorkspaceStaticAndLive,
+  resolveWorkspaceDetailDriverState,
+} from "@/lib/workspace-view-state";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -147,6 +153,7 @@ import {
 } from "@/lib/clerk";
 import { type Language, writeStoredLanguage } from "@/lib/language";
 import { portalSignInUrl } from "@/lib/portal-auth";
+import { resolveAuthGateState } from "@/lib/auth-gate-state";
 
 const SignInPage = React.lazy(() => import("@/routes/sign-in-page"));
 const SignUpPage = React.lazy(() => import("@/routes/sign-up-page"));
@@ -193,6 +200,7 @@ function workspaceSidebarStatusDotClass(backendLiveness: string | null | undefin
 function resolveWorkspaceRuntimeLifecycle(
   workspace:
     | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceLiveSummary, "status">
     | Pick<PortalWorkspaceDetail, "status">
     | null
     | undefined,
@@ -206,6 +214,7 @@ function resolveWorkspaceRuntimeLifecycle(
 function resolveWorkspaceSelectedDriver(
   workspace:
     | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceLiveSummary, "status">
     | Pick<PortalWorkspaceDetail, "status">
     | null
     | undefined,
@@ -214,13 +223,13 @@ function resolveWorkspaceSelectedDriver(
     return null;
   }
   return workspace.status?.driver?.selected
-    ?? workspace.status?.runtime?.selectedDriver
     ?? null;
 }
 
 function resolveWorkspacePaseoTargets(
   workspace:
     | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceLiveSummary, "status">
     | Pick<PortalWorkspaceDetail, "status">
     | null
     | undefined,
@@ -237,6 +246,7 @@ function resolveWorkspacePaseoTargets(
 function resolveWorkspacePaseoWebState(
   workspace:
     | Pick<PortalWorkspaceSummary, "status">
+    | Pick<PortalWorkspaceLiveSummary, "status">
     | Pick<PortalWorkspaceDetail, "status">
     | null
     | undefined,
@@ -252,11 +262,17 @@ type LanguageContextValue = {
 
 type PortalShellContextValue = {
   activeUserId: string;
-  workspaces: PortalWorkspaceSummary[];
-  workspacesLoading: boolean;
-  workspacesError: string | null;
+  workspaceStatic: PortalWorkspaceStaticSummary[];
+  workspaceStaticLoading: boolean;
+  workspaceStaticError: string | null;
+  workspaceLiveByName: Record<string, PortalWorkspaceLiveSummary | undefined>;
+  workspaceLiveConnection: {
+    state: "connecting" | "open" | "reconnecting" | "closed" | "error";
+    error: string | null;
+    lastEventAt: number | null;
+  };
   openCreateWorkspaceDialog: () => void;
-  refreshWorkspaces: () => void;
+  refreshWorkspaceStatic: () => void;
   embeddedPaseoFrames: Array<{ workspaceKey: string; src: string; loaded: boolean }>;
   cacheEmbeddedPaseoFrame: (workspaceKey: string, src: string) => void;
   removeEmbeddedPaseoFrame: (workspaceKey: string) => void;
@@ -1043,6 +1059,12 @@ function AuthGate(props: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    if (!isLoaded) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    setSessionLoading(true);
     void getPortalSession()
       .then((session) => {
         if (!cancelled) {
@@ -1062,22 +1084,22 @@ function AuthGate(props: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isLoaded, userId]);
 
-  const hasBackendSession =
-    backendSession?.authenticated && Boolean(backendSession.clerkUserId);
+  const authGateState = resolveAuthGateState({
+    isLoaded,
+    userId,
+    sessionLoading,
+    backendSession,
+  });
 
   useEffect(() => {
-    if (!isLoaded) {
-      return;
+    if (authGateState.shouldRedirect) {
+      window.location.assign(portalSignInUrl());
     }
-    if (userId || hasBackendSession || sessionLoading) {
-      return;
-    }
-    window.location.assign(portalSignInUrl());
-  }, [hasBackendSession, isLoaded, sessionLoading, userId]);
+  }, [authGateState.shouldRedirect]);
 
-  if (!isLoaded || sessionLoading || (!userId && !hasBackendSession)) {
+  if (!authGateState.shouldRender) {
     return null;
   }
   return <>{props.children}</>;
@@ -1406,26 +1428,6 @@ function translateWorkspaceLiveness(
       return t("workspace_not_started");
     default:
       return t("unknown");
-  }
-}
-
-type WorkspaceUiAction = "starting" | "stopping" | "deleting" | null;
-
-function workspaceStatusOperationToUiAction(
-  driverStatus: PortalWorkspaceStatus["driver"]["status"] | null | undefined,
-): WorkspaceUiAction {
-  switch (driverStatus) {
-    case "creating":
-    case "starting":
-    case "rebuilding":
-      return "starting";
-    case "stopping":
-      return "stopping";
-    case "archiving":
-    case "deleting":
-      return "deleting";
-    default:
-      return null;
   }
 }
 
@@ -1847,8 +1849,6 @@ function PortalShellLayout(props: {
   const [defaultDockerOnly, setDefaultDockerOnly] = useState(true);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [createWorkspaceError, setCreateWorkspaceError] = useState<string | null>(null);
-  const [workspaceRefreshTick, setWorkspaceRefreshTick] = useState(0);
-  const [pendingSidebarWorkspaceName, setPendingSidebarWorkspaceName] = useState<string | null>(null);
   const [embeddedPaseoFrames, setEmbeddedPaseoFrames] = useState<EmbeddedPaseoFrame[]>([]);
   const isAdmin = mapping?.role === "admin";
   const routeScope = resolveWorkspaceRouteScope({
@@ -1869,38 +1869,18 @@ function PortalShellLayout(props: {
   } = routeScope;
   const activeUser = props.users.find((user) => user.id === activeUserId) ?? null;
   const {
-    data: sidebarWorkspaces,
-    loading: sidebarWorkspacesLoading,
-    error: sidebarWorkspacesError,
-  } = useAsyncValue(
-    () => activeUserId ? listWorkspaces(activeUserId) : Promise.resolve<PortalWorkspaceSummary[]>([]),
-    [activeUserId, workspaceRefreshTick],
+    staticWorkspaces: sidebarStaticWorkspaces,
+    staticLoading: sidebarWorkspacesLoading,
+    staticError: sidebarWorkspacesError,
+    liveByWorkspace: sidebarLiveByWorkspace,
+    liveConnection: sidebarLiveConnection,
+    refreshStatic: refreshSidebarWorkspaceStatic,
+  } = useUserWorkspaceStore(activeUserId);
+  const sidebarWorkspaces = mergeWorkspaceStaticAndLive(
+    sidebarStaticWorkspaces,
+    sidebarLiveByWorkspace,
   );
-  const visibleSidebarWorkspaces = pendingSidebarWorkspaceName
-    && !sidebarWorkspaces?.some((workspace) => workspace.name === pendingSidebarWorkspaceName)
-    ? [
-        ...(sidebarWorkspaces ?? []),
-        {
-          name: pendingSidebarWorkspaceName,
-          drivers: [],
-          status: {
-            runtime: {
-              selectedDriver: null,
-              lifecycle: "unknown",
-            },
-            paseo: {
-              daemon: "unknown",
-              web: "unavailable",
-              reconnectMode: "unknown",
-              liveTarget: null,
-              reconnectTarget: null,
-            },
-            operation: undefined,
-            details: {},
-          },
-        } satisfies PortalWorkspaceSummary,
-      ]
-    : (sidebarWorkspaces ?? []);
+  const visibleSidebarWorkspaces = sidebarWorkspaces ?? [];
   const activeFrameKey = currentWorkspaceName
     ? `${activeUserId.trim()}:${currentWorkspaceName.trim()}`
     : "";
@@ -1938,19 +1918,6 @@ function PortalShellLayout(props: {
     !creatingWorkspace
     && newWorkspaceName.trim().length > 0
     && !createWorkspaceNameError;
-
-  useEffect(() => {
-    setPendingSidebarWorkspaceName(null);
-  }, [activeUserId]);
-
-  useEffect(() => {
-    if (!pendingSidebarWorkspaceName) {
-      return;
-    }
-    if (sidebarWorkspaces?.some((workspace) => workspace.name === pendingSidebarWorkspaceName)) {
-      setPendingSidebarWorkspaceName(null);
-    }
-  }, [pendingSidebarWorkspaceName, sidebarWorkspaces]);
 
   function resetCreateWorkspaceForm(): void {
     setNewWorkspaceName("");
@@ -1997,23 +1964,18 @@ function PortalShellLayout(props: {
   ): Promise<void> {
     event.preventDefault();
     handleSidebarNavigate();
-    if (!activeUserId) {
+    const selectedWorkspace = sidebarStaticWorkspaces.find((workspace) => workspace.name === workspaceName) ?? null;
+    if (!selectedWorkspace) {
+      const missingWorkspaceFrameKey = `${activeUserId.trim()}:${workspaceName.trim()}`;
+      setEmbeddedPaseoFrames((current) =>
+        current.filter((entry) => entry.workspaceKey !== missingWorkspaceFrameKey)
+      );
+      if (currentWorkspaceName === workspaceName) {
+        navigate(userWorkspaceIndexLink(), { replace: true });
+      }
       return;
     }
     try {
-      const nextWorkspaces = await listWorkspaces(activeUserId);
-      setWorkspaceRefreshTick((current) => current + 1);
-      const selectedWorkspace = nextWorkspaces.find((workspace) => workspace.name === workspaceName) ?? null;
-      if (!selectedWorkspace) {
-        const missingWorkspaceFrameKey = `${activeUserId.trim()}:${workspaceName.trim()}`;
-        setEmbeddedPaseoFrames((current) =>
-          current.filter((entry) => entry.workspaceKey !== missingWorkspaceFrameKey)
-        );
-        if (currentWorkspaceName === workspaceName) {
-          navigate(userWorkspaceIndexLink(), { replace: true });
-        }
-        return;
-      }
       navigate(workspaceLink(workspaceName));
     } catch {
       navigate(workspaceLink(workspaceName));
@@ -2036,7 +1998,7 @@ function PortalShellLayout(props: {
       setCreateWorkspaceError(createWorkspaceNameError);
       return;
     }
-    if ((sidebarWorkspaces ?? []).some((entry) => entry.name === trimmedName)) {
+    if (sidebarStaticWorkspaces.some((entry) => entry.name === trimmedName)) {
       setCreateWorkspaceError(t("workspace_name_taken"));
       return;
     }
@@ -2049,10 +2011,7 @@ function PortalShellLayout(props: {
       });
       setCreateWorkspaceOpen(false);
       resetCreateWorkspaceForm();
-      if (!adminScopedWorkspaceView) {
-        setPendingSidebarWorkspaceName(trimmedName);
-      }
-      setWorkspaceRefreshTick((current) => current + 1);
+      refreshSidebarWorkspaceStatic();
       if (!adminScopedWorkspaceView) {
         navigate(workspaceLink(trimmedName));
       }
@@ -2088,13 +2047,13 @@ function PortalShellLayout(props: {
           : t("app_name");
   const shellContextValue: PortalShellContextValue = {
     activeUserId,
-    workspaces: visibleSidebarWorkspaces,
-    workspacesLoading: sidebarWorkspacesLoading,
-    workspacesError: sidebarWorkspacesError,
+    workspaceStatic: sidebarStaticWorkspaces,
+    workspaceStaticLoading: sidebarWorkspacesLoading,
+    workspaceStaticError: sidebarWorkspacesError,
+    workspaceLiveByName: sidebarLiveByWorkspace,
+    workspaceLiveConnection: sidebarLiveConnection,
     openCreateWorkspaceDialog,
-    refreshWorkspaces: () => {
-      setWorkspaceRefreshTick((current) => current + 1);
-    },
+    refreshWorkspaceStatic: refreshSidebarWorkspaceStatic,
     embeddedPaseoFrames,
     cacheEmbeddedPaseoFrame: (workspaceKey, src) => {
       setEmbeddedPaseoFrames((current) => {
@@ -2122,18 +2081,6 @@ function PortalShellLayout(props: {
 
   useEffect(() => {
     setEmbeddedPaseoFrames([]);
-  }, [activeUserId]);
-
-  useEffect(() => {
-    if (!activeUserId) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setWorkspaceRefreshTick((current) => current + 1);
-    }, 5000);
-    return () => {
-      window.clearInterval(timer);
-    };
   }, [activeUserId]);
 
   useEffect(() => {
@@ -2402,7 +2349,6 @@ function PortalShellLayout(props: {
                         : entry
                     )
                   );
-                  setWorkspaceRefreshTick((current) => current + 1);
                 }}
                 className={frame.workspaceKey === activeFrameKey
                   ? "absolute inset-4 h-[calc(100%-2rem)] w-[calc(100%-2rem)] border-0 sm:inset-6 sm:h-[calc(100%-3rem)] sm:w-[calc(100%-3rem)]"
@@ -2762,24 +2708,24 @@ function WorkspaceIndexContent(props: {
   workspaceLink: (workspaceName: string) => string;
 }) {
   const { t } = useLanguage();
-  const { workspaces, workspacesLoading, workspacesError } = usePortalShell();
+  const { workspaceStatic, workspaceStaticLoading, workspaceStaticError } = usePortalShell();
 
-  if (workspacesLoading) {
+  if (workspaceStaticLoading) {
     return null;
   }
 
-  if (workspacesError) {
+  if (workspaceStaticError) {
     return (
       <div className="flex min-h-[40dvh] w-full items-center justify-center">
-        <div className="text-sm text-destructive">{workspacesError}</div>
+        <div className="text-sm text-destructive">{workspaceStaticError}</div>
       </div>
     );
   }
 
-  if (workspaces.length > 0) {
+  if (workspaceStatic.length > 0) {
     return (
       <Navigate
-        to={props.workspaceLink(workspaces[0].name)}
+        to={props.workspaceLink(workspaceStatic[0].name)}
         replace
       />
     );
@@ -2802,24 +2748,24 @@ function WorkspaceEmptyState(props: {
 }) {
   const { t } = useLanguage();
   const {
-    workspaces,
-    workspacesLoading,
-    workspacesError,
+    workspaceStatic,
+    workspaceStaticLoading,
+    workspaceStaticError,
     openCreateWorkspaceDialog,
   } = usePortalShell();
 
-  if (workspacesLoading) {
+  if (workspaceStaticLoading) {
     return <div className="min-h-[40dvh] w-full" />;
   }
 
-  if (workspaces.length > 0) {
+  if (workspaceStatic.length > 0) {
     return <div className="min-h-[40dvh]" />;
   }
 
-  if (workspacesError) {
+  if (workspaceStaticError) {
     return (
       <div className="flex min-h-[40dvh] w-full items-center justify-center">
-        <div className="text-sm text-destructive">{workspacesError}</div>
+        <div className="text-sm text-destructive">{workspaceStaticError}</div>
       </div>
     );
   }
@@ -2849,7 +2795,7 @@ function AdminPage() {
   const { t } = useLanguage();
   const { userId = "", targetUserId = "" } = useParams();
   const navigate = useNavigate();
-  const { activeUserId, refreshWorkspaces } = usePortalShell();
+  const { activeUserId, refreshWorkspaceStatic: refreshShellWorkspaceStatic } = usePortalShell();
   const [reloadKey, setReloadKey] = useState(0);
   const { data: users } = useAsyncValue(listUsers, [reloadKey]);
   const { data: adminUsers, error: adminUsersError, loading: adminUsersLoading } = useAsyncValue(
@@ -2939,13 +2885,12 @@ function AdminPage() {
     credentials: (selectedCredentials ?? []).filter((credential) => credential.harness === harness),
   }));
   const {
-    data: selectedWorkspaces,
-    error: selectedWorkspacesError,
-    loading: selectedWorkspacesLoading,
-  } = useAsyncValue(
-    () => selectedAdminUserId ? listWorkspaces(selectedAdminUserId) : Promise.resolve([]),
-    [selectedAdminUserId, reloadKey],
-  );
+    staticWorkspaces: selectedAdminWorkspaceStatic,
+    staticLoading: selectedWorkspacesLoading,
+    staticError: selectedWorkspacesError,
+    liveByWorkspace: selectedAdminWorkspaceLiveByName,
+    refreshStatic: refreshSelectedAdminWorkspaceStatic,
+  } = useUserWorkspaceStore(selectedAdminUserId);
   const {
     data: selectedArchivedWorkspaces,
     error: selectedArchivedWorkspacesError,
@@ -2982,9 +2927,11 @@ function AdminPage() {
     () => selectedAdminUserId ? listSkills(selectedAdminUserId) : Promise.resolve([]),
     [selectedAdminUserId, reloadKey],
   );
-  const visibleSelectedWorkspaces = selectedWorkspacesLoading
-    ? []
-    : (selectedWorkspaces ?? []);
+  const selectedWorkspaces = mergeWorkspaceStaticAndLive(
+    selectedAdminWorkspaceStatic,
+    selectedAdminWorkspaceLiveByName,
+  );
+  const visibleSelectedWorkspaces = selectedWorkspacesLoading ? [] : selectedWorkspaces;
   const visibleSelectedArchivedWorkspaces = selectedArchivedWorkspacesLoading
     ? []
     : (selectedArchivedWorkspaces ?? []);
@@ -3065,33 +3012,6 @@ function AdminPage() {
   }, [adminCredentialGroups, adminCredentialTab]);
 
   useEffect(() => {
-      const hasTransientWorkspace = (selectedWorkspaces ?? []).some((workspace) => {
-        const workspaceStateKey = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
-        return resolveAdminWorkspaceDisplayState({
-          driverStatus: workspace.status?.driver?.status ?? null,
-          localAction: workspaceActionState[workspaceStateKey]?.kind ?? null,
-        }).shouldPoll;
-    }) || Object.values(workspaceActionState).some((entry) =>
-      resolveAdminWorkspaceDisplayState({
-        operation: null,
-        localAction: entry.kind,
-      }).shouldPoll
-    );
-    if (!selectedAdminUserId || !hasTransientWorkspace) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setReloadKey((current) => current + 1);
-      if (selectedAdminUserId === activeUserId) {
-        refreshWorkspaces();
-      }
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [activeUserId, refreshWorkspaces, selectedAdminUserId, selectedWorkspaces, workspaceActionState]);
-
-  useEffect(() => {
     if (!selectedAdminUserId) {
       return;
     }
@@ -3099,7 +3019,7 @@ function AdminPage() {
       const next = { ...current };
       let changed = false;
       const workspaceByKey = new Map(
-        (selectedWorkspaces ?? []).map((workspace) => [
+        selectedWorkspaces.map((workspace) => [
           adminWorkspaceStateKey(selectedAdminUserId, workspace.name),
           workspace,
         ] as const),
@@ -3238,19 +3158,25 @@ function AdminPage() {
     setAdminWorkspaceDriverSelections((current) => {
       const next = { ...current };
       let changed = false;
+      const liveKeys = new Set<string>();
       for (const workspace of selectedWorkspaces) {
         const key = adminWorkspaceStateKey(selectedAdminUserId, workspace.name);
+        liveKeys.add(key);
         const currentDriverLabel = driverLabel(resolveWorkspaceSelectedDriver(workspace));
-        if (!next[key] || !workspaceActionState[key]) {
-          if (next[key] !== currentDriverLabel) {
-            next[key] = currentDriverLabel;
-            changed = true;
-          }
+        if (!(key in next)) {
+          next[key] = currentDriverLabel;
+          changed = true;
+        }
+      }
+      for (const key of Object.keys(next)) {
+        if (!liveKeys.has(key)) {
+          delete next[key];
+          changed = true;
         }
       }
       return changed ? next : current;
     });
-  }, [selectedAdminUserId, selectedWorkspaces, workspaceActionState]);
+  }, [selectedAdminUserId, selectedWorkspaces]);
 
   useEffect(() => {
     if (adminRuntimeSkillSelection || selectedSkills === null) {
@@ -3352,6 +3278,10 @@ function AdminPage() {
     try {
       await deleteWorkspace(selectedAdminUser.id, workspaceName);
       setReloadKey((current) => current + 1);
+      refreshSelectedAdminWorkspaceStatic();
+      if (selectedAdminUser.id === activeUserId) {
+        refreshShellWorkspaceStatic();
+      }
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
       clearWorkspaceAction(actionKey);
@@ -3372,7 +3302,7 @@ function AdminPage() {
       setWorkspaceAdminActionError(adminWorkspaceNameError);
       return;
     }
-    if ((selectedWorkspaces ?? []).some((entry) => entry.name === trimmedName)) {
+    if (selectedWorkspaces.some((entry) => entry.name === trimmedName)) {
       setWorkspaceAdminActionError(t("workspace_name_taken"));
       return;
     }
@@ -3384,6 +3314,10 @@ function AdminPage() {
       });
       setAdminWorkspaceName("");
       setReloadKey((current) => current + 1);
+      refreshSelectedAdminWorkspaceStatic();
+      if (selectedAdminUser.id === activeUserId) {
+        refreshShellWorkspaceStatic();
+      }
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
@@ -3403,7 +3337,6 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await stopWorkspace(selectedAdminUser.id, workspaceName);
-      setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
       clearWorkspaceAction(actionKey);
@@ -3422,7 +3355,6 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await startWorkspace(selectedAdminUser.id, workspaceName);
-      setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
       clearWorkspaceAction(actionKey);
@@ -3441,7 +3373,6 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await rebuildWorkspace(selectedAdminUser.id, workspaceName);
-      setReloadKey((current) => current + 1);
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
       clearWorkspaceAction(actionKey);
@@ -3464,7 +3395,10 @@ function AdminPage() {
     setWorkspaceAdminActionError(null);
     try {
       await updateWorkspaceSelectedDriver(selectedAdminUser.id, workspace.name, nextDriver);
-      setReloadKey((current) => current + 1);
+      refreshSelectedAdminWorkspaceStatic();
+      if (selectedAdminUser.id === activeUserId) {
+        refreshShellWorkspaceStatic();
+      }
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
     } finally {
@@ -3495,9 +3429,9 @@ function AdminPage() {
         harness,
         credentialId,
       });
-      setReloadKey((current) => current + 1);
+      refreshSelectedAdminWorkspaceStatic();
       if (selectedAdminUser.id === activeUserId) {
-        refreshWorkspaces();
+        refreshShellWorkspaceStatic();
       }
     } catch (error) {
       setWorkspaceAdminActionError(formatActionError(error, t));
@@ -4603,7 +4537,7 @@ function AdminPage() {
                                   to={`/users/${encodeURIComponent(userId)}/admin/users/${encodeURIComponent(selectedAdminUser.id)}/workspaces/${encodeURIComponent(workspace.name)}`}
                                   onClick={() => {
                                     if (selectedAdminUserId === activeUserId) {
-                                      refreshWorkspaces();
+                                      refreshShellWorkspaceStatic();
                                     }
                                   }}
                                 >
@@ -5073,15 +5007,17 @@ function WorkspaceDetailContent() {
     cacheEmbeddedPaseoFrame,
     embeddedPaseoFrames,
     removeEmbeddedPaseoFrame,
-    workspaces,
+    workspaceLiveByName,
+    refreshWorkspaceStatic,
   } = usePortalShell();
-  const [refreshTick, setRefreshTick] = useState(0);
   const { data, error, loading } = useAsyncValue(
-    () => getWorkspaceDetail(userId, workspaceName),
-    [refreshTick, userId, workspaceName],
+    () => getWorkspaceDetailStatic(userId, workspaceName),
+    [userId, workspaceName],
   );
-  const workspaceData = data?.name === workspaceName ? data : null;
-  const workspaceLoading = loading || (!!data && !workspaceData);
+  const workspaceStaticData = data?.name === workspaceName ? data : null;
+  const workspaceLiveSummary = workspaceLiveByName[workspaceName] ?? null;
+  const workspaceLoading = loading || (!!data && !workspaceStaticData);
+  const detailErrorMessage = error;
   const detailRouteScope = resolveWorkspaceRouteScope({
     pathname: location.pathname,
     userId: routeUserId,
@@ -5092,13 +5028,15 @@ function WorkspaceDetailContent() {
   const workspaceIndexLink = detailRouteScope.workspaceIndexLink();
   const [driver, setDriver] = useState("");
   const [switching, setSwitching] = useState(false);
-  const [workspaceAction, setWorkspaceAction] = useState<"starting" | "stopping" | "deleting" | null>(null);
+  const [workspaceRequestPending, setWorkspaceRequestPending] = useState<
+    "start" | "stop" | "delete" | null
+  >(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const currentPane = detailRouteScope.currentWorkspacePane;
-  const assets = workspaceData?.status?.assets;
+  const assets = workspaceStaticData?.assets;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
-  const embeddedPortalTargets = resolveWorkspacePaseoTargets(workspaceData);
+  const embeddedPortalTargets = resolveWorkspacePaseoTargets(workspaceLiveSummary);
   const embeddedPortalUrl = embeddedPortalTargets.reconnectTarget ?? embeddedPortalTargets.liveTarget;
   const workspaceFrameKey = `${userId.trim()}:${workspaceName.trim()}`;
   const activeEmbeddedPaseoFrame = embeddedPaseoFrames.find(
@@ -5106,56 +5044,23 @@ function WorkspaceDetailContent() {
   ) ?? null;
   const activeEmbeddedPaseoFrameLoaded = activeEmbeddedPaseoFrame?.loaded === true;
   const hasActiveEmbeddedPaseoFrame = Boolean(activeEmbeddedPaseoFrame);
-  const backendLiveness = resolveWorkspaceRuntimeLifecycle(workspaceData);
-  const runtimeRunning = backendLiveness === "running";
-  const selectedWorkspaceSummary = workspaces.find(
-    (workspace) => workspace.name === workspaceName,
-  ) ?? null;
-  const summaryBackendLiveness = resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary);
-  const keepEmbeddedPaseoPollingUntilRef = useRef<number>(0);
-  const persistedWorkspaceAction = workspaceStatusOperationToUiAction(
-    workspaceData?.status?.driver?.status,
-  );
-  const effectiveRuntimeRunning =
-    (workspaceAction ?? persistedWorkspaceAction) === "starting"
-      ? true
-      : (workspaceAction ?? persistedWorkspaceAction) === "stopping"
-        || (workspaceAction ?? persistedWorkspaceAction) === "deleting"
-        ? false
-        : runtimeRunning;
-  const effectiveWorkspaceAction = workspaceAction ?? persistedWorkspaceAction;
-  const starting = effectiveWorkspaceAction === "starting";
-  const stopping = effectiveWorkspaceAction === "stopping";
-  const deleting = effectiveWorkspaceAction === "deleting";
-  const workspaceActionInFlight = effectiveWorkspaceAction !== null;
-  const backendState = resolveWorkspaceRuntimeLifecycle(workspaceData);
+  const backendLiveness = resolveWorkspaceRuntimeLifecycle(workspaceLiveSummary);
+  const driverStatus = workspaceLiveSummary?.status?.driver?.status ?? null;
+  const detailDriverState = resolveWorkspaceDetailDriverState({
+    driverStatus,
+    requestPending: workspaceRequestPending,
+  });
+  const runtimeRunning = detailDriverState.running;
+  const starting = detailDriverState.starting;
+  const stopping = detailDriverState.stopping;
+  const deleting = detailDriverState.deleting;
+  const workspaceActionInFlight = detailDriverState.actionLocked;
+  const backendState = resolveWorkspaceRuntimeLifecycle(workspaceLiveSummary);
   const runtimeOperationPending =
     backendState === "creating"
     || backendState === "starting"
-    || backendState === "rebuilding"
-    || workspaceAction === "starting";
-  const waitingForEmbeddedPaseo =
-    !deleting
-    && !activeEmbeddedPaseoFrameLoaded
-    && !embeddedPortalUrl
-    && Boolean(workspaceData)
-    && (
-      Date.now() < keepEmbeddedPaseoPollingUntilRef.current
-      || backendState === "creating"
-      || backendState === "starting"
-      || backendState === "rebuilding"
-      || backendState === "running"
-      || resolveWorkspacePaseoWebState(workspaceData) !== "connectable"
-    );
-  const workspaceStateLabel = deleting
-    ? t("deleting")
-    : starting
-      ? t("workspace_starting")
-      : stopping
-        ? t("stopping")
-        : effectiveRuntimeRunning
-          ? t("workspace_ready")
-          : t("workspace_not_started");
+    || backendState === "rebuilding";
+  const workspaceStateLabel = translateWorkspaceLiveness(backendLiveness, t);
   const evolutionSections: AssetSection[] = assets?.evolutionFiles
     ? [
         {
@@ -5175,124 +5080,41 @@ function WorkspaceDetailContent() {
         },
       ]
     : [];
-  const selectedWorkspaceSummarySignature = selectedWorkspaceSummary
-    ? JSON.stringify({
-        name: selectedWorkspaceSummary.name,
-        liveTarget: selectedWorkspaceSummary.status?.paseo?.liveTarget ?? null,
-        reconnectTarget: selectedWorkspaceSummary.status?.paseo?.reconnectTarget ?? null,
-        driverStatus: selectedWorkspaceSummary.status?.driver?.status ?? null,
-        paseoWeb: selectedWorkspaceSummary.status?.paseo?.web ?? "unknown",
-      })
-    : null;
-  const lastAutoRefreshSummarySignatureRef = useRef<string | null>(null);
-  useEffect(() => {
-    keepEmbeddedPaseoPollingUntilRef.current = Date.now() + 60_000;
-  }, [workspaceName]);
-
-  useEffect(() => {
-    if (embeddedPortalUrl || activeEmbeddedPaseoFrameLoaded) {
-      keepEmbeddedPaseoPollingUntilRef.current = 0;
-    }
-  }, [activeEmbeddedPaseoFrameLoaded, embeddedPortalUrl]);
-
   useEffect(() => {
     const selectedDriver =
-      workspaceData?.status?.driver?.selected
-      ?? workspaceData?.status?.runtime?.selectedDriver;
+      workspaceLiveSummary?.status?.driver?.selected;
     if (selectedDriver) {
       setDriver(driverLabel(selectedDriver));
     }
-  }, [workspaceData]);
+  }, [workspaceLiveSummary]);
 
   useEffect(() => {
-    if (!selectedWorkspaceSummary || !selectedWorkspaceSummarySignature) {
-      lastAutoRefreshSummarySignatureRef.current = null;
+    if (workspaceLoading && !workspaceStaticData) {
       return;
     }
-    const summaryReady =
-      resolveWorkspaceRuntimeLifecycle(selectedWorkspaceSummary) === "running"
-      && resolveWorkspacePaseoWebState(selectedWorkspaceSummary) !== "unavailable";
-    const detailReady =
-      resolveWorkspaceRuntimeLifecycle(workspaceData) === "running"
-      && resolveWorkspacePaseoWebState(workspaceData) !== "unavailable";
-    const summaryTargets = resolveWorkspacePaseoTargets(selectedWorkspaceSummary);
-    const detailTargets = resolveWorkspacePaseoTargets(workspaceData);
-    const summaryTarget =
-      summaryTargets.reconnectTarget
-      ?? summaryTargets.liveTarget
-      ?? null;
-    const detailTarget =
-      detailTargets.reconnectTarget
-      ?? detailTargets.liveTarget
-      ?? null;
-    if (!summaryReady) {
-      return;
-    }
-    if (detailReady && summaryTarget === detailTarget) {
-      lastAutoRefreshSummarySignatureRef.current = selectedWorkspaceSummarySignature;
-      return;
-    }
-    if (lastAutoRefreshSummarySignatureRef.current === selectedWorkspaceSummarySignature) {
-      return;
-    }
-    lastAutoRefreshSummarySignatureRef.current = selectedWorkspaceSummarySignature;
-    setRefreshTick((current) => current + 1);
-  }, [
-    selectedWorkspaceSummary,
-    selectedWorkspaceSummarySignature,
-    workspaceData?.status?.paseo?.liveTarget,
-    workspaceData?.status?.paseo?.reconnectTarget,
-    workspaceData?.status?.paseo?.web,
-    workspaceData?.status?.runtime?.lifecycle,
-  ]);
-
-  useEffect(() => {
-    if (workspaceLoading && !workspaceData) {
-      return;
-    }
-    if (!embeddedPortalUrl || !effectiveRuntimeRunning) {
+    if (!embeddedPortalUrl || !runtimeRunning) {
       removeEmbeddedPaseoFrame(workspaceFrameKey);
       return;
     }
     cacheEmbeddedPaseoFrame(workspaceFrameKey, embeddedPortalUrl);
-  }, [effectiveRuntimeRunning, embeddedPortalUrl, workspaceData, workspaceFrameKey, workspaceLoading]);
+  }, [embeddedPortalUrl, runtimeRunning, workspaceFrameKey, workspaceLoading]);
 
   useEffect(() => {
-    if (!workspaceAction) {
+    if (!workspaceRequestPending) {
       return;
     }
-    if (workspaceAction === "starting" && runtimeRunning) {
-      setWorkspaceAction(null);
+    if (workspaceRequestPending === "start" && (starting || runtimeRunning)) {
+      setWorkspaceRequestPending(null);
       return;
     }
-    if (workspaceAction === "stopping" && !runtimeRunning) {
-      setWorkspaceAction(null);
-    }
-  }, [runtimeRunning, workspaceAction]);
-
-  useEffect(() => {
-    if (!effectiveWorkspaceAction || effectiveWorkspaceAction === "deleting") {
+    if (workspaceRequestPending === "stop" && (stopping || !runtimeRunning)) {
+      setWorkspaceRequestPending(null);
       return;
     }
-    const timer = window.setInterval(() => {
-      setRefreshTick((current) => current + 1);
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [effectiveWorkspaceAction]);
-
-  useEffect(() => {
-    if (!waitingForEmbeddedPaseo) {
-      return;
+    if (workspaceRequestPending === "delete" && deleting) {
+      setWorkspaceRequestPending(null);
     }
-    const timer = window.setInterval(() => {
-      setRefreshTick((current) => current + 1);
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [waitingForEmbeddedPaseo]);
+  }, [deleting, runtimeRunning, starting, stopping, workspaceRequestPending]);
 
   async function handleSwitch(): Promise<void> {
     if (!driver) {
@@ -5303,8 +5125,7 @@ function WorkspaceDetailContent() {
     try {
       await switchWorkspaceDriver(userId, workspaceName, driver);
       await refreshWorkspaceStatus(userId, workspaceName);
-      refreshWorkspaces();
-      setRefreshTick((current) => current + 1);
+      refreshWorkspaceStatic();
       setActionError(null);
     } catch (error) {
       setActionError(formatActionError(error, t));
@@ -5315,39 +5136,35 @@ function WorkspaceDetailContent() {
 
   async function handleDelete(): Promise<void> {
     setActionError(null);
-    setWorkspaceAction("deleting");
+    setWorkspaceRequestPending("delete");
     try {
       await deleteWorkspace(userId, workspaceName);
-      refreshWorkspaces();
+      refreshWorkspaceStatic();
       navigate(workspaceIndexLink);
     } catch (error) {
-      setWorkspaceAction(null);
+      setWorkspaceRequestPending(null);
       setActionError(formatActionError(error, t));
     }
   }
 
   async function handleStop(): Promise<void> {
     setActionError(null);
-    setWorkspaceAction("stopping");
+    setWorkspaceRequestPending("stop");
     try {
       await stopWorkspace(userId, workspaceName);
-      refreshWorkspaces();
-      setRefreshTick((current) => current + 1);
     } catch (error) {
-      setWorkspaceAction(null);
+      setWorkspaceRequestPending(null);
       setActionError(formatActionError(error, t));
     }
   }
 
   async function handleStart(): Promise<void> {
     setActionError(null);
-    setWorkspaceAction("starting");
+    setWorkspaceRequestPending("start");
     try {
       await startWorkspace(userId, workspaceName);
-      refreshWorkspaces();
-      setRefreshTick((current) => current + 1);
     } catch (error) {
-      setWorkspaceAction(null);
+      setWorkspaceRequestPending(null);
       setActionError(formatActionError(error, t));
     }
   }
@@ -5357,7 +5174,6 @@ function WorkspaceDetailContent() {
     setRefreshing(true);
     try {
       await refreshWorkspaceStatus(userId, workspaceName);
-      setRefreshTick((current) => current + 1);
     } catch (error) {
       setActionError(formatActionError(error, t));
     } finally {
@@ -5374,7 +5190,7 @@ function WorkspaceDetailContent() {
               <SelectValue placeholder={t("select_driver")} />
             </SelectTrigger>
             <SelectContent>
-              {(workspaceData?.availableDrivers ?? []).map((item) => {
+              {(workspaceStaticData?.availableDrivers ?? []).map((item) => {
                 const label = driverLabel(item);
                 return (
                   <SelectItem key={label} value={label}>
@@ -5405,9 +5221,7 @@ function WorkspaceDetailContent() {
               <div className="text-sm font-medium">{t("switch_driver")}</div>
               <div className="text-sm text-muted-foreground">
                 {driverLabel(
-                  workspaceData?.status?.driver?.selected
-                  ?? workspaceData?.status?.runtime?.selectedDriver
-                  ?? null,
+                  workspaceLiveSummary?.status?.driver?.selected ?? null,
                 )}
               </div>
             </div>
@@ -5416,18 +5230,18 @@ function WorkspaceDetailContent() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="text-sm font-medium">
-                {effectiveRuntimeRunning ? t("stop_workspace") : t("start_workspace")}
+                {runtimeRunning ? t("stop_workspace") : t("start_workspace")}
               </div>
               <div className="text-sm text-muted-foreground">
                 {workspaceStateLabel}
               </div>
             </div>
             <Button
-              variant={effectiveRuntimeRunning ? "outline" : "default"}
-              onClick={() => void (effectiveRuntimeRunning ? handleStop() : handleStart())}
+              variant={runtimeRunning ? "outline" : "default"}
+              onClick={() => void (runtimeRunning ? handleStop() : handleStart())}
               disabled={workspaceActionInFlight}
             >
-              {effectiveRuntimeRunning
+              {runtimeRunning
                 ? (stopping ? t("stopping") : t("stop_workspace"))
                 : (starting ? t("starting") : t("start_workspace"))}
             </Button>
@@ -5478,7 +5292,7 @@ function WorkspaceDetailContent() {
   }
 
   function renderPane(): ReactNode {
-    if (!workspaceData) {
+    if (!workspaceStaticData) {
       return null;
     }
 
@@ -5497,8 +5311,9 @@ function WorkspaceDetailContent() {
 
     if (currentPane === "paseo") {
       const liveTarget =
-        workspaceData.status?.paseo?.reconnectTarget ?? workspaceData.status?.paseo?.liveTarget;
-      const driverStatus = workspaceData.status?.driver;
+        workspaceLiveSummary?.status?.paseo?.reconnectTarget
+        ?? workspaceLiveSummary?.status?.paseo?.liveTarget;
+      const driverStatus = workspaceLiveSummary?.status?.driver;
       return (
         <React.Suspense fallback={null}>
           <WorkspacePaseoPane
@@ -5509,15 +5324,13 @@ function WorkspaceDetailContent() {
             onRefreshStatus={() => void handleRefreshStatus()}
             liveCredentialControls={null}
             workspaceControlsCard={renderWorkspaceControlsCard()}
-            driverLabel={driverStatus
-              ? driverLabel(driverStatus.selected)
-              : driverLabel(workspaceData.status?.runtime?.selectedDriver ?? null)}
+            driverLabel={driverLabel(driverStatus?.selected ?? null)}
             baseImage={driverStatus?.baseImage ?? null}
             rootdiskImage={driverStatus?.rootdiskImage ?? null}
             runtimeKindLabel={translateDriverRuntimeKind(driverStatus?.runtimeKind, t)}
             runtimeRef={driverStatus?.runtimeRef ?? null}
-            assetCountLabel={workspaceData.status?.evolution
-              ? `${workspaceData.status.evolution.artifactCount} ${t("evolution_assets")}`
+            assetCountLabel={workspaceLiveSummary?.status?.evolution
+              ? `${workspaceLiveSummary.status.evolution.artifactCount} ${t("evolution_assets")}`
               : t("no_assets")}
             assetTable={(
               <WorkspaceAssetTable

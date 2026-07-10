@@ -113,10 +113,41 @@ export interface PortalWorkspaceAssetPreview {
   truncated: boolean;
 }
 
+export interface PortalWorkspaceStaticSummary {
+  name: string;
+  availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
+}
+
+export interface PortalWorkspaceLiveStatus {
+  schemaVersion?: WorkspaceStatus["schemaVersion"];
+  driver?: WorkspaceStatus["driver"];
+  paseo: WorkspaceStatus["paseo"];
+  credentials?: Pick<NonNullable<WorkspaceStatus["credentials"]>, "live">;
+  evolution?: WorkspaceStatus["evolution"];
+}
+
+export interface PortalWorkspaceLiveSummary {
+  name: string;
+  status: PortalWorkspaceLiveStatus | null;
+}
+
 export interface PortalWorkspaceSummary {
   name: string;
   drivers: PortalDriverTarget[];
   status: WorkspaceStatus | null;
+}
+
+export interface PortalWorkspaceDetailStatic {
+  name: string;
+  availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
+  credentialBindings: Array<{
+    purpose: string;
+    credentialId: string;
+    required: boolean;
+  }>;
+  assets?: WorkspaceStatus["assets"];
+  attachments?: WorkspaceStatus["attachments"];
+  workspaceAssembly?: WorkspaceStatus["workspaceAssembly"];
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
@@ -148,6 +179,33 @@ export interface PortalWorkspacePaseoDiagnostic {
     connectedDaemon: string;
   } | null;
 }
+
+export type PortalWorkspaceStreamEvent =
+  | {
+    type: "snapshot";
+    staticWorkspaces: PortalWorkspaceStaticSummary[];
+    liveWorkspaces: PortalWorkspaceLiveSummary[];
+  }
+  | {
+    type: "static-upsert";
+    workspace: PortalWorkspaceStaticSummary;
+  }
+  | {
+    type: "static-remove";
+    workspace: string;
+  }
+  | {
+    type: "live-upsert";
+    workspace: PortalWorkspaceLiveSummary;
+  }
+  | {
+    type: "live-remove";
+    workspace: string;
+  }
+  | {
+    type: "heartbeat";
+    ts: number;
+  };
 
 export const PORTAL_DRIVER_TARGETS: PortalDriverTarget[] = [
   { backend: "docker" },
@@ -496,13 +554,61 @@ export function listWorkspaceDriverTargets(userId: string, workspace: string): A
   const root = workspaceRoot(userId, workspace);
   return PORTAL_DRIVER_TARGETS.map((target) => ({
     ...target,
-    available: fs.existsSync(path.join(root, workspaceBackendFile(target))) || fs.existsSync(root),
+    available: fs.existsSync(path.join(root, workspaceBackendFile(target))),
   }));
 }
 
 export function readWorkspaceStatus(userId: string, workspace: string): WorkspaceStatus | null {
   const status = readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
   return status ? normalizeWorkspaceStatus(status) : null;
+}
+
+export function projectPortalWorkspaceLiveStatus(
+  status: WorkspaceStatus | null,
+): PortalWorkspaceLiveStatus | null {
+  if (!status) {
+    return null;
+  }
+  return {
+    ...(status.schemaVersion ? { schemaVersion: status.schemaVersion } : {}),
+    ...(status.driver ? { driver: status.driver } : {}),
+    paseo: status.paseo,
+    ...(status.credentials?.live
+      ? {
+        credentials: {
+          live: status.credentials.live,
+        },
+      }
+      : {}),
+    ...(status.evolution ? { evolution: status.evolution } : {}),
+  };
+}
+
+export function readPortalWorkspaceLiveSummary(
+  userId: string,
+  workspace: string,
+): PortalWorkspaceLiveSummary {
+  return {
+    name: workspace,
+    status: projectPortalWorkspaceLiveStatus(readWorkspaceStatus(userId, workspace)),
+  };
+}
+
+export function listPortalWorkspaceStaticSummaries(
+  userId: string,
+): PortalWorkspaceStaticSummary[] {
+  return listOwnedWorkspaces(userId).map((workspace) => ({
+    name: workspace,
+    availableDrivers: listWorkspaceDriverTargets(userId, workspace),
+  }));
+}
+
+export function listPortalWorkspaceLiveSummaries(
+  userId: string,
+): PortalWorkspaceLiveSummary[] {
+  return listOwnedWorkspaces(userId).map((workspace) =>
+    readPortalWorkspaceLiveSummary(userId, workspace)
+  );
 }
 
 function workspacePaseoScope(userId: string, workspace: string): string {
@@ -630,6 +736,51 @@ function normalizeWorkspaceAssets(
   };
 }
 
+function augmentWorkspaceStatusAssets(
+  userId: string,
+  workspace: string,
+  status: WorkspaceStatus | null,
+): WorkspaceStatus | null {
+  if (!status) {
+    return null;
+  }
+  const assets = status.assets as
+    | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
+    | undefined;
+  let nextStatus = status;
+  if (!assets || !Array.isArray(assets.evolutionFiles) || assets.evolutionFiles.length === 0) {
+    const preferredTargets = [
+      status.driver?.selected ?? null,
+      { backend: "docker" as const },
+      { backend: "pod" as const, profile: "gvisor" },
+      { backend: "kubevirt-vm" as const },
+    ].filter(Boolean) as PortalDriverTarget[];
+    for (const target of preferredTargets) {
+      try {
+        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+        const nextAssets = buildStatusAssets(loaded);
+        nextStatus = {
+          ...nextStatus,
+          assets: {
+            ...(nextStatus.assets ?? {}),
+            ...nextAssets,
+          },
+        };
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
+  if (nextStatus.assets) {
+    return {
+      ...nextStatus,
+      assets: normalizeWorkspaceAssets(nextStatus.assets),
+    };
+  }
+  return nextStatus;
+}
+
 export function readPortalWorkspaceAssetPreview(
   userId: string,
   workspace: string,
@@ -671,40 +822,11 @@ export function readPortalWorkspaceAssetPreview(
 }
 
 export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
-  let status = readWorkspaceStatus(userId, workspace);
-  const assets = status?.assets as
-    | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
-    | undefined;
-  if (status && (!assets || !Array.isArray(assets.evolutionFiles) || assets.evolutionFiles.length === 0)) {
-    const preferredTargets = [
-      status.driver?.selected ?? null,
-      { backend: "docker" as const },
-      { backend: "pod" as const, profile: "gvisor" },
-      { backend: "kubevirt-vm" as const },
-    ].filter(Boolean) as PortalDriverTarget[];
-    for (const target of preferredTargets) {
-      try {
-        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
-        const nextAssets = buildStatusAssets(loaded);
-        status = {
-          ...status,
-          assets: {
-            ...(status.assets ?? {}),
-            ...nextAssets,
-          },
-        };
-        break;
-      } catch {
-        continue;
-      }
-    }
-  }
-  if (status?.assets) {
-    status = {
-      ...status,
-      assets: normalizeWorkspaceAssets(status.assets),
-    };
-  }
+  const status = augmentWorkspaceStatusAssets(
+    userId,
+    workspace,
+    readWorkspaceStatus(userId, workspace),
+  );
   return {
     name: workspace,
     drivers: PORTAL_DRIVER_TARGETS,
@@ -712,13 +834,19 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
   };
 }
 
-export function loadWorkspaceDetail(userId: string, workspace: string): PortalWorkspaceDetail {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  let resolvedWorkspace: WorkspaceStatus | null = summary.status;
-  let bindings: PortalWorkspaceDetail["credentialBindings"] = [];
-  const selectedDriver = summary.status?.driver?.selected ?? null;
+export function loadWorkspaceDetailStatic(
+  userId: string,
+  workspace: string,
+): PortalWorkspaceDetailStatic {
+  const liveSummary = readPortalWorkspaceLiveSummary(userId, workspace);
+  const statusWithAssets = augmentWorkspaceStatusAssets(
+    userId,
+    workspace,
+    readWorkspaceStatus(userId, workspace),
+  );
+  let bindings: PortalWorkspaceDetailStatic["credentialBindings"] = [];
   const preferredTargets = [
-    selectedDriver,
+    liveSummary.status?.driver?.selected ?? null,
     { backend: "docker" as const },
     { backend: "pod" as const, profile: "gvisor" },
     { backend: "kubevirt-vm" as const },
@@ -730,17 +858,32 @@ export function loadWorkspaceDetail(userId: string, workspace: string): PortalWo
         purpose: binding.purpose,
         credentialId: binding.credentialId,
         required: binding.required,
-        }));
+      }));
       break;
     } catch {
       continue;
     }
   }
   return {
-    ...summary,
-    resolvedWorkspace,
+    name: workspace,
     availableDrivers: listWorkspaceDriverTargets(userId, workspace),
     credentialBindings: bindings,
+    ...(statusWithAssets?.assets ? { assets: statusWithAssets.assets } : {}),
+    ...(statusWithAssets?.attachments ? { attachments: statusWithAssets.attachments } : {}),
+    ...(statusWithAssets?.workspaceAssembly
+      ? { workspaceAssembly: statusWithAssets.workspaceAssembly }
+      : {}),
+  };
+}
+
+export function loadWorkspaceDetail(userId: string, workspace: string): PortalWorkspaceDetail {
+  const summary = loadWorkspaceSummary(userId, workspace);
+  const staticDetail = loadWorkspaceDetailStatic(userId, workspace);
+  return {
+    ...summary,
+    resolvedWorkspace: summary.status,
+    availableDrivers: staticDetail.availableDrivers,
+    credentialBindings: staticDetail.credentialBindings,
   };
 }
 

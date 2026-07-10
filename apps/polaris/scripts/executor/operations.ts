@@ -72,6 +72,7 @@ import {
 import { logError, logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 import { logWorkspaceEvent, measureWorkspacePhase } from "../utils/workspace-log.js";
+import { notifyPortalWorkspaceLiveChange } from "../portal/workspace-live-hub.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   withWorkspaceLifecycleLock,
@@ -261,6 +262,7 @@ function writeDirectWorkspaceStatus(
   const current = loadWorkspaceSummary(userId, workspace).status;
   const next = mutate(current);
   writeWorkspaceStatus(next, userId);
+  notifyPortalWorkspaceLiveChange(userId, workspace);
   return next;
 }
 
@@ -283,6 +285,7 @@ function writeCachedWorkspaceStatusUpdate(args: {
     return;
   }
   writeWorkspaceStatus(next, args.userId);
+  notifyPortalWorkspaceLiveChange(args.userId, args.workspace);
   logInfo("executor", "workspace-status-cached", {
     userId: args.userId,
     workspace: args.workspace,
@@ -1260,19 +1263,6 @@ function ensureWorkspaceTargetSpecs(
     ensureWorkspaceConfig(`${workspace}@pod:gvisor`, userId);
     ensureWorkspaceConfig(`${workspace}@kubevirt-vm`, userId);
   }
-  const selectionPath = path.join(
-    portalRoot(userId, workspace),
-    "state",
-    "selection.json",
-  );
-  if (!fs.existsSync(selectionPath)) {
-    fs.mkdirSync(path.dirname(selectionPath), { recursive: true });
-    fs.writeFileSync(
-      selectionPath,
-      `${JSON.stringify({ backend: "docker" }, null, 2)}\n`,
-      "utf8",
-    );
-  }
 }
 
 async function provisionWorkspaceInternal(
@@ -1317,6 +1307,16 @@ async function provisionWorkspaceInternal(
 
       if (startAfterCreate) {
         await maybeDelayProvisionStep(userId, workspace, "start");
+        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+          workspace,
+          current,
+          driver: current?.driver,
+          driverState: {
+            selected: current?.driver?.selected ?? summary.status?.driver?.selected ?? { backend: "docker" },
+            status: driverStatusForOperation("start"),
+            reason: "workspace start requested",
+          },
+        }));
         await startCommand(`${workspace}@docker`, userId);
       }
       await maybeDelayProvisionStep(userId, workspace, "finalize");
@@ -1436,7 +1436,9 @@ export async function reportPortalWorkspaceStatus(input: {
     driver: input.status.driver,
     driverState: input.status.driver
       ? {
-          selected: input.status.driver.selected,
+          ...(Object.prototype.hasOwnProperty.call(input.status.driver, "selected")
+            ? { selected: input.status.driver.selected }
+            : {}),
           status: input.status.driver.status,
           ...(Object.prototype.hasOwnProperty.call(input.status.driver, "reason")
             ? { reason: input.status.driver.reason }
@@ -1489,7 +1491,10 @@ export async function updatePortalWorkspaceSelectedDriver(input: {
     (current) => buildWorkspaceStatusFromCurrent({
       workspace: input.workspace,
       current,
-      driver: current?.driver,
+      driver: current?.driver ?? {
+        selected: null,
+        status: "unknown",
+      },
       driverState: {
         selected: input.target,
       },

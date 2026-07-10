@@ -1,5 +1,7 @@
 const workspaceId = process.env.POLARIS_PROJECT || "workspace";
 const userProfileId = process.env.POLARIS_USER_PROFILE_ID || "default";
+const driverBackend = process.env.POLARIS_DRIVER_BACKEND?.trim() || "";
+const driverProfile = process.env.POLARIS_DRIVER_PROFILE?.trim() || "";
 const statusReportUrl = process.env.POLARIS_RUNTIME_STATUS_REPORT_URL?.trim() || "";
 const statusReportSecret = process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET?.trim() || "";
 const pollIntervalMs = 60000;
@@ -52,6 +54,14 @@ export function isTransientExecutorDisconnect(error) {
 export function buildRuntimeStatusPatch() {
   return {
     driver: {
+      ...(driverBackend
+        ? {
+            selected: {
+              backend: driverBackend,
+              ...(driverProfile ? { profile: driverProfile } : {}),
+            },
+          }
+        : {}),
       status: "running",
       reason: "runtime status observer heartbeat",
     },
