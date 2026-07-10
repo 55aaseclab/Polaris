@@ -1,6 +1,15 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -26,9 +35,47 @@ type Props = {
   onRunAction: (action: PortalAiAccessActionKind) => void;
 };
 
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall through to the legacy copy path for non-secure contexts.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("legacy-copy-failed");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 export default function AdminAiAccessTab(props: Props) {
   const { t, view, error, loading, actionInFlight, onRunAction } = props;
-  const [copiedReferralLink, setCopiedReferralLink] = React.useState(false);
+  const [copyFeedback, setCopyFeedback] = React.useState<{
+    title: string;
+    message: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    setCopyFeedback(null);
+  }, [view?.referral.inviteLink]);
 
   if (loading && !view) {
     return (
@@ -71,23 +118,49 @@ export default function AdminAiAccessTab(props: Props) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(view.referral.inviteLink);
-      setCopiedReferralLink(true);
-      window.setTimeout(() => setCopiedReferralLink(false), 1500);
+      await copyText(view.referral.inviteLink);
+      setCopyFeedback({
+        title: t("ai_access_copy_success_title"),
+        message: t("ai_access_copy_success_hint"),
+      });
     } catch {
-      setCopiedReferralLink(false);
+      setCopyFeedback({
+        title: t("ai_access_copy_failed_title"),
+        message: t("ai_access_copy_failed"),
+      });
     }
   }
 
   return (
-    <Card className="border-border/70">
-      <CardHeader>
-        <CardTitle className="text-base">{t("admin_user_tab_ai_access")}</CardTitle>
-        <CardDescription>{t("ai_access_description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+    <>
+      <AlertDialog
+        open={copyFeedback !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCopyFeedback(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{copyFeedback?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{copyFeedback?.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setCopyFeedback(null)}>
+              {t("ok")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base">{t("admin_user_tab_ai_access")}</CardTitle>
+          <CardDescription>{t("ai_access_description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
           <div className="grid gap-2">
             <div className="flex items-start justify-between gap-3">
               <div className="text-sm font-medium">{t("ai_access_status")}</div>
@@ -220,7 +293,7 @@ export default function AdminAiAccessTab(props: Props) {
                   void handleCopyReferralLink();
                 }}
               >
-                {copiedReferralLink ? t("ai_access_copied") : t("ai_access_copy_link")}
+                {t("ai_access_copy_link")}
               </Button>
             </div>
             <div className="mt-3 grid gap-2 text-sm">
@@ -239,8 +312,8 @@ export default function AdminAiAccessTab(props: Props) {
             </div>
           </div>
         </div>
-
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   );
 }
