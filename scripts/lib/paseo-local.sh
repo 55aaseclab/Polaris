@@ -166,12 +166,25 @@ paseo_local_build_tool_bundle() {
   tmp_dir="$(mktemp -d "${runtime_root}/bundle.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
 
-  paseo_local_buildx_with_local_cache "${cache_dir}" \
-    --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-    --file apps/paseo/Dockerfile.tool-bundle \
-    --target bundle-export \
-    --output "type=local,dest=${tmp_dir}" \
-    .
+  # The local cache exporter can hang indefinitely for the tool bundle build
+  # while exporting the client directory. Reuse the existing cache for reads,
+  # but skip cache writes here so deploys stay reliable.
+  if [ -d "${cache_dir}" ]; then
+    docker buildx build \
+      --cache-from "type=local,src=${cache_dir}" \
+      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
+      --file apps/paseo/Dockerfile.tool-bundle \
+      --target bundle-export \
+      --output "type=local,dest=${tmp_dir}" \
+      .
+  else
+    docker buildx build \
+      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
+      --file apps/paseo/Dockerfile.tool-bundle \
+      --target bundle-export \
+      --output "type=local,dest=${tmp_dir}" \
+      .
+  fi
 
   rm -rf "${bundle_dir}"
   mkdir -p "${bundle_dir}"

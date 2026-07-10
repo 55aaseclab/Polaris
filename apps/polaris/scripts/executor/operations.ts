@@ -1502,15 +1502,6 @@ export function startProvisionWorkspace(
       await provisionWorkspaceInternal(userId, workspace, options);
     } catch (error) {
       const classified = classifyProvisionError(error);
-      writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-        workspace,
-        current,
-        driverState: {
-          selected: current?.driver?.selected ?? null,
-          status: current?.driver?.status ?? "absent",
-          reason: classified.message,
-        },
-      }));
       logWorkspaceEvent("warn", "provision-failed", {
         userId,
         workspace,
@@ -1518,6 +1509,25 @@ export function startProvisionWorkspace(
         errorCode: classified.errorCode,
         reason: classified.message,
       });
+      try {
+        await refreshPortalWorkspaceStatus(userId, workspace);
+      } catch (refreshError) {
+        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
+          workspace,
+          current,
+          driverState: {
+            selected: current?.driver?.selected ?? null,
+            status: "failed",
+            reason: classified.message,
+          },
+        }));
+        logWorkspaceEvent("warn", "provision-failed-refresh", {
+          userId,
+          workspace,
+        }, {
+          error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+        });
+      }
       throw error;
     } finally {
       clearProvisionState(userId, workspace);

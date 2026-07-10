@@ -5033,6 +5033,7 @@ function WorkspaceDetailContent() {
   >(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const lastWorkspaceFailureRef = useRef<string | null>(null);
   const currentPane = detailRouteScope.currentWorkspacePane;
   const assets = workspaceStaticData?.assets;
   const paseoScope = workspacePaseoScope(userId, workspaceName);
@@ -5115,6 +5116,25 @@ function WorkspaceDetailContent() {
       setWorkspaceRequestPending(null);
     }
   }, [deleting, runtimeRunning, starting, stopping, workspaceRequestPending]);
+
+  useEffect(() => {
+    const failureReason = workspaceLiveSummary?.status?.driver?.reason?.trim() ?? "";
+    const failureStatus = workspaceLiveSummary?.status?.driver?.status ?? null;
+    const shouldPopup =
+      Boolean(failureReason)
+      && (failureStatus === "failed" || /^Command failed \(\d+\):/i.test(failureReason))
+      && !workspaceRequestPending;
+    if (!shouldPopup) {
+      return;
+    }
+    const failureKey = `${failureStatus ?? "unknown"}:${failureReason}`;
+    if (lastWorkspaceFailureRef.current === failureKey) {
+      return;
+    }
+    lastWorkspaceFailureRef.current = failureKey;
+    setActionError(failureReason);
+    setWorkspaceRequestPending(null);
+  }, [workspaceLiveSummary, workspaceRequestPending]);
 
   async function handleSwitch(): Promise<void> {
     if (!driver) {
