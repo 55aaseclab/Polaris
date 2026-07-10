@@ -192,8 +192,8 @@ test("admin display state shows starting and polls for local start action", () =
     driverStatus: null,
     localAction: "start",
   });
-  assert.equal(state.statusLabel, "workspace_starting");
-  assert.equal(state.shouldPoll, true);
+  assert.equal(state.statusLabel, null);
+  assert.equal(state.shouldPoll, false);
 });
 
 test("admin display state shows stopping and polls for local stop action", () => {
@@ -201,8 +201,8 @@ test("admin display state shows stopping and polls for local stop action", () =>
     driverStatus: null,
     localAction: "stop",
   });
-  assert.equal(state.statusLabel, "stopping");
-  assert.equal(state.shouldPoll, true);
+  assert.equal(state.statusLabel, null);
+  assert.equal(state.shouldPoll, false);
 });
 
 test("admin display state shows starting and polls for rebuild action", () => {
@@ -210,9 +210,9 @@ test("admin display state shows starting and polls for rebuild action", () => {
     driverStatus: null,
     localAction: "rebuild",
   });
-  assert.equal(state.statusLabel, "workspace_starting");
-  assert.equal(state.shouldPoll, true);
-  assert.equal(state.rebuildLabel, "rebuilding_workspace");
+  assert.equal(state.statusLabel, null);
+  assert.equal(state.shouldPoll, false);
+  assert.equal(state.rebuildLabel, "rebuild_workspace");
 });
 
 test("admin display state shows deleting and polls for archive action", () => {
@@ -220,8 +220,8 @@ test("admin display state shows deleting and polls for archive action", () => {
     driverStatus: null,
     localAction: "archive",
   });
-  assert.equal(state.statusLabel, "deleting");
-  assert.equal(state.shouldPoll, true);
+  assert.equal(state.statusLabel, null);
+  assert.equal(state.shouldPoll, false);
 });
 
 test("admin display state keeps rebuild label while status operation shows rebuild", () => {
@@ -230,7 +230,7 @@ test("admin display state keeps rebuild label while status operation shows rebui
     localAction: null,
   });
   assert.equal(state.statusLabel, "workspace_starting");
-  assert.equal(state.shouldPoll, true);
+  assert.equal(state.shouldPoll, false);
   assert.equal(state.rebuildLabel, "rebuilding_workspace");
   assert.equal(state.rebuildDisabled, true);
 });
@@ -241,7 +241,7 @@ test("admin display state leaves rebuild label idle for ordinary start", () => {
     localAction: "start",
   });
   assert.equal(state.statusLabel, "workspace_starting");
-  assert.equal(state.shouldPoll, true);
+  assert.equal(state.shouldPoll, false);
   assert.equal(state.rebuildLabel, "rebuild_workspace");
   assert.equal(state.rebuildDisabled, true);
 });
@@ -253,4 +253,14 @@ test("admin display state re-enables rebuild only after workspace leaves transit
   });
   assert.equal(state.rebuildLabel, "rebuild_workspace");
   assert.equal(state.rebuildDisabled, false);
+});
+
+test("admin button label stays live-driven while a start request waits for stream", () => {
+  const state = resolveAdminWorkspaceButtonState({
+    runtimeLifecycle: "stopped",
+    driverStatus: null,
+    localAction: "start",
+  });
+  assert.equal(state.primaryLabel, "start_workspace");
+  assert.equal(state.primaryDisabled, true);
 });

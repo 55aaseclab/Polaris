@@ -45,6 +45,7 @@ import {
   listPortalWorkspaceSkills,
   uninstallPortalWorkspaceSkill,
 } from "../scripts/portal/service.js";
+import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
@@ -63,6 +64,7 @@ import {
   writeWorkspaceDriverSelection,
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
+import { stopPortalWorkspace as stopPortalWorkspaceDirect } from "../scripts/executor/operations.js";
 import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
 import { readWorkspaceDriverSelection } from "../scripts/output/state-store.js";
 
@@ -548,7 +550,7 @@ test("portal workspace stop writes cached status before the async refresh comple
           return true;
         }) as typeof process.stderr.write;
         try {
-          await stopPortalWorkspace(userId, workspace);
+          await stopPortalWorkspaceDirect(userId, workspace);
           const cachedStatus = readWorkspaceStatus(userId, workspace);
           assert.equal(cachedStatus?.driver?.status, "stopped");
         } finally {
@@ -563,6 +565,76 @@ test("portal workspace stop writes cached status before the async refresh comple
       recursive: true,
       force: true,
     });
+  }
+});
+
+test("portal workspace stop publishes stopping to the live stream before completion", async () => {
+  const userId = uniqueName("portal-stop-live-user");
+  const workspace = uniqueName("portal-stop-live");
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  try {
+    await createUserCommand([userId, "--name", "Portal Stop Live User", "--email", `${userId}@polaris.local`]);
+    await createCommand([`${workspace}@docker`, "--user", userId]);
+    writeWorkspaceStatus({
+      schemaVersion: 1.1,
+      project: workspace,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: "http://127.0.0.1:6767/h/demo",
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userId);
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "compose" && "$4" == "stop" ]]; then
+  sleep 1
+  exit 0
+fi
+if [[ "$1" == "compose" && "$4" == "ps" ]]; then
+  exit 0
+fi
+if [[ "$1" == "inspect" ]]; then
+  printf '[{"State":{"Running":false}}]'
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        const events: Array<{ status: string | null }> = [];
+        const unsubscribe = subscribePortalWorkspaceStream(userId, (event) => {
+          if (event.type === "live-upsert" && event.workspace.name === workspace) {
+            events.push({
+              status: event.workspace.status?.driver?.status ?? null,
+            });
+          }
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          await stopPortalWorkspace(userId, workspace);
+          await waitFor(() => {
+            return events.some((event) => event.status === "stopping") ? true : null;
+          });
+        } finally {
+          unsubscribe();
+        }
+      },
+    );
+  } finally {
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(profileFile, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
@@ -1531,6 +1603,7 @@ exit 0
           const status = readWorkspaceStatus(userId, workspace);
           return status?.driver?.status === "running" ? status : null;
         });
+        assert.equal(finalStatus.driver?.selected?.backend, "docker");
         assert.ok(["pending", "ready"].includes(finalStatus.paseo.daemon));
         assert.ok(
           readCommandLog().some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")),

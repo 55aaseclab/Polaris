@@ -142,7 +142,7 @@ type WorkspaceStatusV1 = Omit<WorkspaceStatus, "schemaVersion" | "driver"> & {
     kind: "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
     updatedAt: string;
   };
-  runtime: {
+  runtime?: {
     selectedDriver: {
       backend: "docker" | "pod" | "kubevirt-vm";
       profile?: string;
@@ -150,7 +150,29 @@ type WorkspaceStatusV1 = Omit<WorkspaceStatus, "schemaVersion" | "driver"> & {
     lifecycle: "absent" | "running" | "stopped" | "unknown";
     reason?: string;
   };
+  health?: {
+    backendLiveness?: "absent" | "running" | "stopped" | "unknown";
+    reason?: string;
+  };
 };
+
+function upgradeLegacyRuntimeLifecycle(
+  status: WorkspaceStatusV1,
+): NonNullable<WorkspaceStatusV1["runtime"]>["lifecycle"] {
+  if (status.runtime?.lifecycle) {
+    return status.runtime.lifecycle;
+  }
+  switch (status.health?.backendLiveness) {
+    case "absent":
+      return "absent";
+    case "running":
+      return "running";
+    case "stopped":
+      return "stopped";
+    default:
+      return "unknown";
+  }
+}
 
 function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceStatus["driver"]>["status"] {
   switch (status.operation?.kind) {
@@ -169,7 +191,7 @@ function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceSt
     default:
       break;
   }
-  switch (status.runtime.lifecycle) {
+  switch (upgradeLegacyRuntimeLifecycle(status)) {
     case "absent":
       return "absent";
     case "running":
@@ -182,7 +204,7 @@ function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceSt
 }
 
 function downgradeDriverStatus(status: NonNullable<WorkspaceStatus["driver"]>["status"]): {
-  runtimeLifecycle: WorkspaceStatusV1["runtime"]["lifecycle"];
+  runtimeLifecycle: NonNullable<WorkspaceStatusV1["runtime"]>["lifecycle"];
   operation?: WorkspaceStatusV1["operation"];
 } {
   switch (status) {
@@ -223,7 +245,7 @@ function upgradeWorkspaceStatusV1ToV1_1(status: WorkspaceStatusV1): WorkspaceSta
     ?? status.runtime?.selectedDriver
     ?? null;
   const driverStatus = upgradeDriverStatus(status);
-  const driverReason = status.runtime?.reason;
+  const driverReason = status.runtime?.reason ?? status.health?.reason;
   return {
     ...status,
     schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION_V1_1,
@@ -362,6 +384,8 @@ export function writeWorkspaceStatus(
   const next = normalizeWorkspaceStatus(status, targetSchemaVersion);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  fs.rmSync(workspaceSelectionPath(status.project, userProfileId), { force: true });
+  fs.rmSync(legacyWorkspaceSelectionPath(status.project), { force: true });
   if (outputPath !== legacyWorkspaceStatusPath(status.project)) {
     fs.rmSync(legacyWorkspaceStatusPath(status.project), { force: true });
   }

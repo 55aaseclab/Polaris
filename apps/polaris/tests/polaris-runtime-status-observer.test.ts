@@ -31,9 +31,13 @@ test("status observer reports only workspace lifecycle status", async () => {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.POLARIS_RUNTIME_STATUS_REPORT_URL;
   const originalSecret = process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET;
+  const originalBackend = process.env.POLARIS_DRIVER_BACKEND;
+  const originalProfile = process.env.POLARIS_DRIVER_PROFILE;
   const payloads: Array<Record<string, unknown>> = [];
   process.env.POLARIS_RUNTIME_STATUS_REPORT_URL = "http://executor.test/workspaces/status/report";
   process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET = "secret";
+  process.env.POLARIS_DRIVER_BACKEND = "docker";
+  process.env.POLARIS_DRIVER_PROFILE = "";
   globalThis.fetch = async (_input, init) => {
     payloads.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     return new Response(null, { status: 200 });
@@ -55,11 +59,24 @@ test("status observer reports only workspace lifecycle status", async () => {
     } else {
       process.env.POLARIS_RUNTIME_STATUS_REPORT_SECRET = originalSecret;
     }
+    if (originalBackend === undefined) {
+      delete process.env.POLARIS_DRIVER_BACKEND;
+    } else {
+      process.env.POLARIS_DRIVER_BACKEND = originalBackend;
+    }
+    if (originalProfile === undefined) {
+      delete process.env.POLARIS_DRIVER_PROFILE;
+    } else {
+      process.env.POLARIS_DRIVER_PROFILE = originalProfile;
+    }
   }
   assert.equal(payloads.length, 1);
   assert.equal("paseo" in payloads[0], false);
   assert.deepEqual(payloads[0].status, {
     driver: {
+      selected: {
+        backend: "docker",
+      },
       status: "running",
       reason: "runtime status observer heartbeat",
     },

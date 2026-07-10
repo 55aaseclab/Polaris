@@ -556,7 +556,7 @@ exit 0
         });
         assert.match(switched, /"selectedBackend": "docker"/);
         assert.match(switched, /"stoppedBackends": \[\s*"pod"\s*\]/);
-        assert.equal(fs.existsSync(driverSelectionPath), true);
+        assert.equal(fs.existsSync(driverSelectionPath), false);
 
         const dockerOutput = await captureStdout(async () => {
           await runCli(["status", project]);
@@ -623,12 +623,19 @@ exit 0
         assert.match(switched, /"selectedBackend": "pod"/);
         assert.match(switched, /"selectedProfile": "kata"/);
 
-        const saved = JSON.parse(fs.readFileSync(driverSelectionPath, "utf8")) as {
-          backend: string;
-          profile?: string;
+        const saved = JSON.parse(
+          fs.readFileSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
+        ) as {
+          driver?: {
+            selected?: {
+              backend?: string;
+              profile?: string;
+            } | null;
+          };
         };
-        assert.equal(saved.backend, "pod");
-        assert.equal(saved.profile, "kata");
+        assert.equal(fs.existsSync(driverSelectionPath), false);
+        assert.equal(saved.driver?.selected?.backend, "pod");
+        assert.equal(saved.driver?.selected?.profile, "kata");
       },
     );
   } finally {
@@ -956,11 +963,18 @@ exit 0
 
         process.stderr.write(`[polaris-e2e] switch timings ${JSON.stringify(timingSummary)}\n`);
 
-        const saved = JSON.parse(fs.readFileSync(driverSelectionPath, "utf8")) as {
-          backend: string;
-          profile?: string;
+        const saved = JSON.parse(
+          fs.readFileSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
+        ) as {
+          driver?: {
+            selected?: {
+              backend?: string;
+              profile?: string;
+            } | null;
+          };
         };
-        assert.equal(saved.backend, "docker");
+        assert.equal(fs.existsSync(driverSelectionPath), false);
+        assert.equal(saved.driver?.selected?.backend, "docker");
       },
     );
   } finally {

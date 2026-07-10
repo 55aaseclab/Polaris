@@ -30,7 +30,9 @@ import {
   deletePortalCredential,
   deletePortalSkill,
   installPortalWorkspaceSkill,
+  getPortalWorkspaceDetailStatic,
   listPortalWorkspaceSkills,
+  listPortalWorkspaceStaticState,
   readUserPortalCredentialRecord,
   deletePortalWorkspace,
   getPortalWorkspacePaseoDiagnostic,
@@ -54,6 +56,8 @@ import {
   updatePortalUserProfile,
   writePortalCredentialFile,
 } from "./service.js";
+import { subscribePortalWorkspaceStream } from "./workspace-live-hub.js";
+import type { PortalWorkspaceStreamEvent } from "../core/portal.js";
 
 type ParsedBody = Record<string, string>;
 
@@ -80,6 +84,25 @@ function sendText(
     "content-length": Buffer.byteLength(body),
   });
   res.end(body);
+}
+
+function sendEventStreamHeaders(res: ServerResponse): void {
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type",
+  });
+}
+
+function writeEventStreamEvent(
+  res: ServerResponse,
+  event: PortalWorkspaceStreamEvent,
+): void {
+  res.write(`event: ${event.type}\n`);
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 function notFound(res: ServerResponse): void {
@@ -118,6 +141,23 @@ async function readBody(req: IncomingMessage): Promise<ParsedBody> {
     return body;
   }
   return parseFormBody(raw);
+}
+
+async function handleWorkspaceLiveStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  routeUserId: string,
+): Promise<void> {
+  sendEventStreamHeaders(res);
+  const unsubscribe = subscribePortalWorkspaceStream(routeUserId, (event) => {
+    writeEventStreamEvent(res, event);
+  });
+  req.on("close", () => {
+    unsubscribe();
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
 }
 
 function routeSegments(url: URL): string[] {
@@ -669,6 +709,19 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         if (!profile) {
           return;
         }
+        if (segments.length === 5 && segments[3] === "workspaces" && segments[4] === "static" && req.method === "GET") {
+          const workspaces = await listPortalWorkspaceStaticState(routeUserId);
+          sendJson(res, 200, {
+            user: profile,
+            workspaces,
+            archivedWorkspaces: listPortalArchivedWorkspaces(routeUserId),
+          });
+          return;
+        }
+        if (segments.length === 5 && segments[3] === "workspaces" && segments[4] === "live" && req.method === "GET") {
+          await handleWorkspaceLiveStream(req, res, routeUserId);
+          return;
+        }
         const workspace = decodeURIComponent(segments[4] ?? "");
         if (segments.length === 4 && segments[3] === "workspaces" && req.method === "GET") {
           const workspaces = await listPortalWorkspaces(routeUserId);
@@ -737,6 +790,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           const credentialId = decodeURIComponent(segments[4]);
           const fileKey = decodeURIComponent(segments[6]);
           await handleCredentialWrite(req, res, routeUserId, credentialId, fileKey);
+          return;
+        }
+        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "detail" && req.method === "GET") {
+          sendJson(res, 200, await getPortalWorkspaceDetailStatic(routeUserId, workspace));
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "GET") {

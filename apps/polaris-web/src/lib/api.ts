@@ -194,10 +194,49 @@ export interface PortalWorkspaceStatus {
   };
 }
 
+export interface PortalWorkspaceStaticSummary {
+  name: string;
+  availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
+}
+
+export interface PortalWorkspaceLiveStatus {
+  schemaVersion?: number;
+  driver?: PortalWorkspaceStatus["driver"];
+  paseo: PortalWorkspaceStatus["paseo"];
+  credentials?: Pick<NonNullable<PortalWorkspaceStatus["credentials"]>, "live">;
+  evolution?: PortalWorkspaceStatus["evolution"];
+}
+
+export interface PortalWorkspaceLiveSummary {
+  name: string;
+  status: PortalWorkspaceLiveStatus | null;
+}
+
 export interface PortalWorkspaceSummary {
   name: string;
   drivers: PortalDriverTarget[];
-  status: PortalWorkspaceStatus | null;
+  status: PortalWorkspaceStatus | PortalWorkspaceLiveStatus | null;
+}
+
+export interface PortalWorkspaceDetailStatic {
+  name: string;
+  availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
+  credentialBindings: Array<{
+    purpose: string;
+    credentialId: string;
+    required: boolean;
+  }>;
+  assets?: PortalWorkspaceStatus["assets"];
+  attachments?: Record<string, {
+    state: "ok" | "missing" | "drifted" | "unknown";
+    detail?: string;
+    url?: string;
+  }>;
+  workspaceAssembly?: Record<string, {
+    state: "ok" | "missing" | "drifted" | "unknown";
+    detail?: string;
+    url?: string;
+  }>;
 }
 
 export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
@@ -244,6 +283,33 @@ export interface PortalWorkspacePaseoDiagnostic {
     url?: string;
   };
 }
+
+export type PortalWorkspaceStreamEvent =
+  | {
+    type: "snapshot";
+    staticWorkspaces: PortalWorkspaceStaticSummary[];
+    liveWorkspaces: PortalWorkspaceLiveSummary[];
+  }
+  | {
+    type: "static-upsert";
+    workspace: PortalWorkspaceStaticSummary;
+  }
+  | {
+    type: "static-remove";
+    workspace: string;
+  }
+  | {
+    type: "live-upsert";
+    workspace: PortalWorkspaceLiveSummary;
+  }
+  | {
+    type: "live-remove";
+    workspace: string;
+  }
+  | {
+    type: "heartbeat";
+    ts: number;
+  };
 
 export interface PortalCredentialSummary {
   id: string;
@@ -401,6 +467,15 @@ export async function listWorkspaces(userId: string): Promise<PortalWorkspaceSum
   return payload.workspaces;
 }
 
+export async function listWorkspaceStaticSummaries(
+  userId: string,
+): Promise<PortalWorkspaceStaticSummary[]> {
+  const payload = await apiFetch<{ workspaces: PortalWorkspaceStaticSummary[] }>(
+    `/users/${encodeURIComponent(userId)}/workspaces/static`,
+  );
+  return payload.workspaces;
+}
+
 export async function listArchivedWorkspaces(
   userId: string,
 ): Promise<PortalArchivedWorkspaceSummary[]> {
@@ -439,6 +514,97 @@ export async function getWorkspaceDetail(
   return apiFetch<PortalWorkspaceDetail>(
     `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}`,
   );
+}
+
+export async function getWorkspaceDetailStatic(
+  userId: string,
+  workspace: string,
+): Promise<PortalWorkspaceDetailStatic> {
+  return apiFetch<PortalWorkspaceDetailStatic>(
+    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/detail`,
+  );
+}
+
+export async function subscribeWorkspaceLiveStream(
+  userId: string,
+  handlers: {
+    onEvent: (event: PortalWorkspaceStreamEvent) => void;
+    onOpen?: () => void;
+    onError?: (error: string) => void;
+    signal?: AbortSignal;
+  },
+): Promise<() => void> {
+  const token = authTokenProvider ? await authTokenProvider() : null;
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+  };
+  if (handlers.signal) {
+    if (handlers.signal.aborted) {
+      abort();
+    } else {
+      handlers.signal.addEventListener("abort", abort, { once: true });
+    }
+  }
+  const response = await fetch(`${apiBase()}/users/${encodeURIComponent(userId)}/workspaces/live`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    signal: controller.signal,
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body.trim() || `API request failed (${response.status}): workspace live stream`);
+  }
+  handlers.onOpen?.();
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  if (!reader) {
+    return () => {
+      controller.abort();
+    };
+  }
+  let buffer = "";
+  void (async () => {
+    let endedUnexpectedly = false;
+    try {
+      while (!controller.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) {
+          endedUnexpectedly = !controller.signal.aborted;
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const lines = frame.split("\n");
+          const dataLines = lines
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice("data:".length).trim());
+          if (dataLines.length === 0) {
+            continue;
+          }
+          const payload = JSON.parse(dataLines.join("\n")) as PortalWorkspaceStreamEvent;
+          handlers.onEvent(payload);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        handlers.onError?.(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      reader.releaseLock();
+      if (endedUnexpectedly && !controller.signal.aborted) {
+        handlers.onError?.("Workspace live stream closed");
+      }
+    }
+  })();
+  return () => {
+    controller.abort();
+  };
 }
 
 export async function refreshWorkspaceStatus(

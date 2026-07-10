@@ -23,11 +23,13 @@ import {
   clearWorkspaceProvisionProgress,
   listArchivedWorkspaces,
   listPortalProfiles,
+  listPortalWorkspaceStaticSummaries,
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
   writeWorkspaceProvisionProgress,
   readPortalWorkspaceAssetPreview,
+  loadWorkspaceDetailStatic,
   loadWorkspaceDetail,
   loadWorkspaceSummary,
   updatePortalProfile,
@@ -42,7 +44,9 @@ import {
   type PortalWorkspaceAgentBindingResult,
   type PortalDriverTarget,
   type PortalWorkspaceDetail,
+  type PortalWorkspaceDetailStatic,
   type PortalProfileSummary,
+  type PortalWorkspaceStaticSummary,
   type PortalWorkspaceSummary,
 } from "../core/portal.js";
 import type { WorkspaceStatus } from "../core/workspace.js";
@@ -106,6 +110,12 @@ async function refreshPortalWorkspaceStatus(
 export async function listPortalWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {
   const workspaces = listOwnedWorkspaces(userId);
   return workspaces.map((workspace) => loadWorkspaceSummary(userId, workspace));
+}
+
+export async function listPortalWorkspaceStaticState(
+  userId: string,
+): Promise<PortalWorkspaceStaticSummary[]> {
+  return listPortalWorkspaceStaticSummaries(userId);
 }
 
 export function listPortalArchivedWorkspaces(
@@ -185,6 +195,13 @@ export async function getPortalWorkspaceDetail(
   workspace: string,
 ) : Promise<PortalWorkspaceDetail> {
   return loadWorkspaceDetail(userId, workspace);
+}
+
+export async function getPortalWorkspaceDetailStatic(
+  userId: string,
+  workspace: string,
+): Promise<PortalWorkspaceDetailStatic> {
+  return loadWorkspaceDetailStatic(userId, workspace);
 }
 
 export function listUserPortalCredentials(
