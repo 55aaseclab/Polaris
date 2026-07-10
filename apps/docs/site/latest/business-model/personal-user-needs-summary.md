@@ -44,6 +44,7 @@
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 工作空间是否已经预热
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:0.85em; font-weight:600;">3rd-party</span> 文件挂载和 I/O 是否拖慢操作
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 首次启动时间是否过长
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 状态上报代替轮训
 
 ## 需求主题二：对标 GPT 网页版
 
@@ -79,6 +80,7 @@
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#e8f7ec; color:#166534; font-size:0.85em; font-weight:600;">checked</span> 一个对个人用户友好的统一多轮对话产品面，
   并覆盖图片生成；语音沟通推迟支持
 - <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> `MCP apps` 和 `skills` 的产品化入口与安装使用路径
+- <span style="display:inline-block; padding:0.1rem 0.45rem; border-radius:999px; background:#fff4e5; color:#b45309; font-size:0.85em; font-weight:600;">fixing</span> API获取和订阅，自动获取API和自助充值，按量或者包月
 
 所以现在还不能把 Polaris 直接包装成
 “面向 non-CS 用户的 GPT 网页版替代品”。
