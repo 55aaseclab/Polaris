@@ -67,7 +67,6 @@ import {
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
   rebuildPortalWorkspace as rebuildPortalWorkspaceExecutor,
-  reportPortalWorkspaceStatus as reportPortalWorkspaceStatusExecutor,
   restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
   updatePortalWorkspaceSelectedDriver as updatePortalWorkspaceSelectedDriverExecutor,
   installPortalWorkspaceSkill as installPortalWorkspaceSkillExecutor,
@@ -599,14 +598,6 @@ export async function refreshPortalWorkspace(
 ): Promise<{ refreshed: true }> {
   await refreshPortalWorkspaceStatus(userId, workspace);
   return { refreshed: true };
-}
-
-export async function reportPortalWorkspaceStatus(input: {
-  userId: string;
-  workspace: string;
-  status: Partial<WorkspaceStatus>;
-}): Promise<{ reported: true }> {
-  return reportPortalWorkspaceStatusExecutor(input);
 }
 
 export async function switchPortalWorkspaceLiveCredential(input: {

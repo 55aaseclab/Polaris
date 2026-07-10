@@ -155,32 +155,13 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
     "evolution",
     "runtime-memory-observer.mjs",
   );
-  const statusObserverPath = path.join(
-    REPO_ROOT,
-    "apps",
-    "polaris",
-    "scripts",
-    "runtime",
-    "status-observer.mjs",
-  );
   const memoryScript = fs.readFileSync(memoryObserverPath, "utf8");
-  const statusScript = fs.readFileSync(statusObserverPath, "utf8");
   const memoryEncoded = Buffer.from(memoryScript, "utf8").toString("base64");
-  const statusEncoded = Buffer.from(statusScript, "utf8").toString("base64");
   const memoryRuntimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.mjs`;
-  const statusRuntimePath = `${workspace.agent.runtime.evolutionRoot}/status-observer.mjs`;
-  const reportUrl = (
-    process.env.POLARIS_RUNTIME_EXECUTOR_BASE_URL?.trim()
-    || process.env.POLARIS_EXECUTOR_BASE_URL?.trim()
-    || ""
-  ).replace(/\/+$/, "");
-  const reportSecret = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim() || "";
   return [
     `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(memoryRuntimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(memoryEncoded)}));`)}`,
-    `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(statusRuntimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(statusEncoded)}));`)}`,
-    `chmod 755 ${memoryRuntimePath} ${statusRuntimePath}`,
+    `chmod 755 ${memoryRuntimePath}`,
     `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${memoryRuntimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.log 2>&1 &`,
-    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} POLARIS_DRIVER_BACKEND=${q(workspace.backend.kind)} POLARIS_DRIVER_PROFILE=${q(workspace.backend.profile ?? "")} POLARIS_RUNTIME_STATUS_REPORT_URL=${q(reportUrl ? `${reportUrl}/workspaces/status/report` : "")} POLARIS_RUNTIME_STATUS_REPORT_SECRET=${q(reportSecret)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${statusRuntimePath} > ${workspace.agent.runtime.evolutionRoot}/status-observer.log 2>&1 &`,
   ];
 }
 
