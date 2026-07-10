@@ -79,9 +79,13 @@ import {
   uninstallPortalWorkspaceSkill as uninstallPortalWorkspaceSkillExecutor,
 } from "../executor/client.js";
 import {
+  createPortalAiAccessTopUpSession as createPortalAiAccessTopUpSessionView,
   getPortalAiAccess as getPortalAiAccessView,
+  getPortalAiAccessTopUpInfo as getPortalAiAccessTopUpInfoView,
   performPortalAiAccessAction as performPortalAiAccessActionView,
   type PortalAiAccessActionKind,
+  type PortalAiAccessTopUpInfo,
+  type PortalAiAccessTopUpSession,
   type PortalAiAccessView,
 } from "./ai-access.js";
 
@@ -276,6 +280,24 @@ export async function performPortalAiAccessAction(input: {
 }): Promise<PortalAiAccessView> {
   return withUserMutationLock(import.meta.url, input.userId, async () =>
     performPortalAiAccessActionView(input.userId, input.action),
+  );
+}
+
+export async function getPortalAiAccessTopUpInfo(
+  userId: string,
+): Promise<PortalAiAccessTopUpInfo> {
+  return withUserMutationLock(import.meta.url, userId, async () =>
+    getPortalAiAccessTopUpInfoView(userId),
+  );
+}
+
+export async function createPortalAiAccessTopUpSession(input: {
+  userId: string;
+  methodId: string;
+  amount: number;
+}): Promise<PortalAiAccessTopUpSession> {
+  return withUserMutationLock(import.meta.url, input.userId, async () =>
+    createPortalAiAccessTopUpSessionView(input),
   );
 }
 
