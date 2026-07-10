@@ -52,6 +52,48 @@ export function aiAccessReferralLabel(
   }
 }
 
+export function aiAccessHeadline(
+  state: PortalAiAccessState,
+  t: (key: string) => string,
+): string {
+  switch (state) {
+    case "not_provisioned":
+      return t("ai_access_headline_not_provisioned");
+    case "funding_needed":
+      return t("ai_access_headline_funding_needed");
+    case "ready":
+      return t("ai_access_headline_ready");
+    case "error":
+      return t("ai_access_headline_error");
+  }
+}
+
+export function aiAccessDescription(
+  state: PortalAiAccessState,
+  t: (key: string) => string,
+): string {
+  switch (state) {
+    case "not_provisioned":
+      return t("ai_access_desc_not_provisioned");
+    case "funding_needed":
+      return t("ai_access_desc_funding_needed");
+    case "ready":
+      return t("ai_access_desc_ready");
+    case "error":
+      return t("ai_access_desc_error");
+  }
+}
+
+export function aiAccessStateReason(
+  state: PortalAiAccessState,
+  t: (key: string) => string,
+): string | null {
+  if (state === "error") {
+    return t("ai_access_reason_error");
+  }
+  return null;
+}
+
 export function formatAiAccessBalance(
   amount: number | null,
   unit: string | null,
@@ -74,11 +116,6 @@ export function buildAdminAiAccessPanelModel(
 } {
   return {
     summaryCards: [
-      {
-        id: "access",
-        label: t("ai_access_summary_access"),
-        value: aiAccessStateLabel(view.summary.accessState, t),
-      },
       {
         id: "mode",
         label: t("ai_access_summary_mode"),
