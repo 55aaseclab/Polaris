@@ -48,6 +48,7 @@ import {
 import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
+import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
 import {
   listArchivedWorkspaces,
@@ -252,6 +253,22 @@ async function waitForCommandLogMatch(
     const entries = readCommandLog();
     return entries.some(pattern) ? entries : null;
   });
+}
+
+async function cleanupWorkspaceRuntime(
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  try {
+    await stopPortalWorkspaceDirect(userId, workspace);
+  } catch {
+    // Ignore cleanup failures so filesystem cleanup still runs.
+  }
+  try {
+    await deleteWorkspaceOwnedByUser(userId, workspace);
+  } catch {
+    // Ignore cleanup failures so tests do not mask the original assertion.
+  }
 }
 
 async function withFakePath(
@@ -1617,7 +1634,7 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    await cleanupWorkspaceRuntime(userId, workspace);
     clearWorkspaceProvisionProgress(userId, workspace);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -1707,11 +1724,11 @@ exit 0
       },
     );
   } finally {
+    await cleanupWorkspaceRuntime(userId, workspace);
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
     fs.rmSync(privateKey, { force: true });
     fs.rmSync(publicKey, { force: true });
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
 
@@ -1821,7 +1838,7 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    await cleanupWorkspaceRuntime(userId, workspace);
     clearWorkspaceProvisionProgress(userId, workspace);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -1962,6 +1979,7 @@ exit 0
       },
     );
   } finally {
+    await cleanupWorkspaceRuntime(userId, workspace);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
     clearWorkspaceProvisionProgress(userId, workspace);

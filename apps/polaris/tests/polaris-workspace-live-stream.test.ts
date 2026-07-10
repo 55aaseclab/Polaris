@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
+import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
 import {
   listPortalWorkspaceStaticSummaries,
   loadWorkspaceDetailStatic,
@@ -34,6 +35,11 @@ function uniqueName(prefix: string): string {
 async function cleanupStartedWorkspace(userId: string, workspace: string): Promise<void> {
   try {
     await stopPortalWorkspace(userId, workspace);
+  } catch {
+    // Ignore cleanup failures so file cleanup still runs.
+  }
+  try {
+    await deleteWorkspaceOwnedByUser(userId, workspace);
   } catch {
     // Ignore cleanup failures so file cleanup still runs.
   }
