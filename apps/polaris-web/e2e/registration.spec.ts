@@ -382,6 +382,22 @@ async function stopWorkspaceByApi(
   expect(response.ok()).toBeTruthy();
 }
 
+async function cleanupWorkspaceByApi(
+  request: import("@playwright/test").APIRequestContext,
+  userId: string,
+  workspaceName: string,
+): Promise<void> {
+  const stopResponse = await request.post(
+    `${PLAYWRIGHT_API_BASE_URL}/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceName)}/stop`,
+  );
+  if (![200, 404, 409, 500].includes(stopResponse.status())) {
+    expect(stopResponse.ok()).toBeTruthy();
+  }
+  await deleteWorkspaceByApi(request, userId, workspaceName, {
+    bestEffort: true,
+  });
+}
+
 function dockerContainerState(containerName: string): "running" | "stopped" | "missing" {
   const inspect = spawnSync("docker", ["inspect", containerName], {
     cwd: REPO_ROOT,
@@ -518,9 +534,7 @@ test("user001 can create a default-docker workspace, inspect docker assets, and 
       .poll(() => fs.existsSync(workspaceRoot), { timeout: 30_000 })
       .toBe(false);
   } finally {
-    await deleteWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName, {
-      bestEffort: true,
-    });
+    await cleanupWorkspaceByApi(page.request, USER001_POLARIS_ID, workspaceName);
     if (createdUser001) {
       const user = await findClerkUserByUsername(USER001_CLERK_USERNAME);
       await deleteClerkUser(user?.id ?? null);
@@ -585,9 +599,7 @@ test("creating a workspace from the user workspace route switches sidebar select
         page.locator(`iframe[title="${username}:${workspaceName} paseo"]`),
       ).toBeVisible({ timeout: 60_000 });
     } finally {
-      await deleteWorkspaceByApi(page.request, username, workspaceName, {
-        bestEffort: true,
-      });
+      await cleanupWorkspaceByApi(page.request, username, workspaceName);
     }
   } finally {
     cleanupPolarisRegistration(username, username);
@@ -639,9 +651,7 @@ test("creating a workspace from the admin pane stays in the admin pane", async (
       );
       await expect(page.getByText(workspaceName)).toBeVisible({ timeout: 120_000 });
     } finally {
-      await deleteWorkspaceByApi(page.request, targetUsername, workspaceName, {
-        bestEffort: true,
-      });
+      await cleanupWorkspaceByApi(page.request, targetUsername, workspaceName);
     }
   } finally {
     cleanupPolarisRegistration(targetUsername, targetUsername);
@@ -712,10 +722,7 @@ test("entering a workspace from the admin pane lets the sidebar runtime status c
         timeout: 180_000,
       });
     } finally {
-      await stopWorkspaceByApi(page.request, targetUsername, workspaceName);
-      await deleteWorkspaceByApi(page.request, targetUsername, workspaceName, {
-        bestEffort: true,
-      });
+      await cleanupWorkspaceByApi(page.request, targetUsername, workspaceName);
     }
   } finally {
     cleanupPolarisRegistration(targetUsername, targetUsername);
