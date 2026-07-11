@@ -9,6 +9,9 @@ import {
   resolveBrowserTelemetryEnabled,
 } from "../../polaris-web/src/lib/telemetry.ts";
 import fs from "node:fs";
+import { resolveCurrentReleaseVersion } from "../../../scripts/release-version.mjs";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 test("node telemetry is disabled without PostHog or Sentry config", () => {
   assert.equal(telemetryEnabled({}), false);
@@ -45,7 +48,7 @@ test("node telemetry root prefers local deploy data root when provided", () => {
 
 test("polaris app version resolves from the frozen docs version source", () => {
   const version = resolvePolarisAppVersion(new URL("../scripts/telemetry/version.ts", import.meta.url).toString());
-  assert.equal(version, "0.2.6");
+  assert.equal(version, "0.2.7");
 });
 
 test("browser telemetry enablement honors Vite config", () => {
@@ -72,14 +75,14 @@ test("browser telemetry common properties include release metadata", () => {
     locale: "zh-CN",
     platform: "MacIntel",
     sourceEnv: {
-      VITE_POLARIS_APP_VERSION: "0.2.6",
+      VITE_POLARIS_APP_VERSION: "0.2.7",
       VITE_POLARIS_RELEASE_CHANNEL: "stable",
     },
   });
   assert.deepEqual(properties, {
     install_id: "install-1",
     session_id: "session-1",
-    app_version: "0.2.6",
+    app_version: "0.2.7",
     release_channel: "stable",
     platform: "MacIntel",
     arch: "browser",
@@ -95,5 +98,9 @@ test("release script no longer defaults to a synthetic placeholder version", () 
     "utf8",
   );
   assert.doesNotMatch(script, /0\.0\.0-dev/);
-  assert.match(script, /resolvePolarisAppVersion/);
+  assert.match(script, /resolveCurrentReleaseVersion/);
+});
+
+test("release version resolver follows the current release snapshot", () => {
+  assert.equal(resolveCurrentReleaseVersion(REPO_ROOT), "0.2.7");
 });

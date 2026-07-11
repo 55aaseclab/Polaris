@@ -35,8 +35,8 @@ It does not use `vite` dev server or `tsx watch`.
 Release packaging targets now include:
 
 - Debian `.deb`
-- Windows `.zip` bundle with `.exe` launchers
-- macOS `.app.zip`
+- Windows installer `.exe`
+- macOS `.dmg`
 
 Telemetry can be enabled with `PostHog` and `Sentry`.
 Use `.env.dev.example` for the current environment variables.

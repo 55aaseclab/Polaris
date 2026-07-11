@@ -60,7 +60,7 @@ test("local deployment docs separate deployment from development", () => {
   assert.match(doc, /polaris start/);
   assert.match(doc, /Polaris` app icon/);
   assert.match(doc, /Debian `polaris_<version>_amd64\.deb`/);
-  assert.match(doc, /Windows `polaris_<version>_win_x64\.zip`/);
+  assert.match(doc, /Windows `polaris_<version>_win_x64_setup\.exe`/);
   assert.match(doc, /PostHog/);
   assert.match(doc, /Sentry/);
   assert.match(doc, /telemetry configuration is baked into the release\s+image at build time/);
@@ -89,9 +89,9 @@ test("packaging workflow and release bundle artifacts are defined", () => {
     fs.readFileSync(path.join(REPO_ROOT, "deploy/local-deploy/release.json"), "utf8"),
   ) as { images: Record<string, string> };
   assert.match(workflow, /polaris_.*_amd64\.deb/);
-  assert.match(workflow, /polaris_.*_win_x64\.zip/);
-  assert.match(workflow, /polaris_.*_macos_x64\.zip/);
-  assert.equal(manifest.images.controlPlane, "polaris-local/polaris-control-plane:0.2.6");
-  assert.equal(manifest.images.webPortal, "polaris-local/polaris-webportal:0.2.6");
-  assert.equal(manifest.images.paseoApp, "polaris-local/paseo-app:0.2.6");
+  assert.match(workflow, /polaris_.*_win_x64_setup\.exe/);
+  assert.match(workflow, /polaris_.*_macos_x64\.dmg/);
+  assert.equal(manifest.images.controlPlane, "polaris-local/polaris-control-plane:0.2.7");
+  assert.equal(manifest.images.webPortal, "polaris-local/polaris-webportal:0.2.7");
+  assert.equal(manifest.images.paseoApp, "polaris-local/paseo-app:0.2.7");
 });

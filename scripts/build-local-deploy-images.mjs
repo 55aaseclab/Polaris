@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { resolveCurrentReleaseVersion } from "./release-version.mjs";
 
 function run(command, args) {
   execFileSync(command, args, {
@@ -6,12 +7,16 @@ function run(command, args) {
   });
 }
 
+const version = process.env.VITE_POLARIS_APP_VERSION
+  || process.env.POLARIS_APP_VERSION
+  || resolveCurrentReleaseVersion();
+
 run("docker", [
   "build",
   "-f",
   "apps/polaris/Dockerfile",
   "-t",
-  "polaris-local/polaris-control-plane:0.2.6",
+  `polaris-local/polaris-control-plane:${version}`,
   ".",
 ]);
 
@@ -20,7 +25,7 @@ run("docker", [
   "-f",
   "apps/polaris-web/Dockerfile",
   "--build-arg",
-  `VITE_POLARIS_APP_VERSION=${process.env.VITE_POLARIS_APP_VERSION || process.env.POLARIS_APP_VERSION || "0.2.6"}`,
+  `VITE_POLARIS_APP_VERSION=${version}`,
   "--build-arg",
   `VITE_POLARIS_RELEASE_CHANNEL=${process.env.VITE_POLARIS_RELEASE_CHANNEL || process.env.POLARIS_RELEASE_CHANNEL || "stable"}`,
   "--build-arg",
@@ -34,7 +39,7 @@ run("docker", [
   "--build-arg",
   `VITE_POLARIS_SENTRY_ENVIRONMENT=${process.env.VITE_POLARIS_SENTRY_ENVIRONMENT || ""}`,
   "-t",
-  "polaris-local/polaris-webportal:0.2.6",
+  `polaris-local/polaris-webportal:${version}`,
   ".",
 ]);
 
@@ -43,6 +48,6 @@ run("docker", [
   "-f",
   "apps/paseo/Dockerfile",
   "-t",
-  "polaris-local/paseo-app:0.2.6",
+  `polaris-local/paseo-app:${version}`,
   ".",
 ]);
