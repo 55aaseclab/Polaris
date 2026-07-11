@@ -16,6 +16,9 @@ permissions:
   contents: write
   packages: write
 
+env:
+  PASEO_SOURCE_REF: v0.1.101
+
 jobs:
   build-images:
     runs-on: ubuntu-latest
@@ -64,6 +67,8 @@ jobs:
           docker push "${{ steps.meta.outputs.image_prefix }}/polaris-webportal:${{ steps.meta.outputs.version }}"
       - name: Build and push paseo image
         run: |
+          rm -rf apps/paseo/source
+          git clone --depth 1 --branch "${PASEO_SOURCE_REF}" https://github.com/getpaseo/paseo.git apps/paseo/source
           bash ./scripts/build-paseo-web-artifact.sh
           docker build -f apps/paseo/Dockerfile -t "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}" .
           docker push "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}"
