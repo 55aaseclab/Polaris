@@ -7,6 +7,40 @@ Self-hosted workspace control plane.
 `Polaris` manages isolated development environments and external AI coding
 agents across `docker`, `pod`, and `kubevirt-vm` backends.
 
+## Local Deployment
+
+Stage-one local deployment is separate from local development.
+
+Main local deployment entry points:
+
+```bash
+polaris install
+polaris start
+polaris doctor
+```
+
+Desktop entry:
+
+- `Polaris` app icon
+
+Stage-one local deployment supports:
+
+- Linux
+- macOS
+- Windows
+- single-machine Docker-only runtime
+
+It does not use `vite` dev server or `tsx watch`.
+
+Release packaging targets now include:
+
+- Debian `.deb`
+- Windows `.zip` bundle with `.exe` launchers
+- macOS `.app.zip`
+
+Telemetry can be enabled with `PostHog` and `Sentry`.
+Use `.env.dev.example` for the current environment variables.
+
 ## Local Development
 
 Main CLI:

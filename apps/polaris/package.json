@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "polaris": "sh -lc 'if [ \"$1\" = \"--\" ]; then shift; fi; exec ./node_modules/.bin/tsx scripts/polaris.ts \"$@\"' --",
+    "local-deploy": "sh -lc 'if [ \"$1\" = \"--\" ]; then shift; fi; exec ./node_modules/.bin/tsx scripts/polaris.ts local-deploy \"$@\"' --",
     "server": "pnpm run polaris -- server",
     "executor": "pnpm run polaris -- executor",
     "build": "tsc -p tsconfig.json",
@@ -18,7 +19,9 @@
   },
   "dependencies": {
     "@clerk/backend": "^3.8.5",
+    "@sentry/node": "^10.65.0",
     "js-yaml": "^4.1.0",
+    "posthog-node": "^5.41.0",
     "sql.js": "^1.14.1"
   },
   "devDependencies": {

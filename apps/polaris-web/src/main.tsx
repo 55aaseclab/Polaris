@@ -8,7 +8,10 @@ import {
   resolveClerkProviderConfig,
 } from "./lib/clerk";
 import { type Language, readStoredLanguage } from "./lib/language";
+import { initTelemetry, trackTelemetryEvent } from "./lib/telemetry";
 import "./index.css";
+
+initTelemetry();
 
 function resolveClerkLocalization(language: Language) {
   return language === "zh" ? zhCN : enUS;
@@ -51,6 +54,12 @@ function Root() {
     </ClerkProvider>
   );
 }
+
+trackTelemetryEvent("session_started", {
+  category: "product",
+  first_run: !window.localStorage.getItem("polaris_session_seen"),
+});
+window.localStorage.setItem("polaris_session_seen", "1");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

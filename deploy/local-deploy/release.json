@@ -1,0 +1,9 @@
+{
+  "version": "0.2.6",
+  "releaseChannel": "stable",
+  "images": {
+    "controlPlane": "polaris-local/polaris-control-plane:0.2.6",
+    "webPortal": "polaris-local/polaris-webportal:0.2.6",
+    "paseoApp": "polaris-local/paseo-app:0.2.6"
+  }
+}

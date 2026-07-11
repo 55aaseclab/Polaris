@@ -4,6 +4,9 @@ FROM node:22 AS artifact
 
 ARG PASEO_WEB_BASE_URL=/paseo
 
+ENV EXPO_NO_TELEMETRY=1
+ENV DO_NOT_TRACK=1
+
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update \

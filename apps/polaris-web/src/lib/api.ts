@@ -1,3 +1,5 @@
+import { captureTelemetryError, trackTelemetryEvent } from "./telemetry";
+
 export interface PortalProfileSummary {
   id: string;
   name: string;
@@ -483,6 +485,8 @@ export function setApiAuthTokenProvider(
 
 async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
   const token = authTokenProvider ? await authTokenProvider() : null;
+  const method = String(init?.method || "GET").toUpperCase();
+  const startedAt = Date.now();
   const response = await fetch(`${apiBase()}${pathname}`, {
     ...init,
     credentials: "include",
@@ -494,8 +498,26 @@ async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body.trim() || `API request failed (${response.status}): ${pathname}`);
+    const error = new Error(body.trim() || `API request failed (${response.status}): ${pathname}`);
+    captureTelemetryError(error, {
+      event: "api_request_failed",
+      category: "error",
+      error_domain: "portal_api",
+      error_stage: pathname,
+      method,
+      pathname,
+      http_status: response.status,
+      duration_ms: Date.now() - startedAt,
+    });
+    throw error;
   }
+  trackTelemetryEvent("api_request_completed", {
+    category: "runtime",
+    method,
+    pathname,
+    http_status: response.status,
+    duration_ms: Date.now() - startedAt,
+  });
   return response.json() as Promise<T>;
 }
 
@@ -517,10 +539,28 @@ export async function createPortalUser(input: {
   role?: "admin" | "user";
   plan?: "free" | "pro";
 }): Promise<PortalProfileDetail> {
-  return apiFetch<PortalProfileDetail>("/users", {
-    method: "POST",
-    body: JSON.stringify(input),
+  trackTelemetryEvent("feature_used", {
+    category: "product",
+    feature_name: "portal_user_create",
   });
+  try {
+    const result = await apiFetch<PortalProfileDetail>("/users", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    trackTelemetryEvent("feature_used", {
+      category: "product",
+      feature_name: "portal_user_created",
+    });
+    return result;
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "portal_user_create_failed",
+      category: "error",
+      feature_name: "portal_user_create",
+    });
+    throw error;
+  }
 }
 
 export async function deletePortalUser(userId: string): Promise<{
@@ -805,13 +845,26 @@ export async function createCredential(
     activate?: boolean;
   },
 ): Promise<PortalCredentialSummary> {
-  return apiFetch<PortalCredentialSummary>(
-    `/users/${encodeURIComponent(userId)}/credentials`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
+  trackTelemetryEvent("credential_added", {
+    category: "product",
+    harness: input.harness,
+  });
+  try {
+    return await apiFetch<PortalCredentialSummary>(
+      `/users/${encodeURIComponent(userId)}/credentials`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "credential_add_failed",
+      category: "error",
+      harness: input.harness,
+    });
+    throw error;
+  }
 }
 
 export async function deleteCredential(
@@ -862,21 +915,46 @@ export async function updateCredentialFile(
 }
 
 export async function getAiAccess(userId: string): Promise<PortalAiAccessView> {
-  return apiFetch<PortalAiAccessView>(
-    `/users/${encodeURIComponent(userId)}/ai-access`,
-  );
+  trackTelemetryEvent("ai_access_opened", {
+    category: "product",
+  });
+  try {
+    return await apiFetch<PortalAiAccessView>(
+      `/users/${encodeURIComponent(userId)}/ai-access`,
+    );
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "ai_access_failed",
+      category: "error",
+      error_stage: "read",
+    });
+    throw error;
+  }
 }
 
 export async function performAiAccessAction(
   userId: string,
   action: PortalAiAccessActionKind,
 ): Promise<PortalAiAccessView> {
-  return apiFetch<PortalAiAccessView>(
-    `/users/${encodeURIComponent(userId)}/ai-access/actions/${encodeURIComponent(action)}`,
-    {
-      method: "POST",
-    },
-  );
+  trackTelemetryEvent("feature_used", {
+    category: "product",
+    feature_name: `ai_access:${action}`,
+  });
+  try {
+    return await apiFetch<PortalAiAccessView>(
+      `/users/${encodeURIComponent(userId)}/ai-access/actions/${encodeURIComponent(action)}`,
+      {
+        method: "POST",
+      },
+    );
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "ai_access_failed",
+      category: "error",
+      error_stage: action,
+    });
+    throw error;
+  }
 }
 
 export async function getAiAccessTopUpInfo(
@@ -894,13 +972,27 @@ export async function createAiAccessTopUpSession(
     amount: number;
   },
 ): Promise<PortalAiAccessTopUpSession> {
-  return apiFetch<PortalAiAccessTopUpSession>(
-    `/users/${encodeURIComponent(userId)}/ai-access/topup-session`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
+  trackTelemetryEvent("feature_used", {
+    category: "product",
+    feature_name: "ai_access_top_up",
+    amount: input.amount,
+  });
+  try {
+    return await apiFetch<PortalAiAccessTopUpSession>(
+      `/users/${encodeURIComponent(userId)}/ai-access/topup-session`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "ai_access_failed",
+      category: "error",
+      error_stage: "top_up",
+    });
+    throw error;
+  }
 }
 
 export async function switchWorkspaceLiveCredential(
@@ -932,17 +1024,30 @@ export async function createWorkspace(
     startAfterCreate?: boolean;
   },
 ): Promise<{ queued: true; workspace: string }> {
-  return apiFetch<{ queued: true; workspace: string }>(
-    `/users/${encodeURIComponent(userId)}/workspaces`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        workspaceName,
-        defaultDockerOnly: options?.defaultDockerOnly ?? false,
-        startAfterCreate: options?.startAfterCreate ?? false,
-      }),
-    },
-  );
+  trackTelemetryEvent("workspace_created", {
+    category: "product",
+    workspace_backend: options?.defaultDockerOnly ? "docker" : "mixed",
+  });
+  try {
+    return await apiFetch<{ queued: true; workspace: string }>(
+      `/users/${encodeURIComponent(userId)}/workspaces`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceName,
+          defaultDockerOnly: options?.defaultDockerOnly ?? false,
+          startAfterCreate: options?.startAfterCreate ?? false,
+        }),
+      },
+    );
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "workspace_create_failed",
+      category: "error",
+      workspace_backend: options?.defaultDockerOnly ? "docker" : "mixed",
+    });
+    throw error;
+  }
 }
 
 export async function switchWorkspaceDriver(
@@ -1013,24 +1118,53 @@ export async function stopWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ stopped: true }> {
-  return apiFetch<{ stopped: true }>(
-    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
-    {
-      method: "POST",
-    },
-  );
+  try {
+    const result = await apiFetch<{ stopped: true }>(
+      `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/stop`,
+      {
+        method: "POST",
+      },
+    );
+    trackTelemetryEvent("workspace_stopped", {
+      category: "product",
+      workspace_name: workspace,
+    });
+    return result;
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "feature_used",
+      category: "error",
+      feature_name: "workspace_stop_failed",
+      workspace_name: workspace,
+    });
+    throw error;
+  }
 }
 
 export async function startWorkspace(
   userId: string,
   workspace: string,
 ): Promise<{ started: true }> {
-  return apiFetch<{ started: true }>(
-    `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/start`,
-    {
-      method: "POST",
-    },
-  );
+  try {
+    const result = await apiFetch<{ started: true }>(
+      `/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspace)}/start`,
+      {
+        method: "POST",
+      },
+    );
+    trackTelemetryEvent("workspace_started", {
+      category: "product",
+      workspace_name: workspace,
+    });
+    return result;
+  } catch (error) {
+    captureTelemetryError(error, {
+      event: "workspace_start_failed",
+      category: "error",
+      workspace_name: workspace,
+    });
+    throw error;
+  }
 }
 
 export async function rebuildWorkspace(

@@ -1,0 +1,113 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version tag
+        required: true
+      image_prefix:
+        description: GHCR image prefix, for example ghcr.io/org/project
+        required: true
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}/geek-env" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=${{ inputs.image_prefix }}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push control plane image
+        run: |
+          docker build -f apps/polaris/Dockerfile -t "${{ steps.meta.outputs.image_prefix }}/polaris-control-plane:${{ steps.meta.outputs.version }}" .
+          docker push "${{ steps.meta.outputs.image_prefix }}/polaris-control-plane:${{ steps.meta.outputs.version }}"
+      - name: Build and push web image
+        run: |
+          docker build \
+            -f apps/polaris-web/Dockerfile \
+            --build-arg VITE_POLARIS_APP_VERSION="${{ steps.meta.outputs.version }}" \
+            --build-arg VITE_POLARIS_RELEASE_CHANNEL=stable \
+            --build-arg VITE_POLARIS_TELEMETRY_ENABLED="${{ secrets.VITE_POLARIS_TELEMETRY_ENABLED }}" \
+            --build-arg VITE_POLARIS_POSTHOG_KEY="${{ secrets.VITE_POLARIS_POSTHOG_KEY }}" \
+            --build-arg VITE_POLARIS_POSTHOG_HOST="${{ secrets.VITE_POLARIS_POSTHOG_HOST }}" \
+            --build-arg VITE_POLARIS_SENTRY_DSN="${{ secrets.VITE_POLARIS_SENTRY_DSN }}" \
+            --build-arg VITE_POLARIS_SENTRY_ENVIRONMENT=production \
+            -t "${{ steps.meta.outputs.image_prefix }}/polaris-webportal:${{ steps.meta.outputs.version }}" .
+          docker push "${{ steps.meta.outputs.image_prefix }}/polaris-webportal:${{ steps.meta.outputs.version }}"
+      - name: Build and push paseo image
+        run: |
+          docker build -f apps/paseo/Dockerfile -t "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}" .
+          docker push "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}"
+
+  build-release-artifacts:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}/geek-env" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=${{ inputs.image_prefix }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build release artifacts
+        run: >
+          node scripts/build-release.mjs
+          --version "${{ steps.meta.outputs.version }}"
+          --image-prefix "${{ steps.meta.outputs.image_prefix }}"
+          --platforms linux-x64,win-x64,macos-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polaris-release
+          path: dist/release/**
+      - name: Upload assets to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/release/polaris_${{ steps.meta.outputs.version }}_amd64.deb
+            dist/release/polaris_${{ steps.meta.outputs.version }}_win_x64.zip
+            dist/release/polaris_${{ steps.meta.outputs.version }}_macos_x64.zip
+            dist/release/release-metadata.json

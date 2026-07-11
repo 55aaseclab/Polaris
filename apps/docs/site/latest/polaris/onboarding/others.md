@@ -5,21 +5,34 @@ operator-facing than customer-facing.
 
 ## Main Entry Points
 
-The repo exposes three main Polaris surfaces:
+The repo exposes separate local deployment and local development surfaces.
 
-- CLI and services:
+- Local deployment CLI:
+
+```bash
+pnpm run polaris:local-deploy -- start
+pnpm run polaris:local-deploy -- doctor
+```
+
+- Local deployment GUI:
+
+```bash
+pnpm run polaris:local-deploy -- desktop
+```
+
+- CLI and services for development and operator workflows:
 
 ```bash
 pnpm --dir apps/polaris run polaris --
 ```
 
-- local web portal:
+- local web portal in development mode:
 
 ```bash
 pnpm --filter polaris-web exec vite --host 0.0.0.0
 ```
 
-- local stack wrapper:
+- local stack wrapper for development:
 
 ```bash
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
@@ -47,7 +60,7 @@ Responsibilities:
 
 ## Service Ports
 
-Default local ports:
+Default development ports:
 
 - `6767`: Paseo daemon inside a workspace
 - `8082`: Paseo web app
