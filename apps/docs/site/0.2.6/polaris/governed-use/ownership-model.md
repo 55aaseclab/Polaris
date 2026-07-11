@@ -107,14 +107,24 @@ User creation currently does three important things:
 2. create required default credential material for the user profile
 3. write Clerk-to-Polaris mapping if provided
 
-Current onboarding defaults create managed SSH material.
-They do not implicitly create a default Codex provider credential.
+Current onboarding defaults always create managed SSH material.
+When `POLARIS_AI_ACCESS_PROVIDER_BACKEND=new-api`, onboarding also provisions a
+default `codex-new-api` credential, marks it active, and lets new workspaces
+inherit that credential as the default `agent-auth` binding.
 
 User creation now holds a user-scoped mutation lock while it scaffolds the
 profile, creates default credential material, and writes Clerk mapping data.
 
 If the Clerk mapping write fails, Polaris removes the newly scaffolded profile
 and user root instead of leaving an orphaned Polaris user behind.
+
+If the incoming registration flow carries a Polaris invite code, user creation
+stores that code on the Polaris profile under referral metadata.
+That invite code is not only UI state.
+When AI access opens the user's first `new-api` account, Polaris reuses the
+stored code as the upstream `aff_code`.
+This keeps Polaris registration referral state aligned with `new-api`
+affiliate rewards.
 
 Current CLI entry:
 

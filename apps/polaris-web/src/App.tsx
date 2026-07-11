@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useAuth, useClerk, useUser } from "@clerk/react";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Link,
@@ -68,8 +68,6 @@ import {
   uninstallWorkspaceSkill,
   updateCredentialFile,
   type PortalAiAccessActionKind,
-  type PortalAiAccessTopUpInfo,
-  type PortalAiAccessView,
   type PortalAdminUserSummary,
   type PortalArchivedWorkspaceSummary,
   type PortalCredentialMaterialFile,
@@ -503,6 +501,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_reason_error: "Automatic runtime setup failed",
     ai_access_balance_billing: "Balance & Billing",
     ai_access_referral: "Referral",
+    ai_access_polaris_referral_code: "Polaris invite code",
     ai_access_last_topup: "Last top-up",
     ai_access_invite_code: "Invite code",
     ai_access_invite_link: "Invite link",
@@ -614,6 +613,7 @@ const COPY: Record<Language, Record<string, string>> = {
     select_submenu: "Select a workspace submenu.",
     sidebar_tier: "Free",
     menu_account: "Account",
+    menu_top_up: "Top up",
     menu_billing: "Billing",
     menu_logout: "Log out",
     loading_profile: "Loading profile...",
@@ -718,6 +718,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_empty_credentials: "Add credentials",
     global_error_title: "Something went wrong",
     global_error_description: "The page could not be loaded.",
+    creating_account_title: "Creating account",
     global_error_unresolved_access: "Your access could not be verified.",
     creating_account: "Creating account...",
     refresh: "Refresh",
@@ -926,6 +927,7 @@ const COPY: Record<Language, Record<string, string>> = {
     ai_access_reason_error: "自动运行时设置失败",
     ai_access_balance_billing: "余额与计费",
     ai_access_referral: "返利",
+    ai_access_polaris_referral_code: "Polaris 邀请码",
     ai_access_last_topup: "最近充值",
     ai_access_invite_code: "邀请码",
     ai_access_invite_link: "邀请链接",
@@ -1035,8 +1037,9 @@ const COPY: Record<Language, Record<string, string>> = {
     unbind_paseo: "清除覆盖",
     unbinding_paseo: "正在清除覆盖…",
     select_submenu: "请选择工作空间子页面。",
-    sidebar_tier: "免费版",
+    sidebar_tier: "基础版",
     menu_account: "账号",
+    menu_top_up: "充值",
     menu_billing: "账单",
     menu_logout: "退出登录",
     loading_profile: "正在加载用户资料…",
@@ -1141,6 +1144,7 @@ const COPY: Record<Language, Record<string, string>> = {
     workspace_empty_credentials: "添加凭证",
     global_error_title: "出错了",
     global_error_description: "页面无法加载。",
+    creating_account_title: "正在创建账号",
     global_error_unresolved_access: "无法验证当前访问权限。",
     creating_account: "正在创建账号…",
     refresh: "刷新",
@@ -2245,6 +2249,8 @@ function PortalShellLayout(props: {
     ? workspaceHeaderSubtitle
     : location.pathname === adminBackLink
       ? t("administration")
+      : location.pathname.includes("/ai-access")
+        ? t("menu_top_up")
       : location.pathname.includes("/credentials")
         ? t("credentials")
         : location.pathname.includes("/settings")
@@ -2556,6 +2562,15 @@ function PortalShellLayout(props: {
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link
+                        to={`/users/${encodeURIComponent(activeUser.id)}/ai-access`}
+                        onClick={handleSidebarNavigate}
+                      >
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        {t("menu_top_up")}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link
                         to={`/users/${encodeURIComponent(activeUser.id)}/settings`}
                         onClick={handleSidebarNavigate}
                       >
@@ -2795,11 +2810,16 @@ function PortalShellLayout(props: {
   );
 }
 
-function GlobalErrorPage(props: {
+function GlobalStatusPage(props: {
   title: string;
   description: string;
   detail?: string | null;
+  detailTone?: "default" | "destructive";
 }) {
+  const detailClassName =
+    props.detailTone === "destructive"
+      ? "text-sm text-destructive"
+      : "text-sm text-muted-foreground";
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8">
       <Card className="w-full max-w-lg">
@@ -2809,7 +2829,7 @@ function GlobalErrorPage(props: {
         </CardHeader>
         {props.detail && (
           <CardContent>
-            <p className="text-sm text-destructive">{props.detail}</p>
+            <p className={detailClassName}>{props.detail}</p>
           </CardContent>
         )}
       </Card>
@@ -2817,9 +2837,205 @@ function GlobalErrorPage(props: {
   );
 }
 
+function AiAccessSection(props: {
+  userId: string;
+  active: boolean;
+  referredByCode?: string | null;
+  onProvisioningChanged?: () => void;
+}) {
+  const { t } = useLanguage();
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [actionInFlight, setActionInFlight] = useState<PortalAiAccessActionKind | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpMethodId, setTopUpMethodId] = useState("");
+  const [topUpAmount, setTopUpAmount] = useState("10");
+  const [topUpSubmitting, setTopUpSubmitting] = useState(false);
+  const [topUpError, setTopUpError] = useState<string | null>(null);
+  const {
+    data: aiAccess,
+    error: aiAccessError,
+    loading: aiAccessLoading,
+  } = useConditionalAsyncValue(
+    props.active && Boolean(props.userId),
+    () => getAiAccess(props.userId),
+    [props.userId, refreshTick],
+  );
+  const {
+    data: topUpInfo,
+    error: topUpInfoError,
+    loading: topUpInfoLoading,
+  } = useConditionalAsyncValue(
+    props.active && topUpOpen && Boolean(props.userId),
+    () => getAiAccessTopUpInfo(props.userId),
+    [props.userId, topUpOpen],
+  );
+
+  useEffect(() => {
+    if (!topUpOpen || !topUpInfo) {
+      return;
+    }
+    const firstMethod = topUpInfo.methods[0] ?? null;
+    if (firstMethod && !topUpInfo.methods.some((method) => method.id === topUpMethodId)) {
+      setTopUpMethodId(firstMethod.id);
+    }
+    const nextAmount = firstMethod?.fixedAmount ?? topUpInfo.amountOptions[0] ?? 10;
+    setTopUpAmount(String(nextAmount));
+  }, [topUpInfo, topUpMethodId, topUpOpen]);
+
+  const selectedTopUpMethod =
+    topUpInfo?.methods.find((method) => method.id === topUpMethodId)
+    ?? topUpInfo?.methods[0]
+    ?? null;
+
+  async function handleRunAction(action: PortalAiAccessActionKind): Promise<void> {
+    if (action === "top_up") {
+      setTopUpError(null);
+      setTopUpOpen(true);
+      return;
+    }
+    if (!props.userId || actionInFlight) {
+      return;
+    }
+    setActionInFlight(action);
+    setActionError(null);
+    try {
+      await performAiAccessAction(props.userId, action);
+      setRefreshTick((current) => current + 1);
+      if (action === "provision_access" || action === "retry") {
+        props.onProvisioningChanged?.();
+      }
+    } catch (error) {
+      setActionError(formatActionError(error, t));
+    } finally {
+      setActionInFlight(null);
+    }
+  }
+
+  async function handleTopUpSubmit(): Promise<void> {
+    if (!props.userId || !selectedTopUpMethod || topUpSubmitting) {
+      return;
+    }
+    const amount = selectedTopUpMethod.fixedAmount ?? Number(topUpAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setTopUpError(t("ai_access_topup_invalid_amount"));
+      return;
+    }
+    setTopUpSubmitting(true);
+    setTopUpError(null);
+    try {
+      const session = await createAiAccessTopUpSession(props.userId, {
+        methodId: selectedTopUpMethod.id,
+        amount,
+      });
+      window.open(session.redirectUrl, "_blank", "noopener,noreferrer");
+      setTopUpOpen(false);
+    } catch (error) {
+      setTopUpError(formatActionError(error, t));
+    } finally {
+      setTopUpSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <AdminAiAccessTab
+        t={t}
+        view={aiAccess}
+        referredByCode={props.referredByCode ?? null}
+        error={actionError ?? aiAccessError}
+        loading={aiAccessLoading}
+        actionInFlight={actionInFlight}
+        onRunAction={(action) => {
+          void handleRunAction(action);
+        }}
+      />
+      <Sheet open={topUpOpen} onOpenChange={setTopUpOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>{t("ai_access_topup_title")}</SheetTitle>
+            <SheetDescription>{t("ai_access_topup_description")}</SheetDescription>
+          </SheetHeader>
+          <div className="grid gap-4 py-4">
+            {topUpError || topUpInfoError ? (
+              <p className="text-sm text-destructive">
+                {topUpError ?? topUpInfoError}
+              </p>
+            ) : null}
+            {topUpInfoLoading ? (
+              <p className="text-sm text-muted-foreground">{t("loading")}</p>
+            ) : null}
+            {!topUpInfoLoading && (topUpInfo?.methods.length ?? 0) === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t("ai_access_topup_no_methods")}
+              </p>
+            ) : null}
+            {topUpInfo && topUpInfo.methods.length > 0 ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="ai-access-topup-method">{t("ai_access_topup_method")}</Label>
+                  <Select
+                    value={selectedTopUpMethod?.id ?? ""}
+                    onValueChange={setTopUpMethodId}
+                  >
+                    <SelectTrigger id="ai-access-topup-method">
+                      <SelectValue placeholder={t("ai_access_topup_method_placeholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {topUpInfo.methods.map((method) => (
+                        <SelectItem key={method.id} value={method.id}>
+                          {method.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="ai-access-topup-amount">{t("ai_access_topup_amount")}</Label>
+                  <Input
+                    id="ai-access-topup-amount"
+                    type="number"
+                    min={selectedTopUpMethod?.minAmount ?? 1}
+                    step="1"
+                    value={selectedTopUpMethod?.fixedAmount ?? topUpAmount}
+                    disabled={selectedTopUpMethod?.fixedAmount !== null}
+                    onChange={(event) => setTopUpAmount(event.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t("ai_access_topup_minimum")}: {topUpInfo.currencySymbol}
+                    {selectedTopUpMethod?.minAmount ?? 1}
+                  </p>
+                </div>
+              </>
+            ) : null}
+          </div>
+          <SheetFooter>
+            <Button variant="outline" onClick={() => setTopUpOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button
+              disabled={
+                topUpSubmitting
+                || !selectedTopUpMethod
+                || (topUpInfo?.methods.length ?? 0) === 0
+              }
+              onClick={() => {
+                void handleTopUpSubmit();
+              }}
+            >
+              {topUpSubmitting ? t("working") : t("ai_access_topup_continue")}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
 function OverviewPage() {
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useUser();
   const {
     data: backendSession,
@@ -2842,6 +3058,10 @@ function OverviewPage() {
     Boolean(clerkUsername || clerkUserId || backendSession?.clerkUsername || backendSession?.clerkUserId);
 
   const explicitMappedUserId = mapping?.polarisUserId ?? backendSession?.polarisUserId ?? null;
+  const referralCodeFromUrl = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("invite")?.trim() || params.get("code")?.trim() || "";
+  }, [location.search]);
   const nextPolarisUserId = resolvePolarisProfileIdCandidate(user)
     || backendSession?.clerkUsername
     || backendSession?.clerkUserId
@@ -2883,6 +3103,7 @@ function OverviewPage() {
       ...(user?.primaryEmailAddress?.emailAddress?.trim()
         ? { email: user.primaryEmailAddress.emailAddress.trim() }
         : {}),
+      ...(referralCodeFromUrl ? { referralCode: referralCodeFromUrl } : {}),
       name:
         user?.fullName?.trim()
         || user?.username?.trim()
@@ -2913,6 +3134,7 @@ function OverviewPage() {
     mappingLoading,
     navigate,
     nextPolarisUserId,
+    referralCodeFromUrl,
     user,
   ]);
 
@@ -2925,9 +3147,14 @@ function OverviewPage() {
   }
 
   return (
-    <GlobalErrorPage
-      title={t("global_error_title")}
-      description={t("global_error_description")}
+    <GlobalStatusPage
+      title={registering ? t("creating_account_title") : t("global_error_title")}
+      description={
+        registering
+          ? ""
+          : t("global_error_description")
+      }
+      detailTone={registering ? "default" : "destructive"}
       detail={
         registering
           ? t("creating_account")
@@ -3119,14 +3346,6 @@ function AdminPage() {
   >({});
   const { mapping, mappingLoading, mappingError } = useCurrentUserMapping();
   const [adminTab, setAdminTab] = useState<"user" | "credentials" | "skills" | "workspaces" | "paseo" | "ai-access">("user");
-  const [adminAiAccessRefreshTick, setAdminAiAccessRefreshTick] = useState(0);
-  const [adminAiAccessAction, setAdminAiAccessAction] = useState<PortalAiAccessActionKind | null>(null);
-  const [adminAiAccessActionError, setAdminAiAccessActionError] = useState<string | null>(null);
-  const [adminAiAccessTopUpOpen, setAdminAiAccessTopUpOpen] = useState(false);
-  const [adminAiAccessTopUpMethodId, setAdminAiAccessTopUpMethodId] = useState("");
-  const [adminAiAccessTopUpAmount, setAdminAiAccessTopUpAmount] = useState("10");
-  const [adminAiAccessTopUpSubmitting, setAdminAiAccessTopUpSubmitting] = useState(false);
-  const [adminAiAccessTopUpError, setAdminAiAccessTopUpError] = useState<string | null>(null);
   const selectedAdminUser = adminUsers?.find((entry) => entry.id === selectedAdminUserId) ?? null;
   const adminWorkspaceNameError = validateWorkspaceNameInput(adminWorkspaceName, t);
 
@@ -3154,24 +3373,6 @@ function AdminPage() {
   const { data: selectedCredentialCatalog } = useAsyncValue(
     () => selectedAdminUserId ? getCredentialCatalog(selectedAdminUserId) : Promise.resolve(null),
     [selectedAdminUserId, reloadKey],
-  );
-  const {
-    data: selectedAiAccess,
-    error: selectedAiAccessError,
-    loading: selectedAiAccessLoading,
-  } = useConditionalAsyncValue(
-    adminTab === "ai-access" && Boolean(selectedAdminUserId),
-    () => selectedAdminUserId ? getAiAccess(selectedAdminUserId) : Promise.resolve(null),
-    [selectedAdminUserId, adminAiAccessRefreshTick],
-  );
-  const {
-    data: adminAiAccessTopUpInfo,
-    error: adminAiAccessTopUpInfoError,
-    loading: adminAiAccessTopUpInfoLoading,
-  } = useConditionalAsyncValue(
-    adminAiAccessTopUpOpen && Boolean(selectedAdminUserId),
-    () => selectedAdminUserId ? getAiAccessTopUpInfo(selectedAdminUserId) : Promise.resolve(null),
-    [selectedAdminUserId, adminAiAccessTopUpOpen],
   );
   const adminCredentialGroups = MANAGED_HARNESS_ORDER.map((harness) => ({
     harness,
@@ -3293,9 +3494,6 @@ function AdminPage() {
     setAdminRuntimeSkillHarness("codex");
     setAdminRuntimeSkillAction(null);
     setAdminRuntimeSkillRefreshTick(0);
-    setAdminAiAccessRefreshTick(0);
-    setAdminAiAccessAction(null);
-    setAdminAiAccessActionError(null);
   }, [selectedAdminUserId]);
 
   useEffect(() => {
@@ -3493,27 +3691,6 @@ function AdminPage() {
     adminRuntimeSkillSelection,
     selectedSkills,
   ]);
-
-  useEffect(() => {
-    if (!adminAiAccessTopUpOpen || !adminAiAccessTopUpInfo) {
-      return;
-    }
-    const firstMethod = adminAiAccessTopUpInfo.methods[0] ?? null;
-    if (
-      firstMethod
-      && !adminAiAccessTopUpInfo.methods.some((method) => method.id === adminAiAccessTopUpMethodId)
-    ) {
-      setAdminAiAccessTopUpMethodId(firstMethod.id);
-    }
-    if (!firstMethod) {
-      return;
-    }
-    const nextAmount =
-      firstMethod.fixedAmount
-      ?? adminAiAccessTopUpInfo.amountOptions[0]
-      ?? Math.max(firstMethod.minAmount, 1);
-    setAdminAiAccessTopUpAmount(String(nextAmount));
-  }, [adminAiAccessTopUpOpen, adminAiAccessTopUpInfo, adminAiAccessTopUpMethodId]);
 
   if (mappingLoading) {
     return <div className="w-full py-6" />;
@@ -3855,62 +4032,6 @@ function AdminPage() {
     : null;
   const adminInstalledHarnessSkills =
     adminInstalledWorkspaceSkills?.installed.find((entry) => entry.harness === adminRuntimeSkillHarness)?.skills ?? [];
-  const selectedAiAccessTopUpMethod =
-    adminAiAccessTopUpInfo?.methods.find((method) => method.id === adminAiAccessTopUpMethodId)
-    ?? adminAiAccessTopUpInfo?.methods[0]
-    ?? null;
-
-  async function handleAdminAiAccessAction(
-    action: PortalAiAccessActionKind,
-  ): Promise<void> {
-    if (action === "top_up") {
-      setAdminAiAccessTopUpError(null);
-      setAdminAiAccessTopUpOpen(true);
-      return;
-    }
-    if (!selectedAdminUser || adminAiAccessAction) {
-      return;
-    }
-    setAdminAiAccessAction(action);
-    setAdminAiAccessActionError(null);
-    try {
-      await performAiAccessAction(selectedAdminUser.id, action);
-      setAdminAiAccessRefreshTick((current) => current + 1);
-      if (action === "provision_access" || action === "retry") {
-        setReloadKey((current) => current + 1);
-      }
-    } catch (error) {
-      setAdminAiAccessActionError(formatActionError(error, t));
-    } finally {
-      setAdminAiAccessAction(null);
-    }
-  }
-
-  async function handleAdminAiAccessTopUpSubmit(): Promise<void> {
-    if (!selectedAdminUser || !selectedAiAccessTopUpMethod || adminAiAccessTopUpSubmitting) {
-      return;
-    }
-    const amount = selectedAiAccessTopUpMethod.fixedAmount ?? Number(adminAiAccessTopUpAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setAdminAiAccessTopUpError(t("ai_access_topup_invalid_amount"));
-      return;
-    }
-    setAdminAiAccessTopUpSubmitting(true);
-    setAdminAiAccessTopUpError(null);
-    try {
-      const session = await createAiAccessTopUpSession(selectedAdminUser.id, {
-        methodId: selectedAiAccessTopUpMethod.id,
-        amount,
-      });
-      window.open(session.redirectUrl, "_blank", "noopener,noreferrer");
-      setAdminAiAccessTopUpOpen(false);
-    } catch (error) {
-      setAdminAiAccessTopUpError(formatActionError(error, t));
-    } finally {
-      setAdminAiAccessTopUpSubmitting(false);
-    }
-  }
-
   function openAdminCredentialSheet(harness: ManagedHarness): void {
     setAdminCredentialDraft(defaultCredentialDraft(harness, selectedCredentialCatalog));
     setCredentialAdminActionError(null);
@@ -5254,98 +5375,16 @@ function AdminPage() {
 
               <TabsContent value="ai-access">
                 <React.Suspense fallback={null}>
-                  <>
-                    <AdminAiAccessTab
-                      t={t}
-                      view={selectedAiAccess}
-                      error={adminAiAccessActionError ?? selectedAiAccessError}
-                      loading={selectedAiAccessLoading}
-                      actionInFlight={adminAiAccessAction}
-                      onRunAction={(action) => {
-                        void handleAdminAiAccessAction(action);
+                  {selectedAdminUser ? (
+                    <AiAccessSection
+                      userId={selectedAdminUser.id}
+                      active={adminTab === "ai-access"}
+                      referredByCode={selectedProfile?.referredByCode ?? null}
+                      onProvisioningChanged={() => {
+                        setReloadKey((current) => current + 1);
                       }}
                     />
-                    <Sheet open={adminAiAccessTopUpOpen} onOpenChange={setAdminAiAccessTopUpOpen}>
-                      <SheetContent side="right" className="w-full sm:max-w-xl">
-                        <SheetHeader>
-                          <SheetTitle>{t("ai_access_topup_title")}</SheetTitle>
-                          <SheetDescription>{t("ai_access_topup_description")}</SheetDescription>
-                        </SheetHeader>
-                        <div className="grid gap-4 py-4">
-                          {adminAiAccessTopUpError || adminAiAccessTopUpInfoError ? (
-                            <p className="text-sm text-destructive">
-                              {adminAiAccessTopUpError ?? adminAiAccessTopUpInfoError}
-                            </p>
-                          ) : null}
-                          {adminAiAccessTopUpInfoLoading ? (
-                            <p className="text-sm text-muted-foreground">{t("loading")}</p>
-                          ) : null}
-                          {!adminAiAccessTopUpInfoLoading && (adminAiAccessTopUpInfo?.methods.length ?? 0) === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                              {t("ai_access_topup_no_methods")}
-                            </p>
-                          ) : null}
-                          {adminAiAccessTopUpInfo && adminAiAccessTopUpInfo.methods.length > 0 ? (
-                            <>
-                              <div className="grid gap-2">
-                                <Label htmlFor="ai-access-topup-method">{t("ai_access_topup_method")}</Label>
-                                <Select
-                                  value={selectedAiAccessTopUpMethod?.id ?? ""}
-                                  onValueChange={setAdminAiAccessTopUpMethodId}
-                                >
-                                  <SelectTrigger id="ai-access-topup-method">
-                                    <SelectValue placeholder={t("ai_access_topup_method_placeholder")} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {adminAiAccessTopUpInfo.methods.map((method) => (
-                                      <SelectItem key={method.id} value={method.id}>
-                                        {method.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="grid gap-2">
-                                <Label htmlFor="ai-access-topup-amount">{t("ai_access_topup_amount")}</Label>
-                                <Input
-                                  id="ai-access-topup-amount"
-                                  type="number"
-                                  min={selectedAiAccessTopUpMethod?.minAmount ?? 1}
-                                  step="1"
-                                  value={selectedAiAccessTopUpMethod?.fixedAmount ?? adminAiAccessTopUpAmount}
-                                  disabled={selectedAiAccessTopUpMethod?.fixedAmount !== null}
-                                  onChange={(event) => setAdminAiAccessTopUpAmount(event.target.value)}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  {t("ai_access_topup_minimum")}: {adminAiAccessTopUpInfo.currencySymbol}
-                                  {selectedAiAccessTopUpMethod?.minAmount ?? 1}
-                                </p>
-                              </div>
-                            </>
-                          ) : null}
-                        </div>
-                        <SheetFooter>
-                          <Button variant="outline" onClick={() => setAdminAiAccessTopUpOpen(false)}>
-                            {t("cancel")}
-                          </Button>
-                          <Button
-                            disabled={
-                              adminAiAccessTopUpSubmitting
-                              || !selectedAiAccessTopUpMethod
-                              || (adminAiAccessTopUpInfo?.methods.length ?? 0) === 0
-                            }
-                            onClick={() => {
-                              void handleAdminAiAccessTopUpSubmit();
-                            }}
-                          >
-                            {adminAiAccessTopUpSubmitting
-                              ? t("working")
-                              : t("ai_access_topup_continue")}
-                          </Button>
-                        </SheetFooter>
-                      </SheetContent>
-                    </Sheet>
-                  </>
+                  ) : null}
                 </React.Suspense>
               </TabsContent>
           </Tabs>
@@ -6521,6 +6560,17 @@ function SettingsPage() {
   );
 }
 
+function AiAccessPage() {
+  const { userId = "" } = useParams();
+  return (
+    <div className="grid w-full gap-6">
+      <React.Suspense fallback={null}>
+        <AiAccessSection userId={userId} active={Boolean(userId)} />
+      </React.Suspense>
+    </div>
+  );
+}
+
 function trimUserAssetPath(pathValue: string, userId: string): string {
   const prefix = `config/users/${userId}/`;
   return pathValue.startsWith(prefix) ? pathValue.slice(prefix.length) : pathValue;
@@ -6761,6 +6811,7 @@ export default function App(props: {
                     <Route path="/" element={<OverviewPage />} />
                     <Route element={<PortalLayout />}>
                       <Route path="/users/:userId/profile" element={<ProfilePage />} />
+                      <Route path="/users/:userId/ai-access" element={<AiAccessPage />} />
                       <Route path="/users/:userId/admin" element={<AdminPage />} />
                       <Route path="/users/:userId/admin/users/:targetUserId/workspaces" element={<WorkspaceIndexPage />} />
                       <Route path="/users/:userId/admin/users/:targetUserId/workspaces/:workspaceName" element={<WorkspaceDetailPage />} />

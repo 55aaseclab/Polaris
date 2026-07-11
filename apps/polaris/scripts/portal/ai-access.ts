@@ -1,36 +1,61 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import yaml from "js-yaml";
 import {
   createManagedHarnessCredential,
   resolveActiveManagedCredential,
+  type ManagedCredentialSummary,
 } from "../config/credentials.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
-const DEFAULT_TOP_UP_AMOUNT = Number(process.env.POLARIS_AI_ACCESS_TOP_UP_AMOUNT ?? "25");
-const DEFAULT_REFERRAL_BASE_URL =
-  process.env.POLARIS_AI_ACCESS_REFERRAL_BASE_URL?.trim()
-  || "https://ai-access.local/ref";
-const DEFAULT_PROVIDER_BACKEND =
-  process.env.POLARIS_AI_ACCESS_PROVIDER_BACKEND?.trim()
-  || "local";
-const NEW_API_BASE_URL =
-  process.env.POLARIS_AI_ACCESS_NEW_API_BASE_URL?.trim()
-  || "http://127.0.0.1:3000";
-const NEW_API_ADMIN_USERNAME =
-  process.env.POLARIS_AI_ACCESS_NEW_API_ADMIN_USERNAME?.trim()
-  || "polarisroot";
-const NEW_API_ADMIN_PASSWORD =
-  process.env.POLARIS_AI_ACCESS_NEW_API_ADMIN_PASSWORD?.trim()
-  || "Polaris123";
-const NEW_API_TOP_UP_QUOTA = Number(
-  process.env.POLARIS_AI_ACCESS_NEW_API_TOP_UP_QUOTA ?? "500000",
-);
-const NEW_API_REFERRAL_BASE_URL =
-  process.env.POLARIS_AI_ACCESS_NEW_API_REFERRAL_BASE_URL?.trim()
-  || process.env.POLARIS_AI_ACCESS_NEW_API_PUBLIC_BASE_URL?.trim()
-  || "http://128.178.122.228:3000/register";
+
+function defaultTopUpAmount(): number {
+  return Number(process.env.POLARIS_AI_ACCESS_TOP_UP_AMOUNT ?? "25");
+}
+
+function defaultReferralSignUpUrl(): string {
+  return process.env.VITE_CLERK_SIGN_UP_URL?.trim()
+    || process.env.POLARIS_PUBLIC_BASE_URL?.trim()
+    || process.env.POLARIS_AI_ACCESS_REFERRAL_BASE_URL?.trim()
+    || "http://127.0.0.1:8081/sign-up";
+}
+
+function defaultAfterSignUpUrl(): string {
+  return process.env.POLARIS_PUBLIC_BASE_URL?.trim()
+    || "http://127.0.0.1:8081";
+}
+
+function defaultProviderBackend(): string {
+  return process.env.POLARIS_AI_ACCESS_PROVIDER_BACKEND?.trim()
+    || "local";
+}
+
+function newApiBaseUrl(): string {
+  return process.env.POLARIS_AI_ACCESS_NEW_API_BASE_URL?.trim()
+    || "http://127.0.0.1:3000";
+}
+
+function newApiAdminUsername(): string {
+  return process.env.POLARIS_AI_ACCESS_NEW_API_ADMIN_USERNAME?.trim()
+    || "polarisroot";
+}
+
+function newApiAdminPassword(): string {
+  return process.env.POLARIS_AI_ACCESS_NEW_API_ADMIN_PASSWORD?.trim()
+    || "Polaris123";
+}
+
+function newApiTopUpQuota(): number {
+  return Number(process.env.POLARIS_AI_ACCESS_NEW_API_TOP_UP_QUOTA ?? "500000");
+}
+
+function newApiRuntimeBaseUrl(): string {
+  return process.env.POLARIS_AI_ACCESS_NEW_API_RUNTIME_BASE_URL?.trim()
+    || process.env.POLARIS_AI_ACCESS_NEW_API_PUBLIC_BASE_URL?.trim()
+    || newApiBaseUrl();
+}
 
 export type PortalAiAccessState =
   | "not_provisioned"
@@ -209,15 +234,31 @@ function buildInviteCode(userId: string): string {
 }
 
 function buildInviteLink(code: string): string {
-  return `${DEFAULT_REFERRAL_BASE_URL}?code=${encodeURIComponent(code)}`;
+  const signUpUrl = defaultReferralSignUpUrl();
+  const redirectUrl = new URL(trimTrailingSlash(defaultAfterSignUpUrl()) || "/", defaultAfterSignUpUrl());
+  redirectUrl.searchParams.set("invite", code);
+  try {
+    const url = new URL(signUpUrl);
+    url.searchParams.set("invite", code);
+    url.searchParams.set("redirect_url", redirectUrl.toString());
+    return url.toString();
+  } catch {
+    const separator = signUpUrl.includes("?") ? "&" : "?";
+    return `${trimTrailingSlash(signUpUrl)}${separator}invite=${encodeURIComponent(code)}&redirect_url=${encodeURIComponent(redirectUrl.toString())}`;
+  }
 }
 
 function buildProviderAccountId(userId: string): string {
-  return `${DEFAULT_PROVIDER_BACKEND}-${userId}`;
+  return `${defaultProviderBackend()}-${userId}`;
 }
 
 function buildProviderToken(): string {
   return `plrs_${crypto.randomBytes(12).toString("hex")}`;
+}
+
+function newApiCodexBaseUrl(): string {
+  const trimmed = trimTrailingSlash(newApiRuntimeBaseUrl());
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 }
 
 function readPersistedState(userId: string): PersistedAiAccessState | null {
@@ -293,8 +334,9 @@ let cachedNewApiAdminAuth: NewApiCachedAuth | null = null;
 
 
 function normalizeNewApiTopUpQuota(): number {
-  if (Number.isFinite(NEW_API_TOP_UP_QUOTA) && NEW_API_TOP_UP_QUOTA > 0) {
-    return NEW_API_TOP_UP_QUOTA;
+  const value = newApiTopUpQuota();
+  if (Number.isFinite(value) && value > 0) {
+    return value;
   }
   return 1;
 }
@@ -321,7 +363,7 @@ async function newApiRequest<T>(
     userIdHeader?: number;
   },
 ): Promise<T> {
-  const response = await fetch(`${trimTrailingSlash(NEW_API_BASE_URL)}${pathname}`, {
+  const response = await fetch(`${trimTrailingSlash(newApiBaseUrl())}${pathname}`, {
     method: input?.method ?? "GET",
     headers: {
       "content-type": "application/json",
@@ -375,9 +417,9 @@ async function newApiEnsureSetup(): Promise<void> {
   await newApiRequest<unknown>("/api/setup", {
     method: "POST",
     body: {
-      username: NEW_API_ADMIN_USERNAME,
-      password: NEW_API_ADMIN_PASSWORD,
-      confirmPassword: NEW_API_ADMIN_PASSWORD,
+      username: newApiAdminUsername(),
+      password: newApiAdminPassword(),
+      confirmPassword: newApiAdminPassword(),
       SelfUseModeEnabled: false,
       DemoSiteEnabled: false,
     },
@@ -385,7 +427,7 @@ async function newApiEnsureSetup(): Promise<void> {
 }
 
 async function newApiLogin(username: string, password: string): Promise<NewApiSession> {
-  const response = await fetch(`${trimTrailingSlash(NEW_API_BASE_URL)}/api/user/login`, {
+  const response = await fetch(`${trimTrailingSlash(newApiBaseUrl())}/api/user/login`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -439,7 +481,7 @@ function buildNewApiPassword(userId: string): string {
 
 async function newApiAdminSession(): Promise<NewApiSession> {
   await newApiEnsureSetup();
-  return newApiLogin(NEW_API_ADMIN_USERNAME, NEW_API_ADMIN_PASSWORD);
+  return newApiLogin(newApiAdminUsername(), newApiAdminPassword());
 }
 
 async function newApiAdminAuth(forceRefresh = false): Promise<NewApiCachedAuth> {
@@ -485,25 +527,49 @@ async function newApiCreateUserIfMissing(
 }> {
   const username = state.providerUsername?.trim() || buildNewApiUsername(userId);
   const password = state.providerPassword?.trim() || buildNewApiPassword(userId);
+  const referralContext = readProfileReferralContext(userId);
+  const inviterAffCode = !referralContext.aiAccessReferralAppliedAt
+    ? referralContext.referredByCode?.trim() || ""
+    : "";
 
-  try {
-    await withNewApiAdminAccess(async (admin) => {
-      await newApiRequest<unknown>("/api/user/", {
+  if (inviterAffCode) {
+    try {
+      await newApiRequest<unknown>("/api/user/register", {
         method: "POST",
-        accessToken: admin.accessToken,
-        userIdHeader: admin.userId,
         body: {
           username,
           password,
-          display_name: userId.slice(0, 20),
-          role: 1,
+          email: `${username}@polaris.local`,
+          aff_code: inviterAffCode,
         },
       });
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/already|已存在|duplicate/i.test(message)) {
-      throw error;
+      markProfileReferralApplied(userId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/already|已存在|duplicate|exists/i.test(message)) {
+        throw error;
+      }
+    }
+  } else {
+    try {
+      await withNewApiAdminAccess(async (admin) => {
+        await newApiRequest<unknown>("/api/user/", {
+          method: "POST",
+          accessToken: admin.accessToken,
+          userIdHeader: admin.userId,
+          body: {
+            username,
+            password,
+            display_name: userId.slice(0, 20),
+            role: 1,
+          },
+        });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/already|已存在|duplicate/i.test(message)) {
+        throw error;
+      }
     }
   }
 
@@ -515,6 +581,46 @@ async function newApiCreateUserIfMissing(
     password,
     providerToken,
   };
+}
+
+function profilePath(userId: string): string {
+  return path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+}
+
+function readProfileReferralContext(userId: string): {
+  referredByCode: string | null;
+  aiAccessReferralAppliedAt: string | null;
+} {
+  const filePath = profilePath(userId);
+  if (!fs.existsSync(filePath)) {
+    return {
+      referredByCode: null,
+      aiAccessReferralAppliedAt: null,
+    };
+  }
+  const raw = (yaml.load(fs.readFileSync(filePath, "utf8")) ?? {}) as Record<string, unknown>;
+  const referral = typeof raw.referral === "object" && raw.referral
+    ? raw.referral as Record<string, unknown>
+    : {};
+  return {
+    referredByCode: String(referral.referred_by_code ?? "").trim() || null,
+    aiAccessReferralAppliedAt: String(referral.ai_access_applied_at ?? "").trim() || null,
+  };
+}
+
+function markProfileReferralApplied(userId: string): void {
+  const filePath = profilePath(userId);
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+  const raw = yaml.load(fs.readFileSync(filePath, "utf8")) as Record<string, unknown> | null;
+  const next = raw && typeof raw === "object" ? { ...raw } : {};
+  const referral = typeof next.referral === "object" && next.referral
+    ? { ...(next.referral as Record<string, unknown>) }
+    : {};
+  referral.ai_access_applied_at = new Date().toISOString();
+  next.referral = referral;
+  fs.writeFileSync(filePath, yaml.dump(next, { lineWidth: 120, noRefs: true }), "utf8");
 }
 
 async function newApiAddQuota(
@@ -817,7 +923,7 @@ async function newApiReadFacts(
       balanceUnit: "$",
       referralEnabled: true,
       inviteCode: affCode || self.aff_code || "",
-      inviteLink: `${NEW_API_REFERRAL_BASE_URL}?aff=${encodeURIComponent(affCode || self.aff_code || "")}`,
+      inviteLink: buildInviteLink(affCode || self.aff_code || ""),
       rebateSummary: `${Number(self.aff_quota ?? 0)} quota available`,
       lastTopupAt: normalizedState.lastTopupAt,
       lastSyncAt: new Date().toISOString(),
@@ -846,7 +952,7 @@ function defaultPersistedState(userId: string): PersistedAiAccessState {
   const inviteCode = buildInviteCode(userId);
   return {
     version: 1,
-    providerBackend: DEFAULT_PROVIDER_BACKEND,
+    providerBackend: defaultProviderBackend(),
     billingMode: "payg",
     balanceAmount: 0,
     balanceUnit: "credits",
@@ -859,7 +965,7 @@ function defaultPersistedState(userId: string): PersistedAiAccessState {
 
 function stateToFacts(state: PersistedAiAccessState | null): PortalAiAccessProviderFacts {
   return {
-    providerBackend: state?.providerBackend ?? DEFAULT_PROVIDER_BACKEND,
+    providerBackend: state?.providerBackend ?? defaultProviderBackend(),
     accountLinked: Boolean(state?.providerAccountId),
     provisioned: Boolean(state?.provisionedAt),
     billingMode: state?.billingMode ?? "payg",
@@ -949,16 +1055,7 @@ async function ensureRuntimeReadiness(
   }
 
   try {
-    const created = createManagedHarnessCredential({
-      userProfileId: userId,
-      harness: "codex",
-      credentialId: "ai-access-codex",
-      label: "AI Access",
-      providerName: "AI Access",
-      ...(facts.providerToken ? { apiKey: facts.providerToken } : {}),
-      activate: true,
-      ensureIfMissing: true,
-    });
+    const created = syncAiAccessDefaultCredential(userId, facts);
     const lastInternalSyncAt = new Date().toISOString();
     if (persisted) {
       writePersistedState(userId, {
@@ -993,6 +1090,34 @@ async function ensureRuntimeReadiness(
       lastErrorMessage,
     };
   }
+}
+
+function syncAiAccessDefaultCredential(
+  userId: string,
+  facts: PortalAiAccessProviderFacts,
+): ManagedCredentialSummary & { created: boolean } {
+  if (facts.providerBackend === "new-api") {
+    return createManagedHarnessCredential({
+      userProfileId: userId,
+      harness: "codex",
+      credentialId: "codex-new-api",
+      label: "new-api",
+      providerName: "openai",
+      baseUrl: newApiCodexBaseUrl(),
+      apiKey: facts.providerToken ?? "",
+      activate: true,
+      presetId: "openai",
+    });
+  }
+  return createManagedHarnessCredential({
+    userProfileId: userId,
+    harness: "codex",
+    credentialId: "ai-access-codex",
+    label: "AI Access",
+    providerName: "AI Access",
+    ...(facts.providerToken ? { apiKey: facts.providerToken } : {}),
+    activate: true,
+  });
 }
 
 function buildMainAction(
@@ -1114,7 +1239,7 @@ const localProviderAdapter: PortalAiAccessProviderAdapter = {
     const next: PersistedAiAccessState = {
       ...(existing ?? defaultPersistedState(userId)),
       version: 1,
-      providerBackend: DEFAULT_PROVIDER_BACKEND,
+    providerBackend: defaultProviderBackend(),
       provisionedAt: new Date().toISOString(),
       providerAccountId: existing?.providerAccountId ?? buildProviderAccountId(userId),
       providerToken: existing?.providerToken ?? buildProviderToken(),
@@ -1129,11 +1254,11 @@ const localProviderAdapter: PortalAiAccessProviderAdapter = {
     const next: PersistedAiAccessState = {
       ...base,
       version: 1,
-      providerBackend: base.providerBackend || DEFAULT_PROVIDER_BACKEND,
+      providerBackend: base.providerBackend || defaultProviderBackend(),
       provisionedAt: base.provisionedAt ?? now,
       providerAccountId: base.providerAccountId ?? buildProviderAccountId(userId),
       providerToken: base.providerToken ?? buildProviderToken(),
-      balanceAmount: base.balanceAmount + DEFAULT_TOP_UP_AMOUNT,
+      balanceAmount: base.balanceAmount + defaultTopUpAmount(),
       lastTopupAt: now,
       lastErrorMessage: undefined,
     };
@@ -1198,7 +1323,7 @@ const newApiProviderAdapter: PortalAiAccessProviderAdapter = {
     if (!providerUserId) {
       throw new Error("new-api provider user id is missing");
     }
-    await newApiAddQuota(providerUserId, NEW_API_TOP_UP_QUOTA);
+    await newApiAddQuota(providerUserId, newApiTopUpQuota());
     const persisted: PersistedAiAccessState = {
       ...next,
       version: 1,
@@ -1229,7 +1354,7 @@ const newApiProviderAdapter: PortalAiAccessProviderAdapter = {
 };
 
 function providerAdapter(): PortalAiAccessProviderAdapter {
-  if (DEFAULT_PROVIDER_BACKEND === "new-api") {
+  if (defaultProviderBackend() === "new-api") {
     return newApiProviderAdapter;
   }
   return localProviderAdapter;
@@ -1258,10 +1383,23 @@ export async function performPortalAiAccessAction(
   return buildView(facts, runtime);
 }
 
+export async function provisionPortalAiAccessDefaultCredential(
+  userId: string,
+): Promise<ManagedCredentialSummary | null> {
+  if (defaultProviderBackend() !== "new-api") {
+    return null;
+  }
+  const facts = await newApiProviderAdapter.provision(userId);
+  if (!facts.providerToken) {
+    throw new Error("AI access provider token is unavailable after provisioning");
+  }
+  return syncAiAccessDefaultCredential(userId, facts);
+}
+
 export async function getPortalAiAccessTopUpInfo(
   userId: string,
 ): Promise<PortalAiAccessTopUpInfo> {
-  if (DEFAULT_PROVIDER_BACKEND !== "new-api") {
+  if (defaultProviderBackend() !== "new-api") {
     throw new Error("Real top-up is only supported with the new-api backend");
   }
   const { providerToken, providerUserId } = await newApiProvisionedToken(userId);
@@ -1283,7 +1421,7 @@ export async function createPortalAiAccessTopUpSession(input: {
   methodId: string;
   amount: number;
 }): Promise<PortalAiAccessTopUpSession> {
-  if (DEFAULT_PROVIDER_BACKEND !== "new-api") {
+  if (defaultProviderBackend() !== "new-api") {
     throw new Error("Real top-up is only supported with the new-api backend");
   }
   const { providerToken, providerUserId } = await newApiProvisionedToken(input.userId);

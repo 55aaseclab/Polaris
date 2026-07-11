@@ -44,6 +44,8 @@ export interface PortalProfileDetail extends PortalProfileSummary {
   githubAccount?: string;
   sshMode?: string;
   sshComment?: string;
+  referredByCode?: string;
+  aiAccessReferralAppliedAt?: string;
 }
 
 export interface PortalArchivedWorkspaceSummary {
@@ -423,6 +425,12 @@ export function readPortalProfile(userId: string): PortalProfileDetail | null {
       : undefined,
     sshComment: typeof data.ssh === "object" && data.ssh
       ? String((data.ssh as Record<string, unknown>).comment ?? "") || undefined
+      : undefined,
+    referredByCode: typeof data.referral === "object" && data.referral
+      ? String((data.referral as Record<string, unknown>).referred_by_code ?? "") || undefined
+      : undefined,
+    aiAccessReferralAppliedAt: typeof data.referral === "object" && data.referral
+      ? String((data.referral as Record<string, unknown>).ai_access_applied_at ?? "") || undefined
       : undefined,
   };
 }

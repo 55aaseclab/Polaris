@@ -8,6 +8,7 @@ import {
   type PolarisRole,
   upsertUserMapEntries,
 } from "../../portal/user-map.js";
+import { provisionPortalAiAccessDefaultCredential } from "../../portal/ai-access.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
 import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
@@ -44,6 +45,7 @@ function parseCreateUserArgs(argv: string[]): {
   email?: string;
   clerkUsername?: string;
   clerkUserId?: string;
+  referredByCode?: string;
   role?: PolarisRole;
   plan?: PolarisPlan;
 } {
@@ -52,10 +54,11 @@ function parseCreateUserArgs(argv: string[]): {
   const emailFlagIndex = argv.findIndex((value) => value === "--email");
   const clerkFlagIndex = argv.findIndex((value) => value === "--clerk");
   const clerkUserIdFlagIndex = argv.findIndex((value) => value === "--clerk-user-id");
+  const referredByCodeFlagIndex = argv.findIndex((value) => value === "--referred-by-code");
   const roleFlagIndex = argv.findIndex((value) => value === "--role");
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
   if (!userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--clerk-user-id <id>] [--role <admin|user>] [--plan <free|pro>]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--clerk <username>] [--clerk-user-id <id>] [--referred-by-code <code>] [--role <admin|user>] [--plan <free|pro>]");
   }
   return {
     userProfileId,
@@ -63,6 +66,9 @@ function parseCreateUserArgs(argv: string[]): {
     ...(emailFlagIndex >= 0 && argv[emailFlagIndex + 1]?.trim() ? { email: argv[emailFlagIndex + 1].trim() } : {}),
     ...(clerkFlagIndex >= 0 && argv[clerkFlagIndex + 1]?.trim() ? { clerkUsername: argv[clerkFlagIndex + 1].trim().toLowerCase() } : {}),
     ...(clerkUserIdFlagIndex >= 0 && argv[clerkUserIdFlagIndex + 1]?.trim() ? { clerkUserId: argv[clerkUserIdFlagIndex + 1].trim() } : {}),
+    ...(referredByCodeFlagIndex >= 0 && argv[referredByCodeFlagIndex + 1]?.trim()
+      ? { referredByCode: argv[referredByCodeFlagIndex + 1].trim() }
+      : {}),
     ...(roleFlagIndex >= 0 && (argv[roleFlagIndex + 1] === "admin" || argv[roleFlagIndex + 1] === "user")
       ? { role: argv[roleFlagIndex + 1] as PolarisRole }
       : {}),
@@ -73,7 +79,7 @@ function parseCreateUserArgs(argv: string[]): {
 }
 
 export async function createUserCommand(argv: string[]): Promise<void> {
-  const { userProfileId, name, email, clerkUsername, clerkUserId, role, plan } = parseCreateUserArgs(argv);
+  const { userProfileId, name, email, clerkUsername, clerkUserId, referredByCode, role, plan } = parseCreateUserArgs(argv);
   const resolvedRole = resolveDefaultRole({
     userProfileId,
     clerkUsername,
@@ -86,10 +92,15 @@ export async function createUserCommand(argv: string[]): Promise<void> {
       id: userProfileId,
       ...(name ? { name } : {}),
       ...(email ? { email } : {}),
+      ...(referredByCode ? { referredByCode } : {}),
     });
     let defaultCredentials: Array<{ id: string }> = [];
     try {
       defaultCredentials = ensureRequiredProfileCredentials(created.id);
+      const aiAccessCredential = await provisionPortalAiAccessDefaultCredential(created.id);
+      if (aiAccessCredential && !defaultCredentials.some((credential) => credential.id === aiAccessCredential.id)) {
+        defaultCredentials.push(aiAccessCredential);
+      }
       if (clerkUsername || clerkUserId) {
         await upsertUserMapEntries({
           ...(clerkUsername ? { clerkUsername } : {}),

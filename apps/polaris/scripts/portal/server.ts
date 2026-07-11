@@ -613,6 +613,7 @@ async function handleUserCreate(
         : { clerkUserId: session.clerkUserId }),
       ...(body.email?.trim() ? { email: body.email.trim() } : {}),
       ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      ...(body.referralCode?.trim() ? { referralCode: body.referralCode.trim() } : {}),
       ...(session.role === "admin" && (body.role === "admin" || body.role === "user")
         ? { role: body.role }
         : {}),

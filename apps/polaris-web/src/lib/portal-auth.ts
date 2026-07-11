@@ -19,8 +19,16 @@ export function portalSignUpUrl(): string {
   if (typeof window === "undefined") {
     return clerkSignUpUrl();
   }
+  const currentUrl = new URL(window.location.href);
+  const inviteCode = currentUrl.searchParams.get("invite")?.trim()
+    || currentUrl.searchParams.get("code")?.trim()
+    || "";
+  const redirectTarget = new URL("/", window.location.origin);
+  if (inviteCode) {
+    redirectTarget.searchParams.set("invite", inviteCode);
+  }
   return buildClerkUrl(
     clerkSignUpUrl(),
-    new URL("/", window.location.origin).toString(),
+    redirectTarget.toString(),
   );
 }

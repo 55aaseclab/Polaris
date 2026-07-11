@@ -76,11 +76,18 @@ Current registration defaults create:
 - the Polaris user profile
 - required default user material
 - the Clerk mapping
-
-They do not implicitly create a default Codex provider credential.
+- when `POLARIS_AI_ACCESS_PROVIDER_BACKEND=new-api`, Polaris also provisions
+  a default `codex-new-api` credential, activates it, and lets new workspaces
+  resolve that credential as the default `agent-auth` binding
 
 If the Clerk mapping step fails, Polaris rolls back the newly created profile
 and user root instead of leaving partial user state behind.
+
+If the registration URL carries a Polaris invite code, Polaris stores that code
+on the user profile as referral metadata.
+When AI access opens the user's first `new-api` account, Polaris forwards that
+stored code as `aff_code` during `new-api` registration so the invite
+relationship is preserved across systems.
 
 ## Portal Responsibilities
 
