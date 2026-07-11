@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { resolveCurrentReleaseVersion } from "./release-version.mjs";
 
 function run(command, args, options = {}) {
   execFileSync(command, args, {
@@ -26,6 +27,19 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function hasCommand(command) {
+  const result = spawnSync("bash", ["-lc", `command -v "${command}"`], {
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+function requireCommand(command, reason) {
+  if (!hasCommand(command)) {
+    throw new Error(`${command} is required to ${reason}`);
+  }
+}
+
 function copyDir(source, target) {
   ensureDir(target);
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
@@ -41,16 +55,6 @@ function copyDir(source, target) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function resolveDefaultReleaseVersion() {
-  const versionDoc = path.join("apps", "docs", "site", "0.2.6", "VERSION.md");
-  if (!fs.existsSync(versionDoc)) {
-    return "unknown";
-  }
-  const content = fs.readFileSync(versionDoc, "utf8");
-  const match = /Release version:\s*`([^`]+)`/u.exec(content);
-  return match?.[1]?.trim() || "unknown";
 }
 
 function buildReleaseManifest(version, imagePrefix) {
@@ -166,6 +170,10 @@ function writeMacosInfoPlist(filePath, version) {
 }
 
 function buildMacosBundle(distRoot, platform, version) {
+  if (process.platform !== "darwin") {
+    throw new Error("macOS release packaging must run on a macOS host");
+  }
+  requireCommand("hdiutil", "build the macOS dmg");
   const platformRoot = path.join(distRoot, platform);
   const appRoot = path.join(platformRoot, "Polaris.app");
   const contentsRoot = path.join(appRoot, "Contents");
@@ -193,13 +201,27 @@ function buildMacosBundle(distRoot, platform, version) {
     path.join(releaseRoot, "polaris"),
   );
   fs.chmodSync(path.join(releaseRoot, "polaris"), 0o755);
-  const zipName = `polaris_${version}_${platform.replace("-", "_")}.zip`;
-  const zipPath = path.join(distRoot, zipName);
-  fs.rmSync(zipPath, { force: true });
-  run("zip", ["-qry", zipPath, "Polaris.app", "polaris"], { cwd: releaseRoot });
+  const applicationsLink = path.join(releaseRoot, "Applications");
+  fs.rmSync(applicationsLink, { force: true });
+  fs.symlinkSync("/Applications", applicationsLink);
+  const dmgName = `polaris_${version}_${platform.replace("-", "_")}.dmg`;
+  const dmgPath = path.join(distRoot, dmgName);
+  fs.rmSync(dmgPath, { force: true });
+  run("hdiutil", [
+    "create",
+    "-volname",
+    "Polaris",
+    "-srcfolder",
+    releaseRoot,
+    "-ov",
+    "-format",
+    "UDZO",
+    dmgPath,
+  ]);
 }
 
 function buildWindowsBundle(distRoot, version) {
+  requireCommand("makensis", "build the Windows installer");
   const platformRoot = path.join(distRoot, "win-x64");
   const releaseRoot = path.join(platformRoot, "release-package");
   fs.rmSync(releaseRoot, { recursive: true, force: true });
@@ -210,9 +232,48 @@ function buildWindowsBundle(distRoot, version) {
     path.join(platformRoot, "README.txt"),
     path.join(releaseRoot, "README.txt"),
   );
-  const zipPath = path.join(distRoot, `polaris_${version}_win_x64.zip`);
-  fs.rmSync(zipPath, { force: true });
-  run("zip", ["-qry", zipPath, "bin", "bundle", "README.txt"], { cwd: releaseRoot });
+  const scriptPath = path.join(platformRoot, "installer.nsi");
+  const outputPath = path.join(distRoot, `polaris_${version}_win_x64_setup.exe`);
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "Unicode true",
+      "ManifestDPIAware true",
+      "RequestExecutionLevel user",
+      `OutFile "${outputPath}"`,
+      'InstallDir "$LOCALAPPDATA\\Programs\\Polaris"',
+      "Page directory",
+      "Page instfiles",
+      "UninstPage uninstConfirm",
+      "UninstPage instfiles",
+      "",
+      'Section "Install"',
+      '  SetOutPath "$INSTDIR"',
+      `  File /r "${path.join(releaseRoot, "bin")}"`,
+      `  File /r "${path.join(releaseRoot, "bundle")}"`,
+      `  File "${path.join(releaseRoot, "README.txt")}"`,
+      '  CreateDirectory "$SMPROGRAMS\\Polaris"',
+      '  CreateShortcut "$SMPROGRAMS\\Polaris\\Polaris.lnk" "$INSTDIR\\bin\\polaris-desktop.exe"',
+      '  CreateShortcut "$DESKTOP\\Polaris.lnk" "$INSTDIR\\bin\\polaris-desktop.exe"',
+      '  WriteUninstaller "$INSTDIR\\Uninstall Polaris.exe"',
+      'SectionEnd',
+      "",
+      'Section "Uninstall"',
+      '  Delete "$DESKTOP\\Polaris.lnk"',
+      '  Delete "$SMPROGRAMS\\Polaris\\Polaris.lnk"',
+      '  RMDir "$SMPROGRAMS\\Polaris"',
+      '  Delete "$INSTDIR\\README.txt"',
+      '  Delete "$INSTDIR\\Uninstall Polaris.exe"',
+      '  RMDir /r "$INSTDIR\\bin"',
+      '  RMDir /r "$INSTDIR\\bundle"',
+      '  RMDir "$INSTDIR"',
+      'SectionEnd',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  fs.rmSync(outputPath, { force: true });
+  run("makensis", [scriptPath]);
 }
 
 function buildDebPackage(distRoot, version) {
@@ -264,7 +325,7 @@ function buildDebPackage(distRoot, version) {
     "utf8",
   );
   const debOutput = path.join(distRoot, `polaris_${version}_amd64.deb`);
-  run("dpkg-deb", ["--build", packageRoot, debOutput]);
+  run("dpkg-deb", ["--build", "--root-owner-group", packageRoot, debOutput]);
 }
 
 function writeWindowsReadme(distRoot, version) {
@@ -284,7 +345,7 @@ function writeWindowsReadme(distRoot, version) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const version = args.get("version") || resolveDefaultReleaseVersion();
+const version = args.get("version") || resolveCurrentReleaseVersion();
 const imagePrefix = args.get("image-prefix") || process.env.POLARIS_LOCAL_DEPLOY_IMAGE_PREFIX || "ghcr.io/example/polaris";
 const outputDir = path.resolve(args.get("output-dir") || path.join("dist", "release"));
 const platforms = (args.get("platforms") || "linux-x64,win-x64")

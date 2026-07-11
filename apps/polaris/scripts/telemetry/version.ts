@@ -20,7 +20,7 @@ export function resolvePolarisAppVersion(importMetaUrl: string): string {
   }
   try {
     const root = repoRoot(importMetaUrl);
-    const versionDoc = path.join(root, "apps", "docs", "site", "0.2.6", "VERSION.md");
+    const versionDoc = path.join(root, "apps", "docs", "site", "0.2.7", "VERSION.md");
     if (fs.existsSync(versionDoc)) {
       const parsed = parseVersionDoc(fs.readFileSync(versionDoc, "utf8"));
       if (parsed) {

@@ -80,27 +80,27 @@ Stage one ships through native release artifacts.
 Current target outputs include:
 
 - Debian `polaris_<version>_amd64.deb`
-- Windows `polaris_<version>_win_x64.zip`
-- macOS `polaris_<version>_macos_x64.zip`
+- Windows `polaris_<version>_win_x64_setup.exe`
+- macOS `polaris_<version>_macos_x64.dmg`
 
 The Debian package installs both:
 
 - `polaris`
 - the `Polaris` desktop app entry
 
-The Windows release bundle includes:
+The Windows installer installs:
 
 - `bin/polaris.exe`
 - `bin/polaris-desktop.exe`
 - a colocated `bundle/` runtime directory
-- a release zip that keeps them together
+- a desktop shortcut for `Polaris`
 
-The macOS release bundle includes:
+The macOS disk image includes:
 
 - `Polaris.app`
-- `polaris_<version>_macos_x64.zip`
+- `polaris_<version>_macos_x64.dmg`
 - a bundled runtime directory inside the app package
-- a bundled `polaris` CLI binary alongside the app inside the zip
+- a bundled `polaris` CLI binary alongside the app inside the mounted image
 
 ## Runtime Shape
 

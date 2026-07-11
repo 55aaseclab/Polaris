@@ -19,7 +19,7 @@ function readStoredInstallId(): string {
 }
 
 function appVersion(): string {
-  return env.VITE_POLARIS_APP_VERSION?.trim() || "0.2.6";
+  return env.VITE_POLARIS_APP_VERSION?.trim() || "0.2.7";
 }
 
 export function resolveBrowserTelemetryEnabled(sourceEnv: EnvMap = env): boolean {
@@ -45,7 +45,7 @@ export function buildBrowserTelemetryCommonProperties(input: {
   return {
     install_id: input.installId,
     session_id: input.sessionId,
-    app_version: sourceEnv.VITE_POLARIS_APP_VERSION?.trim() || "0.2.6",
+    app_version: sourceEnv.VITE_POLARIS_APP_VERSION?.trim() || "0.2.7",
     release_channel: sourceEnv.VITE_POLARIS_RELEASE_CHANNEL?.trim() || "stable",
     platform: input.platform,
     arch: "browser",
