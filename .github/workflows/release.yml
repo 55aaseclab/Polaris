@@ -10,7 +10,7 @@ on:
         description: Release version tag
         required: true
       image_prefix:
-        description: GHCR image prefix, for example ghcr.io/org/project
+        description: GHCR image prefix, for example ghcr.io/org
         required: true
 permissions:
   contents: write
@@ -35,7 +35,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}/polaris" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}" >> "$GITHUB_OUTPUT"
           else
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
             echo "image_prefix=${{ inputs.image_prefix }}" >> "$GITHUB_OUTPUT"
@@ -100,7 +100,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}/polaris" >> "$GITHUB_OUTPUT"
+            echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER}" >> "$GITHUB_OUTPUT"
           else
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
             echo "image_prefix=${{ inputs.image_prefix }}" >> "$GITHUB_OUTPUT"
