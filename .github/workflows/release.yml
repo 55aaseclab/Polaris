@@ -64,6 +64,7 @@ jobs:
           docker push "${{ steps.meta.outputs.image_prefix }}/polaris-webportal:${{ steps.meta.outputs.version }}"
       - name: Build and push paseo image
         run: |
+          bash ./scripts/build-paseo-web-artifact.sh
           docker build -f apps/paseo/Dockerfile -t "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}" .
           docker push "${{ steps.meta.outputs.image_prefix }}/paseo-app:${{ steps.meta.outputs.version }}"
 
