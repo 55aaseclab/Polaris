@@ -369,6 +369,7 @@ export function createScaffoldUserProfile(profile: {
   id: string;
   name: string;
   email: string;
+  referredByCode?: string;
 }): {
   id: string;
   name: string;
@@ -396,6 +397,14 @@ export function createScaffoldUserProfile(profile: {
           mode: "managed-key",
           comment: profile.email,
         },
+        ...(profile.referredByCode
+          ? {
+            referral: {
+              referred_by_code: profile.referredByCode,
+              captured_at: new Date().toISOString(),
+            },
+          }
+          : {}),
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -426,6 +435,7 @@ export function scaffoldUserProfileById(input: {
   id: string;
   name?: string;
   email?: string;
+  referredByCode?: string;
 }): {
   id: string;
   name: string;
@@ -439,6 +449,9 @@ export function scaffoldUserProfileById(input: {
     id,
     name: input.name?.trim() || id,
     email: input.email?.trim() || `${id}@polaris.local`,
+    ...(input.referredByCode?.trim()
+      ? { referredByCode: input.referredByCode.trim() }
+      : {}),
   });
 }
 

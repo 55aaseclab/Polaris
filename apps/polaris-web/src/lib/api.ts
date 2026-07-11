@@ -9,6 +9,8 @@ export interface PortalProfileDetail extends PortalProfileSummary {
   githubAccount?: string;
   sshMode?: string;
   sshComment?: string;
+  referredByCode?: string;
+  aiAccessReferralAppliedAt?: string;
 }
 
 export interface PortalArchivedWorkspaceSummary {
@@ -511,6 +513,7 @@ export async function createPortalUser(input: {
   clerkUserId?: string;
   email?: string;
   name?: string;
+  referralCode?: string;
   role?: "admin" | "user";
   plan?: "free" | "pro";
 }): Promise<PortalProfileDetail> {

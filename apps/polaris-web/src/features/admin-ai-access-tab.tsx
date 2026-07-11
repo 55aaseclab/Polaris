@@ -9,13 +9,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import type { PortalAiAccessActionKind, PortalAiAccessView } from "@/lib/api";
 import {
   aiAccessActionLabel,
@@ -29,6 +22,7 @@ import {
 type Props = {
   t: (key: string) => string;
   view: PortalAiAccessView | null;
+  referredByCode?: string | null;
   error: string | null;
   loading: boolean;
   actionInFlight: PortalAiAccessActionKind | null;
@@ -67,11 +61,20 @@ async function copyText(value: string): Promise<void> {
 }
 
 export default function AdminAiAccessTab(props: Props) {
-  const { t, view, error, loading, actionInFlight, onRunAction } = props;
+  const {
+    t,
+    view,
+    referredByCode,
+    error,
+    loading,
+    actionInFlight,
+    onRunAction,
+  } = props;
   const [copyFeedback, setCopyFeedback] = React.useState<{
     title: string;
     message: string;
   } | null>(null);
+  const sectionClassName = "grid gap-3 border-b border-border/60 pb-6 last:border-b-0 last:pb-0";
 
   React.useEffect(() => {
     setCopyFeedback(null);
@@ -79,29 +82,17 @@ export default function AdminAiAccessTab(props: Props) {
 
   if (loading && !view) {
     return (
-      <Card className="border-border/70">
-        <CardHeader>
-          <CardTitle className="text-base">{t("admin_user_tab_ai_access")}</CardTitle>
-          <CardDescription>{t("ai_access_description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
-        </CardContent>
-      </Card>
+      <div className="grid gap-3">
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
+      </div>
     );
   }
 
   if (error && !view) {
     return (
-      <Card className="border-border/70">
-        <CardHeader>
-          <CardTitle className="text-base">{t("admin_user_tab_ai_access")}</CardTitle>
-          <CardDescription>{t("ai_access_description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-destructive">{error}</p>
-        </CardContent>
-      </Card>
+      <div className="grid gap-3">
+        <p className="text-sm text-destructive">{error}</p>
+      </div>
     );
   }
 
@@ -153,167 +144,167 @@ export default function AdminAiAccessTab(props: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <Card className="border-border/70">
-        <CardHeader>
-          <CardTitle className="text-base">{t("admin_user_tab_ai_access")}</CardTitle>
-          <CardDescription>{t("ai_access_description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
-          <div className="grid gap-2">
-            <div className="flex items-start justify-between gap-3">
+      <div className="grid gap-6">
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+        <div className={sectionClassName}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
               <div className="text-sm font-medium">{t("ai_access_status")}</div>
-              <div className="flex flex-wrap justify-end gap-2">
-                {view.mainAction.secondaryAction && !secondaryActionInBilling ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={
-                      !view.mainAction.secondaryAction.enabled
-                      || actionInFlight !== null
-                    }
-                    onClick={() => onRunAction(view.mainAction.secondaryAction!.kind)}
-                  >
-                    {actionInFlight === view.mainAction.secondaryAction.kind
-                      ? t("working")
-                      : panel.secondaryActionLabel}
-                  </Button>
-                ) : null}
-              </div>
             </div>
-            <div className="grid gap-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_access_state")}:</span>{" "}
-                {aiAccessStateLabel(view.state, t)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_account_linked")}:</span>{" "}
-                {view.accessStatus.accountLinked ? t("yes") : t("no")}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_runtime_ready")}:</span>{" "}
-                {view.accessStatus.runtimeReady ? t("yes") : t("no")}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_last_sync")}:</span>{" "}
-                {view.accessStatus.lastSyncAt ?? t("none")}
-              </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              {view.mainAction.secondaryAction && !secondaryActionInBilling ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !view.mainAction.secondaryAction.enabled
+                    || actionInFlight !== null
+                  }
+                  onClick={() => onRunAction(view.mainAction.secondaryAction!.kind)}
+                >
+                  {actionInFlight === view.mainAction.secondaryAction.kind
+                    ? t("working")
+                    : panel.secondaryActionLabel}
+                </Button>
+              ) : null}
+              {!primaryActionInBilling ? (
+                <Button
+                  size="sm"
+                  disabled={
+                    !view.mainAction.primaryAction.enabled
+                    || actionInFlight !== null
+                  }
+                  onClick={() => onRunAction(view.mainAction.primaryAction.kind)}
+                >
+                  {actionInFlight === view.mainAction.primaryAction.kind
+                    ? t("working")
+                    : panel.primaryActionLabel}
+                </Button>
+              ) : null}
             </div>
-            {view.accessStatus.statusMessage ? (
-              <p className="text-xs text-muted-foreground">
-                {t("ai_access_status_message")}: {view.accessStatus.statusMessage}
-              </p>
-            ) : null}
-            {aiAccessStateReason(view.state, t) ? (
-              <p className="text-xs text-muted-foreground">{aiAccessStateReason(view.state, t)}</p>
-            ) : null}
           </div>
-          {!primaryActionInBilling ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                disabled={
-                  !view.mainAction.primaryAction.enabled
-                  || actionInFlight !== null
-                }
-                onClick={() => onRunAction(view.mainAction.primaryAction.kind)}
-              >
-                {actionInFlight === view.mainAction.primaryAction.kind
-                  ? t("working")
-                  : panel.primaryActionLabel}
-              </Button>
+          <div className="grid gap-2 text-sm">
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_access_state")}:</span>{" "}
+              {aiAccessStateLabel(view.state, t)}
             </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_account_linked")}:</span>{" "}
+              {view.accessStatus.accountLinked ? t("yes") : t("no")}
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_runtime_ready")}:</span>{" "}
+              {view.accessStatus.runtimeReady ? t("yes") : t("no")}
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_last_sync")}:</span>{" "}
+              {view.accessStatus.lastSyncAt ?? t("none")}
+            </div>
+          </div>
+          {view.accessStatus.statusMessage ? (
+            <p className="text-xs text-muted-foreground">
+              {t("ai_access_status_message")}: {view.accessStatus.statusMessage}
+            </p>
+          ) : null}
+          {aiAccessStateReason(view.state, t) ? (
+            <p className="text-xs text-muted-foreground">{aiAccessStateReason(view.state, t)}</p>
           ) : null}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
-            <div className="flex items-start justify-between gap-3">
+        <div className={sectionClassName}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
               <div className="text-sm font-medium">{t("ai_access_balance_billing")}</div>
-              <div className="flex flex-wrap justify-end gap-2">
-                {primaryActionInBilling ? (
-                  <Button
-                    size="sm"
-                    disabled={
-                      !view.mainAction.primaryAction.enabled
-                      || actionInFlight !== null
-                    }
-                    onClick={() => onRunAction(view.mainAction.primaryAction.kind)}
-                  >
-                    {actionInFlight === view.mainAction.primaryAction.kind
-                      ? t("working")
-                      : panel.primaryActionLabel}
-                  </Button>
-                ) : null}
-                {view.mainAction.secondaryAction && secondaryActionInBilling ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={
-                      !view.mainAction.secondaryAction.enabled
-                      || actionInFlight !== null
-                    }
-                    onClick={() => onRunAction(view.mainAction.secondaryAction!.kind)}
-                  >
-                    {actionInFlight === view.mainAction.secondaryAction.kind
-                      ? t("working")
-                      : panel.secondaryActionLabel}
-                  </Button>
-                ) : null}
-              </div>
             </div>
-            <div className="mt-3 grid gap-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_summary_mode")}:</span>{" "}
-                {view.billing.billingMode.toUpperCase()}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_summary_balance")}:</span>{" "}
-                {formatAiAccessBalance(
-                  view.billing.balanceAmount,
-                  view.billing.balanceUnit,
-                  t,
-                )}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_last_topup")}:</span>{" "}
-                {view.billing.lastTopupAt ?? t("none")}
-              </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              {primaryActionInBilling ? (
+                <Button
+                  size="sm"
+                  disabled={
+                    !view.mainAction.primaryAction.enabled
+                    || actionInFlight !== null
+                  }
+                  onClick={() => onRunAction(view.mainAction.primaryAction.kind)}
+                >
+                  {actionInFlight === view.mainAction.primaryAction.kind
+                    ? t("working")
+                    : panel.primaryActionLabel}
+                </Button>
+              ) : null}
+              {view.mainAction.secondaryAction && secondaryActionInBilling ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !view.mainAction.secondaryAction.enabled
+                    || actionInFlight !== null
+                  }
+                  onClick={() => onRunAction(view.mainAction.secondaryAction!.kind)}
+                >
+                  {actionInFlight === view.mainAction.secondaryAction.kind
+                    ? t("working")
+                    : panel.secondaryActionLabel}
+                </Button>
+              ) : null}
             </div>
           </div>
-
-          <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="text-sm font-medium">{t("ai_access_referral")}</div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!view.referral.inviteLink}
-                onClick={() => {
-                  void handleCopyReferralLink();
-                }}
-              >
-                {t("ai_access_copy_link")}
-              </Button>
+          <div className="grid gap-2 text-sm">
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_summary_mode")}:</span>{" "}
+              {view.billing.billingMode.toUpperCase()}
             </div>
-            <div className="mt-3 grid gap-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_summary_referral")}:</span>{" "}
-                {aiAccessReferralLabel(view.summary.referralState, t)}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("ai_access_invite_code")}:</span>{" "}
-                {view.referral.inviteCode ?? t("none")}
-              </div>
-              <div className="break-all">
-                <span className="text-muted-foreground">{t("ai_access_invite_link")}:</span>{" "}
-                {view.referral.inviteLink ?? t("none")}
-              </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_summary_balance")}:</span>{" "}
+              {formatAiAccessBalance(
+                view.billing.balanceAmount,
+                view.billing.balanceUnit,
+                t,
+              )}
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_last_topup")}:</span>{" "}
+              {view.billing.lastTopupAt ?? t("none")}
             </div>
           </div>
         </div>
-        </CardContent>
-      </Card>
+
+        <div className={sectionClassName}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t("ai_access_referral")}</div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!view.referral.inviteLink}
+              onClick={() => {
+                void handleCopyReferralLink();
+              }}
+            >
+              {t("ai_access_copy_link")}
+            </Button>
+          </div>
+          <div className="grid gap-2 text-sm">
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_summary_referral")}:</span>{" "}
+              {aiAccessReferralLabel(view.summary.referralState, t)}
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_polaris_referral_code")}:</span>{" "}
+              {referredByCode ?? t("none")}
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("ai_access_invite_code")}:</span>{" "}
+              {view.referral.inviteCode ?? t("none")}
+            </div>
+            <div className="break-all">
+              <span className="text-muted-foreground">{t("ai_access_invite_link")}:</span>{" "}
+              {view.referral.inviteLink ?? t("none")}
+            </div>
+          </div>
+        </div>
+      </div>
     </>
   );
 }

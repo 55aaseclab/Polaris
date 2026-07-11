@@ -694,6 +694,7 @@ export async function createPortalUser(input: {
   clerkUserId?: string;
   email?: string;
   name?: string;
+  referralCode?: string;
   role?: "admin" | "user";
   plan?: "free" | "pro";
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
@@ -713,6 +714,7 @@ export async function createPortalUser(input: {
     email,
     ...(input.clerkUsername?.trim() ? ["--clerk", input.clerkUsername.trim()] : []),
     ...(input.clerkUserId?.trim() ? ["--clerk-user-id", input.clerkUserId.trim()] : []),
+    ...(input.referralCode?.trim() ? ["--referred-by-code", input.referralCode.trim()] : []),
     ...(input.role ? ["--role", input.role] : []),
     ...(input.plan ? ["--plan", input.plan] : []),
   ]);
