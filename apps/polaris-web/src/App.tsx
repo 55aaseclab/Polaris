@@ -143,6 +143,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  captureTelemetryError,
+  identifyTelemetryUser,
+  trackTelemetryEvent,
+} from "@/lib/telemetry";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -1199,6 +1204,15 @@ class AppErrorBoundary extends React.Component<
     return { hasError: true };
   }
 
+  override componentDidCatch(error: Error): void {
+    captureTelemetryError(error, {
+      event: "unhandled_exception",
+      category: "error",
+      error_domain: "react",
+      error_stage: "error_boundary",
+    });
+  }
+
   render(): React.ReactNode {
     if (this.state.hasError) {
       return <div className="p-6 text-sm text-destructive">App error.</div>;
@@ -1224,12 +1238,27 @@ function AuthGate(props: { children: ReactNode }) {
       .then((session) => {
         if (!cancelled) {
           setBackendSession(session);
+          identifyTelemetryUser({
+            polarisUserId: session.polarisUserId,
+            role: session.role,
+          });
+          trackTelemetryEvent("signin_completed", {
+            category: "product",
+            authenticated: session.authenticated,
+            role: session.role,
+          });
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
           setBackendSession(null);
         }
+        captureTelemetryError(error, {
+          event: "signin_failed",
+          category: "error",
+          error_domain: "portal_api",
+          error_stage: "session_fetch",
+        });
       })
       .finally(() => {
         if (!cancelled) {

@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "polaris": "pnpm --filter polaris run polaris",
+    "polaris:local-deploy": "pnpm --filter polaris run local-deploy",
+    "polaris:local-deploy:build-images": "node scripts/build-local-deploy-images.mjs",
+    "polaris:release": "node scripts/build-release.mjs",
     "polaris:server": "pnpm --filter polaris run server",
     "polaris:executor": "pnpm --filter polaris run executor",
     "polaris:web": "pnpm --filter polaris-web exec vite --host 0.0.0.0",

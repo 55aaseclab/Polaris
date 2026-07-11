@@ -8,9 +8,10 @@ here:
 
 - [What Your Team Gets](./what-your-team-gets.md)
 
-That customer-facing path is then expanded into four sections:
+That customer-facing path is then expanded into five sections:
 
 - [Onboarding](./onboarding/)
+- [Local Deployment](./local-deployment.md)
 - [Governed Use](./governed-use/)
 - [Shared Infrastructure](./shared-infrastructure/)
 - [Member Exit And Handover](./member-exit-and-handover/)
@@ -23,19 +24,21 @@ Use this order when you want the business story first:
 
 1. [What Your Team Gets](./what-your-team-gets.md)
 2. [Onboarding](./onboarding/)
-3. [Governed Use](./governed-use/)
-4. [Shared Infrastructure](./shared-infrastructure/)
-5. [Member Exit And Handover](./member-exit-and-handover/)
+3. [Local Deployment](./local-deployment.md)
+4. [Governed Use](./governed-use/)
+5. [Shared Infrastructure](./shared-infrastructure/)
+6. [Member Exit And Handover](./member-exit-and-handover/)
 
 ### Technical path
 
 Use this order when you want implementation detail and operational depth:
 
 1. [Onboarding](./onboarding/)
-2. [Governed Use](./governed-use/)
-3. [Shared Infrastructure](./shared-infrastructure/)
-4. [Member Exit And Handover](./member-exit-and-handover/)
-5. [Agent Swarm Maturity](./agent-swarm-maturity.md)
+2. [Local Deployment](./local-deployment.md)
+3. [Governed Use](./governed-use/)
+4. [Shared Infrastructure](./shared-infrastructure/)
+5. [Member Exit And Handover](./member-exit-and-handover/)
+6. [Agent Swarm Maturity](./agent-swarm-maturity.md)
 
 ## What Polaris Covers
 
@@ -56,7 +59,7 @@ Polaris currently supports:
 
 ## Main Entry Points
 
-The main operator and developer surfaces are:
+The main operator, user, and developer surfaces are:
 
 - CLI:
 
@@ -64,16 +67,20 @@ The main operator and developer surfaces are:
 pnpm --dir apps/polaris run polaris --
 ```
 
-- local web portal:
+- stage-one local deployment:
+
+```bash
+polaris start
+```
+
+Desktop entry:
+
+- `Polaris` app icon
+
+- development-only local web portal:
 
 ```bash
 pnpm --filter polaris-web exec vite --host 0.0.0.0
-```
-
-- local stack wrapper:
-
-```bash
-bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
 ## Deep Technical References
