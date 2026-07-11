@@ -56,6 +56,17 @@ paseo_local_buildkit_cache_dir() {
   printf '%s/buildkit-cache\n' "$(paseo_local_runtime_root)"
 }
 
+paseo_local_ensure_builder() {
+  if docker buildx inspect "${POLARIS_PASEO_BUILDER_NAME}" >/dev/null 2>&1; then
+    return
+  fi
+
+  docker buildx create \
+    --name "${POLARIS_PASEO_BUILDER_NAME}" \
+    --driver docker-container \
+    --bootstrap >/dev/null
+}
+
 paseo_local_buildx_with_local_cache() {
   local cache_dir cache_tmp
   cache_dir="$1"
@@ -64,6 +75,7 @@ paseo_local_buildx_with_local_cache() {
 
   rm -rf "${cache_tmp}"
   mkdir -p "$(dirname "${cache_dir}")"
+  paseo_local_ensure_builder
 
   if [ -d "${cache_dir}" ]; then
     docker buildx build \
@@ -165,6 +177,7 @@ paseo_local_build_tool_bundle() {
 
   tmp_dir="$(mktemp -d "${runtime_root}/bundle.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
+  paseo_local_ensure_builder
 
   # The local cache exporter can hang indefinitely for the tool bundle build
   # while exporting the client directory. Reuse the existing cache for reads,
