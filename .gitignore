@@ -27,6 +27,7 @@ apps/polaris/.tmp/
 apps/polaris-web/dist/
 apps/polaris-web/test-results/
 apps/paseo/dist-build/
+apps/paseo/source/
 apps/polaris/.coverage/
 apps/docs/node_modules/
 apps/docs/dist/
