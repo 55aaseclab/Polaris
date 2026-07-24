@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import {
   ArrowRight,
   Check,
@@ -13,10 +13,7 @@ import {
   AccordionTrigger,
 } from "./components/ui/accordion";
 
-type Language = "zh" | "en";
-
 const copy = {
-  zh: {
     nav: ["产品能力", "安全与隔离", "常见问题"],
     signIn: "进入 Polaris",
     trial: "申请团队试点",
@@ -67,59 +64,11 @@ const copy = {
     finalTitle: "从一个线上的AI工作空间开始",
     finalBody: "告诉我们你希望团队先解决什么问题，我们一起确定合适的试点边界。",
     company: "简小弈科技",
-    footer: "面向团队的可控 AI 工作空间。",
-  },
-  en: {
-    nav: ["Capabilities", "Security", "FAQ"],
-    signIn: "Open Polaris",
-    trial: "Request a team pilot",
-    heroKicker: "POLARIS · AI WORKSPACES",
-    heroTitle: "Give your team a controlled\nplace to work with AI.",
-    heroBody:
-      "Bring AI development tools, runtimes, access, and project context into manageable workspaces. Start faster and hand work over with confidence.",
-    heroPrimary: "Open Polaris",
-    heroSecondary: "Request a team pilot",
-    proof: ["Separate members, environments, and credentials", "Choose containers, Pods, or VMs", "Keep project knowledge with the team"],
-    scenariosKicker: "Built for real work",
-    scenariosTitle: "Not another chat window.\nA working surface for AI teams.",
-    scenarios: [
-      ["Development automation", "Run Codex, Claude Code, and team tools in dedicated environments without local configuration drift."],
-      ["Team workspaces", "Organize people, workspaces, credentials, and tools so new members do not begin from zero."],
-      ["Secure handover", "Hand over runnable context and environments, not an instruction document that cannot be reproduced."],
-    ],
-    flowKicker: "From work started to knowledge retained",
-    flowTitle: "A stable team workflow in four steps.",
-    flow: [["01", "Create", "Create a dedicated workspace with clear ownership."], ["02", "Configure", "Connect the required AI tools and credentials."], ["03", "Run", "Execute work in a controlled runtime."], ["04", "Retain", "Keep context, handover snapshots, and reusable knowledge."]],
-    trustKicker: "Security is not an add-on",
-    trustTitle: "Make access and runtime boundaries\nthe default product path.",
-    trustBody: "Polaris does not force one infrastructure model. Choose the isolation level that fits each task, data set, and risk profile.",
-    trust: [["Access and credentials", "Manage credentials by user and workspace instead of scattering them across devices."], ["Runtime isolation", "Use containers, Pods, or VMs according to your team requirements."], ["Traceable work", "Keep key workspace state and handover information inside a managed product boundary."]],
-    audienceKicker: "Start with a concrete problem",
-    audienceTitle: "Solve one real team bottleneck first.",
-    audience: [["Small-team pilot", "For teams introducing AI to daily work without losing control of configuration, access, and knowledge.", "Request a team pilot"], ["Teams with AI workflows", "For teams ready to standardize isolation, onboarding, and handover around existing AI tools.", "Open Polaris"]],
-    faqKicker: "FAQ",
-    faqTitle: "Clarify the boundaries before you begin.",
-    faq: [["Where does data live?", "Data and runtimes follow your deployment. Polaris makes the ownership of users, workspaces, and credentials explicit so your team can govern them on its own infrastructure."], ["How does isolation work?", "Choose containers, Kubernetes Pods, or VMs according to the task. Isolation is a deployment decision matched to risk, not one global switch."], ["How does a team join?", "Start with one workspace: define members, runtime, and tools, then turn the reusable configuration into team capability."], ["Do we need to migrate everything?", "No. Start with one development or automation use case, validate the workflow, then expand deliberately."]],
-    finalTitle: "Start with one real AI workflow.",
-    finalBody: "Tell us what your team needs to solve first, and we will define a practical pilot boundary together.",
-    company: "Jianxiaoyi Technology",
-    footer: "Controlled AI workspaces for teams.",
-  },
-} as const;
+    footer: "面向团队的可控 AI 工作空间",
+};
 
 function App() {
-  const [language, setLanguage] = useState<Language>("zh");
-  const t = copy[language];
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("landing-page-language");
-    if (saved === "zh" || saved === "en") setLanguage(saved);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("landing-page-language", language);
-    document.documentElement.lang = language;
-  }, [language]);
+  const t = copy;
 
   useEffect(() => {
     const sections = Array.from(
@@ -139,15 +88,10 @@ function App() {
 
   return (
     <div className="site-shell">
-      <header className="site-header" id="top">
+      <header className="site-header">
         <div className="container header-inner">
-          <a className="brand" href="#top"><span className="brand-mark">P</span>Polaris</a>
-          <div className="header-actions">
-            <button className="language-toggle" onClick={() => setLanguage(language === "zh" ? "en" : "zh")}>
-              {language === "zh" ? "EN" : "中文"}
-            </button>
-            <a className="button button-secondary" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}</a>
-          </div>
+          <a className="brand" href="#top" onClick={(event) => { event.preventDefault(); window.history.replaceState(null, "", "#top"); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="brand-mark">P</span>Polaris</a>
+          <div className="header-actions"><a className="button button-secondary" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}</a></div>
         </div>
       </header>
 
@@ -159,7 +103,7 @@ function App() {
               <p className="hero-body">{t.heroBody}</p>
               <div className="button-row">
                 <a className="button button-primary" href="https://polaris.jianxiaoyitech.com/sign-in">{t.heroPrimary}<ArrowRight size={17} /></a>
-                <a className="button button-secondary" href="https://www.jianxiaoyitech.com/contact/?source=polaris">{t.heroSecondary}</a>
+                <a className="button button-secondary" href="mailto:contact@jianxiaoyitech.com">{t.heroSecondary}</a>
               </div>
               <ul className="proof-list">{t.proof.map((item) => <li key={item}><Check size={16} />{item}</li>)}</ul>
             </div>
@@ -169,7 +113,7 @@ function App() {
                 <aside><b>POLARIS</b><span className="active">Workspace</span><span>Credentials</span><span>Members</span><span>Settings</span></aside>
                 <div className="product-main"><div className="workspace-head"><div><small>WORKSPACE</small><h2>atlas-api</h2><p>team-platform · ready</p></div><span className="status">Running</span></div><div className="metric-grid"><div><small>Runtime</small><b>Container</b><em>Isolated</em></div><div><small>Credential</small><b>Scoped</b><em>Active</em></div><div><small>Handover</small><b>Snapshot</b><em>Retained</em></div></div><div className="activity"><small>RECENT ACTIVITY</small><p><i /> Workspace context retained for handover</p><p><i /> Runtime policy applied successfully</p></div></div>
               </div>
-              <figcaption>{language === "zh" ? "Polaris 工作空间：把运行环境、凭证与交接状态放在一起。" : "A Polaris workspace keeps runtime, credentials, and handover state together."}</figcaption>
+              <figcaption>Polaris 工作空间：把运行环境、凭证与交接状态放在一起。</figcaption>
             </figure>
           </div>
         </section>
@@ -194,10 +138,10 @@ function App() {
           <Accordion type="single" collapsible className="faq-list">{t.faq.map(([question, answer], index) => <AccordionItem key={question} value={`faq-${index}`}><AccordionTrigger>{question}</AccordionTrigger><AccordionContent>{answer}</AccordionContent></AccordionItem>)}</Accordion>
         </div></section>
 
-        <section className="final-cta" id="pilot" data-section-hash="pilot"><div className="container final-inner"><p className="eyebrow">POLARIS</p><h2>{t.finalTitle}</h2><p>{t.finalBody}</p><div className="final-button-row"><a className="button button-light" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}<ArrowRight size={17} /></a><a className="button button-light-outline" href="https://www.jianxiaoyitech.com/contact/?source=polaris">{t.trial}</a></div></div></section>
+        <section className="final-cta" id="pilot" data-section-hash="pilot"><div className="container final-inner"><p className="eyebrow">POLARIS</p><h2>{t.finalTitle}</h2><p>{t.finalBody}</p><div className="final-button-row"><a className="button button-light" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}<ArrowRight size={17} /></a><a className="button button-light-outline" href="mailto:contact@jianxiaoyitech.com">{t.trial}</a></div></div></section>
       </main>
 
-      <footer className="site-footer"><div className="container footer-inner"><div><a className="brand" href="#top"><span className="brand-mark">P</span>Polaris</a><p>{t.footer}</p></div><div><p>{t.company}</p><a href="https://www.jianxiaoyitech.com">www.jianxiaoyitech.com</a></div></div></footer>
+      <footer className="site-footer"><div className="container footer-inner"><div><a className="brand" href="#top" onClick={(event) => { event.preventDefault(); window.history.replaceState(null, "", "#top"); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="brand-mark">P</span>Polaris</a><p>{t.footer}</p></div><div><p>{t.company}</p><a href="https://www.jianxiaoyitech.com">www.jianxiaoyitech.com</a></div></div></footer>
     </div>
   );
 }
