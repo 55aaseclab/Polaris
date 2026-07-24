@@ -281,9 +281,9 @@ export async function authenticatePortalRequest(
     authingUserId,
     authingUsername,
     authingPhoneNumber,
-    polarisUserId: mapping?.polarisUserId ?? null,
-    role: mapping?.role ?? null,
-    plan: mapping?.plan ?? null,
+    polarisUserId: null,
+    role: null,
+    plan: null,
   };
 }
 
