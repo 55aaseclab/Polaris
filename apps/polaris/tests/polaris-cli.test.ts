@@ -365,6 +365,46 @@ test("runCli user list returns sorted user profiles", async () => {
   }
 });
 
+test("runCli workspace list returns a user's workspace names", async () => {
+  const userId = uniqueProjectName("cli-workspace-list");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces");
+
+  try {
+    await runCli(["user", "create", userId, "--name", "Workspace List User"]);
+    for (const workspace of ["beta", "alpha"]) {
+      const workspacePath = path.join(workspaceRoot, workspace);
+      fs.mkdirSync(workspacePath, { recursive: true });
+      fs.writeFileSync(path.join(workspacePath, "docker.agent.yaml"), "project: test\n", "utf8");
+    }
+
+    const stdout = await captureStdout(async () => {
+      await runCli(["workspace", "list", "--user", userId]);
+    });
+    const parsed = parseJsonOutput<{
+      userId: string;
+      workspaces: Array<{
+        name: string;
+        raw: {
+          dockerAgentYaml: string | null;
+          podAgentYaml: string | null;
+          kubevirtAgentYaml: string | null;
+          status: unknown;
+        };
+      }>;
+    }>(stdout);
+
+    assert.equal(parsed.userId, userId);
+    assert.deepEqual(parsed.workspaces.map((workspace) => workspace.name), ["alpha", "beta"]);
+    assert.equal(parsed.workspaces[0]?.raw.dockerAgentYaml, "project: test\n");
+    assert.equal(parsed.workspaces[0]?.raw.podAgentYaml, null);
+    assert.equal(parsed.workspaces[0]?.raw.status, null);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), { recursive: true, force: true });
+  }
+});
+
 test("runCli user create adds the default RightCode codex credential when configured", async () => {
   const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
