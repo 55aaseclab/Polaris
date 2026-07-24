@@ -461,8 +461,10 @@ test("live auth portal API creates a user profile without a Clerk email by using
 });
 
 test("live auth portal API creates the default RightCode codex credential when configured", async () => {
-  const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
-  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
+  const previousApiKey = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  const previousScript = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+  delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = "printf 'test-default-rightcode-key\\n'";
   const clerkUsername = uniqueName("portal-codex-default");
   const userProfileId = clerkUsername;
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
@@ -493,10 +495,15 @@ test("live auth portal API creates the default RightCode codex credential when c
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "github-ssh.yaml")), true);
     assert.equal(fs.existsSync(path.join(secretsRoot, "credentials", "codex-rightcode.yaml")), true);
   } finally {
-    if (previous === undefined) {
+    if (previousApiKey === undefined) {
       delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
     } else {
-      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previous;
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previousApiKey;
+    }
+    if (previousScript === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = previousScript;
     }
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });

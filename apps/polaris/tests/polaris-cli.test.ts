@@ -406,8 +406,10 @@ test("runCli workspace list returns a user's workspace names", async () => {
 });
 
 test("runCli user create adds the default RightCode codex credential when configured", async () => {
-  const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
-  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
+  const previousApiKey = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  const previousScript = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+  delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = "printf 'test-default-rightcode-key\\n'";
   const userProfileId = uniqueProjectName("cli-user-codex-default");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
@@ -440,10 +442,15 @@ test("runCli user create adds the default RightCode codex credential when config
     assert.equal(codexRegistry.metadata?.harness, "codex");
     assert.equal(codexRegistry.metadata?.presetId, "rightcode");
   } finally {
-    if (previous === undefined) {
+    if (previousApiKey === undefined) {
       delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
     } else {
-      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previous;
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previousApiKey;
+    }
+    if (previousScript === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = previousScript;
     }
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });

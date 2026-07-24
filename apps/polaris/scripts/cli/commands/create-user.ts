@@ -8,7 +8,6 @@ import {
   type PolarisRole,
   upsertUserMapEntries,
 } from "../../portal/user-map.js";
-import { provisionPortalAiAccessDefaultCredential } from "../../portal/ai-access.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
 import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
@@ -97,10 +96,6 @@ export async function createUserCommand(argv: string[]): Promise<void> {
     let defaultCredentials: Array<{ id: string }> = [];
     try {
       defaultCredentials = ensureRequiredProfileCredentials(created.id);
-      const aiAccessCredential = await provisionPortalAiAccessDefaultCredential(created.id);
-      if (aiAccessCredential && !defaultCredentials.some((credential) => credential.id === aiAccessCredential.id)) {
-        defaultCredentials.push(aiAccessCredential);
-      }
       if (authingUsername || authingUserId) {
         await upsertUserMapEntries({
           ...(authingUsername ? { authingUsername } : {}),
