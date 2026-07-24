@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useAuth, useClerk, useUser } from "@clerk/react";
+import { useAuth, useAuthing, useUser } from "@/lib/authing";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -158,9 +158,6 @@ import {
 } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  clerkSignInUrl,
-} from "@/lib/clerk";
 import { type Language, writeStoredLanguage } from "@/lib/language";
 import { portalSignInUrl } from "@/lib/portal-auth";
 import { resolveAuthGateState } from "@/lib/auth-gate-state";
@@ -597,7 +594,7 @@ const COPY: Record<Language, Record<string, string>> = {
     error_user_delete_blocked_archived: "Archived workspaces",
     admin_open_scope: "Open scope",
     admin_saving: "Saving...",
-    admin_no_mapping: "No Clerk mapping",
+    admin_no_mapping: "No Authing mapping",
     admin_status_ok: "OK",
     admin_status_mapping_only: "Mapping only",
     admin_status_profile_only: "Profile only",
@@ -1023,7 +1020,7 @@ const COPY: Record<Language, Record<string, string>> = {
     error_user_delete_blocked_archived: "已归档工作空间",
     admin_open_scope: "打开用户范围",
     admin_saving: "保存中…",
-    admin_no_mapping: "还没有 Clerk 映射",
+    admin_no_mapping: "还没有 Authing 映射",
     admin_status_ok: "正常",
     admin_status_mapping_only: "只有映射",
     admin_status_profile_only: "只有资料",
@@ -1305,18 +1302,18 @@ function ApiAuthBridge() {
   return null;
 }
 
-function normalizeClerkUsername(value: string | null | undefined): string {
+function normalizeAuthingUsername(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function resolveClerkIdentityKey(user: {
+function resolveAuthingIdentityKey(user: {
   id?: string | null;
   username?: string | null;
   primaryEmailAddress?: {
     emailAddress?: string | null;
   } | null;
 } | null | undefined): string {
-  return normalizeClerkUsername(
+  return normalizeAuthingUsername(
     user?.username
       ?? user?.primaryEmailAddress?.emailAddress?.split("@")[0]
       ?? user?.id
@@ -1328,12 +1325,12 @@ function resolvePolarisProfileIdCandidate(user: {
   id?: string | null;
   username?: string | null;
 } | null | undefined): string {
-  const username = normalizeClerkUsername(user?.username);
+  const username = normalizeAuthingUsername(user?.username);
   if (username) {
     return username;
   }
-  const clerkUserId = String(user?.id ?? "").trim();
-  return clerkUserId || "";
+  const authingUserId = String(user?.id ?? "").trim();
+  return authingUserId || "";
 }
 
 function useCurrentUserMapping() {
@@ -1345,13 +1342,13 @@ function useCurrentUserMapping() {
     () => getPortalSession(),
     [],
   );
-  const clerkUsername = resolveClerkIdentityKey(user);
-  const clerkUserId = String(user?.id ?? "").trim();
+  const authingUsername = resolveAuthingIdentityKey(user);
+  const authingUserId = String(user?.id ?? "").trim();
   const { data, error, loading } = useAsyncValue<PortalUserMapping | null>(
-    () => clerkUsername || clerkUserId
-      ? resolvePortalUserMapping({ clerkUsername, clerkUserId })
+    () => authingUsername || authingUserId
+      ? resolvePortalUserMapping({ authingUsername, authingUserId })
       : Promise.resolve(null),
-    [clerkUserId, clerkUsername],
+    [authingUserId, authingUsername],
   );
   const sessionMapping = backendSession?.polarisUserId && backendSession.role
     ? {
@@ -1361,8 +1358,8 @@ function useCurrentUserMapping() {
     }
     : null;
   return {
-    clerkUsername: clerkUsername || backendSession?.clerkUsername || "",
-    clerkUserId: clerkUserId || backendSession?.clerkUserId || "",
+    authingUsername: authingUsername || backendSession?.authingUsername || "",
+    authingUserId: authingUserId || backendSession?.authingUserId || "",
     mapping: sessionMapping ?? data,
     mappingError: sessionMapping ? null : error,
     mappingLoading: backendSessionLoading || (!sessionMapping && loading),
@@ -2058,7 +2055,7 @@ function PortalShellLayout(props: {
   users: PortalProfileSummary[];
 }) {
   const { t } = useLanguage();
-  const clerk = useClerk();
+  const authing = useAuthing();
   const { mapping } = useCurrentUserMapping();
   const {
     userId: routeUserId,
@@ -2581,14 +2578,6 @@ function PortalShellLayout(props: {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => {
-                        clerk.openUserProfile();
-                      }}
-                    >
-                      <CircleUser className="mr-2 h-4 w-4" />
-                      {t("menu_account")}
-                    </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link
                         to={`/users/${encodeURIComponent(activeUser.id)}/ai-access`}
@@ -2610,7 +2599,7 @@ function PortalShellLayout(props: {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => {
-                        void clerk.signOut({ redirectUrl: clerkSignInUrl() });
+                        authing.signOut();
                       }}
                     >
                       <LogOut className="mr-2 h-4 w-4" />
@@ -3074,8 +3063,8 @@ function OverviewPage() {
     [],
   );
   const {
-    clerkUsername,
-    clerkUserId,
+    authingUsername,
+    authingUserId,
     mapping,
     mappingError,
     mappingLoading,
@@ -3084,7 +3073,7 @@ function OverviewPage() {
   const [registering, setRegistering] = useState(false);
   const registrationStartedRef = useRef(false);
   const canSelfRegister =
-    Boolean(clerkUsername || clerkUserId || backendSession?.clerkUsername || backendSession?.clerkUserId);
+    Boolean(authingUsername || authingUserId || backendSession?.authingUsername || backendSession?.authingUserId);
 
   const explicitMappedUserId = mapping?.polarisUserId ?? backendSession?.polarisUserId ?? null;
   const referralCodeFromUrl = useMemo(() => {
@@ -3092,8 +3081,8 @@ function OverviewPage() {
     return params.get("invite")?.trim() || params.get("code")?.trim() || "";
   }, [location.search]);
   const nextPolarisUserId = resolvePolarisProfileIdCandidate(user)
-    || backendSession?.clerkUsername
-    || backendSession?.clerkUserId
+    || backendSession?.authingUsername
+    || backendSession?.authingUserId
     || "";
   const resolvingAccess =
     backendSessionLoading
@@ -3121,13 +3110,13 @@ function OverviewPage() {
     setRegistrationError(null);
     void createPortalUser({
       userProfileId: nextPolarisUserId,
-      ...(clerkUsername ? { clerkUsername } : {}),
-      ...(clerkUserId ? { clerkUserId } : {}),
-      ...(!clerkUsername && backendSession?.clerkUsername
-        ? { clerkUsername: backendSession.clerkUsername }
+      ...(authingUsername ? { authingUsername } : {}),
+      ...(authingUserId ? { authingUserId } : {}),
+      ...(!authingUsername && backendSession?.authingUsername
+        ? { authingUsername: backendSession.authingUsername }
         : {}),
-      ...(!clerkUserId && backendSession?.clerkUserId
-        ? { clerkUserId: backendSession.clerkUserId }
+      ...(!authingUserId && backendSession?.authingUserId
+        ? { authingUserId: backendSession.authingUserId }
         : {}),
       ...(user?.primaryEmailAddress?.emailAddress?.trim()
         ? { email: user.primaryEmailAddress.emailAddress.trim() }
@@ -3136,9 +3125,9 @@ function OverviewPage() {
       name:
         user?.fullName?.trim()
         || user?.username?.trim()
-        || clerkUsername
-        || backendSession?.clerkUsername
-        || backendSession?.clerkUserId
+        || authingUsername
+        || backendSession?.authingUsername
+        || backendSession?.authingUserId
         || nextPolarisUserId,
       role: "user",
       plan: "free",
@@ -3155,8 +3144,8 @@ function OverviewPage() {
       });
   }, [
     canSelfRegister,
-    clerkUsername,
-    clerkUserId,
+    authingUsername,
+    authingUserId,
     explicitMappedUserId,
     backendSession,
     mappingError,
@@ -4025,7 +4014,7 @@ function AdminPage() {
   }
 
   const selectedMappings = selectedAdminUser
-    ? [...selectedAdminUser.clerkUsernames, ...selectedAdminUser.clerkUserIds]
+    ? [...selectedAdminUser.authingUsernames, ...selectedAdminUser.authingUserIds]
     : [];
   const adminCredentialHarnessPresets = presetsForHarness(
     selectedCredentialCatalog,

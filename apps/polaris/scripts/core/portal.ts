@@ -479,7 +479,7 @@ export function updatePortalProfile(
 }
 
 export function resolvePolarisUserIdFromIdentity(params: {
-  clerkUserId?: string;
+  authingUserId?: string;
   email?: string;
   routeUserId?: string;
 }): string | null {
@@ -488,9 +488,9 @@ export function resolvePolarisUserIdFromIdentity(params: {
   if (directId && profiles.some((profile) => profile.id === directId)) {
     return directId;
   }
-  const clerkUserId = params.clerkUserId?.trim();
-  if (clerkUserId && profiles.some((profile) => profile.id === clerkUserId)) {
-    return clerkUserId;
+  const authingUserId = params.authingUserId?.trim();
+  if (authingUserId && profiles.some((profile) => profile.id === authingUserId)) {
+    return authingUserId;
   }
   const email = params.email?.trim().toLowerCase();
   if (email) {

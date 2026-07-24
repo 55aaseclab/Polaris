@@ -183,8 +183,8 @@ export function listPortalAdminUsers(): Array<
         polarisUserId: userId,
         role: "user" as const,
         plan: "free" as const,
-        clerkUsernames: [],
-        clerkUserIds: [],
+        authingUsernames: [],
+        authingUserIds: [],
       };
       return {
         ...baseProfile,
@@ -690,8 +690,8 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
 
 export async function createPortalUser(input: {
   userProfileId?: string;
-  clerkUsername?: string;
-  clerkUserId?: string;
+  authingUsername?: string;
+  authingUserId?: string;
   email?: string;
   name?: string;
   referralCode?: string;
@@ -700,8 +700,8 @@ export async function createPortalUser(input: {
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
   const userProfileId =
     input.userProfileId?.trim()
-    || input.clerkUsername?.trim()
-    || input.clerkUserId?.trim()
+    || input.authingUsername?.trim()
+    || input.authingUserId?.trim()
     || "";
   if (!userProfileId) {
     throw new Error("userProfileId is required");
@@ -712,8 +712,8 @@ export async function createPortalUser(input: {
     ...(input.name ? ["--name", input.name] : []),
     "--email",
     email,
-    ...(input.clerkUsername?.trim() ? ["--clerk", input.clerkUsername.trim()] : []),
-    ...(input.clerkUserId?.trim() ? ["--clerk-user-id", input.clerkUserId.trim()] : []),
+    ...(input.authingUsername?.trim() ? ["--authing", input.authingUsername.trim()] : []),
+    ...(input.authingUserId?.trim() ? ["--authing-user-id", input.authingUserId.trim()] : []),
     ...(input.referralCode?.trim() ? ["--referred-by-code", input.referralCode.trim()] : []),
     ...(input.role ? ["--role", input.role] : []),
     ...(input.plan ? ["--plan", input.plan] : []),

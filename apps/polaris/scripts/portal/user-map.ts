@@ -20,8 +20,8 @@ export interface PortalUserAccessSummary {
   polarisUserId: string;
   role: PolarisRole;
   plan: PolarisPlan;
-  clerkUsernames: string[];
-  clerkUserIds: string[];
+  authingUsernames: string[];
+  authingUserIds: string[];
 }
 
 interface UserMapFile {
@@ -32,8 +32,8 @@ interface UserMapFile {
 export class UserMapConflictError extends Error {}
 
 export interface UserMapEntrySnapshot {
-  clerkUsernameEntries: Record<string, PortalUserMapEntry>;
-  clerkUserIdEntries: Record<string, PortalUserMapEntry>;
+  authingUsernameEntries: Record<string, PortalUserMapEntry>;
+  authingUserIdEntries: Record<string, PortalUserMapEntry>;
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -132,11 +132,11 @@ export async function withUserMapLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function normalizeClerkUsername(value: string): string {
+function normalizeAuthingUsername(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function normalizeClerkUserId(value: string): string {
+function normalizeAuthingUserId(value: string): string {
   return value.trim();
 }
 
@@ -180,11 +180,11 @@ function snapshotEntriesForPolarisUserId(
   polarisUserId: string,
 ): UserMapEntrySnapshot {
   return {
-    clerkUsernameEntries: Object.fromEntries(
+    authingUsernameEntries: Object.fromEntries(
       Object.entries(current.users)
         .filter(([, entry]) => entry.polarisUserId === polarisUserId),
     ),
-    clerkUserIdEntries: Object.fromEntries(
+    authingUserIdEntries: Object.fromEntries(
       Object.entries(current.userIds ?? {})
         .filter(([, entry]) => entry.polarisUserId === polarisUserId),
     ),
@@ -196,11 +196,11 @@ function deleteEntriesForPolarisUserId(
   polarisUserId: string,
 ): UserMapEntrySnapshot {
   const snapshot = snapshotEntriesForPolarisUserId(current, polarisUserId);
-  for (const clerkUsername of Object.keys(snapshot.clerkUsernameEntries)) {
-    delete current.users[clerkUsername];
+  for (const authingUsername of Object.keys(snapshot.authingUsernameEntries)) {
+    delete current.users[authingUsername];
   }
-  for (const clerkUserId of Object.keys(snapshot.clerkUserIdEntries)) {
-    delete current.userIds?.[clerkUserId];
+  for (const authingUserId of Object.keys(snapshot.authingUserIdEntries)) {
+    delete current.userIds?.[authingUserId];
   }
   return snapshot;
 }
@@ -213,36 +213,36 @@ export function writeUserMap(value: UserMapFile): void {
 }
 
 export function findUserMapEntry(input: string | {
-  clerkUserId?: string;
-  clerkUsername?: string;
+  authingUserId?: string;
+  authingUsername?: string;
 }): PortalUserMapEntry | null {
   const current = readUserMap();
   if (typeof input === "string") {
-    const normalized = normalizeClerkUsername(input);
+    const normalized = normalizeAuthingUsername(input);
     const entry = current.users[normalized] ?? null;
     return entry ? withRoleOverrides(entry, [normalized, entry.polarisUserId]) : null;
   }
-  const clerkUserId = normalizeClerkUserId(input.clerkUserId ?? "");
-  if (clerkUserId && current.userIds?.[clerkUserId]) {
-    const entry = current.userIds[clerkUserId] ?? null;
-    return entry ? withRoleOverrides(entry, [clerkUserId, entry.polarisUserId]) : null;
+  const authingUserId = normalizeAuthingUserId(input.authingUserId ?? "");
+  if (authingUserId && current.userIds?.[authingUserId]) {
+    const entry = current.userIds[authingUserId] ?? null;
+    return entry ? withRoleOverrides(entry, [authingUserId, entry.polarisUserId]) : null;
   }
-  const clerkUsername = normalizeClerkUsername(input.clerkUsername ?? "");
-  if (!clerkUsername) {
+  const authingUsername = normalizeAuthingUsername(input.authingUsername ?? "");
+  if (!authingUsername) {
     return null;
   }
-  const entry = current.users[clerkUsername] ?? null;
-  return entry ? withRoleOverrides(entry, [clerkUsername, entry.polarisUserId]) : null;
+  const entry = current.users[authingUsername] ?? null;
+  return entry ? withRoleOverrides(entry, [authingUsername, entry.polarisUserId]) : null;
 }
 
 export function findUserMapEntriesForPolarisUserId(
   polarisUserId: string,
-): Array<{ clerkUsername: string; entry: PortalUserMapEntry }> {
+): Array<{ authingUsername: string; entry: PortalUserMapEntry }> {
   return Object.entries(readUserMap().users)
     .filter(([, entry]) => entry.polarisUserId === polarisUserId)
-    .map(([clerkUsername, entry]) => ({
-      clerkUsername,
-      entry: withRoleOverrides(entry, [clerkUsername, entry.polarisUserId]),
+    .map(([authingUsername, entry]) => ({
+      authingUsername,
+      entry: withRoleOverrides(entry, [authingUsername, entry.polarisUserId]),
     }));
 }
 
@@ -268,8 +268,8 @@ export function readUserAccessSummary(
       polarisUserId,
       role: "admin",
       plan: "free",
-      clerkUsernames: [],
-      clerkUserIds: [],
+      authingUsernames: [],
+      authingUserIds: [],
     };
   }
   const effective = withRoleOverrides(seed, identities);
@@ -277,8 +277,8 @@ export function readUserAccessSummary(
     polarisUserId,
     role: effective.role,
     plan: effective.plan,
-    clerkUsernames: usernameEntries.map(([clerkUsername]) => clerkUsername).sort(),
-    clerkUserIds: userIdEntries.map(([clerkUserId]) => clerkUserId).sort(),
+    authingUsernames: usernameEntries.map(([authingUsername]) => authingUsername).sort(),
+    authingUserIds: userIdEntries.map(([authingUserId]) => authingUserId).sort(),
   };
 }
 
@@ -296,19 +296,19 @@ export function listUserAccessSummaries(): PortalUserAccessSummary[] {
 }
 
 export async function upsertUserMapEntry(
-  clerkUsername: string,
+  authingUsername: string,
   entry: PortalUserMapEntry,
 ): Promise<PortalUserMapEntry> {
-  const normalized = normalizeClerkUsername(clerkUsername);
+  const normalized = normalizeAuthingUsername(authingUsername);
   if (!normalized) {
-    throw new Error("Clerk username is required");
+    throw new Error("Authing username is required");
   }
   return withUserMapLock(async () => {
     const current = readUserMap();
     const existing = current.users[normalized];
     if (existing && existing.polarisUserId !== entry.polarisUserId) {
       throw new UserMapConflictError(
-        `Clerk username '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+        `Authing username '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
       );
     }
     current.users[normalized] = {
@@ -322,14 +322,14 @@ export async function upsertUserMapEntry(
 }
 
 export async function upsertUserMapEntries(input: {
-  clerkUsername?: string;
-  clerkUserId?: string;
+  authingUsername?: string;
+  authingUserId?: string;
   entry: PortalUserMapEntry;
 }): Promise<void> {
-  const normalizedUsername = normalizeClerkUsername(input.clerkUsername ?? "");
-  const normalizedUserId = normalizeClerkUserId(input.clerkUserId ?? "");
+  const normalizedUsername = normalizeAuthingUsername(input.authingUsername ?? "");
+  const normalizedUserId = normalizeAuthingUserId(input.authingUserId ?? "");
   if (!normalizedUsername && !normalizedUserId) {
-    throw new Error("Clerk identity is required");
+    throw new Error("Authing identity is required");
   }
   await withUserMapLock(async () => {
     const current = readUserMap();
@@ -338,7 +338,7 @@ export async function upsertUserMapEntries(input: {
       const existing = current.users[normalizedUsername];
       if (existing && existing.polarisUserId !== input.entry.polarisUserId) {
         throw new UserMapConflictError(
-          `Clerk username '${normalizedUsername}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+          `Authing username '${normalizedUsername}' is already mapped to Polaris user '${existing.polarisUserId}'`,
         );
       }
     }
@@ -346,7 +346,7 @@ export async function upsertUserMapEntries(input: {
       const existing = current.userIds[normalizedUserId];
       if (existing && existing.polarisUserId !== input.entry.polarisUserId) {
         throw new UserMapConflictError(
-          `Clerk user id '${normalizedUserId}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+          `Authing user id '${normalizedUserId}' is already mapped to Polaris user '${existing.polarisUserId}'`,
         );
       }
     }
@@ -369,12 +369,12 @@ export async function upsertUserMapEntries(input: {
 }
 
 export async function upsertUserMapUserId(
-  clerkUserId: string,
+  authingUserId: string,
   entry: PortalUserMapEntry,
 ): Promise<PortalUserMapEntry> {
-  const normalized = normalizeClerkUserId(clerkUserId);
+  const normalized = normalizeAuthingUserId(authingUserId);
   if (!normalized) {
-    throw new Error("Clerk user id is required");
+    throw new Error("Authing user id is required");
   }
   return withUserMapLock(async () => {
     const current = readUserMap();
@@ -382,7 +382,7 @@ export async function upsertUserMapUserId(
     const existing = current.userIds[normalized];
     if (existing && existing.polarisUserId !== entry.polarisUserId) {
       throw new UserMapConflictError(
-        `Clerk user id '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
+        `Authing user id '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
       );
     }
     current.userIds[normalized] = {
@@ -395,8 +395,8 @@ export async function upsertUserMapUserId(
   });
 }
 
-export async function deleteUserMapEntry(clerkUsername: string): Promise<boolean> {
-  const normalized = normalizeClerkUsername(clerkUsername);
+export async function deleteUserMapEntry(authingUsername: string): Promise<boolean> {
+  const normalized = normalizeAuthingUsername(authingUsername);
   if (!normalized) {
     return false;
   }
@@ -414,24 +414,24 @@ export async function deleteUserMapEntry(clerkUsername: string): Promise<boolean
 export async function deleteUserMapEntriesForPolarisUserId(
   polarisUserId: string,
 ): Promise<{
-  clerkUsernames: string[];
-  clerkUserIds: string[];
+  authingUsernames: string[];
+  authingUserIds: string[];
 }> {
   return withUserMapLock(async () => {
     const current = readUserMap();
     const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
-    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
-    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
+    const removedUsernames = Object.keys(removed.authingUsernameEntries);
+    const removedUserIds = Object.keys(removed.authingUserIdEntries);
     if (removedUsernames.length === 0 && removedUserIds.length === 0) {
       return {
-        clerkUsernames: [],
-        clerkUserIds: [],
+        authingUsernames: [],
+        authingUserIds: [],
       };
     }
     writeUserMap(current);
     return {
-      clerkUsernames: removedUsernames,
-      clerkUserIds: removedUserIds,
+      authingUsernames: removedUsernames,
+      authingUserIds: removedUserIds,
     };
   });
 }
@@ -442,8 +442,8 @@ export async function deleteUserMapEntriesWithSnapshot(
   return withUserMapLock(async () => {
     const current = readUserMap();
     const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
-    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
-    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
+    const removedUsernames = Object.keys(removed.authingUsernameEntries);
+    const removedUserIds = Object.keys(removed.authingUserIdEntries);
     if (removedUsernames.length > 0 || removedUserIds.length > 0) {
       writeUserMap(current);
     }
@@ -458,8 +458,8 @@ export async function withDeletedUserMapEntries<T>(
   const snapshot = await withUserMapLock(async () => {
     const current = readUserMap();
     const removed = deleteEntriesForPolarisUserId(current, polarisUserId);
-    const removedUsernames = Object.keys(removed.clerkUsernameEntries);
-    const removedUserIds = Object.keys(removed.clerkUserIdEntries);
+    const removedUsernames = Object.keys(removed.authingUsernameEntries);
+    const removedUserIds = Object.keys(removed.authingUserIdEntries);
     if (removedUsernames.length > 0 || removedUserIds.length > 0) {
       writeUserMap(current);
     }
@@ -471,11 +471,11 @@ export async function withDeletedUserMapEntries<T>(
     await withUserMapLock(async () => {
       const rollback = readUserMap();
       rollback.userIds ??= {};
-      for (const [clerkUsername, entry] of Object.entries(snapshot.clerkUsernameEntries)) {
-        rollback.users[clerkUsername] = entry;
+      for (const [authingUsername, entry] of Object.entries(snapshot.authingUsernameEntries)) {
+        rollback.users[authingUsername] = entry;
       }
-      for (const [clerkUserId, entry] of Object.entries(snapshot.clerkUserIdEntries)) {
-        rollback.userIds[clerkUserId] = entry;
+      for (const [authingUserId, entry] of Object.entries(snapshot.authingUserIdEntries)) {
+        rollback.userIds[authingUserId] = entry;
       }
       writeUserMap(rollback);
     });
@@ -515,7 +515,7 @@ export async function updateUserAccessEntry(
       touched = true;
     }
     if (!touched) {
-      throw new Error(`Polaris user '${polarisUserId}' does not have a Clerk mapping yet`);
+      throw new Error(`Polaris user '${polarisUserId}' does not have a Authing mapping yet`);
     }
     writeUserMap(current);
   });
