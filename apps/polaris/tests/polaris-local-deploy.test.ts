@@ -53,12 +53,12 @@ test("local deploy config resolves a dedicated compose bundle", () => {
 
 test("local deployment docs separate deployment from development", () => {
   const doc = fs.readFileSync(
-    path.join(REPO_ROOT, "apps/docs/site/latest/polaris/local-deployment.md"),
+    path.join(REPO_ROOT, "apps/docs/site/polaris/local-deployment.md"),
     "utf8",
   );
   assert.match(doc, /not the same thing as local development/i);
-  assert.match(doc, /polaris start/);
-  assert.match(doc, /Polaris` app icon/);
+  assert.match(doc, /one-shot local deployment actions/i);
+  assert.match(doc, /desktop app uses the same one-shot local deployment actions/i);
   assert.match(doc, /Debian `polaris_<version>_amd64\.deb`/);
   assert.match(doc, /Windows `polaris_<version>_win_x64_setup\.exe`/);
   assert.match(doc, /PostHog/);

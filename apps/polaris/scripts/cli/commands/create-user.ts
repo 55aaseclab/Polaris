@@ -52,7 +52,9 @@ function parseCreateUserArgs(argv: string[]): {
   const nameFlagIndex = argv.findIndex((value) => value === "--name");
   const emailFlagIndex = argv.findIndex((value) => value === "--email");
   const authingFlagIndex = argv.findIndex((value) => value === "--authing");
+  const clerkFlagIndex = argv.findIndex((value) => value === "--clerk");
   const authingUserIdFlagIndex = argv.findIndex((value) => value === "--authing-user-id");
+  const clerkUserIdFlagIndex = argv.findIndex((value) => value === "--clerk-user-id");
   const referredByCodeFlagIndex = argv.findIndex((value) => value === "--referred-by-code");
   const roleFlagIndex = argv.findIndex((value) => value === "--role");
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
@@ -63,8 +65,26 @@ function parseCreateUserArgs(argv: string[]): {
     userProfileId,
     ...(nameFlagIndex >= 0 && argv[nameFlagIndex + 1]?.trim() ? { name: argv[nameFlagIndex + 1].trim() } : {}),
     ...(emailFlagIndex >= 0 && argv[emailFlagIndex + 1]?.trim() ? { email: argv[emailFlagIndex + 1].trim() } : {}),
-    ...(authingFlagIndex >= 0 && argv[authingFlagIndex + 1]?.trim() ? { authingUsername: argv[authingFlagIndex + 1].trim().toLowerCase() } : {}),
-    ...(authingUserIdFlagIndex >= 0 && argv[authingUserIdFlagIndex + 1]?.trim() ? { authingUserId: argv[authingUserIdFlagIndex + 1].trim() } : {}),
+    ...((authingFlagIndex >= 0 && argv[authingFlagIndex + 1]?.trim())
+      || (clerkFlagIndex >= 0 && argv[clerkFlagIndex + 1]?.trim())
+      ? {
+        authingUsername: String(
+          authingFlagIndex >= 0 && argv[authingFlagIndex + 1]?.trim()
+            ? argv[authingFlagIndex + 1]
+            : argv[clerkFlagIndex + 1],
+        ).trim().toLowerCase(),
+      }
+      : {}),
+    ...((authingUserIdFlagIndex >= 0 && argv[authingUserIdFlagIndex + 1]?.trim())
+      || (clerkUserIdFlagIndex >= 0 && argv[clerkUserIdFlagIndex + 1]?.trim())
+      ? {
+        authingUserId: String(
+          authingUserIdFlagIndex >= 0 && argv[authingUserIdFlagIndex + 1]?.trim()
+            ? argv[authingUserIdFlagIndex + 1]
+            : argv[clerkUserIdFlagIndex + 1],
+        ).trim(),
+      }
+      : {}),
     ...(referredByCodeFlagIndex >= 0 && argv[referredByCodeFlagIndex + 1]?.trim()
       ? { referredByCode: argv[referredByCodeFlagIndex + 1].trim() }
       : {}),

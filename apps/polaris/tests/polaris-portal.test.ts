@@ -51,7 +51,6 @@ import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
 import { workspaceConfigPath } from "../scripts/config/scaffold.js";
 import {
-  listArchivedWorkspaces,
   listOwnedWorkspaces,
   readPortalProfile,
   readWorkspaceProvisionProgress,
@@ -744,7 +743,7 @@ test("portal API reports auth configuration errors as server errors", async () =
     });
     assert.equal(response.status, 500);
     const payload = await response.json() as { error?: string };
-    assert.match(payload.error ?? "", /CLERK_SECRET_KEY is required/i);
+    assert.match(payload.error ?? "", /POLARIS_AUTHING_APP_SECRET is required/i);
   } finally {
     server.close();
     await once(server, "close");
@@ -2092,7 +2091,7 @@ exit 0
   }
 });
 
-test("portal service archives a stopped workspace and removes it from the active profile index", async () => {
+test("portal service deletes a stopped workspace and removes it from the active profile index", async () => {
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
   const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
@@ -2121,24 +2120,19 @@ test("portal service archives a stopped workspace and removes it from the active
 
   try {
     const payload = await deletePortalWorkspace(userId, workspace);
-    assert.equal(payload.archived, true);
-    assert.match(payload.archiveId, new RegExp(`${workspace}$`));
+    assert.equal(payload.deleted, true);
+    assert.equal(payload.workspace, workspace);
 
     assert.equal(fs.existsSync(workspaceRoot), false);
     assert.equal(fs.existsSync(portalStateRoot), false);
-    assert.ok(listArchivedWorkspaces(userId).some((entry) => entry.workspaceName === workspace));
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     fs.rmSync(portalStateRoot, { recursive: true, force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "archives"), {
-      recursive: true,
-      force: true,
-    });
     fs.writeFileSync(profileFile, originalProfile, "utf8");
   }
 });
 
-test("portal service refreshes the real status when archive fails for a running workspace", async () => {
+test("portal service refreshes the real status when delete fails for a running workspace", async () => {
   const userId = uniqueName("portal-archive-running-user");
   const workspace = uniqueName("portal-archive-running");
   try {
@@ -2154,13 +2148,13 @@ test("portal service refreshes the real status when archive fails for a running 
         runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
       },
       operation: {
-        kind: "archive",
+        kind: "delete",
         updatedAt: new Date().toISOString(),
       },
       runtime: {
         selectedDriver: { backend: "docker" },
         lifecycle: "running",
-        reason: "stale archive status",
+        reason: "stale delete status",
       },
       paseo: {
         daemon: "pending",
@@ -2199,8 +2193,8 @@ exit 0
     );
 
     const nextStatus = readWorkspaceStatus(userId, workspace);
-    assert.equal(nextStatus?.driver?.status, "running");
-    assert.notEqual(nextStatus?.driver?.reason, "stale archive status");
+    assert.equal(nextStatus?.driver?.status, "deleting");
+    assert.notEqual(nextStatus?.driver?.reason, "stale delete status");
   } finally {
     fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
       recursive: true,
@@ -2304,7 +2298,7 @@ test("portal root advertises the API surface without a default user fallback", a
       endpoints: string[];
     };
     assert.equal(payload.service, "polaris-portal-api");
-    assert.equal(payload.authMode, "clerk-browser-session");
+    assert.equal(payload.authMode, "authing-browser-session");
     assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
   } finally {
     server.close();

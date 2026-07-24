@@ -144,6 +144,8 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
           mappings: {
             removedAuthingUsernames: removedMappings.authingUsernames,
             removedAuthingUserIds: removedMappings.authingUserIds,
+            removedClerkUsernames: removedMappings.authingUsernames,
+            removedClerkUserIds: removedMappings.authingUserIds,
           },
         },
         null,
