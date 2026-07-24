@@ -10,6 +10,7 @@ import {
 export interface AuthenticatedPortalSession {
   authingUserId: string;
   authingUsername: string | null;
+  authingPhoneNumber: string | null;
   polarisUserId: string | null;
   role: PolarisRole | null;
   plan: PolarisPlan | null;
@@ -30,6 +31,9 @@ interface AuthingClaims {
   preferred_username?: string;
   nickname?: string;
   email?: string;
+  phone?: string;
+  phone_number?: string;
+  phoneNumber?: string;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -165,6 +169,7 @@ async function createPortalSession(user: AuthingClaims): Promise<string> {
     preferred_username: user.preferred_username,
     nickname: user.nickname,
     email: user.email,
+    phoneNumber: user.phone_number ?? user.phone ?? user.phoneNumber,
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuer("polaris")
@@ -253,12 +258,14 @@ export async function authenticatePortalRequest(
   if (!authingUserId) {
     throw new PortalAuthError("Invalid Authing session", 401);
   }
+  const authingPhoneNumber = String(verified.phoneNumber ?? "").trim() || null;
   const directMapping = findUserMapEntry({ authingUserId });
   if (directMapping) {
     const accessSummary = readUserAccessSummary(directMapping.polarisUserId);
     return {
       authingUserId,
       authingUsername: accessSummary?.authingUsernames[0] ?? null,
+      authingPhoneNumber,
       polarisUserId: directMapping.polarisUserId,
       role: directMapping.role,
       plan: directMapping.plan,
@@ -272,6 +279,7 @@ export async function authenticatePortalRequest(
   return {
     authingUserId,
     authingUsername,
+    authingPhoneNumber,
     polarisUserId: mapping?.polarisUserId ?? null,
     role: mapping?.role ?? null,
     plan: mapping?.plan ?? null,

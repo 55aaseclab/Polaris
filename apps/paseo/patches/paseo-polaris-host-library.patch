@@ -1614,10 +1614,10 @@ index 7a97631..af9accf 100644
            <View style={settingsStyles.rowContent}>
 diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
 new file mode 100644
-index 0000000..5b4d45d
+index 0000000..ae64c7e
 --- /dev/null
 +++ b/packages/app/src/screens/settings/polaris-user-page.tsx
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,250 @@
 +import { useCallback, useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -1633,6 +1633,7 @@ index 0000000..5b4d45d
 +    userId: string;
 +    authingUserId: string;
 +    authingUsername: string | null;
++    authingPhoneNumber: string | null;
 +    role: string;
 +    plan: string | null;
 +  };
@@ -1719,6 +1720,7 @@ index 0000000..5b4d45d
 +        <View style={settingsStyles.card}>
 +          <InfoRow label="用户名称" value={data.profile.name || data.session.authingUsername || "未设置"} />
 +          <InfoRow label="邮箱" value={data.profile.email || "未设置"} bordered />
++          <InfoRow label="手机号" value={data.session.authingPhoneNumber || "未设置"} bordered />
 +          <InfoRow label="用户 ID" value={data.session.userId} bordered />
 +          <InfoRow label="Authing ID" value={data.session.authingUserId} bordered />
 +          <InfoRow label="角色" value={data.session.role} bordered />
