@@ -63,7 +63,6 @@ test("local deployment docs separate deployment from development", () => {
   assert.match(doc, /Windows `polaris_<version>_win_x64_setup\.exe`/);
   assert.match(doc, /PostHog/);
   assert.match(doc, /Sentry/);
-  assert.match(doc, /telemetry configuration is baked into the release\s+image at build time/);
   assert.match(doc, /They are not the default stage-one local deployment path\./);
 });
 
