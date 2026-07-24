@@ -866,6 +866,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               userId,
               authingUserId: session.authingUserId,
               authingUsername: session.authingUsername,
+              authingPhoneNumber: session.authingPhoneNumber,
               role: session.role,
               plan: session.plan,
             },
