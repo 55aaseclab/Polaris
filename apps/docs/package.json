@@ -4,9 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node ./scripts/generate-docs-data.mjs",
     "dev": "vitepress dev site --host 0.0.0.0 --port 4180",
-    "prebuild": "node ./scripts/generate-docs-data.mjs",
     "build": "vitepress build site",
     "check": "vitepress build site"
   },

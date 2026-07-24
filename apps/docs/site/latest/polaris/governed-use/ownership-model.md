@@ -3,6 +3,8 @@
 This document explains how Polaris models ownership for users, workspaces, and
 credentials.
 
+For exact CLI syntax, use [Polaris CLI](../cli.md).
+
 ## Core Principle
 
 Polaris separates four related but different things:
@@ -116,12 +118,6 @@ profile, creates default credential material, and writes Clerk mapping data.
 If the Clerk mapping write fails, Polaris removes the newly scaffolded profile
 and user root instead of leaving an orphaned Polaris user behind.
 
-Current CLI entry:
-
-```bash
-pnpm --dir apps/polaris run polaris -- user create <userProfileId>
-```
-
 ### User Deletion
 
 If user deletion is executed, Polaris currently removes:
@@ -151,12 +147,6 @@ That prevents same-user profile or credential mutations from racing the delete
 flow while it is in progress.
 
 It does not delete the Clerk platform user object itself.
-
-Current CLI entry:
-
-```bash
-pnpm --dir apps/polaris run polaris -- user delete <userProfileId>
-```
 
 ### Credential Creation
 
@@ -213,16 +203,10 @@ Workspace lifecycle now separates active use from archived retention.
 When a workspace is archived, Polaris:
 
 - removes it from the active workspace list
-- removes it from the user's active workspace index
 - preserves the archived workspace copy under the user archive root
+- preserves workspace-owned saved runtime state under the archive root
 - keeps user-scoped identity and credential state separate from workspace
   lifecycle
-
-Current CLI entry:
-
-```bash
-pnpm --dir apps/polaris run polaris -- archive <workspaceRef>
-```
 
 ### Workspace Delete
 
@@ -234,12 +218,6 @@ When a workspace is deleted, Polaris:
 - removes workspace-owned runtime state
 - removes it from the user's active workspace index
 - does not keep an archive copy
-
-Current CLI entry:
-
-```bash
-pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
-```
 
 ### TODO
 

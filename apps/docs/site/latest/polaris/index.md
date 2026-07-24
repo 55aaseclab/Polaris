@@ -11,6 +11,7 @@ here:
 That customer-facing path is then expanded into five sections:
 
 - [Onboarding](./onboarding/)
+- [CLI](./cli.md)
 - [Local Deployment](./local-deployment.md)
 - [Governed Use](./governed-use/)
 - [Shared Infrastructure](./shared-infrastructure/)
@@ -34,11 +35,12 @@ Use this order when you want the business story first:
 Use this order when you want implementation detail and operational depth:
 
 1. [Onboarding](./onboarding/)
-2. [Local Deployment](./local-deployment.md)
-3. [Governed Use](./governed-use/)
-4. [Shared Infrastructure](./shared-infrastructure/)
-5. [Member Exit And Handover](./member-exit-and-handover/)
-6. [Agent Swarm Maturity](./agent-swarm-maturity.md)
+2. [CLI](./cli.md)
+3. [Local Deployment](./local-deployment.md)
+4. [Governed Use](./governed-use/)
+5. [Shared Infrastructure](./shared-infrastructure/)
+6. [Member Exit And Handover](./member-exit-and-handover/)
+7. [Agent Swarm Maturity](./agent-swarm-maturity.md)
 
 ## What Polaris Covers
 
@@ -57,25 +59,11 @@ Polaris currently supports:
 - `pod`
 - `kubevirt-vm`
 
-## Main Entry Points
+## Command Reference
 
-The main operator, user, and developer surfaces are:
+For the full CLI surface, use:
 
-- CLI:
-
-```bash
-pnpm --dir apps/polaris run polaris --
-```
-
-- stage-one local deployment:
-
-```bash
-polaris start
-```
-
-Desktop entry:
-
-- `Polaris` app icon
+- [CLI](./cli.md)
 
 ## Deep Technical References
 

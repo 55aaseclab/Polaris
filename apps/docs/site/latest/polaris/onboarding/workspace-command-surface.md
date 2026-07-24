@@ -3,6 +3,8 @@
 This document explains the command surface Polaris exposes for workspace
 lifecycle operations.
 
+For exact CLI syntax, use [Polaris CLI](../cli.md).
+
 ## What Your Team Gets
 
 The customer-facing value is not a collection of raw Docker, Pod, or VM
@@ -23,19 +25,9 @@ It is one workspace-oriented command surface that covers:
 - skill-uninstall
 - skill-sync
 
-## Root Entry
-
-```bash
-pnpm --dir apps/polaris run polaris -- ...
-```
-
 ## Core Commands
 
 ### Create
-
-```bash
-pnpm --dir apps/polaris run polaris -- create <workspace> --user <userProfileId>
-```
 
 Current semantics:
 
@@ -47,10 +39,6 @@ Current semantics:
 
 ### Start
 
-```bash
-pnpm --dir apps/polaris run polaris -- start <workspaceRef>
-```
-
 Current semantics:
 
 - start the backend runtime
@@ -58,10 +46,6 @@ Current semantics:
 - do not implicitly rebuild the workspace image foundation
 
 ### Rebuild
-
-```bash
-pnpm --dir apps/polaris run polaris -- rebuild <workspaceRef>
-```
 
 Current semantics:
 
@@ -72,20 +56,12 @@ Current semantics:
 
 ### Stop
 
-```bash
-pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
-```
-
 Current semantics:
 
 - stop the current workspace runtime
 - keep the workspace saved spec
 
 ### Status
-
-```bash
-pnpm --dir apps/polaris run polaris -- status <workspaceRef>
-```
 
 Current semantics:
 
@@ -95,23 +71,7 @@ Current semantics:
 - inspect daemon and service readiness
 - synthesize `status.json`
 
-### Archive
-
-```bash
-pnpm --dir apps/polaris run polaris -- archive <workspaceRef>
-```
-
-Current semantics:
-
-- remove the workspace from the active workspace list
-- preserve the workspace copy under the user archive root
-- preserve workspace-owned saved runtime state under the archive root
-
 ### Delete
-
-```bash
-pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
-```
 
 Current semantics:
 
@@ -122,12 +82,6 @@ Current semantics:
 
 ### User Skill Registry
 
-```bash
-pnpm --dir apps/polaris run polaris -- user skill list <userProfileId>
-pnpm --dir apps/polaris run polaris -- user skill add <userProfileId> --source <repo-or-source> --skill <skillName> [--harness <codex|claude>]
-pnpm --dir apps/polaris run polaris -- user skill remove <userProfileId> <skillId>
-```
-
 Current semantics:
 
 - keep user-owned skills declarative
@@ -136,10 +90,6 @@ Current semantics:
 
 ### Workspace Skill List
 
-```bash
-pnpm --dir apps/polaris run polaris -- skill-list <workspaceRef> --user <userProfileId> --harness <codex|claude>
-```
-
 Current semantics:
 
 - read installed runtime skills for the selected harness
@@ -147,10 +97,6 @@ Current semantics:
 - hide internal directories such as `.system`
 
 ### Workspace Skill Install
-
-```bash
-pnpm --dir apps/polaris run polaris -- skill-install <workspaceRef> <skillId> --user <userProfileId> --harness <codex|claude>
-```
 
 Current semantics:
 
@@ -161,20 +107,12 @@ Current semantics:
 
 ### Workspace Skill Uninstall
 
-```bash
-pnpm --dir apps/polaris run polaris -- skill-uninstall <workspaceRef> <skillId> --user <userProfileId> --harness <codex|claude>
-```
-
 Current semantics:
 
 - remove the installed runtime skill for the selected harness
 - keep the user registry entry intact
 
 ### Workspace Skill Sync
-
-```bash
-pnpm --dir apps/polaris run polaris -- skill-sync <workspaceRef> --user <userProfileId> --harness <codex|claude>
-```
 
 Current semantics:
 
