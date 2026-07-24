@@ -16,7 +16,7 @@ function defaultTopUpAmount(): number {
 }
 
 function defaultReferralSignUpUrl(): string {
-  return process.env.VITE_CLERK_SIGN_UP_URL?.trim()
+  return process.env.VITE_AUTHING_SIGN_UP_URL?.trim()
     || process.env.POLARIS_PUBLIC_BASE_URL?.trim()
     || process.env.POLARIS_AI_ACCESS_REFERRAL_BASE_URL?.trim()
     || "http://127.0.0.1:8081/sign-up";

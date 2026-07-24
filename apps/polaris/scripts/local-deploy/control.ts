@@ -145,12 +145,12 @@ function buildEnvFile(config: LocalDeployConfig): string {
     `VITE_POLARIS_POSTHOG_HOST=${preserved.get("VITE_POLARIS_POSTHOG_HOST") || "\"https://us.i.posthog.com\""}`,
     `VITE_POLARIS_SENTRY_DSN=${preserved.get("VITE_POLARIS_SENTRY_DSN") || "\"\""}`,
     `VITE_POLARIS_SENTRY_ENVIRONMENT=${preserved.get("VITE_POLARIS_SENTRY_ENVIRONMENT") || "\"\""}`,
-    `VITE_CLERK_PUBLISHABLE_KEY=${preserved.get("VITE_CLERK_PUBLISHABLE_KEY") || "\"\""}`,
-    `VITE_CLERK_DOMAIN=${preserved.get("VITE_CLERK_DOMAIN") || "\"\""}`,
-    `VITE_CLERK_PROXY_URL=${preserved.get("VITE_CLERK_PROXY_URL") || "\"\""}`,
-    `VITE_CLERK_SATELLITE_DOMAIN=${preserved.get("VITE_CLERK_SATELLITE_DOMAIN") || "\"\""}`,
-    `VITE_CLERK_SIGN_IN_URL=${preserved.get("VITE_CLERK_SIGN_IN_URL") || quoteEnvValue(`${config.gatewayUrl}/sign-in/`)}`,
-    `VITE_CLERK_SIGN_UP_URL=${preserved.get("VITE_CLERK_SIGN_UP_URL") || quoteEnvValue(`${config.gatewayUrl}/sign-up/`)}`,
+    `VITE_AUTHING_PUBLISHABLE_KEY=${preserved.get("VITE_AUTHING_PUBLISHABLE_KEY") || "\"\""}`,
+    `VITE_AUTHING_DOMAIN=${preserved.get("VITE_AUTHING_DOMAIN") || "\"\""}`,
+    `VITE_AUTHING_PROXY_URL=${preserved.get("VITE_AUTHING_PROXY_URL") || "\"\""}`,
+    `VITE_AUTHING_SATELLITE_DOMAIN=${preserved.get("VITE_AUTHING_SATELLITE_DOMAIN") || "\"\""}`,
+    `VITE_AUTHING_SIGN_IN_URL=${preserved.get("VITE_AUTHING_SIGN_IN_URL") || quoteEnvValue(`${config.gatewayUrl}/sign-in/`)}`,
+    `VITE_AUTHING_SIGN_UP_URL=${preserved.get("VITE_AUTHING_SIGN_UP_URL") || quoteEnvValue(`${config.gatewayUrl}/sign-up/`)}`,
     "",
   ];
   return lines.join("\n");

@@ -34,8 +34,8 @@ export interface PortalUserMapping {
 export interface PortalSession {
   authMode: string;
   authenticated: boolean;
-  clerkUserId: string;
-  clerkUsername: string | null;
+  authingUserId: string;
+  authingUsername: string | null;
   polarisUserId: string | null;
   role: "admin" | "user" | null;
 }
@@ -44,8 +44,8 @@ export interface PortalAdminUserSummary extends PortalProfileSummary {
   polarisUserId: string;
   role: "admin" | "user";
   plan: "free" | "pro";
-  clerkUsernames: string[];
-  clerkUserIds: string[];
+  authingUsernames: string[];
+  authingUserIds: string[];
   credentialCount: number;
   archivedWorkspaceCount: number;
   mappingPresent: boolean;
@@ -531,8 +531,8 @@ export async function getPortalSession(): Promise<PortalSession> {
 
 export async function createPortalUser(input: {
   userProfileId: string;
-  clerkUsername?: string;
-  clerkUserId?: string;
+  authingUsername?: string;
+  authingUserId?: string;
   email?: string;
   name?: string;
   referralCode?: string;
@@ -574,20 +574,20 @@ export async function deletePortalUser(userId: string): Promise<{
 
 export async function resolvePortalUserMapping(
   input: {
-    clerkUsername?: string;
-    clerkUserId?: string;
+    authingUsername?: string;
+    authingUserId?: string;
   },
 ): Promise<PortalUserMapping | null> {
   const params = new URLSearchParams();
-  if (input.clerkUsername?.trim()) {
-    params.set("clerkUsername", input.clerkUsername.trim());
+  if (input.authingUsername?.trim()) {
+    params.set("authingUsername", input.authingUsername.trim());
   }
-  if (input.clerkUserId?.trim()) {
-    params.set("clerkUserId", input.clerkUserId.trim());
+  if (input.authingUserId?.trim()) {
+    params.set("authingUserId", input.authingUserId.trim());
   }
   const payload = await apiFetch<{
-    clerkUsername: string;
-    clerkUserId?: string;
+    authingUsername: string;
+    authingUserId?: string;
     mapping: PortalUserMapping | null;
   }>(`/user-mapping?${params.toString()}`);
   return payload.mapping;

@@ -3,7 +3,7 @@ import type { PortalSession } from "./api";
 export function hasAuthenticatedBackendSession(
   session: PortalSession | null,
 ): boolean {
-  return Boolean(session?.authenticated && session.clerkUserId);
+  return Boolean(session?.authenticated && session.authingUserId);
 }
 
 export function resolveAuthGateState(input: {

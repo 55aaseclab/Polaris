@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createClerkClient, verifyToken } from "@clerk/backend";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import {
   findUserMapEntry,
   readUserAccessSummary,
@@ -8,8 +8,8 @@ import {
 } from "./user-map.js";
 
 export interface AuthenticatedPortalSession {
-  clerkUserId: string;
-  clerkUsername: string | null;
+  authingUserId: string;
+  authingUsername: string | null;
   polarisUserId: string | null;
   role: PolarisRole | null;
   plan: PolarisPlan | null;
@@ -24,11 +24,11 @@ export class PortalAuthError extends Error {
   }
 }
 
-interface ClerkLikeUser {
-  id?: string | null;
-  username?: string | null;
-  primaryEmailAddress?: { emailAddress?: string | null } | null;
-  emailAddresses?: Array<{ emailAddress?: string | null }>;
+interface AuthingClaims {
+  sub?: string;
+  preferred_username?: string;
+  nickname?: string;
+  email?: string;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -51,11 +51,11 @@ function forbidden(res: ServerResponse, message = "Forbidden"): void {
   sendJson(res, 403, { error: message });
 }
 
-function clerkSecretKey(): string {
-  const value = String(process.env.CLERK_SECRET_KEY ?? "").trim();
+function requiredAuthingEnv(name: "AUTHING_APP_ID" | "AUTHING_ISSUER" | "AUTHING_JWKS_URL"): string {
+  const value = String(process.env[name] ?? "").trim();
   if (!value) {
     throw new PortalAuthError(
-      "CLERK_SECRET_KEY is required for Polaris portal auth",
+      `${name} is required for Polaris portal auth`,
       500,
     );
   }
@@ -91,7 +91,7 @@ function readBearerToken(req: IncomingMessage): string | null {
   return token || null;
 }
 
-function normalizeClerkUsername(value: string | null | undefined): string | null {
+function normalizeAuthingUsername(value: string | null | undefined): string | null {
   const normalized = String(value ?? "").trim().toLowerCase();
   return normalized || null;
 }
@@ -105,24 +105,23 @@ function emailLocalPart(value: string | null | undefined): string | null {
   return localPart?.trim() || null;
 }
 
-function resolveClerkUsername(user: ClerkLikeUser): string | null {
-  return normalizeClerkUsername(
-    user.username
-      ?? user.primaryEmailAddress?.emailAddress
-      ?? user.emailAddresses?.[0]?.emailAddress
+function resolveAuthingUsername(user: AuthingClaims): string | null {
+  return normalizeAuthingUsername(
+    user.preferred_username
+      ?? user.nickname
+      ?? user.email
       ?? null,
-  ) ?? emailLocalPart(
-    user.primaryEmailAddress?.emailAddress
-      ?? user.emailAddresses?.[0]?.emailAddress
-      ?? null,
-  );
+  ) ?? emailLocalPart(user.email ?? null);
 }
 
-async function fetchClerkUser(clerkUserId: string): Promise<ClerkLikeUser> {
-  const client = createClerkClient({
-    secretKey: clerkSecretKey(),
+async function verifyAuthingToken(token: string): Promise<AuthingClaims> {
+  const issuer = requiredAuthingEnv("AUTHING_ISSUER");
+  const jwks = createRemoteJWKSet(new URL(requiredAuthingEnv("AUTHING_JWKS_URL")));
+  const { payload } = await jwtVerify(token, jwks, {
+    issuer,
+    audience: requiredAuthingEnv("AUTHING_APP_ID"),
   });
-  return await client.users.getUser(clerkUserId);
+  return payload as AuthingClaims;
 }
 
 export async function authenticatePortalRequest(
@@ -132,52 +131,38 @@ export async function authenticatePortalRequest(
   if (!token) {
     throw new PortalAuthError("Authentication is required", 401);
   }
-  let verified: Awaited<ReturnType<typeof verifyToken>>;
+  let verified: AuthingClaims;
   try {
-    verified = await verifyToken(token, {
-      secretKey: clerkSecretKey(),
-    });
+    verified = await verifyAuthingToken(token);
   } catch (error) {
     if (error instanceof PortalAuthError) {
       throw error;
     }
-    throw new PortalAuthError("Invalid Clerk session", 401);
+    throw new PortalAuthError("Invalid Authing session", 401);
   }
-  const clerkUserId = String(verified.sub ?? "").trim();
-  if (!clerkUserId) {
-    throw new PortalAuthError("Invalid Clerk session", 401);
+  const authingUserId = String(verified.sub ?? "").trim();
+  if (!authingUserId) {
+    throw new PortalAuthError("Invalid Authing session", 401);
   }
-  const directMapping = findUserMapEntry({ clerkUserId });
+  const directMapping = findUserMapEntry({ authingUserId });
   if (directMapping) {
     const accessSummary = readUserAccessSummary(directMapping.polarisUserId);
     return {
-      clerkUserId,
-      clerkUsername: accessSummary?.clerkUsernames[0] ?? null,
+      authingUserId,
+      authingUsername: accessSummary?.authingUsernames[0] ?? null,
       polarisUserId: directMapping.polarisUserId,
       role: directMapping.role,
       plan: directMapping.plan,
     };
   }
-  let clerkUser: ClerkLikeUser;
-  try {
-    clerkUser = await fetchClerkUser(clerkUserId);
-  } catch (error) {
-    if (error instanceof PortalAuthError) {
-      throw error;
-    }
-    throw new PortalAuthError(
-      "Clerk user lookup failed while authenticating the portal session",
-      502,
-    );
-  }
-  const clerkUsername = resolveClerkUsername(clerkUser);
+  const authingUsername = resolveAuthingUsername(verified);
   const mapping = findUserMapEntry({
-    clerkUserId,
-    ...(clerkUsername ? { clerkUsername } : {}),
+    authingUserId,
+    ...(authingUsername ? { authingUsername } : {}),
   });
   return {
-    clerkUserId,
-    clerkUsername,
+    authingUserId,
+    authingUsername,
     polarisUserId: mapping?.polarisUserId ?? null,
     role: mapping?.role ?? null,
     plan: mapping?.plan ?? null,
@@ -216,7 +201,7 @@ export function requireMappedPortalSession(
     return false;
   }
   if (!session.polarisUserId || !session.role) {
-    forbidden(res, "Polaris access is not provisioned for this Clerk user");
+    forbidden(res, "Polaris access is not provisioned for this Authing user");
     return false;
   }
   return true;
@@ -257,21 +242,21 @@ export function requirePortalScope(
 export function sessionMatchesCurrentIdentity(
   session: AuthenticatedPortalSession,
   input: {
-    clerkUserId?: string;
-    clerkUsername?: string;
+    authingUserId?: string;
+    authingUsername?: string;
   },
 ): boolean {
-  const requestedUserId = String(input.clerkUserId ?? "").trim();
-  if (requestedUserId && requestedUserId !== session.clerkUserId) {
+  const requestedUserId = String(input.authingUserId ?? "").trim();
+  if (requestedUserId && requestedUserId !== session.authingUserId) {
     return false;
   }
-  const requestedUsername = normalizeClerkUsername(input.clerkUsername);
-  if (requestedUsername && requestedUsername !== session.clerkUsername) {
+  const requestedUsername = normalizeAuthingUsername(input.authingUsername);
+  if (requestedUsername && requestedUsername !== session.authingUsername) {
     return false;
   }
   return true;
 }
 
 export function selfProvisionedPolarisUserId(session: AuthenticatedPortalSession): string {
-  return session.clerkUsername || session.clerkUserId;
+  return session.authingUsername || session.authingUserId;
 }

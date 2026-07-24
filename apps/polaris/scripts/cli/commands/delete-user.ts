@@ -102,17 +102,17 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
     const hadProfile = copyIfExists(profilePath, profileBackupPath);
     const hadUserRoot = copyIfExists(userRoot, userRootBackupPath);
     let removedMappings: {
-      clerkUsernames: string[];
-      clerkUserIds: string[];
+      authingUsernames: string[];
+      authingUserIds: string[];
     } = {
-      clerkUsernames: [],
-      clerkUserIds: [],
+      authingUsernames: [],
+      authingUserIds: [],
     };
     try {
       await withDeletedUserMapEntries(userProfileId, async (snapshot) => {
         removedMappings = {
-          clerkUsernames: Object.keys(snapshot.clerkUsernameEntries),
-          clerkUserIds: Object.keys(snapshot.clerkUserIdEntries),
+          authingUsernames: Object.keys(snapshot.authingUsernameEntries),
+          authingUserIds: Object.keys(snapshot.authingUserIdEntries),
         };
         fs.rmSync(profilePath, { force: true });
         fs.rmSync(userRoot, { recursive: true, force: true });
@@ -147,14 +147,14 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
             removed:
               removedProfile
               || removedUserRoot
-              || removedMappings.clerkUsernames.length > 0
-              || removedMappings.clerkUserIds.length > 0,
+              || removedMappings.authingUsernames.length > 0
+              || removedMappings.authingUserIds.length > 0,
             profilePath: `config/users/profiles/${userProfileId}.yaml`,
             secretsRoot: `config/users/${userProfileId}`,
           },
           mappings: {
-            removedClerkUsernames: removedMappings.clerkUsernames,
-            removedClerkUserIds: removedMappings.clerkUserIds,
+            removedAuthingUsernames: removedMappings.authingUsernames,
+            removedAuthingUserIds: removedMappings.authingUserIds,
           },
         },
         null,

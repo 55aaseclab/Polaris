@@ -27,9 +27,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
-            if (id.includes("@clerk/")) {
-              return "vendor-clerk";
-            }
             if (id.includes("@radix-ui/")) {
               return "vendor-radix";
             }

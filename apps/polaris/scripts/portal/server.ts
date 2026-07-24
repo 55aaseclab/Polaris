@@ -578,27 +578,27 @@ async function handleUserCreate(
   }
   const body = await readBody(req);
   const userProfileId = body.userProfileId?.trim() || "";
-  const clerkUsername = body.clerkUsername?.trim() || "";
-  const clerkUserId = body.clerkUserId?.trim() || "";
+  const authingUsername = body.authingUsername?.trim() || "";
+  const authingUserId = body.authingUserId?.trim() || "";
   if (!userProfileId) {
     badRequest(res, "Missing userProfileId");
     return;
   }
-  if (!clerkUsername && !clerkUserId) {
-    badRequest(res, "Missing Clerk identity");
+  if (!authingUsername && !authingUserId) {
+    badRequest(res, "Missing Authing identity");
     return;
   }
   if (session.role !== "admin") {
     if (session.polarisUserId) {
-      sendJson(res, 403, { error: "This Clerk user is already provisioned in Polaris" });
+      sendJson(res, 403, { error: "This Authing user is already provisioned in Polaris" });
       return;
     }
-    if (!sessionMatchesCurrentIdentity(session, { clerkUsername, clerkUserId })) {
-      sendJson(res, 403, { error: "User creation must match the authenticated Clerk identity" });
+    if (!sessionMatchesCurrentIdentity(session, { authingUsername, authingUserId })) {
+      sendJson(res, 403, { error: "User creation must match the authenticated Authing identity" });
       return;
     }
     if (userProfileId !== selfProvisionedPolarisUserId(session)) {
-      sendJson(res, 403, { error: "User creation must use the current Clerk identity as the Polaris user id" });
+      sendJson(res, 403, { error: "User creation must use the current Authing identity as the Polaris user id" });
       return;
     }
   }
@@ -606,11 +606,11 @@ async function handleUserCreate(
     const created = await createPortalUser({
       userProfileId,
       ...(session.role === "admin"
-        ? (clerkUsername ? { clerkUsername } : {})
-        : (session.clerkUsername ? { clerkUsername: session.clerkUsername } : {})),
+        ? (authingUsername ? { authingUsername } : {})
+        : (session.authingUsername ? { authingUsername: session.authingUsername } : {})),
       ...(session.role === "admin"
-        ? (clerkUserId ? { clerkUserId } : {})
-        : { clerkUserId: session.clerkUserId }),
+        ? (authingUserId ? { authingUserId } : {})
+        : { authingUserId: session.authingUserId }),
       ...(body.email?.trim() ? { email: body.email.trim() } : {}),
       ...(body.name !== undefined ? { name: body.name.trim() } : {}),
       ...(body.referralCode?.trim() ? { referralCode: body.referralCode.trim() } : {}),
@@ -660,7 +660,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (segments.length === 0) {
         sendJson(res, 200, {
           service: "polaris-portal-api",
-          authMode: "clerk-browser-session",
+          authMode: "authing-browser-session",
           endpoints: [
             "/api/users",
             "/api/users/:userId",
@@ -708,19 +708,19 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           if (!session) {
             return;
           }
-          const clerkUsername = url.searchParams.get("clerkUsername")?.trim() || "";
-          const clerkUserId = url.searchParams.get("clerkUserId")?.trim() || "";
-          if (!sessionMatchesCurrentIdentity(session, { clerkUsername, clerkUserId })) {
-            sendJson(res, 403, { error: "The requested mapping does not match the authenticated Clerk identity" });
+          const authingUsername = url.searchParams.get("authingUsername")?.trim() || "";
+          const authingUserId = url.searchParams.get("authingUserId")?.trim() || "";
+          if (!sessionMatchesCurrentIdentity(session, { authingUsername, authingUserId })) {
+            sendJson(res, 403, { error: "The requested mapping does not match the authenticated Authing identity" });
             return;
           }
           sendJson(res, 200, {
-            clerkUsername: session.clerkUsername ?? "",
-            clerkUserId: session.clerkUserId,
-            mapping: session.clerkUserId || session.clerkUsername
+            authingUsername: session.authingUsername ?? "",
+            authingUserId: session.authingUserId,
+            mapping: session.authingUserId || session.authingUsername
               ? findUserMapEntry({
-                clerkUserId: session.clerkUserId,
-                ...(session.clerkUsername ? { clerkUsername: session.clerkUsername } : {}),
+                authingUserId: session.authingUserId,
+                ...(session.authingUsername ? { authingUsername: session.authingUsername } : {}),
               })
               : null,
           });
@@ -742,10 +742,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           sendJson(res, 200, {
-            authMode: "clerk-browser-session",
+            authMode: "authing-browser-session",
             authenticated: true,
-            clerkUserId: session.clerkUserId,
-            clerkUsername: session.clerkUsername,
+            authingUserId: session.authingUserId,
+            authingUsername: session.authingUsername,
             polarisUserId: session.polarisUserId,
             role: session.role,
           });
