@@ -3,13 +3,10 @@ layout: home
 
 hero:
   name: Polaris Docs
-  text: Versioned docs browser
-  tagline: Browse release snapshots and inspect inline diffs between versions.
+  text: Current documentation
+  tagline: Read the current Polaris docs without version browsing or diff views.
   actions:
     - theme: brand
-      text: Open Latest
+      text: Open Docs
       link: /latest/
-    - theme: alt
-      text: Open Diff
-      link: /diff
 ---

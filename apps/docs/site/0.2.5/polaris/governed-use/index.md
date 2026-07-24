@@ -11,4 +11,3 @@ The detailed docs are split into:
 
 - [ownership-model.md](./ownership-model.md)
 - [credential-switch.md](./credential-switch.md)
-- [clerk-integration.md](./clerk-integration.md)

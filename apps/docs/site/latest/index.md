@@ -1,20 +1,9 @@
 # Documentation
 
-This directory is the active documentation tree for the current Polaris work.
+This is the maintained Polaris documentation tree.
 
-Unlike the frozen release snapshots, this version is not only a snapshot.
-It is the maintained reference that should explain how the system works today,
-how to operate it, and how to debug it when behavior diverges from expectation.
-
-## Version Model
-
-- `0.2.2`: earlier frozen snapshot
-- `0.2.3`: earlier release snapshot
-- `0.2.4`: earlier release snapshot
-- `0.2.5`: earlier release snapshot
-- `0.2.6`: earlier release snapshot
-- `0.2.7`: current release snapshot
-- `latest`: current maintained docs
+It explains how the system works today, how to operate it, and how to debug it
+when behavior diverges from expectation.
 
 ## Reading Order
 
@@ -45,7 +34,6 @@ If you are new to the repo, read in this order:
   ownership of users, workspaces, and credentials
 - [polaris/governed-use/credential-switch.md](./polaris/governed-use/credential-switch.md):
   runtime credential switch behavior for supported harnesses
-- [polaris/governed-use/clerk-integration.md](./polaris/governed-use/clerk-integration.md):
   Clerk mapping, portal responsibilities, and retained legacy notes
 - `polaris/index.md`: Polaris entry page for customer and technical reading
   paths
@@ -61,8 +49,5 @@ If you are new to the repo, read in this order:
 
 ## Documentation Principles
 
-- Treat docs as versioned product artifacts.
-- Keep release snapshots immutable.
-- Put current operational truth in `docs/latest`.
 - Prefer explicit paths, ports, and ownership boundaries.
 - Document both the happy path and the debug path.
