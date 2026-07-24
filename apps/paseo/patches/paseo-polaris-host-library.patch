@@ -35,6 +35,19 @@ index 0000000..7f06d5d
 +  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
 +  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm, textAlign: "center" },
 +}));
+diff --git a/packages/app/src/app/settings/user.tsx b/packages/app/src/app/settings/user.tsx
+new file mode 100644
+index 0000000..f9b58f7
+--- /dev/null
++++ b/packages/app/src/app/settings/user.tsx
+@@ -0,0 +1,7 @@
++import SettingsScreen from "@/screens/settings-screen";
++
++const USER_VIEW = { kind: "polaris-user" as const };
++
++export default function PolarisUserRoute() {
++  return <SettingsScreen view={USER_VIEW} />;
++}
 diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
 index 8f22c48..dd13625 100644
 --- a/packages/app/src/components/welcome-screen.tsx
@@ -401,10 +414,10 @@ index 7cb3cb5..5d1be6e 100644
        terminals: "Terminals",
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..e6fcd41
+index 0000000..80e2b63
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,159 @@
 +const sessionKey = "polaris_authing_session";
 +const verifierKey = "polaris_authing_pkce_verifier";
 +const stateKey = "polaris_authing_state";
@@ -417,7 +430,7 @@ index 0000000..e6fcd41
 +  return trimmed;
 +}
 +
-+function apiBaseUrl(): string {
++export function polarisApiBaseUrl(): string {
 +  if (typeof globalThis.location === "undefined") throw new Error("A browser is required");
 +  const port = process.env.EXPO_PUBLIC_POLARIS_API_PORT?.trim();
 +  if (!port) return `${globalThis.location.origin}/api`;
@@ -433,10 +446,12 @@ index 0000000..e6fcd41
 +  appId: string;
 +  authorizationUrl: string;
 +  redirectUri: string;
++  logoutUrl?: string;
++  logoutRedirectUri?: string;
 +}
 +
 +async function loadAuthingConfig(): Promise<AuthingConfig> {
-+  const response = await fetch(`${apiBaseUrl()}/authing-config`);
++  const response = await fetch(`${polarisApiBaseUrl()}/authing-config`);
 +  const config = await response.json().catch(() => ({})) as Partial<AuthingConfig>;
 +  if (!response.ok) throw new Error("无法加载 Authing 配置");
 +  return {
@@ -517,7 +532,7 @@ index 0000000..e6fcd41
 +  if (!code || !verifier || state !== sessionStorage.getItem(stateKey)) {
 +    throw new Error("Authing 登录状态无效，请重新登录");
 +  }
-+  const response = await fetch(`${apiBaseUrl()}/auth/callback`, {
++  const response = await fetch(`${polarisApiBaseUrl()}/auth/callback`, {
 +    method: "POST",
 +    headers: { "content-type": "application/json" },
 +    body: JSON.stringify({
@@ -544,6 +559,23 @@ index 0000000..e6fcd41
 +  sessionStorage.removeItem(stateKey);
 +  sessionStorage.removeItem(redirectUriKey);
 +  sessionStorage.removeItem(returnPathKey);
++}
++
++export function signOutPolaris(): void {
++  void (async () => {
++    const config = await loadAuthingConfig().catch(() => null);
++    clearPolarisSignIn();
++    if (config?.logoutUrl) {
++      const logoutUrl = new URL(config.logoutUrl);
++      logoutUrl.searchParams.set(
++        "post_logout_redirect_uri",
++        config.logoutRedirectUri || globalThis.location.origin,
++      );
++      globalThis.location.assign(logoutUrl.toString());
++      return;
++    }
++    globalThis.location.assign("/welcome");
++  })();
 +}
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
 index 8dd01a2..1f90869 100644
@@ -867,6 +899,233 @@ index 0000000..4ea6f80
 +  actions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
 +  empty: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, paddingVertical: theme.spacing[2] },
 +  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++}));
+diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
+new file mode 100644
+index 0000000..22d9b22
+--- /dev/null
++++ b/packages/app/src/screens/settings/polaris-user-page.tsx
+@@ -0,0 +1,221 @@
++import { useCallback, useEffect, useState } from "react";
++import { ActivityIndicator, Text, View } from "react-native";
++import { StyleSheet, useUnistyles } from "react-native-unistyles";
++import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
++import { Button } from "@/components/ui/button";
++import { SettingsSection } from "@/screens/settings/settings-section";
++import { settingsStyles } from "@/styles/settings";
++import { confirmDialog } from "@/utils/confirm-dialog";
++import { getPolarisAuthToken, polarisApiBaseUrl, signOutPolaris } from "@/lib/polaris-authing";
++
++interface PolarisUserResponse {
++  profile: { id: string; name?: string; email?: string };
++  session: {
++    userId: string;
++    authingUserId: string;
++    authingUsername: string | null;
++    role: string;
++    plan: string | null;
++  };
++  credentials: Array<{ id: string; label: string; kind: string; status: string; paths: string[] }>;
++}
++
++interface PolarisCredentialRecord {
++  credential: { id: string; label: string };
++  files: Array<{ key: string; sourcePath: string; content: string }>;
++}
++
++export function PolarisUserPage() {
++  const { theme } = useUnistyles();
++  const [data, setData] = useState<PolarisUserResponse | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [credentialRecord, setCredentialRecord] = useState<PolarisCredentialRecord | null>(null);
++  const [credentialLoading, setCredentialLoading] = useState(false);
++  const [credentialError, setCredentialError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    try {
++      const response = await fetch(`${polarisApiBaseUrl()}/polaris-user`, {
++        headers: getPolarisAuthToken() ? { authorization: `Bearer ${getPolarisAuthToken()}` } : {},
++      });
++      const body = await response.json().catch(() => ({}));
++      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "无法加载用户信息");
++      setData(body as PolarisUserResponse);
++      setError(null);
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    void load();
++  }, [load]);
++
++  const handleSignOut = useCallback(async () => {
++    if (!await confirmDialog({
++      title: "退出登录？",
++      message: "你将退出 Polaris。",
++      confirmLabel: "退出登录",
++      destructive: true,
++    })) return;
++    signOutPolaris();
++  }, []);
++
++  const handleViewCredential = useCallback(async (credential: PolarisUserResponse["credentials"][number]) => {
++    if (!data || credentialLoading) return;
++    setCredentialLoading(true);
++    setCredentialError(null);
++    setCredentialRecord({ credential: { id: credential.id, label: credential.label }, files: [] });
++    try {
++      const token = getPolarisAuthToken();
++      const response = await fetch(
++        `${polarisApiBaseUrl()}/users/${encodeURIComponent(data.session.userId)}/credentials/${encodeURIComponent(credential.id)}`,
++        { headers: token ? { authorization: `Bearer ${token}` } : {} },
++      );
++      const body = await response.json().catch(() => ({}));
++      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "无法读取凭证");
++      setCredentialRecord(body as PolarisCredentialRecord);
++    } catch (reason) {
++      setCredentialError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setCredentialLoading(false);
++    }
++  }, [credentialLoading, data]);
++
++  const closeCredentialViewer = useCallback(() => {
++    setCredentialRecord(null);
++    setCredentialError(null);
++  }, []);
++
++  if (loading) {
++    return <ActivityIndicator color={theme.colors.foregroundMuted} />;
++  }
++
++  if (error || !data) {
++    return <Text style={styles.error}>{error || "无法加载用户信息"}</Text>;
++  }
++
++  return (
++    <View>
++      <SettingsSection title="基本信息">
++        <View style={settingsStyles.card}>
++          <InfoRow label="用户名称" value={data.profile.name || data.session.authingUsername || "未设置"} />
++          <InfoRow label="邮箱" value={data.profile.email || "未设置"} bordered />
++          <InfoRow label="用户 ID" value={data.session.userId} bordered />
++          <InfoRow label="Authing ID" value={data.session.authingUserId} bordered />
++          <InfoRow label="角色" value={data.session.role} bordered />
++          <InfoRow label="订阅" value={formatPlan(data.session.plan)} bordered />
++        </View>
++      </SettingsSection>
++
++      <SettingsSection title="凭证">
++        <View style={settingsStyles.card}>
++          {data.credentials.length > 0 ? data.credentials.map((credential, index) => (
++            <CredentialRow
++              key={credential.id}
++              credential={credential}
++              bordered={index > 0}
++              onView={() => void handleViewCredential(credential)}
++            />
++          )) : <Text style={styles.empty}>还没有凭证</Text>}
++        </View>
++      </SettingsSection>
++
++      <SettingsSection title="会话">
++        <View style={settingsStyles.card}>
++          <View style={settingsStyles.row}>
++            <View style={settingsStyles.rowContent}>
++              <Text style={settingsStyles.rowTitle}>退出登录</Text>
++              <Text style={settingsStyles.rowHint}>退出当前 Polaris 会话</Text>
++            </View>
++            <Button size="sm" variant="destructive" onPress={() => void handleSignOut()}>
++              退出
++            </Button>
++          </View>
++        </View>
++      </SettingsSection>
++
++      {credentialRecord ? (
++        <AdaptiveModalSheet
++          header={{ title: credentialRecord.credential.label, subtitle: "凭证内容" }}
++          visible
++          onClose={closeCredentialViewer}
++          desktopMaxWidth={720}
++        >
++          {credentialLoading ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
++          {credentialError ? <Text style={styles.error}>{credentialError}</Text> : null}
++          {!credentialLoading && !credentialError && credentialRecord.files.length === 0 ? (
++            <Text style={styles.empty}>没有可查看的凭证文件</Text>
++          ) : null}
++          {!credentialLoading && !credentialError ? credentialRecord.files.map((file) => (
++            <View key={file.key} style={settingsStyles.card}>
++              <View style={settingsStyles.row}>
++                <Text style={settingsStyles.rowTitle} numberOfLines={1}>{file.sourcePath}</Text>
++              </View>
++              <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
++                <Text selectable style={styles.fileContent}>{file.content}</Text>
++              </View>
++            </View>
++          )) : null}
++        </AdaptiveModalSheet>
++      ) : null}
++    </View>
++  );
++}
++
++function InfoRow({ label, value, bordered = false }: { label: string; value: string; bordered?: boolean }) {
++  return (
++    <View style={[settingsStyles.row, bordered && settingsStyles.rowBorder]}>
++      <View style={settingsStyles.rowContent}>
++        <Text style={settingsStyles.rowTitle} numberOfLines={1}>{label}</Text>
++      </View>
++      <Text style={styles.value} numberOfLines={1}>{value}</Text>
++    </View>
++  );
++}
++
++function formatPlan(plan: string | null): string {
++  if (plan === "free") return "免费套餐";
++  if (plan === "pro") return "专业套餐";
++  return plan || "未订阅";
++}
++
++function CredentialRow({
++  credential,
++  bordered,
++  onView,
++}: {
++  credential: PolarisUserResponse["credentials"][number];
++  bordered: boolean;
++  onView: () => void;
++}) {
++  return (
++    <View style={[settingsStyles.row, bordered && settingsStyles.rowBorder]}>
++      <View style={settingsStyles.rowContent}>
++        <Text style={settingsStyles.rowTitle} numberOfLines={1}>{credential.label}</Text>
++        {credential.paths.length > 0 ? (
++          <Text style={settingsStyles.rowHint} numberOfLines={1}>{credential.paths.join(" · ")}</Text>
++        ) : null}
++      </View>
++      {credential.status === "ready" ? (
++        <Button size="sm" variant="secondary" onPress={onView}>查看</Button>
++      ) : <Text style={styles.value} numberOfLines={1}>{credential.status}</Text>}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  value: { maxWidth: "58%", color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, textAlign: "right" },
++  empty: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, minHeight: 42, padding: theme.spacing[3] },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++  fileContent: {
++    color: theme.colors.foreground,
++    fontFamily: theme.fontFamily.mono,
++    fontSize: theme.fontSize.code,
++    lineHeight: theme.lineHeight.diff,
++  },
 +}));
 diff --git a/packages/app/src/utils/host-routes.ts b/packages/app/src/utils/host-routes.ts
 index ad1a36b..aeb58f2 100644

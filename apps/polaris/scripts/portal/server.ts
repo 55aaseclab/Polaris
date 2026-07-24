@@ -698,6 +698,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             appId: String(process.env.POLARIS_AUTHING_APP_ID ?? "").trim(),
             authorizationUrl: String(process.env.POLARIS_AUTHING_AUTHORIZATION_URL ?? "").trim(),
             redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
+            logoutUrl: String(process.env.POLARIS_AUTHING_LOGOUT_URL ?? "").trim(),
+            logoutRedirectUri: String(process.env.POLARIS_AUTHING_LOGOUT_REDIRECT_URI ?? "").trim(),
           });
           return;
         }
@@ -866,6 +868,25 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             }
           }
           notFound(res);
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "polaris-user" && req.method === "GET") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          const userId = session.polarisUserId;
+          sendJson(res, 200, {
+            profile: readPortalProfile(userId),
+            session: {
+              userId,
+              authingUserId: session.authingUserId,
+              authingUsername: session.authingUsername,
+              role: session.role,
+              plan: session.plan,
+            },
+            credentials: listUserPortalCredentials(userId),
+          });
           return;
         }
         if (segments[1] !== "users" || segments.length < 4) {
