@@ -288,17 +288,9 @@ rg -n "workspace-status-cached|workspace-status-reported|workspace-status-refres
 
 当前 agent / manager 运行面已经有明确的 CLI 命令面。
 
-根入口是：
-
-```bash
-pnpm --dir apps/polaris run polaris -- ...
-```
+精确命令语法集中在 [Polaris CLI](./cli.md)。
 
 ### start
-
-```bash
-pnpm --dir apps/polaris run polaris -- start <workspaceRef>
-```
 
 当前语义是：
 
@@ -309,10 +301,6 @@ pnpm --dir apps/polaris run polaris -- start <workspaceRef>
 
 ### stop
 
-```bash
-pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
-```
-
 当前语义是：
 
 - 停止当前 workspace runtime
@@ -320,20 +308,12 @@ pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
 
 ### restart
 
-```bash
-pnpm --dir apps/polaris run polaris -- restart <workspaceRef>
-```
-
 当前语义是：
 
 - 重启当前 workspace runtime
 - 保留 manager 相关 durable state 语义边界
 
 ### status
-
-```bash
-pnpm --dir apps/polaris run polaris -- status <workspaceRef>
-```
 
 当前语义是：
 
@@ -344,10 +324,6 @@ pnpm --dir apps/polaris run polaris -- status <workspaceRef>
 - 输出 `supportedHarnesses`、`liveTarget` 和 credential selection 视图
 
 ### logs
-
-```bash
-pnpm --dir apps/polaris run polaris -- logs <workspaceRef>
-```
 
 当前语义是：
 
@@ -371,11 +347,6 @@ pnpm --dir apps/polaris run polaris -- logs <workspaceRef>
 它不等于运行时 live switch。
 
 ### live-switch
-
-```bash
-pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> \
-  [--harness <ssh|codex|claude|copilot|opencode|pi>]
-```
 
 当前语义是：
 

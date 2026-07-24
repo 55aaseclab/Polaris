@@ -3,6 +3,8 @@
 This document explains how Polaris switches credentials in day-to-day runtime
 use.
 
+For exact CLI syntax, use [Polaris CLI](../cli.md).
+
 ## Core Principle
 
 Polaris has two different credential paths:
@@ -31,17 +33,6 @@ Current harness examples include:
 - `copilot`
 - `opencode`
 - `pi`
-
-Current user credential command surface includes:
-
-```bash
-pnpm --dir apps/polaris run polaris -- user credential add <userProfileId> ...
-pnpm --dir apps/polaris run polaris -- user credential list <userProfileId>
-pnpm --dir apps/polaris run polaris -- user credential read <userProfileId> <credentialId>
-pnpm --dir apps/polaris run polaris -- user credential write <userProfileId> <credentialId> <fileKey> --content <value>
-pnpm --dir apps/polaris run polaris -- user credential activate <userProfileId> <credentialId>
-pnpm --dir apps/polaris run polaris -- user credential delete <userProfileId> <credentialId>
-```
 
 The portal mirrors that model.
 
@@ -88,13 +79,6 @@ It is a workspace-spec override path.
 It is not the same as runtime live switch.
 
 ## Command And Portal Surfaces
-
-The main runtime command surface is:
-
-```bash
-pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> \
-  [--harness <ssh|codex|claude|copilot|opencode|pi>]
-```
 
 Current semantics:
 

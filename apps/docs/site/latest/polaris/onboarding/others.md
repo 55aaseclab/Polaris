@@ -7,30 +7,7 @@ operator-facing than customer-facing.
 
 The repo exposes separate local deployment and local development surfaces.
 
-- Local deployment CLI:
-
-```bash
-pnpm run polaris:local-deploy -- start
-pnpm run polaris:local-deploy -- doctor
-```
-
-- Local deployment GUI:
-
-```bash
-pnpm run polaris:local-deploy -- desktop
-```
-
-- CLI and services for development and operator workflows:
-
-```bash
-pnpm --dir apps/polaris run polaris --
-```
-
-- local stack wrapper for development:
-
-```bash
-bash ./scripts/run-polaris-local-stack-service.sh .env.dev
-```
+Use [Polaris CLI](../cli.md) for the exact command surface.
 
 That wrapper also starts the Docker bridge proxy for the local executor, so
 workspace containers can report runtime status and Paseo pairing metadata back
@@ -95,14 +72,16 @@ Generated manifests are rendered artifacts, not hand-maintained source files.
 
 ## Recommended Local Flow
 
-```bash
-pnpm --dir apps/polaris run polaris -- user create <userProfileId>
-pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
-pnpm --dir apps/polaris run polaris -- render <project>@docker
-pnpm --dir apps/polaris run polaris -- start <project>@docker
-pnpm --dir apps/polaris run polaris -- status <project>@docker
-pnpm --dir apps/polaris run polaris -- logs <project>@docker
-```
+The normal local flow is:
+
+1. create the user profile
+2. create the workspace
+3. render the selected backend
+4. start the workspace
+5. inspect status
+6. inspect logs when startup diverges
+
+Use [Polaris CLI](../cli.md) for the exact commands.
 
 ## Validation
 

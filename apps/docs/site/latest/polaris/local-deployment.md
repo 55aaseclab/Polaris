@@ -2,6 +2,8 @@
 
 This page describes stage-one local deployment for Polaris.
 
+For exact CLI syntax, use [Polaris CLI](./cli.md).
+
 It is not the same thing as local development.
 
 Local development is for repo contributors.
@@ -31,44 +33,13 @@ Stage one does not support:
 
 ## Main Entry Points
 
-Installed CLI:
-
-```bash
-polaris install
-polaris start
-polaris stop
-polaris doctor
-polaris open
-```
-
-Desktop entry:
-
-- `Polaris` app icon
-
 The installed desktop app uses the same one-shot local deployment actions as
-the CLI.
-
-Repo-only development entry points still exist for contributors:
-
-```bash
-pnpm run polaris:local-deploy -- desktop
-pnpm run polaris:local-deploy -- start
-```
+the installed `polaris` CLI.
 
 ## Shared Lifecycle Actions
 
-Stage one defines one shared local deployment control model:
-
-- `install`
-- `start`
-- `stop`
-- `restart`
-- `status`
-- `open`
-- `logs`
-- `doctor`
-- `upgrade`
-- `uninstall`
+Stage one defines one shared local deployment control model.
+The full action list is documented in [Polaris CLI](./cli.md).
 
 These actions do not require a resident Polaris control daemon.
 Each action runs and exits.
@@ -139,12 +110,6 @@ The stage-one `doctor` action checks at least:
 - Docker is running
 - the local gateway port is available
 - the local data root can be prepared
-
-Example:
-
-```bash
-polaris doctor
-```
 
 ## Telemetry
 
