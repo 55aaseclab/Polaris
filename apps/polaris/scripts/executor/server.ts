@@ -12,7 +12,6 @@ import { logError, logInfo, logWarn } from "../utils/log.js";
 import {
   deletePortalWorkspace,
   getPortalWorkspacePaseoDiagnostic,
-  permanentlyDeletePortalArchivedWorkspace,
   permanentlyDeletePortalWorkspace,
   queueProvisionWorkspace,
   refreshPortalWorkspaceStatus,
@@ -250,16 +249,6 @@ export function createExecutorServer(
         const result = await permanentlyDeletePortalWorkspace(
           readRequiredString(body, "userId"),
           readRequiredString(body, "workspace"),
-        );
-        sendJson(res, 200, result);
-        return;
-      }
-
-      if (req.method === "DELETE" && url.pathname === "/workspaces/archives") {
-        const body = await readBody(req);
-        const result = await permanentlyDeletePortalArchivedWorkspace(
-          readRequiredString(body, "userId"),
-          readRequiredString(body, "archiveId"),
         );
         sendJson(res, 200, result);
         return;

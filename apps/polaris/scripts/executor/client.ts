@@ -229,9 +229,7 @@ export async function deletePortalWorkspace(input: {
   userId: string;
   workspace: string;
 }): Promise<{
-  archived: true;
-  archiveId: string;
-  archivedAt: string;
+  deleted: true;
   workspace: string;
 }> {
   return executorRequest(
@@ -249,19 +247,6 @@ export async function permanentlyDeletePortalWorkspace(input: {
 }): Promise<{ deleted: true; workspace: string }> {
   return executorRequest(
     "/workspaces/hard-delete",
-    {
-      method: "DELETE",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function permanentlyDeletePortalArchivedWorkspace(input: {
-  userId: string;
-  archiveId: string;
-}): Promise<{ deleted: true; archiveId: string }> {
-  return executorRequest(
-    "/workspaces/archives",
     {
       method: "DELETE",
       body: JSON.stringify(input),

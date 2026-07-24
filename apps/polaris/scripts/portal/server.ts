@@ -28,9 +28,7 @@ import {
   getPortalAiAccessTopUpInfo,
   createPortalSkill,
   listPortalAdminUsers,
-  listPortalArchivedWorkspaces,
   deletePortalUser,
-  permanentlyDeletePortalArchivedWorkspace,
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalSkill,
@@ -253,15 +251,6 @@ async function handleWorkspacePermanentDelete(
   workspace: string,
 ): Promise<void> {
   sendJson(res, 200, await permanentlyDeletePortalWorkspace(userId, workspace));
-}
-
-async function handleArchivedWorkspaceDelete(
-  res: ServerResponse,
-  userId: string,
-  archiveId: string,
-): Promise<void> {
-  const result = await permanentlyDeletePortalArchivedWorkspace(userId, archiveId);
-  sendJson(res, 200, result);
 }
 
 async function handleWorkspaceStop(
@@ -811,7 +800,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           if (segments.length === 2 && req.method === "GET") {
             sendJson(res, 200, {
               hosts: await listPortalWorkspaces(userId),
-              archivedHosts: listPortalArchivedWorkspaces(userId),
             });
             return;
           }
@@ -839,10 +827,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               startAfterCreate: true,
             });
             sendJson(res, 202, provision);
-            return;
-          }
-          if (segments.length === 4 && segments[2] === "archives" && req.method === "DELETE") {
-            await handleArchivedWorkspaceDelete(res, userId, decodeURIComponent(segments[3]));
             return;
           }
           if (segments.length === 3) {
@@ -910,7 +894,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, {
             user: profile,
             workspaces,
-            archivedWorkspaces: listPortalArchivedWorkspaces(routeUserId),
           });
           return;
         }
@@ -924,7 +907,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, {
             user: profile,
             workspaces,
-            archivedWorkspaces: listPortalArchivedWorkspaces(routeUserId),
           });
           return;
         }
@@ -1028,10 +1010,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         }
         if (segments[3] === "workspaces" && segments.length === 5 && req.method === "DELETE") {
           await handleWorkspaceDelete(res, routeUserId, workspace);
-          return;
-        }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[4] === "archives" && req.method === "DELETE") {
-          await handleArchivedWorkspaceDelete(res, routeUserId, decodeURIComponent(segments[5]));
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "switch" && req.method === "POST") {
