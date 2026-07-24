@@ -177,4 +177,3 @@ This model gives teams:
 ## Related Docs
 
 - [credential-switch.md](./credential-switch.md)
-- [clerk-integration.md](./clerk-integration.md)
