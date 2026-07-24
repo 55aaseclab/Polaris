@@ -22,7 +22,7 @@ wrapper, keep the same runtime data root in every process. In local
 development that usually means exporting:
 
 ```bash
-POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
+POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 ```
@@ -40,15 +40,26 @@ The main values are:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_BOOTSTRAP_ADMIN_USERS=<clerk-username-1>,<clerk-username-2>
+POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
+POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 POLARIS_SERVER_PORT=8787
 POLARIS_WEBPORTAL_PORT=8081
 POLARIS_EXECUTOR_PORT=8788
 POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
+POLARIS_PUBLIC_BASE_URL=http://HOST_IP:8081
 VITE_PASEO_APP_BASE_URL=http://HOST_IP:8082
 POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
-VITE_CLERK_SIGN_IN_URL=http://HOST_IP:8000/sign-in/
-VITE_CLERK_SIGN_UP_URL=http://HOST_IP:8000/sign-up/
+POLARIS_LANDING_PAGE_PORT=5173
+POLARIS_DOCS_PORT=4180
+POLARIS_AUTHING_APP_ID=your-authing-app-id
+POLARIS_AUTHING_APP_SECRET=your-authing-app-secret
+POLARIS_AUTHING_ISSUER=https://your-tenant.authing.cn/oidc
+POLARIS_AUTHING_JWKS_URL=https://your-tenant.authing.cn/oidc/.well-known/jwks.json
+POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
+POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
+POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
+POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://HOST_IP:5173
+POLARIS_AUTHING_REDIRECT_URI=http://HOST_IP:8081/auth/callback
 ```
 
 Minimal local test env:
@@ -56,13 +67,21 @@ Minimal local test env:
 ```bash
 POLARIS_DATA_ROOT=./config
 POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces
+POLARIS_SERVER_BIND_HOST=127.0.0.1
+POLARIS_SERVER_PORT=8787
+POLARIS_WEB_DEV_HOST=127.0.0.1
+POLARIS_WEBPORTAL_PORT=8081
 POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 POLARIS_EXECUTOR_SHARED_SECRET=test-executor-shared-secret
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx
-VITE_CLERK_DOMAIN=clerk.your-domain.example
-VITE_CLERK_SIGN_IN_URL=http://127.0.0.1:8000/sign-in/
-VITE_CLERK_SIGN_UP_URL=http://127.0.0.1:8000/sign-up/
-CLERK_SECRET_KEY=sk_test_xxx
+POLARIS_AUTHING_APP_ID=your-authing-app-id
+POLARIS_AUTHING_APP_SECRET=your-authing-app-secret
+POLARIS_AUTHING_ISSUER=https://your-tenant.authing.cn/oidc
+POLARIS_AUTHING_JWKS_URL=https://your-tenant.authing.cn/oidc/.well-known/jwks.json
+POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
+POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
+POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
+POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://127.0.0.1:5173
+POLARIS_AUTHING_REDIRECT_URI=http://127.0.0.1:8081/auth/callback
 ```
 
 ## Local Deployment
@@ -160,13 +179,13 @@ Production data lives under `POLARIS_DATA_ROOT` instead of the repo checkout.
 The current default is:
 
 ```bash
-POLARIS_DATA_ROOT=/home/debian/jianxiaoyi/data/polaris/data
+POLARIS_DATA_ROOT=/srv/polaris/data
 ```
 
 Optional access bootstrap:
 
 ```bash
-POLARIS_BOOTSTRAP_ADMIN_USERS=<clerk-username-1>,<clerk-username-2>
+POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 ```
 
 Executor requirements:

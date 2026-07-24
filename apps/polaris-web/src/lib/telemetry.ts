@@ -5,7 +5,14 @@ type EnvMap = Record<string, string | undefined>;
 
 const env = (import.meta as ImportMeta & { env?: EnvMap }).env ?? {};
 const TELEMETRY_SCHEMA_VERSION = "1";
-const SESSION_ID = crypto.randomUUID();
+function createSessionId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const SESSION_ID = createSessionId();
 
 function readStoredInstallId(): string {
   const key = "polaris_install_id";
@@ -13,7 +20,7 @@ function readStoredInstallId(): string {
   if (existing) {
     return existing;
   }
-  const next = crypto.randomUUID();
+  const next = createSessionId();
   window.localStorage.setItem(key, next);
   return next;
 }

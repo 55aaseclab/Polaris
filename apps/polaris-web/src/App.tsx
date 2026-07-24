@@ -1219,7 +1219,7 @@ class AppErrorBoundary extends React.Component<
 }
 
 function AuthGate(props: { children: ReactNode }) {
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, error: authError, userId } = useAuth();
   const [backendSession, setBackendSession] = useState<PortalSession | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
 
@@ -1275,10 +1275,18 @@ function AuthGate(props: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    if (authGateState.shouldRedirect) {
+    if (!authError && authGateState.shouldRedirect) {
       window.location.assign(portalSignInUrl());
     }
-  }, [authGateState.shouldRedirect]);
+  }, [authError, authGateState.shouldRedirect]);
+
+  if (authError) {
+    return (
+      <div className="p-6 text-sm text-destructive">
+        Authentication failed: {authError}. <a className="underline" href="/sign-in">Try again</a>
+      </div>
+    );
+  }
 
   if (!authGateState.shouldRender) {
     return null;
@@ -1316,7 +1324,6 @@ function resolveAuthingIdentityKey(user: {
   return normalizeAuthingUsername(
     user?.username
       ?? user?.primaryEmailAddress?.emailAddress?.split("@")[0]
-      ?? user?.id
       ?? null,
   );
 }

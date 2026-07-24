@@ -10,6 +10,8 @@ import {
   type PortalProfileSummary,
 } from "../core/portal.js";
 import {
+  exchangeAuthingAuthorizationCode,
+  PortalAuthError,
   requireMappedPortalSession,
   requirePortalAdmin,
   requirePortalScope,
@@ -673,6 +675,27 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
 
       if (isApiPath(segments)) {
+        if (segments.length === 3 && segments[1] === "auth" && segments[2] === "callback") {
+          if (req.method !== "POST") {
+            notFound(res);
+            return;
+          }
+          const body = await readBody(req);
+          const code = body.code?.trim() || "";
+          const codeVerifier = body.codeVerifier?.trim() || "";
+          const redirectUri = body.redirectUri?.trim() || "";
+          if (!code || !codeVerifier || !redirectUri) {
+            badRequest(res, "Missing Authing authorization callback values");
+            return;
+          }
+          const result = await exchangeAuthingAuthorizationCode({
+            code,
+            codeVerifier,
+            redirectUri,
+          });
+          sendJson(res, 200, result);
+          return;
+        }
         if (segments.length === 2 && segments[1] === "users") {
           if (req.method === "POST") {
             await handleUserCreate(req, res);
@@ -999,11 +1022,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       notFound(res);
     } catch (error) {
-      sendText(
-        res,
-        500,
-        error instanceof Error ? error.message : String(error),
-      );
+      const statusCode = error instanceof PortalAuthError ? error.statusCode : 500;
+      const message = error instanceof Error ? error.message : String(error);
+      const isApiRequest = (req.url ?? "").startsWith("/api/");
+      if (isApiRequest) {
+        sendJson(res, statusCode, { error: message });
+        return;
+      }
+      sendText(res, statusCode, message);
     }
   }).listen(port, host);
 }

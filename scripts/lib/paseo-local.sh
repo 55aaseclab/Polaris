@@ -4,6 +4,24 @@ set -euo pipefail
 
 POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-/paseo}"
 POLARIS_PASEO_BUILDER_NAME="${POLARIS_PASEO_BUILDER_NAME:-polaris-builder}"
+POLARIS_PASEO_SOURCE_REF="${POLARIS_PASEO_SOURCE_REF:-v0.1.101}"
+
+paseo_local_ensure_source() {
+  local source_dir="apps/paseo/source"
+
+  if [ -f "${source_dir}/package.json" ]; then
+    return
+  fi
+
+  if [ -d "${source_dir}" ] && [ -n "$(find "${source_dir}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    printf 'Paseo source is incomplete: %s\n' "${source_dir}" >&2
+    return 1
+  fi
+
+  rm -rf "${source_dir}"
+  git clone --depth 1 --branch "${POLARIS_PASEO_SOURCE_REF}" \
+    https://github.com/getpaseo/paseo.git "${source_dir}"
+}
 
 paseo_local_runtime_root() {
   printf '.runtime/paseo-local\n'
@@ -123,6 +141,7 @@ paseo_local_tool_bundle_fingerprint() {
 paseo_local_build_dist() {
   local runtime_root dist_dir fingerprint_file cache_dir wanted_fingerprint tmp_dir
 
+  paseo_local_ensure_source
   runtime_root="$(paseo_local_runtime_root)"
   dist_dir="$(paseo_local_dist_dir)"
   fingerprint_file="$(paseo_local_fingerprint_file)"
@@ -162,6 +181,7 @@ paseo_local_build_dist() {
 paseo_local_build_tool_bundle() {
   local runtime_root bundle_dir fingerprint_file cache_dir wanted_fingerprint tmp_dir
 
+  paseo_local_ensure_source
   runtime_root="$(paseo_local_runtime_root)"
   bundle_dir="$(paseo_local_tool_bundle_dir)"
   fingerprint_file="$(paseo_local_tool_bundle_fingerprint_file)"
