@@ -145,19 +145,6 @@ POLARIS_SENTRY_ENVIRONMENT=production
 POLARIS_TELEMETRY_ENVIRONMENT=production
 ```
 
-For the bundled web portal, telemetry configuration is baked into the release
-image at build time rather than read dynamically at container runtime.
-
-When you build release images yourself, also set:
-
-```bash
-VITE_POLARIS_TELEMETRY_ENABLED=1
-VITE_POLARIS_POSTHOG_KEY=phc_xxx
-VITE_POLARIS_POSTHOG_HOST=https://us.i.posthog.com
-VITE_POLARIS_SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
-VITE_POLARIS_SENTRY_ENVIRONMENT=production
-```
-
 Current telemetry intentionally avoids collecting:
 
 - prompt content
