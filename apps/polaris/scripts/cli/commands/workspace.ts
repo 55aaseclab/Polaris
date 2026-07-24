@@ -2,6 +2,7 @@ import { applyCommand } from "./apply.js";
 import { createCommand } from "./create.js";
 import { deleteCommand } from "./delete.js";
 import { liveSwitchCommand } from "./live-switch.js";
+import { listCommand } from "./list.js";
 import { logsCommand } from "./logs.js";
 import { rebuildCommand } from "./rebuild.js";
 import { reconcileCommand } from "./reconcile.js";
@@ -20,7 +21,7 @@ import { switchCommand } from "./switch.js";
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- workspace <create|apply|render|start|stop|restart|rebuild|status|reconcile|logs|live-switch|switch|delete|skill-list|skill-install|skill-uninstall|skill-sync> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- workspace <list|create|apply|render|start|stop|restart|rebuild|status|reconcile|logs|live-switch|switch|delete|skill-list|skill-install|skill-uninstall|skill-sync> ...",
   );
 }
 
@@ -52,6 +53,10 @@ export async function workspaceCommand(argv: string[]): Promise<void> {
 
   if (action === "create") {
     await createCommand(rest);
+    return;
+  }
+  if (action === "list") {
+    await listCommand(rest);
     return;
   }
   if (action === "apply") {

@@ -20,6 +20,7 @@ Load your env first when you need local development data and services.
 Workspace lifecycle and backend control:
 
 ```bash
+pnpm --dir apps/polaris run polaris -- workspace list --user <userProfileId>
 pnpm --dir apps/polaris run polaris -- workspace create <project> --user <userProfileId>
 pnpm --dir apps/polaris run polaris -- workspace render <workspaceRef>
 pnpm --dir apps/polaris run polaris -- workspace apply <workspaceRef>
@@ -33,6 +34,9 @@ pnpm --dir apps/polaris run polaris -- workspace logs <workspaceRef>
 pnpm --dir apps/polaris run polaris -- workspace switch <project>@<docker|pod|kubevirt-vm>[:driver]
 pnpm --dir apps/polaris run polaris -- workspace delete <workspaceRef>
 ```
+
+`workspace list` returns each saved workspace's raw driver specification files
+and raw persisted status record. It never includes credential material.
 
 Runtime credential switching:
 
