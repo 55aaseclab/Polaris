@@ -114,7 +114,6 @@ Stage-one local deployment uses:
 The stage-one bundle starts:
 
 - `polaris-control-plane`
-- `polaris-webportal`
 - `paseo-app`
 - `polaris-local-gateway`
 
@@ -204,10 +203,9 @@ Current telemetry intentionally avoids collecting:
 
 ## Local Development Is Separate
 
-These are still development-only entry points:
+This is the development-only entry point:
 
 ```bash
-pnpm --filter polaris-web exec vite --host 0.0.0.0
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 

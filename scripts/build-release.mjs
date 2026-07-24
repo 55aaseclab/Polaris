@@ -63,7 +63,6 @@ function buildReleaseManifest(version, imagePrefix) {
     releaseChannel: process.env.POLARIS_RELEASE_CHANNEL?.trim() || "stable",
     images: {
       controlPlane: `${imagePrefix}/polaris-control-plane:${version}`,
-      webPortal: `${imagePrefix}/polaris-webportal:${version}`,
       paseoApp: `${imagePrefix}/paseo-app:${version}`,
     },
   };

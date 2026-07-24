@@ -26,12 +26,6 @@ pnpm run polaris:local-deploy -- desktop
 pnpm --dir apps/polaris run polaris --
 ```
 
-- local web portal in development mode:
-
-```bash
-pnpm --filter polaris-web exec vite --host 0.0.0.0
-```
-
 - local stack wrapper for development:
 
 ```bash
@@ -44,19 +38,18 @@ through `host.docker.internal:8788`.
 
 ## Stack Topology
 
-Polaris has four runtime pieces:
+Polaris has three runtime pieces:
 
 1. `polaris-server`
 2. `polaris-executor`
-3. `polaris-web`
-4. `paseo-app`
+3. `paseo-app`
 
 Responsibilities:
 
 - `polaris-server` serves the portal API and reads persisted workspace state
 - `polaris-executor` performs lifecycle work that may be slow or side-effecting
-- `polaris-web` provides the browser UI
-- `paseo-app` renders the pairing portal for a workspace daemon
+- `paseo-app` provides the browser UI and renders the pairing portal for a
+  workspace daemon
 
 ## Service Ports
 
@@ -66,7 +59,6 @@ Default development ports:
 - `8082`: Paseo web app
 - `8787`: Polaris portal API
 - `8788`: Polaris executor API
-- `8081`: Polaris web portal in local dev mode
 
 ## Data Ownership
 
@@ -119,6 +111,5 @@ Minimum local validation:
 ```bash
 pnpm install
 pnpm --filter polaris exec tsc -p tsconfig.json --noEmit
-pnpm --filter ./apps/polaris-web run build
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
