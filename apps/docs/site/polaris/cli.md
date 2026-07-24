@@ -20,24 +20,24 @@ Load your env first when you need local development data and services.
 Workspace lifecycle and backend control:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId>
-pnpm --dir apps/polaris run polaris -- render <workspaceRef>
-pnpm --dir apps/polaris run polaris -- apply <workspaceRef>
-pnpm --dir apps/polaris run polaris -- start <workspaceRef>
-pnpm --dir apps/polaris run polaris -- stop <workspaceRef>
-pnpm --dir apps/polaris run polaris -- restart <workspaceRef>
-pnpm --dir apps/polaris run polaris -- rebuild <workspaceRef>
-pnpm --dir apps/polaris run polaris -- status <workspaceRef>
-pnpm --dir apps/polaris run polaris -- reconcile <workspaceRef>
-pnpm --dir apps/polaris run polaris -- logs <workspaceRef>
-pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]
-pnpm --dir apps/polaris run polaris -- delete <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace create <project> --user <userProfileId>
+pnpm --dir apps/polaris run polaris -- workspace render <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace apply <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace start <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace stop <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace restart <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace rebuild <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace status <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace reconcile <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace logs <workspaceRef>
+pnpm --dir apps/polaris run polaris -- workspace switch <project>@<docker|pod|kubevirt-vm>[:driver]
+pnpm --dir apps/polaris run polaris -- workspace delete <workspaceRef>
 ```
 
 Runtime credential switching:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> \
+pnpm --dir apps/polaris run polaris -- workspace live-switch <workspaceRef> <credentialId> \
   [--harness <ssh|codex|claude|copilot|opencode|pi>]
 ```
 
@@ -56,13 +56,6 @@ pnpm --dir apps/polaris run polaris -- user create <userProfileId> \
   [--role <admin|user>] \
   [--plan <free|pro>]
 pnpm --dir apps/polaris run polaris -- user delete <userProfileId>
-```
-
-Legacy aliases:
-
-```bash
-pnpm --dir apps/polaris run polaris -- create-user <userProfileId> ...
-pnpm --dir apps/polaris run polaris -- delete-user <userProfileId>
 ```
 
 ## User Credential Commands
@@ -102,13 +95,13 @@ pnpm --dir apps/polaris run polaris -- user skill remove <userProfileId> <skillI
 Workspace runtime skills:
 
 ```bash
-pnpm --dir apps/polaris run polaris -- skill-list <workspaceRef> \
+pnpm --dir apps/polaris run polaris -- workspace skill-list <workspaceRef> \
   [--user <userProfileId>] [--harness <codex|claude>]
-pnpm --dir apps/polaris run polaris -- skill-install <workspaceRef> <skillId> \
+pnpm --dir apps/polaris run polaris -- workspace skill-install <workspaceRef> <skillId> \
   [--user <userProfileId>] [--harness <codex|claude>]
-pnpm --dir apps/polaris run polaris -- skill-uninstall <workspaceRef> <skillId> \
+pnpm --dir apps/polaris run polaris -- workspace skill-uninstall <workspaceRef> <skillId> \
   [--user <userProfileId>] [--harness <codex|claude>]
-pnpm --dir apps/polaris run polaris -- skill-sync <workspaceRef> \
+pnpm --dir apps/polaris run polaris -- workspace skill-sync <workspaceRef> \
   [--user <userProfileId>] [--harness <codex|claude>]
 ```
 
