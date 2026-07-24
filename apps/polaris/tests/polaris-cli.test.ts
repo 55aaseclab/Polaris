@@ -307,6 +307,64 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
   }
 });
 
+test("runCli user list returns sorted user profiles", async () => {
+  const firstUserId = uniqueProjectName("cli-user-list-b");
+  const secondUserId = uniqueProjectName("cli-user-list-a");
+  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
+  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      firstUserId,
+      "--name",
+      "CLI User List B",
+      "--email",
+      `${firstUserId}@polaris.local`,
+    ]);
+    await runCli([
+      "user",
+      "create",
+      secondUserId,
+      "--name",
+      "CLI User List A",
+      "--email",
+      `${secondUserId}@polaris.local`,
+    ]);
+
+    const stdout = await captureStdout(async () => {
+      await runCli(["user", "list"]);
+    });
+    const parsed = parseJsonOutput<{
+      users: Array<{ id: string; name: string; email: string; workspaces: string[] }>;
+    }>(stdout);
+
+    const listedUserIds = parsed.users.map((user) => user.id);
+    const firstIndex = listedUserIds.indexOf(firstUserId);
+    const secondIndex = listedUserIds.indexOf(secondUserId);
+
+    assert.notEqual(firstIndex, -1);
+    assert.notEqual(secondIndex, -1);
+    assert.ok(secondIndex < firstIndex);
+    assert.deepEqual(parsed.users[firstIndex]?.workspaces, []);
+    assert.deepEqual(parsed.users[secondIndex]?.workspaces, []);
+  } finally {
+    await cleanupCliTestUser({
+      userId: firstUserId,
+      profilePath: firstProfilePath,
+      userRoot: firstUserRoot,
+    });
+    await cleanupCliTestUser({
+      userId: secondUserId,
+      profilePath: secondProfilePath,
+      userRoot: secondUserRoot,
+    });
+  }
+});
+
 test("runCli user create adds the default RightCode codex credential when configured", async () => {
   const previous = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = "test-default-rightcode-key";
@@ -397,6 +455,38 @@ test("runCli create allows the same workspace name under a different user", asyn
       userId: secondUserId,
       profilePath: secondProfilePath,
       userRoot: secondUserRoot,
+    });
+  }
+});
+
+test("runCli workspace create scaffolds a workspace through the namespaced command", async () => {
+  const workspace = uniqueProjectName("cli-workspace-command");
+  const userProfileId = uniqueProjectName("cli-workspace-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Workspace User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    await runCli(["workspace", "create", workspace, "--user", userProfileId]);
+
+    assert.equal(
+      fs.existsSync(path.join(userRoot, "workspaces", workspace, "docker.agent.yaml")),
+      true,
+    );
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
     });
   }
 });
