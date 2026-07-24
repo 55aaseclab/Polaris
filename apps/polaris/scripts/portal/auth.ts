@@ -179,7 +179,7 @@ export async function exchangeAuthingAuthorizationCode(input: {
   code: string;
   codeVerifier: string;
   redirectUri: string;
-}): Promise<{ token: string }> {
+}): Promise<{ token: string; idToken?: string }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
@@ -222,11 +222,15 @@ export async function exchangeAuthingAuthorizationCode(input: {
     id_token?: unknown;
   };
   const accessToken = String(payload.access_token ?? "").trim();
+  const idToken = String(payload.id_token ?? "").trim();
   if (!accessToken) {
     throw new PortalAuthError("Authing token exchange did not return a session token", 502);
   }
   const user = await readAuthingUser(accessToken);
-  return { token: await createPortalSession(user) };
+  return {
+    token: await createPortalSession(user),
+    ...(idToken ? { idToken } : {}),
+  };
 }
 
 export async function authenticatePortalRequest(

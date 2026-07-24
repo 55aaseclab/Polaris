@@ -1,70 +1,241 @@
+diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
+index 94061e2..6b9648b 100644
+--- a/packages/app/src/app/_layout.tsx
++++ b/packages/app/src/app/_layout.tsx
+@@ -99,6 +99,7 @@ import {
+ } from "@/utils/host-routes";
+ import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
+ import { navigateToAgent } from "@/utils/navigate-to-agent";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
+ import {
+   ensureOsNotificationPermission,
+   WEB_NOTIFICATION_CLICK_EVENT,
+@@ -879,6 +880,7 @@ function FaviconStatusSync() {
+ 
+ function RootStack() {
+   const storeReady = useStoreReady();
++  const hasPolarisSession = usePolarisAuthSession();
+   const { theme } = useUnistyles();
+   const stackScreenOptions = useMemo(
+     () => ({
+@@ -891,7 +893,7 @@ function RootStack() {
+     [theme.colors.surface0],
+   );
+   return (
+-    <Stack screenOptions={stackScreenOptions}>
++      <Stack screenOptions={stackScreenOptions}>
+       <Stack.Screen name="index" />
+       <Stack.Protected guard={storeReady}>
+         <Stack.Screen name="welcome" />
+@@ -901,9 +903,12 @@ function RootStack() {
+         <Stack.Screen name="settings/projects/[projectKey]" />
+         <Stack.Screen name="pair-scan" />
+       </Stack.Protected>
+-      <Stack.Screen name="h/[serverId]" />
+-      <Stack.Screen name="settings/hosts/[serverId]/index" />
+-      <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
++      <Stack.Protected guard={storeReady && hasPolarisSession}>
++        <Stack.Screen name="settings/user" />
++        <Stack.Screen name="h/[serverId]" />
++        <Stack.Screen name="settings/hosts/[serverId]/index" />
++        <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
++      </Stack.Protected>
+     </Stack>
+   );
+ }
 diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
 new file mode 100644
-index 0000000..b45c7b3
+index 0000000..3ba666f
 --- /dev/null
 +++ b/packages/app/src/app/auth/callback.tsx
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,139 @@
 +import { useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { useRouter } from "expo-router";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
-+import { completePolarisSignIn, clearPolarisSignIn, getPolarisAuthToken, polarisApiBaseUrl } from "@/lib/polaris-authing";
++import { Button } from "@/components/ui/button";
++import {
++  beginPolarisSignIn,
++  clearPolarisSignIn,
++  completePolarisSignIn,
++  getPolarisAuthToken,
++  polarisApiBaseUrl,
++} from "@/lib/polaris-authing";
 +import { useHostMutations } from "@/runtime/host-runtime";
++import { buildHostRootRoute } from "@/utils/host-routes";
 +
 +interface PolarisHostSyncResponse {
 +  hosts: Array<{ name: string; status: { paseo?: { liveTarget?: string | null } } | null }>;
 +}
++
++const DEFAULT_POLARIS_HOST_NAME = "default";
 +
 +export default function PolarisAuthCallbackRoute() {
 +  const router = useRouter();
 +  const { theme } = useUnistyles();
 +  const { upsertConnectionFromOfferUrl } = useHostMutations();
 +  const [error, setError] = useState<string | null>(null);
++  const [retrySeconds, setRetrySeconds] = useState<number | null>(null);
 +
 +  useEffect(() => {
++    let disposed = false;
++    let retryTimer: ReturnType<typeof setTimeout> | null = null;
++    let countdownTimer: ReturnType<typeof setInterval> | null = null;
 +    void completePolarisSignIn()
 +      .then(async (returnPath) => {
-+        const token = getPolarisAuthToken();
-+        const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
-+          headers: token ? { authorization: `Bearer ${token}` } : {},
-+        });
-+        const body = await response.json().catch(() => null) as PolarisHostSyncResponse | null;
-+        if (response.ok) {
-+          await Promise.allSettled((body?.hosts ?? []).map(async (host) => {
-+            const pairingUrl = host.status?.paseo?.liveTarget?.trim();
-+            if (pairingUrl) await upsertConnectionFromOfferUrl(pairingUrl, host.name);
-+          }));
++        let connectedHostServerId: string | null = null;
++        try {
++          const token = getPolarisAuthToken();
++          const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++            headers: token ? { authorization: `Bearer ${token}` } : {},
++          });
++          const body = await response.json().catch(() => null) as PolarisHostSyncResponse | null;
++          if (response.ok) {
++            const hosts = body?.hosts ?? [];
++            if (hosts.length === 0) {
++              const createResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++                method: "POST",
++                headers: {
++                  "content-type": "application/x-www-form-urlencoded",
++                  ...(token ? { authorization: `Bearer ${token}` } : {}),
++                },
++                body: new URLSearchParams({ hostName: DEFAULT_POLARIS_HOST_NAME }).toString(),
++              });
++              if (!createResponse.ok) {
++                throw new Error("无法创建默认主机");
++              }
++
++              while (!disposed) {
++                await new Promise((resolve) => setTimeout(resolve, 1_000));
++                const hostsResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++                  headers: token ? { authorization: `Bearer ${token}` } : {},
++                });
++                if (!hostsResponse.ok) continue;
++                const hostsBody = await hostsResponse.json().catch(() => null) as PolarisHostSyncResponse | null;
++                const pairingUrl = hostsBody?.hosts.find(
++                  (host) => host.name === DEFAULT_POLARIS_HOST_NAME,
++                )?.status?.paseo?.liveTarget?.trim();
++                if (!pairingUrl) continue;
++                connectedHostServerId = (
++                  await upsertConnectionFromOfferUrl(pairingUrl, DEFAULT_POLARIS_HOST_NAME)
++                ).serverId;
++                break;
++              }
++            } else {
++              const syncedHosts = await Promise.allSettled(hosts.map(async (host) => {
++              const pairingUrl = host.status?.paseo?.liveTarget?.trim();
++              return pairingUrl ? upsertConnectionFromOfferUrl(pairingUrl, host.name) : null;
++              }));
++              const connectedHost = syncedHosts.find(
++                (result) => result.status === "fulfilled" && result.value !== null,
++              );
++              if (connectedHost?.status === "fulfilled" && connectedHost.value) {
++                connectedHostServerId = connectedHost.value.serverId;
++              }
++            }
++          }
++        } catch (error) {
++          console.warn("[PolarisAuth] Failed to sync Polaris hosts after sign-in", error);
 +        }
-+        router.replace(returnPath as never);
++        router.replace(
++          connectedHostServerId
++            ? buildHostRootRoute(connectedHostServerId)
++            : returnPath as never,
++        );
 +      })
 +      .catch((reason) => {
++        if (disposed) return;
 +        clearPolarisSignIn();
 +        setError(reason instanceof Error ? reason.message : String(reason));
++        setRetrySeconds(3);
++        retryTimer = setTimeout(beginPolarisSignIn, 3_000);
++        countdownTimer = setInterval(() => {
++          setRetrySeconds((current) => {
++            if (!current || current <= 1) {
++              if (countdownTimer) clearInterval(countdownTimer);
++              return current;
++            }
++            return current - 1;
++          });
++        }, 1_000);
 +      });
++
++    return () => {
++      disposed = true;
++      if (retryTimer) clearTimeout(retryTimer);
++      if (countdownTimer) clearInterval(countdownTimer);
++    };
 +  }, [router, upsertConnectionFromOfferUrl]);
 +
 +  return (
 +    <View style={styles.container}>
-+      {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={theme.colors.foregroundMuted} />}
++      {error ? (
++        <View style={styles.errorContent}>
++          <Text style={styles.error}>{error}</Text>
++          <Text style={styles.hint}>将在 {retrySeconds ?? 3} 秒后重新登录</Text>
++          <Button size="sm" variant="secondary" onPress={beginPolarisSignIn}>
++            重新登录
++          </Button>
++        </View>
++      ) : <ActivityIndicator color={theme.colors.foregroundMuted} />}
 +    </View>
 +  );
 +}
 +
 +const styles = StyleSheet.create((theme) => ({
 +  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
++  errorContent: { alignItems: "center", gap: theme.spacing[3] },
 +  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm, textAlign: "center" },
++  hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, textAlign: "center" },
 +}));
+diff --git a/packages/app/src/app/index.tsx b/packages/app/src/app/index.tsx
+index e0649f6..f7e99bd 100644
+--- a/packages/app/src/app/index.tsx
++++ b/packages/app/src/app/index.tsx
+@@ -13,11 +13,14 @@ import {
+   useLastWorkspaceSelection,
+ } from "@/stores/navigation-active-workspace-store";
+ import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
++import { resolvePolarisAuthRedirect, usePolarisAuthSession } from "@/lib/polaris-authing";
+ 
+ const isDesktop = shouldUseDesktopDaemon();
+ 
+ export default function Index() {
+   const pathname = usePathname();
++  const hasPolarisSession = usePolarisAuthSession();
++  const authRedirect = resolvePolarisAuthRedirect(pathname, hasPolarisSession);
+   const bootstrapState = useHostRuntimeBootstrapState();
+   const anyOnlineHostServerId = useEarliestOnlineHostServerId();
+   const hosts = useHosts();
+@@ -32,6 +35,10 @@ export default function Index() {
+     workspaceSelectionWorkspaceId,
+   );
+ 
++  if (authRedirect) {
++    return <Redirect href={authRedirect} />;
++  }
++
+   const startupRoute = resolveStartupRoute({
+     route: { kind: "index", pathname },
+     startupBlocker: bootstrapState.startupBlocker,
 diff --git a/packages/app/src/app/settings/user.tsx b/packages/app/src/app/settings/user.tsx
 new file mode 100644
-index 0000000..f9b58f7
+index 0000000..456fc20
 --- /dev/null
 +++ b/packages/app/src/app/settings/user.tsx
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,14 @@
++import { Redirect } from "expo-router";
 +import SettingsScreen from "@/screens/settings-screen";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
 +
 +const USER_VIEW = { kind: "polaris-user" as const };
 +
 +export default function PolarisUserRoute() {
++  const hasPolarisSession = usePolarisAuthSession();
++  if (!hasPolarisSession) {
++    return <Redirect href="/welcome" />;
++  }
++
 +  return <SettingsScreen view={USER_VIEW} />;
 +}
 diff --git a/packages/app/src/components/create-polaris-host-modal.tsx b/packages/app/src/components/create-polaris-host-modal.tsx
@@ -137,24 +308,25 @@ index 0000000..239f17a
 +}
 +const styles = StyleSheet.create((theme) => ({ field: { gap: theme.spacing[2] }, label: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm }, hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs }, error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm } }));
 diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
-index 8f22c48..dd13625 100644
+index 8f22c48..a088993 100644
 --- a/packages/app/src/components/welcome-screen.tsx
 +++ b/packages/app/src/components/welcome-screen.tsx
-@@ -1,30 +1,16 @@
+@@ -1,30 +1,14 @@
 -import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
- import { useTranslation } from "react-i18next";
+-import { useTranslation } from "react-i18next";
 -import { Pressable, Text, View, ScrollView } from "react-native";
++import { useCallback, useEffect, useMemo } from "react";
 +import { Text, View, ScrollView } from "react-native";
  import { useRouter } from "expo-router";
  import { StyleSheet, useUnistyles } from "react-native-unistyles";
 -import { QrCode, Link2, ClipboardPaste, ExternalLink, Settings } from "lucide-react-native";
 +import { Settings } from "lucide-react-native";
  import { useSafeAreaInsets } from "react-native-safe-area-context";
- import type { HostProfile } from "@/types/host-connection";
- import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
+-import type { HostProfile } from "@/types/host-connection";
+-import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
 -import { AddHostModal } from "./add-host-modal";
 -import { PairLinkModal } from "./pair-link-modal";
++import { useHosts } from "@/runtime/host-runtime";
  import { Button } from "@/components/ui/button";
 -import { resolveAppVersion } from "@/utils/app-version";
 -import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
@@ -175,7 +347,7 @@ index 8f22c48..dd13625 100644
  
  const styles = StyleSheet.create((theme) => ({
    root: {
-@@ -67,46 +53,6 @@ const styles = StyleSheet.create((theme) => ({
+@@ -67,189 +51,31 @@ const styles = StyleSheet.create((theme) => ({
      maxWidth: 420,
      gap: theme.spacing[3],
    },
@@ -222,9 +394,54 @@ index 8f22c48..dd13625 100644
    settingsButton: {
      alignSelf: "center",
      marginTop: theme.spacing[6],
-@@ -158,98 +104,26 @@ export interface WelcomeScreenProps {
+   },
+ }));
  
- export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+-function useAnyHostOnline(serverIds: string[]): string | null {
+-  const runtime = getHostRuntimeStore();
+-  return useSyncExternalStore(
+-    (onStoreChange) => runtime.subscribeAll(onStoreChange),
+-    () => {
+-      let firstOnlineServerId: string | null = null;
+-      let firstOnlineAt: string | null = null;
+-      for (const serverId of serverIds) {
+-        const snapshot = runtime.getSnapshot(serverId);
+-        const lastOnlineAt = snapshot?.lastOnlineAt ?? null;
+-        if (!isHostRuntimeConnected(snapshot) || !lastOnlineAt) {
+-          continue;
+-        }
+-        if (!firstOnlineAt || lastOnlineAt < firstOnlineAt) {
+-          firstOnlineAt = lastOnlineAt;
+-          firstOnlineServerId = serverId;
+-        }
+-      }
+-      return firstOnlineServerId;
+-    },
+-    () => {
+-      let firstOnlineServerId: string | null = null;
+-      let firstOnlineAt: string | null = null;
+-      for (const serverId of serverIds) {
+-        const snapshot = runtime.getSnapshot(serverId);
+-        const lastOnlineAt = snapshot?.lastOnlineAt ?? null;
+-        if (!isHostRuntimeConnected(snapshot) || !lastOnlineAt) {
+-          continue;
+-        }
+-        if (!firstOnlineAt || lastOnlineAt < firstOnlineAt) {
+-          firstOnlineAt = lastOnlineAt;
+-          firstOnlineServerId = serverId;
+-        }
+-      }
+-      return firstOnlineServerId;
+-    },
+-  );
+-}
+-
+-export interface WelcomeScreenProps {
+-  onHostAdded?: (profile: HostProfile) => void;
+-}
+-
+-export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
++export function WelcomeScreen() {
    const { theme } = useUnistyles();
 -  const { t } = useTranslation();
    const insets = useSafeAreaInsets();
@@ -234,19 +451,14 @@ index 8f22c48..dd13625 100644
 -  const [isDirectOpen, setIsDirectOpen] = useState(false);
 -  const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
    const hosts = useHosts();
-   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
+-  const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
++  const firstHostServerId = hosts[0]?.serverId ?? null;
  
-+  useEffect(() => {
-+    if (getPolarisAuthToken()) {
-+      router.replace("/settings");
-+    }
-+  }, [router]);
-+
    useEffect(() => {
-     if (!anyOnlineServerId) return;
-     router.replace(buildHostRootRoute(anyOnlineServerId));
-   }, [anyOnlineServerId, router]);
- 
+-    if (!anyOnlineServerId) return;
+-    router.replace(buildHostRootRoute(anyOnlineServerId));
+-  }, [anyOnlineServerId, router]);
+-
 -  const finishOnboarding = useCallback(
 -    (serverId: string) => {
 -      router.replace(buildHostRootRoute(serverId));
@@ -257,7 +469,13 @@ index 8f22c48..dd13625 100644
 -  const handleOpenPaseoSite = useCallback(() => {
 -    void openExternalUrl("https://paseo.sh");
 -  }, []);
--
++    if (firstHostServerId) {
++      router.replace(buildHostRootRoute(firstHostServerId));
++      return;
++    }
++    if (getPolarisAuthToken()) router.replace("/settings");
++  }, [firstHostServerId, router]);
+ 
    const handleOpenSettings = useCallback(() => {
      router.push("/settings");
    }, [router]);
@@ -327,7 +545,7 @@ index 8f22c48..dd13625 100644
    const scrollContentContainerStyle = useMemo(
      () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
      [theme.spacing, insets.bottom],
-@@ -266,20 +140,14 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+@@ -266,20 +92,14 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
          <View style={styles.content}>
            <PaseoLogo size={96} />
            <View style={styles.copyBlock}>
@@ -353,7 +571,7 @@ index 8f22c48..dd13625 100644
            </View>
  
            <Button
-@@ -290,49 +158,10 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+@@ -290,49 +110,10 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
              style={styles.settingsButton}
              testID="welcome-open-settings"
            >
@@ -509,17 +727,135 @@ index 7cb3cb5..397c579 100644
        providers: "Providers",
        usage: "使用情况",
        terminals: "Terminals",
+diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
+new file mode 100644
+index 0000000..74d1c32
+--- /dev/null
++++ b/packages/app/src/lib/polaris-authing.test.ts
+@@ -0,0 +1,102 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  clearPolarisSignIn,
++  completePolarisSignIn,
++  getPolarisAuthToken,
++  hasPolarisAuthSession,
++  resolvePolarisAuthRedirect,
++  subscribePolarisAuthSession,
++} from "./polaris-authing";
++
++const sessionKeys = [
++  "polaris_authing_session",
++  "polaris_authing_id_token",
++  "polaris_authing_pkce_verifier",
++  "polaris_authing_state",
++  "polaris_authing_return_path",
++  "polaris_authing_redirect_uri",
++];
++
++function installSessionStorage(): Storage {
++  const values = new Map<string, string>();
++  const storage: Storage = {
++    get length() { return values.size; },
++    clear: () => values.clear(),
++    getItem: (key) => values.get(key) ?? null,
++    key: (index) => [...values.keys()][index] ?? null,
++    removeItem: (key) => values.delete(key),
++    setItem: (key, value) => values.set(key, String(value)),
++  };
++  Object.defineProperty(globalThis, "sessionStorage", {
++    configurable: true,
++    value: storage,
++  });
++  return storage;
++}
++
++afterEach(() => {
++  delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
++  vi.unstubAllGlobals();
++});
++
++describe("Polaris authentication state", () => {
++  it("clears every local authentication value on sign-out", () => {
++    const storage = installSessionStorage();
++    const onSessionChange = vi.fn();
++    const unsubscribe = subscribePolarisAuthSession(onSessionChange);
++    for (const key of sessionKeys) storage.setItem(key, "value");
++
++    expect(hasPolarisAuthSession()).toBe(true);
++
++    clearPolarisSignIn();
++
++    for (const key of sessionKeys) expect(storage.getItem(key)).toBeNull();
++    expect(getPolarisAuthToken()).toBeNull();
++    expect(hasPolarisAuthSession()).toBe(false);
++    expect(onSessionChange).toHaveBeenCalledTimes(1);
++    unsubscribe();
++  });
++
++  it("publishes the authenticated state before navigating from the callback", async () => {
++    const storage = installSessionStorage();
++    storage.setItem("polaris_authing_pkce_verifier", "verifier");
++    storage.setItem("polaris_authing_state", "expected-state");
++    storage.setItem("polaris_authing_return_path", "/welcome");
++    storage.setItem("polaris_authing_redirect_uri", "http://example.test/auth/callback");
++    vi.stubGlobal("location", {
++      search: "?code=authorization-code&state=expected-state",
++      protocol: "http:",
++      hostname: "example.test",
++      origin: "http://example.test",
++    });
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
++      token: "authenticated-token",
++      idToken: "authing-id-token",
++    }), { status: 200 })));
++    const onSessionChange = vi.fn();
++    const unsubscribe = subscribePolarisAuthSession(onSessionChange);
++
++    await expect(completePolarisSignIn()).resolves.toBe("/settings");
++
++    expect(getPolarisAuthToken()).toBe("authenticated-token");
++    expect(storage.getItem("polaris_authing_id_token")).toBe("authing-id-token");
++    expect(hasPolarisAuthSession()).toBe(true);
++    expect(onSessionChange).toHaveBeenCalledTimes(1);
++    unsubscribe();
++  });
++
++  it("redirects unauthenticated users away from Polaris routes", () => {
++    expect(resolvePolarisAuthRedirect("/welcome", false)).toBeNull();
++    expect(resolvePolarisAuthRedirect("/auth/callback", false)).toBeNull();
++    expect(resolvePolarisAuthRedirect("/settings", false)).toBeNull();
++    expect(resolvePolarisAuthRedirect("/settings/user", false)).toBe("/welcome");
++    expect(
++      resolvePolarisAuthRedirect("/settings/hosts/srv_M1ozprYgpVhS/host", false),
++    ).toBe("/welcome");
++  });
++
++  it("allows workspace and settings routes with a session", () => {
++    expect(resolvePolarisAuthRedirect("/settings/user", true)).toBeNull();
++    expect(resolvePolarisAuthRedirect("/h/srv_M1ozprYgpVhS", true)).toBeNull();
++  });
++});
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..80e2b63
+index 0000000..2acde82
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,209 @@
++import { useSyncExternalStore } from "react";
++
 +const sessionKey = "polaris_authing_session";
++const idTokenKey = "polaris_authing_id_token";
 +const verifierKey = "polaris_authing_pkce_verifier";
 +const stateKey = "polaris_authing_state";
 +const returnPathKey = "polaris_authing_return_path";
 +const redirectUriKey = "polaris_authing_redirect_uri";
++
++const protectedPathPrefixes = ["/h/", "/settings/hosts/"];
++const sessionListeners = new Set<() => void>();
++
++function notifyPolarisSessionChange(): void {
++  for (const listener of sessionListeners) listener();
++}
 +
 +function required(value: string | undefined, name: string): string {
 +  const trimmed = value?.trim();
@@ -555,6 +891,8 @@ index 0000000..80e2b63
 +    appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
 +    authorizationUrl: required(config.authorizationUrl, "POLARIS_AUTHING_AUTHORIZATION_URL"),
 +    redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
++    logoutUrl: config.logoutUrl?.trim() || undefined,
++    logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
 +  };
 +}
 +
@@ -595,6 +933,34 @@ index 0000000..80e2b63
 +  } catch {
 +    return null;
 +  }
++}
++
++export function hasPolarisAuthSession(): boolean {
++  return Boolean(getPolarisAuthToken());
++}
++
++export function subscribePolarisAuthSession(listener: () => void): () => void {
++  sessionListeners.add(listener);
++  return () => sessionListeners.delete(listener);
++}
++
++export function usePolarisAuthSession(): boolean {
++  return useSyncExternalStore(
++    subscribePolarisAuthSession,
++    hasPolarisAuthSession,
++    hasPolarisAuthSession,
++  );
++}
++
++export function resolvePolarisAuthRedirect(
++  pathname: string,
++  hasSession: boolean,
++): "/welcome" | null {
++  if (hasSession) return null;
++  if (pathname === "/" || pathname === "/settings/user") return "/welcome";
++  return protectedPathPrefixes.some((prefix) => pathname.startsWith(prefix))
++    ? "/welcome"
++    : null;
 +}
 +
 +export function beginPolarisSignIn(): void {
@@ -638,11 +1004,17 @@ index 0000000..80e2b63
 +      redirectUri: sessionStorage.getItem(redirectUriKey) || fallbackCallbackUrl(),
 +    }),
 +  });
-+  const payload = await response.json().catch(() => ({})) as { token?: string; error?: string };
++  const payload = await response.json().catch(() => ({})) as {
++    token?: string;
++    idToken?: string;
++    error?: string;
++  };
 +  if (!response.ok || !payload.token?.trim()) {
 +    throw new Error(payload.error || "Authing 登录未完成");
 +  }
 +  sessionStorage.setItem(sessionKey, payload.token);
++  if (payload.idToken?.trim()) sessionStorage.setItem(idTokenKey, payload.idToken.trim());
++  notifyPolarisSessionChange();
 +  sessionStorage.removeItem(verifierKey);
 +  sessionStorage.removeItem(stateKey);
 +  sessionStorage.removeItem(redirectUriKey);
@@ -652,30 +1024,34 @@ index 0000000..80e2b63
 +
 +export function clearPolarisSignIn(): void {
 +  sessionStorage.removeItem(sessionKey);
++  sessionStorage.removeItem(idTokenKey);
 +  sessionStorage.removeItem(verifierKey);
 +  sessionStorage.removeItem(stateKey);
 +  sessionStorage.removeItem(redirectUriKey);
 +  sessionStorage.removeItem(returnPathKey);
++  notifyPolarisSessionChange();
 +}
 +
 +export function signOutPolaris(): void {
 +  void (async () => {
 +    const config = await loadAuthingConfig().catch(() => null);
++    const idToken = sessionStorage.getItem(idTokenKey)?.trim();
 +    clearPolarisSignIn();
 +    if (config?.logoutUrl) {
 +      const logoutUrl = new URL(config.logoutUrl);
++      if (idToken) logoutUrl.searchParams.set("id_token_hint", idToken);
 +      logoutUrl.searchParams.set(
 +        "post_logout_redirect_uri",
 +        config.logoutRedirectUri || globalThis.location.origin,
 +      );
-+      globalThis.location.assign(logoutUrl.toString());
++      globalThis.location.replace(logoutUrl.toString());
 +      return;
 +    }
-+    globalThis.location.assign("/welcome");
++    globalThis.location.replace("/welcome");
 +  })();
 +}
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
-index a290156..b824814 100644
+index a290156..ef06565 100644
 --- a/packages/app/src/screens/settings-screen.tsx
 +++ b/packages/app/src/screens/settings-screen.tsx
 @@ -42,6 +42,8 @@ import {
@@ -708,7 +1084,7 @@ index a290156..b824814 100644
    type SettingsSectionSlug,
  } from "@/utils/host-routes";
  import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
-+import { getPolarisAuthToken } from "@/lib/polaris-authing";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
  
  // ---------------------------------------------------------------------------
  // View model
@@ -720,31 +1096,74 @@ index a290156..b824814 100644
    | { kind: "projects" }
    | { kind: "project"; projectKey: string };
  
-@@ -1123,6 +1128,7 @@ interface SettingsSidebarProps {
+@@ -520,9 +525,10 @@ interface AboutSectionProps {
+   appVersion: string | null;
+   appVersionText: string;
+   isDesktopApp: boolean;
++  hosts: HostProfile[];
+ }
+ 
+-function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
++function AboutSection({ appVersion, appVersionText, isDesktopApp, hosts }: AboutSectionProps) {
+   const { t } = useTranslation();
+   return (
+     <>
+@@ -538,7 +544,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
+           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+         </View>
+       </SettingsSection>
+-      <ConnectedHostsSection clientVersion={appVersion} />
++      <ConnectedHostsSection clientVersion={appVersion} hosts={hosts} />
+       <View style={styles.aboutCommunity}>
+         <CommunityLinks />
+       </View>
+@@ -552,9 +558,14 @@ function normalizeVersion(version: string | null | undefined): string | null {
+   return trimmed.replace(/^v/i, "");
+ }
+ 
+-function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null }) {
++function ConnectedHostsSection({
++  clientVersion,
++  hosts,
++}: {
++  clientVersion: string | null;
++  hosts: HostProfile[];
++}) {
+   const { t } = useTranslation();
+-  const hosts = useHosts();
+   if (hosts.length === 0) {
+     return null;
+   }
+@@ -1123,8 +1134,11 @@ interface SettingsSidebarProps {
    onSelectHost: (serverId: string) => void;
    onSelectProjects: () => void;
    onAddHost: () => void;
 +  onSelectPolarisUser: () => void;
    onBackToWorkspace: () => void;
    activeHostServerId: string | null;
++  hosts: HostProfile[];
++  hasPolarisSession: boolean;
    layout: "desktop" | "mobile";
-@@ -1135,6 +1141,7 @@ function SettingsSidebar({
+ }
+ 
+@@ -1135,13 +1149,15 @@ function SettingsSidebar({
    onSelectHost,
    onSelectProjects,
    onAddHost,
 +  onSelectPolarisUser,
    onBackToWorkspace,
    activeHostServerId,
++  hosts,
++  hasPolarisSession,
    layout,
-@@ -1145,6 +1152,7 @@ function SettingsSidebar({
+ }: SettingsSidebarProps) {
+   const { theme } = useUnistyles();
+   const { t } = useTranslation();
+-  const hosts = useHosts();
    const localServerId = useLocalDaemonServerId();
    const sortedHosts = useSortedHosts(hosts, localServerId);
    const hasHosts = sortedHosts.length > 0;
-+  const hasPolarisSession = Boolean(getPolarisAuthToken());
-   const isDesktopApp = isElectronRuntime();
-   const items = SIDEBAR_SECTION_ITEMS.filter((item) => !item.desktopOnly || isDesktopApp);
-   const insets = useSafeAreaInsets();
-@@ -1183,8 +1191,21 @@ function SettingsSidebar({
+@@ -1183,8 +1199,21 @@ function SettingsSidebar({
          ))}
        </View>
        <SidebarSeparator />
@@ -768,7 +1187,7 @@ index a290156..b824814 100644
            <Text style={sidebarStyles.groupLabel}>{t("settings.groups.host")}</Text>
            <HostPicker
              activeServerId={activeHostServerId}
-@@ -1203,9 +1224,8 @@ function SettingsSidebar({
+@@ -1203,9 +1232,8 @@ function SettingsSidebar({
                onSelect={onSelectHostSection}
              />
            ))}
@@ -776,22 +1195,55 @@ index a290156..b824814 100644
 -      ) : (
 -        <View style={sidebarStyles.list}>
 +          </>
-+        ) : (
++        ) : hasPolarisSession ? (
            <Pressable
              accessibilityRole="button"
              accessibilityLabel={t("settings.addHost")}
-@@ -1218,8 +1238,8 @@ function SettingsSidebar({
+@@ -1218,8 +1246,8 @@ function SettingsSidebar({
                {t("settings.addHost")}
              </Text>
            </Pressable>
 -        </View>
 -      )}
-+        )}
++        ) : null}
 +      </View>
      </>
    );
  
-@@ -1459,6 +1479,14 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+@@ -1279,9 +1307,17 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     [webScrollbarStyle],
+   );
+   const hosts = useHosts();
++  const hasPolarisSession = usePolarisAuthSession();
++  const visibleHosts = useMemo(
++    () => hasPolarisSession ? hosts : [],
++    [hasPolarisSession, hosts],
++  );
+   const localServerId = useLocalDaemonServerId();
+-  const sortedHosts = useSortedHosts(hosts, localServerId);
+-  const hostServerIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
++  const sortedHosts = useSortedHosts(visibleHosts, localServerId);
++  const hostServerIds = useMemo(
++    () => visibleHosts.map((host) => host.serverId),
++    [visibleHosts],
++  );
+   const anyOnlineServerId = useAnyOnlineHostServerId(hostServerIds);
+   const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
+     view.kind === "host" ? view.serverId : null,
+@@ -1290,10 +1326,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (!selectedSettingsHostServerId) {
+       return null;
+     }
+-    return hosts.some((host) => host.serverId === selectedSettingsHostServerId)
++    return visibleHosts.some((host) => host.serverId === selectedSettingsHostServerId)
+       ? selectedSettingsHostServerId
+       : null;
+-  }, [hosts, selectedSettingsHostServerId]);
++  }, [visibleHosts, selectedSettingsHostServerId]);
+ 
+   useEffect(() => {
+     if (view.kind === "host") {
+@@ -1459,6 +1495,14 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
      }
    }, [isCompactLayout, router]);
  
@@ -806,7 +1258,40 @@ index a290156..b824814 100644
    const handleScanQr = useCallback(() => {
      closeAddConnectionFlow();
      router.push({
-@@ -1513,6 +1541,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+@@ -1477,14 +1521,22 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+   }, [isCompactLayout, router]);
+ 
+   const handleBackToRoot = useCallback(() => {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
++      return;
++    }
+     if (router.canGoBack()) {
+       router.back();
+     } else {
+       router.replace("/settings");
+     }
+-  }, [router]);
++  }, [hasPolarisSession, router]);
+ 
+   const handleBackToWorkspace = useCallback(() => {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
++      return;
++    }
+     if (navigateToLastWorkspace()) {
+       return;
+     }
+@@ -1493,7 +1545,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+       return;
+     }
+     router.replace("/");
+-  }, [anyOnlineServerId, router]);
++  }, [anyOnlineServerId, hasPolarisSession, router]);
+ 
+   const detailHeader = ((): {
+     title: string;
+@@ -1513,6 +1565,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
      if (view.kind === "project" || view.kind === "projects") {
        return { title: t("settings.projects"), Icon: FolderGit2 };
      }
@@ -816,7 +1301,7 @@ index a290156..b824814 100644
      return null;
    })();
  
-@@ -1526,6 +1557,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+@@ -1526,6 +1581,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
      if (view.kind === "project") {
        return <ProjectSettingsScreen projectKey={view.projectKey} />;
      }
@@ -826,7 +1311,15 @@ index a290156..b824814 100644
      if (view.kind === "section") {
        switch (view.section) {
          case "general":
-@@ -1583,12 +1617,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+@@ -1566,6 +1624,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+               appVersion={appVersion}
+               appVersionText={appVersionText}
+               isDesktopApp={isDesktopApp}
++              hosts={visibleHosts}
+             />
+           );
+       }
+@@ -1583,12 +1642,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
  
    const addHostModals = (
      <>
@@ -840,24 +1333,32 @@ index a290156..b824814 100644
        />
        <AddHostModal
          visible={isDirectHostVisible}
-@@ -1618,6 +1649,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+@@ -1618,8 +1674,11 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
              onSelectHost={handleSelectHost}
              onSelectProjects={handleSelectProjects}
              onAddHost={handleAddHost}
 +            onSelectPolarisUser={handleSelectPolarisUser}
              onBackToWorkspace={handleBackToWorkspace}
              activeHostServerId={activeHostServerId}
++            hosts={visibleHosts}
++            hasPolarisSession={hasPolarisSession}
              layout="mobile"
-@@ -1662,6 +1694,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+           />
+         </ScrollView>
+@@ -1662,8 +1721,11 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
            onSelectHost={handleSelectHost}
            onSelectProjects={handleSelectProjects}
            onAddHost={handleAddHost}
 +          onSelectPolarisUser={handleSelectPolarisUser}
            onBackToWorkspace={handleBackToWorkspace}
            activeHostServerId={activeHostServerId}
++          hosts={visibleHosts}
++          hasPolarisSession={hasPolarisSession}
            layout="desktop"
+         />
+         <View style={desktopStyles.contentPane}>
 diff --git a/packages/app/src/screens/settings/host-page.tsx b/packages/app/src/screens/settings/host-page.tsx
-index 7a97631..55a8ae8 100644
+index 7a97631..af9accf 100644
 --- a/packages/app/src/screens/settings/host-page.tsx
 +++ b/packages/app/src/screens/settings/host-page.tsx
 @@ -5,6 +5,7 @@ import {
@@ -885,7 +1386,7 @@ index 7a97631..55a8ae8 100644
  
  const ThemedArrowUp = withUnistyles(ArrowUp);
  const ThemedArrowDown = withUnistyles(ArrowDown);
-@@ -353,11 +357,50 @@ export function HostSettingsPage({
+@@ -353,7 +357,101 @@ export function HostSettingsPage({
  
        {isLocalDaemon ? <LocalDaemonSection /> : null}
  
@@ -896,27 +1397,56 @@ index 7a97631..55a8ae8 100644
 +        onRemoved={onHostRemoved}
 +        polarisControls={<PolarisHostControls host={host} />}
 +      />
-     </View>
-   );
- }
- 
++    </View>
++  );
++}
++
 +function PolarisHostControls({ host }: { host: HostProfile }) {
-+  const [workspace, setWorkspace] = useState<{ name: string; status: { driver?: { status?: string; selected?: { backend?: string; profile?: string } | null } } | null } | null>(null);
++  const toast = useToast();
++  const [workspace, setWorkspace] = useState<{
++    name: string;
++    status: {
++      driver?: {
++        status?: string;
++        selected?: { backend?: string; profile?: string } | null;
++      } | null;
++    } | null;
++  } | null>(null);
 +  const [busy, setBusy] = useState(false);
 +  const load = useCallback(async () => {
 +    const token = getPolarisAuthToken();
-+    if (!token) return;
-+    const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, { headers: { authorization: `Bearer ${token}` } });
-+    if (!response.ok) return;
-+    const body = await response.json().catch(() => null) as { hosts?: Array<{ name: string; status: { driver?: { status?: string; selected?: { backend?: string; profile?: string } | null } } | null }> } | null;
++    if (!token) {
++      setWorkspace(null);
++      return;
++    }
++    const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++      headers: { authorization: `Bearer ${token}` },
++    });
++    if (!response.ok) throw new Error("无法读取 Polaris 主机状态");
++    const body = await response.json().catch(() => null) as {
++      hosts?: Array<{
++        name: string;
++        status: {
++          driver?: {
++            status?: string;
++            selected?: { backend?: string; profile?: string } | null;
++          } | null;
++        } | null;
++      }>;
++    } | null;
 +    setWorkspace(body?.hosts?.find((item) => item.name === host.label) ?? null);
 +  }, [host.label]);
-+  useEffect(() => { void load(); }, [load]);
++  useEffect(() => {
++    void load().catch((error) => {
++      console.warn("[HostPage] Failed to load Polaris host status", error);
++    });
++  }, [load]);
 +  const act = useCallback(async (action: "start" | "stop") => {
 +    if (!workspace || busy) return;
 +    setBusy(true);
 +    try {
 +      const token = getPolarisAuthToken();
++      if (!token) throw new Error("请先登录 Polaris");
 +      const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts/${encodeURIComponent(workspace.name)}`, {
 +        method: "POST",
 +        headers: { "content-type": "application/x-www-form-urlencoded", ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -924,20 +1454,42 @@ index 7a97631..55a8ae8 100644
 +      });
 +      if (!response.ok) throw new Error("Polaris 操作失败");
 +      await load();
-+    } finally { setBusy(false); }
-+  }, [busy, load, workspace]);
++    } catch (error) {
++      toast.error(error instanceof Error ? error.message : "Polaris 操作失败");
++    } finally {
++      setBusy(false);
++    }
++  }, [busy, load, toast, workspace]);
 +  if (!workspace) return null;
 +  const isRunning = workspace.status?.driver?.status === "running";
 +  const driver = workspace.status?.driver?.selected;
-+  return <View style={settingsStyles.card}>
-+    <View style={settingsStyles.row}><View style={settingsStyles.rowContent}><Text style={settingsStyles.rowTitle}>运行</Text><Text style={settingsStyles.rowHint}>{`${driver?.profile ? `${driver.backend} · ${driver.profile}` : driver?.backend || "Driver 未配置"} · ${isRunning ? "运行中" : "已停止"}`}</Text></View><Button size="sm" variant="secondary" leftIcon={Power} disabled={busy} onPress={() => void act(isRunning ? "stop" : "start")}>{isRunning ? "停止" : "开始"}</Button></View>
-+  </View>;
-+}
++  const driverLabel = driver?.profile
++    ? `${driver.backend} · ${driver.profile}`
++    : driver?.backend || "Driver 未配置";
 +
- export function HostRenameButton({ host }: { host: HostProfile }) {
-   const { t } = useTranslation();
-   const { theme } = useUnistyles();
-@@ -978,10 +1021,12 @@ function RemoveHostSection({
++  return (
++    <View style={settingsStyles.card}>
++      <View style={settingsStyles.row}>
++        <View style={settingsStyles.rowContent}>
++          <Text style={settingsStyles.rowTitle}>运行</Text>
++          <Text style={settingsStyles.rowHint}>
++            {`${driverLabel} · ${isRunning ? "运行中" : "已停止"}`}
++          </Text>
++        </View>
++        <Button
++          size="sm"
++          variant="secondary"
++          leftIcon={Power}
++          disabled={busy}
++          onPress={() => void act(isRunning ? "stop" : "start")}
++        >
++          {isRunning ? "停止" : "开始"}
++        </Button>
++      </View>
+     </View>
+   );
+ }
+@@ -978,10 +1076,12 @@ function RemoveHostSection({
    host,
    isLocalDaemon,
    onRemoved,
@@ -950,7 +1502,7 @@ index 7a97631..55a8ae8 100644
  }) {
    const { t } = useTranslation();
    const { theme } = useUnistyles();
-@@ -990,6 +1035,7 @@ function RemoveHostSection({
+@@ -990,6 +1090,7 @@ function RemoveHostSection({
    const { data: daemonStatusData, setStatus } = useDaemonStatus();
    const [isConfirming, setIsConfirming] = useState(false);
    const [isRemoving, setIsRemoving] = useState(false);
@@ -958,7 +1510,7 @@ index 7a97631..55a8ae8 100644
    const daemonStatus = daemonStatusData?.status ?? null;
    const removeHostHeader = useMemo<SheetHeader>(
      () => ({
-@@ -1005,7 +1051,30 @@ function RemoveHostSection({
+@@ -1005,7 +1106,30 @@ function RemoveHostSection({
      [theme.colors.destructive],
    );
  
@@ -990,7 +1542,7 @@ index 7a97631..55a8ae8 100644
    const handleCloseConfirm = useCallback(() => {
      if (isRemoving) return;
      setIsConfirming(false);
-@@ -1047,6 +1116,33 @@ function RemoveHostSection({
+@@ -1047,6 +1171,34 @@ function RemoveHostSection({
          }
          return;
        }
@@ -999,6 +1551,7 @@ index 7a97631..55a8ae8 100644
 +        const listResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
 +          headers: { authorization: `Bearer ${token}` },
 +        });
++        if (!listResponse.ok) throw new Error("无法确认 Polaris 主机状态");
 +        const list = await listResponse.json().catch(() => null) as {
 +          hosts?: Array<{ name: string; status?: { driver?: { status?: string } } | null }>;
 +        } | null;
@@ -1024,7 +1577,33 @@ index 7a97631..55a8ae8 100644
        await removeHost(host.serverId);
      };
      void remove()
-@@ -1089,6 +1185,8 @@ function RemoveHostSection({
+@@ -1057,11 +1209,12 @@ function RemoveHostSection({
+       })
+       .catch((error) => {
+         console.error("[HostPage] Failed to remove host", error);
+-        Alert.alert(
+-          t("settings.host.daemon.remove.errorTitle"),
+-          isLocalDaemon
+-            ? t("settings.host.daemon.remove.localErrorMessage")
+-            : t("settings.host.daemon.remove.errorMessage"),
++        toast.error(
++          error instanceof Error
++            ? error.message
++            : isLocalDaemon
++              ? t("settings.host.daemon.remove.localErrorMessage")
++              : t("settings.host.daemon.remove.errorMessage"),
+         );
+       })
+       .finally(() => setIsRemoving(false));
+@@ -1074,6 +1227,7 @@ function RemoveHostSection({
+     rollbackLocalhostRemoval,
+     setStatus,
+     t,
++    toast,
+     updateSettings,
+   ]);
+ 
+@@ -1089,6 +1243,8 @@ function RemoveHostSection({
      >
        <RestartDaemonCard host={host} />
  
@@ -1035,10 +1614,10 @@ index 7a97631..55a8ae8 100644
            <View style={settingsStyles.rowContent}>
 diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
 new file mode 100644
-index 0000000..9e9b8cc
+index 0000000..5b4d45d
 --- /dev/null
 +++ b/packages/app/src/screens/settings/polaris-user-page.tsx
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,248 @@
 +import { useCallback, useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -1046,7 +1625,6 @@ index 0000000..9e9b8cc
 +import { Button } from "@/components/ui/button";
 +import { SettingsSection } from "@/screens/settings/settings-section";
 +import { settingsStyles } from "@/styles/settings";
-+import { confirmDialog } from "@/utils/confirm-dialog";
 +import { getPolarisAuthToken, polarisApiBaseUrl, signOutPolaris } from "@/lib/polaris-authing";
 +
 +interface PolarisUserResponse {
@@ -1074,6 +1652,7 @@ index 0000000..9e9b8cc
 +  const [credentialRecord, setCredentialRecord] = useState<PolarisCredentialRecord | null>(null);
 +  const [credentialLoading, setCredentialLoading] = useState(false);
 +  const [credentialError, setCredentialError] = useState<string | null>(null);
++  const [signOutConfirmVisible, setSignOutConfirmVisible] = useState(false);
 +
 +  const load = useCallback(async () => {
 +    setLoading(true);
@@ -1096,13 +1675,7 @@ index 0000000..9e9b8cc
 +    void load();
 +  }, [load]);
 +
-+  const handleSignOut = useCallback(async () => {
-+    if (!await confirmDialog({
-+      title: "退出登录？",
-+      message: "你将退出 Polaris。",
-+      confirmLabel: "退出登录",
-+      destructive: true,
-+    })) return;
++  const handleConfirmSignOut = useCallback(() => {
 +    signOutPolaris();
 +  }, []);
 +
@@ -1173,7 +1746,7 @@ index 0000000..9e9b8cc
 +              <Text style={settingsStyles.rowTitle}>退出登录</Text>
 +              <Text style={settingsStyles.rowHint}>退出当前 Polaris 会话</Text>
 +            </View>
-+            <Button size="sm" variant="destructive" onPress={() => void handleSignOut()}>
++            <Button size="sm" variant="destructive" onPress={() => setSignOutConfirmVisible(true)}>
 +              退出
 +            </Button>
 +          </View>
@@ -1204,6 +1777,32 @@ index 0000000..9e9b8cc
 +          )) : null}
 +        </AdaptiveModalSheet>
 +      ) : null}
++
++      <AdaptiveModalSheet
++        header={{ title: "退出登录？" }}
++        visible={signOutConfirmVisible}
++        onClose={() => setSignOutConfirmVisible(false)}
++      >
++        <Text style={styles.confirmText}>你将退出 Polaris</Text>
++        <View style={styles.confirmActions}>
++          <Button
++            size="sm"
++            variant="secondary"
++            style={styles.confirmAction}
++            onPress={() => setSignOutConfirmVisible(false)}
++          >
++            取消
++          </Button>
++          <Button
++            size="sm"
++            variant="destructive"
++            style={styles.confirmAction}
++            onPress={handleConfirmSignOut}
++          >
++            退出登录
++          </Button>
++        </View>
++      </AdaptiveModalSheet>
 +    </View>
 +  );
 +}
@@ -1253,6 +1852,13 @@ index 0000000..9e9b8cc
 +  value: { maxWidth: "58%", color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, textAlign: "right" },
 +  empty: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, minHeight: 42, padding: theme.spacing[3] },
 +  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++  confirmText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
++  confirmActions: {
++    flexDirection: "row",
++    gap: theme.spacing[2],
++    marginTop: theme.spacing[4],
++  },
++  confirmAction: { flex: 1 },
 +  fileContent: {
 +    color: theme.colors.foreground,
 +    fontFamily: theme.fontFamily.mono,
