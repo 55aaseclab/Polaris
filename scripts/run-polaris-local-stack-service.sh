@@ -56,6 +56,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pnpm install
+paseo_local_ensure_source
 paseo_local_build_tool_bundle >/dev/null
 paseo_dist_dir="$(paseo_local_build_dist)"
 
@@ -93,12 +94,19 @@ pnpm dlx serve@14 -s "${paseo_dist_dir}" -l "tcp://${PASEO_HOST}:${PASEO_PORT}" 
 paseo_pid=$!
 
 VITE_POLARIS_PUBLIC_BASE_URL="${POLARIS_PUBLIC_BASE_URL}" \
-pnpm --filter landing-page run dev -- --host "${LANDING_HOST}" --port "${LANDING_PORT}" \
+pnpm --filter landing-page exec vite \
+  --host "${LANDING_HOST}" \
+  --port "${LANDING_PORT}" \
+  --strictPort \
   > >(tee "${LOG_DIR}/stack.landing.log") \
   2> >(tee "${LOG_DIR}/stack.landing.err.log" >&2) &
 landing_pid=$!
 
-pnpm --filter docs run dev -- --host "${DOCS_HOST}" --port "${DOCS_PORT}" \
+pnpm --filter docs-viewer run predev
+pnpm --filter docs-viewer exec vitepress dev site \
+  --host "${DOCS_HOST}" \
+  --port "${DOCS_PORT}" \
+  --strictPort \
   > >(tee "${LOG_DIR}/stack.docs.log") \
   2> >(tee "${LOG_DIR}/stack.docs.err.log" >&2) &
 docs_pid=$!

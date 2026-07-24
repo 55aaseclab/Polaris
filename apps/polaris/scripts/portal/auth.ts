@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 import {
   findUserMapEntry,
   readUserAccessSummary,
@@ -26,6 +26,7 @@ export class PortalAuthError extends Error {
 
 interface AuthingClaims {
   sub?: string;
+  username?: string;
   preferred_username?: string;
   nickname?: string;
   email?: string;
@@ -52,7 +53,12 @@ function forbidden(res: ServerResponse, message = "Forbidden"): void {
 }
 
 function requiredAuthingEnv(
-  name: "POLARIS_AUTHING_APP_ID" | "POLARIS_AUTHING_ISSUER" | "POLARIS_AUTHING_JWKS_URL",
+  name:
+    | "POLARIS_AUTHING_APP_ID"
+    | "POLARIS_AUTHING_APP_SECRET"
+    | "POLARIS_AUTHING_ISSUER"
+    | "POLARIS_AUTHING_JWKS_URL"
+    | "POLARIS_AUTHING_TOKEN_URL",
 ): string {
   const value = String(process.env[name] ?? "").trim();
   if (!value) {
@@ -109,21 +115,117 @@ function emailLocalPart(value: string | null | undefined): string | null {
 
 function resolveAuthingUsername(user: AuthingClaims): string | null {
   return normalizeAuthingUsername(
-    user.preferred_username
+    user.username
+      ?? user.preferred_username
       ?? user.nickname
       ?? user.email
       ?? null,
   ) ?? emailLocalPart(user.email ?? null);
 }
 
+function portalSessionSecret(): Uint8Array {
+  const configured = String(process.env.POLARIS_AUTH_SHARED_SECRET ?? "").trim();
+  const secret = configured || requiredAuthingEnv("POLARIS_AUTHING_APP_SECRET");
+  return new TextEncoder().encode(secret);
+}
+
 async function verifyAuthingToken(token: string): Promise<AuthingClaims> {
-  const issuer = requiredAuthingEnv("POLARIS_AUTHING_ISSUER");
-  const jwks = createRemoteJWKSet(new URL(requiredAuthingEnv("POLARIS_AUTHING_JWKS_URL")));
-  const { payload } = await jwtVerify(token, jwks, {
-    issuer,
-    audience: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
+  const { payload } = await jwtVerify(token, portalSessionSecret(), {
+    issuer: "polaris",
+    audience: "polaris-portal",
   });
   return payload as AuthingClaims;
+}
+
+async function readAuthingUser(accessToken: string): Promise<AuthingClaims> {
+  const issuer = requiredAuthingEnv("POLARIS_AUTHING_ISSUER").replace(/\/+$/, "");
+  let response: Response;
+  try {
+    response = await fetch(`${issuer}/me`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    throw new PortalAuthError("Authing user info could not be reached", 502);
+  }
+  if (!response.ok) {
+    throw new PortalAuthError("Authing user info request failed", 401);
+  }
+  const payload = await response.json() as AuthingClaims;
+  if (!String(payload.sub ?? "").trim()) {
+    throw new PortalAuthError("Authing user info did not return a subject", 502);
+  }
+  return payload;
+}
+
+async function createPortalSession(user: AuthingClaims): Promise<string> {
+  const now = Math.floor(Date.now() / 1_000);
+  return new SignJWT({
+    username: user.username,
+    preferred_username: user.preferred_username,
+    nickname: user.nickname,
+    email: user.email,
+  })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer("polaris")
+    .setAudience("polaris-portal")
+    .setSubject(String(user.sub).trim())
+    .setIssuedAt(now)
+    .setExpirationTime(now + 60 * 60 * 8)
+    .sign(portalSessionSecret());
+}
+
+export async function exchangeAuthingAuthorizationCode(input: {
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+}): Promise<{ token: string }> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
+    client_secret: requiredAuthingEnv("POLARIS_AUTHING_APP_SECRET"),
+    code: input.code,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.codeVerifier,
+  });
+  let response: Response;
+  try {
+    response = await fetch(requiredAuthingEnv("POLARIS_AUTHING_TOKEN_URL"), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch {
+    throw new PortalAuthError("Authing token exchange could not be reached", 502);
+  }
+  if (!response.ok) {
+    const failure = await response.json().catch(() => null) as {
+      error?: unknown;
+      error_description?: unknown;
+      errorDescription?: unknown;
+      message?: unknown;
+    } | null;
+    const detail = [
+      failure?.error_description,
+      failure?.errorDescription,
+      failure?.message,
+      failure?.error,
+    ]
+      .find((value) => typeof value === "string" && value.trim());
+    const message = detail
+      ? `Authing token exchange failed: ${String(detail).trim()}`
+      : "Authing token exchange failed";
+    throw new PortalAuthError(message, response.status === 400 ? 400 : 401);
+  }
+  const payload = await response.json() as {
+    access_token?: unknown;
+    id_token?: unknown;
+  };
+  const accessToken = String(payload.access_token ?? "").trim();
+  if (!accessToken) {
+    throw new PortalAuthError("Authing token exchange did not return a session token", 502);
+  }
+  const user = await readAuthingUser(accessToken);
+  return { token: await createPortalSession(user) };
 }
 
 export async function authenticatePortalRequest(
@@ -251,6 +353,9 @@ export function sessionMatchesCurrentIdentity(
   const requestedUserId = String(input.authingUserId ?? "").trim();
   if (requestedUserId && requestedUserId !== session.authingUserId) {
     return false;
+  }
+  if (requestedUserId) {
+    return true;
   }
   const requestedUsername = normalizeAuthingUsername(input.authingUsername);
   if (requestedUsername && requestedUsername !== session.authingUsername) {

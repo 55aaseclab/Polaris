@@ -7,7 +7,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-var _a, _b, _c, _d, _e, _f;
+var _a, _b, _c, _d, _e, _f, _g;
 import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -20,7 +20,8 @@ var authingConfig = {
     authorizationUrl: ((_c = process.env.POLARIS_AUTHING_AUTHORIZATION_URL) === null || _c === void 0 ? void 0 : _c.trim()) || "",
     tokenUrl: ((_d = process.env.POLARIS_AUTHING_TOKEN_URL) === null || _d === void 0 ? void 0 : _d.trim()) || "",
     logoutUrl: ((_e = process.env.POLARIS_AUTHING_LOGOUT_URL) === null || _e === void 0 ? void 0 : _e.trim()) || "",
-    redirectUri: ((_f = process.env.POLARIS_AUTHING_REDIRECT_URI) === null || _f === void 0 ? void 0 : _f.trim()) || "",
+    logoutRedirectUri: ((_f = process.env.POLARIS_AUTHING_LOGOUT_REDIRECT_URI) === null || _f === void 0 ? void 0 : _f.trim()) || "",
+    redirectUri: ((_g = process.env.POLARIS_AUTHING_REDIRECT_URI) === null || _g === void 0 ? void 0 : _g.trim()) || "",
 };
 export default defineConfig({
     define: {

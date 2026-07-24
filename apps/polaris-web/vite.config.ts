@@ -11,6 +11,7 @@ const authingConfig = {
   authorizationUrl: process.env.POLARIS_AUTHING_AUTHORIZATION_URL?.trim() || "",
   tokenUrl: process.env.POLARIS_AUTHING_TOKEN_URL?.trim() || "",
   logoutUrl: process.env.POLARIS_AUTHING_LOGOUT_URL?.trim() || "",
+  logoutRedirectUri: process.env.POLARIS_AUTHING_LOGOUT_REDIRECT_URI?.trim() || "",
   redirectUri: process.env.POLARIS_AUTHING_REDIRECT_URI?.trim() || "",
 };
 

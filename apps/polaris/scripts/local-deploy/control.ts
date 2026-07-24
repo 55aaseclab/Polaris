@@ -151,6 +151,7 @@ function buildEnvFile(config: LocalDeployConfig): string {
     `POLARIS_AUTHING_AUTHORIZATION_URL=${preserved.get("POLARIS_AUTHING_AUTHORIZATION_URL") || "\"\""}`,
     `POLARIS_AUTHING_TOKEN_URL=${preserved.get("POLARIS_AUTHING_TOKEN_URL") || "\"\""}`,
     `POLARIS_AUTHING_LOGOUT_URL=${preserved.get("POLARIS_AUTHING_LOGOUT_URL") || "\"\""}`,
+    `POLARIS_AUTHING_LOGOUT_REDIRECT_URI=${preserved.get("POLARIS_AUTHING_LOGOUT_REDIRECT_URI") || quoteEnvValue(config.gatewayUrl)}`,
     `POLARIS_AUTHING_REDIRECT_URI=${preserved.get("POLARIS_AUTHING_REDIRECT_URI") || quoteEnvValue(`${config.gatewayUrl}/auth/callback`)}`,
     "",
   ];

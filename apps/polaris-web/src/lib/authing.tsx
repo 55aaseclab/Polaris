@@ -1,9 +1,7 @@
 import * as React from "react";
 
 type TokenResponse = {
-  access_token?: string;
-  id_token?: string;
-  expires_in?: number;
+  token?: string;
 };
 
 export type AuthingUser = {
@@ -15,6 +13,7 @@ export type AuthingUser = {
 
 type AuthingContextValue = {
   isLoaded: boolean;
+  error: string | null;
   user: AuthingUser | null;
   getToken: () => Promise<string | null>;
   signIn: (screenHint?: string) => void;
@@ -43,10 +42,31 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function challenge(verifier: string): Promise<string> {
-  return base64Url(new Uint8Array(await crypto.subtle.digest(
-    "SHA-256", new TextEncoder().encode(verifier),
-  )));
+function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    return globalThis.crypto.getRandomValues(bytes);
+  }
+  for (let index = 0; index < length; index += 1) {
+    bytes[index] = Math.floor(Math.random() * 256);
+  }
+  return bytes;
+}
+
+async function challenge(verifier: string): Promise<{
+  value: string;
+  method: "S256" | "plain";
+}> {
+  if (typeof globalThis.crypto?.subtle?.digest === "function") {
+    return {
+      value: base64Url(new Uint8Array(await globalThis.crypto.subtle.digest(
+        "SHA-256", new TextEncoder().encode(verifier),
+      ))),
+      method: "S256",
+    };
+  }
+  console.warn("Using plain PKCE for local HTTP development; use HTTPS in production.");
+  return { value: verifier, method: "plain" };
 }
 
 function decodeJwt(token: string): Record<string, unknown> {
@@ -63,7 +83,9 @@ function userFromToken(token: string): AuthingUser {
   const id = String(claims.sub ?? "").trim();
   if (!id) throw new Error("Authing ID token does not contain a subject");
   const email = String(claims.email ?? "").trim();
-  const username = String(claims.preferred_username ?? claims.nickname ?? "").trim() || null;
+  const username = String(
+    claims.username ?? claims.preferred_username ?? claims.nickname ?? "",
+  ).trim() || null;
   const name = String(claims.name ?? claims.nickname ?? "").trim() || username;
   return {
     id,
@@ -78,6 +100,8 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
     try { return sessionStorage.getItem(storageKey); } catch { return null; }
   });
   const [isLoaded, setIsLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const callbackHandledRef = React.useRef(false);
 
   React.useEffect(() => {
     const completeSignIn = async () => {
@@ -87,52 +111,61 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
         setIsLoaded(true);
         return;
       }
+      if (callbackHandledRef.current) {
+        return;
+      }
+      callbackHandledRef.current = true;
       const state = params.get("state");
       const verifier = sessionStorage.getItem(verifierKey);
       if (!verifier || state !== sessionStorage.getItem(stateKey)) {
         throw new Error("Authing login state could not be verified");
       }
-      const body = new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: required(authingConfig.appId, "POLARIS_AUTHING_APP_ID"),
-        code,
-        redirect_uri: redirectUri(),
-        code_verifier: verifier,
-      });
-      const response = await fetch(required(
-        authingConfig.tokenUrl,
-        "POLARIS_AUTHING_TOKEN_URL",
-      ), {
+      const response = await fetch("/api/auth/callback", {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code,
+          codeVerifier: verifier,
+          redirectUri: redirectUri(),
+        }),
       });
-      if (!response.ok) throw new Error("Authing could not complete sign-in");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(String(payload?.error ?? "Authing could not complete sign-in"));
+      }
       const result = await response.json() as TokenResponse;
-      const idToken = result.id_token?.trim();
-      if (!idToken) throw new Error("Authing did not return an ID token");
-      sessionStorage.setItem(storageKey, idToken);
+      const token = result.token?.trim();
+      if (!token) throw new Error("Authing did not return a session token");
+      sessionStorage.setItem(storageKey, token);
       sessionStorage.removeItem(verifierKey);
       sessionStorage.removeItem(stateKey);
-      setToken(idToken);
+      setToken(token);
       window.history.replaceState({}, "", "/");
       setIsLoaded(true);
     };
-    void completeSignIn().catch(() => {
+    void completeSignIn().catch((cause: unknown) => {
       sessionStorage.removeItem(storageKey);
+      sessionStorage.removeItem(verifierKey);
+      sessionStorage.removeItem(stateKey);
+      if (window.location.pathname === "/auth/callback") {
+        window.history.replaceState({}, "", "/sign-in");
+      }
       setToken(null);
+      setError(cause instanceof Error ? cause.message : "Authing could not complete sign-in");
       setIsLoaded(true);
     });
   }, []);
 
   const value = React.useMemo<AuthingContextValue>(() => ({
     isLoaded,
+    error,
     user: token ? userFromToken(token) : null,
     getToken: async () => token,
     signIn: (screenHint?: string) => {
       void (async () => {
-        const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)));
-        const state = base64Url(crypto.getRandomValues(new Uint8Array(24)));
+        const verifier = base64Url(randomBytes(32));
+        const state = base64Url(randomBytes(24));
+        const pkce = await challenge(verifier);
         sessionStorage.setItem(verifierKey, verifier);
         sessionStorage.setItem(stateKey, state);
         const url = new URL(required(
@@ -142,7 +175,7 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
         url.search = new URLSearchParams({
           client_id: required(authingConfig.appId, "POLARIS_AUTHING_APP_ID"), response_type: "code",
           scope: "openid profile email", redirect_uri: redirectUri(), state,
-          code_challenge: await challenge(verifier), code_challenge_method: "S256",
+          code_challenge: pkce.value, code_challenge_method: pkce.method,
           ...(screenHint ? { screen_hint: screenHint } : {}),
         }).toString();
         window.location.assign(url.toString());
@@ -155,10 +188,13 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
         authingConfig.logoutUrl,
         "POLARIS_AUTHING_LOGOUT_URL",
       ));
-      url.searchParams.set("post_logout_redirect_uri", window.location.origin);
+      url.searchParams.set(
+        "post_logout_redirect_uri",
+        authingConfig.logoutRedirectUri || window.location.origin,
+      );
       window.location.assign(url.toString());
     },
-  }), [isLoaded, token]);
+  }), [error, isLoaded, token]);
   return <AuthingContext.Provider value={value}>{children}</AuthingContext.Provider>;
 }
 
@@ -169,8 +205,8 @@ function useAuthingContext(): AuthingContextValue {
 }
 
 export function useAuth() {
-  const { isLoaded, user, getToken } = useAuthingContext();
-  return { isLoaded, userId: user?.id ?? null, getToken };
+  const { isLoaded, error, user, getToken } = useAuthingContext();
+  return { isLoaded, error, userId: user?.id ?? null, getToken };
 }
 
 export function useUser() { return { user: useAuthingContext().user }; }
