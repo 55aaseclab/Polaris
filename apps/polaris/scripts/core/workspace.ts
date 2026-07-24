@@ -16,7 +16,6 @@ export type WorkspaceOperationKind =
   | "start"
   | "stop"
   | "rebuild"
-  | "archive"
   | "delete";
 export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
 export type AttachmentScope = "workspace" | "user";

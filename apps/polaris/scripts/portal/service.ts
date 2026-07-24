@@ -21,7 +21,6 @@ import {
 import {
   credentialCatalog,
   clearWorkspaceProvisionProgress,
-  listArchivedWorkspaces,
   listPortalProfiles,
   listPortalWorkspaceStaticSummaries,
   readPortalProfile,
@@ -35,7 +34,6 @@ import {
   updatePortalProfile,
   updatePortalWorkspaceAgentBinding,
   workspaceRefFromTarget,
-  type PortalArchivedWorkspaceSummary,
   type PortalCredentialSummary,
   type PortalCredentialCatalog,
   type PortalCredentialRecord,
@@ -62,7 +60,6 @@ import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   deletePortalWorkspace as deletePortalWorkspaceExecutor,
   getPortalWorkspacePaseoDiagnostic as getPortalWorkspacePaseoDiagnosticExecutor,
-  permanentlyDeletePortalArchivedWorkspace as permanentlyDeletePortalArchivedWorkspaceExecutor,
   permanentlyDeletePortalWorkspace as permanentlyDeletePortalWorkspaceExecutor,
   queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
   refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
@@ -127,18 +124,11 @@ export async function listPortalWorkspaceStaticState(
   return listPortalWorkspaceStaticSummaries(userId);
 }
 
-export function listPortalArchivedWorkspaces(
-  userId: string,
-): PortalArchivedWorkspaceSummary[] {
-  return listArchivedWorkspaces(userId);
-}
-
 export function listPortalAdminUsers(): Array<
   PortalProfileSummary &
   Partial<PortalUserAccessSummary> &
   {
     credentialCount: number;
-    archivedWorkspaceCount: number;
     mappingPresent: boolean;
     profilePresent: boolean;
     userRootPresent: boolean;
@@ -190,7 +180,6 @@ export function listPortalAdminUsers(): Array<
         ...baseProfile,
         ...baseAccess,
         credentialCount: listPortalCredentials(userId).length,
-        archivedWorkspaceCount: listArchivedWorkspaces(userId).length,
         mappingPresent: Boolean(access),
         profilePresent: Boolean(profile),
         userRootPresent,
@@ -585,12 +574,7 @@ export async function switchPortalWorkspace(
 export async function deletePortalWorkspace(
   userId: string,
   workspace: string,
-): Promise<{
-  archived: true;
-  archiveId: string;
-  archivedAt: string;
-  workspace: string;
-}> {
+): Promise<{ deleted: true; workspace: string }> {
   return deletePortalWorkspaceExecutor({ userId, workspace });
 }
 
@@ -601,12 +585,6 @@ export async function permanentlyDeletePortalWorkspace(
   return permanentlyDeletePortalWorkspaceExecutor({ userId, workspace });
 }
 
-export async function permanentlyDeletePortalArchivedWorkspace(
-  userId: string,
-  archiveId: string,
-): Promise<{ deleted: true; archiveId: string }> {
-  return permanentlyDeletePortalArchivedWorkspaceExecutor({ userId, archiveId });
-}
 
 export async function stopPortalWorkspace(
   userId: string,

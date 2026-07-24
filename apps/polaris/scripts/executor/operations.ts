@@ -36,11 +36,7 @@ import {
 import { loadWorkspaceFromConfigPath } from "../config/load.js";
 import { createWorkspaceForUser } from "../cli/commands/create.js";
 import { performWorkspaceSwitch, type SwitchResult } from "../cli/commands/switch.js";
-import {
-  archiveWorkspaceOwnedByUser,
-  deleteArchivedWorkspaceOwnedByUser,
-  deleteWorkspaceOwnedByUser,
-} from "../cli/commands/delete.js";
+import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
 import {
   loadExecutableWorkspaceForCommand,
   loadWorkspaceForCommand,
@@ -85,7 +81,7 @@ const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
 
-type WorkspaceOperationKind = "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
+type WorkspaceOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
 function workspaceJobKey(userId: string, workspace: string): string {
   return `${userId.trim()}:${workspace.trim()}`;
@@ -132,8 +128,6 @@ function driverStatusForOperation(kind: WorkspaceOperationKind): NonNullable<Wor
       return "stopping";
     case "rebuild":
       return "rebuilding";
-    case "archive":
-      return "archiving";
     case "delete":
       return "deleting";
   }
@@ -1551,27 +1545,8 @@ export async function switchPortalWorkspace(
 export async function deletePortalWorkspace(
   userId: string,
   workspace: string,
-): Promise<{
-  archived: true;
-  archiveId: string;
-  archivedAt: string;
-  workspace: string;
-}> {
-  try {
-    writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-      workspace,
-      current,
-      driverState: {
-        selected: current?.driver?.selected ?? null,
-        status: driverStatusForOperation("archive"),
-        reason: "workspace archive requested",
-      },
-    }));
-    return await archiveWorkspaceOwnedByUser(userId, workspace);
-  } catch (error) {
-    await refreshPortalWorkspaceStatus(userId, workspace);
-    throw error;
-  }
+): Promise<{ deleted: true; workspace: string }> {
+  return permanentlyDeletePortalWorkspace(userId, workspace);
 }
 
 export async function permanentlyDeletePortalWorkspace(
@@ -1588,13 +1563,6 @@ export async function permanentlyDeletePortalWorkspace(
     },
   }));
   return deleteWorkspaceOwnedByUser(userId, workspace);
-}
-
-export async function permanentlyDeletePortalArchivedWorkspace(
-  userId: string,
-  archiveId: string,
-): Promise<{ deleted: true; archiveId: string }> {
-  return deleteArchivedWorkspaceOwnedByUser(userId, archiveId);
 }
 
 export async function stopPortalWorkspace(

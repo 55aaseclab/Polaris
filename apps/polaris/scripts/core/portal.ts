@@ -48,16 +48,6 @@ export interface PortalProfileDetail extends PortalProfileSummary {
   aiAccessReferralAppliedAt?: string;
 }
 
-export interface PortalArchivedWorkspaceSummary {
-  archiveId: string;
-  workspaceName: string;
-  archivedAt: string;
-  originalWorkspaceRoot: string;
-  originalPortalStateRoot?: string;
-  workspaceRoot: string;
-  portalStateRoot?: string;
-}
-
 export interface PortalCredentialSummary {
   id: string;
   kind: Credential["kind"];
@@ -253,10 +243,6 @@ function readPersistedPaseoPairingUrl(userId: string, workspace: string): string
   } catch {
     return null;
   }
-}
-
-function userArchivedWorkspacesRoot(userId: string): string {
-  return path.join(USER_ROOT, userId, "archives", "workspaces");
 }
 
 function credentialRegistryPath(userId: string, credentialId: string): string {
@@ -517,45 +503,6 @@ export function listOwnedWorkspaces(userId: string): string[] {
     )
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
-}
-
-export function listArchivedWorkspaces(
-  userId: string,
-): PortalArchivedWorkspaceSummary[] {
-  const root = userArchivedWorkspacesRoot(userId);
-  if (!fs.existsSync(root)) {
-    return [];
-  }
-  return fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const metadataPath = path.join(root, entry.name, ".polaris-archive.json");
-      const metadata = readJson<PortalArchivedWorkspaceSummary>(metadataPath);
-      const fallback = metadata ?? {
-        archiveId: entry.name,
-        workspaceName: entry.name.replace(/^[0-9]{8}T[0-9]{6}Z-/, ""),
-        archivedAt: "",
-        originalWorkspaceRoot: "",
-        workspaceRoot: path.join(root, entry.name),
-      };
-      if (
-        !fallback.portalStateRoot
-        && fs.existsSync(path.join(root, entry.name, ".portal"))
-      ) {
-        fallback.portalStateRoot = path.join(
-          "config",
-          "users",
-          userId,
-          "archives",
-          "workspaces",
-          entry.name,
-          ".portal",
-        );
-      }
-      return fallback;
-    })
-    .sort((left, right) => right.archiveId.localeCompare(left.archiveId));
 }
 
 export function listWorkspaceDriverTargets(userId: string, workspace: string): Array<PortalDriverTarget & { available: boolean }> {

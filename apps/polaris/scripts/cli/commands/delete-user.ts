@@ -19,10 +19,6 @@ function activeWorkspacesRootFor(userProfileId: string): string {
   return path.join(USER_ROOT, userProfileId, "workspaces");
 }
 
-function archivedWorkspacesRootFor(userProfileId: string): string {
-  return path.join(USER_ROOT, userProfileId, "archives", "workspaces");
-}
-
 function listChildDirectories(root: string): string[] {
   if (!fs.existsSync(root)) {
     return [];
@@ -74,21 +70,14 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const userRoot = userRootFor(userProfileId);
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
     const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
-    const archivedWorkspaces = listChildDirectories(archivedWorkspacesRootFor(userProfileId));
-    if (
-      activeWorkspaces.length > 0
-      || archivedWorkspaces.length > 0
-    ) {
+    if (activeWorkspaces.length > 0) {
       throw new Error(
         [
           `User '${userProfileId}' cannot be deleted while workspace data still exists.`,
           activeWorkspaces.length > 0
             ? `Active workspaces: ${activeWorkspaces.join(", ")}`
             : null,
-          archivedWorkspaces.length > 0
-            ? `Archived workspaces: ${archivedWorkspaces.join(", ")}`
-            : null,
-          "Archive or delete active workspaces first, then clear archived workspaces explicitly.",
+          "Delete active workspaces first.",
         ].filter(Boolean).join(" "),
       );
     }

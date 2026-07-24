@@ -139,7 +139,7 @@ type WorkspaceStatusV1 = Omit<WorkspaceStatus, "schemaVersion" | "driver"> & {
   schemaVersion?: typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1;
   driver?: WorkspaceStatusV1Driver;
   operation?: {
-    kind: "create" | "start" | "stop" | "rebuild" | "archive" | "delete";
+    kind: "create" | "start" | "stop" | "rebuild" | "delete";
     updatedAt: string;
   };
   runtime?: {
@@ -184,8 +184,6 @@ function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceSt
       return "stopping";
     case "rebuild":
       return "rebuilding";
-    case "archive":
-      return "archiving";
     case "delete":
       return "deleting";
     default:
@@ -216,8 +214,6 @@ function downgradeDriverStatus(status: NonNullable<WorkspaceStatus["driver"]>["s
       return { runtimeLifecycle: "running", operation: { kind: "stop", updatedAt: new Date().toISOString() } };
     case "rebuilding":
       return { runtimeLifecycle: "running", operation: { kind: "rebuild", updatedAt: new Date().toISOString() } };
-    case "archiving":
-      return { runtimeLifecycle: "stopped", operation: { kind: "archive", updatedAt: new Date().toISOString() } };
     case "deleting":
       return { runtimeLifecycle: "stopped", operation: { kind: "delete", updatedAt: new Date().toISOString() } };
     case "running":
