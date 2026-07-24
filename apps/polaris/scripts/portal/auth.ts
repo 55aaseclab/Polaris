@@ -232,6 +232,9 @@ export async function exchangeAuthingAuthorizationCode(input: {
     throw new PortalAuthError("Authing token exchange did not return a session token", 502);
   }
   const user = await readAuthingUser(accessToken);
+  if (!resolveAuthingUsername(user)) {
+    throw new PortalAuthError("Authing 用户信息未补全，请先完成用户名补全", 409);
+  }
   return {
     token: await createPortalSession(user),
     ...(idToken ? { idToken } : {}),
@@ -259,23 +262,21 @@ export async function authenticatePortalRequest(
     throw new PortalAuthError("Invalid Authing session", 401);
   }
   const authingPhoneNumber = String(verified.phoneNumber ?? "").trim() || null;
-  const directMapping = findUserMapEntry({ authingUserId });
-  if (directMapping) {
-    const accessSummary = readUserAccessSummary(directMapping.polarisUserId);
+  const authingUsername = resolveAuthingUsername(verified);
+  const mapping = authingUsername
+    ? findUserMapEntry({ authingUsername })
+    : null;
+  if (mapping) {
+    const accessSummary = readUserAccessSummary(mapping.polarisUserId);
     return {
       authingUserId,
       authingUsername: accessSummary?.authingUsernames[0] ?? null,
       authingPhoneNumber,
-      polarisUserId: directMapping.polarisUserId,
-      role: directMapping.role,
-      plan: directMapping.plan,
+      polarisUserId: mapping.polarisUserId,
+      role: mapping.role,
+      plan: mapping.plan,
     };
   }
-  const authingUsername = resolveAuthingUsername(verified);
-  const mapping = findUserMapEntry({
-    authingUserId,
-    ...(authingUsername ? { authingUsername } : {}),
-  });
   return {
     authingUserId,
     authingUsername,
@@ -378,5 +379,9 @@ export function sessionMatchesCurrentIdentity(
 }
 
 export function selfProvisionedPolarisUserId(session: AuthenticatedPortalSession): string {
-  return session.authingUsername || session.authingUserId;
+  const authingUsername = session.authingUsername?.trim();
+  if (!authingUsername) {
+    throw new Error("Authing username is required for Polaris user creation");
+  }
+  return authingUsername;
 }

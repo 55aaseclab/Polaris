@@ -634,7 +634,6 @@ export async function createPortalUser(input: {
   const userProfileId =
     input.userProfileId?.trim()
     || input.authingUsername?.trim()
-    || input.authingUserId?.trim()
     || "";
   if (!userProfileId) {
     throw new Error("userProfileId is required");

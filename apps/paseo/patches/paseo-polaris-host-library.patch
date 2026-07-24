@@ -45,11 +45,11 @@ index 94061e2..6b9648b 100644
  }
 diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
 new file mode 100644
-index 0000000..4318d13
+index 0000000..d30bf0f
 --- /dev/null
 +++ b/packages/app/src/app/auth/callback.tsx
-@@ -0,0 +1,164 @@
-+import { useEffect, useState } from "react";
+@@ -0,0 +1,97 @@
++import { useEffect, useRef, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { useRouter } from "expo-router";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -60,144 +60,92 @@ index 0000000..4318d13
 +  completePolarisSignIn,
 +  getPolarisAuthToken,
 +  polarisApiBaseUrl,
++  publishPolarisAuthSession,
 +} from "@/lib/polaris-authing";
-+import { useHostMutations } from "@/runtime/host-runtime";
-+import { buildHostRootRoute } from "@/utils/host-routes";
-+import { addPolarisProject, DEFAULT_POLARIS_PROJECT_PATH } from "@/lib/polaris-project";
 +
-+interface PolarisHostSyncResponse {
-+  hosts: Array<{ name: string; status: { paseo?: { liveTarget?: string | null } } | null }>;
++const incompleteUserMessage = "Authing 用户信息未补全，请先完成用户名补全";
++
++interface PolarisSessionResponse {
++  authingUserId: string;
++  authingUsername: string | null;
++  polarisUserId: string | null;
 +}
 +
-+const DEFAULT_POLARIS_HOST_NAME = "default";
++async function fetchPolarisSession(token: string): Promise<PolarisSessionResponse> {
++  const response = await fetch(`${polarisApiBaseUrl()}/session`, {
++    headers: { authorization: `Bearer ${token}` },
++  });
++  const body = await response.json().catch(() => ({}));
++  if (!response.ok) {
++    throw new Error(typeof body.error === "string" ? body.error : "无法加载 Polaris 会话");
++  }
++  return body as PolarisSessionResponse;
++}
++
++async function ensurePolarisUser(token: string): Promise<void> {
++  const session = await fetchPolarisSession(token);
++  if (session.polarisUserId) {
++    return;
++  }
++  const userProfileId = session.authingUsername?.trim();
++  if (!userProfileId) {
++    throw new Error(incompleteUserMessage);
++  }
++  const response = await fetch(`${polarisApiBaseUrl()}/users`, {
++    method: "POST",
++    headers: {
++      authorization: `Bearer ${token}`,
++      "content-type": "application/json",
++    },
++    body: JSON.stringify({
++      userProfileId,
++      authingUsername: session.authingUsername ?? "",
++      authingUserId: session.authingUserId,
++    }),
++  });
++  const body = await response.json().catch(() => ({}));
++  if (!response.ok) {
++    throw new Error(typeof body.error === "string" ? body.error : "无法创建 Polaris 用户");
++  }
++}
++
 +export default function PolarisAuthCallbackRoute() {
 +  const router = useRouter();
 +  const { theme } = useUnistyles();
-+  const { upsertConnectionFromOfferUrl } = useHostMutations();
++  const handledRef = useRef(false);
 +  const [error, setError] = useState<string | null>(null);
-+  const [retrySeconds, setRetrySeconds] = useState<number | null>(null);
 +
 +  useEffect(() => {
++    if (handledRef.current) return;
++    handledRef.current = true;
 +    let disposed = false;
-+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-+    let countdownTimer: ReturnType<typeof setInterval> | null = null;
 +    void completePolarisSignIn()
 +      .then(async (returnPath) => {
-+        let connectedHostServerId: string | null = null;
-+        try {
-+          const token = getPolarisAuthToken();
-+          const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
-+            headers: token ? { authorization: `Bearer ${token}` } : {},
-+          });
-+          const body = await response.json().catch(() => null) as PolarisHostSyncResponse | null;
-+          if (response.ok) {
-+            const hosts = body?.hosts ?? [];
-+            if (hosts.length === 0) {
-+              const createResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
-+                method: "POST",
-+                headers: {
-+                  "content-type": "application/x-www-form-urlencoded",
-+                  ...(token ? { authorization: `Bearer ${token}` } : {}),
-+                },
-+                body: new URLSearchParams({ hostName: DEFAULT_POLARIS_HOST_NAME }).toString(),
-+              });
-+              if (!createResponse.ok) {
-+                throw new Error("无法创建默认主机");
-+              }
-+
-+              while (!disposed) {
-+                await new Promise((resolve) => setTimeout(resolve, 1_000));
-+                const hostsResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
-+                  headers: token ? { authorization: `Bearer ${token}` } : {},
-+                });
-+                if (!hostsResponse.ok) continue;
-+                const hostsBody = await hostsResponse.json().catch(() => null) as PolarisHostSyncResponse | null;
-+                const pairingUrl = hostsBody?.hosts.find(
-+                  (host) => host.name === DEFAULT_POLARIS_HOST_NAME,
-+                )?.status?.paseo?.liveTarget?.trim();
-+                if (!pairingUrl) continue;
-+                connectedHostServerId = (
-+                  await upsertConnectionFromOfferUrl(pairingUrl, DEFAULT_POLARIS_HOST_NAME)
-+                ).serverId;
-+                await addPolarisProject(
-+                  connectedHostServerId,
-+                  DEFAULT_POLARIS_PROJECT_PATH,
-+                  () => disposed,
-+                );
-+                break;
-+              }
-+            } else {
-+              const syncedHosts = await Promise.allSettled(hosts.map(async (host) => {
-+                const pairingUrl = host.status?.paseo?.liveTarget?.trim();
-+                return {
-+                  name: host.name,
-+                  profile: pairingUrl
-+                    ? await upsertConnectionFromOfferUrl(pairingUrl, host.name)
-+                    : null,
-+                };
-+              }));
-+              const connectedHost = syncedHosts.find(
-+                (result) => result.status === "fulfilled" && result.value.profile !== null,
-+              );
-+              if (connectedHost?.status === "fulfilled" && connectedHost.value.profile) {
-+                connectedHostServerId = connectedHost.value.profile.serverId;
-+              }
-+              const defaultHost = syncedHosts.find(
-+                (result) => result.status === "fulfilled"
-+                  && result.value.name === DEFAULT_POLARIS_HOST_NAME
-+                  && result.value.profile !== null,
-+              );
-+              if (defaultHost?.status === "fulfilled" && defaultHost.value.profile) {
-+                await addPolarisProject(
-+                  defaultHost.value.profile.serverId,
-+                  DEFAULT_POLARIS_PROJECT_PATH,
-+                  () => disposed,
-+                );
-+                if (!connectedHostServerId) {
-+                  connectedHostServerId = defaultHost.value.profile.serverId;
-+                }
-+              }
-+            }
-+          }
-+        } catch (error) {
-+          console.warn("[PolarisAuth] Failed to sync Polaris hosts after sign-in", error);
++        const token = getPolarisAuthToken();
++        if (!token) {
++          throw new Error("Authing 登录未完成");
 +        }
-+        router.replace(
-+          connectedHostServerId
-+            ? buildHostRootRoute(connectedHostServerId)
-+            : returnPath as never,
-+        );
++        await ensurePolarisUser(token);
++        publishPolarisAuthSession();
++        router.replace(returnPath as never);
 +      })
 +      .catch((reason) => {
 +        if (disposed) return;
++        const message = reason instanceof Error ? reason.message : String(reason);
++        setError(message);
 +        clearPolarisSignIn();
-+        setError(reason instanceof Error ? reason.message : String(reason));
-+        setRetrySeconds(3);
-+        retryTimer = setTimeout(beginPolarisSignIn, 3_000);
-+        countdownTimer = setInterval(() => {
-+          setRetrySeconds((current) => {
-+            if (!current || current <= 1) {
-+              if (countdownTimer) clearInterval(countdownTimer);
-+              return current;
-+            }
-+            return current - 1;
-+          });
-+        }, 1_000);
 +      });
 +
 +    return () => {
 +      disposed = true;
-+      if (retryTimer) clearTimeout(retryTimer);
-+      if (countdownTimer) clearInterval(countdownTimer);
 +    };
-+  }, [router, upsertConnectionFromOfferUrl]);
++  }, [router]);
 +
 +  return (
 +    <View style={styles.container}>
 +      {error ? (
 +        <View style={styles.errorContent}>
 +          <Text style={styles.error}>{error}</Text>
-+          <Text style={styles.hint}>将在 {retrySeconds ?? 3} 秒后重新登录</Text>
 +          <Button size="sm" variant="secondary" onPress={beginPolarisSignIn}>
 +            重新登录
 +          </Button>
@@ -211,8 +159,8 @@ index 0000000..4318d13
 +  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
 +  errorContent: { alignItems: "center", gap: theme.spacing[3] },
 +  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm, textAlign: "center" },
-+  hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, textAlign: "center" },
 +}));
+
 diff --git a/packages/app/src/app/index.tsx b/packages/app/src/app/index.tsx
 index e0649f6..f7e99bd 100644
 --- a/packages/app/src/app/index.tsx
@@ -774,16 +722,17 @@ index 7cb3cb5..397c579 100644
        terminals: "Terminals",
 diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
 new file mode 100644
-index 0000000..74d1c32
+index 0000000..82e7f3c
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.test.ts
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,131 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
 +  clearPolarisSignIn,
 +  completePolarisSignIn,
 +  getPolarisAuthToken,
 +  hasPolarisAuthSession,
++  publishPolarisAuthSession,
 +  resolvePolarisAuthRedirect,
 +  subscribePolarisAuthSession,
 +} from "./polaris-authing";
@@ -814,8 +763,26 @@ index 0000000..74d1c32
 +  return storage;
 +}
 +
++function installLocalStorage(): Storage {
++  const values = new Map<string, string>();
++  const storage: Storage = {
++    get length() { return values.size; },
++    clear: () => values.clear(),
++    getItem: (key) => values.get(key) ?? null,
++    key: (index) => [...values.keys()][index] ?? null,
++    removeItem: (key) => values.delete(key),
++    setItem: (key, value) => values.set(key, String(value)),
++  };
++  Object.defineProperty(globalThis, "localStorage", {
++    configurable: true,
++    value: storage,
++  });
++  return storage;
++}
++
 +afterEach(() => {
 +  delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
++  delete (globalThis as { localStorage?: Storage }).localStorage;
 +  vi.unstubAllGlobals();
 +});
 +
@@ -839,6 +806,7 @@ index 0000000..74d1c32
 +
 +  it("publishes the authenticated state before navigating from the callback", async () => {
 +    const storage = installSessionStorage();
++    installLocalStorage();
 +    storage.setItem("polaris_authing_pkce_verifier", "verifier");
 +    storage.setItem("polaris_authing_state", "expected-state");
 +    storage.setItem("polaris_authing_return_path", "/welcome");
@@ -861,8 +829,32 @@ index 0000000..74d1c32
 +    expect(getPolarisAuthToken()).toBe("authenticated-token");
 +    expect(storage.getItem("polaris_authing_id_token")).toBe("authing-id-token");
 +    expect(hasPolarisAuthSession()).toBe(true);
++    expect(onSessionChange).toHaveBeenCalledTimes(0);
++    publishPolarisAuthSession();
 +    expect(onSessionChange).toHaveBeenCalledTimes(1);
 +    unsubscribe();
++  });
++
++  it("accepts callback state from localStorage fallback", async () => {
++    installSessionStorage();
++    const localStorage = installLocalStorage();
++    localStorage.setItem("polaris_authing_pkce_verifier", "verifier");
++    localStorage.setItem("polaris_authing_state", "expected-state");
++    localStorage.setItem("polaris_authing_return_path", "/projects/demo");
++    localStorage.setItem("polaris_authing_redirect_uri", "http://example.test/auth/callback");
++    vi.stubGlobal("location", {
++      search: "?code=authorization-code&state=expected-state",
++      protocol: "http:",
++      hostname: "example.test",
++      origin: "http://example.test",
++    });
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
++      token: "authenticated-token",
++    }), { status: 200 })));
++
++    await expect(completePolarisSignIn()).resolves.toBe("/projects/demo");
++
++    expect(getPolarisAuthToken()).toBe("authenticated-token");
 +  });
 +
 +  it("redirects unauthenticated users away from Polaris routes", () => {
@@ -882,7 +874,7 @@ index 0000000..74d1c32
 +});
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..d13bb17
+index 0000000..76189ea
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
 @@ -0,0 +1,210 @@
@@ -897,6 +889,37 @@ index 0000000..d13bb17
 +
 +const protectedPathPrefixes = ["/h/", "/settings/hosts/"];
 +const sessionListeners = new Set<() => void>();
++
++function readTransientAuthValue(key: string): string | null {
++  const sessionValue = sessionStorage.getItem(key)?.trim();
++  if (sessionValue) {
++    return sessionValue;
++  }
++  try {
++    const localValue = localStorage.getItem(key)?.trim();
++    return localValue || null;
++  } catch {
++    return null;
++  }
++}
++
++function writeTransientAuthValue(key: string, value: string): void {
++  sessionStorage.setItem(key, value);
++  try {
++    localStorage.setItem(key, value);
++  } catch {
++    // Ignore storage availability issues in restrictive browsers.
++  }
++}
++
++function clearTransientAuthValue(key: string): void {
++  sessionStorage.removeItem(key);
++  try {
++    localStorage.removeItem(key);
++  } catch {
++    // Ignore storage availability issues in restrictive browsers.
++  }
++}
 +
 +function notifyPolarisSessionChange(): void {
 +  for (const listener of sessionListeners) listener();
@@ -1012,17 +1035,17 @@ index 0000000..d13bb17
 +  void (async () => {
 +    const verifier = base64Url(randomBytes(32));
 +    const state = base64Url(randomBytes(24));
-+    sessionStorage.setItem(verifierKey, verifier);
-+    sessionStorage.setItem(stateKey, state);
-+    sessionStorage.setItem(returnPathKey, `${globalThis.location.pathname}${globalThis.location.search}`);
++    writeTransientAuthValue(verifierKey, verifier);
++    writeTransientAuthValue(stateKey, state);
++    writeTransientAuthValue(returnPathKey, `${globalThis.location.pathname}${globalThis.location.search}`);
 +    const config = await loadAuthingConfig();
-+    sessionStorage.setItem(redirectUriKey, config.redirectUri);
++    writeTransientAuthValue(redirectUriKey, config.redirectUri);
 +    const authorizationUrl = new URL(config.authorizationUrl);
 +    const pkce = await challenge(verifier);
 +    authorizationUrl.search = new URLSearchParams({
 +      client_id: config.appId,
 +      response_type: "code",
-+      scope: "openid profile email",
++      scope: "openid profile email username phone",
 +      redirect_uri: config.redirectUri,
 +      state,
 +      code_challenge: pkce.value,
@@ -1036,8 +1059,8 @@ index 0000000..d13bb17
 +  const params = new URLSearchParams(globalThis.location.search);
 +  const code = params.get("code");
 +  const state = params.get("state");
-+  const verifier = sessionStorage.getItem(verifierKey);
-+  if (!code || !verifier || state !== sessionStorage.getItem(stateKey)) {
++  const verifier = readTransientAuthValue(verifierKey);
++  if (!code || !verifier || state !== readTransientAuthValue(stateKey)) {
 +    throw new Error("Authing 登录状态无效，请重新登录");
 +  }
 +  const response = await fetch(`${polarisApiBaseUrl()}/auth/callback`, {
@@ -1046,7 +1069,7 @@ index 0000000..d13bb17
 +    body: JSON.stringify({
 +      code,
 +      codeVerifier: verifier,
-+      redirectUri: sessionStorage.getItem(redirectUriKey) || fallbackCallbackUrl(),
++      redirectUri: readTransientAuthValue(redirectUriKey) || fallbackCallbackUrl(),
 +    }),
 +  });
 +  const payload = await response.json().catch(() => ({})) as {
@@ -1059,21 +1082,20 @@ index 0000000..d13bb17
 +  }
 +  sessionStorage.setItem(sessionKey, payload.token);
 +  if (payload.idToken?.trim()) sessionStorage.setItem(idTokenKey, payload.idToken.trim());
-+  notifyPolarisSessionChange();
-+  sessionStorage.removeItem(verifierKey);
-+  sessionStorage.removeItem(stateKey);
-+  sessionStorage.removeItem(redirectUriKey);
-+  const returnPath = sessionStorage.getItem(returnPathKey);
++  clearTransientAuthValue(verifierKey);
++  clearTransientAuthValue(stateKey);
++  clearTransientAuthValue(redirectUriKey);
++  const returnPath = readTransientAuthValue(returnPathKey);
 +  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
 +}
 +
 +export function clearPolarisSignIn(options?: { notify?: boolean }): void {
 +  sessionStorage.removeItem(sessionKey);
 +  sessionStorage.removeItem(idTokenKey);
-+  sessionStorage.removeItem(verifierKey);
-+  sessionStorage.removeItem(stateKey);
-+  sessionStorage.removeItem(redirectUriKey);
-+  sessionStorage.removeItem(returnPathKey);
++  clearTransientAuthValue(verifierKey);
++  clearTransientAuthValue(stateKey);
++  clearTransientAuthValue(redirectUriKey);
++  clearTransientAuthValue(returnPathKey);
 +  if (options?.notify !== false) notifyPolarisSessionChange();
 +}
 +
