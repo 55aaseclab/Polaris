@@ -128,13 +128,28 @@ paseo_local_build_dist() {
   tmp_dir="$(mktemp -d "${runtime_root}/dist.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
 
-  paseo_local_buildx_with_local_cache "${cache_dir}" \
-    --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-    --file apps/paseo/Dockerfile.artifact \
-    --target artifact-export \
-    --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
-    --output "type=local,dest=${tmp_dir}" \
-    .
+  # The local cache exporter can hang indefinitely here while exporting BuildKit
+  # cache state. Reuse any existing cache for reads, but skip cache writes so
+  # deploy and local artifact builds complete reliably.
+  paseo_local_ensure_builder
+  if [ -d "${cache_dir}" ]; then
+    docker buildx build \
+      --cache-from "type=local,src=${cache_dir}" \
+      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
+      --file apps/paseo/Dockerfile.artifact \
+      --target artifact-export \
+      --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
+      --output "type=local,dest=${tmp_dir}" \
+      .
+  else
+    docker buildx build \
+      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
+      --file apps/paseo/Dockerfile.artifact \
+      --target artifact-export \
+      --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
+      --output "type=local,dest=${tmp_dir}" \
+      .
+  fi
 
   rm -rf "${dist_dir}"
   mkdir -p "${dist_dir}"
