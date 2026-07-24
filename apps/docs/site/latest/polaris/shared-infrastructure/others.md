@@ -36,7 +36,7 @@ Key files:
 
 - `apps/polaris/scripts/executor/operations.ts`
 - `apps/polaris/scripts/runtime/status-observer.mjs`
-- `apps/polaris-web/src/App.tsx`
+- `apps/paseo/source/packages/app`
 
 ## Runtime Credential Switching
 

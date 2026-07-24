@@ -22,8 +22,6 @@ SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-127.0.0.1}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
 EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
-ADMIN_WEB_HOST="${POLARIS_WEB_DEV_HOST:-0.0.0.0}"
-ADMIN_WEB_PORT="${POLARIS_ADMIN_WEB_PORT:-8083}"
 PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
 LANDING_HOST="${POLARIS_LANDING_PAGE_BIND_HOST:-0.0.0.0}"
@@ -39,7 +37,6 @@ cleanup() {
     "${server_pid:-}"
     "${executor_pid:-}"
     "${executor_bridge_proxy_pid:-}"
-    "${admin_web_pid:-}"
     "${paseo_pid:-}"
     "${landing_pid:-}"
     "${docs_pid:-}"
@@ -86,12 +83,6 @@ else
   echo "[polaris-local-stack] executor bridge proxy not started; docker workspaces may not report Paseo pairing metadata back to the host executor" >&2
 fi
 
-POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
-pnpm --filter polaris-web-admin exec vite --host "${ADMIN_WEB_HOST}" --port "${ADMIN_WEB_PORT}" \
-  > >(tee "${LOG_DIR}/stack.admin-web.log") \
-  2> >(tee "${LOG_DIR}/stack.admin-web.err.log" >&2) &
-admin_web_pid=$!
-
 (
   cd apps/paseo/source/packages/app
   EXPO_NO_TELEMETRY=1 \
@@ -123,7 +114,6 @@ docs_pid=$!
 pids=(
   "${server_pid}"
   "${executor_pid}"
-  "${admin_web_pid}"
   "${paseo_pid}"
   "${landing_pid}"
   "${docs_pid}"

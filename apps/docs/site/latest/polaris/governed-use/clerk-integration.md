@@ -151,14 +151,13 @@ Current commands:
 ```bash
 pnpm --filter polaris run test
 pnpm --filter polaris run test:live-auth
-pnpm --filter polaris-web run test:live-auth
 ```
 
 The goal is to keep default test runs independent from external auth, while
 still keeping the real Clerk integration exercised in a dedicated group.
 
-For local development, `pnpm --filter polaris run test:live-auth` and
-`pnpm --filter polaris-web run test:live-auth` read repo-root `.env.test`.
+For local development, `pnpm --filter polaris run test:live-auth` reads
+repo-root `.env.test`.
 
 That file should stay minimal.
 It is not meant to mirror `.env.dev`.

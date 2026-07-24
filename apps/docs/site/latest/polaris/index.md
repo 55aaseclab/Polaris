@@ -77,12 +77,6 @@ Desktop entry:
 
 - `Polaris` app icon
 
-- development-only local web portal:
-
-```bash
-pnpm --filter polaris-web exec vite --host 0.0.0.0
-```
-
 ## Deep Technical References
 
 For deeper operational detail, use the section-specific docs plus:

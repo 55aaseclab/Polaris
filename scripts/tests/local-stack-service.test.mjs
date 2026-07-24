@@ -10,11 +10,11 @@ test("local stack service starts the executor bridge proxy for docker callbacks"
   assert.match(script, /docker workspaces may not report Paseo pairing metadata back to the host executor/);
 });
 
-test("local stack service starts the standalone admin web app", () => {
+test("local stack service does not start a standalone admin web app", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
-  assert.match(script, /POLARIS_ADMIN_WEB_PORT/);
-  assert.match(script, /polaris-web-admin/);
-  assert.match(script, /stack\.admin-web\.log/);
+  assert.doesNotMatch(script, /POLARIS_ADMIN_WEB_PORT/);
+  assert.doesNotMatch(script, /polaris-web-admin/);
+  assert.doesNotMatch(script, /stack\.admin-web\.log/);
 });
 
 test("local stack service runs Paseo with Fast Refresh instead of a web artifact build", () => {

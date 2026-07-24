@@ -9,18 +9,17 @@
     "polaris:release": "node scripts/build-release.mjs",
     "polaris:server": "pnpm --filter polaris run server",
     "polaris:executor": "pnpm --filter polaris run executor",
-    "polaris:web": "pnpm --filter polaris-web exec vite --host 0.0.0.0",
     "landing-page:web": "pnpm --filter landing-page run dev",
     "landing-page:build": "pnpm --filter landing-page run build",
     "landing-page:check": "pnpm --filter landing-page run check",
     "docs:web": "pnpm --filter docs-viewer run dev",
     "docs:build": "pnpm --filter docs-viewer run build",
-    "build": "pnpm --filter polaris run build && pnpm --filter polaris-web run build",
-    "check": "pnpm --filter polaris run check && pnpm --filter polaris-web run check",
+    "build": "pnpm --filter polaris run build",
+    "check": "pnpm --filter polaris run check",
     "test:polaris": "pnpm --filter polaris run test",
     "test:polaris:skills": "pnpm --filter polaris run test:skills",
     "test:polaris:full-minus-infra": "pnpm --filter polaris run test:full-minus-infra",
-    "test:live-auth": "pnpm --filter polaris run test:live-auth && pnpm --filter polaris-web run test:live-auth",
+    "test:live-auth": "pnpm --filter polaris run test:live-auth",
     "test:polaris:coverage": "pnpm --filter polaris run test:coverage"
   }
 }

@@ -29,8 +29,6 @@ rsync -az --delete \
   --include "apps/paseo/tool-bundle/lib/" \
   --include "apps/paseo/tool-bundle/lib/node_modules/***" \
   --exclude ".git" \
-  --exclude "apps/polaris-web/" \
-  --exclude "apps/polaris-web-admin/" \
   --exclude "node_modules" \
   --exclude "dist" \
   --exclude ".runtime" \

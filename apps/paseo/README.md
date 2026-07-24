@@ -18,7 +18,7 @@ Polaris 的产品能力应融入 Paseo 既有的信息架构、组件与交互�
 #### 背景
 
 用户需要在 Paseo 内查看已登录账户与其 Polaris 资产，无需进入已弃用的
-`polaris-web`。
+已移除的 Polaris Web 门户。
 
 #### 目标
 
@@ -67,7 +67,7 @@ Polaris 的原“工作空间”在 Paseo 中统一称为“主机”。每个�
 
 - Polaris 工作库归档能力。
 - 原独立的“Polaris 工作库”设置入口。
-- 对旧 `/paseo` 或 `polaris-web` 入口的兼容。
+- 对已移除 Polaris Web 门户的兼容。
 
 ## 交互原则
 
