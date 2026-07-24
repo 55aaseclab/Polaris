@@ -530,8 +530,8 @@ async function handleUserCreate(
     badRequest(res, "Missing userProfileId");
     return;
   }
-  if (!authingUsername && !authingUserId) {
-    badRequest(res, "Missing Authing identity");
+  if (!authingUsername) {
+    badRequest(res, "Missing Authing username");
     return;
   }
   if (session.role !== "admin") {
@@ -543,7 +543,14 @@ async function handleUserCreate(
       sendJson(res, 403, { error: "User creation must match the authenticated Authing identity" });
       return;
     }
-    if (userProfileId !== selfProvisionedPolarisUserId(session)) {
+    let expectedUserProfileId: string;
+    try {
+      expectedUserProfileId = selfProvisionedPolarisUserId(session);
+    } catch (error) {
+      sendJson(res, 409, { error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    if (userProfileId !== expectedUserProfileId) {
       sendJson(res, 403, { error: "User creation must use the current Authing identity as the Polaris user id" });
       return;
     }
