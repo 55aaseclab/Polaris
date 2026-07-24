@@ -1,5 +1,6 @@
 import { createUserCommand } from "./create-user.js";
 import { deleteUserCommand } from "./delete-user.js";
+import { listPortalProfiles } from "../../core/portal.js";
 import {
   activateUserCredentialCommand,
   addUserCredentialCommand,
@@ -17,12 +18,25 @@ import {
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- user <create|delete|credential|skill> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- user <list|create|delete|credential|skill> ...",
   );
+}
+
+async function listUserCommand(argv: string[]): Promise<void> {
+  if (argv.length > 0) {
+    usage();
+  }
+  process.stdout.write(`${JSON.stringify({
+    users: listPortalProfiles(),
+  }, null, 2)}\n`);
 }
 
 export async function userCommand(argv: string[]): Promise<void> {
   const [subcommand, ...rest] = argv;
+  if (subcommand === "list") {
+    await listUserCommand(rest);
+    return;
+  }
   if (subcommand === "create") {
     await createUserCommand(rest);
     return;
