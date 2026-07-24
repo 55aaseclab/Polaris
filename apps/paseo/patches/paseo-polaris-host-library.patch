@@ -45,10 +45,10 @@ index 94061e2..6b9648b 100644
  }
 diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
 new file mode 100644
-index 0000000..3ba666f
+index 0000000..868e37f
 --- /dev/null
 +++ b/packages/app/src/app/auth/callback.tsx
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,157 @@
 +import { useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { useRouter } from "expo-router";
@@ -61,7 +61,7 @@ index 0000000..3ba666f
 +  getPolarisAuthToken,
 +  polarisApiBaseUrl,
 +} from "@/lib/polaris-authing";
-+import { useHostMutations } from "@/runtime/host-runtime";
++import { getHostRuntimeStore, useHostMutations } from "@/runtime/host-runtime";
 +import { buildHostRootRoute } from "@/utils/host-routes";
 +
 +interface PolarisHostSyncResponse {
@@ -69,6 +69,21 @@ index 0000000..3ba666f
 +}
 +
 +const DEFAULT_POLARIS_HOST_NAME = "default";
++const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
++
++async function addDefaultProject(serverId: string, isDisposed: () => boolean): Promise<void> {
++  while (!isDisposed()) {
++    const client = getHostRuntimeStore().getClient(serverId);
++    if (client) {
++      const result = await client.addProject(DEFAULT_POLARIS_PROJECT_PATH);
++      if (result.error) {
++        throw new Error(result.error);
++      }
++      return;
++    }
++    await new Promise((resolve) => setTimeout(resolve, 1_000));
++  }
++}
 +
 +export default function PolarisAuthCallbackRoute() {
 +  const router = useRouter();
@@ -119,6 +134,9 @@ index 0000000..3ba666f
 +                connectedHostServerId = (
 +                  await upsertConnectionFromOfferUrl(pairingUrl, DEFAULT_POLARIS_HOST_NAME)
 +                ).serverId;
++                void addDefaultProject(connectedHostServerId, () => disposed).catch((error) => {
++                  console.warn("[PolarisAuth] Failed to add the default project", error);
++                });
 +                break;
 +              }
 +            } else {
@@ -837,10 +855,10 @@ index 0000000..74d1c32
 +});
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..2acde82
+index 0000000..d13bb17
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,210 @@
 +import { useSyncExternalStore } from "react";
 +
 +const sessionKey = "polaris_authing_session";
@@ -1022,21 +1040,20 @@ index 0000000..2acde82
 +  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
 +}
 +
-+export function clearPolarisSignIn(): void {
++export function clearPolarisSignIn(options?: { notify?: boolean }): void {
 +  sessionStorage.removeItem(sessionKey);
 +  sessionStorage.removeItem(idTokenKey);
 +  sessionStorage.removeItem(verifierKey);
 +  sessionStorage.removeItem(stateKey);
 +  sessionStorage.removeItem(redirectUriKey);
 +  sessionStorage.removeItem(returnPathKey);
-+  notifyPolarisSessionChange();
++  if (options?.notify !== false) notifyPolarisSessionChange();
 +}
 +
 +export function signOutPolaris(): void {
 +  void (async () => {
 +    const config = await loadAuthingConfig().catch(() => null);
 +    const idToken = sessionStorage.getItem(idTokenKey)?.trim();
-+    clearPolarisSignIn();
 +    if (config?.logoutUrl) {
 +      const logoutUrl = new URL(config.logoutUrl);
 +      if (idToken) logoutUrl.searchParams.set("id_token_hint", idToken);
@@ -1044,9 +1061,11 @@ index 0000000..2acde82
 +        "post_logout_redirect_uri",
 +        config.logoutRedirectUri || globalThis.location.origin,
 +      );
++      clearPolarisSignIn({ notify: false });
 +      globalThis.location.replace(logoutUrl.toString());
 +      return;
 +    }
++    clearPolarisSignIn();
 +    globalThis.location.replace("/welcome");
 +  })();
 +}
