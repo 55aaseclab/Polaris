@@ -45,10 +45,10 @@ index 94061e2..6b9648b 100644
  }
 diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
 new file mode 100644
-index 0000000..868e37f
+index 0000000..4318d13
 --- /dev/null
 +++ b/packages/app/src/app/auth/callback.tsx
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,164 @@
 +import { useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { useRouter } from "expo-router";
@@ -61,30 +61,15 @@ index 0000000..868e37f
 +  getPolarisAuthToken,
 +  polarisApiBaseUrl,
 +} from "@/lib/polaris-authing";
-+import { getHostRuntimeStore, useHostMutations } from "@/runtime/host-runtime";
++import { useHostMutations } from "@/runtime/host-runtime";
 +import { buildHostRootRoute } from "@/utils/host-routes";
++import { addPolarisProject, DEFAULT_POLARIS_PROJECT_PATH } from "@/lib/polaris-project";
 +
 +interface PolarisHostSyncResponse {
 +  hosts: Array<{ name: string; status: { paseo?: { liveTarget?: string | null } } | null }>;
 +}
 +
 +const DEFAULT_POLARIS_HOST_NAME = "default";
-+const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
-+
-+async function addDefaultProject(serverId: string, isDisposed: () => boolean): Promise<void> {
-+  while (!isDisposed()) {
-+    const client = getHostRuntimeStore().getClient(serverId);
-+    if (client) {
-+      const result = await client.addProject(DEFAULT_POLARIS_PROJECT_PATH);
-+      if (result.error) {
-+        throw new Error(result.error);
-+      }
-+      return;
-+    }
-+    await new Promise((resolve) => setTimeout(resolve, 1_000));
-+  }
-+}
-+
 +export default function PolarisAuthCallbackRoute() {
 +  const router = useRouter();
 +  const { theme } = useUnistyles();
@@ -134,21 +119,43 @@ index 0000000..868e37f
 +                connectedHostServerId = (
 +                  await upsertConnectionFromOfferUrl(pairingUrl, DEFAULT_POLARIS_HOST_NAME)
 +                ).serverId;
-+                void addDefaultProject(connectedHostServerId, () => disposed).catch((error) => {
-+                  console.warn("[PolarisAuth] Failed to add the default project", error);
-+                });
++                await addPolarisProject(
++                  connectedHostServerId,
++                  DEFAULT_POLARIS_PROJECT_PATH,
++                  () => disposed,
++                );
 +                break;
 +              }
 +            } else {
 +              const syncedHosts = await Promise.allSettled(hosts.map(async (host) => {
-+              const pairingUrl = host.status?.paseo?.liveTarget?.trim();
-+              return pairingUrl ? upsertConnectionFromOfferUrl(pairingUrl, host.name) : null;
++                const pairingUrl = host.status?.paseo?.liveTarget?.trim();
++                return {
++                  name: host.name,
++                  profile: pairingUrl
++                    ? await upsertConnectionFromOfferUrl(pairingUrl, host.name)
++                    : null,
++                };
 +              }));
 +              const connectedHost = syncedHosts.find(
-+                (result) => result.status === "fulfilled" && result.value !== null,
++                (result) => result.status === "fulfilled" && result.value.profile !== null,
 +              );
-+              if (connectedHost?.status === "fulfilled" && connectedHost.value) {
-+                connectedHostServerId = connectedHost.value.serverId;
++              if (connectedHost?.status === "fulfilled" && connectedHost.value.profile) {
++                connectedHostServerId = connectedHost.value.profile.serverId;
++              }
++              const defaultHost = syncedHosts.find(
++                (result) => result.status === "fulfilled"
++                  && result.value.name === DEFAULT_POLARIS_HOST_NAME
++                  && result.value.profile !== null,
++              );
++              if (defaultHost?.status === "fulfilled" && defaultHost.value.profile) {
++                await addPolarisProject(
++                  defaultHost.value.profile.serverId,
++                  DEFAULT_POLARIS_PROJECT_PATH,
++                  () => disposed,
++                );
++                if (!connectedHostServerId) {
++                  connectedHostServerId = defaultHost.value.profile.serverId;
++                }
 +              }
 +            }
 +          }
@@ -258,16 +265,18 @@ index 0000000..456fc20
 +}
 diff --git a/packages/app/src/components/create-polaris-host-modal.tsx b/packages/app/src/components/create-polaris-host-modal.tsx
 new file mode 100644
-index 0000000..239f17a
+index 0000000..180056b
 --- /dev/null
 +++ b/packages/app/src/components/create-polaris-host-modal.tsx
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,83 @@
 +import { useCallback, useState } from "react";
 +import { Text, View } from "react-native";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
 +import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 +import { Button } from "@/components/ui/button";
++import { Switch } from "@/components/ui/switch";
 +import { getPolarisAuthToken, polarisApiBaseUrl } from "@/lib/polaris-authing";
++import { addPolarisProject, DEFAULT_POLARIS_PROJECT_PATH } from "@/lib/polaris-project";
 +import { useHostMutations } from "@/runtime/host-runtime";
 +
 +export function CreatePolarisHostModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -275,6 +284,7 @@ index 0000000..239f17a
 +  const { upsertConnectionFromOfferUrl } = useHostMutations();
 +  const [name, setName] = useState("");
 +  const [creating, setCreating] = useState(false);
++  const [createDefaultProject, setCreateDefaultProject] = useState(true);
 +  const [error, setError] = useState<string | null>(null);
 +  const trimmedName = name.trim();
 +  const validName = /^(?=.{1,63}$)(?=.*[a-z])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(trimmedName);
@@ -311,20 +321,37 @@ index 0000000..239f17a
 +        const pairingUrl = hostsBody?.hosts?.find((host) => host.name === hostName)
 +          ?.status?.paseo?.liveTarget?.trim();
 +        if (!pairingUrl) continue;
-+        await upsertConnectionFromOfferUrl(pairingUrl, hostName);
++        const profile = await upsertConnectionFromOfferUrl(pairingUrl, hostName);
++        if (createDefaultProject) {
++          await addPolarisProject(profile.serverId, DEFAULT_POLARIS_PROJECT_PATH);
++        }
 +        setName(""); onClose(); return;
 +      }
 +      throw new Error("主机仍在准备中，请稍后刷新主机列表");
 +    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
 +    finally { setCreating(false); }
-+  }, [creating, name, onClose, upsertConnectionFromOfferUrl, validName]);
++  }, [createDefaultProject, creating, name, onClose, upsertConnectionFromOfferUrl, validName]);
 +  return <AdaptiveModalSheet header={{ title: "创建主机" }} visible={visible} onClose={onClose}>
 +    <View style={styles.field}><Text style={styles.label}>名称</Text><AdaptiveTextInput value={name} onChangeText={(value) => { setName(value); setError(null); }} placeholder="主机名称" autoFocus /><Text style={validName || !trimmedName ? styles.hint : styles.error}>1–63 位小写字母、数字或连字符，首尾不能是连字符</Text></View>
++    <View style={styles.projectOption}>
++      <View style={styles.projectOptionCopy}>
++        <Text style={styles.label}>创建默认项目</Text>
++        <Text style={styles.hint}>{DEFAULT_POLARIS_PROJECT_PATH}</Text>
++      </View>
++      <Switch value={createDefaultProject} onValueChange={setCreateDefaultProject} />
++    </View>
 +    {error ? <Text style={styles.error}>{error}</Text> : null}
 +    <Button size="sm" loading={creating} disabled={!validName} onPress={() => void create()}>{creating ? "正在创建" : "创建"}</Button>
 +  </AdaptiveModalSheet>;
 +}
-+const styles = StyleSheet.create((theme) => ({ field: { gap: theme.spacing[2] }, label: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm }, hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs }, error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm } }));
++const styles = StyleSheet.create((theme) => ({
++  field: { gap: theme.spacing[2] },
++  label: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
++  hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++  projectOption: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
++  projectOptionCopy: { gap: theme.spacing[1] },
++}));
 diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
 index 8f22c48..a088993 100644
 --- a/packages/app/src/components/welcome-screen.tsx
@@ -1068,6 +1095,43 @@ index 0000000..d13bb17
 +    clearPolarisSignIn();
 +    globalThis.location.replace("/welcome");
 +  })();
++}
+diff --git a/packages/app/src/lib/polaris-project.ts b/packages/app/src/lib/polaris-project.ts
+new file mode 100644
+index 0000000..97a0b5d
+--- /dev/null
++++ b/packages/app/src/lib/polaris-project.ts
+@@ -0,0 +1,31 @@
++import { getHostRuntimeStore } from "@/runtime/host-runtime";
++import {
++  normalizeEmptyProjectDescriptor,
++  useSessionStore,
++} from "@/stores/session-store";
++
++export const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
++
++export async function addPolarisProject(
++  serverId: string,
++  path: string,
++  isDisposed: () => boolean = () => false,
++): Promise<void> {
++  while (!isDisposed()) {
++    const client = getHostRuntimeStore().getClient(serverId);
++    if (client) {
++      const result = await client.addProject(path);
++      if (result.error) throw new Error(result.error);
++      if (result.project) {
++        const sessionStore = useSessionStore.getState();
++        sessionStore.addEmptyProject(
++          serverId,
++          normalizeEmptyProjectDescriptor(result.project),
++        );
++        sessionStore.setHasHydratedWorkspaces(serverId, true);
++      }
++      return;
++    }
++    await new Promise((resolve) => setTimeout(resolve, 1_000));
++  }
 +}
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
 index a290156..ef06565 100644

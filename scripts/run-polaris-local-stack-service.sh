@@ -102,7 +102,6 @@ pnpm --filter landing-page exec vite \
   2> >(tee "${LOG_DIR}/stack.landing.err.log" >&2) &
 landing_pid=$!
 
-pnpm --filter docs-viewer run predev
 pnpm --filter docs-viewer exec vitepress dev site \
   --host "${DOCS_HOST}" \
   --port "${DOCS_PORT}" \
