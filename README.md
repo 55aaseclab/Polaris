@@ -17,6 +17,11 @@ bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 
 You can also start it through the `stack` service in `paseo.json`.
 
+Paseo runs through its Expo web development server in this stack. Changes under
+`apps/paseo/source` use Fast Refresh and do not rebuild the Paseo web artifact.
+On the first run only, its shared package dependencies are compiled when their
+upstream `dist` entry points are absent.
+
 When you start `polaris server` or `polaris executor` outside the local stack
 wrapper, keep the same runtime data root in every process. In local
 development that usually means exporting:
@@ -43,7 +48,7 @@ POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
 POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 POLARIS_SERVER_PORT=8787
-POLARIS_WEBPORTAL_PORT=8081
+POLARIS_ADMIN_WEB_PORT=8083
 POLARIS_EXECUTOR_PORT=8788
 POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 POLARIS_PUBLIC_BASE_URL=http://HOST_IP:8081
@@ -59,7 +64,7 @@ POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
 POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
 POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
 POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://HOST_IP:5173
-POLARIS_AUTHING_REDIRECT_URI=http://HOST_IP:8081/auth/callback
+POLARIS_AUTHING_REDIRECT_URI=http://HOST_IP:8082/auth/callback
 ```
 
 Minimal local test env:
@@ -70,7 +75,7 @@ POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces
 POLARIS_SERVER_BIND_HOST=127.0.0.1
 POLARIS_SERVER_PORT=8787
 POLARIS_WEB_DEV_HOST=127.0.0.1
-POLARIS_WEBPORTAL_PORT=8081
+POLARIS_ADMIN_WEB_PORT=8083
 POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 POLARIS_EXECUTOR_SHARED_SECRET=test-executor-shared-secret
 POLARIS_AUTHING_APP_ID=your-authing-app-id
@@ -81,7 +86,7 @@ POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
 POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
 POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
 POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://127.0.0.1:5173
-POLARIS_AUTHING_REDIRECT_URI=http://127.0.0.1:8081/auth/callback
+POLARIS_AUTHING_REDIRECT_URI=http://127.0.0.1:8082/auth/callback
 ```
 
 ## Local Deployment

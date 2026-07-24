@@ -67,15 +67,14 @@ const copy = {
     footer: "面向团队的可控 AI 工作空间",
 };
 
-function polarisSignInUrl(): string {
-  const baseUrl = import.meta.env.VITE_POLARIS_PUBLIC_BASE_URL?.trim()
+function paseoEntryUrl(): string {
+  return import.meta.env.VITE_PASEO_APP_BASE_URL?.trim()
     || "https://polaris.jianxiaoyitech.com";
-  return new URL("/sign-in", baseUrl).toString();
 }
 
 function App() {
   const t = copy;
-  const signInUrl = polarisSignInUrl();
+  const signInUrl = paseoEntryUrl();
 
   useEffect(() => {
     const sections = Array.from(

@@ -40,6 +40,7 @@ import {
   listPortalWorkspaceStaticState,
   readUserPortalCredentialRecord,
   deletePortalWorkspace,
+  permanentlyDeletePortalWorkspace,
   getPortalWorkspacePaseoDiagnostic,
   getPortalWorkspaceDetail,
   listPortalWorkspaces,
@@ -67,14 +68,17 @@ import type { PortalWorkspaceStreamEvent } from "../core/portal.js";
 
 type ParsedBody = Record<string, string>;
 
+const requestOrigins = new WeakMap<ServerResponse, string>();
+
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = `${JSON.stringify(body, null, 2)}\n`;
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": requestOrigins.get(res) ?? "*",
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type",
+    "access-control-allow-credentials": "true",
   });
   res.end(payload);
 }
@@ -241,6 +245,14 @@ async function handleWorkspaceDelete(
 ): Promise<void> {
   const result = await deletePortalWorkspace(userId, workspace);
   sendJson(res, 200, result);
+}
+
+async function handleWorkspacePermanentDelete(
+  res: ServerResponse,
+  userId: string,
+  workspace: string,
+): Promise<void> {
+  sendJson(res, 200, await permanentlyDeletePortalWorkspace(userId, workspace));
 }
 
 async function handleArchivedWorkspaceDelete(
@@ -649,11 +661,17 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const segments = routeSegments(url);
+      const requestOrigin = req.headers.origin;
+      if (requestOrigin) {
+        requestOrigins.set(res, requestOrigin);
+        res.setHeader("access-control-allow-origin", requestOrigin);
+      }
       if (req.method === "OPTIONS" && isApiPath(segments)) {
         res.writeHead(204, {
-          "access-control-allow-origin": "*",
+          "access-control-allow-origin": requestOrigin ?? "*",
           "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
           "access-control-allow-headers": "authorization,content-type",
+          "access-control-allow-credentials": "true",
         });
         res.end();
         return;
@@ -675,6 +693,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
 
       if (isApiPath(segments)) {
+        if (segments.length === 2 && segments[1] === "authing-config" && req.method === "GET") {
+          sendJson(res, 200, {
+            appId: String(process.env.POLARIS_AUTHING_APP_ID ?? "").trim(),
+            authorizationUrl: String(process.env.POLARIS_AUTHING_AUTHORIZATION_URL ?? "").trim(),
+            redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
+          });
+          return;
+        }
         if (segments.length === 3 && segments[1] === "auth" && segments[2] === "callback") {
           if (req.method !== "POST") {
             notFound(res);
@@ -772,6 +798,74 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             polarisUserId: session.polarisUserId,
             role: session.role,
           });
+          return;
+        }
+        if (segments[1] === "polaris-hosts") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          const userId = session.polarisUserId;
+          if (segments.length === 2 && req.method === "GET") {
+            sendJson(res, 200, {
+              hosts: await listPortalWorkspaces(userId),
+              archivedHosts: listPortalArchivedWorkspaces(userId),
+            });
+            return;
+          }
+          if (segments.length === 2 && req.method === "POST") {
+            const body = await readBody(req);
+            const hostName = body.hostName?.trim();
+            if (!hostName) {
+              badRequest(res, "hostName is required");
+              return;
+            }
+            try {
+              assertProjectNameAvailableForUser(hostName, userId);
+            } catch (error) {
+              sendJson(res, 409, {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return;
+            }
+            if ((await listPortalWorkspaces(userId)).some((entry) => entry.name === hostName)) {
+              sendJson(res, 409, { error: `Host '${hostName}' already exists.` });
+              return;
+            }
+            const provision = await queueProvisionWorkspace(userId, hostName, {
+              defaultDockerOnly: true,
+              startAfterCreate: true,
+            });
+            sendJson(res, 202, provision);
+            return;
+          }
+          if (segments.length === 4 && segments[2] === "archives" && req.method === "DELETE") {
+            await handleArchivedWorkspaceDelete(res, userId, decodeURIComponent(segments[3]));
+            return;
+          }
+          if (segments.length === 3) {
+            const hostName = decodeURIComponent(segments[2]);
+            if (req.method === "DELETE") {
+              await handleWorkspaceDelete(res, userId, hostName);
+              return;
+            }
+            if (req.method === "POST") {
+              const body = await readBody(req);
+              if (body.action === "start") {
+                await handleWorkspaceStart(res, userId, hostName);
+                return;
+              }
+              if (body.action === "stop") {
+                await handleWorkspaceStop(res, userId, hostName);
+                return;
+              }
+              if (body.action === "delete") {
+                await handleWorkspacePermanentDelete(res, userId, hostName);
+                return;
+              }
+            }
+          }
+          notFound(res);
           return;
         }
         if (segments[1] !== "users" || segments.length < 4) {

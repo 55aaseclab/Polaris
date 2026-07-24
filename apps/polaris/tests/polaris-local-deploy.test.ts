@@ -74,7 +74,7 @@ test("local deployment compose bundle avoids development servers and host networ
   );
   assert.doesNotMatch(compose, /network_mode:\s*host/);
   assert.doesNotMatch(compose, /vite|tsx watch/);
-  assert.match(compose, /polaris-webportal:/);
+  assert.doesNotMatch(compose, /polaris-webportal:/);
   assert.match(compose, /polaris-local-gateway:/);
   assert.match(compose, /image: \$\{POLARIS_LOCAL_DEPLOY_CONTROL_PLANE_IMAGE\}/);
   assert.match(compose, /node apps\/polaris\/dist\/scripts\/polaris\.js server 8787 0\.0\.0\.0/);
@@ -92,6 +92,6 @@ test("packaging workflow and release bundle artifacts are defined", () => {
   assert.match(workflow, /polaris_.*_win_x64_setup\.exe/);
   assert.match(workflow, /polaris_.*_macos_x64\.dmg/);
   assert.equal(manifest.images.controlPlane, "polaris-local/polaris-control-plane:0.2.7");
-  assert.equal(manifest.images.webPortal, "polaris-local/polaris-webportal:0.2.7");
+  assert.equal(manifest.images.webPortal, undefined);
   assert.equal(manifest.images.paseoApp, "polaris-local/paseo-app:0.2.7");
 });

@@ -1,5 +1,7 @@
 .git
 .git/**
+!apps/paseo/source/.git
+!apps/paseo/source/.git/**
 .pnpm-store
 .pnpm-store/**
 .tmp

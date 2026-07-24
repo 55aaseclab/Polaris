@@ -1,0 +1,882 @@
+diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
+new file mode 100644
+index 0000000..7f06d5d
+--- /dev/null
++++ b/packages/app/src/app/auth/callback.tsx
+@@ -0,0 +1,31 @@
++import { useEffect, useState } from "react";
++import { ActivityIndicator, Text, View } from "react-native";
++import { useRouter } from "expo-router";
++import { StyleSheet, useUnistyles } from "react-native-unistyles";
++import { completePolarisSignIn, clearPolarisSignIn } from "@/lib/polaris-authing";
++
++export default function PolarisAuthCallbackRoute() {
++  const router = useRouter();
++  const { theme } = useUnistyles();
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    void completePolarisSignIn()
++      .then((returnPath) => router.replace(returnPath as never))
++      .catch((reason) => {
++        clearPolarisSignIn();
++        setError(reason instanceof Error ? reason.message : String(reason));
++      });
++  }, [router]);
++
++  return (
++    <View style={styles.container}>
++      {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={theme.colors.foregroundMuted} />}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm, textAlign: "center" },
++}));
+diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
+index 8f22c48..dd13625 100644
+--- a/packages/app/src/components/welcome-screen.tsx
++++ b/packages/app/src/components/welcome-screen.tsx
+@@ -1,30 +1,16 @@
+-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
++import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+ import { useTranslation } from "react-i18next";
+-import { Pressable, Text, View, ScrollView } from "react-native";
++import { Text, View, ScrollView } from "react-native";
+ import { useRouter } from "expo-router";
+ import { StyleSheet, useUnistyles } from "react-native-unistyles";
+-import { QrCode, Link2, ClipboardPaste, ExternalLink, Settings } from "lucide-react-native";
++import { Settings } from "lucide-react-native";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import type { HostProfile } from "@/types/host-connection";
+ import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
+-import { AddHostModal } from "./add-host-modal";
+-import { PairLinkModal } from "./pair-link-modal";
+ import { Button } from "@/components/ui/button";
+-import { resolveAppVersion } from "@/utils/app-version";
+-import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
+ import { buildHostRootRoute } from "@/utils/host-routes";
++import { beginPolarisSignIn, getPolarisAuthToken } from "@/lib/polaris-authing";
+ import { PaseoLogo } from "@/components/icons/paseo-logo";
+-import { openExternalUrl } from "@/utils/open-external-url";
+-import { isWeb, isNative } from "@/constants/platform";
+-
+-interface WelcomeAction {
+-  key: "scan-qr" | "direct-connection" | "paste-pairing-link";
+-  label: string;
+-  testID: string;
+-  primary: boolean;
+-  icon: typeof QrCode;
+-  onPress: () => void;
+-}
+
+ const styles = StyleSheet.create((theme) => ({
+   root: {
+@@ -67,46 +53,6 @@ const styles = StyleSheet.create((theme) => ({
+     maxWidth: 420,
+     gap: theme.spacing[3],
+   },
+-  actionButton: {
+-    flexDirection: "row",
+-    alignItems: "center",
+-    justifyContent: "center",
+-    gap: theme.spacing[3],
+-    paddingVertical: theme.spacing[4],
+-    borderRadius: theme.borderRadius.xl,
+-    backgroundColor: theme.colors.surface2,
+-    borderWidth: 1,
+-    borderColor: theme.colors.border,
+-  },
+-  actionButtonPrimary: {
+-    backgroundColor: theme.colors.accent,
+-    borderColor: theme.colors.accent,
+-  },
+-  actionText: {
+-    color: theme.colors.foreground,
+-    fontSize: theme.fontSize.base,
+-    fontWeight: theme.fontWeight.medium,
+-  },
+-  actionTextPrimary: {
+-    color: theme.colors.accentForeground,
+-  },
+-  setupLink: {
+-    flexDirection: "row",
+-    alignItems: "center",
+-    justifyContent: "center",
+-    gap: 6,
+-  },
+-  setupLinkText: {
+-    color: theme.colors.accent,
+-    fontSize: theme.fontSize.sm,
+-    fontWeight: theme.fontWeight.medium,
+-  },
+-  versionLabel: {
+-    color: theme.colors.foregroundMuted,
+-    fontSize: theme.fontSize.xs,
+-    textAlign: "center",
+-    marginTop: theme.spacing[6],
+-  },
+   settingsButton: {
+     alignSelf: "center",
+     marginTop: theme.spacing[6],
+@@ -158,98 +104,26 @@ export interface WelcomeScreenProps {
+
+ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+   const { theme } = useUnistyles();
+-  const { t } = useTranslation();
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+-  const appVersion = resolveAppVersion();
+-  const appVersionText = formatVersionWithPrefix(appVersion);
+-  const [isDirectOpen, setIsDirectOpen] = useState(false);
+-  const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
+   const hosts = useHosts();
+   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
+
++  useEffect(() => {
++    if (getPolarisAuthToken()) {
++      router.replace("/settings");
++    }
++  }, [router]);
++
+   useEffect(() => {
+     if (!anyOnlineServerId) return;
+     router.replace(buildHostRootRoute(anyOnlineServerId));
+   }, [anyOnlineServerId, router]);
+
+-  const finishOnboarding = useCallback(
+-    (serverId: string) => {
+-      router.replace(buildHostRootRoute(serverId));
+-    },
+-    [router],
+-  );
+-
+-  const handleOpenPaseoSite = useCallback(() => {
+-    void openExternalUrl("https://paseo.sh");
+-  }, []);
+-
+   const handleOpenSettings = useCallback(() => {
+     router.push("/settings");
+   }, [router]);
+
+-  const handleOpenDirect = useCallback(() => setIsDirectOpen(true), []);
+-  const handleCloseDirect = useCallback(() => setIsDirectOpen(false), []);
+-  const handleOpenPasteLink = useCallback(() => setIsPasteLinkOpen(true), []);
+-  const handleClosePasteLink = useCallback(() => setIsPasteLinkOpen(false), []);
+-  const handleScanQr = useCallback(() => {
+-    router.push("/pair-scan?source=onboarding");
+-  }, [router]);
+-
+-  const handleHostSaved = useCallback(
+-    ({ profile, serverId }: { profile: HostProfile; serverId: string }) => {
+-      onHostAdded?.(profile);
+-      finishOnboarding(serverId);
+-    },
+-    [onHostAdded, finishOnboarding],
+-  );
+-
+-  const actions: WelcomeAction[] = isWeb
+-    ? [
+-        {
+-          key: "direct-connection",
+-          label: t("pairing.connectionMethods.direct.title"),
+-          testID: "welcome-direct-connection",
+-          primary: true,
+-          icon: Link2,
+-          onPress: handleOpenDirect,
+-        },
+-        {
+-          key: "paste-pairing-link",
+-          label: t("pairing.connectionMethods.pasteLink.title"),
+-          testID: "welcome-paste-pairing-link",
+-          primary: false,
+-          icon: ClipboardPaste,
+-          onPress: handleOpenPasteLink,
+-        },
+-      ]
+-    : [
+-        {
+-          key: "scan-qr",
+-          label: t("pairing.connectionMethods.scanQr.title"),
+-          testID: "welcome-scan-qr",
+-          primary: true,
+-          icon: QrCode,
+-          onPress: handleScanQr,
+-        },
+-        {
+-          key: "direct-connection",
+-          label: t("pairing.connectionMethods.direct.title"),
+-          testID: "welcome-direct-connection",
+-          primary: false,
+-          icon: Link2,
+-          onPress: handleOpenDirect,
+-        },
+-        {
+-          key: "paste-pairing-link",
+-          label: t("pairing.connectionMethods.pasteLink.title"),
+-          testID: "welcome-paste-pairing-link",
+-          primary: false,
+-          icon: ClipboardPaste,
+-          onPress: handleOpenPasteLink,
+-        },
+-      ];
+-
+   const scrollContentContainerStyle = useMemo(
+     () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
+     [theme.spacing, insets.bottom],
+@@ -266,20 +140,14 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+         <View style={styles.content}>
+           <PaseoLogo size={96} />
+           <View style={styles.copyBlock}>
+-            <Text style={styles.title}>{t("onboarding.title")}</Text>
+-            <Text style={styles.subtitle}>{t("onboarding.subtitle")}</Text>
+-            {isNative ? (
+-              <Pressable style={styles.setupLink} onPress={handleOpenPaseoSite}>
+-                <Text style={styles.setupLinkText}>paseo.sh</Text>
+-                <ExternalLink size={14} color={theme.colors.accent} />
+-              </Pressable>
+-            ) : null}
++            <Text style={styles.title}>欢迎使用 Polaris</Text>
++            <Text style={styles.subtitle}>登录即可开始</Text>
+           </View>
+
+           <View style={styles.actions}>
+-            {actions.map((action) => (
+-              <WelcomeActionButton key={action.key} action={action} />
+-            ))}
++            <Button size="lg" onPress={beginPolarisSignIn} testID="welcome-sign-in">
++              登录
++            </Button>
+           </View>
+
+           <Button
+@@ -290,49 +158,10 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+             style={styles.settingsButton}
+             testID="welcome-open-settings"
+           >
+-            {t("onboarding.actions.settings")}
++            设置
+           </Button>
+         </View>
+-        <Text style={styles.versionLabel}>{appVersionText}</Text>
+-
+-        <AddHostModal
+-          visible={isDirectOpen}
+-          onClose={handleCloseDirect}
+-          onSaved={handleHostSaved}
+-        />
+-
+-        <PairLinkModal
+-          visible={isPasteLinkOpen}
+-          onClose={handleClosePasteLink}
+-          onSaved={handleHostSaved}
+-        />
+       </ScrollView>
+     </View>
+   );
+ }
+-
+-interface WelcomeActionButtonProps {
+-  action: WelcomeAction;
+-}
+-
+-function WelcomeActionButton({ action }: WelcomeActionButtonProps) {
+-  const { theme } = useUnistyles();
+-  const Icon = action.icon;
+-  const buttonStyle = useMemo(
+-    () => [styles.actionButton, action.primary ? styles.actionButtonPrimary : null],
+-    [action.primary],
+-  );
+-  const textStyle = useMemo(
+-    () => [styles.actionText, action.primary ? styles.actionTextPrimary : null],
+-    [action.primary],
+-  );
+-  return (
+-    <Pressable style={buttonStyle} onPress={action.onPress} testID={action.testID}>
+-      <Icon
+-        size={18}
+-        color={action.primary ? theme.colors.accentForeground : theme.colors.foreground}
+-      />
+-      <Text style={textStyle}>{action.label}</Text>
+-    </Pressable>
+-  );
+-}
+diff --git a/packages/app/src/i18n/resources/ar.ts b/packages/app/src/i18n/resources/ar.ts
+index 826a932..ebe103c 100644
+--- a/packages/app/src/i18n/resources/ar.ts
++++ b/packages/app/src/i18n/resources/ar.ts
+@@ -1396,6 +1396,7 @@ export const ar: TranslationResources = {
+       connections: "اتصالات",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "مقدمي الخدمات",
+       usage: "الاستخدام",
+       terminals: "Terminals",
+diff --git a/packages/app/src/i18n/resources/en.ts b/packages/app/src/i18n/resources/en.ts
+index bdaa7f8..2d9874a 100644
+--- a/packages/app/src/i18n/resources/en.ts
++++ b/packages/app/src/i18n/resources/en.ts
+@@ -1403,6 +1403,7 @@ export const en = {
+       connections: "Connections",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "Providers",
+       usage: "Usage",
+       terminals: "Terminals",
+diff --git a/packages/app/src/i18n/resources/es.ts b/packages/app/src/i18n/resources/es.ts
+index a8fbf7a..96c2edb 100644
+--- a/packages/app/src/i18n/resources/es.ts
++++ b/packages/app/src/i18n/resources/es.ts
+@@ -1432,6 +1432,7 @@ export const es: TranslationResources = {
+       connections: "Conexiones",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "Proveedores",
+       usage: "Uso",
+       terminals: "Terminals",
+diff --git a/packages/app/src/i18n/resources/fr.ts b/packages/app/src/i18n/resources/fr.ts
+index 5be8267..a14c4d5 100644
+--- a/packages/app/src/i18n/resources/fr.ts
++++ b/packages/app/src/i18n/resources/fr.ts
+@@ -1435,6 +1435,7 @@ export const fr: TranslationResources = {
+       connections: "Relations",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "Fournisseurs",
+       usage: "Utilisation",
+       terminals: "Terminals",
+diff --git a/packages/app/src/i18n/resources/ja.ts b/packages/app/src/i18n/resources/ja.ts
+index f6f7cbf..3770af6 100644
+--- a/packages/app/src/i18n/resources/ja.ts
++++ b/packages/app/src/i18n/resources/ja.ts
+@@ -1412,6 +1412,7 @@ export const ja: TranslationResources = {
+       connections: "接続",
+       agents: "エージェント",
+       workspaces: "ワークスペース",
++      polaris: "Polaris Hosts",
+       providers: "プロバイダー",
+       usage: "使用状況",
+       terminals: "ターミナル",
+diff --git a/packages/app/src/i18n/resources/pt-BR.ts b/packages/app/src/i18n/resources/pt-BR.ts
+index e00c314..8d4e4ff 100644
+--- a/packages/app/src/i18n/resources/pt-BR.ts
++++ b/packages/app/src/i18n/resources/pt-BR.ts
+@@ -1418,6 +1418,7 @@ export const ptBR: TranslationResources = {
+       connections: "Conexões",
+       agents: "Agentes",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "Provedores",
+       usage: "Uso",
+       terminals: "Terminais",
+diff --git a/packages/app/src/i18n/resources/ru.ts b/packages/app/src/i18n/resources/ru.ts
+index e54dd03..3844e73 100644
+--- a/packages/app/src/i18n/resources/ru.ts
++++ b/packages/app/src/i18n/resources/ru.ts
+@@ -1424,6 +1424,7 @@ export const ru: TranslationResources = {
+       connections: "Соединения",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris Hosts",
+       providers: "Провайдеры",
+       usage: "Использование",
+       terminals: "Terminals",
+diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/resources/zh-CN.ts
+index 7cb3cb5..5d1be6e 100644
+--- a/packages/app/src/i18n/resources/zh-CN.ts
++++ b/packages/app/src/i18n/resources/zh-CN.ts
+@@ -1379,6 +1379,7 @@ export const zhCN: TranslationResources = {
+       connections: "连接",
+       agents: "Agents",
+       workspaces: "Workspaces",
++      polaris: "Polaris 工作库",
+       providers: "Providers",
+       usage: "使用情况",
+       terminals: "Terminals",
+diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
+new file mode 100644
+index 0000000..e6fcd41
+--- /dev/null
++++ b/packages/app/src/lib/polaris-authing.ts
+@@ -0,0 +1,140 @@
++const sessionKey = "polaris_authing_session";
++const verifierKey = "polaris_authing_pkce_verifier";
++const stateKey = "polaris_authing_state";
++const returnPathKey = "polaris_authing_return_path";
++const redirectUriKey = "polaris_authing_redirect_uri";
++
++function required(value: string | undefined, name: string): string {
++  const trimmed = value?.trim();
++  if (!trimmed) throw new Error(`${name} is required`);
++  return trimmed;
++}
++
++function apiBaseUrl(): string {
++  if (typeof globalThis.location === "undefined") throw new Error("A browser is required");
++  const port = process.env.EXPO_PUBLIC_POLARIS_API_PORT?.trim();
++  if (!port) return `${globalThis.location.origin}/api`;
++  return `${globalThis.location.protocol}//${globalThis.location.hostname}:${port}/api`;
++}
++
++function fallbackCallbackUrl(): string {
++  if (typeof globalThis.location === "undefined") throw new Error("A browser is required");
++  return `${globalThis.location.origin}/auth/callback`;
++}
++
++interface AuthingConfig {
++  appId: string;
++  authorizationUrl: string;
++  redirectUri: string;
++}
++
++async function loadAuthingConfig(): Promise<AuthingConfig> {
++  const response = await fetch(`${apiBaseUrl()}/authing-config`);
++  const config = await response.json().catch(() => ({})) as Partial<AuthingConfig>;
++  if (!response.ok) throw new Error("无法加载 Authing 配置");
++  return {
++    appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
++    authorizationUrl: required(config.authorizationUrl, "POLARIS_AUTHING_AUTHORIZATION_URL"),
++    redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
++  };
++}
++
++function base64Url(bytes: Uint8Array): string {
++  let value = "";
++  for (const byte of bytes) value += String.fromCharCode(byte);
++  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
++}
++
++function randomBytes(length: number): Uint8Array {
++  const bytes = new Uint8Array(length);
++  if (typeof globalThis.crypto?.getRandomValues === "function") {
++    globalThis.crypto.getRandomValues(bytes);
++    return bytes;
++  }
++  for (let index = 0; index < length; index += 1) {
++    bytes[index] = Math.floor(Math.random() * 256);
++  }
++  return bytes;
++}
++
++async function challenge(verifier: string): Promise<{ value: string; method: "S256" | "plain" }> {
++  if (typeof globalThis.crypto?.subtle?.digest === "function") {
++    return {
++      value: base64Url(new Uint8Array(await globalThis.crypto.subtle.digest(
++        "SHA-256",
++        new TextEncoder().encode(verifier),
++      ))),
++      method: "S256",
++    };
++  }
++  return { value: verifier, method: "plain" };
++}
++
++export function getPolarisAuthToken(): string | null {
++  try {
++    return sessionStorage.getItem(sessionKey);
++  } catch {
++    return null;
++  }
++}
++
++export function beginPolarisSignIn(): void {
++  void (async () => {
++    const verifier = base64Url(randomBytes(32));
++    const state = base64Url(randomBytes(24));
++    sessionStorage.setItem(verifierKey, verifier);
++    sessionStorage.setItem(stateKey, state);
++    sessionStorage.setItem(returnPathKey, `${globalThis.location.pathname}${globalThis.location.search}`);
++    const config = await loadAuthingConfig();
++    sessionStorage.setItem(redirectUriKey, config.redirectUri);
++    const authorizationUrl = new URL(config.authorizationUrl);
++    const pkce = await challenge(verifier);
++    authorizationUrl.search = new URLSearchParams({
++      client_id: config.appId,
++      response_type: "code",
++      scope: "openid profile email",
++      redirect_uri: config.redirectUri,
++      state,
++      code_challenge: pkce.value,
++      code_challenge_method: pkce.method,
++    }).toString();
++    globalThis.location.assign(authorizationUrl.toString());
++  })();
++}
++
++export async function completePolarisSignIn(): Promise<string> {
++  const params = new URLSearchParams(globalThis.location.search);
++  const code = params.get("code");
++  const state = params.get("state");
++  const verifier = sessionStorage.getItem(verifierKey);
++  if (!code || !verifier || state !== sessionStorage.getItem(stateKey)) {
++    throw new Error("Authing 登录状态无效，请重新登录");
++  }
++  const response = await fetch(`${apiBaseUrl()}/auth/callback`, {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({
++      code,
++      codeVerifier: verifier,
++      redirectUri: sessionStorage.getItem(redirectUriKey) || fallbackCallbackUrl(),
++    }),
++  });
++  const payload = await response.json().catch(() => ({})) as { token?: string; error?: string };
++  if (!response.ok || !payload.token?.trim()) {
++    throw new Error(payload.error || "Authing 登录未完成");
++  }
++  sessionStorage.setItem(sessionKey, payload.token);
++  sessionStorage.removeItem(verifierKey);
++  sessionStorage.removeItem(stateKey);
++  sessionStorage.removeItem(redirectUriKey);
++  const returnPath = sessionStorage.getItem(returnPathKey);
++  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
++}
++
++export function clearPolarisSignIn(): void {
++  sessionStorage.removeItem(sessionKey);
++  sessionStorage.removeItem(verifierKey);
++  sessionStorage.removeItem(stateKey);
++  sessionStorage.removeItem(redirectUriKey);
++  sessionStorage.removeItem(returnPathKey);
++}
+diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
+index 8dd01a2..1f90869 100644
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -40,6 +40,7 @@ import {
+   Puzzle,
+   FolderGit2,
+   SquareTerminal,
++  Database,
+ } from "lucide-react-native";
+ import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
+ import { AppDiagnosticSheet } from "@/components/app-diagnostic-sheet";
+@@ -106,6 +107,7 @@ import {
+   HostWorkspacesPage,
+   HostTerminalsPage,
+ } from "@/screens/settings/host-page";
++import { PolarisHostLibraryPage } from "@/screens/settings/polaris-host-library-page";
+ import ProjectsScreen from "@/screens/projects-screen";
+ import ProjectSettingsScreen from "@/screens/project-settings-screen";
+ import { useIsCompactFormFactor } from "@/constants/layout";
+@@ -169,6 +171,7 @@ interface HostSectionItem {
+ const HOST_SECTION_ITEMS: HostSectionItem[] = [
+   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
+   { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
++  { id: "polaris", labelKey: "settings.hostSections.polaris", icon: Database },
+   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
+   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
+   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
+@@ -185,6 +188,8 @@ function renderHostSettingsContent(
+       return <HostAgentsPage serverId={view.serverId} />;
+     case "workspaces":
+       return <HostWorkspacesPage serverId={view.serverId} />;
++    case "polaris":
++      return <PolarisHostLibraryPage serverId={view.serverId} />;
+     case "providers":
+       return <HostProvidersPage serverId={view.serverId} />;
+     case "usage":
+diff --git a/packages/app/src/screens/settings/polaris-host-library-page.tsx b/packages/app/src/screens/settings/polaris-host-library-page.tsx
+new file mode 100644
+index 0000000..4ea6f80
+--- /dev/null
++++ b/packages/app/src/screens/settings/polaris-host-library-page.tsx
+@@ -0,0 +1,280 @@
++import { Plus, Power, Archive, Trash2 } from "lucide-react-native";
++import { useCallback, useEffect, useState } from "react";
++import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
++import { StyleSheet, useUnistyles } from "react-native-unistyles";
++import { Button } from "@/components/ui/button";
++import { SettingsSection } from "@/screens/settings/settings-section";
++import { confirmDialog } from "@/utils/confirm-dialog";
++import { beginPolarisSignIn, getPolarisAuthToken } from "@/lib/polaris-authing";
++
++const labels = {
++  title: "Polaris 工作库",
++  description: "管理此账户的 Polaris Host；它们与 Paseo 原生 Workspaces 相互独立",
++  namePlaceholder: "Host 名称",
++  create: "创建新的 Host",
++  empty: "还没有 Polaris Host",
++  start: "启动",
++  stop: "停止",
++  archive: "归档",
++  delete: "删除",
++  archived: "已归档",
++  unknown: "状态未知",
++  running: "运行中",
++  stopped: "已停止",
++  archiveConfirmTitle: "归档这个 Host？",
++  deleteConfirmTitle: "永久删除这个 Host？",
++};
++
++interface PolarisHost {
++  name: string;
++  status: {
++    lifecycle?: { phase?: string };
++  } | null;
++}
++
++interface ArchivedPolarisHost {
++  archiveId: string;
++  workspaceName: string;
++  archivedAt: string;
++}
++
++interface PolarisHostsResponse {
++  hosts: PolarisHost[];
++  archivedHosts: ArchivedPolarisHost[];
++}
++
++async function polarisRequest(path: string, init?: RequestInit): Promise<unknown> {
++  const configuredPort = process.env.EXPO_PUBLIC_POLARIS_API_PORT;
++  const apiBase = configuredPort && typeof globalThis.location !== "undefined"
++    ? `${globalThis.location.protocol}//${globalThis.location.hostname}:${configuredPort}/api`
++    : "/api";
++  const response = await fetch(`${apiBase}/polaris-hosts${path}`, {
++    ...init,
++    headers: {
++      "content-type": "application/x-www-form-urlencoded",
++      ...(getPolarisAuthToken() ? { authorization: `Bearer ${getPolarisAuthToken()}` } : {}),
++      ...init?.headers,
++    },
++  });
++  const body = await response.json().catch(() => ({}));
++  if (!response.ok) {
++    throw new Error(typeof body.error === "string" ? body.error : "Polaris request failed");
++  }
++  return body;
++}
++
++function hostPhase(host: PolarisHost): string {
++  const phase = host.status?.lifecycle?.phase;
++  if (!phase) return labels.unknown;
++  return phase === "running"
++    ? labels.running
++    : phase === "stopped"
++      ? labels.stopped
++      : phase;
++}
++
++export function PolarisHostLibraryPage({ serverId: _serverId }: { serverId: string }) {
++  const { theme } = useUnistyles();
++  const [hosts, setHosts] = useState<PolarisHost[]>([]);
++  const [archivedHosts, setArchivedHosts] = useState<ArchivedPolarisHost[]>([]);
++  const [hostName, setHostName] = useState("");
++  const [loading, setLoading] = useState(true);
++  const [creating, setCreating] = useState(false);
++  const [busyHost, setBusyHost] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const authenticationRequired = error === "Authentication is required";
++
++  const refresh = useCallback(async () => {
++    setLoading(true);
++    try {
++      const response = await polarisRequest("") as PolarisHostsResponse;
++      setHosts(response.hosts);
++      setArchivedHosts(response.archivedHosts);
++      setError(null);
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    void refresh();
++  }, [refresh]);
++
++  const createHost = useCallback(async () => {
++    const trimmedName = hostName.trim();
++    if (!trimmedName || creating) return;
++    setCreating(true);
++    try {
++      await polarisRequest("", {
++        method: "POST",
++        body: new URLSearchParams({ hostName: trimmedName }).toString(),
++      });
++      setHostName("");
++      await refresh();
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setCreating(false);
++    }
++  }, [creating, hostName, refresh]);
++
++  const actOnHost = useCallback(async (name: string, action: "start" | "stop" | "archive" | "delete") => {
++    const destructive = action === "archive" || action === "delete";
++    if (destructive && !await confirmDialog({
++      title: action === "archive" ? labels.archiveConfirmTitle : labels.deleteConfirmTitle,
++      message: action === "archive"
++        ? `“${name}” 将停止并移入归档。`
++        : `“${name}” 及其所有数据将被永久删除。`,
++      confirmLabel: action === "archive" ? labels.archive : labels.delete,
++      destructive: true,
++    })) return;
++    setBusyHost(name);
++    try {
++      await polarisRequest(`/${encodeURIComponent(name)}`, action === "archive"
++        ? { method: "DELETE" }
++        : {
++          method: "POST",
++          body: new URLSearchParams({ action }).toString(),
++        });
++      await refresh();
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setBusyHost(null);
++    }
++  }, [refresh]);
++
++  const deleteArchivedHost = useCallback(async (host: ArchivedPolarisHost) => {
++    if (!await confirmDialog({
++      title: labels.deleteConfirmTitle,
++      message: `“${host.workspaceName}” 及其归档数据将被永久删除。`,
++      confirmLabel: labels.delete,
++      destructive: true,
++    })) return;
++    setBusyHost(host.archiveId);
++    try {
++      await polarisRequest(`/archives/${encodeURIComponent(host.archiveId)}`, { method: "DELETE" });
++      await refresh();
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setBusyHost(null);
++    }
++  }, [refresh]);
++
++  return (
++    <View>
++      <SettingsSection title={labels.title}>
++        <Text style={styles.description}>{labels.description}</Text>
++        <View style={styles.createRow}>
++          <TextInput
++            value={hostName}
++            onChangeText={setHostName}
++            onSubmitEditing={() => void createHost()}
++            placeholder={labels.namePlaceholder}
++            placeholderTextColor={theme.colors.foregroundMuted}
++            style={styles.input}
++          />
++          <Button size="sm" leftIcon={Plus} loading={creating} onPress={() => void createHost()}>
++            {labels.create}
++          </Button>
++        </View>
++        {error ? <Text style={styles.error}>{error}</Text> : null}
++        {authenticationRequired ? (
++          <Button size="sm" onPress={beginPolarisSignIn}>登录 Polaris</Button>
++        ) : null}
++        {loading ? (
++          <ActivityIndicator color={theme.colors.foregroundMuted} />
++        ) : hosts.length === 0 ? (
++          <Text style={styles.empty}>{labels.empty}</Text>
++        ) : (
++          <View style={styles.table}>
++            {hosts.map((host) => {
++              const busy = busyHost === host.name;
++              const phase = host.status?.lifecycle?.phase;
++              return (
++                <View key={host.name} style={styles.row}>
++                  <View style={styles.hostInfo}>
++                    <Text style={styles.hostName}>{host.name}</Text>
++                    <Text style={styles.status}>{hostPhase(host)}</Text>
++                  </View>
++                  <View style={styles.actions}>
++                    {phase === "stopped" ? (
++                      <Button size="xs" variant="outline" disabled={busy} onPress={() => void actOnHost(host.name, "start")}>
++                        {labels.start}
++                      </Button>
++                    ) : (
++                      <Button size="xs" variant="outline" leftIcon={Power} disabled={busy} onPress={() => void actOnHost(host.name, "stop")}>
++                        {labels.stop}
++                      </Button>
++                    )}
++                    <Button size="xs" variant="ghost" leftIcon={Archive} disabled={busy} onPress={() => void actOnHost(host.name, "archive")}>
++                      {labels.archive}
++                    </Button>
++                    <Button size="xs" variant="destructive" leftIcon={Trash2} disabled={busy} onPress={() => void actOnHost(host.name, "delete")}>
++                      {labels.delete}
++                    </Button>
++                  </View>
++                </View>
++              );
++            })}
++          </View>
++        )}
++      </SettingsSection>
++
++      {archivedHosts.length > 0 ? (
++        <SettingsSection title={labels.archived}>
++          <View style={styles.table}>
++            {archivedHosts.map((host) => (
++              <View key={host.archiveId} style={styles.row}>
++                <View style={styles.hostInfo}>
++                  <Text style={styles.hostName}>{host.workspaceName}</Text>
++                  <Text style={styles.status}>归档于 {new Date(host.archivedAt).toLocaleDateString()}</Text>
++                </View>
++                <Button size="xs" variant="destructive" leftIcon={Trash2} disabled={busyHost === host.archiveId} onPress={() => void deleteArchivedHost(host)}>
++                  {labels.delete}
++                </Button>
++              </View>
++            ))}
++          </View>
++        </SettingsSection>
++      ) : null}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  description: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
++  createRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
++  input: {
++    flex: 1,
++    minWidth: 0,
++    color: theme.colors.foreground,
++    backgroundColor: theme.colors.surface2,
++    borderColor: theme.colors.border,
++    borderWidth: 1,
++    borderRadius: theme.borderRadius.md,
++    paddingHorizontal: theme.spacing[3],
++    paddingVertical: theme.spacing[2],
++    fontSize: theme.fontSize.sm,
++  },
++  table: { borderTopWidth: 1, borderTopColor: theme.colors.border },
++  row: {
++    minHeight: 56,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++    gap: theme.spacing[3],
++    borderBottomWidth: 1,
++    borderBottomColor: theme.colors.border,
++    paddingVertical: theme.spacing[2],
++  },
++  hostInfo: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
++  hostName: { color: theme.colors.foreground, fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.medium },
++  status: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
++  actions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[1] },
++  empty: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, paddingVertical: theme.spacing[2] },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++}));
+diff --git a/packages/app/src/utils/host-routes.ts b/packages/app/src/utils/host-routes.ts
+index ad1a36b..aeb58f2 100644
+--- a/packages/app/src/utils/host-routes.ts
++++ b/packages/app/src/utils/host-routes.ts
+@@ -416,6 +416,7 @@ export const HOST_SECTION_SLUGS = [
+   "connections",
+   "agents",
+   "workspaces",
++  "polaris",
+   "providers",
+   "usage",
+   "terminals",
