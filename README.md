@@ -86,6 +86,20 @@ POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://127.0.0.1:5173
 POLARIS_AUTHING_REDIRECT_URI=http://127.0.0.1:8082/auth/callback
 ```
 
+## Polaris CLI
+
+The repo developer CLI entry point is:
+
+```bash
+pnpm --dir apps/polaris run polaris --
+```
+
+Use it for workspace, user, credential, skill, server, and executor commands
+while working from the repo.
+
+The installed `polaris` binary is the stage-one local deployment CLI.
+That surface is covered in the next section.
+
 ## Local Deployment
 
 Stage-one local deployment is separate from local development.

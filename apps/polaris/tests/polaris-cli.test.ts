@@ -408,8 +408,12 @@ test("runCli workspace list returns a user's workspace names", async () => {
 test("runCli user create adds the default RightCode codex credential when configured", async () => {
   const previousApiKey = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
   const previousScript = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+  const previousQuotaLimit = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT;
+  const previousAllowedPrefixes = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES;
   delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
-  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = "printf 'test-default-rightcode-key\\n'";
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = "node -e \"console.log(JSON.stringify({ apiKey: 'test-default-rightcode-key' }))\" --";
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT = "20";
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = "/codex,/draw";
   const userProfileId = uniqueProjectName("cli-user-codex-default");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
@@ -451,6 +455,16 @@ test("runCli user create adds the default RightCode codex credential when config
       delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
     } else {
       process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = previousScript;
+    }
+    if (previousQuotaLimit === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT = previousQuotaLimit;
+    }
+    if (previousAllowedPrefixes === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = previousAllowedPrefixes;
     }
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });

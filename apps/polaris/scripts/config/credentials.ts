@@ -917,12 +917,30 @@ export function resolveActiveManagedCredential(args: {
   ) ?? null;
 }
 
-function resolveDefaultCodexRightCodeApiKey(): string {
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function resolveDefaultCodexRightCodeApiKey(userProfileId: string): string {
   const script = String(
     process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT ?? "",
   ).trim();
   if (script) {
-    const result = spawnSync("bash", ["-lc", script], {
+    const quotaLimit = String(
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT ?? "",
+    ).trim();
+    const allowedPrefixes = String(
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES ?? "",
+    ).trim();
+    const command = [
+      script,
+      "--name",
+      shellQuote(userProfileId),
+      ...(quotaLimit ? ["--quota-limit", shellQuote(quotaLimit)] : []),
+      ...(allowedPrefixes ? ["--allowed-prefixes", shellQuote(allowedPrefixes)] : []),
+      "--json",
+    ].join(" ");
+    const result = spawnSync("bash", ["-lc", command], {
       encoding: "utf8",
     });
     if (result.error) {
@@ -939,13 +957,22 @@ function resolveDefaultCodexRightCodeApiKey(): string {
           || `POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT failed with exit code ${result.status ?? 1}`,
       );
     }
-    return String(result.stdout ?? "").trim();
+    const stdout = String(result.stdout ?? "").trim();
+    if (!stdout) {
+      return "";
+    }
+    try {
+      const parsed = JSON.parse(stdout) as { apiKey?: unknown };
+      return typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : stdout;
+    } catch {
+      return stdout;
+    }
   }
 
   return String(process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY ?? "").trim();
 }
 
-function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
+function resolveDefaultCredentialPolicies(userProfileId: string): DefaultCredentialPolicy[] {
   const policies: DefaultCredentialPolicy[] = [
     {
       harness: "ssh",
@@ -955,7 +982,7 @@ function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
     },
   ];
 
-  const codexRightCodeApiKey = resolveDefaultCodexRightCodeApiKey();
+  const codexRightCodeApiKey = resolveDefaultCodexRightCodeApiKey(userProfileId);
   if (codexRightCodeApiKey) {
     policies.push({
       harness: "codex",
@@ -973,7 +1000,7 @@ function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
 export function ensureRequiredProfileCredentials(userProfileId: string): ManagedCredentialSummary[] {
   const profile = readUserProfileRecord(userProfileId);
   const created: ManagedCredentialSummary[] = [];
-  const policies = resolveDefaultCredentialPolicies();
+  const policies = resolveDefaultCredentialPolicies(userProfileId);
   for (const policy of policies) {
     if (policy.harness === "ssh") {
       if (!profile.ssh?.mode) {
