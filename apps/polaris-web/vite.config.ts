@@ -6,8 +6,18 @@ import { visualizer } from "rollup-plugin-visualizer";
 const apiTarget = process.env.POLARIS_API_PROXY_TARGET?.trim() || "http://127.0.0.1:8787";
 const port = Number(process.env.POLARIS_WEB_PORT || "4173");
 const analyze = process.env.ANALYZE === "true";
+const authingConfig = {
+  appId: process.env.POLARIS_AUTHING_APP_ID?.trim() || "",
+  authorizationUrl: process.env.POLARIS_AUTHING_AUTHORIZATION_URL?.trim() || "",
+  tokenUrl: process.env.POLARIS_AUTHING_TOKEN_URL?.trim() || "",
+  logoutUrl: process.env.POLARIS_AUTHING_LOGOUT_URL?.trim() || "",
+  redirectUri: process.env.POLARIS_AUTHING_REDIRECT_URI?.trim() || "",
+};
 
 export default defineConfig({
+  define: {
+    __POLARIS_AUTHING_CONFIG__: JSON.stringify(authingConfig),
+  },
   plugins: [
     react(),
     ...(analyze

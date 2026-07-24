@@ -24,8 +24,12 @@ EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
 WEB_HOST="${POLARIS_WEB_DEV_HOST:-0.0.0.0}"
 WEB_PORT="${POLARIS_WEBPORTAL_PORT:-8081}"
-PASEO_HOST="${PASEO_APP_BIND_HOST:-127.0.0.1}"
-PASEO_PORT="${PASEO_APP_PORT:-8082}"
+PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
+PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
+LANDING_HOST="${POLARIS_LANDING_PAGE_BIND_HOST:-0.0.0.0}"
+LANDING_PORT="${POLARIS_LANDING_PAGE_PORT:-5173}"
+DOCS_HOST="${POLARIS_DOCS_BIND_HOST:-0.0.0.0}"
+DOCS_PORT="${POLARIS_DOCS_PORT:-4180}"
 LOG_DIR=".runtime/paseo"
 
 mkdir -p "${LOG_DIR}"
@@ -37,6 +41,8 @@ cleanup() {
     "${executor_bridge_proxy_pid:-}"
     "${web_pid:-}"
     "${paseo_pid:-}"
+    "${landing_pid:-}"
+    "${docs_pid:-}"
   )
   local pid
   for pid in "${pids[@]}"; do
@@ -86,7 +92,25 @@ pnpm dlx serve@14 -s "${paseo_dist_dir}" -l "tcp://${PASEO_HOST}:${PASEO_PORT}" 
   2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
 paseo_pid=$!
 
-pids=("${server_pid}" "${executor_pid}" "${web_pid}" "${paseo_pid}")
+VITE_POLARIS_PUBLIC_BASE_URL="${POLARIS_PUBLIC_BASE_URL}" \
+pnpm --filter landing-page run dev -- --host "${LANDING_HOST}" --port "${LANDING_PORT}" \
+  > >(tee "${LOG_DIR}/stack.landing.log") \
+  2> >(tee "${LOG_DIR}/stack.landing.err.log" >&2) &
+landing_pid=$!
+
+pnpm --filter docs run dev -- --host "${DOCS_HOST}" --port "${DOCS_PORT}" \
+  > >(tee "${LOG_DIR}/stack.docs.log") \
+  2> >(tee "${LOG_DIR}/stack.docs.err.log" >&2) &
+docs_pid=$!
+
+pids=(
+  "${server_pid}"
+  "${executor_pid}"
+  "${web_pid}"
+  "${paseo_pid}"
+  "${landing_pid}"
+  "${docs_pid}"
+)
 if [ -n "${executor_bridge_proxy_pid:-}" ]; then
   pids+=("${executor_bridge_proxy_pid}")
 fi

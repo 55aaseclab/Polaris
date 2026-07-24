@@ -67,8 +67,15 @@ const copy = {
     footer: "面向团队的可控 AI 工作空间",
 };
 
+function polarisSignInUrl(): string {
+  const baseUrl = import.meta.env.VITE_POLARIS_PUBLIC_BASE_URL?.trim()
+    || "https://polaris.jianxiaoyitech.com";
+  return new URL("/sign-in", baseUrl).toString();
+}
+
 function App() {
   const t = copy;
+  const signInUrl = polarisSignInUrl();
 
   useEffect(() => {
     const sections = Array.from(
@@ -91,7 +98,7 @@ function App() {
       <header className="site-header">
         <div className="container header-inner">
           <a className="brand" href="#top" onClick={(event) => { event.preventDefault(); window.history.replaceState(null, "", "#top"); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="brand-mark">P</span>Polaris</a>
-          <div className="header-actions"><a className="button button-secondary" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}</a></div>
+          <div className="header-actions"><a className="button button-secondary" href={signInUrl}>{t.signIn}</a></div>
         </div>
       </header>
 
@@ -102,7 +109,7 @@ function App() {
               <h1>{t.heroTitle.split("\n").map((line) => <span key={line}>{line}</span>)}</h1>
               <p className="hero-body">{t.heroBody}</p>
               <div className="button-row">
-                <a className="button button-primary" href="https://polaris.jianxiaoyitech.com/sign-in">{t.heroPrimary}<ArrowRight size={17} /></a>
+                <a className="button button-primary" href={signInUrl}>{t.heroPrimary}<ArrowRight size={17} /></a>
                 <a className="button button-secondary" href="mailto:contact@jianxiaoyitech.com">{t.heroSecondary}</a>
               </div>
               <ul className="proof-list">{t.proof.map((item) => <li key={item}><Check size={16} />{item}</li>)}</ul>
@@ -138,7 +145,7 @@ function App() {
           <Accordion type="single" collapsible className="faq-list">{t.faq.map(([question, answer], index) => <AccordionItem key={question} value={`faq-${index}`}><AccordionTrigger>{question}</AccordionTrigger><AccordionContent>{answer}</AccordionContent></AccordionItem>)}</Accordion>
         </div></section>
 
-        <section className="final-cta" id="pilot" data-section-hash="pilot"><div className="container final-inner"><p className="eyebrow">POLARIS</p><h2>{t.finalTitle}</h2><p>{t.finalBody}</p><div className="final-button-row"><a className="button button-light" href="https://polaris.jianxiaoyitech.com/sign-in">{t.signIn}<ArrowRight size={17} /></a><a className="button button-light-outline" href="mailto:contact@jianxiaoyitech.com">{t.trial}</a></div></div></section>
+        <section className="final-cta" id="pilot" data-section-hash="pilot"><div className="container final-inner"><p className="eyebrow">POLARIS</p><h2>{t.finalTitle}</h2><p>{t.finalBody}</p><div className="final-button-row"><a className="button button-light" href={signInUrl}>{t.signIn}<ArrowRight size={17} /></a><a className="button button-light-outline" href="mailto:contact@jianxiaoyitech.com">{t.trial}</a></div></div></section>
       </main>
 
       <footer className="site-footer"><div className="container footer-inner"><div><a className="brand" href="#top" onClick={(event) => { event.preventDefault(); window.history.replaceState(null, "", "#top"); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="brand-mark">P</span>Polaris</a><p>{t.footer}</p></div><div><p>{t.company}</p><a href="https://www.jianxiaoyitech.com">www.jianxiaoyitech.com</a></div></div></footer>
