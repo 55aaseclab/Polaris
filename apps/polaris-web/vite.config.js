@@ -7,7 +7,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-var _a;
+var _a, _b, _c, _d, _e, _f;
 import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -15,7 +15,17 @@ import { visualizer } from "rollup-plugin-visualizer";
 var apiTarget = ((_a = process.env.POLARIS_API_PROXY_TARGET) === null || _a === void 0 ? void 0 : _a.trim()) || "http://127.0.0.1:8787";
 var port = Number(process.env.POLARIS_WEB_PORT || "4173");
 var analyze = process.env.ANALYZE === "true";
+var authingConfig = {
+    appId: ((_b = process.env.POLARIS_AUTHING_APP_ID) === null || _b === void 0 ? void 0 : _b.trim()) || "",
+    authorizationUrl: ((_c = process.env.POLARIS_AUTHING_AUTHORIZATION_URL) === null || _c === void 0 ? void 0 : _c.trim()) || "",
+    tokenUrl: ((_d = process.env.POLARIS_AUTHING_TOKEN_URL) === null || _d === void 0 ? void 0 : _d.trim()) || "",
+    logoutUrl: ((_e = process.env.POLARIS_AUTHING_LOGOUT_URL) === null || _e === void 0 ? void 0 : _e.trim()) || "",
+    redirectUri: ((_f = process.env.POLARIS_AUTHING_REDIRECT_URI) === null || _f === void 0 ? void 0 : _f.trim()) || "",
+};
 export default defineConfig({
+    define: {
+        __POLARIS_AUTHING_CONFIG__: JSON.stringify(authingConfig),
+    },
     plugins: __spreadArray([
         react()
     ], (analyze

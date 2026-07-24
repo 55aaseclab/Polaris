@@ -25,15 +25,15 @@ const AuthingContext = React.createContext<AuthingContextValue | null>(null);
 const storageKey = "polaris_authing_session";
 const verifierKey = "polaris_authing_pkce_verifier";
 const stateKey = "polaris_authing_state";
+const authingConfig = __POLARIS_AUTHING_CONFIG__;
 
-function required(name: string): string {
-  const value = import.meta.env[name]?.trim();
+function required(value: string, name: string): string {
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
 function redirectUri(): string {
-  return import.meta.env.VITE_AUTHING_REDIRECT_URI?.trim()
+  return authingConfig.redirectUri
     || `${window.location.origin}/auth/callback`;
 }
 
@@ -94,12 +94,15 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
       }
       const body = new URLSearchParams({
         grant_type: "authorization_code",
-        client_id: required("VITE_AUTHING_APP_ID"),
+        client_id: required(authingConfig.appId, "POLARIS_AUTHING_APP_ID"),
         code,
         redirect_uri: redirectUri(),
         code_verifier: verifier,
       });
-      const response = await fetch(required("VITE_AUTHING_TOKEN_URL"), {
+      const response = await fetch(required(
+        authingConfig.tokenUrl,
+        "POLARIS_AUTHING_TOKEN_URL",
+      ), {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body,
@@ -132,9 +135,12 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
         const state = base64Url(crypto.getRandomValues(new Uint8Array(24)));
         sessionStorage.setItem(verifierKey, verifier);
         sessionStorage.setItem(stateKey, state);
-        const url = new URL(required("VITE_AUTHING_AUTHORIZATION_URL"));
+        const url = new URL(required(
+          authingConfig.authorizationUrl,
+          "POLARIS_AUTHING_AUTHORIZATION_URL",
+        ));
         url.search = new URLSearchParams({
-          client_id: required("VITE_AUTHING_APP_ID"), response_type: "code",
+          client_id: required(authingConfig.appId, "POLARIS_AUTHING_APP_ID"), response_type: "code",
           scope: "openid profile email", redirect_uri: redirectUri(), state,
           code_challenge: await challenge(verifier), code_challenge_method: "S256",
           ...(screenHint ? { screen_hint: screenHint } : {}),
@@ -145,7 +151,10 @@ export function AuthingProvider({ children }: { children: React.ReactNode }) {
     signOut: () => {
       sessionStorage.removeItem(storageKey);
       setToken(null);
-      const url = new URL(required("VITE_AUTHING_LOGOUT_URL"));
+      const url = new URL(required(
+        authingConfig.logoutUrl,
+        "POLARIS_AUTHING_LOGOUT_URL",
+      ));
       url.searchParams.set("post_logout_redirect_uri", window.location.origin);
       window.location.assign(url.toString());
     },

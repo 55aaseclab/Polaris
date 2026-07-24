@@ -51,7 +51,9 @@ function forbidden(res: ServerResponse, message = "Forbidden"): void {
   sendJson(res, 403, { error: message });
 }
 
-function requiredAuthingEnv(name: "AUTHING_APP_ID" | "AUTHING_ISSUER" | "AUTHING_JWKS_URL"): string {
+function requiredAuthingEnv(
+  name: "POLARIS_AUTHING_APP_ID" | "POLARIS_AUTHING_ISSUER" | "POLARIS_AUTHING_JWKS_URL",
+): string {
   const value = String(process.env[name] ?? "").trim();
   if (!value) {
     throw new PortalAuthError(
@@ -115,11 +117,11 @@ function resolveAuthingUsername(user: AuthingClaims): string | null {
 }
 
 async function verifyAuthingToken(token: string): Promise<AuthingClaims> {
-  const issuer = requiredAuthingEnv("AUTHING_ISSUER");
-  const jwks = createRemoteJWKSet(new URL(requiredAuthingEnv("AUTHING_JWKS_URL")));
+  const issuer = requiredAuthingEnv("POLARIS_AUTHING_ISSUER");
+  const jwks = createRemoteJWKSet(new URL(requiredAuthingEnv("POLARIS_AUTHING_JWKS_URL")));
   const { payload } = await jwtVerify(token, jwks, {
     issuer,
-    audience: requiredAuthingEnv("AUTHING_APP_ID"),
+    audience: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
   });
   return payload as AuthingClaims;
 }

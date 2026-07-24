@@ -7,47 +7,7 @@ Self-hosted workspace control plane.
 `Polaris` manages isolated development environments and external AI coding
 agents across `docker`, `pod`, and `kubevirt-vm` backends.
 
-## Local Deployment
-
-Stage-one local deployment is separate from local development.
-
-Main local deployment entry points:
-
-```bash
-polaris install
-polaris start
-polaris doctor
-```
-
-Desktop entry:
-
-- `Polaris` app icon
-
-Stage-one local deployment supports:
-
-- Linux
-- macOS
-- Windows
-- single-machine Docker-only runtime
-
-It does not use `vite` dev server or `tsx watch`.
-
-Release packaging targets now include:
-
-- Debian `.deb`
-- Windows installer `.exe`
-- macOS `.dmg`
-
-Telemetry can be enabled with `PostHog` and `Sentry`.
-Use `.env.dev.example` for the current environment variables.
-
 ## Local Development
-
-Main CLI:
-
-```bash
-pnpm run polaris -- status <workspace>
-```
 
 Local stack service:
 
@@ -104,6 +64,40 @@ VITE_CLERK_SIGN_IN_URL=http://127.0.0.1:8000/sign-in/
 VITE_CLERK_SIGN_UP_URL=http://127.0.0.1:8000/sign-up/
 CLERK_SECRET_KEY=sk_test_xxx
 ```
+
+## Local Deployment
+
+Stage-one local deployment is separate from local development.
+
+Main local deployment entry points:
+
+```bash
+polaris install
+polaris start
+polaris doctor
+```
+
+Desktop entry:
+
+- `Polaris` app icon
+
+Stage-one local deployment supports:
+
+- Linux
+- macOS
+- Windows
+- single-machine Docker-only runtime
+
+It does not use `vite` dev server or `tsx watch`.
+
+Release packaging targets now include:
+
+- Debian `.deb`
+- Windows installer `.exe`
+- macOS `.dmg`
+
+Telemetry can be enabled with `PostHog` and `Sentry`.
+Use `.env.dev.example` for the current environment variables.
 
 ## Workspace Skills
 
