@@ -37,9 +37,10 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": String(res.getHeader("access-control-allow-origin") ?? "*"),
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type",
+    "access-control-allow-credentials": "true",
   });
   res.end(payload);
 }

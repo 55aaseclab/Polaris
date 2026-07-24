@@ -22,8 +22,8 @@ SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-127.0.0.1}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
 EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
-WEB_HOST="${POLARIS_WEB_DEV_HOST:-0.0.0.0}"
-WEB_PORT="${POLARIS_WEBPORTAL_PORT:-8081}"
+ADMIN_WEB_HOST="${POLARIS_WEB_DEV_HOST:-0.0.0.0}"
+ADMIN_WEB_PORT="${POLARIS_ADMIN_WEB_PORT:-8083}"
 PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
 LANDING_HOST="${POLARIS_LANDING_PAGE_BIND_HOST:-0.0.0.0}"
@@ -39,7 +39,7 @@ cleanup() {
     "${server_pid:-}"
     "${executor_pid:-}"
     "${executor_bridge_proxy_pid:-}"
-    "${web_pid:-}"
+    "${admin_web_pid:-}"
     "${paseo_pid:-}"
     "${landing_pid:-}"
     "${docs_pid:-}"
@@ -57,10 +57,15 @@ trap cleanup EXIT INT TERM
 
 pnpm install
 paseo_local_ensure_source
-paseo_local_build_tool_bundle >/dev/null
-paseo_dist_dir="$(paseo_local_build_dist)"
+if [ ! -d "apps/paseo/source/node_modules" ]; then
+  (cd apps/paseo/source && npm ci --ignore-scripts)
+fi
+if [ ! -f "apps/paseo/source/packages/highlight/dist/index.js" ] \
+  || [ ! -f "apps/paseo/source/packages/protocol/dist/messages.js" ] \
+  || [ ! -f "apps/paseo/source/packages/client/dist/daemon-client.js" ]; then
+  (cd apps/paseo/source && npm run build:app-deps)
+fi
 
-POLARIS_WEB_PORT="${WEB_PORT}" \
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
 pnpm --filter polaris exec tsx watch scripts/polaris.ts server "${SERVER_PORT}" "${SERVER_HOST}" \
   > >(tee "${LOG_DIR}/stack.server.log") \
@@ -81,19 +86,23 @@ else
   echo "[polaris-local-stack] executor bridge proxy not started; docker workspaces may not report Paseo pairing metadata back to the host executor" >&2
 fi
 
-POLARIS_WEB_PORT="${WEB_PORT}" \
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
-pnpm --filter polaris-web exec vite --host "${WEB_HOST}" --port "${WEB_PORT}" \
-  > >(tee "${LOG_DIR}/stack.web.log") \
-  2> >(tee "${LOG_DIR}/stack.web.err.log" >&2) &
-web_pid=$!
+pnpm --filter polaris-web-admin exec vite --host "${ADMIN_WEB_HOST}" --port "${ADMIN_WEB_PORT}" \
+  > >(tee "${LOG_DIR}/stack.admin-web.log") \
+  2> >(tee "${LOG_DIR}/stack.admin-web.err.log" >&2) &
+admin_web_pid=$!
 
-pnpm dlx serve@14 -s "${paseo_dist_dir}" -l "tcp://${PASEO_HOST}:${PASEO_PORT}" \
+(
+  cd apps/paseo/source/packages/app
+  EXPO_NO_TELEMETRY=1 \
+  EXPO_PUBLIC_POLARIS_API_PORT="${SERVER_PORT}" \
+  npx expo start --web --host lan --port "${PASEO_PORT}"
+) \
   > >(tee "${LOG_DIR}/stack.paseo.log") \
   2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
 paseo_pid=$!
 
-VITE_POLARIS_PUBLIC_BASE_URL="${POLARIS_PUBLIC_BASE_URL}" \
+VITE_PASEO_APP_BASE_URL="${VITE_PASEO_APP_BASE_URL:-${POLARIS_PASEO_APP_BASE_URL}}" \
 pnpm --filter landing-page exec vite \
   --host "${LANDING_HOST}" \
   --port "${LANDING_PORT}" \
@@ -114,7 +123,7 @@ docs_pid=$!
 pids=(
   "${server_pid}"
   "${executor_pid}"
-  "${web_pid}"
+  "${admin_web_pid}"
   "${paseo_pid}"
   "${landing_pid}"
   "${docs_pid}"
