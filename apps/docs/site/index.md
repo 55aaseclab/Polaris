@@ -8,5 +8,5 @@ hero:
   actions:
     - theme: brand
       text: Open Docs
-      link: /latest/
+      link: /polaris/
 ---

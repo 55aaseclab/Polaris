@@ -58,7 +58,7 @@ function buildDirectoryItems(rootDir: string, currentDir = rootDir): SidebarItem
     const linkPath = markdownPath === "index" ? "" : `/${markdownPath}`;
     items.push({
       text: fileLabel(absolutePath),
-      link: `/latest${linkPath}`,
+      link: linkPath || "/",
     });
   }
 
@@ -66,7 +66,7 @@ function buildDirectoryItems(rootDir: string, currentDir = rootDir): SidebarItem
 }
 
 function buildDocsSidebar() {
-  const docsRoot = path.resolve(__dirname, "..", "latest");
+  const docsRoot = path.resolve(__dirname, "..");
   return [
     {
       text: "Polaris",
@@ -85,16 +85,16 @@ export default defineConfig({
     siteTitle: "Polaris Docs",
     nav: [
       { text: "Home", link: "/" },
-      { text: "Docs", link: "/latest/" },
+      { text: "Docs", link: "/polaris/" },
     ],
     sidebar: {
-      "/latest/": buildDocsSidebar(),
       "/": [
+        ...buildDocsSidebar(),
         {
           text: "Docs",
           items: [
             { text: "Home", link: "/" },
-            { text: "Open Docs", link: "/latest/" },
+            { text: "Open Docs", link: "/polaris/" },
           ],
         },
       ],
