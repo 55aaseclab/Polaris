@@ -23,9 +23,6 @@ import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
   createPortalCredential,
-  createPortalAiAccessTopUpSession,
-  getPortalAiAccess,
-  getPortalAiAccessTopUpInfo,
   createPortalSkill,
   listPortalAdminUsers,
   deletePortalUser,
@@ -59,7 +56,6 @@ import {
   createPortalUser,
   updatePortalUserProfile,
   writePortalCredentialFile,
-  performPortalAiAccessAction,
 } from "./service.js";
 import { subscribePortalWorkspaceStream } from "./workspace-live-hub.js";
 import type { PortalWorkspaceStreamEvent } from "../core/portal.js";
@@ -397,59 +393,6 @@ async function handleCredentialWrite(
     content: body.content ?? "",
   });
   sendJson(res, 200, updated);
-}
-
-async function handleAiAccessRead(
-  res: ServerResponse,
-  userId: string,
-): Promise<void> {
-  sendJson(res, 200, await getPortalAiAccess(userId));
-}
-
-async function handleAiAccessAction(
-  res: ServerResponse,
-  userId: string,
-  action: string,
-): Promise<void> {
-  if (
-    action !== "provision_access"
-    && action !== "top_up"
-    && action !== "refresh_status"
-    && action !== "retry"
-  ) {
-    badRequest(res, `Unsupported AI access action '${action}'`);
-    return;
-  }
-  sendJson(res, 200, await performPortalAiAccessAction({
-    userId,
-    action,
-  }));
-}
-
-async function handleAiAccessTopUpInfo(
-  res: ServerResponse,
-  userId: string,
-): Promise<void> {
-  sendJson(res, 200, await getPortalAiAccessTopUpInfo(userId));
-}
-
-async function handleAiAccessTopUpSession(
-  req: IncomingMessage,
-  res: ServerResponse,
-  userId: string,
-): Promise<void> {
-  const body = await readBody(req);
-  const methodId = body.methodId?.trim() || "";
-  const amount = Number(body.amount ?? 0);
-  if (!methodId || !Number.isFinite(amount)) {
-    badRequest(res, "AI access top-up methodId and amount are required");
-    return;
-  }
-  sendJson(res, 200, await createPortalAiAccessTopUpSession({
-    userId,
-    methodId,
-    amount,
-  }));
 }
 
 async function handleWorkspaceLiveCredentialSwitch(
@@ -928,27 +871,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             user: profile,
             credentials: listUserPortalCredentials(routeUserId),
           });
-          return;
-        }
-        if (segments[3] === "ai-access" && segments.length === 4 && req.method === "GET") {
-          await handleAiAccessRead(res, routeUserId);
-          return;
-        }
-        if (segments[3] === "ai-access" && segments.length === 5 && segments[4] === "topup-info" && req.method === "GET") {
-          await handleAiAccessTopUpInfo(res, routeUserId);
-          return;
-        }
-        if (segments[3] === "ai-access" && segments.length === 5 && segments[4] === "topup-session" && req.method === "POST") {
-          await handleAiAccessTopUpSession(req, res, routeUserId);
-          return;
-        }
-        if (
-          segments[3] === "ai-access"
-          && segments.length === 6
-          && segments[4] === "actions"
-          && req.method === "POST"
-        ) {
-          await handleAiAccessAction(res, routeUserId, decodeURIComponent(segments[5]));
           return;
         }
         if (segments[3] === "skills" && segments.length === 4) {

@@ -917,6 +917,34 @@ export function resolveActiveManagedCredential(args: {
   ) ?? null;
 }
 
+function resolveDefaultCodexRightCodeApiKey(): string {
+  const script = String(
+    process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT ?? "",
+  ).trim();
+  if (script) {
+    const result = spawnSync("bash", ["-lc", script], {
+      encoding: "utf8",
+    });
+    if (result.error) {
+      throw new Error(
+        `Failed to execute POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT: ${result.error.message}`,
+      );
+    }
+    if ((result.status ?? 1) !== 0) {
+      const stderr = String(result.stderr ?? "").trim();
+      const stdout = String(result.stdout ?? "").trim();
+      throw new Error(
+        stderr
+          || stdout
+          || `POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT failed with exit code ${result.status ?? 1}`,
+      );
+    }
+    return String(result.stdout ?? "").trim();
+  }
+
+  return String(process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY ?? "").trim();
+}
+
 function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
   const policies: DefaultCredentialPolicy[] = [
     {
@@ -927,9 +955,7 @@ function resolveDefaultCredentialPolicies(): DefaultCredentialPolicy[] {
     },
   ];
 
-  const codexRightCodeApiKey = String(
-    process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY ?? "",
-  ).trim();
+  const codexRightCodeApiKey = resolveDefaultCodexRightCodeApiKey();
   if (codexRightCodeApiKey) {
     policies.push({
       harness: "codex",

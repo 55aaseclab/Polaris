@@ -131,7 +131,7 @@ Typical events include:
 - install, upgrade, and uninstall lifecycle
 - Docker checks, image pulls, and bundle resolution
 - app launch, portal readiness, and shutdown
-- workspace, credential, and AI access actions
+- workspace and credential actions
 - API failures, unhandled exceptions, and runtime action failures
 
 To enable telemetry in stage-one local deployment, set:

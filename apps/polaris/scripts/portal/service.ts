@@ -75,16 +75,6 @@ import {
   syncPortalWorkspaceSkills as syncPortalWorkspaceSkillsExecutor,
   uninstallPortalWorkspaceSkill as uninstallPortalWorkspaceSkillExecutor,
 } from "../executor/client.js";
-import {
-  createPortalAiAccessTopUpSession as createPortalAiAccessTopUpSessionView,
-  getPortalAiAccess as getPortalAiAccessView,
-  getPortalAiAccessTopUpInfo as getPortalAiAccessTopUpInfoView,
-  performPortalAiAccessAction as performPortalAiAccessActionView,
-  type PortalAiAccessActionKind,
-  type PortalAiAccessTopUpInfo,
-  type PortalAiAccessTopUpSession,
-  type PortalAiAccessView,
-} from "./ai-access.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
@@ -253,41 +243,6 @@ export function readUserPortalCredentialPreview(
     content: "[credential preview hidden]",
     truncated: false,
   };
-}
-
-export async function getPortalAiAccess(
-  userId: string,
-): Promise<PortalAiAccessView> {
-  return withUserMutationLock(import.meta.url, userId, async () =>
-    getPortalAiAccessView(userId),
-  );
-}
-
-export async function performPortalAiAccessAction(input: {
-  userId: string;
-  action: PortalAiAccessActionKind;
-}): Promise<PortalAiAccessView> {
-  return withUserMutationLock(import.meta.url, input.userId, async () =>
-    performPortalAiAccessActionView(input.userId, input.action),
-  );
-}
-
-export async function getPortalAiAccessTopUpInfo(
-  userId: string,
-): Promise<PortalAiAccessTopUpInfo> {
-  return withUserMutationLock(import.meta.url, userId, async () =>
-    getPortalAiAccessTopUpInfoView(userId),
-  );
-}
-
-export async function createPortalAiAccessTopUpSession(input: {
-  userId: string;
-  methodId: string;
-  amount: number;
-}): Promise<PortalAiAccessTopUpSession> {
-  return withUserMutationLock(import.meta.url, input.userId, async () =>
-    createPortalAiAccessTopUpSessionView(input),
-  );
 }
 
 export async function createPortalSkill(input: {
