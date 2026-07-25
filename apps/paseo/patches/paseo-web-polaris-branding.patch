@@ -11,6 +11,28 @@ index 959fb27..6f29797 100644
      },
      autolinking: {
        searchPaths: ["../../node_modules", "./node_modules"],
+diff --git a/packages/app/public/index.html b/packages/app/public/index.html
+index f7116fc..5f951df 100644
+--- a/packages/app/public/index.html
++++ b/packages/app/public/index.html
+@@ -83,6 +83,17 @@
+     </style>
+   </head>
+   <body>
++    <script>
++      (() => {
++        const favicon = document.querySelector('link[rel="icon"]');
++        const href = favicon?.getAttribute("href");
++        if (!favicon || !href) return;
++
++        const url = new URL(href, window.location.href);
++        url.searchParams.set("v", "polaris-20260725");
++        favicon.href = url.toString();
++      })();
++    </script>
+     <noscript>You need to enable JavaScript to run this app.</noscript>
+     <div id="root"></div>
+   </body>
 diff --git a/packages/app/src/hooks/use-favicon-status.ts b/packages/app/src/hooks/use-favicon-status.ts
 index 0f054ee..d4b08aa 100644
 --- a/packages/app/src/hooks/use-favicon-status.ts
