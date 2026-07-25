@@ -484,7 +484,7 @@ index a290156..a3e5114 100644
          />
          <View style={desktopStyles.contentPane}>
 diff --git a/packages/app/src/screens/settings/host-page.tsx b/packages/app/src/screens/settings/host-page.tsx
-index 7a97631..f25f8de 100644
+index 7a97631..efa91e0 100644
 --- a/packages/app/src/screens/settings/host-page.tsx
 +++ b/packages/app/src/screens/settings/host-page.tsx
 @@ -5,6 +5,7 @@ import {
@@ -503,20 +503,17 @@ index 7a97631..f25f8de 100644
  import { useTranslation } from "react-i18next";
  import { Alert, Pressable, Text, View } from "react-native";
  import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
-@@ -58,6 +60,12 @@ import { formatLatency } from "@/utils/latency";
+@@ -58,6 +60,9 @@ import { formatLatency } from "@/utils/latency";
  import { ICON_SIZE } from "@/styles/theme";
  import type { Theme } from "@/styles/theme";
  import { getProviderIcon } from "@/components/provider-icons";
 +import { useToast } from "@/contexts/toast-context";
 +import { getPolarisAuthToken, polarisApiBaseUrl } from "@/lib/polaris-authing";
-+import {
-+  findPolarisHostForServerId,
-+  type PolarisHostSummary,
-+} from "@/lib/polaris-host-sync";
++import { findPolarisHostForServerId, type PolarisHostSummary } from "@/lib/polaris-host-sync";
  
  const ThemedArrowUp = withUnistyles(ArrowUp);
  const ThemedArrowDown = withUnistyles(ArrowDown);
-@@ -353,7 +361,94 @@ export function HostSettingsPage({
+@@ -353,7 +358,93 @@ export function HostSettingsPage({
  
        {isLocalDaemon ? <LocalDaemonSection /> : null}
  
@@ -557,13 +554,14 @@ index 7a97631..f25f8de 100644
 +  }, [load]);
 +  const act = useCallback(
 +    async (action: "start" | "stop") => {
-+      if (!workspace || busy) return;
++      const workspaceName = workspace?.name ?? host.label.trim();
++      if (!workspaceName || busy) return;
 +      setBusy(true);
 +      try {
 +        const token = getPolarisAuthToken();
 +        if (!token) throw new Error("请先登录 Polaris");
 +        const response = await fetch(
-+          `${polarisApiBaseUrl()}/polaris-hosts/${encodeURIComponent(workspace.name)}`,
++          `${polarisApiBaseUrl()}/polaris-hosts/${encodeURIComponent(workspaceName)}`,
 +          {
 +            method: "POST",
 +            headers: {
@@ -581,23 +579,21 @@ index 7a97631..f25f8de 100644
 +        setBusy(false);
 +      }
 +    },
-+    [busy, load, toast, workspace],
++    [busy, host.label, load, toast, workspace],
 +  );
-+  if (!workspace) return null;
-+  const isRunning = workspace.status?.driver?.status === "running";
-+  const driver = workspace.status?.driver?.selected;
++  const isRunning = workspace?.status?.driver?.status === "running";
++  const driver = workspace?.status?.driver?.selected;
 +  const driverLabel = driver?.profile
 +    ? `${driver.backend} · ${driver.profile}`
-+    : driver?.backend || "Driver 未配置";
++    : driver?.backend || "Polaris Host";
++  const statusLabel = workspace ? (isRunning ? "运行中" : "已停止") : "状态未知";
 +
 +  return (
 +    <View style={settingsStyles.card}>
 +      <View style={settingsStyles.row}>
 +        <View style={settingsStyles.rowContent}>
 +          <Text style={settingsStyles.rowTitle}>运行</Text>
-+          <Text style={settingsStyles.rowHint}>
-+            {`${driverLabel} · ${isRunning ? "运行中" : "已停止"}`}
-+          </Text>
++          <Text style={settingsStyles.rowHint}>{`${driverLabel} · ${statusLabel}`}</Text>
 +        </View>
 +        <Button
 +          size="sm"
@@ -612,7 +608,7 @@ index 7a97631..f25f8de 100644
      </View>
    );
  }
-@@ -978,10 +1073,12 @@ function RemoveHostSection({
+@@ -978,10 +1069,12 @@ function RemoveHostSection({
    host,
    isLocalDaemon,
    onRemoved,
@@ -625,7 +621,7 @@ index 7a97631..f25f8de 100644
  }) {
    const { t } = useTranslation();
    const { theme } = useUnistyles();
-@@ -990,6 +1087,7 @@ function RemoveHostSection({
+@@ -990,6 +1083,7 @@ function RemoveHostSection({
    const { data: daemonStatusData, setStatus } = useDaemonStatus();
    const [isConfirming, setIsConfirming] = useState(false);
    const [isRemoving, setIsRemoving] = useState(false);
@@ -633,7 +629,7 @@ index 7a97631..f25f8de 100644
    const daemonStatus = daemonStatusData?.status ?? null;
    const removeHostHeader = useMemo<SheetHeader>(
      () => ({
-@@ -1005,7 +1103,30 @@ function RemoveHostSection({
+@@ -1005,7 +1099,30 @@ function RemoveHostSection({
      [theme.colors.destructive],
    );
  
@@ -665,7 +661,7 @@ index 7a97631..f25f8de 100644
    const handleCloseConfirm = useCallback(() => {
      if (isRemoving) return;
      setIsConfirming(false);
-@@ -1047,6 +1168,34 @@ function RemoveHostSection({
+@@ -1047,6 +1164,34 @@ function RemoveHostSection({
          }
          return;
        }
@@ -700,7 +696,7 @@ index 7a97631..f25f8de 100644
        await removeHost(host.serverId);
      };
      void remove()
-@@ -1057,11 +1206,12 @@ function RemoveHostSection({
+@@ -1057,11 +1202,12 @@ function RemoveHostSection({
        })
        .catch((error) => {
          console.error("[HostPage] Failed to remove host", error);
@@ -718,7 +714,7 @@ index 7a97631..f25f8de 100644
          );
        })
        .finally(() => setIsRemoving(false));
-@@ -1074,6 +1224,7 @@ function RemoveHostSection({
+@@ -1074,6 +1220,7 @@ function RemoveHostSection({
      rollbackLocalhostRemoval,
      setStatus,
      t,
@@ -726,7 +722,7 @@ index 7a97631..f25f8de 100644
      updateSettings,
    ]);
  
-@@ -1089,6 +1240,8 @@ function RemoveHostSection({
+@@ -1089,6 +1236,8 @@ function RemoveHostSection({
      >
        <RestartDaemonCard host={host} />
  
