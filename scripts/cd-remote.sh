@@ -19,11 +19,17 @@ cd "${ROOT_DIR}"
 
 bash ./scripts/ci-local.sh
 bash ./scripts/build-paseo-tool-bundle.sh
-bash ./scripts/build-paseo-web-artifact.sh
+(
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.prod
+  set +a
+  bash ./scripts/build-paseo-web-artifact.sh
+)
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 
-rsync -az --delete \
+rsync -az --delete --delete-excluded \
   --include "apps/paseo/tool-bundle/" \
   --include "apps/paseo/tool-bundle/bin/***" \
   --include "apps/paseo/tool-bundle/lib/" \

@@ -1,0 +1,993 @@
+diff --git a/packages/app/src/components/create-polaris-host-modal.tsx b/packages/app/src/components/create-polaris-host-modal.tsx
+new file mode 100644
+index 0000000..180056b
+--- /dev/null
++++ b/packages/app/src/components/create-polaris-host-modal.tsx
+@@ -0,0 +1,83 @@
++import { useCallback, useState } from "react";
++import { Text, View } from "react-native";
++import { StyleSheet, useUnistyles } from "react-native-unistyles";
++import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
++import { Button } from "@/components/ui/button";
++import { Switch } from "@/components/ui/switch";
++import { getPolarisAuthToken, polarisApiBaseUrl } from "@/lib/polaris-authing";
++import { addPolarisProject, DEFAULT_POLARIS_PROJECT_PATH } from "@/lib/polaris-project";
++import { useHostMutations } from "@/runtime/host-runtime";
++
++export function CreatePolarisHostModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
++  const { theme } = useUnistyles();
++  const { upsertConnectionFromOfferUrl } = useHostMutations();
++  const [name, setName] = useState("");
++  const [creating, setCreating] = useState(false);
++  const [createDefaultProject, setCreateDefaultProject] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++  const trimmedName = name.trim();
++  const validName = /^(?=.{1,63}$)(?=.*[a-z])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(trimmedName);
++  const create = useCallback(async () => {
++    const hostName = name.trim();
++    if (!hostName || creating) return;
++    if (!validName) {
++      setError("名称需为 1–63 位小写字母、数字或连字符，并且包含字母");
++      return;
++    }
++    setCreating(true); setError(null);
++    try {
++      const token = getPolarisAuthToken();
++      const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++        method: "POST",
++        headers: { "content-type": "application/x-www-form-urlencoded", ...(token ? { authorization: `Bearer ${token}` } : {}) },
++        body: new URLSearchParams({ hostName }).toString(),
++      });
++      const body = await response.json().catch(() => ({}));
++      if (!response.ok) {
++        const message = typeof body.error === "string" ? body.error : "创建主机失败";
++        if (/already exists/i.test(message)) throw new Error(`主机“${hostName}”已存在`);
++        throw new Error(message);
++      }
++      const deadline = Date.now() + 90_000;
++      while (Date.now() < deadline) {
++        await new Promise((resolve) => setTimeout(resolve, 1_000));
++        const hostsResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++          headers: token ? { authorization: `Bearer ${token}` } : {},
++        });
++        const hostsBody = await hostsResponse.json().catch(() => null) as {
++          hosts?: Array<{ name: string; status?: { paseo?: { liveTarget?: string | null } } | null }>;
++        } | null;
++        const pairingUrl = hostsBody?.hosts?.find((host) => host.name === hostName)
++          ?.status?.paseo?.liveTarget?.trim();
++        if (!pairingUrl) continue;
++        const profile = await upsertConnectionFromOfferUrl(pairingUrl, hostName);
++        if (createDefaultProject) {
++          await addPolarisProject(profile.serverId, DEFAULT_POLARIS_PROJECT_PATH);
++        }
++        setName(""); onClose(); return;
++      }
++      throw new Error("主机仍在准备中，请稍后刷新主机列表");
++    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
++    finally { setCreating(false); }
++  }, [createDefaultProject, creating, name, onClose, upsertConnectionFromOfferUrl, validName]);
++  return <AdaptiveModalSheet header={{ title: "创建主机" }} visible={visible} onClose={onClose}>
++    <View style={styles.field}><Text style={styles.label}>名称</Text><AdaptiveTextInput value={name} onChangeText={(value) => { setName(value); setError(null); }} placeholder="主机名称" autoFocus /><Text style={validName || !trimmedName ? styles.hint : styles.error}>1–63 位小写字母、数字或连字符，首尾不能是连字符</Text></View>
++    <View style={styles.projectOption}>
++      <View style={styles.projectOptionCopy}>
++        <Text style={styles.label}>创建默认项目</Text>
++        <Text style={styles.hint}>{DEFAULT_POLARIS_PROJECT_PATH}</Text>
++      </View>
++      <Switch value={createDefaultProject} onValueChange={setCreateDefaultProject} />
++    </View>
++    {error ? <Text style={styles.error}>{error}</Text> : null}
++    <Button size="sm" loading={creating} disabled={!validName} onPress={() => void create()}>{creating ? "正在创建" : "创建"}</Button>
++  </AdaptiveModalSheet>;
++}
++const styles = StyleSheet.create((theme) => ({
++  field: { gap: theme.spacing[2] },
++  label: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
++  hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++  projectOption: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
++  projectOptionCopy: { gap: theme.spacing[1] },
++}));
+diff --git a/packages/app/src/i18n/resources/en.ts b/packages/app/src/i18n/resources/en.ts
+index bdaa7f8..032ca2e 100644
+--- a/packages/app/src/i18n/resources/en.ts
++++ b/packages/app/src/i18n/resources/en.ts
+@@ -1382,7 +1382,7 @@ export const en = {
+       local: "Local",
+     },
+     backToWorkspace: "Back",
+-    addHost: "Add host",
++    addHost: "Create Host",
+     projects: "Projects",
+     projectList: {
+       hostLoadFailed: "Couldn't load projects from host {{hostName}}: {{message}}",
+diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/resources/zh-CN.ts
+index 7cb3cb5..478b53b 100644
+--- a/packages/app/src/i18n/resources/zh-CN.ts
++++ b/packages/app/src/i18n/resources/zh-CN.ts
+@@ -1358,7 +1358,7 @@ export const zhCN: TranslationResources = {
+       local: "本机",
+     },
+     backToWorkspace: "返回",
+-    addHost: "添加主机",
++    addHost: "创建主机",
+     projects: "项目",
+     projectList: {
+       hostLoadFailed: "无法从 Host {{hostName}} 加载 projects：{{message}}",
+diff --git a/packages/app/src/lib/polaris-project.ts b/packages/app/src/lib/polaris-project.ts
+new file mode 100644
+index 0000000..97a0b5d
+--- /dev/null
++++ b/packages/app/src/lib/polaris-project.ts
+@@ -0,0 +1,31 @@
++import { getHostRuntimeStore } from "@/runtime/host-runtime";
++import {
++  normalizeEmptyProjectDescriptor,
++  useSessionStore,
++} from "@/stores/session-store";
++
++export const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
++
++export async function addPolarisProject(
++  serverId: string,
++  path: string,
++  isDisposed: () => boolean = () => false,
++): Promise<void> {
++  while (!isDisposed()) {
++    const client = getHostRuntimeStore().getClient(serverId);
++    if (client) {
++      const result = await client.addProject(path);
++      if (result.error) throw new Error(result.error);
++      if (result.project) {
++        const sessionStore = useSessionStore.getState();
++        sessionStore.addEmptyProject(
++          serverId,
++          normalizeEmptyProjectDescriptor(result.project),
++        );
++        sessionStore.setHasHydratedWorkspaces(serverId, true);
++      }
++      return;
++    }
++    await new Promise((resolve) => setTimeout(resolve, 1_000));
++  }
++}
+diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
+index a290156..a3e5114 100644
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -42,6 +42,7 @@ import {
+   Plus,
+   FolderGit2,
+   SquareTerminal,
++  UserRound,
+ } from "lucide-react-native";
+ import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
+ import { AppDiagnosticSheet } from "@/components/app-diagnostic-sheet";
+@@ -74,7 +75,7 @@ import { useWindowControlsPadding } from "@/utils/desktop-window";
+ import { confirmDialog } from "@/utils/confirm-dialog";
+ import { BackHeader } from "@/components/headers/back-header";
+ import { ScreenHeader } from "@/components/headers/screen-header";
+-import { AddHostMethodModal } from "@/components/add-host-method-modal";
++import { CreatePolarisHostModal } from "@/components/create-polaris-host-modal";
+ import { AddHostModal } from "@/components/add-host-modal";
+ import { PairLinkModal } from "@/components/pair-link-modal";
+ import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
+@@ -109,6 +110,7 @@ import {
+   HostWorkspacesPage,
+   HostTerminalsPage,
+ } from "@/screens/settings/host-page";
++import { PolarisUserPage } from "@/screens/settings/polaris-user-page";
+ import ProjectsScreen from "@/screens/projects-screen";
+ import ProjectSettingsScreen from "@/screens/project-settings-screen";
+ import { useIsCompactFormFactor } from "@/constants/layout";
+@@ -123,6 +125,7 @@ import {
+   type SettingsSectionSlug,
+ } from "@/utils/host-routes";
+ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
+ 
+ // ---------------------------------------------------------------------------
+ // View model
+@@ -132,6 +135,7 @@ export type SettingsView =
+   | { kind: "root" }
+   | { kind: "section"; section: SettingsSectionSlug }
+   | { kind: "host"; serverId: string; section: HostSectionSlug }
++  | { kind: "polaris-user" }
+   | { kind: "projects" }
+   | { kind: "project"; projectKey: string };
+ 
+@@ -520,9 +524,10 @@ interface AboutSectionProps {
+   appVersion: string | null;
+   appVersionText: string;
+   isDesktopApp: boolean;
++  hosts: HostProfile[];
+ }
+ 
+-function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
++function AboutSection({ appVersion, appVersionText, isDesktopApp, hosts }: AboutSectionProps) {
+   const { t } = useTranslation();
+   return (
+     <>
+@@ -538,7 +543,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
+           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+         </View>
+       </SettingsSection>
+-      <ConnectedHostsSection clientVersion={appVersion} />
++      <ConnectedHostsSection clientVersion={appVersion} hosts={hosts} />
+       <View style={styles.aboutCommunity}>
+         <CommunityLinks />
+       </View>
+@@ -552,9 +557,14 @@ function normalizeVersion(version: string | null | undefined): string | null {
+   return trimmed.replace(/^v/i, "");
+ }
+ 
+-function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null }) {
++function ConnectedHostsSection({
++  clientVersion,
++  hosts,
++}: {
++  clientVersion: string | null;
++  hosts: HostProfile[];
++}) {
+   const { t } = useTranslation();
+-  const hosts = useHosts();
+   if (hosts.length === 0) {
+     return null;
+   }
+@@ -1123,8 +1133,11 @@ interface SettingsSidebarProps {
+   onSelectHost: (serverId: string) => void;
+   onSelectProjects: () => void;
+   onAddHost: () => void;
++  onSelectPolarisUser: () => void;
+   onBackToWorkspace: () => void;
+   activeHostServerId: string | null;
++  hosts: HostProfile[];
++  hasPolarisSession: boolean;
+   layout: "desktop" | "mobile";
+ }
+ 
+@@ -1135,13 +1148,15 @@ function SettingsSidebar({
+   onSelectHost,
+   onSelectProjects,
+   onAddHost,
++  onSelectPolarisUser,
+   onBackToWorkspace,
+   activeHostServerId,
++  hosts,
++  hasPolarisSession,
+   layout,
+ }: SettingsSidebarProps) {
+   const { theme } = useUnistyles();
+   const { t } = useTranslation();
+-  const hosts = useHosts();
+   const localServerId = useLocalDaemonServerId();
+   const sortedHosts = useSortedHosts(hosts, localServerId);
+   const hasHosts = sortedHosts.length > 0;
+@@ -1183,29 +1198,41 @@ function SettingsSidebar({
+         ))}
+       </View>
+       <SidebarSeparator />
+-      {hasHosts ? (
+-        <View style={sidebarStyles.list}>
+-          <Text style={sidebarStyles.groupLabel}>{t("settings.groups.host")}</Text>
+-          <HostPicker
+-            activeServerId={activeHostServerId}
+-            sortedHosts={sortedHosts}
+-            localServerId={localServerId}
+-            onSelectHost={onSelectHost}
+-            onAddHost={onAddHost}
+-          />
+-          {HOST_SECTION_ITEMS.map((item) => (
+-            <SidebarHostSectionButton
+-              key={item.id}
+-              itemId={item.id}
+-              label={t(item.labelKey)}
+-              icon={item.icon}
+-              isSelected={selectedHostSection === item.id}
+-              onSelect={onSelectHostSection}
++      <View style={sidebarStyles.list}>
++        {hasPolarisSession ? (
++          <Pressable
++            accessibilityRole="button"
++            accessibilityLabel="用户管理"
++            onPress={onSelectPolarisUser}
++            testID="settings-polaris-user"
++            style={sidebarItemStyle}
++          >
++            <UserRound size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
++            <Text style={sidebarStyles.label} numberOfLines={1}>用户管理</Text>
++          </Pressable>
++        ) : null}
++        {hasHosts ? (
++          <>
++            <Text style={sidebarStyles.groupLabel}>{t("settings.groups.host")}</Text>
++            <HostPicker
++              activeServerId={activeHostServerId}
++              sortedHosts={sortedHosts}
++              localServerId={localServerId}
++              onSelectHost={onSelectHost}
++              onAddHost={onAddHost}
+             />
+-          ))}
+-        </View>
+-      ) : (
+-        <View style={sidebarStyles.list}>
++            {HOST_SECTION_ITEMS.map((item) => (
++              <SidebarHostSectionButton
++                key={item.id}
++                itemId={item.id}
++                label={t(item.labelKey)}
++                icon={item.icon}
++                isSelected={selectedHostSection === item.id}
++                onSelect={onSelectHostSection}
++              />
++            ))}
++          </>
++        ) : hasPolarisSession ? (
+           <Pressable
+             accessibilityRole="button"
+             accessibilityLabel={t("settings.addHost")}
+@@ -1218,8 +1245,8 @@ function SettingsSidebar({
+               {t("settings.addHost")}
+             </Text>
+           </Pressable>
+-        </View>
+-      )}
++        ) : null}
++      </View>
+     </>
+   );
+ 
+@@ -1279,9 +1306,17 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     [webScrollbarStyle],
+   );
+   const hosts = useHosts();
++  const hasPolarisSession = usePolarisAuthSession();
++  const visibleHosts = useMemo(
++    () => (hasPolarisSession ? hosts : []),
++    [hasPolarisSession, hosts],
++  );
+   const localServerId = useLocalDaemonServerId();
+-  const sortedHosts = useSortedHosts(hosts, localServerId);
+-  const hostServerIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
++  const sortedHosts = useSortedHosts(visibleHosts, localServerId);
++  const hostServerIds = useMemo(
++    () => visibleHosts.map((host) => host.serverId),
++    [visibleHosts],
++  );
+   const anyOnlineServerId = useAnyOnlineHostServerId(hostServerIds);
+   const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
+     view.kind === "host" ? view.serverId : null,
+@@ -1290,10 +1325,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (!selectedSettingsHostServerId) {
+       return null;
+     }
+-    return hosts.some((host) => host.serverId === selectedSettingsHostServerId)
++    return visibleHosts.some((host) => host.serverId === selectedSettingsHostServerId)
+       ? selectedSettingsHostServerId
+       : null;
+-  }, [hosts, selectedSettingsHostServerId]);
++  }, [visibleHosts, selectedSettingsHostServerId]);
+ 
+   useEffect(() => {
+     if (view.kind === "host") {
+@@ -1476,15 +1511,35 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     }
+   }, [isCompactLayout, router]);
+ 
++  const handleSelectPolarisUser = useCallback(() => {
++    if (isCompactLayout) {
++      router.push("/settings/user");
++    } else {
++      router.replace("/settings/user");
++    }
++  }, [isCompactLayout, router]);
++
+   const handleBackToRoot = useCallback(() => {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
++      return;
++    }
+     if (router.canGoBack()) {
+       router.back();
++      return;
++    }
++    if (anyOnlineServerId) {
++      router.replace(buildHostOpenProjectRoute(anyOnlineServerId));
+     } else {
+-      router.replace("/settings");
++      router.replace("/");
+     }
+-  }, [router]);
++  }, [anyOnlineServerId, hasPolarisSession, router]);
+ 
+   const handleBackToWorkspace = useCallback(() => {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
++      return;
++    }
+     if (navigateToLastWorkspace()) {
+       return;
+     }
+@@ -1493,7 +1548,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+       return;
+     }
+     router.replace("/");
+-  }, [anyOnlineServerId, router]);
++  }, [anyOnlineServerId, hasPolarisSession, router]);
+ 
+   const detailHeader = ((): {
+     title: string;
+@@ -1513,6 +1568,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (view.kind === "project" || view.kind === "projects") {
+       return { title: t("settings.projects"), Icon: FolderGit2 };
+     }
++    if (view.kind === "polaris-user") {
++      return { title: "用户管理", Icon: UserRound };
++    }
+     return null;
+   })();
+ 
+@@ -1526,6 +1584,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (view.kind === "project") {
+       return <ProjectSettingsScreen projectKey={view.projectKey} />;
+     }
++    if (view.kind === "polaris-user") {
++      return <PolarisUserPage />;
++    }
+     if (view.kind === "section") {
+       switch (view.section) {
+         case "general":
+@@ -1566,6 +1627,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+               appVersion={appVersion}
+               appVersionText={appVersionText}
+               isDesktopApp={isDesktopApp}
++              hosts={visibleHosts}
+             />
+           );
+       }
+@@ -1583,12 +1645,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+ 
+   const addHostModals = (
+     <>
+-      <AddHostMethodModal
++      <CreatePolarisHostModal
+         visible={isAddHostMethodVisible}
+         onClose={closeAddConnectionFlow}
+-        onDirectConnection={handleSelectDirectConnection}
+-        onPasteLink={handleSelectPasteLink}
+-        onScanQr={handleScanQr}
+       />
+       <AddHostModal
+         visible={isDirectHostVisible}
+@@ -1618,8 +1677,11 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+             onSelectHost={handleSelectHost}
+             onSelectProjects={handleSelectProjects}
+             onAddHost={handleAddHost}
++            onSelectPolarisUser={handleSelectPolarisUser}
+             onBackToWorkspace={handleBackToWorkspace}
+             activeHostServerId={activeHostServerId}
++            hosts={visibleHosts}
++            hasPolarisSession={hasPolarisSession}
+             layout="mobile"
+           />
+         </ScrollView>
+@@ -1662,8 +1724,11 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+           onSelectHost={handleSelectHost}
+           onSelectProjects={handleSelectProjects}
+           onAddHost={handleAddHost}
++          onSelectPolarisUser={handleSelectPolarisUser}
+           onBackToWorkspace={handleBackToWorkspace}
+           activeHostServerId={activeHostServerId}
++          hosts={visibleHosts}
++          hasPolarisSession={hasPolarisSession}
+           layout="desktop"
+         />
+         <View style={desktopStyles.contentPane}>
+diff --git a/packages/app/src/screens/settings/host-page.tsx b/packages/app/src/screens/settings/host-page.tsx
+index 7a97631..f25f8de 100644
+--- a/packages/app/src/screens/settings/host-page.tsx
++++ b/packages/app/src/screens/settings/host-page.tsx
+@@ -5,6 +5,7 @@ import {
+   Globe,
+   Monitor,
+   Pencil,
++  Power,
+   Plus,
+   RotateCw,
+   SquareTerminal,
+@@ -12,6 +13,7 @@ import {
+ } from "lucide-react-native";
+ import type { TFunction } from "i18next";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
++import type { ReactNode } from "react";
+ import { useTranslation } from "react-i18next";
+ import { Alert, Pressable, Text, View } from "react-native";
+ import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
+@@ -58,6 +60,12 @@ import { formatLatency } from "@/utils/latency";
+ import { ICON_SIZE } from "@/styles/theme";
+ import type { Theme } from "@/styles/theme";
+ import { getProviderIcon } from "@/components/provider-icons";
++import { useToast } from "@/contexts/toast-context";
++import { getPolarisAuthToken, polarisApiBaseUrl } from "@/lib/polaris-authing";
++import {
++  findPolarisHostForServerId,
++  type PolarisHostSummary,
++} from "@/lib/polaris-host-sync";
+ 
+ const ThemedArrowUp = withUnistyles(ArrowUp);
+ const ThemedArrowDown = withUnistyles(ArrowDown);
+@@ -353,7 +361,94 @@ export function HostSettingsPage({
+ 
+       {isLocalDaemon ? <LocalDaemonSection /> : null}
+ 
+-      <RemoveHostSection host={host} isLocalDaemon={isLocalDaemon} onRemoved={onHostRemoved} />
++      <RemoveHostSection
++        host={host}
++        isLocalDaemon={isLocalDaemon}
++        onRemoved={onHostRemoved}
++        polarisControls={<PolarisHostControls host={host} />}
++      />
++    </View>
++  );
++}
++
++function PolarisHostControls({ host }: { host: HostProfile }) {
++  const toast = useToast();
++  const [workspace, setWorkspace] = useState<PolarisHostSummary | null>(null);
++  const [busy, setBusy] = useState(false);
++  const load = useCallback(async () => {
++    const token = getPolarisAuthToken();
++    if (!token) {
++      setWorkspace(null);
++      return;
++    }
++    const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++      headers: { authorization: `Bearer ${token}` },
++    });
++    if (!response.ok) throw new Error("无法读取 Polaris 主机状态");
++    const body = (await response.json().catch(() => null)) as {
++      hosts?: PolarisHostSummary[];
++    } | null;
++    setWorkspace(findPolarisHostForServerId(body?.hosts ?? [], host.serverId));
++  }, [host.serverId]);
++  useEffect(() => {
++    void load().catch((error) => {
++      console.warn("[HostPage] Failed to load Polaris host status", error);
++    });
++  }, [load]);
++  const act = useCallback(
++    async (action: "start" | "stop") => {
++      if (!workspace || busy) return;
++      setBusy(true);
++      try {
++        const token = getPolarisAuthToken();
++        if (!token) throw new Error("请先登录 Polaris");
++        const response = await fetch(
++          `${polarisApiBaseUrl()}/polaris-hosts/${encodeURIComponent(workspace.name)}`,
++          {
++            method: "POST",
++            headers: {
++              "content-type": "application/x-www-form-urlencoded",
++              ...(token ? { authorization: `Bearer ${token}` } : {}),
++            },
++            body: new URLSearchParams({ action }).toString(),
++          },
++        );
++        if (!response.ok) throw new Error("Polaris 操作失败");
++        await load();
++      } catch (error) {
++        toast.error(error instanceof Error ? error.message : "Polaris 操作失败");
++      } finally {
++        setBusy(false);
++      }
++    },
++    [busy, load, toast, workspace],
++  );
++  if (!workspace) return null;
++  const isRunning = workspace.status?.driver?.status === "running";
++  const driver = workspace.status?.driver?.selected;
++  const driverLabel = driver?.profile
++    ? `${driver.backend} · ${driver.profile}`
++    : driver?.backend || "Driver 未配置";
++
++  return (
++    <View style={settingsStyles.card}>
++      <View style={settingsStyles.row}>
++        <View style={settingsStyles.rowContent}>
++          <Text style={settingsStyles.rowTitle}>运行</Text>
++          <Text style={settingsStyles.rowHint}>
++            {`${driverLabel} · ${isRunning ? "运行中" : "已停止"}`}
++          </Text>
++        </View>
++        <Button
++          size="sm"
++          variant="secondary"
++          leftIcon={Power}
++          disabled={busy}
++          onPress={() => void act(isRunning ? "stop" : "start")}
++        >
++          {isRunning ? "停止" : "开始"}
++        </Button>
++      </View>
+     </View>
+   );
+ }
+@@ -978,10 +1073,12 @@ function RemoveHostSection({
+   host,
+   isLocalDaemon,
+   onRemoved,
++  polarisControls,
+ }: {
+   host: HostProfile;
+   isLocalDaemon: boolean;
+   onRemoved?: () => void;
++  polarisControls?: ReactNode;
+ }) {
+   const { t } = useTranslation();
+   const { theme } = useUnistyles();
+@@ -990,6 +1087,7 @@ function RemoveHostSection({
+   const { data: daemonStatusData, setStatus } = useDaemonStatus();
+   const [isConfirming, setIsConfirming] = useState(false);
+   const [isRemoving, setIsRemoving] = useState(false);
++  const toast = useToast();
+   const daemonStatus = daemonStatusData?.status ?? null;
+   const removeHostHeader = useMemo<SheetHeader>(
+     () => ({
+@@ -1005,7 +1103,30 @@ function RemoveHostSection({
+     [theme.colors.destructive],
+   );
+ 
+-  const handleOpenConfirm = useCallback(() => setIsConfirming(true), []);
++  const handleOpenConfirm = useCallback(() => {
++    void (async () => {
++      try {
++        const token = getPolarisAuthToken();
++        if (token && !isLocalDaemon) {
++          const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++            headers: { authorization: `Bearer ${token}` },
++          });
++          if (!response.ok) throw new Error("无法确认 Polaris 主机状态");
++          const body = (await response.json().catch(() => null)) as {
++            hosts?: PolarisHostSummary[];
++          } | null;
++          const workspace = findPolarisHostForServerId(body?.hosts ?? [], host.serverId);
++          if (workspace?.status?.driver?.status === "running") {
++            toast.error("请先停止主机，再删除");
++            return;
++          }
++        }
++        setIsConfirming(true);
++      } catch (reason) {
++        toast.error(reason instanceof Error ? reason.message : "无法确认 Polaris 主机状态");
++      }
++    })();
++  }, [host.serverId, isLocalDaemon, toast]);
+   const handleCloseConfirm = useCallback(() => {
+     if (isRemoving) return;
+     setIsConfirming(false);
+@@ -1047,6 +1168,34 @@ function RemoveHostSection({
+         }
+         return;
+       }
++      const token = getPolarisAuthToken();
++      if (token) {
++        const listResponse = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++          headers: { authorization: `Bearer ${token}` },
++        });
++        if (!listResponse.ok) throw new Error("无法确认 Polaris 主机状态");
++        const list = (await listResponse.json().catch(() => null)) as {
++          hosts?: PolarisHostSummary[];
++        } | null;
++        const workspace = findPolarisHostForServerId(list?.hosts ?? [], host.serverId);
++        if (workspace) {
++          if (workspace.status?.driver?.status === "running") {
++            throw new Error("主机运行中，请先停止后再删除");
++          }
++          const deleteResponse = await fetch(
++            `${polarisApiBaseUrl()}/polaris-hosts/${encodeURIComponent(workspace.name)}`,
++            {
++              method: "POST",
++              headers: {
++                "content-type": "application/x-www-form-urlencoded",
++                authorization: `Bearer ${token}`,
++              },
++              body: new URLSearchParams({ action: "delete" }).toString(),
++            },
++          );
++          if (!deleteResponse.ok) throw new Error("删除 Polaris 工作空间失败");
++        }
++      }
+       await removeHost(host.serverId);
+     };
+     void remove()
+@@ -1057,11 +1206,12 @@ function RemoveHostSection({
+       })
+       .catch((error) => {
+         console.error("[HostPage] Failed to remove host", error);
+-        Alert.alert(
+-          t("settings.host.daemon.remove.errorTitle"),
+-          isLocalDaemon
+-            ? t("settings.host.daemon.remove.localErrorMessage")
+-            : t("settings.host.daemon.remove.errorMessage"),
++        toast.error(
++          error instanceof Error
++            ? error.message
++            : isLocalDaemon
++              ? t("settings.host.daemon.remove.localErrorMessage")
++              : t("settings.host.daemon.remove.errorMessage"),
+         );
+       })
+       .finally(() => setIsRemoving(false));
+@@ -1074,6 +1224,7 @@ function RemoveHostSection({
+     rollbackLocalhostRemoval,
+     setStatus,
+     t,
++    toast,
+     updateSettings,
+   ]);
+ 
+@@ -1089,6 +1240,8 @@ function RemoveHostSection({
+     >
+       <RestartDaemonCard host={host} />
+ 
++      {polarisControls}
++
+       <View style={settingsStyles.card}>
+         <View style={settingsStyles.row}>
+           <View style={settingsStyles.rowContent}>
+diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
+new file mode 100644
+index 0000000..ae64c7e
+--- /dev/null
++++ b/packages/app/src/screens/settings/polaris-user-page.tsx
+@@ -0,0 +1,250 @@
++import { useCallback, useEffect, useState } from "react";
++import { ActivityIndicator, Text, View } from "react-native";
++import { StyleSheet, useUnistyles } from "react-native-unistyles";
++import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
++import { Button } from "@/components/ui/button";
++import { SettingsSection } from "@/screens/settings/settings-section";
++import { settingsStyles } from "@/styles/settings";
++import { getPolarisAuthToken, polarisApiBaseUrl, signOutPolaris } from "@/lib/polaris-authing";
++
++interface PolarisUserResponse {
++  profile: { id: string; name?: string; email?: string };
++  session: {
++    userId: string;
++    authingUserId: string;
++    authingUsername: string | null;
++    authingPhoneNumber: string | null;
++    role: string;
++    plan: string | null;
++  };
++  credentials: Array<{ id: string; label: string; kind: string; status: string; paths: string[] }>;
++}
++
++interface PolarisCredentialRecord {
++  credential: { id: string; label: string };
++  files: Array<{ key: string; sourcePath: string; content: string }>;
++}
++
++export function PolarisUserPage() {
++  const { theme } = useUnistyles();
++  const [data, setData] = useState<PolarisUserResponse | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [credentialRecord, setCredentialRecord] = useState<PolarisCredentialRecord | null>(null);
++  const [credentialLoading, setCredentialLoading] = useState(false);
++  const [credentialError, setCredentialError] = useState<string | null>(null);
++  const [signOutConfirmVisible, setSignOutConfirmVisible] = useState(false);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    try {
++      const response = await fetch(`${polarisApiBaseUrl()}/polaris-user`, {
++        headers: getPolarisAuthToken() ? { authorization: `Bearer ${getPolarisAuthToken()}` } : {},
++      });
++      const body = await response.json().catch(() => ({}));
++      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "无法加载用户信息");
++      setData(body as PolarisUserResponse);
++      setError(null);
++    } catch (reason) {
++      setError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    void load();
++  }, [load]);
++
++  const handleConfirmSignOut = useCallback(() => {
++    signOutPolaris();
++  }, []);
++
++  const handleViewCredential = useCallback(async (credential: PolarisUserResponse["credentials"][number]) => {
++    if (!data || credentialLoading) return;
++    setCredentialLoading(true);
++    setCredentialError(null);
++    setCredentialRecord({ credential: { id: credential.id, label: credential.label }, files: [] });
++    try {
++      const token = getPolarisAuthToken();
++      const response = await fetch(
++        `${polarisApiBaseUrl()}/users/${encodeURIComponent(data.session.userId)}/credentials/${encodeURIComponent(credential.id)}`,
++        { headers: token ? { authorization: `Bearer ${token}` } : {} },
++      );
++      const body = await response.json().catch(() => ({}));
++      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "无法读取凭证");
++      setCredentialRecord(body as PolarisCredentialRecord);
++    } catch (reason) {
++      setCredentialError(reason instanceof Error ? reason.message : String(reason));
++    } finally {
++      setCredentialLoading(false);
++    }
++  }, [credentialLoading, data]);
++
++  const closeCredentialViewer = useCallback(() => {
++    setCredentialRecord(null);
++    setCredentialError(null);
++  }, []);
++
++  if (loading) {
++    return <ActivityIndicator color={theme.colors.foregroundMuted} />;
++  }
++
++  if (error || !data) {
++    return <Text style={styles.error}>{error || "无法加载用户信息"}</Text>;
++  }
++
++  return (
++    <View>
++      <SettingsSection title="基本信息">
++        <View style={settingsStyles.card}>
++          <InfoRow label="用户名称" value={data.profile.name || data.session.authingUsername || "未设置"} />
++          <InfoRow label="邮箱" value={data.profile.email || "未设置"} bordered />
++          <InfoRow label="手机号" value={data.session.authingPhoneNumber || "未设置"} bordered />
++          <InfoRow label="用户 ID" value={data.session.userId} bordered />
++          <InfoRow label="Authing ID" value={data.session.authingUserId} bordered />
++          <InfoRow label="角色" value={data.session.role} bordered />
++          <InfoRow label="订阅" value={formatPlan(data.session.plan)} bordered />
++        </View>
++      </SettingsSection>
++
++      <SettingsSection title="凭证">
++        <View style={settingsStyles.card}>
++          {data.credentials.length > 0 ? data.credentials.map((credential, index) => (
++            <CredentialRow
++              key={credential.id}
++              credential={credential}
++              bordered={index > 0}
++              onView={() => void handleViewCredential(credential)}
++            />
++          )) : <Text style={styles.empty}>还没有凭证</Text>}
++        </View>
++      </SettingsSection>
++
++      <SettingsSection title="会话">
++        <View style={settingsStyles.card}>
++          <View style={settingsStyles.row}>
++            <View style={settingsStyles.rowContent}>
++              <Text style={settingsStyles.rowTitle}>退出登录</Text>
++              <Text style={settingsStyles.rowHint}>退出当前 Polaris 会话</Text>
++            </View>
++            <Button size="sm" variant="destructive" onPress={() => setSignOutConfirmVisible(true)}>
++              退出
++            </Button>
++          </View>
++        </View>
++      </SettingsSection>
++
++      {credentialRecord ? (
++        <AdaptiveModalSheet
++          header={{ title: credentialRecord.credential.label, subtitle: "凭证内容" }}
++          visible
++          onClose={closeCredentialViewer}
++          desktopMaxWidth={720}
++        >
++          {credentialLoading ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
++          {credentialError ? <Text style={styles.error}>{credentialError}</Text> : null}
++          {!credentialLoading && !credentialError && credentialRecord.files.length === 0 ? (
++            <Text style={styles.empty}>没有可查看的凭证文件</Text>
++          ) : null}
++          {!credentialLoading && !credentialError ? credentialRecord.files.map((file) => (
++            <View key={file.key} style={settingsStyles.card}>
++              <View style={settingsStyles.row}>
++                <Text style={settingsStyles.rowTitle} numberOfLines={1}>{file.sourcePath}</Text>
++              </View>
++              <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
++                <Text selectable style={styles.fileContent}>{file.content}</Text>
++              </View>
++            </View>
++          )) : null}
++        </AdaptiveModalSheet>
++      ) : null}
++
++      <AdaptiveModalSheet
++        header={{ title: "退出登录？" }}
++        visible={signOutConfirmVisible}
++        onClose={() => setSignOutConfirmVisible(false)}
++      >
++        <Text style={styles.confirmText}>你将退出 Polaris</Text>
++        <View style={styles.confirmActions}>
++          <Button
++            size="sm"
++            variant="secondary"
++            style={styles.confirmAction}
++            onPress={() => setSignOutConfirmVisible(false)}
++          >
++            取消
++          </Button>
++          <Button
++            size="sm"
++            variant="destructive"
++            style={styles.confirmAction}
++            onPress={handleConfirmSignOut}
++          >
++            退出登录
++          </Button>
++        </View>
++      </AdaptiveModalSheet>
++    </View>
++  );
++}
++
++function InfoRow({ label, value, bordered = false }: { label: string; value: string; bordered?: boolean }) {
++  return (
++    <View style={[settingsStyles.row, bordered && settingsStyles.rowBorder]}>
++      <View style={settingsStyles.rowContent}>
++        <Text style={settingsStyles.rowTitle} numberOfLines={1}>{label}</Text>
++      </View>
++      <Text style={styles.value} numberOfLines={1}>{value}</Text>
++    </View>
++  );
++}
++
++function formatPlan(plan: string | null): string {
++  if (plan === "free") return "免费套餐";
++  if (plan === "pro") return "专业套餐";
++  return plan || "未订阅";
++}
++
++function CredentialRow({
++  credential,
++  bordered,
++  onView,
++}: {
++  credential: PolarisUserResponse["credentials"][number];
++  bordered: boolean;
++  onView: () => void;
++}) {
++  return (
++    <View style={[settingsStyles.row, bordered && settingsStyles.rowBorder]}>
++      <View style={settingsStyles.rowContent}>
++        <Text style={settingsStyles.rowTitle} numberOfLines={1}>{credential.label}</Text>
++        {credential.paths.length > 0 ? (
++          <Text style={settingsStyles.rowHint} numberOfLines={1}>{credential.paths.join(" · ")}</Text>
++        ) : null}
++      </View>
++      {credential.status === "ready" ? (
++        <Button size="sm" variant="secondary" onPress={onView}>查看</Button>
++      ) : <Text style={styles.value} numberOfLines={1}>{credential.status}</Text>}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  value: { maxWidth: "58%", color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, textAlign: "right" },
++  empty: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm, minHeight: 42, padding: theme.spacing[3] },
++  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
++  confirmText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
++  confirmActions: {
++    flexDirection: "row",
++    gap: theme.spacing[2],
++    marginTop: theme.spacing[4],
++  },
++  confirmAction: { flex: 1 },
++  fileContent: {
++    color: theme.colors.foreground,
++    fontFamily: theme.fontFamily.mono,
++    fontSize: theme.fontSize.code,
++    lineHeight: theme.lineHeight.diff,
++  },
++}));

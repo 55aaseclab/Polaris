@@ -1,0 +1,90 @@
+diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
+index dea7666..d6ba159 100644
+--- a/packages/app/src/runtime/host-runtime.ts
++++ b/packages/app/src/runtime/host-runtime.ts
+@@ -44,6 +44,7 @@ import {
+ } from "@/workspace/legacy-daemon-workspaces";
+ import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
+ import { queryClient } from "@/query/query-client";
++import { hasPolarisAuthSession, subscribePolarisAuthSession } from "@/lib/polaris-authing";
+ 
+ export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
+ export type HostRegistryStatus = "loading" | "ready";
+@@ -138,6 +139,19 @@ export interface HostRuntimeControllerDeps {
+   getClientId: () => Promise<string>;
+ }
+ 
++// Stable empty snapshot for useSyncExternalStore. Returning a fresh [] on
++// every getSnapshot call causes an infinite re-render loop.
++const EMPTY_POLARIS_HOSTS: HostProfile[] = [];
++
++export function filterHostsForPolarisSession(
++  hosts: HostProfile[],
++  hasPolarisSession: boolean,
++): HostProfile[] {
++  // Preserve the store reference when authenticated so subscribers only
++  // re-render when the host list itself changes.
++  return hasPolarisSession ? hosts : EMPTY_POLARIS_HOSTS;
++}
++
+ export interface HostRuntimeStartOptions {
+   autoProbe?: boolean;
+   initialConnection?: {
+@@ -2215,9 +2229,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
+ export function useHosts(): HostProfile[] {
+   const store = getHostRuntimeStore();
+   return useSyncExternalStore(
+-    (onStoreChange) => store.subscribeHostList(onStoreChange),
+-    () => store.getHosts(),
+-    () => store.getHosts(),
++    (onStoreChange) => {
++      const unsubscribeHosts = store.subscribeHostList(onStoreChange);
++      const unsubscribeAuth = subscribePolarisAuthSession(onStoreChange);
++      return () => {
++        unsubscribeHosts();
++        unsubscribeAuth();
++      };
++    },
++    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisAuthSession()),
++    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisAuthSession()),
+   );
+ }
+ 
+diff --git a/packages/app/src/runtime/host-runtime-auth.test.ts b/packages/app/src/runtime/host-runtime-auth.test.ts
+new file mode 100644
+index 0000000..94f4a62
+--- /dev/null
++++ b/packages/app/src/runtime/host-runtime-auth.test.ts
+@@ -0,0 +1,32 @@
++import { describe, expect, it } from "vitest";
++import type { HostProfile } from "@/types/host-connection";
++import { filterHostsForPolarisSession } from "./host-runtime";
++
++function makeHost(): HostProfile {
++  return {
++    serverId: "srv_1",
++    label: "Host 1",
++    lifecycle: {},
++    connections: [],
++    preferredConnectionId: null,
++    createdAt: "2026-01-01T00:00:00.000Z",
++    updatedAt: "2026-01-01T00:00:00.000Z",
++  };
++}
++
++describe("host runtime auth visibility", () => {
++  it("hides hosts for anonymous users with a stable empty snapshot", () => {
++    const hosts = [makeHost()];
++    const first = filterHostsForPolarisSession(hosts, false);
++    const second = filterHostsForPolarisSession(hosts, false);
++    expect(first).toEqual([]);
++    // useSyncExternalStore requires referential stability across getSnapshot
++    // calls when the underlying data has not changed.
++    expect(first).toBe(second);
++  });
++
++  it("keeps the same host list reference for authenticated users", () => {
++    const hosts = [makeHost()];
++    expect(filterHostsForPolarisSession(hosts, true)).toBe(hosts);
++  });
++});

@@ -1,5 +1,7 @@
 packages:
   - apps/*
+overrides:
+  '@clerk/shared': 4.25.6
 allowBuilds:
   esbuild: true
 onlyBuiltDependencies:

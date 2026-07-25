@@ -8,8 +8,8 @@ Paseo 是 Polaris 的唯一用户入口。
 Polaris 的产品能力应融入 Paseo 既有的信息架构、组件与交互规范，
 不新增第二套应用 shell。
 
-当前扩展通过 `patches/paseo-polaris-host-library.patch` 应用于 Paseo
-源码。
+当前扩展通过 `patches/` 中按功能拆分的补丁应用于 Paseo 源码。
+`source/` 是唯一的开发事实来源；修改后必须从它重新生成活动补丁。
 
 ## 产品需求
 

@@ -1,0 +1,348 @@
+diff --git a/packages/app/src/components/welcome-screen.test.tsx b/packages/app/src/components/welcome-screen.test.tsx
+new file mode 100644
+index 0000000..65dc578
+--- /dev/null
++++ b/packages/app/src/components/welcome-screen.test.tsx
+@@ -0,0 +1,10 @@
++import { readFileSync } from "node:fs";
++import { describe, expect, it } from "vitest";
++
++describe("welcome screen", () => {
++  it("does not expose a settings entry", () => {
++    const source = readFileSync(new URL("./welcome-screen.tsx", import.meta.url), "utf8");
++    expect(source).not.toContain("welcome-open-settings");
++    expect(source).not.toContain("router.push(\"/settings\")");
++  });
++});
+diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
+new file mode 100644
+index 0000000..4d9aa63
+--- /dev/null
++++ b/packages/app/src/lib/polaris-host-sync.test.ts
+@@ -0,0 +1,147 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  extractServerIdFromPairingUrl,
++  findPolarisHostForServerId,
++  pickPolarisPairingUrl,
++  rankPolarisHosts,
++  resolvePostLoginHref,
++  syncPolarisHostsFromApi,
++  type PolarisHostSummary,
++} from "./polaris-host-sync";
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function offerUrl(serverId: string, path = "/paseo"): string {
++  const payload = Buffer.from(
++    JSON.stringify({
++      v: 2,
++      serverId,
++      daemonPublicKeyB64: "abc",
++      relay: { endpoint: "relay.example:443", useTls: true },
++    }),
++  )
++    .toString("base64")
++    .replace(/\+/g, "-")
++    .replace(/\//g, "_")
++    .replace(/=+$/, "");
++  return `https://polaris.example${path}#offer=${payload}`;
++}
++
++describe("polaris host sync helpers", () => {
++  it("prefers reconnectTarget when it carries an offer", () => {
++    const host: PolarisHostSummary = {
++      name: "test",
++      status: {
++        paseo: {
++          liveTarget: offerUrl("srv_live"),
++          reconnectTarget: `https://polaris.example/paseo/h/srv_reconnect#offer=${
++            offerUrl("srv_reconnect").split("#offer=")[1]
++          }`,
++        },
++      },
++    };
++    const url = pickPolarisPairingUrl(host);
++    expect(url).toContain("srv_reconnect");
++    expect(extractServerIdFromPairingUrl(url!)).toBe("srv_reconnect");
++  });
++
++  it("extracts serverId from /h/ path and from offer payload", () => {
++    expect(
++      extractServerIdFromPairingUrl("https://polaris.example/paseo/h/srv_AiBanc_-FHWd?scope=x"),
++    ).toBe("srv_AiBanc_-FHWd");
++    expect(extractServerIdFromPairingUrl(offerUrl("srv_FromOffer"))).toBe("srv_FromOffer");
++  });
++
++  it("finds an offline Polaris host by its stable Paseo server ID", () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "workspace-name",
++        status: {
++          driver: { status: "stopped" },
++          paseo: {
++            reconnectTarget: "https://polaris.example/paseo/h/srv_offline?scope=user-a",
++          },
++        },
++      },
++    ];
++
++    expect(findPolarisHostForServerId(hosts, "srv_offline")?.name).toBe("workspace-name");
++    expect(findPolarisHostForServerId(hosts, "srv_other")).toBeNull();
++  });
++
++  it("ranks running hosts before stopped ones", () => {
++    const ranked = rankPolarisHosts([
++      { name: "zzz", status: { driver: { status: "stopped" } } },
++      { name: "aaa", status: { driver: { status: "running" } } },
++      { name: "mmm", status: { driver: { status: "running" } } },
++    ]);
++    expect(ranked.map((host) => host.name)).toEqual(["aaa", "mmm", "zzz"]);
++  });
++
++  it("resolves post-login href to preferred host over return path", () => {
++    expect(
++      resolvePostLoginHref({
++        preferredHref: "/h/srv_good",
++        returnPath: "/settings",
++      }),
++    ).toBe("/h/srv_good");
++    expect(
++      resolvePostLoginHref({
++        preferredHref: null,
++        returnPath: "/welcome",
++      }),
++    ).toBe("/settings");
++  });
++
++  it("syncs hosts from API using offer URLs in ranked order", async () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "stopped",
++        status: {
++          driver: { status: "stopped" },
++          paseo: { liveTarget: offerUrl("srv_stopped") },
++        },
++      },
++      {
++        name: "test",
++        status: {
++          driver: { status: "running" },
++          paseo: {
++            reconnectTarget: `https://polaris.example/paseo/h/srv_AiBanc_-FHWd#offer=${
++              offerUrl("srv_AiBanc_-FHWd").split("#offer=")[1]
++            }`,
++          },
++        },
++      },
++    ];
++    vi.stubGlobal(
++      "fetch",
++      vi.fn().mockResolvedValue(
++        new Response(JSON.stringify({ hosts }), { status: 200 }),
++      ),
++    );
++    vi.stubGlobal("location", {
++      origin: "https://polaris.example",
++      protocol: "https:",
++      hostname: "polaris.example",
++    });
++    const upsert = vi
++      .fn()
++      .mockImplementation(async (url: string) => ({
++        serverId: extractServerIdFromPairingUrl(url) ?? "unknown",
++      }));
++
++    const result = await syncPolarisHostsFromApi({
++      token: "token",
++      upsertFromOfferUrl: upsert,
++    });
++
++    expect(upsert).toHaveBeenCalledTimes(2);
++    expect(upsert.mock.calls[0]?.[1]).toBe("test");
++    expect(result.preferredServerId).toBe("srv_AiBanc_-FHWd");
++    expect(result.preferredHref).toBe("/h/srv_AiBanc_-FHWd");
++    expect(result.serverIds).toEqual(["srv_AiBanc_-FHWd", "srv_stopped"]);
++  });
++});
+diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
+new file mode 100644
+index 0000000..87aa16c
+--- /dev/null
++++ b/packages/app/src/lib/polaris-host-sync.ts
+@@ -0,0 +1,173 @@
++import { polarisApiBaseUrl } from "@/lib/polaris-authing";
++import { buildHostRootRoute } from "@/utils/host-routes";
++
++export interface PolarisHostSummary {
++  name: string;
++  status?: {
++    driver?: {
++      status?: string | null;
++      selected?: { backend?: string | null; profile?: string | null } | null;
++    } | null;
++    paseo?: {
++      liveTarget?: string | null;
++      reconnectTarget?: string | null;
++    } | null;
++  } | null;
++}
++
++export interface SyncPolarisHostsResult {
++  serverIds: string[];
++  preferredServerId: string | null;
++  preferredHref: string | null;
++}
++
++type UpsertFromOfferUrl = (
++  offerUrl: string,
++  label?: string,
++) => Promise<{ serverId: string }>;
++
++let inflight: Promise<SyncPolarisHostsResult> | null = null;
++
++function decodeBase64UrlJson(value: string): unknown {
++  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
++  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
++  const json =
++    typeof globalThis.atob === "function"
++      ? globalThis.atob(padded)
++      : Buffer.from(padded, "base64").toString("utf8");
++  return JSON.parse(json) as unknown;
++}
++
++/** Prefer reconnectTarget (includes /h/srv_...) when it carries an offer. */
++export function pickPolarisPairingUrl(host: PolarisHostSummary): string | null {
++  const reconnect = host.status?.paseo?.reconnectTarget?.trim() || "";
++  const live = host.status?.paseo?.liveTarget?.trim() || "";
++  if (reconnect.includes("#offer=")) return reconnect;
++  if (live.includes("#offer=")) return live;
++  if (reconnect) return reconnect;
++  if (live) return live;
++  return null;
++}
++
++export function extractServerIdFromPairingUrl(url: string): string | null {
++  const trimmed = url.trim();
++  if (!trimmed) return null;
++  try {
++    const parsed = new URL(trimmed, "https://polaris.local");
++    const pathMatch = parsed.pathname.match(/\/h\/(srv_[^/]+)/);
++    if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
++    const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash;
++    const offer = new URLSearchParams(hash).get("offer");
++    if (!offer) return null;
++    const payload = decodeBase64UrlJson(offer);
++    if (
++      payload &&
++      typeof payload === "object" &&
++      typeof (payload as { serverId?: unknown }).serverId === "string"
++    ) {
++      const serverId = (payload as { serverId: string }).serverId.trim();
++      return serverId || null;
++    }
++  } catch {
++    // Fall through to regex fallbacks for non-standard URLs.
++  }
++  const pathFallback = trimmed.match(/\/h\/(srv_[^/?#]+)/);
++  if (pathFallback?.[1]) return decodeURIComponent(pathFallback[1]);
++  return null;
++}
++
++/**
++ * A Paseo host can be renamed locally, so its label is not a safe identity.
++ * The Polaris pairing target carries the immutable Paseo server ID instead.
++ */
++export function findPolarisHostForServerId(
++  hosts: readonly PolarisHostSummary[],
++  serverId: string,
++): PolarisHostSummary | null {
++  const expectedServerId = serverId.trim();
++  if (!expectedServerId) {
++    return null;
++  }
++  return (
++    hosts.find(
++      (host) => extractServerIdFromPairingUrl(pickPolarisPairingUrl(host) ?? "") === expectedServerId,
++    ) ?? null
++  );
++}
++
++/** Running hosts first, then name order — stable for “prefer correct srv”. */
++export function rankPolarisHosts(hosts: readonly PolarisHostSummary[]): PolarisHostSummary[] {
++  return [...hosts].sort((left, right) => {
++    const leftRunning = left.status?.driver?.status === "running" ? 0 : 1;
++    const rightRunning = right.status?.driver?.status === "running" ? 0 : 1;
++    if (leftRunning !== rightRunning) return leftRunning - rightRunning;
++    return left.name.localeCompare(right.name);
++  });
++}
++
++export async function fetchPolarisHosts(token: string): Promise<PolarisHostSummary[]> {
++  const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++    headers: { authorization: `Bearer ${token}` },
++  });
++  const body = (await response.json().catch(() => ({}))) as {
++    hosts?: PolarisHostSummary[];
++    error?: string;
++  };
++  if (!response.ok) {
++    throw new Error(typeof body.error === "string" ? body.error : "无法加载 Polaris 主机列表");
++  }
++  return Array.isArray(body.hosts) ? body.hosts : [];
++}
++
++export async function syncPolarisHostsFromApi(options: {
++  token: string;
++  upsertFromOfferUrl: UpsertFromOfferUrl;
++}): Promise<SyncPolarisHostsResult> {
++  const hosts = rankPolarisHosts(await fetchPolarisHosts(options.token));
++  const serverIds: string[] = [];
++  for (const host of hosts) {
++    const pairingUrl = pickPolarisPairingUrl(host);
++    if (!pairingUrl || !pairingUrl.includes("#offer=")) {
++      continue;
++    }
++    try {
++      const profile = await options.upsertFromOfferUrl(pairingUrl, host.name);
++      const serverId = profile.serverId?.trim();
++      if (serverId && !serverIds.includes(serverId)) {
++        serverIds.push(serverId);
++      }
++    } catch (error) {
++      console.warn("[polaris-host-sync] failed to upsert host", host.name, error);
++    }
++  }
++  const preferredServerId = serverIds[0] ?? null;
++  return {
++    serverIds,
++    preferredServerId,
++    preferredHref: preferredServerId ? buildHostRootRoute(preferredServerId) : null,
++  };
++}
++
++/** Deduplicate concurrent login/welcome syncs. */
++export function syncPolarisHostsOnce(options: {
++  token: string;
++  upsertFromOfferUrl: UpsertFromOfferUrl;
++}): Promise<SyncPolarisHostsResult> {
++  if (inflight) return inflight;
++  inflight = syncPolarisHostsFromApi(options).finally(() => {
++    inflight = null;
++  });
++  return inflight;
++}
++
++export function resolvePostLoginHref(options: {
++  preferredHref: string | null;
++  returnPath: string;
++}): string {
++  if (options.preferredHref) return options.preferredHref;
++  const returnPath = options.returnPath.trim();
++  if (returnPath && returnPath !== "/welcome" && returnPath !== "/") {
++    return returnPath;
++  }
++  return "/settings";
++}

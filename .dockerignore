@@ -8,6 +8,16 @@
 .tmp/**
 node_modules
 node_modules/**
+apps/paseo/source/node_modules
+apps/paseo/source/node_modules/**
+apps/paseo/source/packages/app/dist
+apps/paseo/source/packages/app/dist/**
+apps/paseo/source/packages/app/.expo
+apps/paseo/source/packages/app/.expo/**
+apps/paseo/source/packages/app/.expo-shared
+apps/paseo/source/packages/app/.expo-shared/**
+apps/paseo/source/packages/app/web-build
+apps/paseo/source/packages/app/web-build/**
 dist
 dist/**
 apps/polaris/.tmp
