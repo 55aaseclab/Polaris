@@ -15,7 +15,7 @@ COPY apps/paseo/patches /tmp/paseo-patches
 
 RUN git reset --hard -q \
   && git clean -fdq \
-  && git apply --3way /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-server-file-upload-unicode.patch /tmp/paseo-patches/paseo-client-rpc-waiter-order.patch /tmp/paseo-patches/paseo-web-authing-core.patch /tmp/paseo-patches/paseo-web-host-runtime-auth-filter.patch /tmp/paseo-patches/paseo-web-auth-guard.patch /tmp/paseo-patches/paseo-web-polaris-branding.patch /tmp/paseo-patches/paseo-web-settings-auth-visibility.patch /tmp/paseo-patches/paseo-web-host-user-management.patch /tmp/paseo-patches/paseo-web-polaris-host-sync.patch /tmp/paseo-patches/paseo-local-runtime-overrides.patch \
+  && git apply --3way /tmp/paseo-patches/paseo-web-base-url.patch /tmp/paseo-patches/paseo-web-registry-scope.patch /tmp/paseo-patches/paseo-web-offer-link.patch /tmp/paseo-patches/paseo-server-file-upload-unicode.patch /tmp/paseo-patches/paseo-client-rpc-waiter-order.patch /tmp/paseo-patches/paseo-web-authing-core.patch /tmp/paseo-patches/paseo-web-host-runtime-auth-filter.patch /tmp/paseo-patches/paseo-web-auth-guard.patch /tmp/paseo-patches/paseo-web-polaris-branding.patch /tmp/paseo-patches/paseo-web-settings-auth-visibility.patch /tmp/paseo-patches/paseo-web-host-user-management.patch /tmp/paseo-patches/paseo-web-polaris-host-sync.patch /tmp/paseo-patches/paseo-local-runtime-overrides.patch /tmp/paseo-patches/paseo-web-host-account-isolation.patch \
   && rm -rf .git
 
 RUN --mount=type=cache,target=/root/.npm \
