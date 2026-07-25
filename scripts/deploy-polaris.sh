@@ -58,7 +58,20 @@ if polaris_deploy_service_changed "${ROOT_DIR}" "polaris-executor-bridge-proxy" 
   restart_bridge=true
 fi
 
-docker compose -f "${COMPOSE_FILE}" -p "${project_name}" --env-file "${temp_env}" up -d --build
+docker compose \
+  -f "${COMPOSE_FILE}" \
+  -p "${project_name}" \
+  --env-file "${temp_env}" \
+  up -d --build --remove-orphans
+
+# Nginx renders its configuration template only when the container starts.
+# Recreate the inactive stack's proxy so template changes are active before
+# switching the public upstream.
+docker compose \
+  -f "${COMPOSE_FILE}" \
+  -p "${project_name}" \
+  --env-file "${temp_env}" \
+  up -d --no-deps --force-recreate nginx
 
 if [ "${restart_executor}" = true ]; then
   systemctl restart polaris-executor.service

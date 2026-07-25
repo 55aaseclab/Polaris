@@ -1,0 +1,42 @@
+diff --git a/packages/app/src/screens/settings-screen-auth.test.ts b/packages/app/src/screens/settings-screen-auth.test.ts
+new file mode 100644
+index 0000000..1f5a78a
+--- /dev/null
++++ b/packages/app/src/screens/settings-screen-auth.test.ts
+@@ -0,0 +1,20 @@
++import { describe, expect, it } from "vitest";
++import { canManageSettingsHosts, getVisibleSettingsHosts } from "./settings-screen-auth";
++
++describe("settings host auth visibility", () => {
++  it("hides host management when the user is not authenticated", () => {
++    expect(canManageSettingsHosts(false)).toBe(false);
++    expect(
++      getVisibleSettingsHosts(
++        [{ serverId: "srv_1", label: "Host 1" }],
++        false,
++      ),
++    ).toEqual([]);
++  });
++
++  it("keeps hosts visible for authenticated users", () => {
++    const hosts = [{ serverId: "srv_1", label: "Host 1" }];
++    expect(canManageSettingsHosts(true)).toBe(true);
++    expect(getVisibleSettingsHosts(hosts, true)).toEqual(hosts);
++  });
++});
+diff --git a/packages/app/src/screens/settings-screen-auth.ts b/packages/app/src/screens/settings-screen-auth.ts
+new file mode 100644
+index 0000000..d4b97d2
+--- /dev/null
++++ b/packages/app/src/screens/settings-screen-auth.ts
+@@ -0,0 +1,10 @@
++export function canManageSettingsHosts(hasPolarisSession: boolean): boolean {
++  return hasPolarisSession;
++}
++
++export function getVisibleSettingsHosts<THost>(
++  hosts: readonly THost[],
++  hasPolarisSession: boolean,
++): THost[] {
++  return canManageSettingsHosts(hasPolarisSession) ? [...hosts] : [];
++}

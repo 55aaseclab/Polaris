@@ -41,7 +41,18 @@ docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.pr
 
 echo "[8/8] paseo artifact verification"
 bash ./scripts/build-paseo-tool-bundle.sh >/dev/null
-bash ./scripts/build-paseo-web-artifact.sh >/dev/null
+(
+  set -a
+  if [ -f ./.env.prod ]; then
+    # shellcheck disable=SC1091
+    . ./.env.prod
+  else
+    # shellcheck disable=SC1091
+    . ./.env.prod.example
+  fi
+  set +a
+  bash ./scripts/build-paseo-web-artifact.sh >/dev/null
+)
 
 temp_blue_env="$(mktemp)"
 temp_green_env="$(mktemp)"

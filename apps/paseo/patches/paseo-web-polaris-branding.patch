@@ -1,0 +1,249 @@
+diff --git a/packages/app/app.config.js b/packages/app/app.config.js
+index 959fb27..6f29797 100644
+--- a/packages/app/app.config.js
++++ b/packages/app/app.config.js
+@@ -95,7 +95,7 @@ export default {
+     },
+     web: {
+       output: "single",
+-      favicon: "./assets/images/favicon.png",
++      favicon: "./assets/images/polaris-favicon.png",
+     },
+     autolinking: {
+       searchPaths: ["../../node_modules", "./node_modules"],
+diff --git a/packages/app/src/hooks/use-favicon-status.ts b/packages/app/src/hooks/use-favicon-status.ts
+index 0f054ee..d4b08aa 100644
+--- a/packages/app/src/hooks/use-favicon-status.ts
++++ b/packages/app/src/hooks/use-favicon-status.ts
+@@ -9,20 +9,51 @@ import { isNative } from "@/constants/platform";
+ type FaviconStatus = "none" | "running" | "attention";
+ type ColorScheme = "dark" | "light";
+ 
+-/* eslint-disable @typescript-eslint/no-require-imports */
+-const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, { uri: string } | number>> = {
++const POLARIS_FAVICON_PATH = [
++  "M128 18",
++  "L156 100",
++  "L238 128",
++  "L156 156",
++  "L128 238",
++  "L100 156",
++  "L18 128",
++  "L100 100",
++  "Z",
++  "M128 74",
++  "L142 114",
++  "L182 128",
++  "L142 142",
++  "L128 182",
++  "L114 142",
++  "L74 128",
++  "L114 114",
++  "Z",
++].join(" ");
++
++function createPolarisFaviconUri(badgeColor?: string): string {
++  const badge = badgeColor ? `<circle cx="208" cy="208" r="48" fill="${badgeColor}"/>` : "";
++  const svg = [
++    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">',
++    '<rect width="256" height="256" rx="57" fill="#000"/>',
++    `<path d="${POLARIS_FAVICON_PATH}" fill="#fff" fill-rule="evenodd" clip-rule="evenodd"/>`,
++    badge,
++    "</svg>",
++  ].join("");
++  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
++}
++
++const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, string>> = {
+   dark: {
+-    none: require("../../assets/images/favicon-dark.png"),
+-    running: require("../../assets/images/favicon-dark-running.png"),
+-    attention: require("../../assets/images/favicon-dark-attention.png"),
++    none: createPolarisFaviconUri(),
++    running: createPolarisFaviconUri("#3b82f6"),
++    attention: createPolarisFaviconUri("#22c55e"),
+   },
+   light: {
+-    none: require("../../assets/images/favicon-light.png"),
+-    running: require("../../assets/images/favicon-light-running.png"),
+-    attention: require("../../assets/images/favicon-light-attention.png"),
++    none: createPolarisFaviconUri(),
++    running: createPolarisFaviconUri("#3b82f6"),
++    attention: createPolarisFaviconUri("#22c55e"),
+   },
+ };
+-/* eslint-enable @typescript-eslint/no-require-imports */
+ 
+ function deriveFaviconStatus(
+   agents: ReturnType<typeof useAggregatedAgents>["agents"],
+@@ -40,12 +71,7 @@ function deriveFaviconStatus(
+ }
+ 
+ function getFaviconUri(status: FaviconStatus, colorScheme: ColorScheme): string {
+-  const image = FAVICON_IMAGES[colorScheme][status];
+-  if (typeof image === "object" && "uri" in image) {
+-    return image.uri;
+-  }
+-  const suffix = status === "none" ? "" : `-${status}`;
+-  return `/assets/images/favicon-${colorScheme}${suffix}.png`;
++  return FAVICON_IMAGES[colorScheme][status];
+ }
+ 
+ function getOrCreateFaviconLink(): HTMLLinkElement | null {
+@@ -55,9 +81,9 @@ function getOrCreateFaviconLink(): HTMLLinkElement | null {
+   if (!link) {
+     link = document.createElement("link");
+     link.rel = "icon";
+-    link.type = "image/png";
+     document.head.appendChild(link);
+   }
++  link.type = "image/svg+xml";
+   return link;
+ }
+ 
+diff --git a/packages/app/assets/images/polaris-favicon.svg b/packages/app/assets/images/polaris-favicon.svg
+new file mode 100644
+index 0000000..67d28b1
+--- /dev/null
++++ b/packages/app/assets/images/polaris-favicon.svg
+@@ -0,0 +1,9 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
++  <rect width="256" height="256" rx="57" fill="#000"/>
++  <path
++    d="M128 18 L156 100 L238 128 L156 156 L128 238 L100 156 L18 128 L100 100 Z M128 74 L142 114 L182 128 L142 142 L128 182 L114 142 L74 128 L114 114 Z"
++    fill="#fff"
++    fill-rule="evenodd"
++    clip-rule="evenodd"
++  />
++</svg>
+diff --git a/packages/app/assets/images/polaris-favicon.png b/packages/app/assets/images/polaris-favicon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..38b8ae767c96a54db95f98ea0b7008486822dd10
+GIT binary patch
+literal 6535
+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
+
+literal 0
+HcmV?d00001
+
