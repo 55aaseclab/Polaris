@@ -178,11 +178,40 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+cat > /etc/systemd/system/polaris-container-runtime-cleanup.service <<EOF
+[Unit]
+Description=Polaris remote container runtime cleanup
+After=docker.service containerd.service
+Wants=docker.service containerd.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=${REMOTE_APP_DIR}
+ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/cleanup-remote-container-runtime.sh
+Environment=LEASE_RETENTION_HOURS=24
+Environment=DOCKER_PRUNE_UNTIL=24h
+EOF
+
+cat > /etc/systemd/system/polaris-container-runtime-cleanup.timer <<EOF
+[Unit]
+Description=Run Polaris remote container runtime cleanup daily
+
+[Timer]
+OnCalendar=*-*-* 04:40:00
+Persistent=true
+Unit=polaris-container-runtime-cleanup.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable polaris-executor.service
 systemctl enable polaris-executor-bridge-proxy.service
+systemctl enable polaris-container-runtime-cleanup.timer
 systemctl restart polaris-executor.service
 systemctl restart polaris-executor-bridge-proxy.service
+systemctl restart polaris-container-runtime-cleanup.timer
 
 nginx_dump=\"\$(nginx -T 2>/dev/null || true)\"
 missing=0

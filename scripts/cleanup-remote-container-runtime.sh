@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LEASE_RETENTION_HOURS="${LEASE_RETENTION_HOURS:-24}"
-DOCKER_PRUNE_UNTIL="${DOCKER_PRUNE_UNTIL:-168h}"
+DOCKER_PRUNE_UNTIL="${DOCKER_PRUNE_UNTIL:-24h}"
 
 log() {
   printf '[cleanup-container-runtime] %s\n' "$*"
