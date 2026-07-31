@@ -23,6 +23,8 @@ bash -n scripts/ci-local.sh
 bash -n scripts/provision-remote.sh
 bash -n scripts/cd-remote.sh
 bash -n scripts/rollback-remote.sh
+bash -n scripts/install-local-container-runtime-cleanup.sh
+bash -n scripts/cleanup-remote-container-runtime.sh
 bash -n scripts/build-paseo-web-artifact.sh
 bash -n scripts/build-paseo-tool-bundle.sh
 bash -n scripts/clean-paseo-web-artifact.sh
