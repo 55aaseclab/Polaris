@@ -1,6 +1,6 @@
 {
   "name": "@paseo/embed",
-  "version": "0.1.0",
+  "version": "0.2.8",
   "description": "A small, framework-independent embed bridge for Paseo Web",
   "type": "module",
   "sideEffects": false,
