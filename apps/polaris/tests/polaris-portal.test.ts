@@ -2306,6 +2306,38 @@ test("portal root advertises the API surface without a default user fallback", a
   }
 });
 
+test("portal disabled auth mode returns a local development session without credentials", async () => {
+  await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+    await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", DEMO_USER_ID, async () => {
+      const server = createPortalServer(0);
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Portal server did not expose a TCP address");
+      }
+      try {
+        const response = await fetch(`http://127.0.0.1:${address.port}/api/session`);
+        assert.equal(response.status, 200);
+        const payload = await response.json() as {
+          authMode: string;
+          authenticated: boolean;
+          authingUsername: string | null;
+          polarisUserId: string | null;
+          role: string | null;
+        };
+        assert.equal(payload.authMode, "disabled");
+        assert.equal(payload.authenticated, true);
+        assert.equal(payload.authingUsername, DEMO_USER_ID);
+        assert.equal(payload.polarisUserId, DEMO_USER_ID);
+        assert.equal(payload.role, "admin");
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
+    });
+  });
+});
+
 test("portal admin list includes mapped users", async () => {
   const userId = uniqueName("portal-admin-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);

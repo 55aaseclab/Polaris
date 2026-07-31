@@ -19,6 +19,7 @@ import {
   selfProvisionedPolarisUserId,
   sessionMatchesCurrentIdentity,
 } from "./auth.js";
+import { resolvePortalAuthMode } from "@qingniao/polaris-auth-server";
 import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
 import {
   activatePortalCredential,
@@ -619,7 +620,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (segments.length === 0) {
         sendJson(res, 200, {
           service: "polaris-portal-api",
-          authMode: "authing-browser-session",
+          authMode: resolvePortalAuthMode(),
           endpoints: [
             "/api/users",
             "/api/users/:userId",
@@ -634,6 +635,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (isApiPath(segments)) {
         if (segments.length === 2 && segments[1] === "authing-config" && req.method === "GET") {
           sendJson(res, 200, {
+            authMode: resolvePortalAuthMode(),
             appId: String(process.env.POLARIS_AUTHING_APP_ID ?? "").trim(),
             authorizationUrl: String(process.env.POLARIS_AUTHING_AUTHORIZATION_URL ?? "").trim(),
             redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
@@ -732,7 +734,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           sendJson(res, 200, {
-            authMode: "authing-browser-session",
+            authMode: session.authMode,
             authenticated: true,
             authingUserId: session.authingUserId,
             authingUsername: session.authingUsername,

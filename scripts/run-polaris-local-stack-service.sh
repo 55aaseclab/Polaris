@@ -18,6 +18,11 @@ set -a
 . "${ENV_FILE}"
 set +a
 
+POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE:-disabled}"
+POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID:-100000000000000001}"
+export POLARIS_AUTH_MODE
+export POLARIS_AUTH_DEFAULT_USER_ID
+
 SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-127.0.0.1}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
 EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
@@ -53,6 +58,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pnpm install
+pnpm --filter @qingniao/polaris-auth-server run build
 paseo_local_ensure_source
 if [ ! -d "apps/paseo/source/node_modules" ]; then
   (cd apps/paseo/source && npm ci --ignore-scripts)
@@ -87,6 +93,8 @@ fi
   cd apps/paseo/source/packages/app
   EXPO_NO_TELEMETRY=1 \
   EXPO_PUBLIC_POLARIS_API_PORT="${SERVER_PORT}" \
+  EXPO_PUBLIC_POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE}" \
+  EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID}" \
   npx expo start --web --host lan --port "${PASEO_PORT}"
 ) \
   > >(tee "${LOG_DIR}/stack.paseo.log") \

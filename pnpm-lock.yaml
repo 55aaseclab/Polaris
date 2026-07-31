@@ -89,12 +89,12 @@ importers:
 
   apps/polaris:
     dependencies:
+      '@qingniao/polaris-auth-server':
+        specifier: workspace:*
+        version: link:../../packages/polaris-auth-server
       '@sentry/node':
         specifier: ^10.65.0
         version: 10.65.0(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))
-      jose:
-        specifier: ^6.2.4
-        version: 6.2.4
       js-yaml:
         specifier: ^4.1.0
         version: 4.2.0
@@ -125,6 +125,19 @@ importers:
         version: 5.9.3
 
   packages/paseo-embed: {}
+
+  packages/polaris-auth-server:
+    dependencies:
+      jose:
+        specifier: ^6.2.4
+        version: 6.2.4
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
 packages:
 
