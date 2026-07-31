@@ -20,6 +20,58 @@ lease_epoch() {
   date -d "$1" +%s
 }
 
+delete_stale_ttl_containers() {
+  if ! have_cmd docker; then
+    log "skip ttl container cleanup: docker not found"
+    return 0
+  fi
+
+  if ! systemctl is-active --quiet docker; then
+    log "skip ttl container cleanup: docker is not active"
+    return 0
+  fi
+
+  local now
+  local retention_seconds
+  local container_id
+  local image
+  local created_at
+  local created_epoch
+  local age_seconds
+  local deleted=0
+
+  now="$(epoch_now)"
+  retention_seconds="$((LEASE_RETENTION_HOURS * 3600))"
+
+  while read -r container_id; do
+    [ -n "${container_id}" ] || continue
+    local image
+    local created_at
+
+    image="$(docker inspect -f '{{.Config.Image}}' "${container_id}" 2>/dev/null || true)"
+    created_at="$(docker inspect -f '{{.Created}}' "${container_id}" 2>/dev/null || true)"
+
+    [ -n "${image}" ] || continue
+    [ -n "${created_at}" ] || continue
+    case "${image}" in
+      ttl.sh/*)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    created_epoch="$(date -u -d "${created_at}" +%s)" || continue
+    age_seconds="$((now - created_epoch))"
+    if [ "${age_seconds}" -lt "${retention_seconds}" ]; then
+      continue
+    fi
+    docker rm -f "${container_id}" >/dev/null 2>&1 || true
+    deleted="$((deleted + 1))"
+  done < <(docker ps -a --format '{{.ID}}')
+
+  log "deleted stale ttl containers: ${deleted}"
+}
+
 delete_stale_moby_leases() {
   if ! have_cmd ctr; then
     log "skip ctr lease cleanup: ctr not found"
@@ -90,6 +142,7 @@ report_usage() {
 main() {
   log "start"
   report_usage
+  delete_stale_ttl_containers
   delete_stale_moby_leases
   prune_docker_runtime
   sleep 3
