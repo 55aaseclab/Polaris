@@ -18,7 +18,6 @@ import { portalCommand } from "./commands/portal.js";
 import { deleteCommand } from "./commands/delete.js";
 import { executorCommand } from "./commands/executor.js";
 import { opsCommand } from "./commands/ops.js";
-import { localDeployCommand } from "./commands/local-deploy.js";
 import {
   skillInstallCommand,
   skillListCommand,
@@ -27,10 +26,10 @@ import {
 } from "./commands/skill.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "workspace", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor", "ops", "local-deploy"]);
+const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "workspace", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor", "ops"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|workspace|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor|ops|local-deploy> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|workspace|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor|ops> ...");
 }
 
 function extractUserProfileId(argv: string[]): string | undefined {
@@ -61,10 +60,6 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (first === "ops") {
     await opsCommand(second, argv.slice(2));
-    return;
-  }
-  if (first === "local-deploy") {
-    await localDeployCommand(argv.slice(1));
     return;
   }
   if (first === "user") {

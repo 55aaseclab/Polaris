@@ -97,40 +97,6 @@ pnpm --dir apps/polaris run polaris --
 Use it for workspace, user, credential, skill, server, and executor commands
 while working from the repo.
 
-The installed `polaris` binary is the stage-one local deployment CLI.
-That surface is covered in the next section.
-
-## Local Deployment
-
-Stage-one local deployment is separate from local development.
-
-Main local deployment entry points:
-
-```bash
-polaris install
-polaris start
-polaris doctor
-```
-
-Desktop entry:
-
-- `Polaris` app icon
-
-Stage-one local deployment supports:
-
-- Linux
-- macOS
-- Windows
-- single-machine Docker-only runtime
-
-It does not use `vite` dev server or `tsx watch`.
-
-Release packaging targets now include:
-
-- Debian `.deb`
-- Windows installer `.exe`
-- macOS `.dmg`
-
 Telemetry can be enabled with `PostHog` and `Sentry`.
 Use `.env.dev.example` for the current environment variables.
 

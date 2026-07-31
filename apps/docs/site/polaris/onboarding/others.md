@@ -5,7 +5,7 @@ operator-facing than customer-facing.
 
 ## Main Entry Points
 
-The repo exposes separate local deployment and local development surfaces.
+The repo exposes separate remote deployment and local development surfaces.
 
 Use [Polaris CLI](../cli.md) for the exact command surface.
 

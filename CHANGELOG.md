@@ -4,25 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.7] - 2026-07-11
 
-Shipped Polaris local deployment as a release artifact with native packaging,
-full telemetry wiring, and a new frozen docs snapshot for the release line.
+Shipped Polaris deployment packaging as a release artifact, with full
+telemetry wiring and a new frozen docs snapshot for the release line.
 
 ### Added
 
-- Added native Polaris release packaging for Debian, Windows, and macOS,
-  including CLI and desktop entry distribution.
-- Added PostHog and Sentry telemetry coverage across local deployment,
-  runtime, product, environment, and error events.
+- Added native Polaris release packaging, including CLI and desktop entry
+  distribution.
+- Added PostHog and Sentry telemetry coverage across deployment, runtime,
+  product, environment, and error events.
 - Added a frozen `0.2.7` docs snapshot.
 
 ### Changed
 
-- Updated release build scripts and CI to produce `.deb`, Windows installer
-  `.exe`, and macOS `.dmg` artifacts.
-- Updated local deployment defaults, release manifests, and web telemetry
-  metadata to use `0.2.7` as the current release snapshot.
-- Updated maintained docs and release notes to document local deployment,
-  packaging, and telemetry behavior.
+- Updated release build scripts and CI for native deployment artifacts.
+- Updated deployment defaults, release manifests, and web telemetry metadata
+  to use `0.2.7` as the current release snapshot.
+- Updated maintained docs and release notes to document deployment, packaging,
+  and telemetry behavior.
 
 ## [0.2.6] - 2026-07-08
 
