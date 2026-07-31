@@ -1,0 +1,1132 @@
+diff --git a/package-lock.json b/package-lock.json
+index b6729d1..6c27418 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -19,7 +19,8 @@
+         "packages/relay",
+         "packages/website",
+         "packages/desktop",
+-        "packages/cli"
++        "packages/cli",
++        "packages/polaris-auth-client"
+       ],
+       "devDependencies": {
+         "@types/ws": "^8.5.14",
+@@ -6332,6 +6333,10 @@
+       "resolved": "packages/highlight",
+       "link": true
+     },
++    "node_modules/@getpaseo/polaris-auth-client": {
++      "resolved": "packages/polaris-auth-client",
++      "link": true
++    },
+     "node_modules/@getpaseo/protocol": {
+       "resolved": "packages/protocol",
+       "link": true
+@@ -11207,8 +11212,7 @@
+       "optional": true,
+       "os": [
+         "android"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-android-arm64": {
+       "version": "4.59.0",
+@@ -11221,8 +11225,7 @@
+       "optional": true,
+       "os": [
+         "android"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-darwin-arm64": {
+       "version": "4.59.0",
+@@ -11235,8 +11238,7 @@
+       "optional": true,
+       "os": [
+         "darwin"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-darwin-x64": {
+       "version": "4.59.0",
+@@ -11249,8 +11251,7 @@
+       "optional": true,
+       "os": [
+         "darwin"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-freebsd-arm64": {
+       "version": "4.59.0",
+@@ -11263,8 +11264,7 @@
+       "optional": true,
+       "os": [
+         "freebsd"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-freebsd-x64": {
+       "version": "4.59.0",
+@@ -11277,8 +11277,7 @@
+       "optional": true,
+       "os": [
+         "freebsd"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-arm-gnueabihf": {
+       "version": "4.59.0",
+@@ -11291,8 +11290,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-arm-musleabihf": {
+       "version": "4.59.0",
+@@ -11305,8 +11303,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-arm64-gnu": {
+       "version": "4.59.0",
+@@ -11319,8 +11316,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-arm64-musl": {
+       "version": "4.59.0",
+@@ -11333,8 +11329,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-loong64-gnu": {
+       "version": "4.59.0",
+@@ -11347,8 +11342,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-loong64-musl": {
+       "version": "4.59.0",
+@@ -11361,8 +11355,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-ppc64-gnu": {
+       "version": "4.59.0",
+@@ -11375,8 +11368,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-ppc64-musl": {
+       "version": "4.59.0",
+@@ -11389,8 +11381,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-riscv64-gnu": {
+       "version": "4.59.0",
+@@ -11403,8 +11394,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-riscv64-musl": {
+       "version": "4.59.0",
+@@ -11417,8 +11407,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-s390x-gnu": {
+       "version": "4.59.0",
+@@ -11431,8 +11420,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-x64-gnu": {
+       "version": "4.59.0",
+@@ -11445,8 +11433,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-linux-x64-musl": {
+       "version": "4.59.0",
+@@ -11459,8 +11446,7 @@
+       "optional": true,
+       "os": [
+         "linux"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-openbsd-x64": {
+       "version": "4.59.0",
+@@ -11473,8 +11459,7 @@
+       "optional": true,
+       "os": [
+         "openbsd"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-openharmony-arm64": {
+       "version": "4.59.0",
+@@ -11487,8 +11472,7 @@
+       "optional": true,
+       "os": [
+         "openharmony"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-win32-arm64-msvc": {
+       "version": "4.59.0",
+@@ -11501,8 +11485,7 @@
+       "optional": true,
+       "os": [
+         "win32"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-win32-ia32-msvc": {
+       "version": "4.59.0",
+@@ -11515,8 +11498,7 @@
+       "optional": true,
+       "os": [
+         "win32"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-win32-x64-gnu": {
+       "version": "4.59.0",
+@@ -11529,8 +11511,7 @@
+       "optional": true,
+       "os": [
+         "win32"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rollup/rollup-win32-x64-msvc": {
+       "version": "4.59.0",
+@@ -11543,8 +11524,7 @@
+       "optional": true,
+       "os": [
+         "win32"
+-      ],
+-      "peer": true
++      ]
+     },
+     "node_modules/@rtsao/scc": {
+       "version": "1.1.0",
+@@ -18272,7 +18252,6 @@
+       "dev": true,
+       "license": "BSD-3-Clause",
+       "optional": true,
+-      "peer": true,
+       "engines": {
+         "node": ">=0.10.0"
+       }
+@@ -18386,21 +18365,6 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
+-    "node_modules/eslint-config-prettier": {
+-      "version": "8.10.2",
+-      "resolved": "https://registry.npmjs.org/eslint-config-prettier/-/eslint-config-prettier-8.10.2.tgz",
+-      "integrity": "sha512-/IGJ6+Dka158JnP5n5YFMOszjDWrXggGz1LaK/guZq9vZTmniaKlHcsscvkAhn9y4U+BU3JuUdYvtAMcv30y4A==",
+-      "dev": true,
+-      "license": "MIT",
+-      "optional": true,
+-      "peer": true,
+-      "bin": {
+-        "eslint-config-prettier": "bin/cli.js"
+-      },
+-      "peerDependencies": {
+-        "eslint": ">=7.0.0"
+-      }
+-    },
+     "node_modules/eslint-import-resolver-node": {
+       "version": "0.3.9",
+       "resolved": "https://registry.npmjs.org/eslint-import-resolver-node/-/eslint-import-resolver-node-0.3.9.tgz",
+@@ -29875,18 +29839,6 @@
+         "react-native-worklets": "0.8.x"
+       }
+     },
+-    "node_modules/react-native-reanimated/node_modules/semver": {
+-      "version": "7.7.2",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.7.2.tgz",
+-      "integrity": "sha512-RF0Fw+rO5AMf9MAyaRXI4AV0Ulj5lMHqVxxdSgiVbixSCXoEmmX/jk0CuJw4+3SqroYO9VoUh+HcuJivvtJemA==",
+-      "license": "ISC",
+-      "bin": {
+-        "semver": "bin/semver.js"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+     "node_modules/react-native-safe-area-context": {
+       "version": "5.6.2",
+       "resolved": "https://registry.npmjs.org/react-native-safe-area-context/-/react-native-safe-area-context-5.6.2.tgz",
+@@ -30038,18 +29990,6 @@
+         "react-native": "0.81 - 0.85"
+       }
+     },
+-    "node_modules/react-native-worklets/node_modules/semver": {
+-      "version": "7.7.2",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.7.2.tgz",
+-      "integrity": "sha512-RF0Fw+rO5AMf9MAyaRXI4AV0Ulj5lMHqVxxdSgiVbixSCXoEmmX/jk0CuJw4+3SqroYO9VoUh+HcuJivvtJemA==",
+-      "license": "ISC",
+-      "bin": {
+-        "semver": "bin/semver.js"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+     "node_modules/react-native/node_modules/@react-native/normalize-colors": {
+       "version": "0.81.5",
+       "resolved": "https://registry.npmjs.org/@react-native/normalize-colors/-/normalize-colors-0.81.5.tgz",
+@@ -35252,6 +35192,7 @@
+         "@getpaseo/client": "*",
+         "@getpaseo/expo-two-way-audio": "*",
+         "@getpaseo/highlight": "*",
++        "@getpaseo/polaris-auth-client": "*",
+         "@getpaseo/protocol": "*",
+         "@gorhom/bottom-sheet": "^5.2.14",
+         "@gorhom/portal": "^1.0.14",
+@@ -37199,6 +37140,13 @@
+         }
+       }
+     },
++    "packages/polaris-auth-client": {
++      "name": "@getpaseo/polaris-auth-client",
++      "version": "0.1.101",
++      "peerDependencies": {
++        "react": "*"
++      }
++    },
+     "packages/protocol": {
+       "name": "@getpaseo/protocol",
+       "version": "0.1.101",
+diff --git a/package.json b/package.json
+index 34e1b52..731cc47 100644
+--- a/package.json
++++ b/package.json
+@@ -30,7 +30,8 @@
+     "packages/relay",
+     "packages/website",
+     "packages/desktop",
+-    "packages/cli"
++    "packages/cli",
++    "packages/polaris-auth-client"
+   ],
+   "scripts": {
+     "dev": "npm run dev:server",
+diff --git a/packages/app/package.json b/packages/app/package.json
+index 43d93bf..4db20f1 100644
+--- a/packages/app/package.json
++++ b/packages/app/package.json
+@@ -110,7 +110,8 @@
+     "tiny-invariant": "^1.3.3",
+     "use-sync-external-store": "^1.6.0",
+     "zod": "^4.4.3",
+-    "zustand": "^5.0.9"
++    "zustand": "^5.0.9",
++    "@getpaseo/polaris-auth-client": "*"
+   },
+   "devDependencies": {
+     "@playwright/test": "^1.56.1",
+diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
+index 963e9c1..597866a 100644
+--- a/packages/app/src/lib/polaris-authing.test.ts
++++ b/packages/app/src/lib/polaris-authing.test.ts
+@@ -78,6 +78,8 @@ function portalSessionToken(subject: string): string {
+ afterEach(() => {
+   delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+   delete (globalThis as { localStorage?: Storage }).localStorage;
++  delete process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE;
++  delete process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID;
+   vi.unstubAllGlobals();
+ });
+ 
+@@ -153,6 +155,17 @@ describe("Polaris authentication state", () => {
+     expect(hasPolarisHostSession()).toBe(false);
+   });
+ 
++  it("treats disabled auth override as an authenticated local session", () => {
++    process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE = "disabled";
++    process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID = "local-dev-admin";
++
++    expect(getPolarisAuthToken()).toBe("polaris-disabled-auth-session");
++    expect(hasPolarisAuthSession()).toBe(true);
++    expect(hasPolarisHostSession()).toBe(true);
++    expect(getPolarisAuthUserScope()).toBe("local-dev-admin");
++    expect(resolvePolarisAuthRedirect("/settings", true)).toBeNull();
++  });
++
+   it("accepts callback state from localStorage fallback", async () => {
+     installSessionStorage();
+     const localStorage = installLocalStorage();
+diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
+index eea858e..e72eb78 100644
+--- a/packages/app/src/lib/polaris-authing.ts
++++ b/packages/app/src/lib/polaris-authing.ts
+@@ -1,269 +1,31 @@
+-import { useSyncExternalStore } from "react";
++import { isEmbedDevelopmentEnabled } from "@/embed/protocol";
++export {
++  beginPolarisSignIn,
++  clearPolarisSignIn,
++  completePolarisSignIn,
++  getPolarisAuthToken,
++  getPolarisAuthUserScope,
++  hasPolarisAuthSession,
++  hasPolarisHostSession,
++  polarisApiBaseUrl,
++  publishPolarisAuthSession,
++  signOutPolaris,
++  subscribePolarisAuthSession,
++  usePolarisAuthSession,
++} from "@getpaseo/polaris-auth-client";
+ 
+-const sessionKey = "polaris_authing_session";
+-const idTokenKey = "polaris_authing_id_token";
+-const verifierKey = "polaris_authing_pkce_verifier";
+-const stateKey = "polaris_authing_state";
+-const returnPathKey = "polaris_authing_return_path";
+-const redirectUriKey = "polaris_authing_redirect_uri";
+-
+-const sessionListeners = new Set<() => void>();
+-
+-function readTransientAuthValue(key: string): string | null {
+-  const sessionValue = sessionStorage.getItem(key)?.trim();
+-  if (sessionValue) {
+-    return sessionValue;
+-  }
+-  try {
+-    const localValue = localStorage.getItem(key)?.trim();
+-    return localValue || null;
+-  } catch {
++export function resolvePolarisAuthRedirect(
++  pathname: string,
++  hasSession: boolean,
++): "/welcome" | null {
++  if (hasSession) {
+     return null;
+   }
+-}
+-
+-function writeTransientAuthValue(key: string, value: string): void {
+-  sessionStorage.setItem(key, value);
+-  try {
+-    localStorage.setItem(key, value);
+-  } catch {
+-    // Ignore storage availability issues in restrictive browsers.
+-  }
+-}
+-
+-function clearTransientAuthValue(key: string): void {
+-  sessionStorage.removeItem(key);
+-  try {
+-    localStorage.removeItem(key);
+-  } catch {
+-    // Ignore storage availability issues in restrictive browsers.
+-  }
+-}
+-
+-function notifyPolarisSessionChange(): void {
+-  for (const listener of sessionListeners) listener();
+-}
+-
+-export function publishPolarisAuthSession(): void {
+-  notifyPolarisSessionChange();
+-}
+-
+-function required(value: string | undefined, name: string): string {
+-  const trimmed = value?.trim();
+-  if (!trimmed) throw new Error(`${name} is required`);
+-  return trimmed;
+-}
+-
+-export function polarisApiBaseUrl(): string {
+-  if (typeof globalThis.location === "undefined") throw new Error("A browser is required");
+-  const port = process.env.EXPO_PUBLIC_POLARIS_API_PORT?.trim();
+-  if (!port) return `${globalThis.location.origin}/api`;
+-  return `${globalThis.location.protocol}//${globalThis.location.hostname}:${port}/api`;
+-}
+-
+-function fallbackCallbackUrl(): string {
+-  if (typeof globalThis.location === "undefined") throw new Error("A browser is required");
+-  return `${globalThis.location.origin}/auth/callback`;
+-}
+-
+-interface AuthingConfig {
+-  appId: string;
+-  authorizationUrl: string;
+-  redirectUri: string;
+-  logoutUrl?: string;
+-  logoutRedirectUri?: string;
+-}
+-
+-async function loadAuthingConfig(): Promise<AuthingConfig> {
+-  const response = await fetch(`${polarisApiBaseUrl()}/authing-config`);
+-  const config = (await response.json().catch(() => ({}))) as Partial<AuthingConfig>;
+-  if (!response.ok) throw new Error("无法加载 Authing 配置");
+-  return {
+-    appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
+-    authorizationUrl: required(config.authorizationUrl, "POLARIS_AUTHING_AUTHORIZATION_URL"),
+-    redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
+-    logoutUrl: config.logoutUrl?.trim() || undefined,
+-    logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
+-  };
+-}
+-
+-function base64Url(bytes: Uint8Array): string {
+-  let value = "";
+-  for (const byte of bytes) value += String.fromCharCode(byte);
+-  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+-}
+-
+-function randomBytes(length: number): Uint8Array {
+-  const bytes = new Uint8Array(length);
+-  if (typeof globalThis.crypto?.getRandomValues === "function") {
+-    globalThis.crypto.getRandomValues(bytes);
+-    return bytes;
+-  }
+-  for (let index = 0; index < length; index += 1) {
+-    bytes[index] = Math.floor(Math.random() * 256);
+-  }
+-  return bytes;
+-}
+-
+-async function challenge(verifier: string): Promise<{ value: string; method: "S256" | "plain" }> {
+-  if (typeof globalThis.crypto?.subtle?.digest === "function") {
+-    return {
+-      value: base64Url(
+-        new Uint8Array(
+-          await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+-        ),
+-      ),
+-      method: "S256",
+-    };
+-  }
+-  return { value: verifier, method: "plain" };
+-}
+-
+-export function getPolarisAuthToken(): string | null {
+-  try {
+-    return sessionStorage.getItem(sessionKey);
+-  } catch {
++  if (pathname === "/embed" && isEmbedDevelopmentEnabled()) {
+     return null;
+   }
+-}
+-
+-/**
+- * The portal session is a signed JWT whose subject is the immutable Authing
+- * user ID. Keep Host storage scoped to that identity, never to a pairing URL
+- * or a locally remembered host.
+- */
+-export function getPolarisAuthUserScope(): string | null {
+-  const token = getPolarisAuthToken();
+-  const payload = token?.split(".")[1];
+-  if (!payload) return null;
+-  try {
+-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+-    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+-    const decoded = globalThis.atob(padded);
+-    const subject = (JSON.parse(decoded) as { sub?: unknown }).sub;
+-    return typeof subject === "string" && subject.trim() ? subject.trim() : null;
+-  } catch {
++  if (pathname === "/welcome" || pathname === "/auth/callback") {
+     return null;
+   }
+-}
+-
+-export function hasPolarisAuthSession(): boolean {
+-  return Boolean(getPolarisAuthToken());
+-}
+-
+-export function hasPolarisHostSession(): boolean {
+-  return Boolean(getPolarisAuthToken() && getPolarisAuthUserScope());
+-}
+-
+-export function subscribePolarisAuthSession(listener: () => void): () => void {
+-  sessionListeners.add(listener);
+-  return () => sessionListeners.delete(listener);
+-}
+-
+-export function usePolarisAuthSession(): boolean {
+-  return useSyncExternalStore(
+-    subscribePolarisAuthSession,
+-    hasPolarisAuthSession,
+-    hasPolarisAuthSession,
+-  );
+-}
+-
+-export function resolvePolarisAuthRedirect(
+-  pathname: string,
+-  hasSession: boolean,
+-): "/welcome" | null {
+-  if (hasSession) return null;
+-  if (pathname === "/welcome" || pathname === "/auth/callback") return null;
+   return "/welcome";
+ }
+-
+-export function beginPolarisSignIn(): void {
+-  void (async () => {
+-    const verifier = base64Url(randomBytes(32));
+-    const state = base64Url(randomBytes(24));
+-    writeTransientAuthValue(verifierKey, verifier);
+-    writeTransientAuthValue(stateKey, state);
+-    writeTransientAuthValue(
+-      returnPathKey,
+-      `${globalThis.location.pathname}${globalThis.location.search}`,
+-    );
+-    const config = await loadAuthingConfig();
+-    writeTransientAuthValue(redirectUriKey, config.redirectUri);
+-    const authorizationUrl = new URL(config.authorizationUrl);
+-    const pkce = await challenge(verifier);
+-    authorizationUrl.search = new URLSearchParams({
+-      client_id: config.appId,
+-      response_type: "code",
+-      scope: "openid profile email username phone",
+-      redirect_uri: config.redirectUri,
+-      state,
+-      code_challenge: pkce.value,
+-      code_challenge_method: pkce.method,
+-    }).toString();
+-    globalThis.location.assign(authorizationUrl.toString());
+-  })();
+-}
+-
+-export async function completePolarisSignIn(): Promise<string> {
+-  const params = new URLSearchParams(globalThis.location.search);
+-  const code = params.get("code");
+-  const state = params.get("state");
+-  const verifier = readTransientAuthValue(verifierKey);
+-  if (!code || !verifier || state !== readTransientAuthValue(stateKey)) {
+-    throw new Error("Authing 登录状态无效，请重新登录");
+-  }
+-  const response = await fetch(`${polarisApiBaseUrl()}/auth/callback`, {
+-    method: "POST",
+-    headers: { "content-type": "application/json" },
+-    body: JSON.stringify({
+-      code,
+-      codeVerifier: verifier,
+-      redirectUri: readTransientAuthValue(redirectUriKey) || fallbackCallbackUrl(),
+-    }),
+-  });
+-  const payload = (await response.json().catch(() => ({}))) as {
+-    token?: string;
+-    idToken?: string;
+-    error?: string;
+-  };
+-  if (!response.ok || !payload.token?.trim()) {
+-    throw new Error(payload.error || "Authing 登录未完成");
+-  }
+-  sessionStorage.setItem(sessionKey, payload.token);
+-  if (payload.idToken?.trim()) sessionStorage.setItem(idTokenKey, payload.idToken.trim());
+-  clearTransientAuthValue(verifierKey);
+-  clearTransientAuthValue(stateKey);
+-  clearTransientAuthValue(redirectUriKey);
+-  const returnPath = readTransientAuthValue(returnPathKey);
+-  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
+-}
+-
+-export function clearPolarisSignIn(options?: { notify?: boolean }): void {
+-  sessionStorage.removeItem(sessionKey);
+-  sessionStorage.removeItem(idTokenKey);
+-  clearTransientAuthValue(verifierKey);
+-  clearTransientAuthValue(stateKey);
+-  clearTransientAuthValue(redirectUriKey);
+-  clearTransientAuthValue(returnPathKey);
+-  if (options?.notify !== false) notifyPolarisSessionChange();
+-}
+-
+-export function signOutPolaris(): void {
+-  void (async () => {
+-    const config = await loadAuthingConfig().catch(() => null);
+-    const idToken = sessionStorage.getItem(idTokenKey)?.trim();
+-    if (config?.logoutUrl) {
+-      const logoutUrl = new URL(config.logoutUrl);
+-      if (idToken) logoutUrl.searchParams.set("id_token_hint", idToken);
+-      logoutUrl.searchParams.set(
+-        "post_logout_redirect_uri",
+-        config.logoutRedirectUri || globalThis.location.origin,
+-      );
+-      clearPolarisSignIn({ notify: false });
+-      globalThis.location.replace(logoutUrl.toString());
+-      return;
+-    }
+-    clearPolarisSignIn();
+-    globalThis.location.replace("/welcome");
+-  })();
+-}
+diff --git a/packages/polaris-auth-client/package.json b/packages/polaris-auth-client/package.json
+new file mode 100644
+index 0000000..44a7c4d
+--- /dev/null
++++ b/packages/polaris-auth-client/package.json
+@@ -0,0 +1,21 @@
++{
++  "name": "@getpaseo/polaris-auth-client",
++  "version": "0.1.101",
++  "private": true,
++  "type": "module",
++  "main": "./src/index.ts",
++  "types": "./src/index.ts",
++  "exports": {
++    ".": {
++      "types": "./src/index.ts",
++      "import": "./src/index.ts",
++      "default": "./src/index.ts"
++    }
++  },
++  "scripts": {
++    "typecheck": "tsgo --noEmit"
++  },
++  "peerDependencies": {
++    "react": "*"
++  }
++}
+diff --git a/packages/polaris-auth-client/src/index.ts b/packages/polaris-auth-client/src/index.ts
+new file mode 100644
+index 0000000..29400c6
+--- /dev/null
++++ b/packages/polaris-auth-client/src/index.ts
+@@ -0,0 +1,358 @@
++import { useSyncExternalStore } from "react";
++
++const sessionKey = "polaris_authing_session";
++const idTokenKey = "polaris_authing_id_token";
++const verifierKey = "polaris_authing_pkce_verifier";
++const stateKey = "polaris_authing_state";
++const returnPathKey = "polaris_authing_return_path";
++const redirectUriKey = "polaris_authing_redirect_uri";
++const authOverrideCookieKey = "polaris_auth_override";
++const disabledAuthToken = "polaris-disabled-auth-session";
++
++const sessionListeners = new Set<() => void>();
++
++interface PolarisAuthOverride {
++  mode: "disabled";
++  userScope: string;
++}
++
++function readTransientAuthValue(key: string): string | null {
++  const sessionValue = sessionStorage.getItem(key)?.trim();
++  if (sessionValue) {
++    return sessionValue;
++  }
++  try {
++    const localValue = localStorage.getItem(key)?.trim();
++    return localValue || null;
++  } catch {
++    return null;
++  }
++}
++
++function writeTransientAuthValue(key: string, value: string): void {
++  sessionStorage.setItem(key, value);
++  try {
++    localStorage.setItem(key, value);
++  } catch {
++    // Ignore storage availability issues in restrictive browsers.
++  }
++}
++
++function clearTransientAuthValue(key: string): void {
++  sessionStorage.removeItem(key);
++  try {
++    localStorage.removeItem(key);
++  } catch {
++    // Ignore storage availability issues in restrictive browsers.
++  }
++}
++
++function notifyPolarisSessionChange(): void {
++  for (const listener of sessionListeners) {
++    listener();
++  }
++}
++
++function readCookieValue(key: string): string | null {
++  if (typeof globalThis.document === "undefined") {
++    return null;
++  }
++  const entry = globalThis.document.cookie
++    .split(";")
++    .map((part) => part.trim())
++    .find((part) => part.startsWith(`${key}=`));
++  if (!entry) {
++    return null;
++  }
++  return decodeURIComponent(entry.slice(key.length + 1).trim()) || null;
++}
++
++function resolvePolarisAuthOverride(): PolarisAuthOverride | null {
++  const envMode = process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE?.trim().toLowerCase();
++  if (envMode === "disabled") {
++    const envUserScope =
++      process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID?.trim() ||
++      "100000000000000001";
++    return {
++      mode: "disabled",
++      userScope: envUserScope,
++    };
++  }
++  const cookieValue = readCookieValue(authOverrideCookieKey);
++  if (!cookieValue?.startsWith("disabled:")) {
++    return null;
++  }
++  const userScope = cookieValue.slice("disabled:".length).trim();
++  if (!userScope) {
++    return null;
++  }
++  return {
++    mode: "disabled",
++    userScope,
++  };
++}
++
++function required(value: string | undefined, name: string): string {
++  const trimmed = value?.trim();
++  if (!trimmed) {
++    throw new Error(`${name} is required`);
++  }
++  return trimmed;
++}
++
++function fallbackCallbackUrl(): string {
++  if (typeof globalThis.location === "undefined") {
++    throw new Error("A browser is required");
++  }
++  return `${globalThis.location.origin}/auth/callback`;
++}
++
++function base64Url(bytes: Uint8Array): string {
++  let value = "";
++  for (const byte of bytes) {
++    value += String.fromCharCode(byte);
++  }
++  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
++}
++
++function randomBytes(length: number): Uint8Array {
++  const bytes = new Uint8Array(length);
++  if (typeof globalThis.crypto?.getRandomValues === "function") {
++    globalThis.crypto.getRandomValues(bytes);
++    return bytes;
++  }
++  for (let index = 0; index < length; index += 1) {
++    bytes[index] = Math.floor(Math.random() * 256);
++  }
++  return bytes;
++}
++
++async function challenge(
++  verifier: string,
++): Promise<{ value: string; method: "S256" | "plain" }> {
++  if (typeof globalThis.crypto?.subtle?.digest === "function") {
++    return {
++      value: base64Url(
++        new Uint8Array(
++          await globalThis.crypto.subtle.digest(
++            "SHA-256",
++            new TextEncoder().encode(verifier),
++          ),
++        ),
++      ),
++      method: "S256",
++    };
++  }
++  return { value: verifier, method: "plain" };
++}
++
++interface AuthingConfig {
++  appId: string;
++  authorizationUrl: string;
++  redirectUri: string;
++  logoutUrl?: string;
++  logoutRedirectUri?: string;
++}
++
++async function loadAuthingConfig(): Promise<AuthingConfig> {
++  const response = await fetch(`${polarisApiBaseUrl()}/authing-config`);
++  const config = (await response.json().catch(() => ({}))) as Partial<AuthingConfig>;
++  if (!response.ok) {
++    throw new Error("无法加载 Authing 配置");
++  }
++  return {
++    appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
++    authorizationUrl: required(
++      config.authorizationUrl,
++      "POLARIS_AUTHING_AUTHORIZATION_URL",
++    ),
++    redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
++    logoutUrl: config.logoutUrl?.trim() || undefined,
++    logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
++  };
++}
++
++export function publishPolarisAuthSession(): void {
++  notifyPolarisSessionChange();
++}
++
++export function polarisApiBaseUrl(): string {
++  if (typeof globalThis.location === "undefined") {
++    throw new Error("A browser is required");
++  }
++  const port = process.env.EXPO_PUBLIC_POLARIS_API_PORT?.trim();
++  if (!port) {
++    return `${globalThis.location.origin}/api`;
++  }
++  return `${globalThis.location.protocol}//${globalThis.location.hostname}:${port}/api`;
++}
++
++export function getPolarisAuthToken(): string | null {
++  try {
++    const token = sessionStorage.getItem(sessionKey);
++    if (token?.trim()) {
++      return token;
++    }
++  } catch {
++    // Ignore browsers that block session storage.
++  }
++  if (resolvePolarisAuthOverride()?.mode === "disabled") {
++    return disabledAuthToken;
++  }
++  return null;
++}
++
++/**
++ * The portal session is a signed JWT whose subject is the immutable Authing
++ * user ID. Keep Host storage scoped to that identity, never to a pairing URL
++ * or a locally remembered host.
++ */
++export function getPolarisAuthUserScope(): string | null {
++  const authOverride = resolvePolarisAuthOverride();
++  if (authOverride?.mode === "disabled") {
++    return authOverride.userScope;
++  }
++  const token = getPolarisAuthToken();
++  const payload = token?.split(".")[1];
++  if (!payload) {
++    return null;
++  }
++  try {
++    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
++    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
++    const decoded = globalThis.atob(padded);
++    const subject = (JSON.parse(decoded) as { sub?: unknown }).sub;
++    return typeof subject === "string" && subject.trim() ? subject.trim() : null;
++  } catch {
++    return null;
++  }
++}
++
++export function hasPolarisAuthSession(): boolean {
++  return Boolean(getPolarisAuthToken());
++}
++
++export function hasPolarisHostSession(): boolean {
++  return Boolean(getPolarisAuthToken() && getPolarisAuthUserScope());
++}
++
++export function subscribePolarisAuthSession(
++  listener: () => void,
++): () => void {
++  sessionListeners.add(listener);
++  return () => sessionListeners.delete(listener);
++}
++
++export function usePolarisAuthSession(): boolean {
++  return useSyncExternalStore(
++    subscribePolarisAuthSession,
++    hasPolarisAuthSession,
++    hasPolarisAuthSession,
++  );
++}
++
++export function beginPolarisSignIn(): void {
++  void (async () => {
++    if (resolvePolarisAuthOverride()?.mode === "disabled") {
++      globalThis.location.replace("/settings");
++      return;
++    }
++    const verifier = base64Url(randomBytes(32));
++    const state = base64Url(randomBytes(24));
++    writeTransientAuthValue(verifierKey, verifier);
++    writeTransientAuthValue(stateKey, state);
++    writeTransientAuthValue(
++      returnPathKey,
++      `${globalThis.location.pathname}${globalThis.location.search}`,
++    );
++    const config = await loadAuthingConfig();
++    writeTransientAuthValue(redirectUriKey, config.redirectUri);
++    const authorizationUrl = new URL(config.authorizationUrl);
++    const pkce = await challenge(verifier);
++    authorizationUrl.search = new URLSearchParams({
++      client_id: config.appId,
++      response_type: "code",
++      scope: "openid profile email username phone",
++      redirect_uri: config.redirectUri,
++      state,
++      code_challenge: pkce.value,
++      code_challenge_method: pkce.method,
++    }).toString();
++    globalThis.location.assign(authorizationUrl.toString());
++  })();
++}
++
++export async function completePolarisSignIn(): Promise<string> {
++  const params = new URLSearchParams(globalThis.location.search);
++  const code = params.get("code");
++  const state = params.get("state");
++  const verifier = readTransientAuthValue(verifierKey);
++  if (!code || !verifier || state !== readTransientAuthValue(stateKey)) {
++    throw new Error("Authing 登录状态无效，请重新登录");
++  }
++  const response = await fetch(`${polarisApiBaseUrl()}/auth/callback`, {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify({
++      code,
++      codeVerifier: verifier,
++      redirectUri: readTransientAuthValue(redirectUriKey) || fallbackCallbackUrl(),
++    }),
++  });
++  const payload = (await response.json().catch(() => ({}))) as {
++    token?: string;
++    idToken?: string;
++    error?: string;
++  };
++  if (!response.ok || !payload.token?.trim()) {
++    throw new Error(payload.error || "Authing 登录未完成");
++  }
++  sessionStorage.setItem(sessionKey, payload.token);
++  if (payload.idToken?.trim()) {
++    sessionStorage.setItem(idTokenKey, payload.idToken.trim());
++  }
++  clearTransientAuthValue(verifierKey);
++  clearTransientAuthValue(stateKey);
++  clearTransientAuthValue(redirectUriKey);
++  const returnPath = readTransientAuthValue(returnPathKey);
++  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
++}
++
++export function clearPolarisSignIn(options?: { notify?: boolean }): void {
++  sessionStorage.removeItem(sessionKey);
++  sessionStorage.removeItem(idTokenKey);
++  clearTransientAuthValue(verifierKey);
++  clearTransientAuthValue(stateKey);
++  clearTransientAuthValue(redirectUriKey);
++  clearTransientAuthValue(returnPathKey);
++  if (options?.notify !== false) {
++    notifyPolarisSessionChange();
++  }
++}
++
++export function signOutPolaris(): void {
++  void (async () => {
++    if (resolvePolarisAuthOverride()?.mode === "disabled") {
++      clearPolarisSignIn();
++      globalThis.location.replace("/settings");
++      return;
++    }
++    const config = await loadAuthingConfig().catch(() => null);
++    const idToken = sessionStorage.getItem(idTokenKey)?.trim();
++    if (config?.logoutUrl) {
++      const logoutUrl = new URL(config.logoutUrl);
++      if (idToken) {
++        logoutUrl.searchParams.set("id_token_hint", idToken);
++      }
++      logoutUrl.searchParams.set(
++        "post_logout_redirect_uri",
++        config.logoutRedirectUri || globalThis.location.origin,
++      );
++      clearPolarisSignIn({ notify: false });
++      globalThis.location.replace(logoutUrl.toString());
++      return;
++    }
++    clearPolarisSignIn();
++    globalThis.location.replace("/welcome");
++  })();
++}
+diff --git a/packages/polaris-auth-client/tsconfig.json b/packages/polaris-auth-client/tsconfig.json
+new file mode 100644
+index 0000000..f6b3506
+--- /dev/null
++++ b/packages/polaris-auth-client/tsconfig.json
+@@ -0,0 +1,15 @@
++{
++  "extends": "../../tsconfig.base.json",
++  "compilerOptions": {
++    "lib": [
++      "ES2023",
++      "DOM"
++    ],
++    "types": [
++      "node"
++    ]
++  },
++  "include": [
++    "src/**/*"
++  ]
++}

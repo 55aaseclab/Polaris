@@ -3,6 +3,11 @@ map $http_x_forwarded_proto $polaris_content_security_policy {
   https "upgrade-insecure-requests";
 }
 
+map "${POLARIS_AUTH_MODE}" $polaris_auth_override {
+  default "";
+  disabled "disabled:${POLARIS_AUTH_DEFAULT_USER_ID}";
+}
+
 upstream landing_page {
   server ${LANDING_PAGE_UPSTREAM};
 }
@@ -20,6 +25,7 @@ server {
   server_name ${NGINX_SERVER_NAME} _;
   absolute_redirect off;
   add_header Content-Security-Policy $polaris_content_security_policy always;
+  add_header Set-Cookie "polaris_auth_override=$polaris_auth_override; Path=/; SameSite=Lax" always;
 
   location /api/ {
     proxy_pass http://polaris_server;
