@@ -29,8 +29,6 @@ EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
 PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
-LANDING_HOST="${POLARIS_LANDING_PAGE_BIND_HOST:-0.0.0.0}"
-LANDING_PORT="${POLARIS_LANDING_PAGE_PORT:-5173}"
 DOCS_HOST="${POLARIS_DOCS_BIND_HOST:-0.0.0.0}"
 DOCS_PORT="${POLARIS_DOCS_PORT:-4180}"
 LOG_DIR=".runtime/paseo"
@@ -43,7 +41,6 @@ cleanup() {
     "${executor_pid:-}"
     "${executor_bridge_proxy_pid:-}"
     "${paseo_pid:-}"
-    "${landing_pid:-}"
     "${docs_pid:-}"
   )
   local pid
@@ -101,15 +98,6 @@ fi
   2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
 paseo_pid=$!
 
-VITE_PASEO_APP_BASE_URL="${VITE_PASEO_APP_BASE_URL:-${POLARIS_PASEO_APP_BASE_URL}}" \
-pnpm --filter landing-page exec vite \
-  --host "${LANDING_HOST}" \
-  --port "${LANDING_PORT}" \
-  --strictPort \
-  > >(tee "${LOG_DIR}/stack.landing.log") \
-  2> >(tee "${LOG_DIR}/stack.landing.err.log" >&2) &
-landing_pid=$!
-
 pnpm --filter docs-viewer exec vitepress dev site \
   --host "${DOCS_HOST}" \
   --port "${DOCS_PORT}" \
@@ -122,7 +110,6 @@ pids=(
   "${server_pid}"
   "${executor_pid}"
   "${paseo_pid}"
-  "${landing_pid}"
   "${docs_pid}"
 )
 if [ -n "${executor_bridge_proxy_pid:-}" ]; then

@@ -68,15 +68,6 @@ polaris_bluegreen_paseo_port() {
   fi
 }
 
-polaris_bluegreen_landing_page_port() {
-  local color="$1"
-  if [ "${color}" = "blue" ]; then
-    printf '%s\n' "${BLUE_POLARIS_LANDING_PAGE_PORT:-15173}"
-  else
-    printf '%s\n' "${GREEN_POLARIS_LANDING_PAGE_PORT:-25173}"
-  fi
-}
-
 polaris_bluegreen_write_temp_env() {
   local source_env="$1"
   local color="$2"
@@ -87,10 +78,8 @@ polaris_bluegreen_write_temp_env() {
       skip["NGINX_HTTP_PORT"]=1
       skip["POLARIS_SERVER_PORT"]=1
       skip["PASEO_APP_PORT"]=1
-      skip["POLARIS_LANDING_PAGE_PORT"]=1
       skip["POLARIS_SERVER_BIND_HOST"]=1
       skip["PASEO_APP_BIND_HOST"]=1
-      skip["POLARIS_LANDING_PAGE_BIND_HOST"]=1
     }
     {
       split($0, parts, "=")
@@ -106,10 +95,8 @@ polaris_bluegreen_write_temp_env() {
 NGINX_HTTP_PORT=$(polaris_bluegreen_nginx_port "${color}")
 POLARIS_SERVER_PORT=$(polaris_bluegreen_server_port "${color}")
 PASEO_APP_PORT=$(polaris_bluegreen_paseo_port "${color}")
-POLARIS_LANDING_PAGE_PORT=$(polaris_bluegreen_landing_page_port "${color}")
 POLARIS_SERVER_BIND_HOST=127.0.0.1
 PASEO_APP_BIND_HOST=127.0.0.1
-POLARIS_LANDING_PAGE_BIND_HOST=127.0.0.1
 EOF
 }
 
