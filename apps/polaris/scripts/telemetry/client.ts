@@ -22,7 +22,6 @@ export function telemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 
 export function telemetryRoot(env: NodeJS.ProcessEnv = process.env): string {
   const dataRoot = env.POLARIS_DATA_ROOT?.trim()
-    || env.POLARIS_LOCAL_DEPLOY_DATA_ROOT?.trim()
     || path.join(os.homedir(), ".local", "share", "polaris");
   return path.isAbsolute(dataRoot) ? dataRoot : path.resolve(dataRoot);
 }

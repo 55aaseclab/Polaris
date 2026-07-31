@@ -45,14 +45,6 @@ export function resolveCurrentReleaseVersion(rootDir = process.cwd()) {
 }
 
 function resolveFallbackReleaseVersion(rootDir) {
-  const releaseManifestPath = path.join(rootDir, "deploy", "local-deploy", "release.json");
-  if (fs.existsSync(releaseManifestPath)) {
-    const manifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
-    if (typeof manifest.version === "string" && parseSemver(manifest.version)) {
-      return manifest.version;
-    }
-  }
-
   const changelogPath = path.join(rootDir, "CHANGELOG.md");
   if (fs.existsSync(changelogPath)) {
     const content = fs.readFileSync(changelogPath, "utf8");

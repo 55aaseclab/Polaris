@@ -124,19 +124,7 @@ pnpm --dir apps/polaris run polaris -- ops reconcile-workspaces \
 
 `server` and `portal` use the same portal service surface.
 
-## Local Deployment CLI
+## Deployment
 
-Repo-only local deployment entry point:
-
-```bash
-pnpm --dir apps/polaris run polaris -- local-deploy \
-  <install|start|stop|restart|status|open|logs|doctor|upgrade|uninstall|desktop>
-```
-
-Installed stage-one local deployment CLI:
-
-```bash
-polaris <install|start|stop|restart|status|open|logs|doctor|upgrade|uninstall>
-```
-
-The desktop app uses the same local deployment action model.
+Deployment is remote-only.
+Use the scripts and guide under [Remote Deploy](../operations/remote-deploy.md).

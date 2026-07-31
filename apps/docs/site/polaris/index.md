@@ -8,11 +8,11 @@ here:
 
 - [What Your Team Gets](./what-your-team-gets.md)
 
-That customer-facing path is then expanded into five sections:
+That customer-facing path is then expanded into six sections:
 
 - [Onboarding](./onboarding/)
 - [CLI](./cli.md)
-- [Local Deployment](./local-deployment.md)
+- [Remote Deploy](../operations/remote-deploy.md)
 - [Governed Use](./governed-use/)
 - [Shared Infrastructure](./shared-infrastructure/)
 - [Member Exit And Handover](./member-exit-and-handover/)
@@ -25,7 +25,7 @@ Use this order when you want the business story first:
 
 1. [What Your Team Gets](./what-your-team-gets.md)
 2. [Onboarding](./onboarding/)
-3. [Local Deployment](./local-deployment.md)
+3. [Remote Deploy](../operations/remote-deploy.md)
 4. [Governed Use](./governed-use/)
 5. [Shared Infrastructure](./shared-infrastructure/)
 6. [Member Exit And Handover](./member-exit-and-handover/)
@@ -36,7 +36,7 @@ Use this order when you want implementation detail and operational depth:
 
 1. [Onboarding](./onboarding/)
 2. [CLI](./cli.md)
-3. [Local Deployment](./local-deployment.md)
+3. [Remote Deploy](../operations/remote-deploy.md)
 4. [Governed Use](./governed-use/)
 5. [Shared Infrastructure](./shared-infrastructure/)
 6. [Member Exit And Handover](./member-exit-and-handover/)
