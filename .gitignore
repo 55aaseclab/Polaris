@@ -28,6 +28,7 @@ apps/polaris-web/dist/
 apps/polaris-web/test-results/
 apps/paseo/dist-build/
 apps/paseo/source/
+.paseo/
 apps/polaris/.coverage/
 apps/docs/node_modules/
 apps/docs/dist/

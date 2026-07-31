@@ -81,6 +81,12 @@ importers:
         specifier: ^7.1.2
         version: 7.3.6(@types/node@24.13.2)(jiti@1.21.7)(tsx@4.22.4)
 
+  apps/paseo-embed-demo:
+    dependencies:
+      '@paseo/embed':
+        specifier: workspace:*
+        version: link:../../packages/paseo-embed
+
   apps/polaris:
     dependencies:
       '@sentry/node':
@@ -117,6 +123,8 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
+
+  packages/paseo-embed: {}
 
 packages:
 

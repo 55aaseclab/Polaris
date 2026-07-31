@@ -1,0 +1,12 @@
+{
+  "name": "paseo-embed-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @paseo/embed run build && node server.mjs",
+    "start": "pnpm --filter @paseo/embed run build && node server.mjs"
+  },
+  "dependencies": {
+    "@paseo/embed": "workspace:*"
+  }
+}

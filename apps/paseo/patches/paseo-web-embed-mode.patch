@@ -1,0 +1,1786 @@
+diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
+index be6e687..62974fa 100644
+--- a/packages/app/src/app/_layout.tsx
++++ b/packages/app/src/app/_layout.tsx
+@@ -957,6 +957,7 @@ function RootStack() {
+   return (
+     <Stack screenOptions={stackScreenOptions}>
+       <Stack.Screen name="index" />
++      <Stack.Screen name="embed" />
+       <Stack.Protected guard={storeReady}>
+         <Stack.Screen name="welcome" />
+       </Stack.Protected>
+diff --git a/packages/app/src/app/embed.tsx b/packages/app/src/app/embed.tsx
+new file mode 100644
+index 0000000..325edf5
+--- /dev/null
++++ b/packages/app/src/app/embed.tsx
+@@ -0,0 +1,485 @@
++import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
++import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
++import { useLocalSearchParams } from "expo-router";
++import { useUnistyles } from "react-native-unistyles";
++import { SessionProvider } from "@/contexts/session-context";
++import {
++  buildWorkspaceAttachmentScopeKey,
++  useWorkspaceAttachmentsStore,
++} from "@/attachments/workspace-attachments-store";
++import { usePaseoEmbedBridge } from "@/embed/bridge";
++import {
++  isEmbedDevelopmentEnabled,
++  type PaseoEmbedContext,
++  type PaseoEmbedWorkspaceRequest,
++} from "@/embed/protocol";
++import { createEmbeddedWorkspaceAgent } from "@/embed/workspace";
++import { EmbeddedAgentPanel } from "@/embed/embedded-agent-panel";
++import {
++  getHostRuntimeStore,
++  useHostRuntimeClient,
++  useHostRuntimeConnectionStatus,
++  useHostRuntimeIsConnected,
++} from "@/runtime/host-runtime";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
++
++interface AgentOption {
++  id: string;
++  title: string;
++}
++
++interface AgentScope {
++  cwd: string;
++  workspaceId: string | null;
++}
++
++type WorkspaceSetupState = "idle" | "creating" | "error" | "ready";
++
++function firstParam(value: string | string[] | undefined): string {
++  if (typeof value === "string") {
++    return value.trim();
++  }
++  if (Array.isArray(value)) {
++    return value[0]?.trim() ?? "";
++  }
++  return "";
++}
++
++function normalizeAgentOptions(
++  entries: Array<{ agent: { id: string; title?: string | null } }>,
++): AgentOption[] {
++  return entries.map((entry) => ({
++    id: entry.agent.id,
++    title: entry.agent.title?.trim() || entry.agent.id,
++  }));
++}
++
++export default function EmbedRoute() {
++  const params = useLocalSearchParams<{
++    agentId?: string | string[];
++    endpoint?: string | string[];
++    parentOrigin?: string | string[];
++    nonce?: string | string[];
++    serverId?: string | string[];
++  }>();
++  const { theme } = useUnistyles();
++  const requestedServerId = firstParam(params.serverId);
++  const requestedAgentId = firstParam(params.agentId);
++  const requestedEndpoint = firstParam(params.endpoint);
++  const parentOrigin = firstParam(params.parentOrigin);
++  const nonce = firstParam(params.nonce);
++  const endpoint = requestedEndpoint || (isEmbedDevelopmentEnabled() ? "localhost:6767" : "");
++  const hostRuntimeStore = getHostRuntimeStore();
++  const runtimeHosts = useSyncExternalStore(
++    (onStoreChange) => hostRuntimeStore.subscribeHostList(onStoreChange),
++    () => hostRuntimeStore.getHosts(),
++    () => hostRuntimeStore.getHosts(),
++  );
++
++  const [serverId, setServerId] = useState(requestedServerId || "");
++  const [agentId, setAgentId] = useState(requestedAgentId || "");
++  const [agentOptions, setAgentOptions] = useState<AgentOption[]>([]);
++  const [agentScope, setAgentScope] = useState<AgentScope | null>(null);
++  const [context, setContext] = useState<PaseoEmbedContext | null>(null);
++  const [workspaceRequest, setWorkspaceRequest] = useState<PaseoEmbedWorkspaceRequest | null>(
++    null,
++  );
++  const [workspaceSetupState, setWorkspaceSetupState] = useState<WorkspaceSetupState>("idle");
++  const [workspaceSetupError, setWorkspaceSetupError] = useState<string | null>(null);
++  const endpointProbeRef = useRef<string | null>(null);
++  const workspaceSetupRequestRef = useRef<string | null>(null);
++
++  const runtimeClient = useHostRuntimeClient(serverId);
++  const isConnected = useHostRuntimeIsConnected(serverId);
++  const connectionStatus = useHostRuntimeConnectionStatus(serverId);
++  const hasPolarisSession = usePolarisAuthSession();
++
++  const embedBridge = usePaseoEmbedBridge({
++    parentOrigin,
++    nonce,
++    onContext: setContext,
++    onWorkspaceCreate: setWorkspaceRequest,
++  });
++
++  useEffect(() => {
++    if (requestedServerId) {
++      setServerId(requestedServerId);
++    }
++  }, [requestedServerId]);
++
++  useEffect(() => {
++    if (requestedAgentId) {
++      setAgentId(requestedAgentId);
++    }
++  }, [requestedAgentId]);
++
++  useEffect(() => {
++    if (serverId || requestedServerId || !endpoint || !isEmbedDevelopmentEnabled()) {
++      return;
++    }
++    const localHost = runtimeHosts.find((host) =>
++      host.connections.some(
++        (connection) => connection.type === "directTcp" && connection.endpoint === endpoint,
++      ),
++    );
++    if (localHost) {
++      setServerId(localHost.serverId);
++      return;
++    }
++
++    if (endpointProbeRef.current === endpoint) {
++      return;
++    }
++    endpointProbeRef.current = endpoint;
++    void hostRuntimeStore
++      .probeAndUpsertDirectConnection({
++        endpoint,
++        label: "Embedded Paseo host",
++      })
++      .then(({ serverId: discoveredServerId }) => {
++        if (endpointProbeRef.current === endpoint) {
++          setServerId(discoveredServerId);
++        }
++      })
++      .catch(() => {
++        if (endpointProbeRef.current === endpoint) {
++          endpointProbeRef.current = null;
++        }
++      });
++  }, [endpoint, requestedServerId, runtimeHosts, serverId]);
++
++  useEffect(() => {
++    if (!runtimeClient || !isConnected) {
++      return;
++    }
++
++    let disposed = false;
++    void runtimeClient
++      .fetchAgents({ scope: "active", page: { limit: 50 } })
++      .then((result) => {
++        if (disposed) {
++          return;
++        }
++        const options = normalizeAgentOptions(result.entries);
++        setAgentOptions(options);
++      })
++      .catch(() => {
++        if (!disposed) {
++          setAgentOptions([]);
++        }
++      });
++
++    return () => {
++      disposed = true;
++    };
++  }, [agentId, isConnected, runtimeClient]);
++
++  useEffect(() => {
++    if (!workspaceRequest || !runtimeClient || !isConnected) {
++      return;
++    }
++    if (workspaceSetupRequestRef.current === workspaceRequest.requestId) {
++      return;
++    }
++
++    const requestId = workspaceRequest.requestId;
++    workspaceSetupRequestRef.current = requestId;
++    setWorkspaceSetupState("creating");
++    setWorkspaceSetupError(null);
++    void createEmbeddedWorkspaceAgent({ client: runtimeClient, request: workspaceRequest })
++      .then(({ agentId: createdAgentId, workspaceId: createdWorkspaceId }) => {
++        if (workspaceSetupRequestRef.current !== requestId) {
++          return;
++        }
++        setAgentId(createdAgentId);
++        setWorkspaceSetupState("ready");
++        embedBridge.reportWorkspaceCreated({
++          requestId,
++          workspaceId: createdWorkspaceId,
++          agentId: createdAgentId,
++        });
++      })
++      .catch((error) => {
++        if (workspaceSetupRequestRef.current !== requestId) {
++          return;
++        }
++        const message = error instanceof Error ? error.message : String(error);
++        setWorkspaceSetupState("error");
++        setWorkspaceSetupError(message);
++        embedBridge.reportWorkspaceFailed({ requestId, error: message });
++      });
++  }, [embedBridge, isConnected, runtimeClient, workspaceRequest]);
++
++  useEffect(() => {
++    if (!runtimeClient || !isConnected || !agentId) {
++      setAgentScope(null);
++      return;
++    }
++
++    let disposed = false;
++    void runtimeClient
++      .fetchAgent(agentId)
++      .then((result) => {
++        if (disposed) {
++          return;
++        }
++        const agent = result?.agent;
++        setAgentScope(
++          agent?.cwd ? { cwd: agent.cwd, workspaceId: agent.workspaceId ?? null } : null,
++        );
++      })
++      .catch(() => {
++        if (!disposed) {
++          setAgentScope(null);
++        }
++      });
++
++    return () => {
++      disposed = true;
++    };
++  }, [agentId, isConnected, runtimeClient]);
++
++  useEffect(() => {
++    if (!context || !serverId || !agentScope) {
++      return;
++    }
++
++    const scopeKey = buildWorkspaceAttachmentScopeKey({
++      serverId,
++      workspaceId: agentScope.workspaceId,
++      cwd: agentScope.cwd,
++    });
++    useWorkspaceAttachmentsStore.getState().setExternalContextAttachment({
++      scopeKey,
++      attachment: {
++        kind: "external_context",
++        source: context.source,
++        id: `${context.kind}:${context.id}`,
++        title: context.title,
++        ...(context.subtitle ? { subtitle: context.subtitle } : {}),
++        text: context.text,
++        ...(context.url ? { url: context.url } : {}),
++      },
++    });
++  }, [agentScope, context, serverId]);
++
++  const connectionLabel = useMemo(() => {
++    if (isConnected) {
++      return "Connected";
++    }
++    if (connectionStatus === "connecting") {
++      return "Connecting";
++    }
++    return "Awaiting host";
++  }, [connectionStatus, isConnected]);
++  const isCreatingWorkspace = workspaceSetupState === "creating";
++  const emptyTitle = isCreatingWorkspace ? "Creating workspace" : "Choose an agent";
++  const emptyBody = !serverId
++    ? "The embedded panel is connecting to the local Paseo daemon."
++    : isCreatingWorkspace
++      ? `Creating ${workspaceRequest?.title || workspaceRequest?.path || "workspace"}.`
++      : workspaceSetupError ??
++        "This local daemon has no active agent yet. Ask the embedding app to create one.";
++
++  const content = (
++    <View style={[styles.root, { backgroundColor: theme.colors.surface0 }]}>
++      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
++        <View>
++          <Text style={[styles.eyebrow, { color: theme.colors.foregroundMuted }]}>
++            PASEO / EMBED
++          </Text>
++          <Text style={[styles.title, { color: theme.colors.foreground }]}>Companion</Text>
++        </View>
++        <View style={styles.statusGroup}>
++          <View
++            style={[
++              styles.statusDot,
++              {
++                backgroundColor: isConnected
++                  ? theme.colors.statusSuccess
++                  : theme.colors.foregroundMuted,
++              },
++            ]}
++          />
++          <Text style={[styles.statusText, { color: theme.colors.foregroundMuted }]}>
++            {connectionLabel}
++          </Text>
++        </View>
++      </View>
++
++      {context ? (
++        <View
++          style={[
++            styles.contextCard,
++            { backgroundColor: theme.colors.surface1, borderColor: theme.colors.border },
++          ]}
++        >
++          <Text style={[styles.contextLabel, { color: theme.colors.foregroundMuted }]}>
++            CONTEXT FROM {context.source.toUpperCase()}
++          </Text>
++          <Text numberOfLines={1} style={[styles.contextTitle, { color: theme.colors.foreground }]}>
++            {context.title}
++          </Text>
++          {context.subtitle ? (
++            <Text
++              numberOfLines={1}
++              style={[styles.contextSubtitle, { color: theme.colors.foregroundMuted }]}
++            >
++              {context.subtitle}
++            </Text>
++          ) : null}
++        </View>
++      ) : null}
++
++      {!serverId || (!agentId && isConnected) ? (
++        <ScrollView contentContainerStyle={styles.emptyContent}>
++          {!serverId || isCreatingWorkspace ? (
++            <ActivityIndicator color={theme.colors.foregroundMuted} />
++          ) : null}
++          <Text style={[styles.emptyTitle, { color: theme.colors.foreground }]}>
++            {emptyTitle}
++          </Text>
++          <Text style={[styles.emptyBody, { color: theme.colors.foregroundMuted }]}>
++            {emptyBody}
++          </Text>
++          {agentOptions.length > 0 ? (
++            <View style={styles.agentList}>
++              {agentOptions.map((agent) => (
++                <Pressable
++                  key={agent.id}
++                  onPress={() => setAgentId(agent.id)}
++                  style={[
++                    styles.agentButton,
++                    { borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 },
++                  ]}
++                >
++                  <Text
++                    numberOfLines={1}
++                    style={[styles.agentButtonText, { color: theme.colors.foreground }]}
++                  >
++                    {agent.title}
++                  </Text>
++                </Pressable>
++              ))}
++            </View>
++          ) : null}
++        </ScrollView>
++      ) : (
++        <View style={styles.agentPanel}>
++          <EmbeddedAgentPanel
++            serverId={serverId}
++            workspaceId={agentScope?.workspaceId ?? agentId}
++            agentId={agentId}
++            onAgentChange={setAgentId}
++          />
++        </View>
++      )}
++    </View>
++  );
++
++  // Normal authenticated routes are already covered by HostSessionManager.
++  // The local development embed route is intentionally public, so it mounts
++  // its own provider to keep the daemon session and agent directory alive.
++  if (!hasPolarisSession && runtimeClient && serverId) {
++    return (
++      <SessionProvider serverId={serverId} client={runtimeClient}>
++        {content}
++      </SessionProvider>
++    );
++  }
++
++  return content;
++}
++
++const styles = StyleSheet.create({
++  root: {
++    flex: 1,
++    minHeight: 0,
++  },
++  header: {
++    alignItems: "center",
++    borderBottomWidth: StyleSheet.hairlineWidth,
++    flexDirection: "row",
++    justifyContent: "space-between",
++    paddingHorizontal: 16,
++    paddingVertical: 12,
++  },
++  eyebrow: {
++    fontSize: 10,
++    fontWeight: "700",
++    letterSpacing: 1.4,
++  },
++  title: {
++    fontSize: 18,
++    fontWeight: "700",
++    marginTop: 2,
++  },
++  statusGroup: {
++    alignItems: "center",
++    flexDirection: "row",
++    gap: 6,
++  },
++  statusDot: {
++    borderRadius: 4,
++    height: 7,
++    width: 7,
++  },
++  statusText: {
++    fontSize: 12,
++  },
++  contextCard: {
++    borderBottomWidth: StyleSheet.hairlineWidth,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++  },
++  contextLabel: {
++    fontSize: 9,
++    fontWeight: "700",
++    letterSpacing: 1.1,
++  },
++  contextTitle: {
++    fontSize: 13,
++    fontWeight: "700",
++    marginTop: 3,
++  },
++  contextSubtitle: {
++    fontSize: 12,
++    marginTop: 2,
++  },
++  emptyContent: {
++    alignItems: "center",
++    flexGrow: 1,
++    justifyContent: "center",
++    padding: 28,
++  },
++  emptyTitle: {
++    fontSize: 16,
++    fontWeight: "700",
++    marginTop: 14,
++  },
++  emptyBody: {
++    fontSize: 13,
++    lineHeight: 20,
++    marginTop: 7,
++    maxWidth: 320,
++    textAlign: "center",
++  },
++  agentList: {
++    alignSelf: "stretch",
++    gap: 8,
++    marginTop: 18,
++  },
++  agentButton: {
++    borderWidth: StyleSheet.hairlineWidth,
++    paddingHorizontal: 12,
++    paddingVertical: 10,
++  },
++  agentButtonText: {
++    fontSize: 13,
++    fontWeight: "600",
++  },
++  agentPanel: {
++    flex: 1,
++    minHeight: 0,
++  },
++});
+diff --git a/packages/app/src/attachments/types.ts b/packages/app/src/attachments/types.ts
+index 24cbf02..7bf3e3f 100644
+--- a/packages/app/src/attachments/types.ts
++++ b/packages/app/src/attachments/types.ts
+@@ -63,6 +63,20 @@ export type PullRequestContextAttachment =
+   | ({ kind: "github.pull_request_review" } & PullRequestContextAttachmentFields)
+   | ({ kind: "github.pull_request_check" } & PullRequestContextAttachmentFields);
+ 
++/**
++ * Context supplied by an application embedding Paseo. It remains visible in
++ * the composer and is serialized as a normal text attachment on send.
++ */
++export interface ExternalContextAttachment {
++  kind: "external_context";
++  source: string;
++  id: string;
++  title: string;
++  subtitle?: string;
++  text: string;
++  url?: string | null;
++}
++
+ export type UserComposerAttachment =
+   | { kind: "image"; metadata: AttachmentMetadata }
+   | { kind: "file"; attachment: UploadedFileAttachment }
+@@ -75,6 +89,7 @@ export type WorkspaceComposerAttachment =
+       attachment: BrowserElementAttachment;
+     }
+   | PullRequestContextAttachment
++  | ExternalContextAttachment
+   | {
+       kind: "review";
+       attachment: Extract<AgentAttachment, { type: "review" }>;
+diff --git a/packages/app/src/attachments/workspace-attachment-utils.test.ts b/packages/app/src/attachments/workspace-attachment-utils.test.ts
+index 5fd12cd..4a0bd86 100644
+--- a/packages/app/src/attachments/workspace-attachment-utils.test.ts
++++ b/packages/app/src/attachments/workspace-attachment-utils.test.ts
+@@ -1,5 +1,9 @@
+ import { describe, expect, it } from "vitest";
+-import type { ComposerAttachment, PullRequestContextAttachment } from "./types";
++import type {
++  ComposerAttachment,
++  ExternalContextAttachment,
++  PullRequestContextAttachment,
++} from "./types";
+ import {
+   isWorkspaceAttachment,
+   userAttachmentsOnly,
+@@ -20,6 +24,17 @@ function contextAttachment(
+   };
+ }
+ 
++function externalContextAttachment(): ExternalContextAttachment {
++  return {
++    kind: "external_context",
++    source: "portal",
++    id: "order-42",
++    title: "Order 42",
++    subtitle: "Manual review",
++    text: "Order context supplied by the portal.",
++  };
++}
++
+ describe("workspace attachment utilities", () => {
+   it("treats pull request context as a workspace attachment", () => {
+     expect(isWorkspaceAttachment(contextAttachment())).toBe(true);
+@@ -54,4 +69,13 @@ describe("workspace attachment utilities", () => {
+       text: "GitHub pull request comment\n\nLooks good.",
+     });
+   });
++
++  it("serializes external context attachments as protocol text attachments", () => {
++    expect(workspaceAttachmentToSubmitAttachment(externalContextAttachment())).toEqual({
++      type: "text",
++      mimeType: "text/plain",
++      title: "Order 42",
++      text: "Order context supplied by the portal.",
++    });
++  });
+ });
+diff --git a/packages/app/src/attachments/workspace-attachment-utils.ts b/packages/app/src/attachments/workspace-attachment-utils.ts
+index 8284be0..7f8049b 100644
+--- a/packages/app/src/attachments/workspace-attachment-utils.ts
++++ b/packages/app/src/attachments/workspace-attachment-utils.ts
+@@ -1,5 +1,6 @@
+ import type {
+   ComposerAttachment,
++  ExternalContextAttachment,
+   PullRequestContextAttachment,
+   UserComposerAttachment,
+   WorkspaceComposerAttachment,
+@@ -16,12 +17,19 @@ export function isPullRequestContextAttachment(
+   );
+ }
+ 
++export function isExternalContextAttachment(
++  attachment: ComposerAttachment | undefined,
++): attachment is ExternalContextAttachment {
++  return attachment?.kind === "external_context";
++}
++
+ export function isWorkspaceAttachment(
+   attachment: ComposerAttachment | undefined,
+ ): attachment is WorkspaceComposerAttachment {
+   return (
+     attachment?.kind === "review" ||
+     attachment?.kind === "browser_element" ||
++    isExternalContextAttachment(attachment) ||
+     isPullRequestContextAttachment(attachment)
+   );
+ }
+@@ -33,6 +41,7 @@ export function userAttachmentsOnly(
+     (attachment): attachment is UserComposerAttachment =>
+       attachment.kind !== "review" &&
+       attachment.kind !== "browser_element" &&
++      !isExternalContextAttachment(attachment) &&
+       !isPullRequestContextAttachment(attachment),
+   );
+ }
+@@ -56,5 +65,13 @@ export function workspaceAttachmentToSubmitAttachment(
+       text: attachment.text,
+     };
+   }
++  if (isExternalContextAttachment(attachment)) {
++    return {
++      type: "text",
++      mimeType: "text/plain",
++      title: attachment.title,
++      text: attachment.text,
++    };
++  }
+   return attachment.kind === "review" ? attachment.attachment : null;
+ }
+diff --git a/packages/app/src/attachments/workspace-attachments-store.test.ts b/packages/app/src/attachments/workspace-attachments-store.test.ts
+index 888a21d..f96fe82 100644
+--- a/packages/app/src/attachments/workspace-attachments-store.test.ts
++++ b/packages/app/src/attachments/workspace-attachments-store.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import type { WorkspaceComposerAttachment } from "./types";
++import type { ExternalContextAttachment, WorkspaceComposerAttachment } from "./types";
+ import {
+   appendWorkspaceAttachment,
+   buildWorkspaceAttachmentScopeKey,
+@@ -57,6 +57,16 @@ function contextAttachment(id: string): WorkspaceComposerAttachment {
+   };
+ }
+ 
++function externalContextAttachment(id: string, title = "Order 42"): ExternalContextAttachment {
++  return {
++    kind: "external_context",
++    source: "portal",
++    id,
++    title,
++    text: "Order context supplied by the portal.",
++  };
++}
++
+ describe("workspace attachments store", () => {
+   it("scopes workspace attachments by server and workspace before cwd fallback", () => {
+     expect(
+@@ -138,4 +148,28 @@ describe("workspace attachments store", () => {
+       context,
+     ]);
+   });
++
++  it("replaces the active external context from one portal source", () => {
++    resetWorkspaceAttachmentsStore();
++    const scopeKey = buildWorkspaceAttachmentScopeKey({
++      serverId: "local",
++      workspaceId: "workspace-1",
++      cwd: "/repo",
++    });
++    const review = reviewAttachment("Please simplify this.");
++    const previous = externalContextAttachment("order-41", "Order 41");
++    const next = externalContextAttachment("order-42");
++
++    useWorkspaceAttachmentsStore
++      .getState()
++      .setWorkspaceAttachments({ scopeKey, attachments: [review, previous] });
++    useWorkspaceAttachmentsStore
++      .getState()
++      .setExternalContextAttachment({ scopeKey, attachment: next });
++
++    expect(useWorkspaceAttachmentsStore.getState().attachmentsByScope[scopeKey]).toEqual([
++      review,
++      next,
++    ]);
++  });
+ });
+diff --git a/packages/app/src/attachments/workspace-attachments-store.ts b/packages/app/src/attachments/workspace-attachments-store.ts
+index 12ccc13..b94f554 100644
+--- a/packages/app/src/attachments/workspace-attachments-store.ts
++++ b/packages/app/src/attachments/workspace-attachments-store.ts
+@@ -1,6 +1,6 @@
+ import { useMemo } from "react";
+ import { create } from "zustand";
+-import type { WorkspaceComposerAttachment } from "./types";
++import type { ExternalContextAttachment, WorkspaceComposerAttachment } from "./types";
+ 
+ const EMPTY_WORKSPACE_ATTACHMENTS: readonly WorkspaceComposerAttachment[] = [];
+ 
+@@ -23,6 +23,10 @@ interface WorkspaceAttachmentsStoreActions {
+     scopeKey: string;
+     attachment: WorkspaceComposerAttachment;
+   }) => void;
++  setExternalContextAttachment: (input: {
++    scopeKey: string;
++    attachment: ExternalContextAttachment;
++  }) => void;
+   clearWorkspaceAttachments: (input: { scopeKey: string }) => void;
+ }
+ 
+@@ -66,6 +70,13 @@ function areWorkspaceAttachmentsEqual(
+ }
+ 
+ function getContextAttachmentKey(attachment: WorkspaceComposerAttachment): string | null {
++  if (attachment.kind === "external_context") {
++    return JSON.stringify({
++      kind: attachment.kind,
++      source: attachment.source,
++      id: attachment.id,
++    });
++  }
+   if (
+     attachment.kind !== "github.pull_request_comment" &&
+     attachment.kind !== "github.pull_request_review" &&
+@@ -133,6 +144,28 @@ export const useWorkspaceAttachmentsStore = create<WorkspaceAttachmentsStore>()(
+       };
+     });
+   },
++  setExternalContextAttachment: ({ scopeKey, attachment }) => {
++    set((state) => {
++      const current = state.attachmentsByScope[scopeKey] ?? EMPTY_WORKSPACE_ATTACHMENTS;
++      const attachments = [
++        ...current.filter(
++          (currentAttachment) =>
++            currentAttachment.kind !== "external_context" ||
++            currentAttachment.source !== attachment.source,
++        ),
++        attachment,
++      ];
++      if (areWorkspaceAttachmentsEqual(current, attachments)) {
++        return state;
++      }
++      return {
++        attachmentsByScope: {
++          ...state.attachmentsByScope,
++          [scopeKey]: attachments,
++        },
++      };
++    });
++  },
+   clearWorkspaceAttachments: ({ scopeKey }) => {
+     set((state) => {
+       if (!state.attachmentsByScope[scopeKey]) {
+diff --git a/packages/app/src/composer/attachments/workspace.tsx b/packages/app/src/composer/attachments/workspace.tsx
+index e414247..c6c3fed 100644
+--- a/packages/app/src/composer/attachments/workspace.tsx
++++ b/packages/app/src/composer/attachments/workspace.tsx
+@@ -10,6 +10,7 @@ import type {
+ import { AttachmentLabel, AttachmentPill } from "@/components/attachment-pill";
+ import { useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
+ import {
++  isExternalContextAttachment,
+   isWorkspaceAttachment,
+   isPullRequestContextAttachment,
+   userAttachmentsOnly,
+@@ -67,6 +68,13 @@ function getAttachmentKey(attachment: WorkspaceComposerAttachment): string {
+       id: attachment.id,
+     });
+   }
++  if (isExternalContextAttachment(attachment)) {
++    return JSON.stringify({
++      kind: attachment.kind,
++      source: attachment.source,
++      id: attachment.id,
++    });
++  }
+   return JSON.stringify({
+     type: "review",
+     cwd: attachment.attachment.cwd,
+@@ -95,13 +103,21 @@ function removeWorkspaceAttachmentsMatching(selectedKey: string): void {
+ }
+ 
+ function removeSentContextAttachments(attachments: readonly ComposerAttachment[]): void {
+-  const sentContextKeys = attachments.filter(isPullRequestContextAttachment).map(getAttachmentKey);
++  const sentContextKeys = attachments
++    .filter(
++      (attachment) =>
++        isPullRequestContextAttachment(attachment) || isExternalContextAttachment(attachment),
++    )
++    .map(getAttachmentKey);
+   for (const key of sentContextKeys) {
+     removeWorkspaceAttachmentsMatching(key);
+   }
+ }
+ 
+ function getContextSourceLabel(attachment: WorkspaceComposerAttachment): string {
++  if (isExternalContextAttachment(attachment)) {
++    return attachment.subtitle?.trim() || attachment.source;
++  }
+   if (attachment.kind === "github.pull_request_check") {
+     return "Check logs";
+   }
+@@ -129,6 +145,12 @@ function getPillContent(attachment: WorkspaceComposerAttachment, t: TranslationF
+       subtitle: getContextSourceLabel(attachment),
+     };
+   }
++  if (isExternalContextAttachment(attachment)) {
++    return {
++      title: attachment.title,
++      subtitle: getContextSourceLabel(attachment),
++    };
++  }
+   return {
+     title: t("message.attachments.review"),
+     subtitle:
+@@ -145,7 +167,7 @@ function getOpenAccessibilityLabel(
+   if (attachment.kind === "browser_element") {
+     return t("composer.attachments.openBrowserElement");
+   }
+-  if (isPullRequestContextAttachment(attachment)) {
++  if (isPullRequestContextAttachment(attachment) || isExternalContextAttachment(attachment)) {
+     return "Open context attachment";
+   }
+   return t("composer.attachments.openReview");
+@@ -158,7 +180,7 @@ function getRemoveAccessibilityLabel(
+   if (attachment.kind === "browser_element") {
+     return t("composer.attachments.removeBrowserElement");
+   }
+-  if (isPullRequestContextAttachment(attachment)) {
++  if (isPullRequestContextAttachment(attachment) || isExternalContextAttachment(attachment)) {
+     return "Remove context attachment";
+   }
+   return t("composer.attachments.removeReview");
+@@ -168,7 +190,7 @@ function renderPillIcon(attachment: WorkspaceComposerAttachment): ReactElement {
+   if (attachment.kind === "browser_element") {
+     return <ThemedMousePointer2 size={ICON_SIZE.sm} uniProps={iconForegroundMutedMapping} />;
+   }
+-  if (isPullRequestContextAttachment(attachment)) {
++  if (isPullRequestContextAttachment(attachment) || isExternalContextAttachment(attachment)) {
+     return <ThemedFileText size={ICON_SIZE.sm} uniProps={iconForegroundMutedMapping} />;
+   }
+   return <ThemedMessageSquareCode size={ICON_SIZE.sm} uniProps={iconForegroundMutedMapping} />;
+@@ -249,7 +271,11 @@ function useWorkspaceAttachmentBinding({
+     ({ selectedAttachments: current, index }: RemoveWorkspaceAttachmentInput) => {
+       const selected = current[index];
+       if (isWorkspaceAttachment(selected)) {
+-        if (selected.kind === "browser_element" || isPullRequestContextAttachment(selected)) {
++        if (
++          selected.kind === "browser_element" ||
++          isPullRequestContextAttachment(selected) ||
++          isExternalContextAttachment(selected)
++        ) {
+           const selectedKey = getAttachmentKey(selected);
+           removeWorkspaceAttachmentsMatching(selectedKey);
+           return true;
+diff --git a/packages/app/src/embed/bridge.native.ts b/packages/app/src/embed/bridge.native.ts
+new file mode 100644
+index 0000000..fa298c1
+--- /dev/null
++++ b/packages/app/src/embed/bridge.native.ts
+@@ -0,0 +1,12 @@
++import type { PaseoEmbedBridge, PaseoEmbedBridgeOptions } from "./bridge.shared";
++
++const noopEmbedBridge: PaseoEmbedBridge = {
++  reportWorkspaceCreated: () => {},
++  reportWorkspaceFailed: () => {},
++};
++
++// Native WebView transport will supply this bridge when the embed is exposed
++// outside the browser. The web implementation is intentionally isolated.
++export function usePaseoEmbedBridge(_input: PaseoEmbedBridgeOptions): PaseoEmbedBridge {
++  return noopEmbedBridge;
++}
+diff --git a/packages/app/src/embed/bridge.shared.ts b/packages/app/src/embed/bridge.shared.ts
+new file mode 100644
+index 0000000..5608cd5
+--- /dev/null
++++ b/packages/app/src/embed/bridge.shared.ts
+@@ -0,0 +1,25 @@
++import type {
++  PaseoEmbedContext,
++  PaseoEmbedWorkspaceRequest,
++  PaseoEmbedWorkspaceCreatedMessage,
++  PaseoEmbedWorkspaceFailedMessage,
++} from "./protocol";
++
++export interface PaseoEmbedBridgeOptions {
++  parentOrigin?: string;
++  nonce?: string;
++  onContext: (context: PaseoEmbedContext) => void;
++  onWorkspaceCreate?: (workspace: PaseoEmbedWorkspaceRequest) => void;
++}
++
++export interface PaseoEmbedBridge {
++  reportWorkspaceCreated: (
++    message: Omit<
++      PaseoEmbedWorkspaceCreatedMessage,
++      "type" | "version" | "nonce"
++    >,
++  ) => void;
++  reportWorkspaceFailed: (
++    message: Omit<PaseoEmbedWorkspaceFailedMessage, "type" | "version" | "nonce">,
++  ) => void;
++}
+diff --git a/packages/app/src/embed/bridge.ts b/packages/app/src/embed/bridge.ts
+new file mode 100644
+index 0000000..052a3d9
+--- /dev/null
++++ b/packages/app/src/embed/bridge.ts
+@@ -0,0 +1,12 @@
++import type { PaseoEmbedBridge, PaseoEmbedBridgeOptions } from "./bridge.shared";
++
++const noopEmbedBridge: PaseoEmbedBridge = {
++  reportWorkspaceCreated: () => {},
++  reportWorkspaceFailed: () => {},
++};
++
++// Expo resolves bridge.web.ts or bridge.native.ts at runtime. This fallback
++// keeps non-platform-aware TypeScript tooling able to resolve the module.
++export function usePaseoEmbedBridge(_input: PaseoEmbedBridgeOptions): PaseoEmbedBridge {
++  return noopEmbedBridge;
++}
+diff --git a/packages/app/src/embed/bridge.web.ts b/packages/app/src/embed/bridge.web.ts
+new file mode 100644
+index 0000000..f20b98d
+--- /dev/null
++++ b/packages/app/src/embed/bridge.web.ts
+@@ -0,0 +1,102 @@
++import { useEffect, useRef } from "react";
++import {
++  PASEO_EMBED_PROTOCOL_VERSION,
++  PASEO_EMBED_READY,
++  PASEO_EMBED_WORKSPACE_CREATED,
++  PASEO_EMBED_WORKSPACE_FAILED,
++  parsePaseoEmbedCreateWorkspaceMessage,
++  parsePaseoEmbedSetContextMessage,
++  resolveEmbedParentOrigin,
++} from "./protocol";
++import type { PaseoEmbedBridge, PaseoEmbedBridgeOptions } from "./bridge.shared";
++
++export function usePaseoEmbedBridge(input: PaseoEmbedBridgeOptions): PaseoEmbedBridge {
++  const onContextRef = useRef(input.onContext);
++  const onWorkspaceCreateRef = useRef(input.onWorkspaceCreate);
++  const parentOriginRef = useRef<string | null>(null);
++  const nonceRef = useRef<string | null>(null);
++  const bridgeRef = useRef<PaseoEmbedBridge | null>(null);
++  onContextRef.current = input.onContext;
++  onWorkspaceCreateRef.current = input.onWorkspaceCreate;
++
++  if (!bridgeRef.current) {
++    const postToParent = (message: Record<string, unknown>) => {
++      const parentOrigin = parentOriginRef.current;
++      const nonce = nonceRef.current;
++      if (!parentOrigin || !nonce || window.parent === window) {
++        return;
++      }
++      window.parent.postMessage(
++        {
++          ...message,
++          version: PASEO_EMBED_PROTOCOL_VERSION,
++          nonce,
++        },
++        parentOrigin,
++      );
++    };
++    bridgeRef.current = {
++      reportWorkspaceCreated: ({ requestId, workspaceId, agentId }) => {
++        postToParent({
++          type: PASEO_EMBED_WORKSPACE_CREATED,
++          requestId,
++          workspaceId,
++          agentId,
++        });
++      },
++      reportWorkspaceFailed: ({ requestId, error }) => {
++        postToParent({
++          type: PASEO_EMBED_WORKSPACE_FAILED,
++          requestId,
++          error: error.slice(0, 1_000),
++        });
++      },
++    };
++  }
++
++  useEffect(() => {
++    const parentOrigin = resolveEmbedParentOrigin(input.parentOrigin);
++    const nonce = input.nonce?.trim();
++    parentOriginRef.current = null;
++    nonceRef.current = null;
++    if (!parentOrigin || !nonce || window.parent === window) {
++      return;
++    }
++    parentOriginRef.current = parentOrigin;
++    nonceRef.current = nonce;
++
++    const handleMessage = (event: MessageEvent<unknown>) => {
++      if (event.origin !== parentOrigin || event.source !== window.parent) {
++        return;
++      }
++      const message = parsePaseoEmbedSetContextMessage(event.data);
++      if (!message || message.nonce !== nonce) {
++        const workspaceMessage = parsePaseoEmbedCreateWorkspaceMessage(event.data);
++        if (workspaceMessage && workspaceMessage.nonce === nonce) {
++          onWorkspaceCreateRef.current?.(workspaceMessage.workspace);
++        }
++        return;
++      }
++      onContextRef.current(message.context);
++    };
++
++    window.addEventListener("message", handleMessage);
++    window.parent.postMessage(
++      {
++        type: PASEO_EMBED_READY,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce,
++      },
++      parentOrigin,
++    );
++    return () => {
++      window.removeEventListener("message", handleMessage);
++      if (parentOriginRef.current === parentOrigin && nonceRef.current === nonce) {
++        parentOriginRef.current = null;
++        nonceRef.current = null;
++      }
++    };
++  }, [input.nonce, input.parentOrigin]);
++
++  return bridgeRef.current;
++}
+diff --git a/packages/app/src/embed/bridge.web.test.tsx b/packages/app/src/embed/bridge.web.test.tsx
+new file mode 100644
+index 0000000..6fa3334
+--- /dev/null
++++ b/packages/app/src/embed/bridge.web.test.tsx
+@@ -0,0 +1,87 @@
++// @vitest-environment jsdom
++
++import { act, renderHook } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  PASEO_EMBED_PROTOCOL_VERSION,
++  PASEO_EMBED_READY,
++  PASEO_EMBED_WORKSPACE_CREATED,
++  PASEO_EMBED_WORKSPACE_FAILED,
++} from "./protocol";
++import { usePaseoEmbedBridge } from "./bridge.web";
++
++const originalParentDescriptor = Object.getOwnPropertyDescriptor(window, "parent");
++
++function installParentWindow() {
++  const parentWindow = { postMessage: vi.fn() };
++  Object.defineProperty(window, "parent", {
++    configurable: true,
++    value: parentWindow,
++  });
++  return parentWindow;
++}
++
++afterEach(() => {
++  if (originalParentDescriptor) {
++    Object.defineProperty(window, "parent", originalParentDescriptor);
++  }
++  vi.unstubAllEnvs();
++});
++
++describe("Paseo embed web bridge", () => {
++  it("reports workspace creation and failure to the verified parent", () => {
++    vi.stubEnv("EXPO_PUBLIC_PASEO_EMBED_DEV", "1");
++    const parentWindow = installParentWindow();
++    const onContext = vi.fn();
++    const { result } = renderHook(() =>
++      usePaseoEmbedBridge({
++        parentOrigin: "https://host.example",
++        nonce: "nonce-1",
++        onContext,
++      }),
++    );
++
++    expect(parentWindow.postMessage).toHaveBeenCalledWith(
++      {
++        type: PASEO_EMBED_READY,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++      },
++      "https://host.example",
++    );
++
++    act(() => {
++      result.current.reportWorkspaceCreated({
++        requestId: "request-1",
++        workspaceId: "workspace-1",
++        agentId: "agent-1",
++      });
++      result.current.reportWorkspaceFailed({
++        requestId: "request-2",
++        error: "Provider unavailable",
++      });
++    });
++
++    expect(parentWindow.postMessage).toHaveBeenLastCalledWith(
++      {
++        type: PASEO_EMBED_WORKSPACE_FAILED,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        requestId: "request-2",
++        error: "Provider unavailable",
++      },
++      "https://host.example",
++    );
++    expect(parentWindow.postMessage).toHaveBeenCalledWith(
++      {
++        type: PASEO_EMBED_WORKSPACE_CREATED,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        requestId: "request-1",
++        workspaceId: "workspace-1",
++        agentId: "agent-1",
++      },
++      "https://host.example",
++    );
++  });
++});
+diff --git a/packages/app/src/embed/embedded-agent-panel.tsx b/packages/app/src/embed/embedded-agent-panel.tsx
+new file mode 100644
+index 0000000..f943d7d
+--- /dev/null
++++ b/packages/app/src/embed/embedded-agent-panel.tsx
+@@ -0,0 +1,35 @@
++import { useMemo } from "react";
++import { AgentPanelContent } from "@/panels/agent-panel";
++import { PaneProvider } from "@/panels/pane-context";
++import { createEmbeddedAgentPaneContext } from "@/embed/embedded-pane-context";
++
++interface EmbeddedAgentPanelProps {
++  serverId: string;
++  workspaceId: string;
++  agentId: string;
++  onAgentChange: (agentId: string) => void;
++}
++
++export function EmbeddedAgentPanel({
++  serverId,
++  workspaceId,
++  agentId,
++  onAgentChange,
++}: EmbeddedAgentPanelProps) {
++  const paneContext = useMemo(
++    () =>
++      createEmbeddedAgentPaneContext({
++        serverId,
++        workspaceId,
++        agentId,
++        onAgentChange,
++      }),
++    [agentId, onAgentChange, serverId, workspaceId],
++  );
++
++  return (
++    <PaneProvider value={paneContext}>
++      <AgentPanelContent serverId={serverId} agentId={agentId} isPaneFocused />
++    </PaneProvider>
++  );
++}
+diff --git a/packages/app/src/embed/embedded-pane-context.test.ts b/packages/app/src/embed/embedded-pane-context.test.ts
+new file mode 100644
+index 0000000..b499470
+--- /dev/null
++++ b/packages/app/src/embed/embedded-pane-context.test.ts
+@@ -0,0 +1,37 @@
++import { describe, expect, it, vi } from "vitest";
++import { createEmbeddedAgentPaneContext } from "./embedded-pane-context";
++
++describe("embedded agent pane context", () => {
++  it("provides the agent panel with an isolated workspace pane", () => {
++    const onAgentChange = vi.fn();
++    const context = createEmbeddedAgentPaneContext({
++      serverId: "server-1",
++      workspaceId: "workspace-1",
++      agentId: "agent-1",
++      onAgentChange,
++    });
++
++    expect(context.serverId).toBe("server-1");
++    expect(context.workspaceId).toBe("workspace-1");
++    expect(context.tabId).toBe("embed:agent-1");
++    expect(context.target).toEqual({ kind: "agent", agentId: "agent-1" });
++  });
++
++  it("keeps navigation within the embedded agent surface", () => {
++    const onAgentChange = vi.fn();
++    const context = createEmbeddedAgentPaneContext({
++      serverId: "server-1",
++      workspaceId: "workspace-1",
++      agentId: "agent-1",
++      onAgentChange,
++    });
++
++    context.openTab({ kind: "agent", agentId: "agent-2" });
++    context.retargetCurrentTab({ kind: "draft", draftId: "draft-1" });
++    context.closeCurrentTab();
++
++    expect(onAgentChange).toHaveBeenNthCalledWith(1, "agent-2");
++    expect(onAgentChange).toHaveBeenNthCalledWith(2, "");
++    expect(onAgentChange).toHaveBeenNthCalledWith(3, "");
++  });
++});
+diff --git a/packages/app/src/embed/embedded-pane-context.ts b/packages/app/src/embed/embedded-pane-context.ts
+new file mode 100644
+index 0000000..8de47d8
+--- /dev/null
++++ b/packages/app/src/embed/embedded-pane-context.ts
+@@ -0,0 +1,25 @@
++import { type PaneContextValue } from "@/panels/pane-context";
++import type { WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
++
++export function createEmbeddedAgentPaneContext(input: {
++  serverId: string;
++  workspaceId: string;
++  agentId: string;
++  onAgentChange: (agentId: string) => void;
++}): PaneContextValue {
++  const selectTarget = (target: WorkspaceTabTarget) => {
++    input.onAgentChange(target.kind === "agent" ? target.agentId : "");
++  };
++
++  return {
++    serverId: input.serverId,
++    workspaceId: input.workspaceId,
++    tabId: `embed:${input.agentId}`,
++    target: { kind: "agent", agentId: input.agentId },
++    openTab: selectTarget,
++    closeCurrentTab: () => input.onAgentChange(""),
++    retargetCurrentTab: selectTarget,
++    openFileInWorkspace: () => {},
++    openImportSheet: () => {},
++  };
++}
+diff --git a/packages/app/src/embed/protocol.test.ts b/packages/app/src/embed/protocol.test.ts
+new file mode 100644
+index 0000000..fcbe5ff
+--- /dev/null
++++ b/packages/app/src/embed/protocol.test.ts
+@@ -0,0 +1,117 @@
++import { describe, expect, it } from "vitest";
++import {
++  PASEO_EMBED_CREATE_WORKSPACE,
++  PASEO_EMBED_PROTOCOL_VERSION,
++  PASEO_EMBED_SET_CONTEXT,
++  parsePaseoEmbedCreateWorkspaceMessage,
++  parsePaseoEmbedSetContextMessage,
++} from "./protocol";
++
++describe("Paseo embed protocol", () => {
++  it("accepts a valid host context message", () => {
++    expect(
++      parsePaseoEmbedSetContextMessage({
++        type: PASEO_EMBED_SET_CONTEXT,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        context: {
++          source: "portal",
++          kind: "order",
++          id: "order-42",
++          title: "Order 42",
++          subtitle: "Manual review",
++          text: "Review the current order before release.",
++          url: "/orders/order-42",
++        },
++      }),
++    ).toEqual({
++      type: PASEO_EMBED_SET_CONTEXT,
++      version: PASEO_EMBED_PROTOCOL_VERSION,
++      nonce: "nonce-1",
++      context: {
++        source: "portal",
++        kind: "order",
++        id: "order-42",
++        title: "Order 42",
++        subtitle: "Manual review",
++        text: "Review the current order before release.",
++        url: "/orders/order-42",
++      },
++    });
++  });
++
++  it("rejects malformed or oversized host context", () => {
++    expect(parsePaseoEmbedSetContextMessage({ type: PASEO_EMBED_SET_CONTEXT })).toBeNull();
++    expect(
++      parsePaseoEmbedSetContextMessage({
++        type: PASEO_EMBED_SET_CONTEXT,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        context: {
++          source: "portal",
++          kind: "order",
++          id: "order-42",
++          title: "Order 42",
++          text: "x".repeat(32_001),
++        },
++      }),
++    ).toBeNull();
++  });
++
++  it("accepts an external workspace request with a default model", () => {
++    expect(
++      parsePaseoEmbedCreateWorkspaceMessage({
++        type: PASEO_EMBED_CREATE_WORKSPACE,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        workspace: {
++          requestId: "workspace-request-1",
++          path: "/tmp/embed-fixture",
++          title: "Embedded fixture",
++          defaultModel: {
++            provider: "codex",
++            model: "model-fast",
++            thinkingOptionId: "medium",
++          },
++        },
++      }),
++    ).toEqual({
++      type: PASEO_EMBED_CREATE_WORKSPACE,
++      version: PASEO_EMBED_PROTOCOL_VERSION,
++      nonce: "nonce-1",
++      workspace: {
++        requestId: "workspace-request-1",
++        path: "/tmp/embed-fixture",
++        title: "Embedded fixture",
++        defaultModel: {
++          provider: "codex",
++          model: "model-fast",
++          thinkingOptionId: "medium",
++        },
++      },
++    });
++  });
++
++  it("rejects a workspace request without a path or model provider", () => {
++    expect(
++      parsePaseoEmbedCreateWorkspaceMessage({
++        type: PASEO_EMBED_CREATE_WORKSPACE,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        workspace: { requestId: "workspace-request-1", path: "" },
++      }),
++    ).toBeNull();
++    expect(
++      parsePaseoEmbedCreateWorkspaceMessage({
++        type: PASEO_EMBED_CREATE_WORKSPACE,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        workspace: {
++          requestId: "workspace-request-1",
++          path: "/tmp/embed-fixture",
++          defaultModel: { model: "model-fast" },
++        },
++      }),
++    ).toBeNull();
++  });
++});
+diff --git a/packages/app/src/embed/protocol.ts b/packages/app/src/embed/protocol.ts
+new file mode 100644
+index 0000000..8db71bb
+--- /dev/null
++++ b/packages/app/src/embed/protocol.ts
+@@ -0,0 +1,232 @@
++export const PASEO_EMBED_PROTOCOL_VERSION = 1 as const;
++export const PASEO_EMBED_READY = "paseo.embed.ready";
++export const PASEO_EMBED_SET_CONTEXT = "paseo.embed.context.set";
++export const PASEO_EMBED_CREATE_WORKSPACE = "paseo.embed.workspace.create";
++export const PASEO_EMBED_WORKSPACE_CREATED = "paseo.embed.workspace.created";
++export const PASEO_EMBED_WORKSPACE_FAILED = "paseo.embed.workspace.failed";
++
++const MAX_CONTEXT_FIELD_LENGTH = 240;
++const MAX_CONTEXT_TEXT_LENGTH = 32_000;
++const MAX_WORKSPACE_PATH_LENGTH = 4_096;
++
++export interface PaseoEmbedContext {
++  source: string;
++  kind: string;
++  id: string;
++  title: string;
++  subtitle?: string;
++  text: string;
++  url?: string;
++}
++
++export interface PaseoEmbedReadyMessage {
++  type: typeof PASEO_EMBED_READY;
++  version: typeof PASEO_EMBED_PROTOCOL_VERSION;
++  nonce: string;
++}
++
++export interface PaseoEmbedSetContextMessage {
++  type: typeof PASEO_EMBED_SET_CONTEXT;
++  version: typeof PASEO_EMBED_PROTOCOL_VERSION;
++  nonce: string;
++  context: PaseoEmbedContext;
++}
++
++export interface PaseoEmbedDefaultModel {
++  provider: string;
++  model?: string;
++  thinkingOptionId?: string;
++}
++
++export interface PaseoEmbedWorkspaceRequest {
++  requestId: string;
++  path: string;
++  title?: string;
++  defaultModel?: PaseoEmbedDefaultModel;
++}
++
++export interface PaseoEmbedCreateWorkspaceMessage {
++  type: typeof PASEO_EMBED_CREATE_WORKSPACE;
++  version: typeof PASEO_EMBED_PROTOCOL_VERSION;
++  nonce: string;
++  workspace: PaseoEmbedWorkspaceRequest;
++}
++
++export interface PaseoEmbedWorkspaceCreatedMessage {
++  type: typeof PASEO_EMBED_WORKSPACE_CREATED;
++  version: typeof PASEO_EMBED_PROTOCOL_VERSION;
++  nonce: string;
++  requestId: string;
++  workspaceId: string;
++  agentId: string;
++}
++
++export interface PaseoEmbedWorkspaceFailedMessage {
++  type: typeof PASEO_EMBED_WORKSPACE_FAILED;
++  version: typeof PASEO_EMBED_PROTOCOL_VERSION;
++  nonce: string;
++  requestId: string;
++  error: string;
++}
++
++function asRecord(value: unknown): Record<string, unknown> | null {
++  return value && typeof value === "object" && !Array.isArray(value)
++    ? (value as Record<string, unknown>)
++    : null;
++}
++
++function readString(value: unknown, maxLength: number): string | null {
++  if (typeof value !== "string") {
++    return null;
++  }
++  const normalized = value.trim();
++  return normalized && normalized.length <= maxLength ? normalized : null;
++}
++
++function readOptionalString(value: unknown, maxLength: number): string | undefined | null {
++  if (value === undefined || value === null) {
++    return undefined;
++  }
++  return readString(value, maxLength);
++}
++
++function parseDefaultModel(value: unknown): PaseoEmbedDefaultModel | undefined | null {
++  if (value === undefined || value === null) {
++    return undefined;
++  }
++  const model = asRecord(value);
++  if (!model) {
++    return null;
++  }
++  const provider = readString(model.provider, MAX_CONTEXT_FIELD_LENGTH);
++  const modelId = readOptionalString(model.model, MAX_CONTEXT_FIELD_LENGTH);
++  const thinkingOptionId = readOptionalString(model.thinkingOptionId, MAX_CONTEXT_FIELD_LENGTH);
++  if (!provider || modelId === null || thinkingOptionId === null) {
++    return null;
++  }
++  return {
++    provider,
++    ...(modelId ? { model: modelId } : {}),
++    ...(thinkingOptionId ? { thinkingOptionId } : {}),
++  };
++}
++
++export function isEmbedDevelopmentEnabled(): boolean {
++  return process.env.EXPO_PUBLIC_PASEO_EMBED_DEV === "1";
++}
++
++export function normalizeEmbedOrigin(value: string | undefined): string | null {
++  const raw = value?.trim();
++  if (!raw) {
++    return null;
++  }
++  try {
++    const url = new URL(raw);
++    if (url.protocol !== "http:" && url.protocol !== "https:") {
++      return null;
++    }
++    return url.origin;
++  } catch {
++    return null;
++  }
++}
++
++/**
++ * Production embeds must opt into one known parent origin. Local development
++ * may supply an origin through the route while the explicit dev flag is set.
++ */
++export function resolveEmbedParentOrigin(value: string | undefined): string | null {
++  const candidate = normalizeEmbedOrigin(value);
++  if (!candidate) {
++    return null;
++  }
++  const configured = normalizeEmbedOrigin(process.env.EXPO_PUBLIC_PASEO_EMBED_PARENT_ORIGIN);
++  if (configured) {
++    return configured === candidate ? configured : null;
++  }
++  return isEmbedDevelopmentEnabled() ? candidate : null;
++}
++
++export function parsePaseoEmbedSetContextMessage(
++  value: unknown,
++): PaseoEmbedSetContextMessage | null {
++  const message = asRecord(value);
++  if (
++    !message ||
++    message.type !== PASEO_EMBED_SET_CONTEXT ||
++    message.version !== PASEO_EMBED_PROTOCOL_VERSION
++  ) {
++    return null;
++  }
++
++  const nonce = readString(message.nonce, MAX_CONTEXT_FIELD_LENGTH);
++  const context = asRecord(message.context);
++  if (!nonce || !context) {
++    return null;
++  }
++
++  const source = readString(context.source, MAX_CONTEXT_FIELD_LENGTH);
++  const kind = readString(context.kind, MAX_CONTEXT_FIELD_LENGTH);
++  const id = readString(context.id, MAX_CONTEXT_FIELD_LENGTH);
++  const title = readString(context.title, MAX_CONTEXT_FIELD_LENGTH);
++  const text = readString(context.text, MAX_CONTEXT_TEXT_LENGTH);
++  const subtitle = readOptionalString(context.subtitle, MAX_CONTEXT_FIELD_LENGTH);
++  const url = readOptionalString(context.url, 2_000);
++  if (!source || !kind || !id || !title || !text || subtitle === null || url === null) {
++    return null;
++  }
++
++  return {
++    type: PASEO_EMBED_SET_CONTEXT,
++    version: PASEO_EMBED_PROTOCOL_VERSION,
++    nonce,
++    context: {
++      source,
++      kind,
++      id,
++      title,
++      ...(subtitle ? { subtitle } : {}),
++      text,
++      ...(url ? { url } : {}),
++    },
++  };
++}
++
++export function parsePaseoEmbedCreateWorkspaceMessage(
++  value: unknown,
++): PaseoEmbedCreateWorkspaceMessage | null {
++  const message = asRecord(value);
++  if (
++    !message ||
++    message.type !== PASEO_EMBED_CREATE_WORKSPACE ||
++    message.version !== PASEO_EMBED_PROTOCOL_VERSION
++  ) {
++    return null;
++  }
++
++  const nonce = readString(message.nonce, MAX_CONTEXT_FIELD_LENGTH);
++  const workspace = asRecord(message.workspace);
++  if (!nonce || !workspace) {
++    return null;
++  }
++
++  const requestId = readString(workspace.requestId, MAX_CONTEXT_FIELD_LENGTH);
++  const path = readString(workspace.path, MAX_WORKSPACE_PATH_LENGTH);
++  const title = readOptionalString(workspace.title, MAX_CONTEXT_FIELD_LENGTH);
++  const defaultModel = parseDefaultModel(workspace.defaultModel);
++  if (!requestId || !path || title === null || defaultModel === null) {
++    return null;
++  }
++
++  return {
++    type: PASEO_EMBED_CREATE_WORKSPACE,
++    version: PASEO_EMBED_PROTOCOL_VERSION,
++    nonce,
++    workspace: {
++      requestId,
++      path,
++      ...(title ? { title } : {}),
++      ...(defaultModel ? { defaultModel } : {}),
++    },
++  };
++}
+diff --git a/packages/app/src/embed/workspace.test.ts b/packages/app/src/embed/workspace.test.ts
+new file mode 100644
+index 0000000..998cf36
+--- /dev/null
++++ b/packages/app/src/embed/workspace.test.ts
+@@ -0,0 +1,74 @@
++import { describe, expect, it, vi } from "vitest";
++import type { EmbedWorkspaceClient } from "./workspace";
++import { createEmbeddedWorkspaceAgent, resolveEmbedAgentDefaults } from "./workspace";
++
++describe("embedded workspace creation", () => {
++  it("creates the requested directory workspace and agent model", async () => {
++    const client = {
++      createWorkspace: vi.fn().mockResolvedValue({
++        workspace: { id: "workspace-1", workspaceDirectory: "/work/example" },
++      }),
++      getProvidersSnapshot: vi.fn().mockResolvedValue({
++        entries: [
++          {
++            provider: "codex",
++            enabled: true,
++            status: "ready",
++            defaultModeId: "full-access",
++            models: [
++              { provider: "codex", id: "model-default", label: "Default", isDefault: true },
++              { provider: "codex", id: "model-fast", label: "Fast" },
++            ],
++          },
++        ],
++      }),
++      createAgent: vi.fn().mockResolvedValue({ id: "agent-1" }),
++    } as unknown as EmbedWorkspaceClient;
++
++    await expect(
++      createEmbeddedWorkspaceAgent({
++        client,
++        request: {
++          requestId: "request-1",
++          path: "/work/example",
++          title: "Example workspace",
++          defaultModel: {
++            provider: "codex",
++            model: "model-fast",
++            thinkingOptionId: "medium",
++          },
++        },
++      }),
++    ).resolves.toEqual({ agentId: "agent-1", workspaceId: "workspace-1" });
++
++    expect(client.createWorkspace).toHaveBeenCalledWith({
++      source: { kind: "directory", path: "/work/example" },
++      title: "Example workspace",
++    });
++    expect(client.getProvidersSnapshot).toHaveBeenCalledWith({ cwd: "/work/example" });
++    expect(client.createAgent).toHaveBeenCalledWith({
++      provider: "codex",
++      model: "model-fast",
++      modeId: "full-access",
++      thinkingOptionId: "medium",
++      cwd: "/work/example",
++      workspaceId: "workspace-1",
++    });
++  });
++
++  it("uses Codex GPT-5.4 with medium thinking by default", () => {
++    expect(
++      resolveEmbedAgentDefaults([
++        {
++          provider: "codex",
++          enabled: true,
++          status: "ready",
++          models: [
++            { provider: "codex", id: "gpt-5.4", label: "GPT-5.4" },
++            { provider: "codex", id: "gpt-5.4-mini", label: "GPT-5.4 Mini", isDefault: true },
++          ],
++        },
++      ]),
++    ).toEqual({ provider: "codex", model: "gpt-5.4", thinkingOptionId: "medium" });
++  });
++});
+diff --git a/packages/app/src/embed/workspace.ts b/packages/app/src/embed/workspace.ts
+new file mode 100644
+index 0000000..2d17065
+--- /dev/null
++++ b/packages/app/src/embed/workspace.ts
+@@ -0,0 +1,82 @@
++import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
++import type { AgentProvider, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
++import type { PaseoEmbedDefaultModel, PaseoEmbedWorkspaceRequest } from "./protocol";
++
++export interface EmbedAgentDefaults {
++  provider: AgentProvider;
++  model?: string;
++  modeId?: string;
++  thinkingOptionId?: string;
++}
++
++export const DEFAULT_EMBED_AGENT_MODEL: PaseoEmbedDefaultModel = {
++  provider: "codex",
++  model: "gpt-5.4",
++  thinkingOptionId: "medium",
++};
++
++export type EmbedWorkspaceClient = Pick<
++  DaemonClient,
++  "createAgent" | "createWorkspace" | "getProvidersSnapshot"
++>;
++
++export function resolveEmbedAgentDefaults(
++  entries: readonly ProviderSnapshotEntry[],
++  requested?: PaseoEmbedDefaultModel,
++): EmbedAgentDefaults {
++  const requestedModel = requested ?? DEFAULT_EMBED_AGENT_MODEL;
++  const requestedEntry = entries.find(
++    (candidate) => candidate.provider === requestedModel.provider,
++  );
++  if (requestedModel.provider) {
++    const availableModels = requestedEntry?.models ?? [];
++    const model =
++      requestedModel.model ??
++      availableModels.find((candidate) => candidate.isDefault)?.id ??
++      availableModels[0]?.id;
++    const selectedModel = availableModels.find((candidate) => candidate.id === model);
++    return {
++      provider: requestedModel.provider,
++      ...(model ? { model } : {}),
++      ...(requestedEntry?.defaultModeId ? { modeId: requestedEntry.defaultModeId } : {}),
++      ...(requestedModel.thinkingOptionId
++        ? { thinkingOptionId: requestedModel.thinkingOptionId }
++        : selectedModel?.defaultThinkingOptionId
++          ? { thinkingOptionId: selectedModel.defaultThinkingOptionId }
++          : {}),
++    };
++  }
++
++  throw new Error("No default provider is configured for the embedded workspace.");
++}
++
++export async function createEmbeddedWorkspaceAgent(input: {
++  client: EmbedWorkspaceClient;
++  request: PaseoEmbedWorkspaceRequest;
++}): Promise<{ agentId: string; workspaceId: string }> {
++  const createdWorkspace = await input.client.createWorkspace({
++    source: { kind: "directory", path: input.request.path },
++    ...(input.request.title ? { title: input.request.title } : {}),
++  });
++  const workspace = createdWorkspace.workspace;
++  if (!workspace) {
++    throw new Error(createdWorkspace.error ?? "The embedded workspace could not be created.");
++  }
++
++  const cwd = workspace.workspaceDirectory?.trim();
++  if (!cwd) {
++    throw new Error("The created workspace does not have a directory.");
++  }
++
++  const providers = await input.client.getProvidersSnapshot({ cwd });
++  const defaults = resolveEmbedAgentDefaults(providers.entries, input.request.defaultModel);
++  const agent = await input.client.createAgent({
++    provider: defaults.provider,
++    cwd,
++    workspaceId: workspace.id,
++    ...(defaults.model ? { model: defaults.model } : {}),
++    ...(defaults.modeId ? { modeId: defaults.modeId } : {}),
++    ...(defaults.thinkingOptionId ? { thinkingOptionId: defaults.thinkingOptionId } : {}),
++  });
++  return { agentId: agent.id, workspaceId: workspace.id };
++}
+diff --git a/packages/app/src/panels/agent-panel.tsx b/packages/app/src/panels/agent-panel.tsx
+index 5271010..15181ac 100644
+--- a/packages/app/src/panels/agent-panel.tsx
++++ b/packages/app/src/panels/agent-panel.tsx
+@@ -461,7 +461,7 @@ type AgentLookupState =
+   | { tag: "not_found"; message: string }
+   | { tag: "error"; message: string };
+ 
+-function AgentPanelContent({
++export function AgentPanelContent({
+   serverId,
+   agentId,
+   isPaneFocused,

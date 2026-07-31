@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paseo Embed Package Demo</title>
+    <style>
+      :root {
+        --ink: #18251f;
+        --muted: #65736b;
+        --paper: #f5f1e6;
+        --panel: #fffdf8;
+        --line: #d8d2c4;
+        --accent: #176246;
+        --accent-soft: #dcecdf;
+        --danger: #a34134;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        background:
+          radial-gradient(circle at 8% 0%, rgb(213 181 102 / 22%), transparent 32rem),
+          linear-gradient(135deg, #f8f5ed, #eae5d9);
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .controls {
+        background: rgb(255 253 248 / 82%);
+        border-right: 1px solid var(--line);
+        padding: 28px;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        margin: 0 0 9px;
+      }
+
+      h1 {
+        font-family: Georgia, "Iowan Old Style", serif;
+        font-size: 33px;
+        font-weight: 400;
+        letter-spacing: -0.045em;
+        line-height: 0.96;
+        margin: 0;
+      }
+
+      .lede { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 16px 0 26px; }
+
+      form { display: grid; gap: 17px; }
+      fieldset { border: 0; display: grid; gap: 9px; margin: 0; padding: 0; }
+      legend { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.11em; padding: 0; }
+      label { color: var(--muted); display: grid; font-size: 11px; gap: 5px; }
+      input, textarea {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        padding: 9px 10px;
+        width: 100%;
+      }
+      textarea { min-height: 86px; resize: vertical; }
+      .model-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      button {
+        background: var(--accent);
+        border: 0;
+        border-radius: 7px;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 10px 12px;
+      }
+      button.secondary { background: var(--accent-soft); color: #174c39; }
+      .status {
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        margin-top: 24px;
+        padding-top: 16px;
+      }
+      .status.error { color: var(--danger); }
+      .status.ready { color: var(--accent); }
+
+      .companion { display: flex; flex-direction: column; min-width: 0; }
+      .companion-header {
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        padding: 15px 20px;
+      }
+      .companion-header strong { font-size: 13px; }
+      .companion-header span { color: var(--muted); font-size: 11px; }
+      #paseo-panel { flex: 1; min-height: 0; }
+      #paseo-panel iframe { border: 0; display: block; height: 100%; width: 100%; }
+
+      @media (max-width: 760px) {
+        .shell { display: block; }
+        .controls { border-bottom: 1px solid var(--line); border-right: 0; }
+        .companion { height: 75vh; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <main class="controls">
+        <p class="eyebrow">PACKAGE SMOKE TEST</p>
+        <h1>Paseo embed.</h1>
+        <p class="lede">This host page imports only <code>@paseo/embed</code>. The package owns the iframe bridge and returns workspace creation results.</p>
+
+        <form id="workspace-form">
+          <fieldset>
+            <legend>HOST CONTEXT</legend>
+            <label>
+              Title
+              <input id="context-title" value="Order #LF-1847" />
+            </label>
+            <label>
+              Text
+              <textarea id="context-text">Supplier confirmation is missing for two stocked items. Assess release risk and propose the next operator action.</textarea>
+            </label>
+            <button class="secondary" id="send-context" type="button">Send context</button>
+          </fieldset>
+
+          <fieldset>
+            <legend>CREATE WORKSPACE</legend>
+            <label>
+              Daemon path
+              <input id="workspace-path" placeholder="/path/on/paseo-host" spellcheck="false" />
+            </label>
+            <div class="model-grid">
+              <label>Provider<input id="model-provider" spellcheck="false" value="codex" /></label>
+              <label>Model<input id="model-id" spellcheck="false" value="gpt-5.4" /></label>
+              <label>Thinking<input id="thinking-option" spellcheck="false" value="medium" /></label>
+            </div>
+            <button type="submit">Create and reconnect companion</button>
+          </fieldset>
+        </form>
+
+        <p class="status" id="status">Loading Paseo embed package.</p>
+      </main>
+
+      <section class="companion">
+        <header class="companion-header">
+          <strong>Paseo companion</strong>
+          <span id="endpoint-label"></span>
+        </header>
+        <div id="paseo-panel"></div>
+      </section>
+    </div>
+
+    <script type="module">
+      import { createPaseoEmbed } from "/vendor/paseo-embed.js";
+
+      const params = new URLSearchParams(window.location.search);
+      const runtimeConfig = await fetch("/config.json")
+        .then((response) => (response.ok ? response.json() : {}))
+        .catch(() => ({}));
+      const defaultPaseoUrl = `${window.location.protocol}//${window.location.hostname}:8081`;
+      const paseoUrl = params.get("paseo") || defaultPaseoUrl;
+      const endpoint = params.get("endpoint") || `${window.location.hostname}:6768`;
+      const status = document.getElementById("status");
+      const titleInput = document.getElementById("context-title");
+      const textInput = document.getElementById("context-text");
+      const pathInput = document.getElementById("workspace-path");
+      const providerInput = document.getElementById("model-provider");
+      const modelInput = document.getElementById("model-id");
+      const thinkingInput = document.getElementById("thinking-option");
+      const configuredWorkspacePath =
+        typeof runtimeConfig.workspacePath === "string" ? runtimeConfig.workspacePath.trim() : "";
+      const initialWorkspacePath = params.get("workspacePath")?.trim() || configuredWorkspacePath;
+
+      pathInput.value = initialWorkspacePath;
+      providerInput.value = params.get("provider") || "codex";
+      modelInput.value = params.get("model") || "gpt-5.4";
+      thinkingInput.value = params.get("thinking") || "medium";
+      document.getElementById("endpoint-label").textContent = endpoint;
+
+      let activeAgentId = params.get("agentId") || "";
+      let activeWorkspaceId = params.get("workspaceId") || "";
+      let paseo;
+      let autoProvisionAttempted = false;
+      let provisioning = false;
+
+      function setStatus(message, kind = "") {
+        status.textContent = message;
+        status.className = `status ${kind}`.trim();
+      }
+
+      function currentContext() {
+        const title = titleInput.value.trim() || "Untitled host record";
+        return {
+          source: "paseo-embed-demo",
+          kind: "record",
+          id: "demo-record",
+          title,
+          text: textInput.value.trim() || title,
+        };
+      }
+
+      function readWorkspaceInput() {
+        const path = pathInput.value.trim();
+        const provider = providerInput.value.trim();
+        const model = modelInput.value.trim();
+        const thinkingOptionId = thinkingInput.value.trim();
+        if (!path) {
+          setStatus("A daemon workspace path is required.", "error");
+          return null;
+        }
+        if ((model || thinkingOptionId) && !provider) {
+          setStatus("A provider is required when setting a model or thinking level.", "error");
+          return null;
+        }
+        return { path, provider, model, thinkingOptionId };
+      }
+
+      function persistCompanionConnection(input, result) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("workspacePath", input.path);
+        url.searchParams.set("workspaceId", result.workspaceId);
+        url.searchParams.set("agentId", result.agentId);
+        if (input.provider) url.searchParams.set("provider", input.provider);
+        if (input.model) url.searchParams.set("model", input.model);
+        if (input.thinkingOptionId) url.searchParams.set("thinking", input.thinkingOptionId);
+        window.history.replaceState(null, "", url);
+      }
+
+      function mountEmbed() {
+        paseo?.destroy();
+        const embed = createPaseoEmbed({
+          container: document.getElementById("paseo-panel"),
+          paseoUrl,
+          endpoint,
+          agentId: activeAgentId || undefined,
+          onReady: () => {
+            if (embed !== paseo) return;
+            if (activeAgentId) {
+              setStatus(`Connected to companion agent ${activeAgentId}.`, "ready");
+              return;
+            }
+            setStatus("Bridge ready. Context is synchronized.", "ready");
+            if (initialWorkspacePath && !autoProvisionAttempted) {
+              autoProvisionAttempted = true;
+              void createAndReconnect();
+            }
+          },
+          onError: (error) => setStatus(error.message, "error"),
+        });
+        paseo = embed;
+        embed.setContext(currentContext());
+      }
+
+      async function createAndReconnect() {
+        if (provisioning) return;
+        const input = readWorkspaceInput();
+        if (!input || !paseo) return;
+
+        provisioning = true;
+        setStatus("Creating companion workspace and agent.");
+        try {
+          const result = await paseo.createWorkspace({
+            path: input.path,
+            title: `${currentContext().title} companion`,
+            ...(input.provider
+              ? {
+                  defaultModel: {
+                    provider: input.provider,
+                    ...(input.model ? { model: input.model } : {}),
+                    ...(input.thinkingOptionId
+                      ? { thinkingOptionId: input.thinkingOptionId }
+                      : {}),
+                  },
+                }
+              : {}),
+          });
+          activeAgentId = result.agentId;
+          activeWorkspaceId = result.workspaceId;
+          persistCompanionConnection(input, result);
+          setStatus(`Created ${activeWorkspaceId}; reconnecting to ${activeAgentId}.`, "ready");
+          mountEmbed();
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error), "error");
+        } finally {
+          provisioning = false;
+        }
+      }
+
+      mountEmbed();
+
+      document.getElementById("send-context").addEventListener("click", () => {
+        paseo.setContext(currentContext());
+        setStatus("Context queued for Paseo.", "ready");
+      });
+
+      document.getElementById("workspace-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await createAndReconnect();
+      });
+
+      window.addEventListener("beforeunload", () => paseo.destroy(), { once: true });
+    </script>
+  </body>
+</html>

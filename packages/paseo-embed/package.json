@@ -1,0 +1,23 @@
+{
+  "name": "@paseo/embed",
+  "version": "0.1.0",
+  "description": "A small, framework-independent embed bridge for Paseo Web",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
