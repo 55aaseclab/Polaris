@@ -8,10 +8,6 @@ map "${POLARIS_AUTH_MODE}" $polaris_auth_override {
   disabled "disabled:${POLARIS_AUTH_DEFAULT_USER_ID}";
 }
 
-upstream landing_page {
-  server ${LANDING_PAGE_UPSTREAM};
-}
-
 upstream polaris_server {
   server ${POLARIS_SERVER_UPSTREAM};
 }
@@ -39,29 +35,8 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
   }
 
-  location ^~ /assets/ {
-    proxy_pass http://landing_page;
-    proxy_http_version 1.1;
-    proxy_connect_timeout 300s;
-    proxy_send_timeout 300s;
-    proxy_read_timeout 300s;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  location /landing/ {
-    rewrite ^/landing/(.*)$ /$1 break;
-    proxy_pass http://landing_page;
-    proxy_http_version 1.1;
-    proxy_connect_timeout 300s;
-    proxy_send_timeout 300s;
-    proxy_read_timeout 300s;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+  location ^~ /landing/ {
+    return 302 /paseo;
   }
 
   location = /welcome {
@@ -98,14 +73,6 @@ server {
   }
 
   location / {
-    proxy_pass http://landing_page;
-    proxy_http_version 1.1;
-    proxy_connect_timeout 300s;
-    proxy_send_timeout 300s;
-    proxy_read_timeout 300s;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    return 302 /paseo;
   }
 }
