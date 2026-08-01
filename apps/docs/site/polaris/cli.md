@@ -21,7 +21,8 @@ Workspace lifecycle and backend control:
 
 ```bash
 pnpm --dir apps/polaris run polaris -- workspace list --user <userProfileId>
-pnpm --dir apps/polaris run polaris -- workspace create <project> --user <userProfileId>
+pnpm --dir apps/polaris run polaris -- workspace create <project> --user <userProfileId> \
+  [--base-image <image>]
 pnpm --dir apps/polaris run polaris -- workspace render <workspaceRef>
 pnpm --dir apps/polaris run polaris -- workspace apply <workspaceRef>
 pnpm --dir apps/polaris run polaris -- workspace start <workspaceRef>
@@ -59,6 +60,9 @@ pnpm --dir apps/polaris run polaris -- user create <userProfileId> \
   [--referred-by-code <code>] \
   [--role <admin|user>] \
   [--plan <free|pro>]
+pnpm --dir apps/polaris run polaris -- user defaults read <userProfileId>
+pnpm --dir apps/polaris run polaris -- user defaults set <userProfileId> \
+  [--docker-base-image <image> | --clear-docker-base-image]
 pnpm --dir apps/polaris run polaris -- user delete <userProfileId>
 ```
 

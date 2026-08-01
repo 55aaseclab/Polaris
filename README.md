@@ -35,11 +35,10 @@ POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 If the server and executor point at different `POLARIS_DATA_ROOT` values, the
 portal can show workspace state that the executor cannot resolve.
 
-Local development requires `.env.dev`.
-
-Live-auth tests use `.env.test`.
-That file should contain the minimal test runtime env, not the local stack env.
-Use `.env.test.example` as the starting template.
+Local development uses `.env.dev`.
+Polaris test commands also source `.env.dev` and use the same configured
+`POLARIS_DATA_ROOT`.
+Use `.env.dev.example` as the starting template.
 
 The main values are:
 
@@ -64,11 +63,11 @@ POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://HOST_IP:5173
 POLARIS_AUTHING_REDIRECT_URI=http://HOST_IP:8082/auth/callback
 ```
 
-Minimal local test env:
+Minimal Polaris env:
 
 ```bash
-POLARIS_DATA_ROOT=./config
-POLARIS_NETFS_LOCAL_EXPORT_ROOT=./config/exports/workspaces
+POLARIS_DATA_ROOT=/path/to/polaris/data
+POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
 POLARIS_SERVER_BIND_HOST=127.0.0.1
 POLARIS_SERVER_PORT=8787
 POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788

@@ -19,6 +19,10 @@ const DEMO_USER_PROFILE_ID = "100000000000000001";
 const WORKSPACE_SERVICE_PORT_START = 32000;
 const WORKSPACE_SERVICE_PORT_END = 32999;
 
+export interface UserWorkspaceDefaults {
+  dockerBaseImage: string | null;
+}
+
 function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
     kind: "netfs",
@@ -153,6 +157,101 @@ function localUserProfileSeed(): { id: string; name: string; email: string } {
 
 function userProfilePath(userProfileId: string): string {
   return path.join(USER_PROFILES_DIR, `${userProfileId}.yaml`);
+}
+
+function readUserProfileDoc(userProfileId: string): Record<string, any> {
+  const profilePath = userProfilePath(userProfileId);
+  if (!fs.existsSync(profilePath)) {
+    throw new Error(`User profile '${userProfileId}' was not found.`);
+  }
+  return (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+}
+
+function writeUserProfileDoc(userProfileId: string, doc: Record<string, any>): void {
+  const profilePath = userProfilePath(userProfileId);
+  if (!fs.existsSync(profilePath)) {
+    throw new Error(`User profile '${userProfileId}' was not found.`);
+  }
+  fs.writeFileSync(profilePath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+}
+
+function normalizeBaseImage(value: unknown): string | null {
+  const baseImage = String(value ?? "").trim();
+  return baseImage || null;
+}
+
+function readWorkspaceDefaultsDoc(userProfileId: string): Record<string, any> {
+  const doc = readUserProfileDoc(userProfileId);
+  return doc.workspace_defaults && typeof doc.workspace_defaults === "object"
+    ? (doc.workspace_defaults as Record<string, any>)
+    : {};
+}
+
+export function readUserWorkspaceDefaults(userProfileId: string): UserWorkspaceDefaults {
+  const defaults = readWorkspaceDefaultsDoc(userProfileId);
+  return {
+    dockerBaseImage: normalizeBaseImage(defaults.docker?.runtime?.base_image),
+  };
+}
+
+function writeWorkspaceDefaultsDoc(
+  userProfileId: string,
+  defaults: UserWorkspaceDefaults,
+): void {
+  const doc = readUserProfileDoc(userProfileId);
+  const workspaceDefaults = (doc.workspace_defaults ??= {}) as Record<string, any>;
+  const dockerDefaults = (workspaceDefaults.docker ??= {}) as Record<string, any>;
+  const dockerRuntimeDefaults = (dockerDefaults.runtime ??= {}) as Record<string, any>;
+
+  if (defaults.dockerBaseImage) {
+    dockerRuntimeDefaults.base_image = defaults.dockerBaseImage;
+  } else {
+    delete dockerRuntimeDefaults.base_image;
+  }
+
+  if (Object.keys(dockerRuntimeDefaults).length === 0) {
+    delete dockerDefaults.runtime;
+  }
+  if (Object.keys(dockerDefaults).length === 0) {
+    delete workspaceDefaults.docker;
+  }
+  if (Object.keys(workspaceDefaults).length === 0) {
+    delete doc.workspace_defaults;
+  }
+
+  writeUserProfileDoc(userProfileId, doc);
+}
+
+export function setUserWorkspaceDefaults(
+  userProfileId: string,
+  defaults: UserWorkspaceDefaults,
+): UserWorkspaceDefaults {
+  writeWorkspaceDefaultsDoc(userProfileId, defaults);
+  return readUserWorkspaceDefaults(userProfileId);
+}
+
+export function resolveWorkspaceDockerBaseImage(input: {
+  userProfileId: string;
+  project: string;
+  baseImage?: string | null;
+}): string {
+  const explicitBaseImage = normalizeBaseImage(input.baseImage);
+  if (explicitBaseImage) {
+    return explicitBaseImage;
+  }
+  const defaultBaseImage = readUserWorkspaceDefaults(input.userProfileId).dockerBaseImage;
+  if (defaultBaseImage) {
+    return defaultBaseImage;
+  }
+  return workspaceImageRef(input.userProfileId, input.project);
+}
+
+export function isManagedWorkspaceDockerBaseImage(input: {
+  userProfileId: string;
+  project: string;
+  baseImage?: string | null;
+}): boolean {
+  return resolveWorkspaceDockerBaseImage(input) === workspaceImageRef(input.userProfileId, input.project);
 }
 
 function userCredentialRegistryDir(userProfileId: string): string {
@@ -459,10 +558,23 @@ export function userProfileExists(userProfileId: string): boolean {
   return fs.existsSync(userProfilePath(userProfileId));
 }
 
-export function scaffoldDockerWorkspace(project: string, userProfileId: string): string {
+export function scaffoldDockerWorkspace(
+  project: string,
+  userProfileId: string,
+  options?: {
+    baseImage?: string | null;
+  },
+): string {
   const outputPath = workspaceConfigPath(project, "docker", userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  ensureWorkspaceDockerfile(userProfileId);
+  const baseImage = resolveWorkspaceDockerBaseImage({
+    userProfileId,
+    project,
+    baseImage: options?.baseImage,
+  });
+  if (baseImage === workspaceImageRef(userProfileId, project)) {
+    ensureWorkspaceDockerfile(userProfileId);
+  }
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const workspaceServicePort = allocateWorkspaceServicePort();
@@ -478,7 +590,7 @@ export function scaffoldDockerWorkspace(project: string, userProfileId: string):
     },
     runtime: {
       class: "docker",
-      base_image: workspaceImageRef(userProfileId, project),
+      base_image: baseImage,
       user: "root",
       storage_claim_name: null,
       privileged: null,

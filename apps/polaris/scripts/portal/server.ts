@@ -634,13 +634,16 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       if (isApiPath(segments)) {
         if (segments.length === 2 && segments[1] === "authing-config" && req.method === "GET") {
+          const authMode = resolvePortalAuthMode();
           sendJson(res, 200, {
-            authMode: resolvePortalAuthMode(),
+            authMode,
             appId: String(process.env.POLARIS_AUTHING_APP_ID ?? "").trim(),
             authorizationUrl: String(process.env.POLARIS_AUTHING_AUTHORIZATION_URL ?? "").trim(),
             redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
             logoutUrl: String(process.env.POLARIS_AUTHING_LOGOUT_URL ?? "").trim(),
             logoutRedirectUri: String(process.env.POLARIS_AUTHING_LOGOUT_REDIRECT_URI ?? "").trim(),
+            signInUrl: authMode === "oauth2-proxy" ? "/oauth2/start" : "",
+            signOutUrl: authMode === "oauth2-proxy" ? "/oauth2/sign_out" : "",
           });
           return;
         }

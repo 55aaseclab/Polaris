@@ -15,10 +15,14 @@ import {
   listUserSkillCommand,
   removeUserSkillCommand,
 } from "./user-skill.js";
+import {
+  readUserDefaultsCommand,
+  setUserDefaultsCommand,
+} from "./user-defaults.js";
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- user <list|create|delete|credential|skill> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- user <list|create|delete|defaults|credential|skill> ...",
   );
 }
 
@@ -44,6 +48,17 @@ export async function userCommand(argv: string[]): Promise<void> {
   if (subcommand === "delete") {
     await deleteUserCommand(rest);
     return;
+  }
+  if (subcommand === "defaults") {
+    const [defaultsAction, ...defaultsRest] = rest;
+    if (defaultsAction === "read") {
+      await readUserDefaultsCommand(defaultsRest);
+      return;
+    }
+    if (defaultsAction === "set") {
+      await setUserDefaultsCommand(defaultsRest);
+      return;
+    }
   }
   if (subcommand === "credential") {
     const [credentialAction, ...credentialRest] = rest;
