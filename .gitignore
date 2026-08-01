@@ -39,9 +39,7 @@ apps/docs/tsconfig.app.tsbuildinfo
 apps/docs/tsconfig.node.tsbuildinfo
 .env.local
 .env.dev
-.env.test
 .env.prod
-config/users/user-map.json
 
 # K3S kata configs
 agents
@@ -56,19 +54,3 @@ secrets/agentctl/**
 !secrets/agentctl/README.md
 config/users/*
 !config/users/user-map.example.json
-!config/users/profiles/
-config/users/profiles/**
-config/users/*/**
-!config/users/profiles/100000000000000001.yaml
-!config/users/100000000000000001/.gitignore
-!config/users/100000000000000001/
-config/users/100000000000000001/.portal/
-config/users/100000000000000001/polaris/
-!config/users/100000000000000001/credentials/
-!config/users/100000000000000001/credentials/**
-!config/users/100000000000000001/docker/
-!config/users/100000000000000001/docker/**
-!config/users/100000000000000001/workspaces/
-config/users/100000000000000001/workspaces/**
-!config/users/100000000000000001/workspaces/demo/
-!config/users/100000000000000001/workspaces/demo/*.agent.yaml
