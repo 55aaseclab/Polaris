@@ -16,10 +16,16 @@ import {
   workspaceSelectionPath,
   writeWorkspaceDriverSelection,
 } from "../scripts/output/state-store.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+function repoRelative(filePath: string): string {
+  return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
+}
 
 function loadWorkspaceFromRefForTest(projectRef: string) {
   const resolved = resolveWorkspaceConfigPath(projectRef);
@@ -175,9 +181,9 @@ test("create scaffolds a docker-first saved spec when the project is new", async
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
   const configPath = workspaceConfigPath(project, "docker", userProfileId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
+  const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
 
   try {
     await withEnv(
@@ -217,9 +223,9 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.project, project);
         assert.equal(parsed.userProfile.id, userProfileId);
         assert.equal(parsed.userProfile.created, false);
-        assert.equal(parsed.userProfile.profilePath, `config/users/profiles/${userProfileId}.yaml`);
-        assert.equal(parsed.userProfile.secretsRoot, `config/users/${userProfileId}`);
-        assert.equal(parsed.credentials.registryRoot, `config/users/${userProfileId}/credentials`);
+        assert.equal(parsed.userProfile.profilePath, repoRelative(profilePath));
+        assert.equal(parsed.userProfile.secretsRoot, repoRelative(secretsRoot));
+        assert.equal(parsed.credentials.registryRoot, repoRelative(credentialRoot));
         assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
         assert.equal(fs.existsSync(path.join(secretsRoot, "workspaces", project)), true);
@@ -241,9 +247,9 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
   const userProfileId = `local-${project}-polaris.local`;
   const dockerConfigPath = workspaceConfigPath(project, "docker", userProfileId);
   const podConfigPath = workspaceConfigPath(project, "pod", userProfileId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
+  const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
 
   try {
     await withEnv(
@@ -284,9 +290,9 @@ test("create adapts workspace credential bindings to the user's available regist
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
   const configPath = workspaceConfigPath(project, "docker", userProfileId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
+  const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
   const legacyGitCredential = path.join(credentialRoot, "github-ssh.yaml");
   const adaptiveAgentCredential = path.join(credentialRoot, "demo-codex.yaml");
   const adaptiveGitCredential = path.join(credentialRoot, "demo-ssh.yaml");
@@ -377,9 +383,9 @@ test("create fails when the user has no git-auth credential", async () => {
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
   const configPath = workspaceConfigPath(project, "docker", userProfileId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const credentialRoot = path.join(REPO_ROOT, "config", "users", userProfileId, "credentials");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
+  const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
 
   try {
     await withEnv(

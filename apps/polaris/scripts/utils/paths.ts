@@ -30,6 +30,10 @@ export function repoRoot(importMetaUrl: string): string {
   return resolveRepoRoot(importMetaUrl);
 }
 
+export function repoRelativePath(importMetaUrl: string, filePath: string): string {
+  return path.relative(repoRoot(importMetaUrl), filePath) || ".";
+}
+
 export function polarisDataRoot(importMetaUrl: string): string {
   const root = repoRoot(importMetaUrl);
   const configured = process.env.POLARIS_DATA_ROOT?.trim()

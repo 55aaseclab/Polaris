@@ -9,7 +9,7 @@ import {
   type PolarisSubscriptionLine,
   upsertUserMapEntries,
 } from "../../portal/user-map.js";
-import { polarisUsersRoot } from "../../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath } from "../../utils/paths.js";
 import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
 function bootstrapAdminTokens(): Set<string> {
@@ -62,7 +62,7 @@ function parseCreateUserArgs(argv: string[]): {
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
   const lineFlagIndex = argv.findIndex((value) => value === "--line");
   if (!userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--authing <username>] [--authing-user-id <id>] [--referred-by-code <code>] [--role <admin|user>] [--plan <free|pro>] [--line <coding|vertical>]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--authing <username>] [--authing-user-id <id>] [--referred-by-code <code>] [--role <admin|user>] [--plan <free|pro>] [--line <coding|vertical|both>]");
   }
   return {
     userProfileId,
@@ -97,7 +97,11 @@ function parseCreateUserArgs(argv: string[]): {
     ...(planFlagIndex >= 0 && (argv[planFlagIndex + 1] === "free" || argv[planFlagIndex + 1] === "pro")
       ? { plan: argv[planFlagIndex + 1] as PolarisPlan }
       : {}),
-    ...(lineFlagIndex >= 0 && (argv[lineFlagIndex + 1] === "coding" || argv[lineFlagIndex + 1] === "vertical")
+    ...(lineFlagIndex >= 0 && (
+      argv[lineFlagIndex + 1] === "coding"
+      || argv[lineFlagIndex + 1] === "vertical"
+      || argv[lineFlagIndex + 1] === "both"
+    )
       ? { line: argv[lineFlagIndex + 1] as PolarisSubscriptionLine }
       : {}),
   };
@@ -165,7 +169,7 @@ export async function createUserCommand(argv: string[]): Promise<void> {
         email: created.email,
       },
       credentials: {
-        registryRoot: `config/users/${created.id}/credentials`,
+        registryRoot: repoRelativePath(import.meta.url, path.join(usersRoot, created.id, "credentials")),
         defaults: defaultCredentials.map((credential) => credential.id),
       },
     }, null, 2)}\n`);

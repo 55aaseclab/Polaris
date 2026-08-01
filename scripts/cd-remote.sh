@@ -48,14 +48,6 @@ rsync -az --delete --delete-excluded \
   --exclude "test-results" \
   --exclude "config/exports" \
   --exclude "config/generated" \
-  --include "config/users/" \
-  --include "config/users/user-map.example.json" \
-  --include "config/users/profiles/" \
-  --include "config/users/profiles/100000000000000001.yaml" \
-  --include "config/users/100000000000000001/" \
-  --include "config/users/100000000000000001/.gitignore" \
-  --exclude "config/users/*/**" \
-  --exclude "config/users/*" \
   --exclude "config/state" \
   -e "${RSYNC_RSH}" \
   ./ "${REMOTE_HOST}:${REMOTE_APP_DIR}/"

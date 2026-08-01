@@ -27,7 +27,7 @@ import {
 } from "../core/identity-layout.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
-import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
@@ -201,7 +201,7 @@ function buildCompatibilityUserProfile(args: {
     id,
     name,
     email,
-    secretsRoot: path.join("config", "users", id),
+    secretsRoot: repoRelativePath(import.meta.url, path.join(USER_SECRETS_ROOT, id)),
     workspaces: [],
     github: {},
     ssh: {
@@ -582,7 +582,7 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       id: String(data.id ?? profileId),
       name: String(data.name ?? ""),
       email: String(data.email ?? ""),
-      secretsRoot: path.join("config", "users", profileId),
+      secretsRoot: repoRelativePath(import.meta.url, path.join(USER_SECRETS_ROOT, profileId)),
       workspaces: listUserWorkspaceDirs(profileId),
       github: {
         account: data.github?.account

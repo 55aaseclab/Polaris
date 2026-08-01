@@ -15,8 +15,10 @@ import {
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
 import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
 const previousExecutorEnv = new Map<string, string | undefined>();
 
@@ -86,8 +88,8 @@ test("portal workspace stop waits for backend completion and converges both work
   const userId = uniqueName("portal-stop-concurrent-user");
   const firstWorkspace = uniqueName("portal-stop-concurrent-a");
   const secondWorkspace = uniqueName("portal-stop-concurrent-b");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Concurrent User", "--email", `${userId}@polaris.local`]);
     await createCommand([firstWorkspace, "--user", userId]);

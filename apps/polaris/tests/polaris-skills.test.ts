@@ -22,8 +22,10 @@ import {
   deletePortalSkill,
   listUserPortalSkills,
 } from "../scripts/portal/service.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_skill_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
 
@@ -88,8 +90,8 @@ async function cleanupUser(userId: string): Promise<void> {
   } catch {
     // Best-effort cleanup for tests that intentionally leave state behind.
   }
-  fs.rmSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), { force: true });
-  fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), { recursive: true, force: true });
+  fs.rmSync(path.join(USER_ROOT, "profiles", `${userId}.yaml`), { force: true });
+  fs.rmSync(path.join(USER_ROOT, userId), { recursive: true, force: true });
 }
 
 async function withFakeCommands(
@@ -293,7 +295,7 @@ test("user skill config helpers reject duplicates and missing users", async () =
 
     const registry = (yaml.load(
       fs.readFileSync(
-        path.join(REPO_ROOT, "config", "users", userId, "skills", "use-polaris.yaml"),
+        path.join(USER_ROOT, userId, "skills", "use-polaris.yaml"),
         "utf8",
       ),
     ) ?? {}) as { packageName?: string; source?: string; selectedSkillName?: string };

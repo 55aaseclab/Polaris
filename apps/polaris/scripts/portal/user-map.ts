@@ -14,7 +14,7 @@ export type PolarisPlan = "free" | "pro";
  * Subscription product line (what product the user is on).
  * Independent of free/pro — free/pro only means how many features within a line.
  */
-export type PolarisSubscriptionLine = "coding" | "vertical";
+export type PolarisSubscriptionLine = "coding" | "vertical" | "both";
 
 export interface PortalUserMapEntry {
   polarisUserId: string;
@@ -37,6 +37,29 @@ interface UserMapFile {
   users: Record<string, PortalUserMapEntry>;
   userIds?: Record<string, PortalUserMapEntry>;
 }
+
+/**
+ * Example user-map payload (kept here intentionally; no standalone repo file):
+ *
+ * {
+ *   "users": {
+ *     "example_user": {
+ *       "polarisUserId": "example_polaris_user",
+ *       "role": "user",
+ *       "plan": "free",
+ *       "line": "coding"
+ *     }
+ *   },
+ *   "userIds": {
+ *     "user_example123": {
+ *       "polarisUserId": "example_polaris_user",
+ *       "role": "user",
+ *       "plan": "free",
+ *       "line": "coding"
+ *     }
+ *   }
+ * }
+ */
 
 export class UserMapConflictError extends Error {}
 
@@ -164,6 +187,9 @@ export function normalizePolarisPlan(value: unknown): PolarisPlan {
 
 export function normalizePolarisSubscriptionLine(value: unknown): PolarisSubscriptionLine {
   const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "both" || raw === "polaris-both") {
+    return "both";
+  }
   if (raw === "vertical" || raw === "wanghai" || raw === "polaris-vertical") {
     return "vertical";
   }

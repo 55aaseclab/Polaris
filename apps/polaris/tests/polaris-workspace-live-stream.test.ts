@@ -25,8 +25,14 @@ import {
   updatePortalWorkspaceSelectedDriver,
 } from "../scripts/executor/operations.js";
 import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
+
+function repoRelative(filePath: string): string {
+  return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
+}
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
@@ -50,8 +56,8 @@ async function withTempPortalWorkspace(
 ): Promise<void> {
   const userId = uniqueName("portal-live-user");
   const workspace = uniqueName("portal-live-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Live User", "--email", `${userId}@polaris.local`]);
     await createCommand([workspace, "--user", userId]);
@@ -244,8 +250,8 @@ test("updating selected driver creates live driver state for workspaces without 
 test("workspace live stream emits starting during create-and-start flow", async () => {
   const userId = uniqueName("portal-live-create-user");
   const workspace = uniqueName("portal-live-create-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const previousDelay = process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS;
   process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS = "150";
   try {
@@ -326,7 +332,7 @@ test("portal live projection keeps the canonical live fields only", () => {
     assets: {
       dockerfile: {
         file: "Dockerfile",
-        path: "config/users/demo/workspaces/demo/Dockerfile",
+        path: repoRelative(path.join(USER_ROOT, "demo", "workspaces", "demo", "Dockerfile")),
       },
       specs: [],
       generatedManifests: [],

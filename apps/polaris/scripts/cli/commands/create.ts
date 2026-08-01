@@ -8,13 +8,15 @@ import {
   userProfileExists,
   workspaceConfigExists,
 } from "../../config/scaffold.js";
+import { readUserAccessSummary } from "../../portal/user-map.js";
 import { ensureWorkspaceConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
-import { repoRoot } from "../../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath, repoRoot } from "../../utils/paths.js";
 import { withWorkspaceMutationLock } from "../../utils/workspace-lifecycle-lock.js";
 import { loadWorkspaceForProjectRef } from "./shared.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 function parseCreateArgs(argv: string[]): {
   projectRef: string;
@@ -45,6 +47,7 @@ export async function createWorkspaceForUser(
   userProfileId: string,
   options?: {
     baseImage?: string;
+    line?: "coding" | "vertical";
   },
 ): Promise<void> {
   const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
@@ -60,12 +63,16 @@ export async function createWorkspaceForUser(
     );
   }
   if (!workspaceConfigExists(project, userProfileId)) {
+    const accessLine =
+      options?.line
+      ?? (readUserAccessSummary(userProfileId)?.line === "vertical" ? "vertical" : "coding");
     const scaffoldBackend =
       backendHint === "pod" || backendHint === "kubevirt-vm"
         ? backendHint
         : "docker";
     const outputPath = scaffoldDockerWorkspace(project, userProfileId, {
       baseImage: options?.baseImage,
+      line: accessLine,
     });
     const defaultCredentialIds = listDefaultCredentialIds(userProfileId);
     const requestedRef =
@@ -97,15 +104,15 @@ export async function createWorkspaceForUser(
           userProfile: {
             id: userProfileId,
             created: false,
-            profilePath: `config/users/profiles/${userProfileId}.yaml`,
-            secretsRoot: `config/users/${userProfileId}`,
+            profilePath: repoRelativePath(import.meta.url, path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`)),
+            secretsRoot: repoRelativePath(import.meta.url, path.join(USER_ROOT, userProfileId)),
           },
           credentials: {
-            registryRoot: `config/users/${userProfileId}/credentials`,
+            registryRoot: repoRelativePath(import.meta.url, path.join(USER_ROOT, userProfileId, "credentials")),
             defaults: defaultCredentialIds,
           },
           nextSteps: [
-            `Stage credentials under config/users/${userProfileId}/`,
+            `Stage credentials under ${repoRelativePath(import.meta.url, path.join(USER_ROOT, userProfileId))}/`,
             `pnpm --dir apps/polaris run polaris -- render ${project}@${scaffoldBackend}`,
             `pnpm --dir apps/polaris run polaris -- start ${project}@${scaffoldBackend}`,
           ],
