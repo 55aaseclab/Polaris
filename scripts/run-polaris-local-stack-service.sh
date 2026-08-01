@@ -25,12 +25,12 @@ POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID:-100000000000000001
 export POLARIS_AUTH_MODE
 export POLARIS_AUTH_DEFAULT_USER_ID
 
-SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-127.0.0.1}"
+SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-0.0.0.0}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
-EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
+EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-0.0.0.0}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
 # paseo-web runs OUTSIDE workspace containers (shared coding UI capability).
-PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
+# Expo `--host lan` already exposes it beyond loopback.
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
 LOG_DIR=".runtime/paseo"
 
@@ -56,7 +56,7 @@ trap cleanup EXIT INT TERM
 
 pnpm install
 pnpm --filter @qingniao/polaris-auth-server run build
-# Route/product contracts used by shell + surfaces (and future UI wiring).
+# Build the shell bundle and the two surface packages before starting the stack.
 pnpm run build:surfaces
 
 paseo_local_ensure_source
@@ -93,8 +93,8 @@ else
   echo "[polaris-local-stack] executor bridge proxy not started; docker workspaces may not report Paseo pairing metadata back to the host executor" >&2
 fi
 
-# Outer shared coding UI (surface-paseo routes live under /h/...; shell routes
-# still temporarily hosted in this app until polaris-shell owns them).
+# Outer shared coding UI. It owns /h/... only; polaris-shell is served by the
+# Polaris control plane on the outer shell routes.
 (
   cd apps/paseo/source/packages/app
   EXPO_NO_TELEMETRY=1 \

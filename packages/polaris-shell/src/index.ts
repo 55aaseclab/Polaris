@@ -2,6 +2,7 @@ export {
   SHELL_ROUTE_PREFIXES,
   shellPath,
   isShellPath,
+  codingEmbedPath,
   wanghaiEmbedPath,
   WANGHAI_EMBED_ROUTE_PREFIX,
   type ShellRouteId,

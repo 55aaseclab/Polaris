@@ -18,7 +18,7 @@ import {
   workspaceStateDir,
   workspaceStatusPath,
 } from "../output/state-store.js";
-import type { Credential, WorkspaceStatus } from "./workspace.js";
+import type { Credential, ServicePort, WorkspaceStatus } from "./workspace.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -125,6 +125,12 @@ export interface PortalWorkspaceLiveSummary {
 
 export interface PortalWorkspaceSummary {
   name: string;
+  /** Surface capabilities read from the workspace's selected runtime spec. */
+  surfaces: string[];
+  /** Published ports needed by outer shell surfaces. */
+  ports: ServicePort[];
+  /** Available once the in-container Paseo daemon finishes pairing. */
+  serverId: string | null;
   drivers: PortalDriverTarget[];
   status: WorkspaceStatus | null;
 }
@@ -782,10 +788,50 @@ export function loadWorkspaceSummary(userId: string, workspace: string): PortalW
     workspace,
     readWorkspaceStatus(userId, workspace),
   );
+  const runtime = loadPortalWorkspaceRuntimeSurface(userId, workspace, status);
   return {
     name: workspace,
+    surfaces: runtime.surfaces,
+    ports: runtime.ports,
+    serverId: readPersistedPaseoServerId(userId, workspace),
     drivers: PORTAL_DRIVER_TARGETS,
     status,
+  };
+}
+
+function loadPortalWorkspaceRuntimeSurface(
+  userId: string,
+  workspace: string,
+  status: WorkspaceStatus | null,
+): {
+  surfaces: string[];
+  ports: ServicePort[];
+} {
+  const targets = [
+    status?.driver?.selected ?? null,
+    { backend: "docker" as const },
+    { backend: "pod" as const, profile: "gvisor" },
+    { backend: "kubevirt-vm" as const },
+  ].filter(Boolean) as PortalDriverTarget[];
+  for (const target of targets) {
+    try {
+      const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+      const ports = loaded.connectivity.servicePorts;
+      return {
+        surfaces: ports.some((port) =>
+          port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
+        )
+          ? ["paseo", "wanghai"]
+          : ["paseo"],
+        ports,
+      };
+    } catch {
+      continue;
+    }
+  }
+  return {
+    surfaces: [],
+    ports: [],
   };
 }
 

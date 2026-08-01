@@ -12,15 +12,22 @@ ENV PNPM_STORE_DIR=/pnpm/store
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY packages/polaris-auth-server/package.json packages/polaris-auth-server/package.json
+COPY packages/polaris-shell/package.json packages/polaris-shell/package.json
+COPY packages/surface-coding/package.json packages/surface-coding/package.json
+COPY packages/surface-wanghai/package.json packages/surface-wanghai/package.json
 
 RUN --mount=type=cache,target=/pnpm/store \
   pnpm install --frozen-lockfile --filter polaris...
 
 COPY apps/polaris ./apps/polaris
 COPY packages/polaris-auth-server ./packages/polaris-auth-server
+COPY packages/polaris-shell ./packages/polaris-shell
+COPY packages/surface-coding ./packages/surface-coding
+COPY packages/surface-wanghai ./packages/surface-wanghai
 
 RUN --mount=type=cache,target=/pnpm/store \
-  pnpm --filter polaris run build
+  pnpm run build:surfaces \
+  && pnpm --filter polaris run build
 
 FROM node:22-bookworm
 
@@ -32,6 +39,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /workspace/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY --from=build /workspace/packages/polaris-auth-server ./packages/polaris-auth-server
+COPY --from=build /workspace/packages/polaris-shell ./packages/polaris-shell
+COPY --from=build /workspace/packages/surface-coding ./packages/surface-coding
+COPY --from=build /workspace/packages/surface-wanghai ./packages/surface-wanghai
 COPY --from=build /workspace/apps/polaris/node_modules ./apps/polaris/node_modules
 COPY --from=build /workspace/apps/polaris/dist ./apps/polaris/dist
 

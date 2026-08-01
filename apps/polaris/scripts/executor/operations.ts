@@ -1445,6 +1445,7 @@ export async function queueProvisionWorkspace(
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
+    line?: "coding" | "vertical";
   },
 ): Promise<{ queued: true; workspace: string }> {
   return withUserMutationLock(import.meta.url, userId, async () => {
@@ -1464,13 +1465,16 @@ export async function queueProvisionWorkspace(
     if (workspaceConfigExists(workspace, userId)) {
       throw new Error(`Workspace '${workspace}' already exists for user ${userId}.`);
     }
-    await createWorkspaceForUser(workspace, userId);
+    await createWorkspaceForUser(workspace, userId, {
+      ...(options?.line ? { line: options.line } : {}),
+    });
     clearProvisionState(userId, workspace);
     logInfo("executor", "workspace-provision-queued", {
       userId,
       workspace,
       defaultDockerOnly: options?.defaultDockerOnly ?? false,
       startAfterCreate: options?.startAfterCreate ?? false,
+      line: options?.line ?? "coding",
     });
     void startProvisionWorkspace(userId, workspace, options);
     return { queued: true, workspace };
@@ -1562,7 +1566,35 @@ export async function permanentlyDeletePortalWorkspace(
       reason: "workspace delete requested",
     },
   }));
-  return deleteWorkspaceOwnedByUser(userId, workspace);
+  try {
+    return await deleteWorkspaceOwnedByUser(userId, workspace);
+  } catch (error) {
+    const summary = loadWorkspaceSummary(userId, workspace);
+    const selectedDriver = summary.status?.driver?.selected ?? null;
+    const ref = selectedDriver
+      ? workspaceRefFromTarget(workspace, selectedDriver)
+      : null;
+    const message = error instanceof Error ? error.message : String(error);
+    logWorkspaceEvent("error", "delete-failed", {
+      userId,
+      workspace,
+      ref: ref ?? undefined,
+    }, {
+      error: message,
+    });
+    try {
+      await refreshPortalWorkspaceStatus(userId, workspace);
+    } catch (refreshError) {
+      logWorkspaceEvent("warn", "delete-failed-refresh", {
+        userId,
+        workspace,
+        ref: ref ?? undefined,
+      }, {
+        error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+      });
+    }
+    throw error;
+  }
 }
 
 export async function stopPortalWorkspace(

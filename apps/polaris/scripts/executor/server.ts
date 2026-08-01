@@ -143,6 +143,7 @@ export function createExecutorServer(
           {
             defaultDockerOnly: body.defaultDockerOnly === true,
             startAfterCreate: body.startAfterCreate === true,
+            ...(body.line === "coding" || body.line === "vertical" ? { line: body.line } : {}),
           },
         );
         sendJson(res, 202, result);

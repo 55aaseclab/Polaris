@@ -174,6 +174,7 @@ export async function queueProvisionWorkspace(input: {
   workspace: string;
   defaultDockerOnly?: boolean;
   startAfterCreate?: boolean;
+  line?: "coding" | "vertical";
 }): Promise<{ queued: true; workspace: string }> {
   return executorRequest(
     "/workspaces/provision",

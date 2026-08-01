@@ -19,6 +19,14 @@ export type ShellRouteId =
 
 export const WANGHAI_EMBED_ROUTE_PREFIX = "/v" as const;
 
+export function codingEmbedPath(serverId: string): string {
+  const trimmed = serverId.trim();
+  if (!trimmed) {
+    throw new Error("codingEmbedPath requires serverId");
+  }
+  return `${WANGHAI_EMBED_ROUTE_PREFIX}/${encodeURIComponent(trimmed)}/coding`;
+}
+
 export function wanghaiEmbedPath(serverId: string): string {
   const trimmed = serverId.trim();
   if (!trimmed) {

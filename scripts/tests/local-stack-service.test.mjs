@@ -27,6 +27,12 @@ test("local stack service runs Paseo with Fast Refresh instead of a web artifact
   assert.doesNotMatch(script, /paseo_local_build_tool_bundle/);
 });
 
+test("local stack service binds the API and executor to 0.0.0.0 by default", () => {
+  const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
+  assert.match(script, /SERVER_HOST="\$\{POLARIS_SERVER_BIND_HOST:-0\.0\.0\.0\}"/);
+  assert.match(script, /EXECUTOR_HOST="\$\{POLARIS_EXECUTOR_HOST:-0\.0\.0\.0\}"/);
+});
+
 test("local stack service builds shell and surface packages", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
   assert.match(script, /pnpm run build:surfaces/);

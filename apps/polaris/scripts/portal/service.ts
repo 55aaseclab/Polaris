@@ -53,6 +53,7 @@ import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
   listUserAccessSummaries,
   readUserAccessSummary,
+  updateUserAccessEntry,
   type PortalUserAccessSummary,
 } from "./user-map.js";
 import { polarisUsersRoot } from "../utils/paths.js";
@@ -488,6 +489,7 @@ export async function queueProvisionWorkspace(
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
+    line?: "coding" | "vertical";
   },
 ) {
   return queueProvisionWorkspaceExecutor({
@@ -495,6 +497,7 @@ export async function queueProvisionWorkspace(
     workspace,
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
+    line: options?.line,
   });
 }
 
@@ -631,7 +634,7 @@ export async function createPortalUser(input: {
   referralCode?: string;
   role?: "admin" | "user";
   plan?: "free" | "pro";
-  line?: "coding" | "vertical";
+  line?: "coding" | "vertical" | "both";
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
   const userProfileId =
     input.userProfileId?.trim()
@@ -674,6 +677,20 @@ export async function updatePortalUserProfile(
   return withUserMutationLock(import.meta.url, userId, async () =>
     updatePortalProfile(userId, patch),
   );
+}
+
+export async function updatePortalUserAccess(
+  userId: string,
+  patch: {
+    role?: "admin" | "user";
+    plan?: "free" | "pro";
+    line?: "coding" | "vertical" | "both";
+  },
+): Promise<PortalUserAccessSummary> {
+  if (!patch.role && !patch.plan && !patch.line) {
+    throw new Error("At least one access field is required");
+  }
+  return updateUserAccessEntry(userId, patch);
 }
 
 export async function deletePortalUser(userId: string): Promise<{

@@ -4,6 +4,7 @@ import {
   buildCreatedHostSurfaceHref,
   HOST_NAME_VALIDATION_MESSAGE,
   isValidPolarisHostName,
+  resolveCodingSurfaceUrl,
   validatePolarisHostName,
 } from "./create-host.js";
 
@@ -28,7 +29,36 @@ test("validatePolarisHostName returns the shared message for invalid names", () 
 
 test("buildCreatedHostSurfaceHref targets the Paseo surface root", () => {
   assert.equal(
-    buildCreatedHostSurfaceHref("srv_demo"),
-    "/h/srv_demo",
+    buildCreatedHostSurfaceHref("srv_demo", "coding"),
+    "/v/srv_demo/coding",
+  );
+});
+
+test("buildCreatedHostSurfaceHref targets the Wanghai embed route for vertical hosts", () => {
+  assert.equal(
+    buildCreatedHostSurfaceHref("srv_demo", "vertical"),
+    "/v/srv_demo/wanghai",
+  );
+});
+
+test("resolveCodingSurfaceUrl prefers the configured Paseo app base URL", () => {
+  assert.equal(
+    resolveCodingSurfaceUrl({
+      href: "/v/srv_demo/coding",
+      paseoAppBaseUrl: "http://128.178.122.228:8082",
+      currentOrigin: "http://128.178.122.228:8787",
+    }),
+    "http://128.178.122.228:8082/h/srv_demo",
+  );
+});
+
+test("resolveCodingSurfaceUrl falls back to the current origin", () => {
+  assert.equal(
+    resolveCodingSurfaceUrl({
+      href: "/v/srv_demo/coding",
+      paseoAppBaseUrl: "",
+      currentOrigin: "http://128.178.122.228:8787",
+    }),
+    "http://128.178.122.228:8787/h/srv_demo",
   );
 });

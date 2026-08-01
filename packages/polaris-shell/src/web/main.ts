@@ -6,6 +6,7 @@ import {
 import {
   buildCreatedHostSurfaceHref,
   DEFAULT_POLARIS_PROJECT_PATH,
+  resolveCodingSurfaceUrl,
   validatePolarisHostName,
 } from "../create-host.js";
 import {
@@ -16,10 +17,10 @@ import {
 } from "../floating-button.js";
 import {
   resolveAllowedWorkspaceLines,
-  resolveProductForUser,
   type PolarisWorkspaceLine,
 } from "../product.js";
 import { SHELL_HOST_API } from "../hosts.js";
+import { renderPaseoEmbedPage } from "../paseo-embed.js";
 import { renderWanghaiEmbedPage } from "../wanghai-embed.js";
 
 const SESSION_TOKEN_KEY = "polaris_authing_session";
@@ -28,8 +29,8 @@ const PKCE_VERIFIER_KEY = "polaris_authing_pkce_verifier";
 const PKCE_STATE_KEY = "polaris_authing_state";
 const RETURN_PATH_KEY = "polaris_authing_return_path";
 const REDIRECT_URI_KEY = "polaris_authing_redirect_uri";
-const WANGHAI_BACK_BUTTON_MARGIN = 14;
-const WANGHAI_BACK_BUTTON_DRAG_THRESHOLD = 4;
+const SURFACE_BACK_BUTTON_MARGIN = 14;
+const SURFACE_BACK_BUTTON_DRAG_THRESHOLD = 4;
 
 interface AuthingConfig {
   authMode: ShellSession["authMode"];
@@ -38,6 +39,7 @@ interface AuthingConfig {
   redirectUri?: string;
   logoutUrl?: string;
   logoutRedirectUri?: string;
+  paseoAppBaseUrl?: string;
   signInUrl?: string;
   signOutUrl?: string;
 }
@@ -81,7 +83,7 @@ interface ApiError extends Error {
 
 const app = requiredElement("app");
 let currentSession: ShellSession | null = null;
-let wanghaiBackButtonCleanup: (() => void) | null = null;
+let surfaceBackButtonCleanup: (() => void) | null = null;
 
 function requiredElement(id: string): HTMLElement {
   const element = document.getElementById(id);
@@ -152,8 +154,13 @@ function navigate(path: string, replace = false): void {
   void render();
 }
 
-function goToPaseo(path: string): void {
-  location.assign(path);
+async function resolvePaseoUrl(path: string): Promise<string> {
+  const config = await authingConfig().catch(() => null);
+  return resolveCodingSurfaceUrl({
+    href: path,
+    paseoAppBaseUrl: config?.paseoAppBaseUrl,
+    currentOrigin: location.origin,
+  });
 }
 
 function escapeHtml(value: string | null | undefined): string {
@@ -188,9 +195,9 @@ function renderError(error: unknown): void {
 }
 
 async function render(): Promise<void> {
-  if (wanghaiBackButtonCleanup) {
-    wanghaiBackButtonCleanup();
-    wanghaiBackButtonCleanup = null;
+  if (surfaceBackButtonCleanup) {
+    surfaceBackButtonCleanup();
+    surfaceBackButtonCleanup = null;
   }
   const path = shellPath();
   if (path === "/welcome") {
@@ -229,6 +236,11 @@ async function render(): Promise<void> {
     const hostMatch = path.match(/^\/hosts\/([^/]+)$/);
     if (hostMatch) {
       navigate("/hosts", true);
+      return;
+    }
+    const codingMatch = path.match(/^\/v\/([^/]+)\/coding$/);
+    if (codingMatch) {
+      await renderCodingSurface(decodeURIComponent(codingMatch[1]));
       return;
     }
     const portalMatch = path.match(/^\/v\/([^/]+)\/wanghai$/);
@@ -362,8 +374,8 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
       <span class="status ${driverStatus === "running" ? "running" : ""}">${escapeHtml(driverStatus)}</span>
     </div>
     <div class="actions">
-      ${coding ? `<button type="button" data-action="open-coding" data-href="${escapeHtml(coding.href)}">打开 coding</button>` : ""}
-      ${wanghai ? `<button type="button" class="secondary" data-action="open-wanghai" data-href="${escapeHtml(wanghai.href)}">打开行业门户</button>` : ""}
+      ${coding ? `<button type="button" data-action="open-coding" data-href="${escapeHtml(coding.href)}">进入 coding 工作面</button>` : ""}
+      ${wanghai ? `<button type="button" data-action="open-wanghai" data-href="${escapeHtml(wanghai.href)}">进入 vertical 工作面</button>` : ""}
       ${canStop
         ? `<button type="button" class="secondary" data-action="stop">停止</button>`
         : `<button type="button" class="secondary" data-action="start">启动</button>`}
@@ -374,11 +386,6 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
 
 async function renderWanghaiPortal(serverId: string): Promise<void> {
   const session = requireSession();
-  const product = resolveProductForUser({ line: session.line, plan: session.plan });
-  if (!product.surfaces.includes("wanghai")) {
-    navigate("/hosts", true);
-    return;
-  }
   const payload = await request<{ hosts: ShellHostSummary[] }>(SHELL_HOST_API.listHosts);
   const host = payload.hosts.find((item) => item.serverId === serverId);
   if (!host) {
@@ -401,11 +408,30 @@ async function renderWanghaiPortal(serverId: string): Promise<void> {
   });
   const backButton = app.querySelector<HTMLAnchorElement>(".portal-shell-back");
   if (backButton) {
-    wanghaiBackButtonCleanup = bindDraggableWanghaiBackButton(backButton);
+    surfaceBackButtonCleanup = bindDraggableSurfaceBackButton(backButton);
   }
 }
 
-function bindDraggableWanghaiBackButton(button: HTMLAnchorElement): () => void {
+async function renderCodingSurface(serverId: string): Promise<void> {
+  const payload = await request<{ hosts: ShellHostSummary[] }>(SHELL_HOST_API.listHosts);
+  const host = payload.hosts.find((item) => item.serverId === serverId);
+  if (!host) {
+    navigate("/hosts", true);
+    return;
+  }
+  const paseoUrl = await resolvePaseoUrl(`/v/${encodeURIComponent(serverId)}/coding`);
+  app.innerHTML = renderPaseoEmbedPage({
+    hostName: host.name,
+    paseoUrl,
+    backHref: "/hosts",
+  });
+  const backButton = app.querySelector<HTMLAnchorElement>(".portal-shell-back");
+  if (backButton) {
+    surfaceBackButtonCleanup = bindDraggableSurfaceBackButton(backButton);
+  }
+}
+
+function bindDraggableSurfaceBackButton(button: HTMLAnchorElement): () => void {
   let activePointerId: number | null = null;
   let pointerOffsetX = 0;
   let pointerOffsetY = 0;
@@ -418,7 +444,7 @@ function bindDraggableWanghaiBackButton(button: HTMLAnchorElement): () => void {
     viewportHeight: window.innerHeight,
     elementWidth: button.offsetWidth,
     elementHeight: button.offsetHeight,
-    margin: WANGHAI_BACK_BUTTON_MARGIN,
+    margin: SURFACE_BACK_BUTTON_MARGIN,
   });
 
   const applyPosition = (x: number, y: number): void => {
@@ -459,7 +485,7 @@ function bindDraggableWanghaiBackButton(button: HTMLAnchorElement): () => void {
       startY: dragStartY,
       currentX: event.clientX,
       currentY: event.clientY,
-    }, WANGHAI_BACK_BUTTON_DRAG_THRESHOLD)) {
+    }, SURFACE_BACK_BUTTON_DRAG_THRESHOLD)) {
       button.classList.add("is-dragging");
       suppressClick = true;
     }
@@ -675,7 +701,7 @@ function bindCreateHostForm(session: Pick<ShellSession, "line">): void {
         if (!host.serverId) {
           throw new Error("主机仍在准备中，请稍后刷新主机列表");
         }
-        goToPaseo(buildCreatedHostSurfaceHref(host.serverId));
+        navigate(buildCreatedHostSurfaceHref(host.serverId, selectedLine));
       } catch (error) {
         alert(error instanceof Error ? error.message : String(error));
       } finally {
@@ -715,7 +741,7 @@ function bindHostActions(
     button.addEventListener("click", () => {
       const action = button.dataset.action;
       if (action === "open-coding" && button.dataset.href) {
-        goToPaseo(button.dataset.href);
+        navigate(button.dataset.href);
         return;
       }
       if (action === "open-wanghai" && button.dataset.href) {

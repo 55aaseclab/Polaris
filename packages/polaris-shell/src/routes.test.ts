@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isShellPath, shellPath, wanghaiEmbedPath } from "./routes.js";
+import { codingEmbedPath, isShellPath, shellPath, wanghaiEmbedPath } from "./routes.js";
 import {
   productHasSurface,
   resolveAllowedWorkspaceLines,
@@ -18,13 +18,15 @@ test("shell paths cover auth user hosts only", () => {
   assert.equal(isShellPath("/h/srv_x"), false);
   assert.equal(isShellPath("/h/srv_x/workspace/a"), false);
   assert.equal(isShellPath("/settings/general"), false);
+  assert.equal(isShellPath("/v/srv_1/coding"), true);
   assert.equal(isShellPath("/v/srv_1/wanghai"), true);
 });
 
 test("shellPath builds stable links", () => {
   assert.equal(shellPath("settings-user"), "/settings/user");
   assert.equal(shellPath("hosts"), "/hosts");
-  assert.equal(buildOpenCodingHref("srv_1").href, "/h/srv_1");
+  assert.equal(buildOpenCodingHref("srv_1").href, "/v/srv_1/coding");
+  assert.equal(codingEmbedPath("srv_1"), "/v/srv_1/coding");
   assert.equal(wanghaiEmbedPath("srv_1"), "/v/srv_1/wanghai");
 });
 

@@ -60,7 +60,20 @@ export async function authenticatePortalRequest(
 ): Promise<AuthenticatedPortalSession> {
   const disabledSession = resolveDisabledPortalSession();
   if (disabledSession) {
-    return disabledSession;
+    const accessSummary = readUserAccessSummary(disabledSession.polarisUserId);
+    return {
+      ...disabledSession,
+      ...(accessSummary
+        ? {
+          role: accessSummary.role,
+          plan: accessSummary.plan,
+          line: accessSummary.line,
+          authingUsername:
+            accessSummary.authingUsernames[0]
+            ?? disabledSession.authingUsername,
+        }
+        : {}),
+    };
   }
   const identity = await authenticatePortalIdentity(req);
   const mapping = findUserMapEntry({

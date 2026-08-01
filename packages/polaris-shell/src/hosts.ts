@@ -1,6 +1,9 @@
+import { codingEmbedPath } from "./routes.js";
+
 /**
  * Host directory actions for the shell.
- * Coding opens outer paseo-web against an in-container daemon.
+ * Coding opens a shell-owned surface that embeds outer paseo-web against an
+ * in-container daemon.
  * Wanghai opens the in-container portal URL (never a global host process).
  */
 
@@ -8,9 +11,9 @@ export type HostSurfaceAction = "open-coding" | "open-wanghai-portal";
 
 export interface HostOpenTarget {
   action: HostSurfaceAction;
-  /** Path on outer paseo-web, or absolute portal URL for wanghai. */
+  /** Path on polaris-shell, or absolute portal URL for wanghai. */
   href: string;
-  kind: "paseo-route" | "wanghai-portal-url";
+  kind: "shell-route" | "wanghai-portal-url";
 }
 
 export function buildOpenCodingHref(serverId: string): HostOpenTarget {
@@ -20,8 +23,8 @@ export function buildOpenCodingHref(serverId: string): HostOpenTarget {
   }
   return {
     action: "open-coding",
-    kind: "paseo-route",
-    href: `/h/${encodeURIComponent(id)}`,
+    kind: "shell-route",
+    href: codingEmbedPath(id),
   };
 }
 

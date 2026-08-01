@@ -1,5 +1,6 @@
 import { createUserCommand } from "./create-user.js";
 import { deleteUserCommand } from "./delete-user.js";
+import { updateUserCommand } from "./update-user.js";
 import { listPortalProfiles } from "../../core/portal.js";
 import {
   activateUserCredentialCommand,
@@ -22,7 +23,7 @@ import {
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- user <list|create|delete|defaults|credential|skill> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- user <list|create|update|delete|defaults|credential|skill> ...",
   );
 }
 
@@ -43,6 +44,10 @@ export async function userCommand(argv: string[]): Promise<void> {
   }
   if (subcommand === "create") {
     await createUserCommand(rest);
+    return;
+  }
+  if (subcommand === "update") {
+    await updateUserCommand(rest);
     return;
   }
   if (subcommand === "delete") {

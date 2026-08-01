@@ -4,7 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
-import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import {
+  scaffoldDockerWorkspace,
+  verticalWorkspaceBaseImage,
+  workspaceConfigPath,
+} from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
 import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
@@ -63,6 +67,40 @@ test("normalizePairingUrl rewrites the offer onto the configured Paseo app base 
     }),
     "http://portal.example.test:8082/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0",
   );
+});
+
+test("vertical docker scaffold selects the Wanghai image, surfaces, and dual ports", () => {
+  const project = `vertical-scaffold-${process.pid}-${Date.now()}`;
+  const outputPath = scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, {
+    line: "vertical",
+  });
+  try {
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as {
+      runtime?: { base_image?: unknown };
+      surfaces?: unknown;
+      service?: {
+        ports?: Array<{
+          container_port?: unknown;
+          name?: unknown;
+        }>;
+      };
+    };
+
+    assert.equal(doc.runtime?.base_image, verticalWorkspaceBaseImage());
+    assert.deepEqual(doc.surfaces, ["paseo", "wanghai"]);
+    assert.deepEqual(
+      (doc.service?.ports ?? []).map((entry) => ({
+        containerPort: String(entry.container_port ?? ""),
+        name: String(entry.name ?? ""),
+      })),
+      [
+        { containerPort: "6767", name: "paseo" },
+        { containerPort: "9090", name: "wanghai" },
+      ],
+    );
+  } finally {
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+  }
 });
 
 test("normalizePairingUrl preserves a user scope on the rewritten Paseo URL", () => {

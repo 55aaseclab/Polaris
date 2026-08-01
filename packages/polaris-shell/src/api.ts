@@ -1,15 +1,11 @@
 import {
-  paseoSurfacePath,
-} from "@qingniao/surface-paseo";
-import {
   planOpenWanghaiPortal,
   resolveWanghaiPortalUrl,
   type WorkspaceServicePort,
 } from "@qingniao/surface-wanghai";
+import { codingEmbedPath } from "./routes.js";
 import {
-  productHasSurface,
-  resolveProductForUser,
-  type PolarisProductDefinition,
+  resolveAllowedWorkspaceLines,
 } from "./product.js";
 
 /** Session shape returned by Polaris `/api/session`. */
@@ -64,26 +60,24 @@ export function resolveShellHostActions(input: {
   host: ShellHostSummary;
   publicHost: string;
 }): ShellHostSurfaceAction[] {
-  const product = resolveProductForUser({
-    line: input.session.line,
-    plan: input.session.plan,
-  });
   const actions: ShellHostSurfaceAction[] = [];
+  const allowedLines = resolveAllowedWorkspaceLines(input.session.line);
+  const hostLine = resolveHostWorkspaceLine(input.host);
   const isRunning = input.host.status?.driver?.status === "running";
 
-  if (input.host.serverId && isRunning) {
+  if (hostLine === "coding" && allowedLines.includes("coding") && input.host.serverId && isRunning) {
     actions.push({
       kind: "open-coding",
-      href: paseoSurfacePath("host-root", { serverId: input.host.serverId }),
+      href: codingEmbedPath(input.host.serverId),
     });
+    return actions;
   }
 
   const portalUrl = resolveHostWanghaiPortalUrl({
-    product,
     host: input.host,
     publicHost: input.publicHost,
   });
-  if (portalUrl && input.host.serverId) {
+  if (hostLine === "vertical" && allowedLines.includes("vertical") && portalUrl && input.host.serverId) {
     actions.push({
       kind: "open-wanghai",
       href: planOpenWanghaiPortal({
@@ -97,15 +91,18 @@ export function resolveShellHostActions(input: {
   return actions;
 }
 
+function resolveHostWorkspaceLine(host: ShellHostSummary): "coding" | "vertical" {
+  if (host.surfaces.some((surface) => surface.trim().toLowerCase() === "wanghai")) {
+    return "vertical";
+  }
+  return "coding";
+}
+
 function resolveHostWanghaiPortalUrl(input: {
-  product: PolarisProductDefinition;
   host: ShellHostSummary;
   publicHost: string;
 }): string | null {
-  if (!productHasSurface(input.product, "wanghai")) {
-    return null;
-  }
-  if (!input.host.surfaces.some((surface) => surface.trim().toLowerCase() === "wanghai")) {
+  if (resolveHostWorkspaceLine(input.host) !== "vertical") {
     return null;
   }
   return resolveWanghaiPortalUrl({

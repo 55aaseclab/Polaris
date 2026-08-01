@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@qingniao/polaris-auth-server": "workspace:*",
+    "@qingniao/polaris-shell": "workspace:*",
     "@sentry/node": "^10.65.0",
     "js-yaml": "^4.1.0",
     "posthog-node": "^5.41.0",

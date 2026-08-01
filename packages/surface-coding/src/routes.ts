@@ -56,11 +56,12 @@ export function paseoSurfacePath(
  * Use when stripping shell routes out of the Expo app.
  */
 export const PASEO_APP_SHELL_ROUTES_TO_REMOVE = [
-  "/welcome",
+  "/",
   "/auth/callback",
+  "/settings",
   "/settings/user",
-  // Global settings index used as shell fallback when no host is online
-  // stays until shell hosts directory is mounted; then remove from surface.
+  "/hosts",
+  "/v",
 ] as const;
 
 function requireId(value: string | undefined, name: string): string {
