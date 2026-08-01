@@ -219,6 +219,34 @@ function buildAgentCliWrapperLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
+function workspaceEnablesWanghaiPortal(workspace: WorkspaceSpec): boolean {
+  return workspace.connectivity.servicePorts.some((port) => {
+    const name = (port.name ?? "").toLowerCase();
+    return name === "wanghai" || String(port.containerPort) === "9090";
+  });
+}
+
+/**
+ * Wanghai portal runs **inside** the workspace container (not on the host).
+ * Started after paseo daemon bootstrap; logs under workspace runtime state.
+ */
+function buildWanghaiPortalBootstrapLines(workspace: WorkspaceSpec): string[] {
+  if (!workspaceEnablesWanghaiPortal(workspace)) {
+    return [];
+  }
+  const logFile = `${workspace.attachments.workspaceRuntimeState.mountRoot}/wanghai-portal.log`;
+  const pidFile = `${workspace.attachments.ephemeralRuntime.mountRoot}/pids/wanghai-portal.pid`;
+  return [
+    `mkdir -p ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.workspaceRuntimeState.mountRoot}`,
+    `if [ -x /usr/local/bin/wanghai-entrypoint ] && [ -d /opt/wanghai/apps/admin-portal ]; then`,
+    `  if ! curl -fsS http://127.0.0.1:9090/ >/dev/null 2>&1; then`,
+    `    nohup /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090 > ${logFile} 2>&1 &`,
+    `    echo $! > ${pidFile}`,
+    `  fi`,
+    `fi`,
+  ];
+}
+
 function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
   if (!workspace.agent.enabled) {
     return [];
@@ -356,6 +384,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildEvolutionBootstrapLines(workspace),
     ...buildPaseoBootstrapLines(workspace),
+    ...buildWanghaiPortalBootstrapLines(workspace),
     "touch /tmp/.ready",
     "sleep infinity",
   ]

@@ -8,18 +8,27 @@ const DEFAULT_USER_MAP_LOCK_TTL_MS = 30_000;
 const DEFAULT_USER_MAP_LOCK_TIMEOUT_BUFFER_MS = 5_000;
 
 export type PolarisRole = "admin" | "user";
+/** Feature richness tier. Kept for billing/entitlements; not product line. */
 export type PolarisPlan = "free" | "pro";
+/**
+ * Subscription product line (what product the user is on).
+ * Independent of free/pro — free/pro only means how many features within a line.
+ */
+export type PolarisSubscriptionLine = "coding" | "vertical";
 
 export interface PortalUserMapEntry {
   polarisUserId: string;
   role: PolarisRole;
   plan: PolarisPlan;
+  /** Defaults to coding when missing (older user-map rows). */
+  line: PolarisSubscriptionLine;
 }
 
 export interface PortalUserAccessSummary {
   polarisUserId: string;
   role: PolarisRole;
   plan: PolarisPlan;
+  line: PolarisSubscriptionLine;
   authingUsernames: string[];
   authingUserIds: string[];
 }
@@ -149,18 +158,43 @@ function bootstrapAdminTokens(): Set<string> {
   );
 }
 
+export function normalizePolarisPlan(value: unknown): PolarisPlan {
+  return value === "pro" ? "pro" : "free";
+}
+
+export function normalizePolarisSubscriptionLine(value: unknown): PolarisSubscriptionLine {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "vertical" || raw === "wanghai" || raw === "polaris-vertical") {
+    return "vertical";
+  }
+  return "coding";
+}
+
+/** Fill defaults for older user-map rows that only had role/plan. */
+export function normalizePortalUserMapEntry(
+  entry: Partial<PortalUserMapEntry> & Pick<PortalUserMapEntry, "polarisUserId">,
+): PortalUserMapEntry {
+  return {
+    polarisUserId: entry.polarisUserId,
+    role: entry.role === "admin" ? "admin" : "user",
+    plan: normalizePolarisPlan(entry.plan),
+    line: normalizePolarisSubscriptionLine(entry.line),
+  };
+}
+
 function withRoleOverrides(
   entry: PortalUserMapEntry,
   identities: string[],
 ): PortalUserMapEntry {
+  const normalized = normalizePortalUserMapEntry(entry);
   const overrides = bootstrapAdminTokens();
   if (identities.some((value) => overrides.has(value.trim().toLowerCase()))) {
     return {
-      ...entry,
+      ...normalized,
       role: "admin",
     };
   }
-  return entry;
+  return normalized;
 }
 
 function hasBootstrapAdminOverride(identities: string[]): boolean {
@@ -268,6 +302,7 @@ export function readUserAccessSummary(
       polarisUserId,
       role: "admin",
       plan: "free",
+      line: "coding",
       authingUsernames: [],
       authingUserIds: [],
     };
@@ -277,6 +312,7 @@ export function readUserAccessSummary(
     polarisUserId,
     role: effective.role,
     plan: effective.plan,
+    line: effective.line,
     authingUsernames: usernameEntries.map(([authingUsername]) => authingUsername).sort(),
     authingUserIds: userIdEntries.map(([authingUserId]) => authingUserId).sort(),
   };
@@ -311,11 +347,7 @@ export async function upsertUserMapEntry(
         `Authing username '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
       );
     }
-    current.users[normalized] = {
-      polarisUserId: entry.polarisUserId,
-      role: entry.role,
-      plan: entry.plan,
-    };
+    current.users[normalized] = normalizePortalUserMapEntry(entry);
     writeUserMap(current);
     return current.users[normalized];
   });
@@ -350,19 +382,12 @@ export async function upsertUserMapEntries(input: {
         );
       }
     }
+    const normalizedEntry = normalizePortalUserMapEntry(input.entry);
     if (normalizedUsername) {
-      current.users[normalizedUsername] = {
-        polarisUserId: input.entry.polarisUserId,
-        role: input.entry.role,
-        plan: input.entry.plan,
-      };
+      current.users[normalizedUsername] = normalizedEntry;
     }
     if (normalizedUserId) {
-      current.userIds[normalizedUserId] = {
-        polarisUserId: input.entry.polarisUserId,
-        role: input.entry.role,
-        plan: input.entry.plan,
-      };
+      current.userIds[normalizedUserId] = normalizedEntry;
     }
     writeUserMap(current);
   });
@@ -385,11 +410,7 @@ export async function upsertUserMapUserId(
         `Authing user id '${normalized}' is already mapped to Polaris user '${existing.polarisUserId}'`,
       );
     }
-    current.userIds[normalized] = {
-      polarisUserId: entry.polarisUserId,
-      role: entry.role,
-      plan: entry.plan,
-    };
+    current.userIds[normalized] = normalizePortalUserMapEntry(entry);
     writeUserMap(current);
     return current.userIds[normalized];
   });
@@ -485,33 +506,44 @@ export async function withDeletedUserMapEntries<T>(
 
 export async function updateUserAccessEntry(
   polarisUserId: string,
-  patch: Partial<Pick<PortalUserMapEntry, "role" | "plan">>,
+  patch: Partial<Pick<PortalUserMapEntry, "role" | "plan" | "line">>,
 ): Promise<PortalUserAccessSummary> {
   await withUserMapLock(async () => {
     const current = readUserMap();
     let touched = false;
-    for (const entry of Object.values(current.users)) {
-      if (entry.polarisUserId !== polarisUserId) {
+    for (const [key, raw] of Object.entries(current.users)) {
+      if (raw.polarisUserId !== polarisUserId) {
         continue;
       }
+      const entry = normalizePortalUserMapEntry(raw);
       if (patch.role) {
         entry.role = patch.role;
       }
       if (patch.plan) {
         entry.plan = patch.plan;
       }
+      if (patch.line) {
+        entry.line = patch.line;
+      }
+      current.users[key] = entry;
       touched = true;
     }
-    for (const entry of Object.values(current.userIds ?? {})) {
-      if (entry.polarisUserId !== polarisUserId) {
+    current.userIds ??= {};
+    for (const [key, raw] of Object.entries(current.userIds)) {
+      if (raw.polarisUserId !== polarisUserId) {
         continue;
       }
+      const entry = normalizePortalUserMapEntry(raw);
       if (patch.role) {
         entry.role = patch.role;
       }
       if (patch.plan) {
         entry.plan = patch.plan;
       }
+      if (patch.line) {
+        entry.line = patch.line;
+      }
+      current.userIds[key] = entry;
       touched = true;
     }
     if (!touched) {

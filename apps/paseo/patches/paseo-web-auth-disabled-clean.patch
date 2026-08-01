@@ -1,0 +1,798 @@
+diff --git a/packages/app/src/app/h/[serverId]/_layout.tsx b/packages/app/src/app/h/[serverId]/_layout.tsx
+index 0fb551f..59513e0 100644
+--- a/packages/app/src/app/h/[serverId]/_layout.tsx
++++ b/packages/app/src/app/h/[serverId]/_layout.tsx
+@@ -1,5 +1,6 @@
+ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
+ import { useHostRuntimeBootstrapState } from "@/app/_layout";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
+ import { HostRouteProvider } from "@/navigation/host-route-context";
+ import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
+ import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
+@@ -20,12 +21,14 @@ function KnownHostRoute() {
+   const hosts = useHosts();
+   const hostRegistryStatus = useHostRegistryStatus();
+   const bootstrapState = useHostRuntimeBootstrapState();
++  const hasPolarisSession = usePolarisAuthSession();
+   const routeServerId = typeof params.serverId === "string" ? params.serverId : null;
+   const startupRoute = resolveStartupRoute({
+     route: { kind: "host", serverId: routeServerId },
+     startupBlocker: bootstrapState.startupBlocker,
+     hostRegistryStatus,
+     hosts,
++    hasPolarisSession,
+   });
+ 
+   if (startupRoute.kind === "redirect") {
+diff --git a/packages/app/src/app/index.tsx b/packages/app/src/app/index.tsx
+index f7e99bd..eeeeb71 100644
+--- a/packages/app/src/app/index.tsx
++++ b/packages/app/src/app/index.tsx
+@@ -52,6 +52,7 @@ export default function Index() {
+     }),
+     isWorkspaceSelectionLoaded,
+     hasGivenUpWaitingForHost: bootstrapState.hasGivenUpWaitingForHost,
++    hasPolarisSession,
+   });
+ 
+   if (startupRoute.kind === "redirect") {
+diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
+index 906c4ff..ac89531 100644
+--- a/packages/app/src/components/welcome-screen.tsx
++++ b/packages/app/src/components/welcome-screen.tsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useMemo, useRef } from "react";
+ import { Text, View, ScrollView } from "react-native";
+-import { useRouter } from "expo-router";
++import { Redirect, useRouter } from "expo-router";
+ import { StyleSheet, useUnistyles } from "react-native-unistyles";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import { getHostRuntimeStore } from "@/runtime/host-runtime";
+@@ -9,6 +9,7 @@ import { buildHostRootRoute } from "@/utils/host-routes";
+ import {
+   beginPolarisSignIn,
+   getPolarisAuthToken,
++  isPolarisAuthDisabled,
+   usePolarisAuthSession,
+ } from "@/lib/polaris-authing";
+ import { syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
+@@ -62,10 +63,15 @@ export function WelcomeScreen() {
+   const insets = useSafeAreaInsets();
+   const router = useRouter();
+   const hasPolarisSession = usePolarisAuthSession();
++  const authDisabled = isPolarisAuthDisabled();
+   const syncStartedRef = useRef(false);
+ 
++  // Disabled / already-authenticated users never need the login wall.
++  // Root auth redirect also sends them to /settings; this is a safety net.
++  const skipLoginWall = authDisabled || hasPolarisSession;
++
+   useEffect(() => {
+-    if (!hasPolarisSession) {
++    if (!hasPolarisSession || authDisabled) {
+       syncStartedRef.current = false;
+       return;
+     }
+@@ -111,13 +117,17 @@ export function WelcomeScreen() {
+     return () => {
+       disposed = true;
+     };
+-  }, [hasPolarisSession, router]);
++  }, [authDisabled, hasPolarisSession, router]);
+ 
+   const scrollContentContainerStyle = useMemo(
+     () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
+     [theme.spacing, insets.bottom],
+   );
+ 
++  if (skipLoginWall) {
++    return <Redirect href="/settings" />;
++  }
++
+   return (
+     <View style={styles.root}>
+       <ScrollView
+diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
+index 597866a..d2c59ce 100644
+--- a/packages/app/src/lib/polaris-authing.test.ts
++++ b/packages/app/src/lib/polaris-authing.test.ts
+@@ -1,13 +1,16 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import {
++  beginPolarisSignIn,
+   clearPolarisSignIn,
+   completePolarisSignIn,
+   getPolarisAuthToken,
+   getPolarisAuthUserScope,
+   hasPolarisAuthSession,
+   hasPolarisHostSession,
++  isPolarisAuthDisabled,
+   publishPolarisAuthSession,
+   resolvePolarisAuthRedirect,
++  signOutPolaris,
+   subscribePolarisAuthSession,
+ } from "./polaris-authing";
+ 
+@@ -159,11 +162,50 @@ describe("Polaris authentication state", () => {
+     process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE = "disabled";
+     process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID = "local-dev-admin";
+ 
++    expect(isPolarisAuthDisabled()).toBe(true);
+     expect(getPolarisAuthToken()).toBe("polaris-disabled-auth-session");
+     expect(hasPolarisAuthSession()).toBe(true);
+     expect(hasPolarisHostSession()).toBe(true);
+     expect(getPolarisAuthUserScope()).toBe("local-dev-admin");
+     expect(resolvePolarisAuthRedirect("/settings", true)).toBeNull();
++    expect(resolvePolarisAuthRedirect("/settings", false)).toBeNull();
++    // Login surfaces are skipped entirely in disabled mode.
++    expect(resolvePolarisAuthRedirect("/welcome", false)).toBe("/settings");
++    expect(resolvePolarisAuthRedirect("/welcome", true)).toBe("/settings");
++    expect(resolvePolarisAuthRedirect("/auth/callback", false)).toBe("/settings");
++  });
++
++  it("ignores sign-in and sign-out when auth is disabled", () => {
++    process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE = "disabled";
++    process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID = "local-dev-admin";
++    const replace = vi.fn();
++    vi.stubGlobal("location", {
++      replace,
++      assign: vi.fn(),
++      pathname: "/welcome",
++      search: "",
++      protocol: "http:",
++      hostname: "example.test",
++      origin: "http://example.test",
++    });
++
++    beginPolarisSignIn();
++    signOutPolaris();
++
++    expect(replace).not.toHaveBeenCalled();
++    expect(getPolarisAuthToken()).toBe("polaris-disabled-auth-session");
++    expect(hasPolarisAuthSession()).toBe(true);
++  });
++
++  it("treats oauth2-proxy sessions as plain username scopes", () => {
++    process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE = "oauth2-proxy";
++    const storage = installSessionStorage();
++    storage.setItem("polaris_authing_session", "authing-user-a");
++
++    expect(getPolarisAuthToken()).toBe("authing-user-a");
++    expect(hasPolarisAuthSession()).toBe(true);
++    expect(hasPolarisHostSession()).toBe(true);
++    expect(getPolarisAuthUserScope()).toBe("authing-user-a");
+   });
+ 
+   it("accepts callback state from localStorage fallback", async () => {
+@@ -212,4 +254,9 @@ describe("Polaris authentication state", () => {
+     expect(resolvePolarisAuthRedirect("/settings/user", true)).toBeNull();
+     expect(resolvePolarisAuthRedirect("/h/srv_M1ozprYgpVhS", true)).toBeNull();
+   });
++
++  it("sends authenticated users away from the welcome login wall", () => {
++    expect(resolvePolarisAuthRedirect("/welcome", true)).toBe("/settings");
++    expect(resolvePolarisAuthRedirect("/auth/callback", true)).toBeNull();
++  });
+ });
+diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
+index e72eb78..f6674b6 100644
+--- a/packages/app/src/lib/polaris-authing.ts
++++ b/packages/app/src/lib/polaris-authing.ts
+@@ -1,4 +1,6 @@
+ import { isEmbedDevelopmentEnabled } from "@/embed/protocol";
++import { isPolarisAuthDisabled } from "@getpaseo/polaris-auth-client";
++
+ export {
+   beginPolarisSignIn,
+   clearPolarisSignIn,
+@@ -7,6 +9,7 @@ export {
+   getPolarisAuthUserScope,
+   hasPolarisAuthSession,
+   hasPolarisHostSession,
++  isPolarisAuthDisabled,
+   polarisApiBaseUrl,
+   publishPolarisAuthSession,
+   signOutPolaris,
+@@ -14,13 +17,32 @@ export {
+   usePolarisAuthSession,
+ } from "@getpaseo/polaris-auth-client";
+ 
++export type PolarisAuthRedirect = "/welcome" | "/settings" | null;
++
++/**
++ * Gate app routes against auth state.
++ *
++ * Disabled mode is always "signed in": never send the user to /welcome, and
++ * bounce them off login-only surfaces to /settings (host sync still runs via
++ * PolarisHostRegistrySync).
++ */
+ export function resolvePolarisAuthRedirect(
+   pathname: string,
+   hasSession: boolean,
+-): "/welcome" | null {
+-  if (hasSession) {
++): PolarisAuthRedirect {
++  const authenticated = hasSession || isPolarisAuthDisabled();
++
++  if (authenticated) {
++    if (pathname === "/welcome") {
++      return "/settings";
++    }
++    // Disabled mode has no OAuth callback; real Authing still needs /auth/callback.
++    if (pathname === "/auth/callback" && isPolarisAuthDisabled()) {
++      return "/settings";
++    }
+     return null;
+   }
++
+   if (pathname === "/embed" && isEmbedDevelopmentEnabled()) {
+     return null;
+   }
+diff --git a/packages/app/src/navigation/host-runtime-bootstrap.test.ts b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
+index 5d16ed0..b0cc22c 100644
+--- a/packages/app/src/navigation/host-runtime-bootstrap.test.ts
++++ b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
+@@ -3,6 +3,8 @@ import {
+   resolveHostIndexRoute,
+   resolveStartupBlocker,
+   resolveStartupNavigationReady,
++  resolveNoHostHomeHref,
++  resolveSettingsExitHref,
+   resolveStartupRoute,
+   shouldRunStartupGiveUpTimer,
+   startHostRuntimeBootstrap,
+@@ -312,6 +314,16 @@ describe("resolveStartupRoute", () => {
+     ).toEqual({ kind: "redirect", href: "/welcome" });
+   });
+ 
++  it("sends authenticated users to settings after root startup gives up with no host", () => {
++    expect(
++      resolveStartupRoute({
++        ...baseIndexInput,
++        hasGivenUpWaitingForHost: true,
++        hasPolarisSession: true,
++      }),
++    ).toEqual({ kind: "redirect", href: "/settings" });
++  });
++
+   it("keeps host routes mounted while the host registry is loading", () => {
+     expect(
+       resolveStartupRoute({
+@@ -357,6 +369,59 @@ describe("resolveStartupRoute", () => {
+       }),
+     ).toEqual({ kind: "redirect", href: "/welcome" });
+   });
++
++  it("sends authenticated users to settings from a removed host with an empty registry", () => {
++    expect(
++      resolveStartupRoute({
++        ...baseHostInput,
++        route: { kind: "host", serverId: "server-removed" },
++        hasPolarisSession: true,
++      }),
++    ).toEqual({ kind: "redirect", href: "/settings" });
++  });
++});
++
++describe("resolveNoHostHomeHref", () => {
++  it("uses settings for authenticated sessions and welcome otherwise", () => {
++    expect(resolveNoHostHomeHref(true)).toBe("/settings");
++    expect(resolveNoHostHomeHref(false)).toBe("/welcome");
++  });
++});
++
++describe("resolveSettingsExitHref", () => {
++  it("returns welcome when unauthenticated", () => {
++    expect(
++      resolveSettingsExitHref({
++        hasPolarisSession: false,
++        anyOnlineServerId: "srv_online",
++        anySavedServerId: "srv_saved",
++      }),
++    ).toBe("/welcome");
++  });
++
++  it("prefers an online host, then a saved host, then settings", () => {
++    expect(
++      resolveSettingsExitHref({
++        hasPolarisSession: true,
++        anyOnlineServerId: "srv_online",
++        anySavedServerId: "srv_saved",
++      }),
++    ).toBe("/h/srv_online/open-project");
++    expect(
++      resolveSettingsExitHref({
++        hasPolarisSession: true,
++        anyOnlineServerId: null,
++        anySavedServerId: "srv_saved",
++      }),
++    ).toBe("/h/srv_saved");
++    expect(
++      resolveSettingsExitHref({
++        hasPolarisSession: true,
++        anyOnlineServerId: null,
++        anySavedServerId: null,
++      }),
++    ).toBe("/settings");
++  });
+ });
+ 
+ describe("resolveHostIndexRoute", () => {
+diff --git a/packages/app/src/navigation/host-runtime-bootstrap.ts b/packages/app/src/navigation/host-runtime-bootstrap.ts
+index 77a8cfd..f46e2bc 100644
+--- a/packages/app/src/navigation/host-runtime-bootstrap.ts
++++ b/packages/app/src/navigation/host-runtime-bootstrap.ts
+@@ -61,6 +61,37 @@ export function startDaemonIfGateAllows(input: {
+ }
+ 
+ const WELCOME_ROUTE: Href = "/welcome";
++const SETTINGS_ROUTE: Href = "/settings";
++
++/**
++ * Where to land when no host/workspace is available.
++ * Authenticated users (including auth-disabled local mode) go to settings to
++ * create/start hosts — never the login welcome screen.
++ */
++export function resolveNoHostHomeHref(hasPolarisSession: boolean): Href {
++  return hasPolarisSession ? SETTINGS_ROUTE : WELCOME_ROUTE;
++}
++
++/**
++ * Exit target from settings when the user asks to return to the workspace.
++ * Prefer an online host, then any saved host, else the no-host home.
++ */
++export function resolveSettingsExitHref(options: {
++  hasPolarisSession: boolean;
++  anyOnlineServerId: string | null;
++  anySavedServerId: string | null;
++}): Href {
++  if (!options.hasPolarisSession) {
++    return WELCOME_ROUTE;
++  }
++  if (options.anyOnlineServerId) {
++    return buildHostOpenProjectRoute(options.anyOnlineServerId);
++  }
++  if (options.anySavedServerId) {
++    return buildHostRootRoute(options.anySavedServerId);
++  }
++  return SETTINGS_ROUTE;
++}
+ 
+ export type StartupBlocker =
+   | { kind: "none" }
+@@ -130,6 +161,8 @@ interface ResolveStartupRouteBaseInput {
+   startupBlocker: StartupBlocker;
+   hostRegistryStatus: StartupRegistryStatus;
+   hosts: readonly { serverId: string }[];
++  /** When true, empty-host fallback is /settings instead of /welcome. */
++  hasPolarisSession?: boolean;
+ }
+ 
+ export interface ResolveIndexStartupRouteInput extends ResolveStartupRouteBaseInput {
+@@ -231,7 +264,10 @@ function resolveReadyIndexStartupRoute(input: ResolveIndexStartupRouteInput): St
+   }
+ 
+   if (input.hasGivenUpWaitingForHost) {
+-    return { kind: "redirect", href: WELCOME_ROUTE };
++    return {
++      kind: "redirect",
++      href: resolveNoHostHomeHref(Boolean(input.hasPolarisSession)),
++    };
+   }
+ 
+   return { kind: "splash" };
+@@ -247,7 +283,10 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
+     return { kind: "redirect", href: buildHostOpenProjectRoute(fallbackServerId) };
+   }
+ 
+-  return { kind: "redirect", href: WELCOME_ROUTE };
++  return {
++    kind: "redirect",
++    href: resolveNoHostHomeHref(Boolean(input.hasPolarisSession)),
++  };
+ }
+ 
+ function isHostStartupRouteInput(
+diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
+index a3e5114..2ee7dd1 100644
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -117,13 +117,13 @@ import { useIsCompactFormFactor } from "@/constants/layout";
+ import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
+ import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
+ import {
+-  buildHostOpenProjectRoute,
+   buildProjectsSettingsRoute,
+   buildSettingsHostSectionRoute,
+   buildSettingsSectionRoute,
+   type HostSectionSlug,
+   type SettingsSectionSlug,
+ } from "@/utils/host-routes";
++import { resolveSettingsExitHref } from "@/navigation/host-runtime-bootstrap";
+ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
+ import { usePolarisAuthSession } from "@/lib/polaris-authing";
+ 
+@@ -1519,6 +1519,16 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     }
+   }, [isCompactLayout, router]);
+ 
++  const settingsExitHref = useMemo(
++    () =>
++      resolveSettingsExitHref({
++        hasPolarisSession,
++        anyOnlineServerId,
++        anySavedServerId: visibleHosts[0]?.serverId ?? null,
++      }),
++    [anyOnlineServerId, hasPolarisSession, visibleHosts],
++  );
++
+   const handleBackToRoot = useCallback(() => {
+     if (!hasPolarisSession) {
+       router.replace("/welcome");
+@@ -1528,12 +1538,8 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+       router.back();
+       return;
+     }
+-    if (anyOnlineServerId) {
+-      router.replace(buildHostOpenProjectRoute(anyOnlineServerId));
+-    } else {
+-      router.replace("/");
+-    }
+-  }, [anyOnlineServerId, hasPolarisSession, router]);
++    router.replace(settingsExitHref);
++  }, [hasPolarisSession, router, settingsExitHref]);
+ 
+   const handleBackToWorkspace = useCallback(() => {
+     if (!hasPolarisSession) {
+@@ -1543,12 +1549,8 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (navigateToLastWorkspace()) {
+       return;
+     }
+-    if (anyOnlineServerId) {
+-      router.replace(buildHostOpenProjectRoute(anyOnlineServerId));
+-      return;
+-    }
+-    router.replace("/");
+-  }, [anyOnlineServerId, hasPolarisSession, router]);
++    router.replace(settingsExitHref);
++  }, [hasPolarisSession, router, settingsExitHref]);
+ 
+   const detailHeader = ((): {
+     title: string;
+diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
+index 17c9ad5..d77b5fe 100644
+--- a/packages/app/src/screens/settings/polaris-user-page.tsx
++++ b/packages/app/src/screens/settings/polaris-user-page.tsx
+@@ -5,7 +5,12 @@ import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
+ import { Button } from "@/components/ui/button";
+ import { SettingsSection } from "@/screens/settings/settings-section";
+ import { settingsStyles } from "@/styles/settings";
+-import { getPolarisAuthToken, polarisApiBaseUrl, signOutPolaris } from "@/lib/polaris-authing";
++import {
++  getPolarisAuthToken,
++  isPolarisAuthDisabled,
++  polarisApiBaseUrl,
++  signOutPolaris,
++} from "@/lib/polaris-authing";
+ 
+ interface PolarisUserResponse {
+   profile: { id: string; name?: string; email?: string };
+@@ -34,6 +39,7 @@ interface PolarisCredentialRecord {
+ 
+ export function PolarisUserPage() {
+   const { theme } = useUnistyles();
++  const authDisabled = isPolarisAuthDisabled();
+   const [data, setData] = useState<PolarisUserResponse | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [loading, setLoading] = useState(true);
+@@ -142,19 +148,34 @@ export function PolarisUserPage() {
+         </View>
+       </SettingsSection>
+ 
+-      <SettingsSection title="会话">
+-        <View style={settingsStyles.card}>
+-          <View style={settingsStyles.row}>
+-            <View style={settingsStyles.rowContent}>
+-              <Text style={settingsStyles.rowTitle}>退出登录</Text>
+-              <Text style={settingsStyles.rowHint}>退出当前 Polaris 会话</Text>
++      {authDisabled ? (
++        <SettingsSection title="会话">
++          <View style={settingsStyles.card}>
++            <View style={settingsStyles.row}>
++              <View style={settingsStyles.rowContent}>
++                <Text style={settingsStyles.rowTitle}>本地开发模式</Text>
++                <Text style={settingsStyles.rowHint}>
++                  Authing 已关闭，固定使用本地默认用户，无需登录或退出
++                </Text>
++              </View>
+             </View>
+-            <Button size="sm" variant="destructive" onPress={() => setSignOutConfirmVisible(true)}>
+-              退出
+-            </Button>
+           </View>
+-        </View>
+-      </SettingsSection>
++        </SettingsSection>
++      ) : (
++        <SettingsSection title="会话">
++          <View style={settingsStyles.card}>
++            <View style={settingsStyles.row}>
++              <View style={settingsStyles.rowContent}>
++                <Text style={settingsStyles.rowTitle}>退出登录</Text>
++                <Text style={settingsStyles.rowHint}>退出当前 Polaris 会话</Text>
++              </View>
++              <Button size="sm" variant="destructive" onPress={() => setSignOutConfirmVisible(true)}>
++                退出
++              </Button>
++            </View>
++          </View>
++        </SettingsSection>
++      )}
+ 
+       {credentialRecord ? (
+         <AdaptiveModalSheet
+@@ -181,7 +202,8 @@ export function PolarisUserPage() {
+         </AdaptiveModalSheet>
+       ) : null}
+ 
+-      <AdaptiveModalSheet
++      {!authDisabled ? (
++        <AdaptiveModalSheet
+           header={{ title: "退出登录？" }}
+           visible={signOutConfirmVisible}
+           onClose={() => setSignOutConfirmVisible(false)}
+@@ -206,6 +228,7 @@ export function PolarisUserPage() {
+             </Button>
+           </View>
+         </AdaptiveModalSheet>
++      ) : null}
+     </View>
+   );
+ }
+diff --git a/packages/polaris-auth-client/src/index.ts b/packages/polaris-auth-client/src/index.ts
+index 29400c6..a4bcb4b 100644
+--- a/packages/polaris-auth-client/src/index.ts
++++ b/packages/polaris-auth-client/src/index.ts
+@@ -16,6 +16,13 @@ interface PolarisAuthOverride {
+   userScope: string;
+ }
+ 
++type PolarisRemoteAuthMode = "authing-browser-session" | "oauth2-proxy" | "disabled";
++
++function resolvePolarisRemoteAuthMode(): PolarisRemoteAuthMode {
++  return (process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE?.trim().toLowerCase() ||
++    "authing-browser-session") as PolarisRemoteAuthMode;
++}
++
+ function readTransientAuthValue(key: string): string | null {
+   const sessionValue = sessionStorage.getItem(key)?.trim();
+   if (sessionValue) {
+@@ -67,8 +74,15 @@ function readCookieValue(key: string): string | null {
+   return decodeURIComponent(entry.slice(key.length + 1).trim()) || null;
+ }
+ 
++function clearCookieValue(key: string): void {
++  if (typeof globalThis.document === "undefined") {
++    return;
++  }
++  globalThis.document.cookie = `${key}=; Max-Age=0; path=/`;
++}
++
+ function resolvePolarisAuthOverride(): PolarisAuthOverride | null {
+-  const envMode = process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE?.trim().toLowerCase();
++  const envMode = resolvePolarisRemoteAuthMode();
+   if (envMode === "disabled") {
+     const envUserScope =
+       process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID?.trim() ||
+@@ -92,6 +106,14 @@ function resolvePolarisAuthOverride(): PolarisAuthOverride | null {
+   };
+ }
+ 
++/**
++ * Local-dev / no-IdP mode. The app is permanently signed in as the default
++ * Polaris user: no login wall, no logout, no Authing redirects.
++ */
++export function isPolarisAuthDisabled(): boolean {
++  return resolvePolarisAuthOverride()?.mode === "disabled";
++}
++
+ function required(value: string | undefined, name: string): string {
+   const trimmed = value?.trim();
+   if (!trimmed) {
+@@ -147,11 +169,14 @@ async function challenge(
+ }
+ 
+ interface AuthingConfig {
+-  appId: string;
+-  authorizationUrl: string;
++  authMode: PolarisRemoteAuthMode;
++  appId?: string;
++  authorizationUrl?: string;
+   redirectUri: string;
+   logoutUrl?: string;
+   logoutRedirectUri?: string;
++  signInUrl?: string;
++  signOutUrl?: string;
+ }
+ 
+ async function loadAuthingConfig(): Promise<AuthingConfig> {
+@@ -160,15 +185,27 @@ async function loadAuthingConfig(): Promise<AuthingConfig> {
+   if (!response.ok) {
+     throw new Error("无法加载 Authing 配置");
+   }
++  const authMode = (config.authMode?.trim().toLowerCase() ||
++    resolvePolarisRemoteAuthMode()) as PolarisRemoteAuthMode;
++  if (authMode === "oauth2-proxy") {
++    return {
++      authMode,
++      redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
++      logoutUrl: config.logoutUrl?.trim() || undefined,
++      logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
++      signInUrl: config.signInUrl?.trim() || "/oauth2/start",
++      signOutUrl: config.signOutUrl?.trim() || "/oauth2/sign_out",
++    };
++  }
+   return {
++    authMode,
+     appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
+-    authorizationUrl: required(
+-      config.authorizationUrl,
+-      "POLARIS_AUTHING_AUTHORIZATION_URL",
+-    ),
++    authorizationUrl: required(config.authorizationUrl, "POLARIS_AUTHING_AUTHORIZATION_URL"),
+     redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
+     logoutUrl: config.logoutUrl?.trim() || undefined,
+     logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
++    signInUrl: config.signInUrl?.trim() || undefined,
++    signOutUrl: config.signOutUrl?.trim() || undefined,
+   };
+ }
+ 
+@@ -189,9 +226,9 @@ export function polarisApiBaseUrl(): string {
+ 
+ export function getPolarisAuthToken(): string | null {
+   try {
+-    const token = sessionStorage.getItem(sessionKey);
++    const token = sessionStorage.getItem(sessionKey) || readCookieValue(sessionKey);
+     if (token?.trim()) {
+-      return token;
++      return token.replace(/^Bearer\s+/i, "").trim();
+     }
+   } catch {
+     // Ignore browsers that block session storage.
+@@ -203,15 +240,17 @@ export function getPolarisAuthToken(): string | null {
+ }
+ 
+ /**
+- * The portal session is a signed JWT whose subject is the immutable Authing
+- * user ID. Keep Host storage scoped to that identity, never to a pairing URL
+- * or a locally remembered host.
++ * Keep Host storage scoped to the authenticated identity, never to a pairing
++ * URL or a locally remembered host.
+  */
+ export function getPolarisAuthUserScope(): string | null {
+   const authOverride = resolvePolarisAuthOverride();
+   if (authOverride?.mode === "disabled") {
+     return authOverride.userScope;
+   }
++  if (resolvePolarisRemoteAuthMode() === "oauth2-proxy") {
++    return getPolarisAuthToken();
++  }
+   const token = getPolarisAuthToken();
+   const payload = token?.split(".")[1];
+   if (!payload) {
+@@ -253,19 +292,29 @@ export function usePolarisAuthSession(): boolean {
+ 
+ export function beginPolarisSignIn(): void {
+   void (async () => {
+-    if (resolvePolarisAuthOverride()?.mode === "disabled") {
+-      globalThis.location.replace("/settings");
++    // Disabled mode is always authenticated. Callers should not show a sign-in
++    // affordance; if they do, stay put instead of bouncing through /settings.
++    if (isPolarisAuthDisabled()) {
+       return;
+     }
+-    const verifier = base64Url(randomBytes(32));
+-    const state = base64Url(randomBytes(24));
+-    writeTransientAuthValue(verifierKey, verifier);
+-    writeTransientAuthValue(stateKey, state);
+     writeTransientAuthValue(
+       returnPathKey,
+       `${globalThis.location.pathname}${globalThis.location.search}`,
+     );
+     const config = await loadAuthingConfig();
++    if (config.authMode === "oauth2-proxy") {
++      clearTransientAuthValue(verifierKey);
++      clearTransientAuthValue(stateKey);
++      writeTransientAuthValue(redirectUriKey, config.redirectUri);
++      const signInUrl = new URL(config.signInUrl || "/oauth2/start", globalThis.location.origin);
++      signInUrl.searchParams.set("rd", config.redirectUri);
++      globalThis.location.assign(signInUrl.toString());
++      return;
++    }
++    const verifier = base64Url(randomBytes(32));
++    const state = base64Url(randomBytes(24));
++    writeTransientAuthValue(verifierKey, verifier);
++    writeTransientAuthValue(stateKey, state);
+     writeTransientAuthValue(redirectUriKey, config.redirectUri);
+     const authorizationUrl = new URL(config.authorizationUrl);
+     const pkce = await challenge(verifier);
+@@ -283,9 +332,37 @@ export function beginPolarisSignIn(): void {
+ }
+ 
+ export async function completePolarisSignIn(): Promise<string> {
++  const envMode = resolvePolarisRemoteAuthMode();
++  const config = envMode === "oauth2-proxy" ? await loadAuthingConfig().catch(() => null) : null;
+   const params = new URLSearchParams(globalThis.location.search);
+   const code = params.get("code");
+   const state = params.get("state");
++  if ((config?.authMode ?? envMode) === "oauth2-proxy" && !code) {
++    const token =
++      getPolarisAuthToken() ||
++      (await fetch(`${polarisApiBaseUrl()}/session`)
++        .then(async (response) => {
++          const body = (await response.json().catch(() => ({}))) as {
++            authingUserId?: string;
++            authingUsername?: string | null;
++            error?: string;
++          };
++          if (!response.ok) {
++            throw new Error(body.error || "Authing 登录未完成");
++          }
++          return body.authingUserId?.trim() || body.authingUsername?.trim() || null;
++        })
++        .catch(() => null));
++    if (!token) {
++      throw new Error("Authing 登录未完成");
++    }
++    sessionStorage.setItem(sessionKey, token);
++    clearTransientAuthValue(verifierKey);
++    clearTransientAuthValue(stateKey);
++    clearTransientAuthValue(redirectUriKey);
++    const returnPath = readTransientAuthValue(returnPathKey);
++    return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
++  }
+   const verifier = readTransientAuthValue(verifierKey);
+   if (!code || !verifier || state !== readTransientAuthValue(stateKey)) {
+     throw new Error("Authing 登录状态无效，请重新登录");
+@@ -318,9 +395,15 @@ export async function completePolarisSignIn(): Promise<string> {
+   return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
+ }
+ 
+-export function clearPolarisSignIn(options?: { notify?: boolean }): void {
++export function clearPolarisSignIn(options?: {
++  notify?: boolean;
++  preserveCookie?: boolean;
++}): void {
+   sessionStorage.removeItem(sessionKey);
+   sessionStorage.removeItem(idTokenKey);
++  if (!options?.preserveCookie) {
++    clearCookieValue(sessionKey);
++  }
+   clearTransientAuthValue(verifierKey);
+   clearTransientAuthValue(stateKey);
+   clearTransientAuthValue(redirectUriKey);
+@@ -332,13 +415,20 @@ export function clearPolarisSignIn(options?: { notify?: boolean }): void {
+ 
+ export function signOutPolaris(): void {
+   void (async () => {
+-    if (resolvePolarisAuthOverride()?.mode === "disabled") {
+-      clearPolarisSignIn();
+-      globalThis.location.replace("/settings");
++    // There is no real session to clear in disabled mode; pretend-logout only
++    // confuses navigation (token still resolves, welcome/settings loop).
++    if (isPolarisAuthDisabled()) {
+       return;
+     }
+     const config = await loadAuthingConfig().catch(() => null);
+     const idToken = sessionStorage.getItem(idTokenKey)?.trim();
++    if ((config?.authMode ?? resolvePolarisRemoteAuthMode()) === "oauth2-proxy") {
++      const proxyLogoutUrl = new URL(config?.signOutUrl || "/oauth2/sign_out", globalThis.location.origin);
++      proxyLogoutUrl.searchParams.set("rd", "/welcome");
++      clearPolarisSignIn({ notify: false, preserveCookie: true });
++      globalThis.location.replace(proxyLogoutUrl.toString());
++      return;
++    }
+     if (config?.logoutUrl) {
+       const logoutUrl = new URL(config.logoutUrl);
+       if (idToken) {

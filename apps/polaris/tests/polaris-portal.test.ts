@@ -179,18 +179,17 @@ async function mapIdentityToPolarisUser(
     polarisUserId: string;
     role?: "admin" | "user";
     plan?: "free" | "pro";
+    line?: "coding" | "vertical";
   },
 ): Promise<void> {
-  await upsertUserMapEntry(identity.clerkUsername, {
+  const entry = {
     polarisUserId: input.polarisUserId,
-    role: input.role ?? "user",
-    plan: input.plan ?? "free",
-  });
-  await upsertUserMapUserId(identity.clerkUserId, {
-    polarisUserId: input.polarisUserId,
-    role: input.role ?? "user",
-    plan: input.plan ?? "free",
-  });
+    role: input.role ?? "user" as const,
+    plan: input.plan ?? "free" as const,
+    line: input.line ?? "coding" as const,
+  };
+  await upsertUserMapEntry(identity.clerkUsername, entry);
+  await upsertUserMapUserId(identity.clerkUserId, entry);
 }
 
 function removeIdentityMappings(identity: LivePortalIdentity): void {

@@ -69,6 +69,42 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/polaris-shell:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.2
+      tsx:
+        specifier: ^4.19.4
+        version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/surface-paseo:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.2
+      tsx:
+        specifier: ^4.19.4
+        version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/surface-wanghai:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.2
+      tsx:
+        specifier: ^4.19.4
+        version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
 packages:
 
   '@apm-js-collab/code-transformer-bundler-plugins@0.5.0':

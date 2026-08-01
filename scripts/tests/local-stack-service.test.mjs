@@ -26,3 +26,13 @@ test("local stack service runs Paseo with Fast Refresh instead of a web artifact
   assert.doesNotMatch(script, /paseo_local_build_dist/);
   assert.doesNotMatch(script, /paseo_local_build_tool_bundle/);
 });
+
+test("local stack service builds shell and surface packages", () => {
+  const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
+  assert.match(script, /pnpm run build:surfaces/);
+  assert.match(script, /in-container \(per workspace\): paseo daemon :6767/);
+  assert.match(script, /wanghai portal :9090/);
+  // Product flavor is per-user, not a single-stack env switch.
+  assert.doesNotMatch(script, /EXPO_PUBLIC_POLARIS_PRODUCT/);
+  assert.doesNotMatch(script, /POLARIS_PRODUCT=/);
+});
