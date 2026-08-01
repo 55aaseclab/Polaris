@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   findWanghaiPortalPort,
   planOpenWanghaiPortal,
+  isWanghaiPortalEmbedPath,
   resolveWanghaiPortalUrl,
   WANGHAI_PORTAL_CONTAINER_PORT,
 } from "./portal.js";
@@ -34,12 +35,13 @@ test("resolves browser URL from public host and node port", () => {
   assert.equal(url, "http://128.0.0.1:32099");
 });
 
-test("plans external open by default", () => {
+test("plans the shell embed route", () => {
   const plan = planOpenWanghaiPortal({
     serverId: "srv_1",
     portalUrl: "http://example:32099",
   });
-  assert.equal(plan.mode, "external");
   assert.equal(plan.href, "http://example:32099");
   assert.equal(plan.shellEmbedPath, "/v/srv_1/wanghai");
+  assert.equal(isWanghaiPortalEmbedPath(plan.shellEmbedPath), true);
+  assert.equal(isWanghaiPortalEmbedPath("/h/srv_1"), false);
 });
