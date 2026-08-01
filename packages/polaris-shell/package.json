@@ -12,12 +12,17 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --incremental false",
+    "build": "tsc -p tsconfig.json --incremental false && node scripts/build-web.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts"
   },
+  "dependencies": {
+    "@qingniao/surface-paseo": "workspace:*",
+    "@qingniao/surface-wanghai": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.0.3",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

@@ -15,10 +15,19 @@ export type ShellRouteId =
   | "welcome"
   | "auth-callback"
   | "settings-user"
-  | "hosts"
-  | "host-detail";
+  | "hosts";
 
-export function shellPath(id: ShellRouteId, params?: { hostKey?: string }): string {
+export const WANGHAI_EMBED_ROUTE_PREFIX = "/v" as const;
+
+export function wanghaiEmbedPath(serverId: string): string {
+  const trimmed = serverId.trim();
+  if (!trimmed) {
+    throw new Error("wanghaiEmbedPath requires serverId");
+  }
+  return `${WANGHAI_EMBED_ROUTE_PREFIX}/${encodeURIComponent(trimmed)}/wanghai`;
+}
+
+export function shellPath(id: ShellRouteId): string {
   switch (id) {
     case "home":
       return "/";
@@ -30,13 +39,6 @@ export function shellPath(id: ShellRouteId, params?: { hostKey?: string }): stri
       return "/settings/user";
     case "hosts":
       return "/hosts";
-    case "host-detail": {
-      const hostKey = params?.hostKey?.trim();
-      if (!hostKey) {
-        throw new Error("shellPath(host-detail) requires hostKey");
-      }
-      return `/hosts/${encodeURIComponent(hostKey)}`;
-    }
     default: {
       const _exhaustive: never = id;
       return _exhaustive;
@@ -64,6 +66,9 @@ export function isShellPath(pathname: string): boolean {
     return true;
   }
   if (path === "/hosts" || path.startsWith("/hosts/")) {
+    return true;
+  }
+  if (path === "/v" || path.startsWith("/v/")) {
     return true;
   }
   return false;
