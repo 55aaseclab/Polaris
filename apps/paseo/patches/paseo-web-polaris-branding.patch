@@ -11,133 +11,6 @@ index 959fb27..6f29797 100644
      },
      autolinking: {
        searchPaths: ["../../node_modules", "./node_modules"],
-diff --git a/packages/app/public/index.html b/packages/app/public/index.html
-index f7116fc..5f951df 100644
---- a/packages/app/public/index.html
-+++ b/packages/app/public/index.html
-@@ -83,6 +83,17 @@
-     </style>
-   </head>
-   <body>
-+    <script>
-+      (() => {
-+        const favicon = document.querySelector('link[rel="icon"]');
-+        const href = favicon?.getAttribute("href");
-+        if (!favicon || !href) return;
-+
-+        const url = new URL(href, window.location.href);
-+        url.searchParams.set("v", "polaris-20260725");
-+        favicon.href = url.toString();
-+      })();
-+    </script>
-     <noscript>You need to enable JavaScript to run this app.</noscript>
-     <div id="root"></div>
-   </body>
-diff --git a/packages/app/src/hooks/use-favicon-status.ts b/packages/app/src/hooks/use-favicon-status.ts
-index 0f054ee..d4b08aa 100644
---- a/packages/app/src/hooks/use-favicon-status.ts
-+++ b/packages/app/src/hooks/use-favicon-status.ts
-@@ -9,20 +9,51 @@ import { isNative } from "@/constants/platform";
- type FaviconStatus = "none" | "running" | "attention";
- type ColorScheme = "dark" | "light";
- 
--/* eslint-disable @typescript-eslint/no-require-imports */
--const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, { uri: string } | number>> = {
-+const POLARIS_FAVICON_PATH = [
-+  "M128 18",
-+  "L156 100",
-+  "L238 128",
-+  "L156 156",
-+  "L128 238",
-+  "L100 156",
-+  "L18 128",
-+  "L100 100",
-+  "Z",
-+  "M128 74",
-+  "L142 114",
-+  "L182 128",
-+  "L142 142",
-+  "L128 182",
-+  "L114 142",
-+  "L74 128",
-+  "L114 114",
-+  "Z",
-+].join(" ");
-+
-+function createPolarisFaviconUri(badgeColor?: string): string {
-+  const badge = badgeColor ? `<circle cx="208" cy="208" r="48" fill="${badgeColor}"/>` : "";
-+  const svg = [
-+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">',
-+    '<rect width="256" height="256" rx="57" fill="#000"/>',
-+    `<path d="${POLARIS_FAVICON_PATH}" fill="#fff" fill-rule="evenodd" clip-rule="evenodd"/>`,
-+    badge,
-+    "</svg>",
-+  ].join("");
-+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-+}
-+
-+const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, string>> = {
-   dark: {
--    none: require("../../assets/images/favicon-dark.png"),
--    running: require("../../assets/images/favicon-dark-running.png"),
--    attention: require("../../assets/images/favicon-dark-attention.png"),
-+    none: createPolarisFaviconUri(),
-+    running: createPolarisFaviconUri("#3b82f6"),
-+    attention: createPolarisFaviconUri("#22c55e"),
-   },
-   light: {
--    none: require("../../assets/images/favicon-light.png"),
--    running: require("../../assets/images/favicon-light-running.png"),
--    attention: require("../../assets/images/favicon-light-attention.png"),
-+    none: createPolarisFaviconUri(),
-+    running: createPolarisFaviconUri("#3b82f6"),
-+    attention: createPolarisFaviconUri("#22c55e"),
-   },
- };
--/* eslint-enable @typescript-eslint/no-require-imports */
- 
- function deriveFaviconStatus(
-   agents: ReturnType<typeof useAggregatedAgents>["agents"],
-@@ -40,12 +71,7 @@ function deriveFaviconStatus(
- }
- 
- function getFaviconUri(status: FaviconStatus, colorScheme: ColorScheme): string {
--  const image = FAVICON_IMAGES[colorScheme][status];
--  if (typeof image === "object" && "uri" in image) {
--    return image.uri;
--  }
--  const suffix = status === "none" ? "" : `-${status}`;
--  return `/assets/images/favicon-${colorScheme}${suffix}.png`;
-+  return FAVICON_IMAGES[colorScheme][status];
- }
- 
- function getOrCreateFaviconLink(): HTMLLinkElement | null {
-@@ -55,9 +81,9 @@ function getOrCreateFaviconLink(): HTMLLinkElement | null {
-   if (!link) {
-     link = document.createElement("link");
-     link.rel = "icon";
--    link.type = "image/png";
-     document.head.appendChild(link);
-   }
-+  link.type = "image/svg+xml";
-   return link;
- }
- 
-diff --git a/packages/app/assets/images/polaris-favicon.svg b/packages/app/assets/images/polaris-favicon.svg
-new file mode 100644
-index 0000000..67d28b1
---- /dev/null
-+++ b/packages/app/assets/images/polaris-favicon.svg
-@@ -0,0 +1,9 @@
-+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-+  <rect width="256" height="256" rx="57" fill="#000"/>
-+  <path
-+    d="M128 18 L156 100 L238 128 L156 156 L128 238 L100 156 L18 128 L100 100 Z M128 74 L142 114 L182 128 L142 142 L128 182 L114 142 L74 128 L114 114 Z"
-+    fill="#fff"
-+    fill-rule="evenodd"
-+    clip-rule="evenodd"
-+  />
-+</svg>
 diff --git a/packages/app/assets/images/polaris-favicon.png b/packages/app/assets/images/polaris-favicon.png
 new file mode 100644
 index 0000000000000000000000000000000000000000..38b8ae767c96a54db95f98ea0b7008486822dd10
@@ -269,3 +142,130 @@ t1pogApO4HBK?A}6UBTZS;rz(o9^v!<+r;351VJ0%zM8J;8)dsE{{#0_VjBPe
 literal 0
 HcmV?d00001
 
+diff --git a/packages/app/assets/images/polaris-favicon.svg b/packages/app/assets/images/polaris-favicon.svg
+new file mode 100644
+index 0000000..67d28b1
+--- /dev/null
++++ b/packages/app/assets/images/polaris-favicon.svg
+@@ -0,0 +1,9 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
++  <rect width="256" height="256" rx="57" fill="#000"/>
++  <path
++    d="M128 18 L156 100 L238 128 L156 156 L128 238 L100 156 L18 128 L100 100 Z M128 74 L142 114 L182 128 L142 142 L128 182 L114 142 L74 128 L114 114 Z"
++    fill="#fff"
++    fill-rule="evenodd"
++    clip-rule="evenodd"
++  />
++</svg>
+diff --git a/packages/app/public/index.html b/packages/app/public/index.html
+index f7116fc..5f951df 100644
+--- a/packages/app/public/index.html
++++ b/packages/app/public/index.html
+@@ -83,6 +83,17 @@
+     </style>
+   </head>
+   <body>
++    <script>
++      (() => {
++        const favicon = document.querySelector('link[rel="icon"]');
++        const href = favicon?.getAttribute("href");
++        if (!favicon || !href) return;
++
++        const url = new URL(href, window.location.href);
++        url.searchParams.set("v", "polaris-20260725");
++        favicon.href = url.toString();
++      })();
++    </script>
+     <noscript>You need to enable JavaScript to run this app.</noscript>
+     <div id="root"></div>
+   </body>
+diff --git a/packages/app/src/hooks/use-favicon-status.ts b/packages/app/src/hooks/use-favicon-status.ts
+index 0f054ee..d4b08aa 100644
+--- a/packages/app/src/hooks/use-favicon-status.ts
++++ b/packages/app/src/hooks/use-favicon-status.ts
+@@ -9,20 +9,51 @@ import { isNative } from "@/constants/platform";
+ type FaviconStatus = "none" | "running" | "attention";
+ type ColorScheme = "dark" | "light";
+ 
+-/* eslint-disable @typescript-eslint/no-require-imports */
+-const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, { uri: string } | number>> = {
++const POLARIS_FAVICON_PATH = [
++  "M128 18",
++  "L156 100",
++  "L238 128",
++  "L156 156",
++  "L128 238",
++  "L100 156",
++  "L18 128",
++  "L100 100",
++  "Z",
++  "M128 74",
++  "L142 114",
++  "L182 128",
++  "L142 142",
++  "L128 182",
++  "L114 142",
++  "L74 128",
++  "L114 114",
++  "Z",
++].join(" ");
++
++function createPolarisFaviconUri(badgeColor?: string): string {
++  const badge = badgeColor ? `<circle cx="208" cy="208" r="48" fill="${badgeColor}"/>` : "";
++  const svg = [
++    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">',
++    '<rect width="256" height="256" rx="57" fill="#000"/>',
++    `<path d="${POLARIS_FAVICON_PATH}" fill="#fff" fill-rule="evenodd" clip-rule="evenodd"/>`,
++    badge,
++    "</svg>",
++  ].join("");
++  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
++}
++
++const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, string>> = {
+   dark: {
+-    none: require("../../assets/images/favicon-dark.png"),
+-    running: require("../../assets/images/favicon-dark-running.png"),
+-    attention: require("../../assets/images/favicon-dark-attention.png"),
++    none: createPolarisFaviconUri(),
++    running: createPolarisFaviconUri("#3b82f6"),
++    attention: createPolarisFaviconUri("#22c55e"),
+   },
+   light: {
+-    none: require("../../assets/images/favicon-light.png"),
+-    running: require("../../assets/images/favicon-light-running.png"),
+-    attention: require("../../assets/images/favicon-light-attention.png"),
++    none: createPolarisFaviconUri(),
++    running: createPolarisFaviconUri("#3b82f6"),
++    attention: createPolarisFaviconUri("#22c55e"),
+   },
+ };
+-/* eslint-enable @typescript-eslint/no-require-imports */
+ 
+ function deriveFaviconStatus(
+   agents: ReturnType<typeof useAggregatedAgents>["agents"],
+@@ -40,12 +71,7 @@ function deriveFaviconStatus(
+ }
+ 
+ function getFaviconUri(status: FaviconStatus, colorScheme: ColorScheme): string {
+-  const image = FAVICON_IMAGES[colorScheme][status];
+-  if (typeof image === "object" && "uri" in image) {
+-    return image.uri;
+-  }
+-  const suffix = status === "none" ? "" : `-${status}`;
+-  return `/assets/images/favicon-${colorScheme}${suffix}.png`;
++  return FAVICON_IMAGES[colorScheme][status];
+ }
+ 
+ function getOrCreateFaviconLink(): HTMLLinkElement | null {
+@@ -55,9 +81,9 @@ function getOrCreateFaviconLink(): HTMLLinkElement | null {
+   if (!link) {
+     link = document.createElement("link");
+     link.rel = "icon";
+-    link.type = "image/png";
+     document.head.appendChild(link);
+   }
++  link.type = "image/svg+xml";
+   return link;
+ }
+ 

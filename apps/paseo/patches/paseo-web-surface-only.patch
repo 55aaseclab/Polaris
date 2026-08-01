@@ -1,0 +1,776 @@
+diff --git a/packages/app/src/components/left-sidebar.tsx b/packages/app/src/components/left-sidebar.tsx
+index 55675e0..cec5a25 100644
+--- a/packages/app/src/components/left-sidebar.tsx
++++ b/packages/app/src/components/left-sidebar.tsx
+@@ -66,8 +66,8 @@ import {
+   buildHostOpenProjectRoute,
+   buildHostNewWorkspaceRoute,
+   buildHostSessionsRoute,
+-  buildSettingsRoute,
+   mapPathnameToServer,
++  resolveSidebarSettingsRoute,
+ } from "@/utils/host-routes";
+ import type { ShortcutKey } from "@/utils/format-shortcut";
+ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
+@@ -250,12 +250,12 @@ export const LeftSidebar = memo(function LeftSidebar({
+ 
+   const handleSettingsMobile = useCallback(() => {
+     showMobileAgent();
+-    router.push(buildSettingsRoute());
+-  }, [showMobileAgent]);
++    router.push(resolveSidebarSettingsRoute(activeServerId));
++  }, [activeServerId, showMobileAgent]);
+ 
+   const handleSettingsDesktop = useCallback(() => {
+-    router.push(buildSettingsRoute());
+-  }, []);
++    router.push(resolveSidebarSettingsRoute(activeServerId));
++  }, [activeServerId]);
+ 
+   const handleHomeMobile = useCallback(() => {
+     if (!activeServerId) return;
+diff --git a/packages/app/src/screens/open-project-screen.tsx b/packages/app/src/screens/open-project-screen.tsx
+index d1f240b..2f5e20b 100644
+--- a/packages/app/src/screens/open-project-screen.tsx
++++ b/packages/app/src/screens/open-project-screen.tsx
+@@ -1,8 +1,8 @@
+-import { useCallback, useEffect, useState, type ComponentType } from "react";
++import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+ import { useTranslation } from "react-i18next";
+ import { View, Text, Pressable } from "react-native";
+ import { StyleSheet, useUnistyles } from "react-native-unistyles";
+-import { useRouter } from "expo-router";
++import { useLocalSearchParams, useRouter, type Href } from "expo-router";
+ import { FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-native";
+ import { PaseoLogo } from "@/components/icons/paseo-logo";
+ import { CommunityLinks } from "@/components/community-links";
+@@ -18,15 +18,20 @@ import {
+ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+ import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
+ import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
+-import { buildHostAgentDetailRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
++import {
++  buildHostAgentDetailRoute,
++  buildHostRootRoute,
++  buildSettingsHostSectionRoute,
++} from "@/utils/host-routes";
+ import { ImportSessionSheet } from "@/components/import-session-sheet";
+ import { useHostRuntimeClient } from "@/runtime/host-runtime";
+ import { useOpenProject } from "@/hooks/use-open-project";
+-import type { Href } from "expo-router";
++import { normalizeShellAutoProject } from "./open-project-shell-transfer";
+ 
+ export function OpenProjectScreen({ serverId }: { serverId: string }) {
+   const { t } = useTranslation();
+   const router = useRouter();
++  const params = useLocalSearchParams<{ projectPath?: string; returnTo?: string }>();
+   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
+   const openProjectPicker = useOpenProjectPicker(serverId);
+   const isLocalDaemon = useIsLocalDaemon(serverId);
+@@ -34,8 +39,14 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
+   const openProject = useOpenProject(serverId);
+   const [isPairDeviceOpen, setIsPairDeviceOpen] = useState(false);
+   const [isImportSheetOpen, setIsImportSheetOpen] = useState(false);
++  const [autoProjectError, setAutoProjectError] = useState<string | null>(null);
++  const autoProjectRequestRef = useRef<string | null>(null);
+ 
+   const isCompactLayout = useIsCompactFormFactor();
++  const autoProject = normalizeShellAutoProject({
++    projectPath: typeof params.projectPath === "string" ? params.projectPath : null,
++    returnTo: typeof params.returnTo === "string" ? params.returnTo : null,
++  });
+ 
+   useEffect(() => {
+     if (!isCompactLayout) {
+@@ -43,6 +54,44 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
+     }
+   }, [isCompactLayout, openDesktopAgentList]);
+ 
++  useEffect(() => {
++    if (!autoProject) {
++      return;
++    }
++    const requestKey = `${serverId}:${autoProject.projectPath}:${autoProject.returnTo ?? ""}`;
++    if (autoProjectRequestRef.current === requestKey) {
++      return;
++    }
++    autoProjectRequestRef.current = requestKey;
++    let disposed = false;
++    void (async () => {
++      const deadline = Date.now() + 90_000;
++      let lastError = "默认项目仍在准备中，请稍后重试";
++      while (!disposed && Date.now() < deadline) {
++        const result = await openProject(autoProject.projectPath);
++        if (disposed) {
++          return;
++        }
++        if (result.ok) {
++          if (autoProject.returnTo && typeof globalThis.location !== "undefined") {
++            globalThis.location.assign(autoProject.returnTo);
++            return;
++          }
++          router.replace(buildHostRootRoute(serverId) as Href);
++          return;
++        }
++        if (result.error) {
++          lastError = result.error;
++        }
++        await new Promise((resolve) => setTimeout(resolve, 1_000));
++      }
++      setAutoProjectError(lastError);
++    })();
++    return () => {
++      disposed = true;
++    };
++  }, [autoProject, openProject, router, serverId]);
++
+   const handleOpenPicker = useCallback(() => {
+     void openProjectPicker();
+   }, [openProjectPicker]);
+@@ -75,6 +124,16 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
+         <View style={styles.logo}>
+           <PaseoLogo size={52} />
+         </View>
++        {autoProject ? (
++          <View style={styles.autoProjectStatus}>
++            <Text style={styles.tileTitle}>
++              {autoProjectError ? "默认项目创建失败" : "正在创建默认项目…"}
++            </Text>
++            <Text style={autoProjectError ? styles.autoProjectError : styles.tileDescription}>
++              {autoProjectError ?? autoProject.projectPath}
++            </Text>
++          </View>
++        ) : null}
+         <View style={styles.tiles}>
+           <HomeTile
+             icon={FolderOpen}
+@@ -194,6 +253,21 @@ const styles = StyleSheet.create((theme) => ({
+   logo: {
+     marginBottom: theme.spacing[8],
+   },
++  autoProjectStatus: {
++    width: "100%",
++    maxWidth: 452,
++    padding: theme.spacing[4],
++    backgroundColor: theme.colors.surface1,
++    borderWidth: 1,
++    borderColor: theme.colors.border,
++    borderRadius: theme.borderRadius.xl,
++    gap: theme.spacing[1],
++  },
++  autoProjectError: {
++    color: theme.colors.destructive,
++    fontSize: theme.fontSize.sm,
++    lineHeight: 18,
++  },
+   tiles: {
+     marginTop: { xs: theme.spacing[6], md: theme.spacing[12] },
+     width: "100%",
+diff --git a/packages/app/src/screens/open-project-shell-transfer.test.ts b/packages/app/src/screens/open-project-shell-transfer.test.ts
+new file mode 100644
+index 0000000..fd64566
+--- /dev/null
++++ b/packages/app/src/screens/open-project-shell-transfer.test.ts
+@@ -0,0 +1,28 @@
++import { describe, expect, it } from "vitest";
++import {
++  normalizeShellAutoProject,
++  normalizeShellReturnPath,
++} from "./open-project-shell-transfer";
++
++describe("open-project shell transfer helpers", () => {
++  it("accepts same-origin shell return paths only", () => {
++    expect(normalizeShellReturnPath("/hosts/demo")).toBe("/hosts/demo");
++    expect(normalizeShellReturnPath(" /hosts/demo ")).toBe("/hosts/demo");
++    expect(normalizeShellReturnPath("https://example.com/hosts/demo")).toBeNull();
++    expect(normalizeShellReturnPath("//evil.test")).toBeNull();
++    expect(normalizeShellReturnPath("hosts/demo")).toBeNull();
++  });
++
++  it("builds an auto-project request only when a path is present", () => {
++    expect(
++      normalizeShellAutoProject({
++        projectPath: "/root/workspace",
++        returnTo: "/hosts/demo",
++      }),
++    ).toEqual({
++      projectPath: "/root/workspace",
++      returnTo: "/hosts/demo",
++    });
++    expect(normalizeShellAutoProject({ projectPath: "   " })).toBeNull();
++  });
++});
+diff --git a/packages/app/src/screens/open-project-shell-transfer.ts b/packages/app/src/screens/open-project-shell-transfer.ts
+new file mode 100644
+index 0000000..2abf24d
+--- /dev/null
++++ b/packages/app/src/screens/open-project-shell-transfer.ts
+@@ -0,0 +1,30 @@
++export interface ShellAutoProjectInput {
++  projectPath?: string | null;
++  returnTo?: string | null;
++}
++
++export interface ShellAutoProjectConfig {
++  projectPath: string;
++  returnTo: string | null;
++}
++
++export function normalizeShellReturnPath(value: string | null | undefined): string | null {
++  const trimmed = String(value ?? "").trim();
++  if (!trimmed || !trimmed.startsWith("/") || trimmed.startsWith("//")) {
++    return null;
++  }
++  return trimmed;
++}
++
++export function normalizeShellAutoProject(
++  input: ShellAutoProjectInput,
++): ShellAutoProjectConfig | null {
++  const projectPath = String(input.projectPath ?? "").trim();
++  if (!projectPath) {
++    return null;
++  }
++  return {
++    projectPath,
++    returnTo: normalizeShellReturnPath(input.returnTo),
++  };
++}
+diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
+index a290156..5a5a4fb 100644
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -39,7 +39,6 @@ import {
+   Info,
+   Shield,
+   Puzzle,
+-  Plus,
+   FolderGit2,
+   SquareTerminal,
+ } from "lucide-react-native";
+@@ -74,9 +73,6 @@ import { useWindowControlsPadding } from "@/utils/desktop-window";
+ import { confirmDialog } from "@/utils/confirm-dialog";
+ import { BackHeader } from "@/components/headers/back-header";
+ import { ScreenHeader } from "@/components/headers/screen-header";
+-import { AddHostMethodModal } from "@/components/add-host-method-modal";
+-import { AddHostModal } from "@/components/add-host-modal";
+-import { PairLinkModal } from "@/components/pair-link-modal";
+ import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
+ import { Button } from "@/components/ui/button";
+ import { CommunityLinks } from "@/components/community-links";
+@@ -115,14 +111,15 @@ import { useIsCompactFormFactor } from "@/constants/layout";
+ import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
+ import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
+ import {
+-  buildHostOpenProjectRoute,
+   buildProjectsSettingsRoute,
+   buildSettingsHostSectionRoute,
+   buildSettingsSectionRoute,
+   type HostSectionSlug,
+   type SettingsSectionSlug,
+ } from "@/utils/host-routes";
++import { resolveSettingsExitHref } from "@/navigation/host-runtime-bootstrap";
+ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
++import { usePolarisAuthSession } from "@/lib/polaris-authing";
+ 
+ // ---------------------------------------------------------------------------
+ // View model
+@@ -520,9 +517,10 @@ interface AboutSectionProps {
+   appVersion: string | null;
+   appVersionText: string;
+   isDesktopApp: boolean;
++  hosts: HostProfile[];
+ }
+ 
+-function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
++function AboutSection({ appVersion, appVersionText, isDesktopApp, hosts }: AboutSectionProps) {
+   const { t } = useTranslation();
+   return (
+     <>
+@@ -538,7 +536,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
+           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+         </View>
+       </SettingsSection>
+-      <ConnectedHostsSection clientVersion={appVersion} />
++      <ConnectedHostsSection clientVersion={appVersion} hosts={hosts} />
+       <View style={styles.aboutCommunity}>
+         <CommunityLinks />
+       </View>
+@@ -552,9 +550,14 @@ function normalizeVersion(version: string | null | undefined): string | null {
+   return trimmed.replace(/^v/i, "");
+ }
+ 
+-function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null }) {
++function ConnectedHostsSection({
++  clientVersion,
++  hosts,
++}: {
++  clientVersion: string | null;
++  hosts: HostProfile[];
++}) {
+   const { t } = useTranslation();
+-  const hosts = useHosts();
+   if (hosts.length === 0) {
+     return null;
+   }
+@@ -935,9 +938,6 @@ function SidebarProjectsButton({ isSelected, onSelect }: SidebarProjectsButtonPr
+   );
+ }
+ 
+-// Sentinel option id for the "Add host" row appended to the picker list.
+-const ADD_HOST_OPTION_ID = "__add_host__";
+-
+ interface HostPickerOptionProps {
+   serverId: string;
+   label: string;
+@@ -985,44 +985,23 @@ function HostPickerOption({
+   );
+ }
+ 
+-function AddHostOption({ active, onPress }: { active: boolean; onPress: () => void }) {
+-  const { theme } = useUnistyles();
+-  const { t } = useTranslation();
+-  const leadingSlot = useMemo(
+-    () => <Plus size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />,
+-    [theme.iconSize.sm, theme.colors.foregroundMuted],
+-  );
+-  return (
+-    <ComboboxItem
+-      label={t("settings.addHost")}
+-      leadingSlot={leadingSlot}
+-      active={active}
+-      onPress={onPress}
+-      testID="settings-add-host"
+-    />
+-  );
+-}
+-
+ interface HostPickerProps {
+   activeServerId: string | null;
+   sortedHosts: HostProfile[];
+   localServerId: string | null;
+   onSelectHost: (serverId: string) => void;
+-  onAddHost: () => void;
+ }
+ 
+ /**
+  * Scopes the four host sections to a host. Reuses the canonical sidebar host
+  * switcher pattern (left-sidebar.tsx): a quiet row-styled trigger opening a
+- * <Combobox>. The local host is listed first and tagged "Local"; an "Add host"
+- * row is always reachable from the list — even with a single host.
++ * <Combobox>. The local host is listed first and tagged "Local".
+  */
+ function HostPicker({
+   activeServerId,
+   sortedHosts,
+   localServerId,
+   onSelectHost,
+-  onAddHost,
+ }: HostPickerProps) {
+   const { theme } = useUnistyles();
+   const { t } = useTranslation();
+@@ -1031,20 +1010,9 @@ function HostPicker({
+   const activeHost =
+     sortedHosts.find((host) => host.serverId === activeServerId) ?? sortedHosts[0] ?? null;
+ 
+-  const options = useMemo<ComboboxOption[]>(() => {
+-    const hostOptions = sortedHosts.map((host) => ({ id: host.serverId, label: host.label }));
+-    return [...hostOptions, { id: ADD_HOST_OPTION_ID, label: t("settings.addHost") }];
+-  }, [sortedHosts, t]);
+-
+-  const handleSelect = useCallback(
+-    (id: string) => {
+-      if (id === ADD_HOST_OPTION_ID) {
+-        onAddHost();
+-        return;
+-      }
+-      onSelectHost(id);
+-    },
+-    [onAddHost, onSelectHost],
++  const options = useMemo<ComboboxOption[]>(
++    () => sortedHosts.map((host) => ({ id: host.serverId, label: host.label })),
++    [sortedHosts],
+   );
+ 
+   const renderOption = useCallback(
+@@ -1059,9 +1027,6 @@ function HostPicker({
+       active: boolean;
+       onPress: () => void;
+     }): ReactElement => {
+-      if (option.id === ADD_HOST_OPTION_ID) {
+-        return <AddHostOption active={active} onPress={onPress} />;
+-      }
+       return (
+         <HostPickerOption
+           serverId={option.id}
+@@ -1103,7 +1068,7 @@ function HostPicker({
+       <Combobox
+         options={options}
+         value={activeServerId ?? ""}
+-        onSelect={handleSelect}
++        onSelect={onSelectHost}
+         renderOption={renderOption}
+         searchable={false}
+         title={t("settings.hostPicker.switchHost")}
+@@ -1122,9 +1087,9 @@ interface SettingsSidebarProps {
+   onSelectHostSection: (section: HostSectionSlug) => void;
+   onSelectHost: (serverId: string) => void;
+   onSelectProjects: () => void;
+-  onAddHost: () => void;
+   onBackToWorkspace: () => void;
+   activeHostServerId: string | null;
++  hosts: HostProfile[];
+   layout: "desktop" | "mobile";
+ }
+ 
+@@ -1134,14 +1099,12 @@ function SettingsSidebar({
+   onSelectHostSection,
+   onSelectHost,
+   onSelectProjects,
+-  onAddHost,
+   onBackToWorkspace,
+   activeHostServerId,
++  hosts,
+   layout,
+ }: SettingsSidebarProps) {
+-  const { theme } = useUnistyles();
+   const { t } = useTranslation();
+-  const hosts = useHosts();
+   const localServerId = useLocalDaemonServerId();
+   const sortedHosts = useSortedHosts(hosts, localServerId);
+   const hasHosts = sortedHosts.length > 0;
+@@ -1191,7 +1154,6 @@ function SettingsSidebar({
+             sortedHosts={sortedHosts}
+             localServerId={localServerId}
+             onSelectHost={onSelectHost}
+-            onAddHost={onAddHost}
+           />
+           {HOST_SECTION_ITEMS.map((item) => (
+             <SidebarHostSectionButton
+@@ -1204,22 +1166,7 @@ function SettingsSidebar({
+             />
+           ))}
+         </View>
+-      ) : (
+-        <View style={sidebarStyles.list}>
+-          <Pressable
+-            accessibilityRole="button"
+-            accessibilityLabel={t("settings.addHost")}
+-            onPress={onAddHost}
+-            testID="settings-add-host"
+-            style={sidebarItemStyle}
+-          >
+-            <Plus size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+-            <Text style={sidebarStyles.label} numberOfLines={1}>
+-              {t("settings.addHost")}
+-            </Text>
+-          </Pressable>
+-        </View>
+-      )}
++      ) : null}
+     </>
+   );
+ 
+@@ -1262,9 +1209,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+   const { t } = useTranslation();
+   const voiceAudioEngine = useVoiceAudioEngineOptional();
+   const { settings, isLoading: settingsLoading, updateSettings } = useAppSettings();
+-  const [isAddHostMethodVisible, setIsAddHostMethodVisible] = useState(false);
+-  const [isDirectHostVisible, setIsDirectHostVisible] = useState(false);
+-  const [isPasteLinkVisible, setIsPasteLinkVisible] = useState(false);
+   const [isPlaybackTestRunning, setIsPlaybackTestRunning] = useState(false);
+   const [playbackTestResult, setPlaybackTestResult] = useState<string | null>(null);
+   const isDesktopApp = isElectronRuntime();
+@@ -1279,9 +1223,17 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     [webScrollbarStyle],
+   );
+   const hosts = useHosts();
++  const hasPolarisSession = usePolarisAuthSession();
++  const visibleHosts = useMemo(
++    () => (hasPolarisSession ? hosts : []),
++    [hasPolarisSession, hosts],
++  );
+   const localServerId = useLocalDaemonServerId();
+-  const sortedHosts = useSortedHosts(hosts, localServerId);
+-  const hostServerIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
++  const sortedHosts = useSortedHosts(visibleHosts, localServerId);
++  const hostServerIds = useMemo(
++    () => visibleHosts.map((host) => host.serverId),
++    [visibleHosts],
++  );
+   const anyOnlineServerId = useAnyOnlineHostServerId(hostServerIds);
+   const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
+     view.kind === "host" ? view.serverId : null,
+@@ -1290,10 +1242,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     if (!selectedSettingsHostServerId) {
+       return null;
+     }
+-    return hosts.some((host) => host.serverId === selectedSettingsHostServerId)
++    return visibleHosts.some((host) => host.serverId === selectedSettingsHostServerId)
+       ? selectedSettingsHostServerId
+       : null;
+-  }, [hosts, selectedSettingsHostServerId]);
++  }, [visibleHosts, selectedSettingsHostServerId]);
+ 
+   useEffect(() => {
+     if (view.kind === "host") {
+@@ -1365,44 +1317,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     }
+   }, [isPlaybackTestRunning, t, voiceAudioEngine]);
+ 
+-  const closeAddConnectionFlow = useCallback(() => {
+-    setIsAddHostMethodVisible(false);
+-    setIsDirectHostVisible(false);
+-    setIsPasteLinkVisible(false);
+-  }, []);
+-
+-  const goBackToAddConnectionMethods = useCallback(() => {
+-    setIsDirectHostVisible(false);
+-    setIsPasteLinkVisible(false);
+-    setIsAddHostMethodVisible(true);
+-  }, []);
+-
+-  const handleAddHost = useCallback(() => {
+-    setIsAddHostMethodVisible(true);
+-  }, []);
+-
+-  const handleSelectDirectConnection = useCallback(() => {
+-    setIsAddHostMethodVisible(false);
+-    setIsDirectHostVisible(true);
+-  }, []);
+-
+-  const handleSelectPasteLink = useCallback(() => {
+-    setIsAddHostMethodVisible(false);
+-    setIsPasteLinkVisible(true);
+-  }, []);
+-
+-  const handleHostAdded = useCallback(
+-    ({ serverId }: { serverId: string }) => {
+-      const target = buildSettingsHostSectionRoute(serverId, "connections");
+-      if (isCompactLayout) {
+-        router.push(target);
+-      } else {
+-        router.replace(target);
+-      }
+-    },
+-    [isCompactLayout, router],
+-  );
+-
+   const handleSelectSection = useCallback(
+     (section: SettingsSectionSlug) => {
+       const target = buildSettingsSectionRoute(section);
+@@ -1437,7 +1351,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+   const handleSelectHostSection = useCallback(
+     (section: HostSectionSlug) => {
+       if (!activeHostServerId) {
+-        handleAddHost();
+         return;
+       }
+       const target = buildSettingsHostSectionRoute(activeHostServerId, section);
+@@ -1447,7 +1360,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+         router.replace(target);
+       }
+     },
+-    [activeHostServerId, handleAddHost, isCompactLayout, router],
++    [activeHostServerId, isCompactLayout, router],
+   );
+ 
+   const handleSelectProjects = useCallback(() => {
+@@ -1459,14 +1372,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     }
+   }, [isCompactLayout, router]);
+ 
+-  const handleScanQr = useCallback(() => {
+-    closeAddConnectionFlow();
+-    router.push({
+-      pathname: "/pair-scan",
+-      params: { source: "settings" },
+-    });
+-  }, [closeAddConnectionFlow, router]);
+-
+   const handleHostRemoved = useCallback(() => {
+     const fallback = buildSettingsSectionRoute("general");
+     if (isCompactLayout) {
+@@ -1476,24 +1381,38 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     }
+   }, [isCompactLayout, router]);
+ 
++  const settingsExitHref = useMemo(
++    () =>
++      resolveSettingsExitHref({
++        hasPolarisSession,
++        anyOnlineServerId,
++        anySavedServerId: visibleHosts[0]?.serverId ?? null,
++      }),
++    [anyOnlineServerId, hasPolarisSession, visibleHosts],
++  );
++
+   const handleBackToRoot = useCallback(() => {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
++      return;
++    }
+     if (router.canGoBack()) {
+       router.back();
+-    } else {
+-      router.replace("/settings");
++      return;
+     }
+-  }, [router]);
++    router.replace(settingsExitHref);
++  }, [hasPolarisSession, router, settingsExitHref]);
+ 
+   const handleBackToWorkspace = useCallback(() => {
+-    if (navigateToLastWorkspace()) {
++    if (!hasPolarisSession) {
++      router.replace("/welcome");
+       return;
+     }
+-    if (anyOnlineServerId) {
+-      router.replace(buildHostOpenProjectRoute(anyOnlineServerId));
++    if (navigateToLastWorkspace()) {
+       return;
+     }
+-    router.replace("/");
+-  }, [anyOnlineServerId, router]);
++    router.replace(settingsExitHref);
++  }, [hasPolarisSession, router, settingsExitHref]);
+ 
+   const detailHeader = ((): {
+     title: string;
+@@ -1566,6 +1485,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+               appVersion={appVersion}
+               appVersionText={appVersionText}
+               isDesktopApp={isDesktopApp}
++              hosts={visibleHosts}
+             />
+           );
+       }
+@@ -1581,30 +1501,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+     );
+   }
+ 
+-  const addHostModals = (
+-    <>
+-      <AddHostMethodModal
+-        visible={isAddHostMethodVisible}
+-        onClose={closeAddConnectionFlow}
+-        onDirectConnection={handleSelectDirectConnection}
+-        onPasteLink={handleSelectPasteLink}
+-        onScanQr={handleScanQr}
+-      />
+-      <AddHostModal
+-        visible={isDirectHostVisible}
+-        onClose={closeAddConnectionFlow}
+-        onCancel={goBackToAddConnectionMethods}
+-        onSaved={handleHostAdded}
+-      />
+-      <PairLinkModal
+-        visible={isPasteLinkVisible}
+-        onClose={closeAddConnectionFlow}
+-        onCancel={goBackToAddConnectionMethods}
+-        onSaved={handleHostAdded}
+-      />
+-    </>
+-  );
+-
+   // Mobile root: full-screen sidebar-as-list.
+   if (isCompactLayout && view.kind === "root") {
+     return (
+@@ -1617,13 +1513,12 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+             onSelectHostSection={handleSelectHostSection}
+             onSelectHost={handleSelectHost}
+             onSelectProjects={handleSelectProjects}
+-            onAddHost={handleAddHost}
+             onBackToWorkspace={handleBackToWorkspace}
+             activeHostServerId={activeHostServerId}
++            hosts={visibleHosts}
+             layout="mobile"
+           />
+         </ScrollView>
+-        {addHostModals}
+       </View>
+     );
+   }
+@@ -1644,7 +1539,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+         <ScrollView style={scrollViewStyle} contentContainerStyle={insetBottomStyle}>
+           <View style={styles.content}>{content}</View>
+         </ScrollView>
+-        {addHostModals}
+       </View>
+     );
+   }
+@@ -1661,9 +1555,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+           onSelectHostSection={handleSelectHostSection}
+           onSelectHost={handleSelectHost}
+           onSelectProjects={handleSelectProjects}
+-          onAddHost={handleAddHost}
+           onBackToWorkspace={handleBackToWorkspace}
+           activeHostServerId={activeHostServerId}
++          hosts={visibleHosts}
+           layout="desktop"
+         />
+         <View style={desktopStyles.contentPane}>
+@@ -1693,7 +1587,6 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
+           </ScrollView>
+         </View>
+       </View>
+-      {addHostModals}
+     </View>
+   );
+ }
+diff --git a/packages/app/src/utils/host-routes.test.ts b/packages/app/src/utils/host-routes.test.ts
+index c053bae..3a151ac 100644
+--- a/packages/app/src/utils/host-routes.test.ts
++++ b/packages/app/src/utils/host-routes.test.ts
+@@ -7,6 +7,8 @@ import {
+   buildHostWorkspaceRoute,
+   buildProjectSettingsRoute,
+   buildProjectsSettingsRoute,
++  buildSettingsHostRoute,
++  buildSettingsRoute,
+   decodeFilePathFromPathSegment,
+   decodeWorkspaceIdFromPathSegment,
+   encodeFilePathForPathSegment,
+@@ -16,6 +18,7 @@ import {
+   parseHostWorkspaceOpenIntentFromPathname,
+   parseHostWorkspaceRouteFromPathname,
+   parseWorkspaceOpenIntent,
++  resolveSidebarSettingsRoute,
+ } from "./host-routes";
+ 
+ describe("parseHostAgentRouteFromPathname", () => {
+@@ -177,6 +180,17 @@ describe("projects settings routes", () => {
+   });
+ });
+ 
++describe("sidebar settings route resolution", () => {
++  it("uses host settings when a host is active", () => {
++    expect(resolveSidebarSettingsRoute("srv_local")).toBe(buildSettingsHostRoute("srv_local"));
++  });
++
++  it("falls back to the app settings route when there is no active host", () => {
++    expect(resolveSidebarSettingsRoute("")).toBe(buildSettingsRoute());
++    expect(resolveSidebarSettingsRoute(null)).toBe(buildSettingsRoute());
++  });
++});
++
+ describe("host settings section slugs", () => {
+   it("keeps current host settings sections", () => {
+     expect(normalizeHostSectionSlug("connections")).toBe("connections");
+diff --git a/packages/app/src/utils/host-routes.ts b/packages/app/src/utils/host-routes.ts
+index ad1a36b..329f8c7 100644
+--- a/packages/app/src/utils/host-routes.ts
++++ b/packages/app/src/utils/host-routes.ts
+@@ -464,6 +464,11 @@ export function buildSettingsHostSectionRoute(serverId: string, section: HostSec
+   return `/settings/hosts/${encodeSegment(normalized)}/${section}` as const;
+ }
+ 
++export function resolveSidebarSettingsRoute(serverId: NullableString) {
++  const normalized = trimNonEmpty(serverId);
++  return normalized ? buildSettingsHostRoute(normalized) : buildSettingsRoute();
++}
++
+ export function buildProjectsSettingsRoute() {
+   return "/settings/projects" as const;
+ }
