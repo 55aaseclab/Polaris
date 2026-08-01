@@ -29,6 +29,7 @@ const PKCE_VERIFIER_KEY = "polaris_authing_pkce_verifier";
 const PKCE_STATE_KEY = "polaris_authing_state";
 const RETURN_PATH_KEY = "polaris_authing_return_path";
 const REDIRECT_URI_KEY = "polaris_authing_redirect_uri";
+const SHELL_SCROLL_ROOT_CLASS = "shell-scroll-root";
 const SURFACE_BACK_BUTTON_MARGIN = 14;
 const SURFACE_BACK_BUTTON_DRAG_THRESHOLD = 4;
 
@@ -185,13 +186,22 @@ function shellFrame(content: string, active: "hosts" | "user" | null = null): st
   </div>`;
 }
 
+function setShellScrollRoot(enabled: boolean): void {
+  document.documentElement.classList.toggle(SHELL_SCROLL_ROOT_CLASS, enabled);
+}
+
+function renderShell(content: string, active: "hosts" | "user" | null = null): void {
+  setShellScrollRoot(true);
+  app.innerHTML = shellFrame(content, active);
+}
+
 function renderLoading(label = "正在加载…"): void {
-  app.innerHTML = shellFrame(`<div class="empty">${escapeHtml(label)}</div>`);
+  renderShell(`<div class="empty">${escapeHtml(label)}</div>`);
 }
 
 function renderError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  app.innerHTML = shellFrame(`<div class="error">${escapeHtml(message)}</div>`);
+  renderShell(`<div class="error">${escapeHtml(message)}</div>`);
 }
 
 async function render(): Promise<void> {
@@ -265,7 +275,7 @@ async function renderWelcome(): Promise<void> {
       navigate("/hosts", true);
       return;
     }
-    app.innerHTML = shellFrame(`<section class="hero">
+    renderShell(`<section class="hero">
       <div class="eyebrow">Polaris workspace control</div>
       <h1>把工作区放在正确的产品线里。</h1>
       <p>登录后管理主机，并从同一个入口打开 coding 或 vertical 工作面。</p>
@@ -289,7 +299,7 @@ async function renderAuthCallback(): Promise<void> {
     }
     navigate(returnPath === "/welcome" ? "/hosts" : returnPath, true);
   } catch (error) {
-    app.innerHTML = shellFrame(`<section class="hero">
+    renderShell(`<section class="hero">
       <h1>登录未完成</h1>
       <p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
       <div class="actions"><button type="button" data-action="sign-in">重新登录</button></div>
@@ -299,7 +309,7 @@ async function renderAuthCallback(): Promise<void> {
 
 async function renderHostsPage(): Promise<void> {
   const session = requireSession();
-  app.innerHTML = shellFrame(`<section class="host-grid" id="host-list">
+  renderShell(`<section class="host-grid" id="host-list">
       ${createHostCard(session)}
       <div class="empty">正在加载主机…</div>
     </section>`, "hosts");
@@ -401,6 +411,7 @@ async function renderWanghaiPortal(serverId: string): Promise<void> {
     navigate("/hosts", true);
     return;
   }
+  setShellScrollRoot(false);
   app.innerHTML = renderWanghaiEmbedPage({
     hostName: host.name,
     portalUrl: action.portalUrl,
@@ -420,6 +431,7 @@ async function renderCodingSurface(serverId: string): Promise<void> {
     return;
   }
   const paseoUrl = await resolvePaseoUrl(`/v/${encodeURIComponent(serverId)}/coding`);
+  setShellScrollRoot(false);
   app.innerHTML = renderPaseoEmbedPage({
     hostName: host.name,
     paseoUrl,
@@ -576,7 +588,7 @@ async function renderUserPage(): Promise<void> {
     ["产品线", subscriptionLineLabel(data.session.line)],
     ["套餐", planLabel(data.session.plan)],
   ];
-  app.innerHTML = shellFrame(`<section class="stack">
+  renderShell(`<section class="stack">
       <section class="stack">
         <h2>基本信息</h2>
         <section class="card"><dl class="rows">${profileRows.map(([label, value]) => row(label, value)).join("")}</dl></section>
