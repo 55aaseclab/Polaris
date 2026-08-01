@@ -3,14 +3,16 @@
  * One polaris stack serves coding and vertical subscribers together.
  *
  * Two independent axes on the user subscription:
- * - **line**: `coding` | `vertical` — which product family
+ * - **line**: `coding` | `vertical` | `both` — which product family
  * - **plan**: `free` | `pro` — feature richness within that line (reserved; keep)
  */
 
 export type PolarisSurfaceId = "paseo" | "wanghai";
 
 /** Subscription product line (coding agent vs vertical industry). */
-export type PolarisSubscriptionLine = "coding" | "vertical";
+export type PolarisSubscriptionLine = "coding" | "vertical" | "both";
+
+export type PolarisWorkspaceLine = "coding" | "vertical";
 
 /**
  * Feature richness within a line. Currently unused for gating but must remain
@@ -22,7 +24,7 @@ export type PolarisProductId = "polaris-coding" | "polaris-vertical";
 
 export interface PolarisProductDefinition {
   id: PolarisProductId;
-  line: PolarisSubscriptionLine;
+  line: PolarisWorkspaceLine;
   /** Outer UI surfaces the shell should offer this user. */
   surfaces: readonly PolarisSurfaceId[];
   /**
@@ -87,8 +89,19 @@ export function resolveProductForUser(
   input: ResolveProductForUserInput = {},
 ): PolarisProductDefinition {
   const fromLine = normalizeSubscriptionLine(input.line ?? input.productId);
-  if (fromLine) {
+  if (fromLine === "coding" || fromLine === "vertical") {
     return productForLine(fromLine);
+  }
+
+  // `both` keeps the selection open; use surfaces when they are available.
+  if (fromLine === "both") {
+    const surfaces = (input.surfaces ?? [])
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (surfaces.includes("wanghai")) {
+      return POLARIS_PRODUCTS["polaris-vertical"];
+    }
+    return POLARIS_PRODUCTS["polaris-coding"];
   }
 
   // Workspace-level surfaces are a fallback when line is not on the session yet.
@@ -131,6 +144,9 @@ export function normalizeSubscriptionLine(
   ) {
     return "vertical";
   }
+  if (id === "both" || id === "polaris-both") {
+    return "both";
+  }
   if (
     id === "coding"
     || id === "paseo"
@@ -145,7 +161,39 @@ export function normalizePlanTier(value: string | null | undefined): PolarisPlan
   return value?.trim().toLowerCase() === "pro" ? "pro" : "free";
 }
 
-function productForLine(line: PolarisSubscriptionLine): PolarisProductDefinition {
+export function normalizeWorkspaceLine(
+  value: string | null | undefined,
+): PolarisWorkspaceLine | null {
+  const normalized = normalizeSubscriptionLine(value);
+  if (normalized === "coding" || normalized === "vertical") {
+    return normalized;
+  }
+  return null;
+}
+
+export function resolveAllowedWorkspaceLines(
+  line: string | null | undefined,
+): PolarisWorkspaceLine[] {
+  const normalized = normalizeSubscriptionLine(line);
+  if (normalized === "both") {
+    return ["coding", "vertical"];
+  }
+  if (normalized === "vertical") {
+    return ["vertical"];
+  }
+  if (normalized === "coding") {
+    return ["coding"];
+  }
+  return ["coding"];
+}
+
+export function resolveDefaultWorkspaceLine(
+  line: string | null | undefined,
+): PolarisWorkspaceLine {
+  return resolveAllowedWorkspaceLines(line)[0] ?? "coding";
+}
+
+function productForLine(line: PolarisWorkspaceLine): PolarisProductDefinition {
   return line === "vertical"
     ? POLARIS_PRODUCTS["polaris-vertical"]
     : POLARIS_PRODUCTS["polaris-coding"];

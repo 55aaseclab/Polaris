@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isShellPath, shellPath } from "./routes.js";
-import { resolveProductForUser, productHasSurface } from "./product.js";
+import { isShellPath, shellPath, wanghaiEmbedPath } from "./routes.js";
+import {
+  productHasSurface,
+  resolveAllowedWorkspaceLines,
+  resolveProductForUser,
+} from "./product.js";
 import { buildOpenCodingHref } from "./hosts.js";
 
 test("shell paths cover auth user hosts only", () => {
@@ -14,15 +18,17 @@ test("shell paths cover auth user hosts only", () => {
   assert.equal(isShellPath("/h/srv_x"), false);
   assert.equal(isShellPath("/h/srv_x/workspace/a"), false);
   assert.equal(isShellPath("/settings/general"), false);
+  assert.equal(isShellPath("/v/srv_1/wanghai"), true);
 });
 
 test("shellPath builds stable links", () => {
   assert.equal(shellPath("settings-user"), "/settings/user");
-  assert.equal(shellPath("host-detail", { hostKey: "demo" }), "/hosts/demo");
+  assert.equal(shellPath("hosts"), "/hosts");
   assert.equal(buildOpenCodingHref("srv_1").href, "/h/srv_1");
+  assert.equal(wanghaiEmbedPath("srv_1"), "/v/srv_1/wanghai");
 });
 
-test("product line is coding|vertical; plan free|pro does not pick the line", () => {
+test("product line is coding|vertical|both; plan free|pro does not pick the line", () => {
   const vertical = resolveProductForUser({ line: "vertical" });
   assert.equal(vertical.line, "vertical");
   assert.equal(productHasSurface(vertical, "wanghai"), true);
@@ -37,4 +43,11 @@ test("product line is coding|vertical; plan free|pro does not pick the line", ()
 
   const fromSurfaces = resolveProductForUser({ surfaces: ["paseo", "wanghai"] });
   assert.equal(fromSurfaces.id, "polaris-vertical");
+
+  assert.deepEqual(resolveAllowedWorkspaceLines("both"), ["coding", "vertical"]);
+  assert.equal(resolveProductForUser({ line: "both" }).id, "polaris-coding");
+  assert.equal(
+    resolveProductForUser({ line: "both", surfaces: ["paseo", "wanghai"] }).id,
+    "polaris-vertical",
+  );
 });

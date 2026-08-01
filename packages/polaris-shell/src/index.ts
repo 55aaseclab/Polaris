@@ -2,12 +2,17 @@ export {
   SHELL_ROUTE_PREFIXES,
   shellPath,
   isShellPath,
+  wanghaiEmbedPath,
+  WANGHAI_EMBED_ROUTE_PREFIX,
   type ShellRouteId,
 } from "./routes.js";
 export {
   POLARIS_PRODUCTS,
   resolveProduct,
   resolveProductForUser,
+  resolveAllowedWorkspaceLines,
+  resolveDefaultWorkspaceLine,
+  normalizeWorkspaceLine,
   productHasSurface,
   normalizeSubscriptionLine,
   normalizePlanTier,
@@ -15,6 +20,7 @@ export {
   type PolarisProductDefinition,
   type PolarisSurfaceId,
   type PolarisSubscriptionLine,
+  type PolarisWorkspaceLine,
   type PolarisPlanTier,
   type ResolveProductForUserInput,
 } from "./product.js";
@@ -26,9 +32,12 @@ export {
   type HostSurfaceAction,
 } from "./hosts.js";
 export {
-  emptyWorkspaceDefaults,
-  formatDockerBaseImage,
   SHELL_USER_MIGRATION_SOURCES,
   type ShellUserPageModel,
-  type ShellWorkspaceDefaults,
 } from "./user.js";
+export {
+  resolveShellHostActions,
+  type ShellHostSummary,
+  type ShellHostSurfaceAction,
+  type ShellSession,
+} from "./api.js";

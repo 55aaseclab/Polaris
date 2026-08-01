@@ -1,15 +1,7 @@
 /**
  * User-management contracts for shell `/settings/user`.
- * Matches polaris `/api/polaris-user` and `user defaults` CLI shape.
+ * Matches polaris `/api/polaris-user`.
  */
-
-export interface ShellWorkspaceDefaults {
-  docker: {
-    runtime: {
-      baseImage: string | null;
-    };
-  };
-}
 
 export interface ShellUserPageModel {
   profile: {
@@ -24,25 +16,16 @@ export interface ShellUserPageModel {
     role: string;
     /** free | pro — feature richness (reserved). */
     plan: string | null;
-    /** coding | vertical — product line. */
+    /** coding | vertical | both — product entitlement. */
     line: string | null;
   };
-  workspaceDefaults: ShellWorkspaceDefaults;
-}
-
-export function emptyWorkspaceDefaults(): ShellWorkspaceDefaults {
-  return {
-    docker: {
-      runtime: {
-        baseImage: null,
-      },
-    },
-  };
-}
-
-export function formatDockerBaseImage(value: string | null | undefined): string {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : "未设置";
+  credentials: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    status: string;
+    paths: string[];
+  }>;
 }
 
 /** Pages/modules to migrate out of patched Paseo into shell UI. */
