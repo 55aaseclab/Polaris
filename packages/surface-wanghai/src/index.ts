@@ -3,8 +3,8 @@ export {
   findWanghaiPortalPort,
   resolveWanghaiPortalUrl,
   planOpenWanghaiPortal,
+  isWanghaiPortalEmbedPath,
   type WorkspaceServicePort,
   type ResolveWanghaiPortalUrlInput,
-  type WanghaiOpenMode,
   type WanghaiOpenPlan,
 } from "./portal.js";

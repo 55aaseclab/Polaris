@@ -1,7 +1,7 @@
 /**
  * Wanghai vertical surface helpers.
  * Portal **server** runs inside the workspace container on :9090.
- * Outer UI only resolves/opens the mapped URL (embed or new tab).
+ * Outer UI only resolves the mapped URL and serves the embed route.
  */
 
 export const WANGHAI_PORTAL_CONTAINER_PORT = 9090;
@@ -48,29 +48,27 @@ export function resolveWanghaiPortalUrl(input: ResolveWanghaiPortalUrlInput): st
   return `${protocol}://${host}:${published}`;
 }
 
-export type WanghaiOpenMode = "embed" | "external";
-
 export interface WanghaiOpenPlan {
-  mode: WanghaiOpenMode;
   href: string;
-  /** Suggested outer shell path for a thin embed wrapper (future). */
+  /** Outer shell path for the thin embed wrapper. */
   shellEmbedPath: string;
 }
 
 export function planOpenWanghaiPortal(input: {
   serverId: string;
   portalUrl: string;
-  mode?: WanghaiOpenMode;
 }): WanghaiOpenPlan {
   const serverId = input.serverId.trim();
   const href = input.portalUrl.trim();
   if (!serverId || !href) {
     throw new Error("serverId and portalUrl are required");
   }
-  const mode = input.mode ?? "external";
   return {
-    mode,
     href,
     shellEmbedPath: `/v/${encodeURIComponent(serverId)}/wanghai`,
   };
+}
+
+export function isWanghaiPortalEmbedPath(pathname: string): boolean {
+  return /^\/v\/[^/]+\/wanghai\/?$/u.test(pathname.trim());
 }

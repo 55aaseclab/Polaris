@@ -89,7 +89,6 @@ export function resolveShellHostActions(input: {
       href: planOpenWanghaiPortal({
         serverId: input.host.serverId,
         portalUrl,
-        mode: "embed",
       }).shellEmbedPath,
       portalUrl,
     });
