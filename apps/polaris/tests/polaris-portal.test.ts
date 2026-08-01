@@ -2338,6 +2338,42 @@ test("portal disabled auth mode returns a local development session without cred
   });
 });
 
+test("portal oauth2-proxy auth mode trusts forwarded username headers", async () => {
+  await withEnv("POLARIS_AUTH_MODE", "oauth2-proxy", async () => {
+    const server = createPortalServer(0);
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Portal server did not expose a TCP address");
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/session`, {
+        headers: {
+          "X-Auth-Request-User": "authing-user-a",
+        },
+      });
+      assert.equal(response.status, 200);
+      const payload = await response.json() as {
+        authMode: string;
+        authenticated: boolean;
+        authingUsername: string | null;
+        authingUserId: string | null;
+        polarisUserId: string | null;
+        role: string | null;
+      };
+      assert.equal(payload.authMode, "oauth2-proxy");
+      assert.equal(payload.authenticated, true);
+      assert.equal(payload.authingUsername, "authing-user-a");
+      assert.equal(payload.authingUserId, "authing-user-a");
+      assert.equal(payload.polarisUserId, null);
+      assert.equal(payload.role, null);
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  });
+});
+
 test("portal admin list includes mapped users", async () => {
   const userId = uniqueName("portal-admin-user");
   const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);

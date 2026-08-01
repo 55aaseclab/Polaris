@@ -7,9 +7,16 @@ import os from "node:os";
 import yaml from "js-yaml";
 import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
 import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
+import { createManagedSshCredential } from "../scripts/config/credentials.js";
 import { assertNoProjectNameCollision, assertProjectNameAvailableForUser } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
-import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "../scripts/config/scaffold.js";
+import {
+  scaffoldDockerWorkspace,
+  scaffoldUserProfileById,
+  syncWorkspaceDockerfileTemplate,
+  workspaceConfigPath,
+  workspaceImageRef,
+} from "../scripts/config/scaffold.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
@@ -38,6 +45,24 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+const DEMO_USER_PROFILE_PATH = path.join(
+  REPO_ROOT,
+  "config",
+  "users",
+  "profiles",
+  `${DEMO_USER_PROFILE_ID}.yaml`,
+);
+const DEMO_USER_ROOT = path.join(
+  REPO_ROOT,
+  "config",
+  "users",
+  DEMO_USER_PROFILE_ID,
+);
+const DEMO_GITHUB_SSH_CREDENTIAL_PATH = path.join(
+  DEMO_USER_ROOT,
+  "credentials",
+  "github-ssh.yaml",
+);
 const SHARED_WORKSPACE_DOCKERFILE = path.join(
   REPO_ROOT,
   "config",
@@ -52,7 +77,37 @@ function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
   return `ttl.sh/polaris-workspace-prebuilt-${digest.slice(0, 32)}:24h`;
 }
 
+function ensureDemoWorkspaceFixtures(): void {
+  if (!fs.existsSync(DEMO_USER_PROFILE_PATH)) {
+    scaffoldUserProfileById({
+      id: DEMO_USER_PROFILE_ID,
+      name: "Demo User",
+      email: "demo@example.com",
+    });
+  }
+
+  if (!fs.existsSync(DEMO_GITHUB_SSH_CREDENTIAL_PATH)) {
+    createManagedSshCredential({
+      userProfileId: DEMO_USER_PROFILE_ID,
+      credentialId: "github-ssh",
+      label: "GitHub SSH",
+      activate: true,
+    });
+  }
+
+  if (!fs.existsSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID))) {
+    scaffoldDockerWorkspace("demo", DEMO_USER_PROFILE_ID);
+  }
+  if (!fs.existsSync(workspaceConfigPath("demo", "pod", DEMO_USER_PROFILE_ID))) {
+    ensureWorkspaceConfig("demo@pod:gvisor", DEMO_USER_PROFILE_ID);
+  }
+  if (!fs.existsSync(workspaceConfigPath("demo", "kubevirt-vm", DEMO_USER_PROFILE_ID))) {
+    ensureWorkspaceConfig("demo@kubevirt-vm", DEMO_USER_PROFILE_ID);
+  }
+}
+
 function loadWorkspaceFromRefForTest(projectRef: string) {
+  ensureDemoWorkspaceFixtures();
   const resolved = resolveWorkspaceConfigPath(projectRef);
   return loadWorkspaceFromConfigPath(
     resolved.configPath,
@@ -203,6 +258,7 @@ async function withTempWorkspaceSpec(
   backendKind: "docker" | "pod" | "kubevirt-vm",
   fn: () => Promise<void> | void,
 ): Promise<void> {
+  ensureDemoWorkspaceFixtures();
   const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
@@ -212,6 +268,10 @@ async function withTempWorkspaceSpec(
   doc.backend = {
     ...(doc.backend ?? {}),
     kind: backendKind,
+  };
+  doc.runtime = {
+    ...(doc.runtime ?? {}),
+    base_image: workspaceImageRef(DEMO_USER_PROFILE_ID, project),
   };
   if (backendKind === "docker") {
     doc.runtime = {
@@ -301,6 +361,66 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "github-ssh.yaml")), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("runCli user defaults set stores a user's default docker base image", async () => {
+  const userProfileId = uniqueProjectName("cli-user-defaults");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const baseImage = "wanghai-admin-portal:latest";
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI User Defaults",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    const setStdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "defaults",
+        "set",
+        userProfileId,
+        "--docker-base-image",
+        baseImage,
+      ]);
+    });
+    const setParsed = parseJsonOutput<{
+      workspaceDefaults: {
+        docker: {
+          runtime: {
+            baseImage: string | null;
+          };
+        };
+      };
+    }>(setStdout);
+    assert.equal(setParsed.workspaceDefaults.docker.runtime.baseImage, baseImage);
+
+    const storedProfile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+    assert.equal(storedProfile.workspace_defaults?.docker?.runtime?.base_image, baseImage);
+
+    const readStdout = await captureStdout(async () => {
+      await runCli(["user", "defaults", "read", userProfileId]);
+    });
+    const readParsed = parseJsonOutput<{
+      workspaceDefaults: {
+        docker: {
+          runtime: {
+            baseImage: string | null;
+          };
+        };
+      };
+    }>(readStdout);
+    assert.equal(readParsed.workspaceDefaults.docker.runtime.baseImage, baseImage);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -543,6 +663,104 @@ test("runCli workspace create scaffolds a workspace through the namespaced comma
       fs.existsSync(path.join(userRoot, "workspaces", workspace, "docker.agent.yaml")),
       true,
     );
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
+  }
+});
+
+test("runCli create uses a user's default docker base image when scaffolding a workspace", async () => {
+  const workspace = uniqueProjectName("cli-default-base-workspace");
+  const userProfileId = uniqueProjectName("cli-default-base-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
+  const dockerfilePath = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const baseImage = "wanghai-admin-portal:latest";
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Default Base User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    await runCli([
+      "user",
+      "defaults",
+      "set",
+      userProfileId,
+      "--docker-base-image",
+      baseImage,
+    ]);
+
+    await runCli(["create", workspace, "--user", userProfileId]);
+
+    const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
+    assert.equal(doc.runtime?.base_image, baseImage);
+    assert.equal(fs.existsSync(dockerfilePath), false);
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
+  }
+});
+
+test("runCli create --base-image overrides the user's default docker base image", async () => {
+  const workspace = uniqueProjectName("cli-override-base-workspace");
+  const userProfileId = uniqueProjectName("cli-override-base-user");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
+  const dockerfilePath = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const defaultBaseImage = "wanghai-admin-portal:latest";
+  const overrideBaseImage = "wanghai-admin-portal:custom";
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Override Base User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    await runCli([
+      "user",
+      "defaults",
+      "set",
+      userProfileId,
+      "--docker-base-image",
+      defaultBaseImage,
+    ]);
+
+    const stdout = await captureStdout(async () => {
+      await runCli([
+        "create",
+        workspace,
+        "--user",
+        userProfileId,
+        "--base-image",
+        overrideBaseImage,
+      ]);
+    });
+    const parsed = parseJsonOutput<{
+      baseImage?: string;
+    }>(stdout);
+
+    const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
+    assert.equal(parsed.baseImage, overrideBaseImage);
+    assert.equal(doc.runtime?.base_image, overrideBaseImage);
+    assert.equal(fs.existsSync(dockerfilePath), false);
   } finally {
     await cleanupCliTestUser({
       userId: userProfileId,
@@ -1157,6 +1375,8 @@ exit 0
 `,
         },
         async ({ readCommandLog }) => {
+          const expectedContainerName =
+            `${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`;
           const stdout = await captureStdout(async () => {
             await runCli([
               "live-switch",
@@ -1178,7 +1398,7 @@ exit 0
           assert.equal(payload.credentialId, "claude-live");
           assert.ok(
             readCommandLog().some((entry) =>
-              entry.includes(`exec ${project}-docker sh -lc`),
+              entry.includes(`exec ${expectedContainerName} sh -lc`),
             ),
           );
           assert.match(
@@ -1431,6 +1651,54 @@ exit 0
     fs.rmSync(path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "workspaces", project), {
       recursive: true,
       force: true,
+    });
+  }
+});
+
+test("ensureCanonicalWorkspaceImage skips managed image provisioning for external base images", async () => {
+  const userProfileId = uniqueProjectName("external-image-user");
+  const project = uniqueProjectName("external-image-project");
+  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const baseImage = "wanghai-admin-portal:latest";
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "External Image User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+
+    await runCli([
+      "create",
+      project,
+      "--user",
+      userProfileId,
+      "--base-image",
+      baseImage,
+    ]);
+
+    await withFakeCommands(
+      {
+        docker: `
+printf 'unexpected docker call for external base image\\n' >&2
+exit 1
+`,
+      },
+      async ({ readCommandLog }) => {
+        ensureCanonicalWorkspaceImage(`${project}@docker`, userProfileId);
+        assert.deepEqual(readCommandLog(), []);
+      },
+    );
+  } finally {
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
     });
   }
 });
@@ -2579,10 +2847,28 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   const workspace = loadWorkspaceFromRefForTest("demo@docker");
   const outputPath = renderAndWriteDockerWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
+  const expectedWorkspaceExport = path.join(
+    REPO_ROOT,
+    "config",
+    "exports",
+    "workspaces",
+    "demo",
+  ).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedRuntimeVolumeName = `${workspaceRuntimeScopeName(
+    DEMO_USER_PROFILE_ID,
+    "demo",
+  )}-workspace-runtime-state`;
+  const expectedRuntimeVolumePattern = expectedRuntimeVolumeName.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
 
-  assert.match(rendered, /source: "\/exports\/polaris\/workspaces\/demo"/);
-  assert.match(rendered, /source: demo-project-state\b/);
-  assert.match(rendered, /demo-project-state:\n    name: demo-project-state/);
+  assert.match(rendered, new RegExp(`source: "${expectedWorkspaceExport}"`));
+  assert.match(rendered, new RegExp(`source: ${expectedRuntimeVolumePattern}\\b`));
+  assert.match(
+    rendered,
+    new RegExp(`${expectedRuntimeVolumePattern}:\\n    name: ${expectedRuntimeVolumePattern}`),
+  );
 });
 
 test("loadWorkspace rejects a netfs workspace-data attachment without a server", () => {
@@ -2609,11 +2895,18 @@ test("pod render mounts demo workspace data through netfs", () => {
   const workspace = loadWorkspaceFromRefForTest("demo@pod");
   const outputPath = renderAndWritePodWorkspace(workspace);
   const rendered = fs.readFileSync(outputPath, "utf8");
+  const expectedWorkspaceExport = path.join(
+    REPO_ROOT,
+    "config",
+    "exports",
+    "workspaces",
+    "demo",
+  ).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.doesNotThrow(() => yaml.loadAll(rendered));
 
   assert.match(rendered, /- name: workspace-data\n        nfs:/);
   assert.match(rendered, /server: netfs\.local/);
-  assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
+  assert.match(rendered, new RegExp(`path: ${expectedWorkspaceExport}`));
 });
 
 test("kubevirt render bridges netfs workspace data through a PV and PVC", () => {
@@ -2632,7 +2925,12 @@ test("kubevirt render bridges netfs workspace data through a PV and PVC", () => 
     new RegExp(`name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}`),
   );
   assert.match(rendered, /server: netfs\.local/);
-  assert.match(rendered, /path: \/exports\/polaris\/workspaces\/demo/);
+  assert.match(
+    rendered,
+    new RegExp(
+      `path: ${path.join(REPO_ROOT, "config", "exports", "workspaces", "demo").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+  );
   assert.match(rendered, new RegExp(`root:${kubevirtProbePassword(workspace)}`));
   assert.match(rendered, /mount -t virtiofs workspace-runtime-state \/mnt\/polaris-shared\/workspace-runtime-state/);
   assert.match(rendered, /polaris-sync-shared-state/);
@@ -2867,7 +3165,6 @@ if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, 
 fi
 if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 1
   exit 0
 fi
 if [[ "$*" == *"logs"* ]]; then
@@ -2988,7 +3285,7 @@ exit 0
       assert.equal(parsed.driver?.selected?.profile, "gvisor");
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
-      assert.equal(parsed.driver?.baseImage, "ttl.sh/polaris-demo-debian13-1782126452:24h");
+      assert.equal(parsed.driver?.baseImage, workspaceImageRef(DEMO_USER_PROFILE_ID, "demo"));
       assert.equal(parsed.driver?.status, "running");
       assert.equal(parsed.paseo.daemon, "pending");
       assert.equal(parsed.paseo.web, "pairing-required");
@@ -3644,7 +3941,6 @@ if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, 
 fi
 if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 1
   exit 0
 fi
 if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
@@ -3656,19 +3952,22 @@ fi
 exit 0
 `,
           sshpass: `
-if [[ "$*" == *" bash -lc "* && "$*" == *" true"* ]]; then
-  exit 0
-fi
-if [[ "$*" == *"systemctl restart polaris-runtime-bootstrap.service"* ]]; then
-  printf 'active\n'
-  exit 0
-fi
 if [[ "$*" == *"guestReachable=1"* ]]; then
   printf 'guestReachable=1\n'
   printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
   printf 'persistedServerId<<EOF\nsrv_switch\nEOF\n'
   printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}\nEOF\n'
   printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  exit 0
+fi
+if [[ "$*" == *"test -s "* && "$*" == *"server-id"* && "$*" == *"grep -q"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"set -euo pipefail"* && "$*" == *"\ntrue"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"systemctl restart polaris-runtime-bootstrap.service"* ]]; then
+  printf 'active\n'
   exit 0
 fi
 exit 1
@@ -3936,7 +4235,6 @@ if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, 
 fi
 if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 1
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
@@ -4070,7 +4368,6 @@ if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, 
 fi
 if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
-  sleep 1
   exit 0
 fi
 if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
@@ -4133,6 +4430,35 @@ test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
   await withFakeCommands(
     {
       kubectl: `
+if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
+  exit 0
+fi
+if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+  printf 'Running'
+  exit 0
+fi
+if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+  exit 0
+fi
+if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
+  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
+  exit 0
+fi
+if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* && "$*" == *":22"* ]]; then
+  printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
+  exit 0
+fi
+exit 0
+`,
+      sshpass: `
+if [[ "$*" == *"set -euo pipefail"* && "$*" == *"true"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"test -s "* && "$*" == *"server-id"* && "$*" == *"grep -q"* ]]; then
+  exit 0
+fi
 exit 0
 `,
     },

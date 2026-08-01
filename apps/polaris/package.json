@@ -10,12 +10,12 @@
     "build": "pnpm run build:auth && tsc -p tsconfig.json",
     "check": "pnpm run build:auth && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run test:smoke",
-    "test:skills": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test || true; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-skills.test.ts'",
-    "test:smoke": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-pairing-url.test.ts tests/polaris-runtime-observer.test.ts'",
-    "test:full-minus-infra": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; pnpm run build:auth && NODE_ENV=test node scripts/test-groups.mjs default'",
-    "test:infra": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; pnpm run build:auth && NODE_ENV=test node scripts/test-groups.mjs infra'",
-    "test:live-auth": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/live-auth/polaris-portal.test.ts'",
-    "test:coverage": "sh -lc 'set -a; [ -f ../../.env.test ] && . ../../.env.test; set +a; pnpm run build:auth && node scripts/test-coverage.mjs'"
+    "test:skills": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-skills.test.ts'",
+    "test:smoke": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/polaris-pairing-url.test.ts tests/polaris-runtime-observer.test.ts'",
+    "test:full-minus-infra": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test node scripts/test-groups.mjs default'",
+    "test:infra": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test node scripts/test-groups.mjs infra'",
+    "test:live-auth": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=1 tests/live-auth/polaris-portal.test.ts'",
+    "test:coverage": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; pnpm run build:auth && NODE_ENV=test node scripts/test-coverage.mjs'"
   },
   "dependencies": {
     "@qingniao/polaris-auth-server": "workspace:*",

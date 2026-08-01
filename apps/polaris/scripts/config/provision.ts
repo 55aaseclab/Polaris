@@ -102,6 +102,10 @@ function bestSourceConfig(project: string, userProfileId?: string): WorkspaceCon
   return matches.find((match) => match.backendKind === "docker") ?? matches[0] ?? null;
 }
 
+function readConfigDoc(configPath: string): Record<string, any> {
+  return (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
+}
+
 function cloneDoc<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -254,7 +258,7 @@ export function ensureWorkspaceConfig(
     return null;
   }
 
-  const sourceDoc = (yaml.load(fs.readFileSync(source.configPath, "utf8")) ?? {}) as Record<string, any>;
+  const sourceDoc = readConfigDoc(source.configPath);
   const outputPath = workspaceConfigPath(project, backendHint, source.userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const synthesized = synthesizeConfigDoc(
@@ -414,7 +418,19 @@ export function ensureCanonicalWorkspaceImage(
     return;
   }
 
+  const sourceDoc = readConfigDoc(source.configPath);
   const imageRef = workspaceImageRef(source.userProfileId, source.project);
+  const configuredBaseImage = String(sourceDoc.runtime?.base_image ?? "").trim();
+  if (configuredBaseImage && configuredBaseImage !== imageRef) {
+    logInfo("provision", "workspace-image-external", {
+      project: source.project,
+      userProfileId: source.userProfileId,
+      imageRef: configuredBaseImage,
+      configPath: path.relative(REPO_ROOT, source.configPath),
+    });
+    return;
+  }
+
   const dockerfileState = syncWorkspaceDockerfileTemplate(source.userProfileId);
   const dockerfileDigest = digestFile(dockerfileState.path);
   const sharedImageRef = sharedWorkspaceImageRef(dockerfileDigest);

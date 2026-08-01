@@ -1,12 +1,12 @@
 import type { IncomingMessage } from "node:http";
-import { SignJWT, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
-export type PortalAuthMode = "authing-browser-session" | "disabled";
+export type PortalAuthMode = "authing-browser-session" | "oauth2-proxy" | "disabled";
 export type PortalPlan = "free" | "pro" | null;
 export type PortalRole = "admin" | "user";
 
 export interface PortalAuthIdentity {
-  authMode: "authing-browser-session";
+  authMode: "authing-browser-session" | "oauth2-proxy";
   authingUserId: string;
   authingUsername: string | null;
   authingPhoneNumber: string | null;
@@ -48,6 +48,7 @@ function requiredAuthingEnv(
     | "POLARIS_AUTHING_APP_ID"
     | "POLARIS_AUTHING_APP_SECRET"
     | "POLARIS_AUTHING_ISSUER"
+    | "POLARIS_AUTHING_JWKS_URL"
     | "POLARIS_AUTHING_TOKEN_URL",
 ): string {
   const value = String(process.env[name] ?? "").trim();
@@ -65,6 +66,14 @@ function readHeader(req: IncomingMessage, name: string): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function readOauth2ProxyUser(req: IncomingMessage): string | null {
+  return (
+    readHeader(req, "x-auth-request-user") ??
+    readHeader(req, "x-auth-request-preferred-username") ??
+    readHeader(req, "x-forwarded-user")
+  );
+}
+
 function readBearerToken(req: IncomingMessage): string | null {
   const authorization = readHeader(req, "authorization");
   if (authorization?.startsWith("Bearer ")) {
@@ -78,11 +87,13 @@ function readBearerToken(req: IncomingMessage): string | null {
   const sessionCookie = cookieHeader
     .split(";")
     .map((part) => part.trim())
-    .find((part) => part.startsWith("__session="));
+    .find((part) => part.startsWith("polaris_authing_session=") || part.startsWith("__session="));
   if (!sessionCookie) {
     return null;
   }
-  const token = decodeURIComponent(sessionCookie.slice("__session=".length).trim());
+  const token = decodeURIComponent(sessionCookie.slice(sessionCookie.indexOf("=") + 1).trim())
+    .replace(/^Bearer\s+/i, "")
+    .trim();
   return token || null;
 }
 
@@ -91,40 +102,37 @@ function normalizeAuthingUsername(value: string | null | undefined): string | nu
   return normalized || null;
 }
 
-function emailLocalPart(value: string | null | undefined): string | null {
-  const trimmed = String(value ?? "").trim().toLowerCase();
-  if (!trimmed.includes("@")) {
-    return null;
-  }
-  const [localPart] = trimmed.split("@", 1);
-  return localPart?.trim() || null;
-}
-
 export function resolveAuthingUsername(user: {
   username?: string;
   preferred_username?: string;
   nickname?: string;
-  email?: string;
 }): string | null {
   return normalizeAuthingUsername(
-    user.username ?? user.preferred_username ?? user.nickname ?? user.email ?? null,
-  ) ?? emailLocalPart(user.email ?? null);
+    user.username ?? user.preferred_username ?? user.nickname ?? null,
+  );
 }
 
-function portalSessionSecret(): Uint8Array {
-  const configured = String(process.env.POLARIS_AUTH_SHARED_SECRET ?? "").trim();
-  const secret = configured || requiredAuthingEnv("POLARIS_AUTHING_APP_SECRET");
-  return new TextEncoder().encode(secret);
+function authingIssuer(): string {
+  return requiredAuthingEnv("POLARIS_AUTHING_ISSUER").replace(/\/+$/, "");
 }
 
 function authingIssuerMeUrl(): string {
-  return `${requiredAuthingEnv("POLARIS_AUTHING_ISSUER").replace(/\/+$/, "")}/me`;
+  return `${authingIssuer()}/me`;
+}
+
+let authingJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function resolveAuthingJwks() {
+  if (!authingJwks) {
+    authingJwks = createRemoteJWKSet(new URL(requiredAuthingEnv("POLARIS_AUTHING_JWKS_URL")));
+  }
+  return authingJwks;
 }
 
 async function verifyAuthingToken(token: string): Promise<AuthingClaims> {
-  const { payload } = await jwtVerify(token, portalSessionSecret(), {
-    issuer: "polaris",
-    audience: "polaris-portal",
+  const { payload } = await jwtVerify(token, resolveAuthingJwks(), {
+    issuer: authingIssuer(),
+    audience: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
   });
   return payload as AuthingClaims;
 }
@@ -148,24 +156,6 @@ async function readAuthingUser(accessToken: string): Promise<AuthingClaims> {
   return payload;
 }
 
-async function createPortalSession(user: AuthingClaims): Promise<string> {
-  const now = Math.floor(Date.now() / 1_000);
-  return new SignJWT({
-    username: user.username,
-    preferred_username: user.preferred_username,
-    nickname: user.nickname,
-    email: user.email,
-    phoneNumber: user.phone_number ?? user.phone ?? user.phoneNumber,
-  })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setIssuer("polaris")
-    .setAudience("polaris-portal")
-    .setSubject(String(user.sub).trim())
-    .setIssuedAt(now)
-    .setExpirationTime(now + 60 * 60 * 8)
-    .sign(portalSessionSecret());
-}
-
 function resolveDisabledPolarisUserId(): string {
   const value = String(process.env.POLARIS_AUTH_DEFAULT_USER_ID ?? "").trim();
   return value || "100000000000000001";
@@ -184,9 +174,14 @@ function resolveDisabledPortalPlan(): PortalPlan {
 }
 
 export function resolvePortalAuthMode(): PortalAuthMode {
-  return String(process.env.POLARIS_AUTH_MODE ?? "").trim().toLowerCase() === "disabled"
-    ? "disabled"
-    : "authing-browser-session";
+  const mode = String(process.env.POLARIS_AUTH_MODE ?? "").trim().toLowerCase();
+  if (mode === "disabled") {
+    return "disabled";
+  }
+  if (mode === "oauth2-proxy") {
+    return "oauth2-proxy";
+  }
+  return "authing-browser-session";
 }
 
 export function resolveDisabledPortalSession(): DisabledPortalSessionConfig | null {
@@ -258,6 +253,9 @@ export async function exchangeAuthingAuthorizationCode(input: {
   };
   const accessToken = String(payload.access_token ?? "").trim();
   const idToken = String(payload.id_token ?? "").trim();
+  if (!idToken) {
+    throw new PortalAuthError("Authing token exchange did not return an id_token", 502);
+  }
   if (!accessToken) {
     throw new PortalAuthError(
       "Authing token exchange did not return a session token",
@@ -269,14 +267,26 @@ export async function exchangeAuthingAuthorizationCode(input: {
     throw new PortalAuthError("Authing 用户信息未补全，请先完成用户名补全", 409);
   }
   return {
-    token: await createPortalSession(user),
-    ...(idToken ? { idToken } : {}),
+    token: idToken,
+    idToken,
   };
 }
 
 export async function authenticatePortalIdentity(
   req: IncomingMessage,
 ): Promise<PortalAuthIdentity> {
+  if (resolvePortalAuthMode() === "oauth2-proxy") {
+    const username = normalizeAuthingUsername(readOauth2ProxyUser(req) ?? readBearerToken(req));
+    if (!username) {
+      throw new PortalAuthError("Authentication is required", 401);
+    }
+    return {
+      authMode: "oauth2-proxy",
+      authingUserId: username,
+      authingUsername: username,
+      authingPhoneNumber: null,
+    };
+  }
   const token = readBearerToken(req);
   if (!token) {
     throw new PortalAuthError("Authentication is required", 401);

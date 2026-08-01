@@ -109,8 +109,8 @@ Current supported values are:
 Do not rely on repo-local fallback paths for deployed or long-running
 processes.
 
-Local live-auth tests should set `POLARIS_DATA_ROOT=./config` through
-`.env.test`.
+Local live-auth tests source `.env.dev` and use the configured
+`POLARIS_DATA_ROOT`.
 
 For the current status model, executor reachability is no longer optional.
 
