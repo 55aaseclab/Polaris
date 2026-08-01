@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
+import { readUserWorkspaceDefaults } from "../config/scaffold.js";
 import {
   listPortalProfiles,
   parsePortalDriverTarget,
@@ -574,6 +575,9 @@ async function handleUserCreate(
       ...(session.role === "admin" && (body.plan === "free" || body.plan === "pro")
         ? { plan: body.plan }
         : {}),
+      ...(session.role === "admin" && (body.line === "coding" || body.line === "vertical")
+        ? { line: body.line }
+        : {}),
     });
     sendJson(res, 201, created);
   } catch (error) {
@@ -743,6 +747,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             authingUsername: session.authingUsername,
             polarisUserId: session.polarisUserId,
             role: session.role,
+            plan: session.plan,
+            line: session.line,
           });
           return;
         }
@@ -815,6 +821,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           const userId = session.polarisUserId;
+          const workspaceDefaults = readUserWorkspaceDefaults(userId);
           sendJson(res, 200, {
             profile: readPortalProfile(userId),
             session: {
@@ -824,6 +831,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               authingPhoneNumber: session.authingPhoneNumber,
               role: session.role,
               plan: session.plan,
+              line: session.line,
+            },
+            workspaceDefaults: {
+              docker: {
+                runtime: {
+                  baseImage: workspaceDefaults.dockerBaseImage,
+                },
+              },
             },
             credentials: listUserPortalCredentials(userId),
           });

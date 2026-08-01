@@ -295,10 +295,11 @@ function configuredWorkspaceServicePorts(): Set<number> {
   return configured;
 }
 
-function allocateWorkspaceServicePort(): string {
+function allocateWorkspaceServicePort(unavailableExtra: Iterable<number> = []): string {
   const unavailable = new Set<number>([
     ...configuredWorkspaceServicePorts(),
     ...currentlyListeningPorts(),
+    ...unavailableExtra,
   ]);
 
   for (let port = WORKSPACE_SERVICE_PORT_START; port <= WORKSPACE_SERVICE_PORT_END; port += 1) {
@@ -310,6 +311,17 @@ function allocateWorkspaceServicePort(): string {
   throw new Error(
     `No free workspace service port is available in range ${WORKSPACE_SERVICE_PORT_START}-${WORKSPACE_SERVICE_PORT_END}`,
   );
+}
+
+/** Vertical wanghai portal listens in-container; coding-only images do not. */
+export const WANGHAI_PORTAL_CONTAINER_PORT = "9090";
+
+export function isWanghaiVerticalBaseImage(baseImage: string | null | undefined): boolean {
+  const image = String(baseImage ?? "").trim().toLowerCase();
+  if (!image) {
+    return false;
+  }
+  return image.includes("wanghai-admin-portal") || /(^|\/)wanghai([:@]|$)/.test(image);
 }
 
 function userDockerfilePath(userProfileId: string): string {
@@ -578,9 +590,28 @@ export function scaffoldDockerWorkspace(
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
   const workspaceServicePort = allocateWorkspaceServicePort();
+  const verticalWanghai = isWanghaiVerticalBaseImage(baseImage);
+  const wanghaiServicePort = verticalWanghai
+    ? allocateWorkspaceServicePort([Number.parseInt(workspaceServicePort, 10)])
+    : null;
+  const servicePorts: Array<Record<string, string>> = [
+    {
+      container_port: "6767",
+      node_port: workspaceServicePort,
+      name: "paseo",
+    },
+  ];
+  if (wanghaiServicePort) {
+    servicePorts.push({
+      container_port: WANGHAI_PORTAL_CONTAINER_PORT,
+      node_port: wanghaiServicePort,
+      name: "wanghai",
+    });
+  }
   const doc = {
     project,
     user_profile: userProfileId,
+    surfaces: verticalWanghai ? ["paseo", "wanghai"] : ["paseo"],
     backend: {
       kind: "docker",
       spec_files: null,
@@ -617,18 +648,18 @@ export function scaffoldDockerWorkspace(
       git_core_editor: "vi",
     },
     env: {
-      plain: {},
+      plain: verticalWanghai
+        ? {
+            WANGHAI_REPO_ROOT: "/opt/wanghai",
+            WANGHAI_WORKSPACES_ROOT: "/workspace/project/workspaces",
+            WANGHAI_BACKUP_ROOT: "/workspace/project/backups",
+          }
+        : {},
     },
     service: {
       enabled: true,
       mode: "nodeport",
-      ports: [
-        {
-          container_port: "6767",
-          node_port: workspaceServicePort,
-          name: "paseo",
-        },
-      ],
+      ports: servicePorts,
       host: null,
       path: "/",
     },

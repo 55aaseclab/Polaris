@@ -733,10 +733,10 @@ index 7a97631..efa91e0 100644
            <View style={settingsStyles.rowContent}>
 diff --git a/packages/app/src/screens/settings/polaris-user-page.tsx b/packages/app/src/screens/settings/polaris-user-page.tsx
 new file mode 100644
-index 0000000..ae64c7e
+index 0000000..17c9ad5
 --- /dev/null
 +++ b/packages/app/src/screens/settings/polaris-user-page.tsx
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,276 @@
 +import { useCallback, useEffect, useState } from "react";
 +import { ActivityIndicator, Text, View } from "react-native";
 +import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -755,6 +755,13 @@ index 0000000..ae64c7e
 +    authingPhoneNumber: string | null;
 +    role: string;
 +    plan: string | null;
++  };
++  workspaceDefaults?: {
++    docker?: {
++      runtime?: {
++        baseImage?: string | null;
++      };
++    };
 +  };
 +  credentials: Array<{ id: string; label: string; kind: string; status: string; paths: string[] }>;
 +}
@@ -847,6 +854,20 @@ index 0000000..ae64c7e
 +        </View>
 +      </SettingsSection>
 +
++      <SettingsSection title="Workspace 默认配置">
++        <View style={settingsStyles.card}>
++          <View style={settingsStyles.row}>
++            <View style={settingsStyles.rowContent}>
++              <Text style={settingsStyles.rowTitle}>Docker base image</Text>
++              <Text style={settingsStyles.rowHint}>新建 workspace 时的默认基础镜像</Text>
++            </View>
++            <Text style={styles.value} numberOfLines={1}>
++              {formatWorkspaceDefault(data.workspaceDefaults?.docker?.runtime?.baseImage)}
++            </Text>
++          </View>
++        </View>
++      </SettingsSection>
++
 +      <SettingsSection title="凭证">
 +        <View style={settingsStyles.card}>
 +          {data.credentials.length > 0 ? data.credentials.map((credential, index) => (
@@ -900,30 +921,30 @@ index 0000000..ae64c7e
 +      ) : null}
 +
 +      <AdaptiveModalSheet
-+        header={{ title: "退出登录？" }}
-+        visible={signOutConfirmVisible}
-+        onClose={() => setSignOutConfirmVisible(false)}
-+      >
-+        <Text style={styles.confirmText}>你将退出 Polaris</Text>
-+        <View style={styles.confirmActions}>
-+          <Button
-+            size="sm"
-+            variant="secondary"
-+            style={styles.confirmAction}
-+            onPress={() => setSignOutConfirmVisible(false)}
-+          >
-+            取消
-+          </Button>
-+          <Button
-+            size="sm"
-+            variant="destructive"
-+            style={styles.confirmAction}
-+            onPress={handleConfirmSignOut}
-+          >
-+            退出登录
-+          </Button>
-+        </View>
-+      </AdaptiveModalSheet>
++          header={{ title: "退出登录？" }}
++          visible={signOutConfirmVisible}
++          onClose={() => setSignOutConfirmVisible(false)}
++        >
++          <Text style={styles.confirmText}>你将退出 Polaris</Text>
++          <View style={styles.confirmActions}>
++            <Button
++              size="sm"
++              variant="secondary"
++              style={styles.confirmAction}
++              onPress={() => setSignOutConfirmVisible(false)}
++            >
++              取消
++            </Button>
++            <Button
++              size="sm"
++              variant="destructive"
++              style={styles.confirmAction}
++              onPress={handleConfirmSignOut}
++            >
++              退出登录
++            </Button>
++          </View>
++        </AdaptiveModalSheet>
 +    </View>
 +  );
 +}
@@ -943,6 +964,11 @@ index 0000000..ae64c7e
 +  if (plan === "free") return "免费套餐";
 +  if (plan === "pro") return "专业套餐";
 +  return plan || "未订阅";
++}
++
++function formatWorkspaceDefault(value: string | null | undefined): string {
++  const trimmed = value?.trim();
++  return trimmed ? trimmed : "未设置";
 +}
 +
 +function CredentialRow({

@@ -6,6 +6,7 @@ import { logInfo } from "../../utils/log.js";
 import {
   type PolarisPlan,
   type PolarisRole,
+  type PolarisSubscriptionLine,
   upsertUserMapEntries,
 } from "../../portal/user-map.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
@@ -47,6 +48,7 @@ function parseCreateUserArgs(argv: string[]): {
   referredByCode?: string;
   role?: PolarisRole;
   plan?: PolarisPlan;
+  line?: PolarisSubscriptionLine;
 } {
   const userProfileId = argv[0]?.trim();
   const nameFlagIndex = argv.findIndex((value) => value === "--name");
@@ -58,8 +60,9 @@ function parseCreateUserArgs(argv: string[]): {
   const referredByCodeFlagIndex = argv.findIndex((value) => value === "--referred-by-code");
   const roleFlagIndex = argv.findIndex((value) => value === "--role");
   const planFlagIndex = argv.findIndex((value) => value === "--plan");
+  const lineFlagIndex = argv.findIndex((value) => value === "--line");
   if (!userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--authing <username>] [--authing-user-id <id>] [--referred-by-code <code>] [--role <admin|user>] [--plan <free|pro>]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- user create <userProfileId> [--name <name>] [--email <email>] [--authing <username>] [--authing-user-id <id>] [--referred-by-code <code>] [--role <admin|user>] [--plan <free|pro>] [--line <coding|vertical>]");
   }
   return {
     userProfileId,
@@ -94,11 +97,24 @@ function parseCreateUserArgs(argv: string[]): {
     ...(planFlagIndex >= 0 && (argv[planFlagIndex + 1] === "free" || argv[planFlagIndex + 1] === "pro")
       ? { plan: argv[planFlagIndex + 1] as PolarisPlan }
       : {}),
+    ...(lineFlagIndex >= 0 && (argv[lineFlagIndex + 1] === "coding" || argv[lineFlagIndex + 1] === "vertical")
+      ? { line: argv[lineFlagIndex + 1] as PolarisSubscriptionLine }
+      : {}),
   };
 }
 
 export async function createUserCommand(argv: string[]): Promise<void> {
-  const { userProfileId, name, email, authingUsername, authingUserId, referredByCode, role, plan } = parseCreateUserArgs(argv);
+  const {
+    userProfileId,
+    name,
+    email,
+    authingUsername,
+    authingUserId,
+    referredByCode,
+    role,
+    plan,
+    line,
+  } = parseCreateUserArgs(argv);
   const resolvedRole = resolveDefaultRole({
     userProfileId,
     authingUsername,
@@ -124,6 +140,7 @@ export async function createUserCommand(argv: string[]): Promise<void> {
             polarisUserId: created.id,
             role: resolvedRole,
             plan: plan ?? "free",
+            line: line ?? "coding",
           },
         });
       }

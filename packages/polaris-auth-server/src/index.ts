@@ -2,8 +2,11 @@ import type { IncomingMessage } from "node:http";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 export type PortalAuthMode = "authing-browser-session" | "oauth2-proxy" | "disabled";
+/** Feature richness tier (free/pro). Not product line. */
 export type PortalPlan = "free" | "pro" | null;
 export type PortalRole = "admin" | "user";
+/** Subscription product line. Independent of free/pro. */
+export type PortalSubscriptionLine = "coding" | "vertical";
 
 export interface PortalAuthIdentity {
   authMode: "authing-browser-session" | "oauth2-proxy";
@@ -20,6 +23,7 @@ export interface DisabledPortalSessionConfig {
   polarisUserId: string;
   role: PortalRole;
   plan: PortalPlan;
+  line: PortalSubscriptionLine;
 }
 
 interface AuthingClaims {
@@ -173,6 +177,14 @@ function resolveDisabledPortalPlan(): PortalPlan {
     : "free";
 }
 
+function resolveDisabledPortalLine(): PortalSubscriptionLine {
+  const raw = String(process.env.POLARIS_AUTH_DEFAULT_LINE ?? "").trim().toLowerCase();
+  if (raw === "vertical" || raw === "wanghai" || raw === "polaris-vertical") {
+    return "vertical";
+  }
+  return "coding";
+}
+
 export function resolvePortalAuthMode(): PortalAuthMode {
   const mode = String(process.env.POLARIS_AUTH_MODE ?? "").trim().toLowerCase();
   if (mode === "disabled") {
@@ -203,6 +215,7 @@ export function resolveDisabledPortalSession(): DisabledPortalSessionConfig | nu
     polarisUserId,
     role: resolveDisabledPortalRole(),
     plan: resolveDisabledPortalPlan(),
+    line: resolveDisabledPortalLine(),
   };
 }
 

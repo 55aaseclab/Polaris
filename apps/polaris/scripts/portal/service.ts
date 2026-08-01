@@ -163,6 +163,7 @@ export function listPortalAdminUsers(): Array<
         polarisUserId: userId,
         role: "user" as const,
         plan: "free" as const,
+        line: "coding" as const,
         authingUsernames: [],
         authingUserIds: [],
       };
@@ -630,6 +631,7 @@ export async function createPortalUser(input: {
   referralCode?: string;
   role?: "admin" | "user";
   plan?: "free" | "pro";
+  line?: "coding" | "vertical";
 }): Promise<NonNullable<ReturnType<typeof readPortalProfile>>> {
   const userProfileId =
     input.userProfileId?.trim()
@@ -649,6 +651,7 @@ export async function createPortalUser(input: {
     ...(input.referralCode?.trim() ? ["--referred-by-code", input.referralCode.trim()] : []),
     ...(input.role ? ["--role", input.role] : []),
     ...(input.plan ? ["--plan", input.plan] : []),
+    ...(input.line ? ["--line", input.line] : []),
   ]);
   const created = readPortalProfile(userProfileId);
   if (!created) {

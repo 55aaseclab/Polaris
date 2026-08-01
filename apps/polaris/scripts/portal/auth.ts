@@ -11,6 +11,7 @@ import {
   readUserAccessSummary,
   type PolarisPlan,
   type PolarisRole,
+  type PolarisSubscriptionLine,
 } from "./user-map.js";
 
 export { exchangeAuthingAuthorizationCode, PortalAuthError };
@@ -22,7 +23,10 @@ export interface AuthenticatedPortalSession {
   authingPhoneNumber: string | null;
   polarisUserId: string | null;
   role: PolarisRole | null;
+  /** Feature richness; reserved, not product line. */
   plan: PolarisPlan | null;
+  /** coding | vertical product line for this user. */
+  line: PolarisSubscriptionLine | null;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -73,6 +77,7 @@ export async function authenticatePortalRequest(
       polarisUserId: mapping.polarisUserId,
       role: mapping.role,
       plan: mapping.plan,
+      line: mapping.line,
     };
   }
   return {
@@ -83,6 +88,7 @@ export async function authenticatePortalRequest(
     polarisUserId: null,
     role: null,
     plan: null,
+    line: null,
   };
 }
 
@@ -113,6 +119,7 @@ export function requireMappedPortalSession(
   polarisUserId: string;
   role: PolarisRole;
   plan: PolarisPlan | null;
+  line: PolarisSubscriptionLine | null;
 } {
   if (!session) {
     return false;
