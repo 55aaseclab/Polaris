@@ -29,8 +29,6 @@ EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-127.0.0.1}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
 PASEO_HOST="${POLARIS_PASEO_APP_BIND_HOST:-127.0.0.1}"
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
-DOCS_HOST="${POLARIS_DOCS_BIND_HOST:-0.0.0.0}"
-DOCS_PORT="${POLARIS_DOCS_PORT:-4180}"
 LOG_DIR=".runtime/paseo"
 
 mkdir -p "${LOG_DIR}"
@@ -41,7 +39,6 @@ cleanup() {
     "${executor_pid:-}"
     "${executor_bridge_proxy_pid:-}"
     "${paseo_pid:-}"
-    "${docs_pid:-}"
   )
   local pid
   for pid in "${pids[@]}"; do
@@ -98,19 +95,10 @@ fi
   2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
 paseo_pid=$!
 
-pnpm --filter docs-viewer exec vitepress dev site \
-  --host "${DOCS_HOST}" \
-  --port "${DOCS_PORT}" \
-  --strictPort \
-  > >(tee "${LOG_DIR}/stack.docs.log") \
-  2> >(tee "${LOG_DIR}/stack.docs.err.log" >&2) &
-docs_pid=$!
-
 pids=(
   "${server_pid}"
   "${executor_pid}"
   "${paseo_pid}"
-  "${docs_pid}"
 )
 if [ -n "${executor_bridge_proxy_pid:-}" ]; then
   pids+=("${executor_bridge_proxy_pid}")
