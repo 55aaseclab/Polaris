@@ -1,18 +1,176 @@
 diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
-index be6e687..62974fa 100644
+index 94061e2..62974fa 100644
 --- a/packages/app/src/app/_layout.tsx
 +++ b/packages/app/src/app/_layout.tsx
-@@ -957,6 +957,7 @@ function RootStack() {
+@@ -4,7 +4,7 @@ import { PortalProvider } from "@gorhom/portal";
+ import { QueryClientProvider } from "@tanstack/react-query";
+ import * as Linking from "expo-linking";
+ import * as Notifications from "expo-notifications";
+-import { Stack, useGlobalSearchParams, usePathname, useRouter } from "expo-router";
++import { Redirect, Stack, useGlobalSearchParams, usePathname, useRouter } from "expo-router";
+ import {
+   createContext,
+   type ReactNode,
+@@ -99,6 +99,13 @@ import {
+ } from "@/utils/host-routes";
+ import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
+ import { navigateToAgent } from "@/utils/navigate-to-agent";
++import {
++  getPolarisAuthToken,
++  hasPolarisHostSession,
++  resolvePolarisAuthRedirect,
++  usePolarisAuthSession,
++} from "@/lib/polaris-authing";
++import { syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
+ import {
+   ensureOsNotificationPermission,
+   WEB_NOTIFICATION_CLICK_EVENT,
+@@ -689,6 +696,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
+     <VoiceProvider>
+       <DesktopWindowControlsSync enabled={!settingsLoading} />
+       <OfferLinkListener upsertDaemonFromOfferUrl={upsertConnectionFromOfferUrl} />
++      <PolarisHostRegistrySync />
+       <HostSessionManager />
+       <FaviconStatusSync />
+       {children}
+@@ -696,6 +704,33 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
+   );
+ }
+ 
++function PolarisHostRegistrySync() {
++  const hasPolarisSession = usePolarisAuthSession();
++  const { upsertConnectionFromOfferUrl } = useHostMutations();
++  const syncedTokenRef = useRef<string | null>(null);
++  const token = getPolarisAuthToken();
++
++  useEffect(() => {
++    if (!hasPolarisSession || !hasPolarisHostSession() || !token) return;
++    if (syncedTokenRef.current === token) return;
++    syncedTokenRef.current = token;
++
++    void syncPolarisHostsOnce({
++      token,
++      upsertFromOfferUrl: (url, label) => {
++        if (getPolarisAuthToken() !== token) {
++          throw new Error("Polaris 登录已切换");
++        }
++        return upsertConnectionFromOfferUrl(url, label);
++      },
++    }).catch((error) => {
++      console.warn("[PolarisHostRegistrySync] Failed to sync Polaris hosts", error);
++    });
++  }, [hasPolarisSession, token, upsertConnectionFromOfferUrl]);
++
++  return null;
++}
++
+ function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
+   const { theme } = useUnistyles();
+   const surface0 = theme.colors.surface0;
+@@ -720,12 +755,21 @@ function OfferLinkListener({
+   upsertDaemonFromOfferUrl: (offerUrlOrFragment: string) => Promise<unknown>;
+ }) {
+   const router = useRouter();
++  const lastHandledUrlRef = useRef<string | null>(null);
+ 
+   useEffect(() => {
++    // Web Hosts are owned by the authenticated Polaris user and must come
++    // from /polaris-hosts. A raw #offer URL is not an authorization grant.
++    if (isWeb) return;
++
+     let cancelled = false;
+     const handleUrl = (url: string | null) => {
+       if (!url) return;
+       if (!url.includes("#offer=")) return;
++      if (lastHandledUrlRef.current === url) {
++        return;
++      }
++      lastHandledUrlRef.current = url;
+       void upsertDaemonFromOfferUrl(url)
+         .then((profile) => {
+           if (cancelled) return;
+@@ -735,11 +779,16 @@ function OfferLinkListener({
+           return;
+         })
+         .catch((error) => {
++          lastHandledUrlRef.current = null;
+           if (cancelled) return;
+           console.warn("[Linking] Failed to import pairing offer", error);
+         });
+     };
+ 
++    if (typeof window !== "undefined") {
++      handleUrl(window.location.href);
++    }
++
+     void Linking.getInitialURL()
+       .then(handleUrl)
+       .catch(() => undefined);
+@@ -747,10 +796,19 @@ function OfferLinkListener({
+     const subscription = Linking.addEventListener("url", (event) => {
+       handleUrl(event.url);
+     });
++    const handleHashChange = () => {
++      handleUrl(window.location.href);
++    };
++    if (typeof window !== "undefined") {
++      window.addEventListener("hashchange", handleHashChange);
++    }
+ 
+     return () => {
+       cancelled = true;
+       subscription.remove();
++      if (typeof window !== "undefined") {
++        window.removeEventListener("hashchange", handleHashChange);
++      }
+     };
+   }, [router, upsertDaemonFromOfferUrl]);
+ 
+@@ -879,7 +937,10 @@ function FaviconStatusSync() {
+ 
+ function RootStack() {
+   const storeReady = useStoreReady();
++  const pathname = usePathname();
++  const hasPolarisSession = usePolarisAuthSession();
+   const { theme } = useUnistyles();
++  const authRedirect = resolvePolarisAuthRedirect(pathname, hasPolarisSession);
+   const stackScreenOptions = useMemo(
+     () => ({
+       headerShown: false,
+@@ -890,20 +951,27 @@ function RootStack() {
+     }),
+     [theme.colors.surface0],
+   );
++  if (authRedirect) {
++    return <Redirect href={authRedirect} />;
++  }
    return (
      <Stack screenOptions={stackScreenOptions}>
        <Stack.Screen name="index" />
 +      <Stack.Screen name="embed" />
        <Stack.Protected guard={storeReady}>
          <Stack.Screen name="welcome" />
++      </Stack.Protected>
++      <Stack.Protected guard={storeReady && hasPolarisSession}>
+         <Stack.Screen name="settings/index" />
+         <Stack.Screen name="settings/[section]" />
+         <Stack.Screen name="settings/projects/index" />
+         <Stack.Screen name="settings/projects/[projectKey]" />
+         <Stack.Screen name="pair-scan" />
++        <Stack.Screen name="settings/user" />
++        <Stack.Screen name="h/[serverId]" />
++        <Stack.Screen name="settings/hosts/[serverId]/index" />
++        <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
        </Stack.Protected>
+-      <Stack.Screen name="h/[serverId]" />
+-      <Stack.Screen name="settings/hosts/[serverId]/index" />
+-      <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
+     </Stack>
+   );
+ }
 diff --git a/packages/app/src/app/embed.tsx b/packages/app/src/app/embed.tsx
 new file mode 100644
-index 0000000..325edf5
+index 0000000..4da0b7b
 --- /dev/null
 +++ b/packages/app/src/app/embed.tsx
 @@ -0,0 +1,376 @@
@@ -817,6 +975,99 @@ index 0000000..052a3d9
 +export function usePaseoEmbedBridge(_input: PaseoEmbedBridgeOptions): PaseoEmbedBridge {
 +  return noopEmbedBridge;
 +}
+diff --git a/packages/app/src/embed/bridge.web.test.tsx b/packages/app/src/embed/bridge.web.test.tsx
+new file mode 100644
+index 0000000..6fa3334
+--- /dev/null
++++ b/packages/app/src/embed/bridge.web.test.tsx
+@@ -0,0 +1,87 @@
++// @vitest-environment jsdom
++
++import { act, renderHook } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  PASEO_EMBED_PROTOCOL_VERSION,
++  PASEO_EMBED_READY,
++  PASEO_EMBED_WORKSPACE_CREATED,
++  PASEO_EMBED_WORKSPACE_FAILED,
++} from "./protocol";
++import { usePaseoEmbedBridge } from "./bridge.web";
++
++const originalParentDescriptor = Object.getOwnPropertyDescriptor(window, "parent");
++
++function installParentWindow() {
++  const parentWindow = { postMessage: vi.fn() };
++  Object.defineProperty(window, "parent", {
++    configurable: true,
++    value: parentWindow,
++  });
++  return parentWindow;
++}
++
++afterEach(() => {
++  if (originalParentDescriptor) {
++    Object.defineProperty(window, "parent", originalParentDescriptor);
++  }
++  vi.unstubAllEnvs();
++});
++
++describe("Paseo embed web bridge", () => {
++  it("reports workspace creation and failure to the verified parent", () => {
++    vi.stubEnv("EXPO_PUBLIC_PASEO_EMBED_DEV", "1");
++    const parentWindow = installParentWindow();
++    const onContext = vi.fn();
++    const { result } = renderHook(() =>
++      usePaseoEmbedBridge({
++        parentOrigin: "https://host.example",
++        nonce: "nonce-1",
++        onContext,
++      }),
++    );
++
++    expect(parentWindow.postMessage).toHaveBeenCalledWith(
++      {
++        type: PASEO_EMBED_READY,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++      },
++      "https://host.example",
++    );
++
++    act(() => {
++      result.current.reportWorkspaceCreated({
++        requestId: "request-1",
++        workspaceId: "workspace-1",
++        agentId: "agent-1",
++      });
++      result.current.reportWorkspaceFailed({
++        requestId: "request-2",
++        error: "Provider unavailable",
++      });
++    });
++
++    expect(parentWindow.postMessage).toHaveBeenLastCalledWith(
++      {
++        type: PASEO_EMBED_WORKSPACE_FAILED,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        requestId: "request-2",
++        error: "Provider unavailable",
++      },
++      "https://host.example",
++    );
++    expect(parentWindow.postMessage).toHaveBeenCalledWith(
++      {
++        type: PASEO_EMBED_WORKSPACE_CREATED,
++        version: PASEO_EMBED_PROTOCOL_VERSION,
++        nonce: "nonce-1",
++        requestId: "request-1",
++        workspaceId: "workspace-1",
++        agentId: "agent-1",
++      },
++      "https://host.example",
++    );
++  });
++});
 diff --git a/packages/app/src/embed/bridge.web.ts b/packages/app/src/embed/bridge.web.ts
 new file mode 100644
 index 0000000..f20b98d
@@ -925,99 +1176,6 @@ index 0000000..f20b98d
 +
 +  return bridgeRef.current;
 +}
-diff --git a/packages/app/src/embed/bridge.web.test.tsx b/packages/app/src/embed/bridge.web.test.tsx
-new file mode 100644
-index 0000000..6fa3334
---- /dev/null
-+++ b/packages/app/src/embed/bridge.web.test.tsx
-@@ -0,0 +1,87 @@
-+// @vitest-environment jsdom
-+
-+import { act, renderHook } from "@testing-library/react";
-+import { afterEach, describe, expect, it, vi } from "vitest";
-+import {
-+  PASEO_EMBED_PROTOCOL_VERSION,
-+  PASEO_EMBED_READY,
-+  PASEO_EMBED_WORKSPACE_CREATED,
-+  PASEO_EMBED_WORKSPACE_FAILED,
-+} from "./protocol";
-+import { usePaseoEmbedBridge } from "./bridge.web";
-+
-+const originalParentDescriptor = Object.getOwnPropertyDescriptor(window, "parent");
-+
-+function installParentWindow() {
-+  const parentWindow = { postMessage: vi.fn() };
-+  Object.defineProperty(window, "parent", {
-+    configurable: true,
-+    value: parentWindow,
-+  });
-+  return parentWindow;
-+}
-+
-+afterEach(() => {
-+  if (originalParentDescriptor) {
-+    Object.defineProperty(window, "parent", originalParentDescriptor);
-+  }
-+  vi.unstubAllEnvs();
-+});
-+
-+describe("Paseo embed web bridge", () => {
-+  it("reports workspace creation and failure to the verified parent", () => {
-+    vi.stubEnv("EXPO_PUBLIC_PASEO_EMBED_DEV", "1");
-+    const parentWindow = installParentWindow();
-+    const onContext = vi.fn();
-+    const { result } = renderHook(() =>
-+      usePaseoEmbedBridge({
-+        parentOrigin: "https://host.example",
-+        nonce: "nonce-1",
-+        onContext,
-+      }),
-+    );
-+
-+    expect(parentWindow.postMessage).toHaveBeenCalledWith(
-+      {
-+        type: PASEO_EMBED_READY,
-+        version: PASEO_EMBED_PROTOCOL_VERSION,
-+        nonce: "nonce-1",
-+      },
-+      "https://host.example",
-+    );
-+
-+    act(() => {
-+      result.current.reportWorkspaceCreated({
-+        requestId: "request-1",
-+        workspaceId: "workspace-1",
-+        agentId: "agent-1",
-+      });
-+      result.current.reportWorkspaceFailed({
-+        requestId: "request-2",
-+        error: "Provider unavailable",
-+      });
-+    });
-+
-+    expect(parentWindow.postMessage).toHaveBeenLastCalledWith(
-+      {
-+        type: PASEO_EMBED_WORKSPACE_FAILED,
-+        version: PASEO_EMBED_PROTOCOL_VERSION,
-+        nonce: "nonce-1",
-+        requestId: "request-2",
-+        error: "Provider unavailable",
-+      },
-+      "https://host.example",
-+    );
-+    expect(parentWindow.postMessage).toHaveBeenCalledWith(
-+      {
-+        type: PASEO_EMBED_WORKSPACE_CREATED,
-+        version: PASEO_EMBED_PROTOCOL_VERSION,
-+        nonce: "nonce-1",
-+        requestId: "request-1",
-+        workspaceId: "workspace-1",
-+        agentId: "agent-1",
-+      },
-+      "https://host.example",
-+    );
-+  });
-+});
 diff --git a/packages/app/src/embed/embedded-agent-panel.tsx b/packages/app/src/embed/embedded-agent-panel.tsx
 new file mode 100644
 index 0000000..f943d7d
@@ -1135,10 +1293,10 @@ index 0000000..8de47d8
 +}
 diff --git a/packages/app/src/embed/protocol.test.ts b/packages/app/src/embed/protocol.test.ts
 new file mode 100644
-index 0000000..fcbe5ff
+index 0000000..b72866b
 --- /dev/null
 +++ b/packages/app/src/embed/protocol.test.ts
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,147 @@
 +import { describe, expect, it } from "vitest";
 +import {
 +  PASEO_EMBED_CREATE_WORKSPACE,
@@ -1288,7 +1446,7 @@ index 0000000..fcbe5ff
 +});
 diff --git a/packages/app/src/embed/protocol.ts b/packages/app/src/embed/protocol.ts
 new file mode 100644
-index 0000000..8db71bb
+index 0000000..b1acff0
 --- /dev/null
 +++ b/packages/app/src/embed/protocol.ts
 @@ -0,0 +1,243 @@

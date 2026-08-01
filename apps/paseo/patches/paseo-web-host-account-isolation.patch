@@ -1,375 +1,105 @@
---- a/packages/app/src/app/_layout.tsx
-+++ b/packages/app/src/app/_layout.tsx
-@@ -99,7 +99,13 @@
- } from "@/utils/host-routes";
- import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
- import { navigateToAgent } from "@/utils/navigate-to-agent";
--import { resolvePolarisAuthRedirect, usePolarisAuthSession } from "@/lib/polaris-authing";
+diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
+new file mode 100644
+index 0000000..5906192
+--- /dev/null
++++ b/packages/app/src/lib/polaris-host-sync.test.ts
+@@ -0,0 +1,182 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
-+  getPolarisAuthToken,
-+  hasPolarisHostSession,
-+  resolvePolarisAuthRedirect,
-+  usePolarisAuthSession,
-+} from "@/lib/polaris-authing";
-+import { syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
- import {
-   ensureOsNotificationPermission,
-   WEB_NOTIFICATION_CLICK_EVENT,
-@@ -690,6 +696,7 @@
-     <VoiceProvider>
-       <DesktopWindowControlsSync enabled={!settingsLoading} />
-       <OfferLinkListener upsertDaemonFromOfferUrl={upsertConnectionFromOfferUrl} />
-+      <PolarisHostRegistrySync />
-       <HostSessionManager />
-       <FaviconStatusSync />
-       {children}
-@@ -697,6 +704,33 @@
-   );
- }
- 
-+function PolarisHostRegistrySync() {
-+  const hasPolarisSession = usePolarisAuthSession();
-+  const { upsertConnectionFromOfferUrl } = useHostMutations();
-+  const syncedTokenRef = useRef<string | null>(null);
-+  const token = getPolarisAuthToken();
++  extractServerIdFromPairingUrl,
++  findPolarisHostForServerId,
++  pickPolarisPairingUrl,
++  rankPolarisHosts,
++  resolvePostLoginHref,
++  syncPolarisHostsFromApi,
++  syncPolarisHostsOnce,
++  type PolarisHostSummary,
++} from "./polaris-host-sync";
 +
-+  useEffect(() => {
-+    if (!hasPolarisSession || !hasPolarisHostSession() || !token) return;
-+    if (syncedTokenRef.current === token) return;
-+    syncedTokenRef.current = token;
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
 +
-+    void syncPolarisHostsOnce({
-+      token,
-+      upsertFromOfferUrl: (url, label) => {
-+        if (getPolarisAuthToken() !== token) {
-+          throw new Error("Polaris 登录已切换");
-+        }
-+        return upsertConnectionFromOfferUrl(url, label);
-+      },
-+    }).catch((error) => {
-+      console.warn("[PolarisHostRegistrySync] Failed to sync Polaris hosts", error);
-+    });
-+  }, [hasPolarisSession, token, upsertConnectionFromOfferUrl]);
-+
-+  return null;
-+}
-+
- function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
-   const { theme } = useUnistyles();
-   const surface0 = theme.colors.surface0;
-@@ -724,6 +758,10 @@
-   const lastHandledUrlRef = useRef<string | null>(null);
- 
-   useEffect(() => {
-+    // Web Hosts are owned by the authenticated Polaris user and must come
-+    // from /polaris-hosts. A raw #offer URL is not an authorization grant.
-+    if (isWeb) return;
-+
-     let cancelled = false;
-     const handleUrl = (url: string | null) => {
-       if (!url) return;
---- a/packages/app/src/app/auth/callback.tsx
-+++ b/packages/app/src/app/auth/callback.tsx
-@@ -76,13 +76,22 @@
-         if (!token) {
-           throw new Error("Authing 登录未完成");
-         }
-+        const store = getHostRuntimeStore();
-+        // The token now identifies the newly authenticated user. Drop every
-+        // in-memory Host from the prior account before fetching this account's
-+        // authorized workspace list.
-+        await store.resetPolarisHostsForCurrentUser();
-         await ensurePolarisUser(token);
-         // Publish before host sync so useHosts is not filtered empty mid-flight.
-         publishPolarisAuthSession();
--        const store = getHostRuntimeStore();
-         const synced = await syncPolarisHostsOnce({
-           token,
--          upsertFromOfferUrl: (url, label) => store.upsertConnectionFromOfferUrl(url, label),
-+          upsertFromOfferUrl: (url, label) => {
-+            if (getPolarisAuthToken() !== token) {
-+              throw new Error("Polaris 登录已切换");
-+            }
-+            return store.upsertConnectionFromOfferUrl(url, label);
-+          },
-         }).catch((syncError) => {
-           console.warn("[auth/callback] polaris host sync failed", syncError);
-           return {
---- a/packages/app/src/lib/polaris-authing.ts
-+++ b/packages/app/src/lib/polaris-authing.ts
-@@ -76,7 +76,7 @@
- 
- async function loadAuthingConfig(): Promise<AuthingConfig> {
-   const response = await fetch(`${polarisApiBaseUrl()}/authing-config`);
--  const config = await response.json().catch(() => ({})) as Partial<AuthingConfig>;
-+  const config = (await response.json().catch(() => ({}))) as Partial<AuthingConfig>;
-   if (!response.ok) throw new Error("无法加载 Authing 配置");
-   return {
-     appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
-@@ -108,10 +108,11 @@
- async function challenge(verifier: string): Promise<{ value: string; method: "S256" | "plain" }> {
-   if (typeof globalThis.crypto?.subtle?.digest === "function") {
-     return {
--      value: base64Url(new Uint8Array(await globalThis.crypto.subtle.digest(
--        "SHA-256",
--        new TextEncoder().encode(verifier),
--      ))),
-+      value: base64Url(
-+        new Uint8Array(
-+          await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
-+        ),
-+      ),
-       method: "S256",
-     };
-   }
-@@ -126,10 +127,34 @@
-   }
- }
- 
-+/**
-+ * The portal session is a signed JWT whose subject is the immutable Authing
-+ * user ID. Keep Host storage scoped to that identity, never to a pairing URL
-+ * or a locally remembered host.
-+ */
-+export function getPolarisAuthUserScope(): string | null {
-+  const token = getPolarisAuthToken();
-+  const payload = token?.split(".")[1];
-+  if (!payload) return null;
-+  try {
-+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-+    const decoded = globalThis.atob(padded);
-+    const subject = (JSON.parse(decoded) as { sub?: unknown }).sub;
-+    return typeof subject === "string" && subject.trim() ? subject.trim() : null;
-+  } catch {
-+    return null;
-+  }
-+}
-+
- export function hasPolarisAuthSession(): boolean {
-   return Boolean(getPolarisAuthToken());
- }
- 
-+export function hasPolarisHostSession(): boolean {
-+  return Boolean(getPolarisAuthToken() && getPolarisAuthUserScope());
-+}
-+
- export function subscribePolarisAuthSession(listener: () => void): () => void {
-   sessionListeners.add(listener);
-   return () => sessionListeners.delete(listener);
-@@ -158,7 +183,10 @@
-     const state = base64Url(randomBytes(24));
-     writeTransientAuthValue(verifierKey, verifier);
-     writeTransientAuthValue(stateKey, state);
--    writeTransientAuthValue(returnPathKey, `${globalThis.location.pathname}${globalThis.location.search}`);
-+    writeTransientAuthValue(
-+      returnPathKey,
-+      `${globalThis.location.pathname}${globalThis.location.search}`,
-+    );
-     const config = await loadAuthingConfig();
-     writeTransientAuthValue(redirectUriKey, config.redirectUri);
-     const authorizationUrl = new URL(config.authorizationUrl);
-@@ -193,7 +221,7 @@
-       redirectUri: readTransientAuthValue(redirectUriKey) || fallbackCallbackUrl(),
-     }),
-   });
--  const payload = await response.json().catch(() => ({})) as {
-+  const payload = (await response.json().catch(() => ({}))) as {
-     token?: string;
-     idToken?: string;
-     error?: string;
-@@ -206,7 +234,6 @@
-   clearTransientAuthValue(verifierKey);
-   clearTransientAuthValue(stateKey);
-   clearTransientAuthValue(redirectUriKey);
--  notifyPolarisSessionChange();
-   const returnPath = readTransientAuthValue(returnPathKey);
-   return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
- }
---- a/packages/app/src/lib/polaris-authing.test.ts
-+++ b/packages/app/src/lib/polaris-authing.test.ts
-@@ -3,7 +3,10 @@
-   clearPolarisSignIn,
-   completePolarisSignIn,
-   getPolarisAuthToken,
-+  getPolarisAuthUserScope,
-   hasPolarisAuthSession,
-+  hasPolarisHostSession,
-+  publishPolarisAuthSession,
-   resolvePolarisAuthRedirect,
-   subscribePolarisAuthSession,
- } from "./polaris-authing";
-@@ -63,6 +66,15 @@
-   return storage;
- }
- 
-+function portalSessionToken(subject: string): string {
-+  const payload = Buffer.from(JSON.stringify({ sub: subject }))
++function offerUrl(serverId: string, path = "/paseo"): string {
++  const payload = Buffer.from(
++    JSON.stringify({
++      v: 2,
++      serverId,
++      daemonPublicKeyB64: "abc",
++      relay: { endpoint: "relay.example:443", useTls: true },
++    }),
++  )
 +    .toString("base64")
 +    .replace(/\+/g, "-")
 +    .replace(/\//g, "_")
 +    .replace(/=+$/, "");
-+  return `header.${payload}.signature`;
++  return `https://polaris.example${path}#offer=${payload}`;
 +}
 +
- afterEach(() => {
-   delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
-   delete (globalThis as { localStorage?: Storage }).localStorage;
-@@ -90,6 +102,7 @@
-   it("publishes the authenticated state when completing sign-in", async () => {
-     const storage = installSessionStorage();
-     installLocalStorage();
-+    const token = portalSessionToken("authing-user-a");
-     storage.setItem("polaris_authing_pkce_verifier", "verifier");
-     storage.setItem("polaris_authing_state", "expected-state");
-     storage.setItem("polaris_authing_return_path", "/welcome");
-@@ -105,7 +118,7 @@
-       vi.fn().mockResolvedValue(
-         new Response(
-           JSON.stringify({
--            token: "authenticated-token",
-+            token,
-             idToken: "authing-id-token",
-           }),
-           { status: 200 },
-@@ -117,13 +130,29 @@
- 
-     await expect(completePolarisSignIn()).resolves.toBe("/settings");
- 
--    expect(getPolarisAuthToken()).toBe("authenticated-token");
-+    expect(getPolarisAuthToken()).toBe(token);
-     expect(storage.getItem("polaris_authing_id_token")).toBe("authing-id-token");
-     expect(hasPolarisAuthSession()).toBe(true);
-+    expect(hasPolarisHostSession()).toBe(true);
-+    expect(getPolarisAuthUserScope()).toBe("authing-user-a");
-+    expect(onSessionChange).not.toHaveBeenCalled();
-+    publishPolarisAuthSession();
-     expect(onSessionChange).toHaveBeenCalledTimes(1);
-     unsubscribe();
-   });
- 
-+  it("derives the Host registry scope from the authenticated user subject", () => {
-+    const storage = installSessionStorage();
-+    storage.setItem("polaris_authing_session", portalSessionToken("authing-user-b"));
-+
-+    expect(getPolarisAuthUserScope()).toBe("authing-user-b");
-+    expect(hasPolarisHostSession()).toBe(true);
-+
-+    clearPolarisSignIn();
-+    expect(getPolarisAuthUserScope()).toBeNull();
-+    expect(hasPolarisHostSession()).toBe(false);
++describe("polaris host sync helpers", () => {
++  it("prefers reconnectTarget when it carries an offer", () => {
++    const host: PolarisHostSummary = {
++      name: "test",
++      status: {
++        paseo: {
++          liveTarget: offerUrl("srv_live"),
++          reconnectTarget: `https://polaris.example/paseo/h/srv_reconnect#offer=${
++            offerUrl("srv_reconnect").split("#offer=")[1]
++          }`,
++        },
++      },
++    };
++    const url = pickPolarisPairingUrl(host);
++    expect(url).toContain("srv_reconnect");
++    expect(extractServerIdFromPairingUrl(url!)).toBe("srv_reconnect");
 +  });
 +
-   it("accepts callback state from localStorage fallback", async () => {
-     installSessionStorage();
-     const localStorage = installLocalStorage();
-@@ -139,9 +168,11 @@
-     });
-     vi.stubGlobal(
-       "fetch",
--      vi.fn().mockResolvedValue(
--        new Response(JSON.stringify({ token: "authenticated-token" }), { status: 200 }),
--      ),
-+      vi
-+        .fn()
-+        .mockResolvedValue(
-+          new Response(JSON.stringify({ token: "authenticated-token" }), { status: 200 }),
-+        ),
-     );
- 
-     await expect(completePolarisSignIn()).resolves.toBe("/projects/demo");
-@@ -157,9 +188,9 @@
-     expect(resolvePolarisAuthRedirect("/settings/user", false)).toBe("/welcome");
-     expect(resolvePolarisAuthRedirect("/settings/projects", false)).toBe("/welcome");
-     expect(resolvePolarisAuthRedirect("/pair-scan", false)).toBe("/welcome");
--    expect(
--      resolvePolarisAuthRedirect("/settings/hosts/srv_M1ozprYgpVhS/host", false),
--    ).toBe("/welcome");
-+    expect(resolvePolarisAuthRedirect("/settings/hosts/srv_M1ozprYgpVhS/host", false)).toBe(
-+      "/welcome",
-+    );
-     expect(resolvePolarisAuthRedirect("/h/srv_M1ozprYgpVhS", false)).toBe("/welcome");
-   });
- 
---- a/packages/app/src/lib/polaris-host-sync.ts
-+++ b/packages/app/src/lib/polaris-host-sync.ts
-@@ -21,12 +21,9 @@
-   preferredHref: string | null;
- }
- 
--type UpsertFromOfferUrl = (
--  offerUrl: string,
--  label?: string,
--) => Promise<{ serverId: string }>;
-+type UpsertFromOfferUrl = (offerUrl: string, label?: string) => Promise<{ serverId: string }>;
- 
--let inflight: Promise<SyncPolarisHostsResult> | null = null;
-+let inflight: { token: string; promise: Promise<SyncPolarisHostsResult> } | null = null;
- 
- function decodeBase64UrlJson(value: string): unknown {
-   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-@@ -90,7 +87,8 @@
-   }
-   return (
-     hosts.find(
--      (host) => extractServerIdFromPairingUrl(pickPolarisPairingUrl(host) ?? "") === expectedServerId,
-+      (host) =>
-+        extractServerIdFromPairingUrl(pickPolarisPairingUrl(host) ?? "") === expectedServerId,
-     ) ?? null
-   );
- }
-@@ -153,11 +151,19 @@
-   token: string;
-   upsertFromOfferUrl: UpsertFromOfferUrl;
- }): Promise<SyncPolarisHostsResult> {
--  if (inflight) return inflight;
--  inflight = syncPolarisHostsFromApi(options).finally(() => {
--    inflight = null;
-+  if (inflight?.token === options.token) return inflight.promise;
-+  const promise = syncPolarisHostsFromApi(options).finally(() => {
-+    if (inflight?.promise === promise) {
-+      inflight = null;
-+    }
-   });
--  return inflight;
-+  inflight = { token: options.token, promise };
-+  return promise;
-+}
++  it("extracts serverId from /h/ path and from offer payload", () => {
++    expect(
++      extractServerIdFromPairingUrl("https://polaris.example/paseo/h/srv_AiBanc_-FHWd?scope=x"),
++    ).toBe("srv_AiBanc_-FHWd");
++    expect(extractServerIdFromPairingUrl(offerUrl("srv_FromOffer"))).toBe("srv_FromOffer");
++  });
 +
-+function isHostSpecificReturnPath(returnPath: string): boolean {
-+  const pathOnly = returnPath.split(/[?#]/, 1)[0]?.replace(/^\/paseo(?=\/|$)/, "") ?? "";
-+  return /^\/(?:h|settings\/hosts)\//.test(pathOnly);
- }
- 
- export function resolvePostLoginHref(options: {
-@@ -166,7 +172,12 @@
- }): string {
-   if (options.preferredHref) return options.preferredHref;
-   const returnPath = options.returnPath.trim();
--  if (returnPath && returnPath !== "/welcome" && returnPath !== "/") {
-+  if (
-+    returnPath &&
-+    returnPath !== "/welcome" &&
-+    returnPath !== "/" &&
-+    !isHostSpecificReturnPath(returnPath)
-+  ) {
-     return returnPath;
-   }
-   return "/settings";
---- a/packages/app/src/lib/polaris-host-sync.test.ts
-+++ b/packages/app/src/lib/polaris-host-sync.test.ts
-@@ -6,6 +6,7 @@
-   rankPolarisHosts,
-   resolvePostLoginHref,
-   syncPolarisHostsFromApi,
-+  syncPolarisHostsOnce,
-   type PolarisHostSummary,
- } from "./polaris-host-sync";
- 
-@@ -93,6 +94,44 @@
-         returnPath: "/welcome",
-       }),
-     ).toBe("/settings");
++  it("finds an offline Polaris host by its stable Paseo server ID", () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "workspace-name",
++        status: {
++          driver: { status: "stopped" },
++          paseo: {
++            reconnectTarget: "https://polaris.example/paseo/h/srv_offline?scope=user-a",
++          },
++        },
++      },
++    ];
++
++    expect(findPolarisHostForServerId(hosts, "srv_offline")?.name).toBe("workspace-name");
++    expect(findPolarisHostForServerId(hosts, "srv_other")).toBeNull();
++  });
++
++  it("ranks running hosts before stopped ones", () => {
++    const ranked = rankPolarisHosts([
++      { name: "zzz", status: { driver: { status: "stopped" } } },
++      { name: "aaa", status: { driver: { status: "running" } } },
++      { name: "mmm", status: { driver: { status: "running" } } },
++    ]);
++    expect(ranked.map((host) => host.name)).toEqual(["aaa", "mmm", "zzz"]);
++  });
++
++  it("resolves post-login href to preferred host over return path", () => {
++    expect(
++      resolvePostLoginHref({
++        preferredHref: "/h/srv_good",
++        returnPath: "/settings",
++      }),
++    ).toBe("/h/srv_good");
++    expect(
++      resolvePostLoginHref({
++        preferredHref: null,
++        returnPath: "/welcome",
++      }),
++    ).toBe("/settings");
 +    expect(
 +      resolvePostLoginHref({
 +        preferredHref: null,
@@ -408,137 +138,252 @@
 +    resolveFirstFetch(new Response(JSON.stringify({ hosts: [] }), { status: 200 }));
 +    await expect(first).resolves.toMatchObject({ serverIds: [] });
 +    expect(fetchMock).toHaveBeenCalledTimes(2);
-   });
- 
-   it("syncs hosts from API using offer URLs in ranked order", async () => {
-@@ -118,20 +157,16 @@
-     ];
-     vi.stubGlobal(
-       "fetch",
--      vi.fn().mockResolvedValue(
--        new Response(JSON.stringify({ hosts }), { status: 200 }),
--      ),
++  });
++
++  it("syncs hosts from API using offer URLs in ranked order", async () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "stopped",
++        status: {
++          driver: { status: "stopped" },
++          paseo: { liveTarget: offerUrl("srv_stopped") },
++        },
++      },
++      {
++        name: "test",
++        status: {
++          driver: { status: "running" },
++          paseo: {
++            reconnectTarget: `https://polaris.example/paseo/h/srv_AiBanc_-FHWd#offer=${
++              offerUrl("srv_AiBanc_-FHWd").split("#offer=")[1]
++            }`,
++          },
++        },
++      },
++    ];
++    vi.stubGlobal(
++      "fetch",
 +      vi.fn().mockResolvedValue(new Response(JSON.stringify({ hosts }), { status: 200 })),
-     );
-     vi.stubGlobal("location", {
-       origin: "https://polaris.example",
-       protocol: "https:",
-       hostname: "polaris.example",
-     });
--    const upsert = vi
--      .fn()
--      .mockImplementation(async (url: string) => ({
--        serverId: extractServerIdFromPairingUrl(url) ?? "unknown",
--      }));
++    );
++    vi.stubGlobal("location", {
++      origin: "https://polaris.example",
++      protocol: "https:",
++      hostname: "polaris.example",
++    });
 +    const upsert = vi.fn().mockImplementation(async (url: string) => ({
 +      serverId: extractServerIdFromPairingUrl(url) ?? "unknown",
 +    }));
- 
-     const result = await syncPolarisHostsFromApi({
-       token: "token",
---- a/packages/app/src/runtime/host-runtime.ts
-+++ b/packages/app/src/runtime/host-runtime.ts
-@@ -44,7 +44,11 @@
- } from "@/workspace/legacy-daemon-workspaces";
- import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
- import { queryClient } from "@/query/query-client";
--import { hasPolarisAuthSession, subscribePolarisAuthSession } from "@/lib/polaris-authing";
-+import {
-+  getPolarisAuthUserScope,
-+  hasPolarisHostSession,
-+  subscribePolarisAuthSession,
-+} from "@/lib/polaris-authing";
- 
- export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
- export type HostRegistryStatus = "loading" | "ready";
-@@ -1333,6 +1337,10 @@
-   if (typeof window === "undefined") {
-     return REGISTRY_STORAGE_KEY;
-   }
-+  const userScope = getPolarisAuthUserScope();
-+  if (userScope) {
-+    return `${REGISTRY_STORAGE_KEY}:user:${encodeURIComponent(userScope)}`;
-+  }
-   const scope = readWebRegistryScopeFromLocation();
-   if (scope) {
-     persistActiveWebRegistryScope(scope);
-@@ -1346,7 +1354,14 @@
- 
- function resolveRegistryStorageKeys(): string[] {
-   const primary = resolveRegistryStorageKey();
--  return primary === REGISTRY_STORAGE_KEY ? [REGISTRY_STORAGE_KEY] : [primary, REGISTRY_STORAGE_KEY];
-+  // A signed portal session identifies one user. Never hydrate that user from
-+  // a legacy global or pairing-link scope that may belong to another account.
-+  if (getPolarisAuthUserScope()) {
-+    return [primary];
-+  }
-+  return primary === REGISTRY_STORAGE_KEY
-+    ? [REGISTRY_STORAGE_KEY]
-+    : [primary, REGISTRY_STORAGE_KEY];
- }
- 
- function readConfiguredLocalDaemonOverride(): string | null {
-@@ -1763,6 +1778,12 @@
-     await this.persistHosts();
-   }
- 
-+  /** Remove every Host and active daemon client before syncing another account. */
-+  async resetPolarisHostsForCurrentUser(): Promise<void> {
-+    this.setHostsAndSync([]);
-+    await this.persistHosts();
-+  }
 +
-   async removeConnection(serverId: string, connectionId: string): Promise<void> {
-     const now = new Date().toISOString();
-     const next = this.hosts
-@@ -2237,8 +2258,8 @@
-         unsubscribeAuth();
-       };
-     },
--    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisAuthSession()),
--    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisAuthSession()),
-+    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
-+    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
-   );
- }
- 
---- a/packages/app/src/runtime/host-runtime.test.ts
-+++ b/packages/app/src/runtime/host-runtime.test.ts
-@@ -1171,6 +1171,27 @@
- });
- 
- describe("HostRuntimeStore", () => {
-+  it("removes previous-account hosts before syncing the current user", async () => {
-+    const host = makeHost({ connections: [] });
-+    const store = new HostRuntimeStore({
-+      deps: {
-+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
-+        connectToDaemon: async ({ host: hostProfile }) => ({
-+          client: makeConnectedProbeClient(5) as unknown as DaemonClient,
-+          serverId: hostProfile.serverId,
-+          hostname: hostProfile.label ?? null,
-+        }),
-+        getClientId: async () => "cid_test_runtime",
-+      },
++    const result = await syncPolarisHostsFromApi({
++      token: "token",
++      upsertFromOfferUrl: upsert,
 +    });
 +
-+    store.syncHosts([host]);
-+    await store.resetPolarisHostsForCurrentUser();
-+
-+    expect(store.getHosts()).toEqual([]);
-+    expect(store.getSnapshot(host.serverId)).toBeNull();
++    expect(upsert).toHaveBeenCalledTimes(2);
++    expect(upsert.mock.calls[0]?.[1]).toBe("test");
++    expect(result.preferredServerId).toBe("srv_AiBanc_-FHWd");
++    expect(result.preferredHref).toBe("/h/srv_AiBanc_-FHWd");
++    expect(result.serverIds).toEqual(["srv_AiBanc_-FHWd", "srv_stopped"]);
 +  });
++});
+diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
+new file mode 100644
+index 0000000..6f16709
+--- /dev/null
++++ b/packages/app/src/lib/polaris-host-sync.ts
+@@ -0,0 +1,184 @@
++import { polarisApiBaseUrl } from "@/lib/polaris-authing";
++import { buildHostRootRoute } from "@/utils/host-routes";
 +
-   it("bootstraps agent directory subscription when host transitions online", async () => {
-     const host = makeHost({
-       connections: [
---- a/packages/app/src/runtime/host-runtime-auth.test.ts
++export interface PolarisHostSummary {
++  name: string;
++  status?: {
++    driver?: {
++      status?: string | null;
++      selected?: { backend?: string | null; profile?: string | null } | null;
++    } | null;
++    paseo?: {
++      liveTarget?: string | null;
++      reconnectTarget?: string | null;
++    } | null;
++  } | null;
++}
++
++export interface SyncPolarisHostsResult {
++  serverIds: string[];
++  preferredServerId: string | null;
++  preferredHref: string | null;
++}
++
++type UpsertFromOfferUrl = (offerUrl: string, label?: string) => Promise<{ serverId: string }>;
++
++let inflight: { token: string; promise: Promise<SyncPolarisHostsResult> } | null = null;
++
++function decodeBase64UrlJson(value: string): unknown {
++  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
++  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
++  const json =
++    typeof globalThis.atob === "function"
++      ? globalThis.atob(padded)
++      : Buffer.from(padded, "base64").toString("utf8");
++  return JSON.parse(json) as unknown;
++}
++
++/** Prefer reconnectTarget (includes /h/srv_...) when it carries an offer. */
++export function pickPolarisPairingUrl(host: PolarisHostSummary): string | null {
++  const reconnect = host.status?.paseo?.reconnectTarget?.trim() || "";
++  const live = host.status?.paseo?.liveTarget?.trim() || "";
++  if (reconnect.includes("#offer=")) return reconnect;
++  if (live.includes("#offer=")) return live;
++  if (reconnect) return reconnect;
++  if (live) return live;
++  return null;
++}
++
++export function extractServerIdFromPairingUrl(url: string): string | null {
++  const trimmed = url.trim();
++  if (!trimmed) return null;
++  try {
++    const parsed = new URL(trimmed, "https://polaris.local");
++    const pathMatch = parsed.pathname.match(/\/h\/(srv_[^/]+)/);
++    if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1]);
++    const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash;
++    const offer = new URLSearchParams(hash).get("offer");
++    if (!offer) return null;
++    const payload = decodeBase64UrlJson(offer);
++    if (
++      payload &&
++      typeof payload === "object" &&
++      typeof (payload as { serverId?: unknown }).serverId === "string"
++    ) {
++      const serverId = (payload as { serverId: string }).serverId.trim();
++      return serverId || null;
++    }
++  } catch {
++    // Fall through to regex fallbacks for non-standard URLs.
++  }
++  const pathFallback = trimmed.match(/\/h\/(srv_[^/?#]+)/);
++  if (pathFallback?.[1]) return decodeURIComponent(pathFallback[1]);
++  return null;
++}
++
++/**
++ * A Paseo host can be renamed locally, so its label is not a safe identity.
++ * The Polaris pairing target carries the immutable Paseo server ID instead.
++ */
++export function findPolarisHostForServerId(
++  hosts: readonly PolarisHostSummary[],
++  serverId: string,
++): PolarisHostSummary | null {
++  const expectedServerId = serverId.trim();
++  if (!expectedServerId) {
++    return null;
++  }
++  return (
++    hosts.find(
++      (host) =>
++        extractServerIdFromPairingUrl(pickPolarisPairingUrl(host) ?? "") === expectedServerId,
++    ) ?? null
++  );
++}
++
++/** Running hosts first, then name order — stable for “prefer correct srv”. */
++export function rankPolarisHosts(hosts: readonly PolarisHostSummary[]): PolarisHostSummary[] {
++  return [...hosts].sort((left, right) => {
++    const leftRunning = left.status?.driver?.status === "running" ? 0 : 1;
++    const rightRunning = right.status?.driver?.status === "running" ? 0 : 1;
++    if (leftRunning !== rightRunning) return leftRunning - rightRunning;
++    return left.name.localeCompare(right.name);
++  });
++}
++
++export async function fetchPolarisHosts(token: string): Promise<PolarisHostSummary[]> {
++  const response = await fetch(`${polarisApiBaseUrl()}/polaris-hosts`, {
++    headers: { authorization: `Bearer ${token}` },
++  });
++  const body = (await response.json().catch(() => ({}))) as {
++    hosts?: PolarisHostSummary[];
++    error?: string;
++  };
++  if (!response.ok) {
++    throw new Error(typeof body.error === "string" ? body.error : "无法加载 Polaris 主机列表");
++  }
++  return Array.isArray(body.hosts) ? body.hosts : [];
++}
++
++export async function syncPolarisHostsFromApi(options: {
++  token: string;
++  upsertFromOfferUrl: UpsertFromOfferUrl;
++}): Promise<SyncPolarisHostsResult> {
++  const hosts = rankPolarisHosts(await fetchPolarisHosts(options.token));
++  const serverIds: string[] = [];
++  for (const host of hosts) {
++    const pairingUrl = pickPolarisPairingUrl(host);
++    if (!pairingUrl || !pairingUrl.includes("#offer=")) {
++      continue;
++    }
++    try {
++      const profile = await options.upsertFromOfferUrl(pairingUrl, host.name);
++      const serverId = profile.serverId?.trim();
++      if (serverId && !serverIds.includes(serverId)) {
++        serverIds.push(serverId);
++      }
++    } catch (error) {
++      console.warn("[polaris-host-sync] failed to upsert host", host.name, error);
++    }
++  }
++  const preferredServerId = serverIds[0] ?? null;
++  return {
++    serverIds,
++    preferredServerId,
++    preferredHref: preferredServerId ? buildHostRootRoute(preferredServerId) : null,
++  };
++}
++
++/** Deduplicate concurrent login/welcome syncs. */
++export function syncPolarisHostsOnce(options: {
++  token: string;
++  upsertFromOfferUrl: UpsertFromOfferUrl;
++}): Promise<SyncPolarisHostsResult> {
++  if (inflight?.token === options.token) return inflight.promise;
++  const promise = syncPolarisHostsFromApi(options).finally(() => {
++    if (inflight?.promise === promise) {
++      inflight = null;
++    }
++  });
++  inflight = { token: options.token, promise };
++  return promise;
++}
++
++function isHostSpecificReturnPath(returnPath: string): boolean {
++  const pathOnly = returnPath.split(/[?#]/, 1)[0]?.replace(/^\/paseo(?=\/|$)/, "") ?? "";
++  return /^\/(?:h|settings\/hosts)\//.test(pathOnly);
++}
++
++export function resolvePostLoginHref(options: {
++  preferredHref: string | null;
++  returnPath: string;
++}): string {
++  if (options.preferredHref) return options.preferredHref;
++  const returnPath = options.returnPath.trim();
++  if (
++    returnPath &&
++    returnPath !== "/welcome" &&
++    returnPath !== "/" &&
++    !isHostSpecificReturnPath(returnPath)
++  ) {
++    return returnPath;
++  }
++  return "/settings";
++}
+diff --git a/packages/app/src/runtime/host-runtime-auth.test.ts b/packages/app/src/runtime/host-runtime-auth.test.ts
+new file mode 100644
+index 0000000..ba4196c
+--- /dev/null
 +++ b/packages/app/src/runtime/host-runtime-auth.test.ts
-@@ -1,6 +1,65 @@
--import { describe, expect, it } from "vitest";
+@@ -0,0 +1,118 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
- import type { HostProfile } from "@/types/host-connection";
--import { filterHostsForPolarisSession } from "./host-runtime";
++import type { HostProfile } from "@/types/host-connection";
 +
 +const asyncStorage = vi.hoisted(() => {
 +  const values = new Map<string, string>();
@@ -599,13 +444,34 @@
 +  asyncStorage.removeItem.mockClear();
 +  vi.unstubAllGlobals();
 +});
- 
- function makeHost(): HostProfile {
-   return {
-@@ -29,4 +88,31 @@
-     const hosts = [makeHost()];
-     expect(filterHostsForPolarisSession(hosts, true)).toBe(hosts);
-   });
++
++function makeHost(): HostProfile {
++  return {
++    serverId: "srv_1",
++    label: "Host 1",
++    lifecycle: {},
++    connections: [],
++    preferredConnectionId: null,
++    createdAt: "2026-01-01T00:00:00.000Z",
++    updatedAt: "2026-01-01T00:00:00.000Z",
++  };
++}
++
++describe("host runtime auth visibility", () => {
++  it("hides hosts for anonymous users with a stable empty snapshot", () => {
++    const hosts = [makeHost()];
++    const first = filterHostsForPolarisSession(hosts, false);
++    const second = filterHostsForPolarisSession(hosts, false);
++    expect(first).toEqual([]);
++    // useSyncExternalStore requires referential stability across getSnapshot
++    // calls when the underlying data has not changed.
++    expect(first).toBe(second);
++  });
++
++  it("keeps the same host list reference for authenticated users", () => {
++    const hosts = [makeHost()];
++    expect(filterHostsForPolarisSession(hosts, true)).toBe(hosts);
++  });
 +
 +  it("never loads a previous user's scoped or legacy Host registry", async () => {
 +    installAuthenticatedBrowser(
@@ -633,5 +499,238 @@
 +    );
 +    expect(asyncStorage.getItem).not.toHaveBeenCalledWith("@paseo:daemon-registry");
 +  });
++});
+diff --git a/packages/app/src/runtime/host-runtime.test.ts b/packages/app/src/runtime/host-runtime.test.ts
+index 6f94689..5ce7084 100644
+--- a/packages/app/src/runtime/host-runtime.test.ts
++++ b/packages/app/src/runtime/host-runtime.test.ts
+@@ -1171,6 +1171,27 @@ describe("HostRuntimeController", () => {
  });
-
+ 
+ describe("HostRuntimeStore", () => {
++  it("removes previous-account hosts before syncing the current user", async () => {
++    const host = makeHost({ connections: [] });
++    const store = new HostRuntimeStore({
++      deps: {
++        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
++        connectToDaemon: async ({ host: hostProfile }) => ({
++          client: makeConnectedProbeClient(5) as unknown as DaemonClient,
++          serverId: hostProfile.serverId,
++          hostname: hostProfile.label ?? null,
++        }),
++        getClientId: async () => "cid_test_runtime",
++      },
++    });
++
++    store.syncHosts([host]);
++    await store.resetPolarisHostsForCurrentUser();
++
++    expect(store.getHosts()).toEqual([]);
++    expect(store.getSnapshot(host.serverId)).toBeNull();
++  });
++
+   it("bootstraps agent directory subscription when host transitions online", async () => {
+     const host = makeHost({
+       connections: [
+diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
+index 672642f..2c6681f 100644
+--- a/packages/app/src/runtime/host-runtime.ts
++++ b/packages/app/src/runtime/host-runtime.ts
+@@ -44,6 +44,11 @@ import {
+ } from "@/workspace/legacy-daemon-workspaces";
+ import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
+ import { queryClient } from "@/query/query-client";
++import {
++  getPolarisAuthUserScope,
++  hasPolarisHostSession,
++  subscribePolarisAuthSession,
++} from "@/lib/polaris-authing";
+ 
+ export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
+ export type HostRegistryStatus = "loading" | "ready";
+@@ -138,6 +143,19 @@ export interface HostRuntimeControllerDeps {
+   getClientId: () => Promise<string>;
+ }
+ 
++// Stable empty snapshot for useSyncExternalStore. Returning a fresh [] on
++// every getSnapshot call causes an infinite re-render loop.
++const EMPTY_POLARIS_HOSTS: HostProfile[] = [];
++
++export function filterHostsForPolarisSession(
++  hosts: HostProfile[],
++  hasPolarisSession: boolean,
++): HostProfile[] {
++  // Preserve the store reference when authenticated so subscribers only
++  // re-render when the host list itself changes.
++  return hasPolarisSession ? hosts : EMPTY_POLARIS_HOSTS;
++}
++
+ export interface HostRuntimeStartOptions {
+   autoProbe?: boolean;
+   initialConnection?: {
+@@ -1270,10 +1288,82 @@ export class HostRuntimeController {
+ }
+ 
+ const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
++const WEB_REGISTRY_SCOPE_PARAM = "scope";
++const ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY = "@paseo:active-web-registry-scope";
+ const LOCALHOST_FALLBACK_ENDPOINT = "localhost:6767";
+ const DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS = 2500;
+ const E2E_STORAGE_KEY = "@paseo:e2e";
+ 
++function readWebRegistryScopeFromLocation(): string | null {
++  if (typeof window === "undefined") {
++    return null;
++  }
++  try {
++    const scope = new URL(window.location.href).searchParams.get(WEB_REGISTRY_SCOPE_PARAM)?.trim();
++    return scope && scope.length > 0 ? scope : null;
++  } catch {
++    return null;
++  }
++}
++
++function persistActiveWebRegistryScope(scope: string | null): void {
++  if (typeof window === "undefined") {
++    return;
++  }
++  try {
++    if (scope) {
++      window.sessionStorage.setItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY, scope);
++      return;
++    }
++    window.sessionStorage.removeItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY);
++  } catch {
++    // Ignore browsers that disable session storage for embedded contexts.
++  }
++}
++
++function readPersistedWebRegistryScope(): string | null {
++  if (typeof window === "undefined") {
++    return null;
++  }
++  try {
++    const scope = window.sessionStorage.getItem(ACTIVE_WEB_REGISTRY_SCOPE_STORAGE_KEY)?.trim();
++    return scope && scope.length > 0 ? scope : null;
++  } catch {
++    return null;
++  }
++}
++
++function resolveRegistryStorageKey(): string {
++  if (typeof window === "undefined") {
++    return REGISTRY_STORAGE_KEY;
++  }
++  const userScope = getPolarisAuthUserScope();
++  if (userScope) {
++    return `${REGISTRY_STORAGE_KEY}:user:${encodeURIComponent(userScope)}`;
++  }
++  const scope = readWebRegistryScopeFromLocation();
++  if (scope) {
++    persistActiveWebRegistryScope(scope);
++    return `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(scope)}`;
++  }
++  const persistedScope = readPersistedWebRegistryScope();
++  return persistedScope
++    ? `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(persistedScope)}`
++    : REGISTRY_STORAGE_KEY;
++}
++
++function resolveRegistryStorageKeys(): string[] {
++  const primary = resolveRegistryStorageKey();
++  // A signed portal session identifies one user. Never hydrate that user from
++  // a legacy global or pairing-link scope that may belong to another account.
++  if (getPolarisAuthUserScope()) {
++    return [primary];
++  }
++  return primary === REGISTRY_STORAGE_KEY
++    ? [REGISTRY_STORAGE_KEY]
++    : [primary, REGISTRY_STORAGE_KEY];
++}
++
+ function readConfiguredLocalDaemonOverride(): string | null {
+   const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
+   return value && value.length > 0 ? value : null;
+@@ -1369,14 +1459,28 @@ export class HostRuntimeStore {
+     if (override) {
+       this.bootstrapConfiguredOverride(override);
+     } else {
++      if (typeof window !== "undefined") {
++        return;
++      }
+       await this.bootstrapDefaultLocalhost();
+     }
+   }
+ 
+   private async loadFromStorage(): Promise<void> {
+     let shouldPersistHosts = false;
++    const storageKeys = resolveRegistryStorageKeys();
+     try {
+-      const stored = await AsyncStorage.getItem(REGISTRY_STORAGE_KEY);
++      let stored: string | null = null;
++      let resolvedStorageKey = storageKeys[0] ?? REGISTRY_STORAGE_KEY;
++      for (const storageKey of storageKeys) {
++        const candidate = await AsyncStorage.getItem(storageKey);
++        if (!candidate) {
++          continue;
++        }
++        stored = candidate;
++        resolvedStorageKey = storageKey;
++        break;
++      }
+       if (!stored) {
+         return;
+       }
+@@ -1390,7 +1494,7 @@ export class HostRuntimeStore {
+       const profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
+       this.hosts = profiles;
+       this.syncHosts(profiles);
+-      if (profiles.length !== normalizedProfiles.length) {
++      if (profiles.length !== normalizedProfiles.length || resolvedStorageKey !== storageKeys[0]) {
+         shouldPersistHosts = true;
+       }
+     } catch (error) {
+@@ -1674,6 +1778,12 @@ export class HostRuntimeStore {
+     await this.persistHosts();
+   }
+ 
++  /** Remove every Host and active daemon client before syncing another account. */
++  async resetPolarisHostsForCurrentUser(): Promise<void> {
++    this.setHostsAndSync([]);
++    await this.persistHosts();
++  }
++
+   async removeConnection(serverId: string, connectionId: string): Promise<void> {
+     const now = new Date().toISOString();
+     const next = this.hosts
+@@ -1745,8 +1855,9 @@ export class HostRuntimeStore {
+   }
+ 
+   private async persistHosts(): Promise<void> {
++    const storageKey = resolveRegistryStorageKey();
+     try {
+-      await AsyncStorage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify(this.hosts));
++      await AsyncStorage.setItem(storageKey, JSON.stringify(this.hosts));
+     } catch (error) {
+       console.error("[HostRuntime] Failed to persist host registry", error);
+     }
+@@ -2139,9 +2250,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
+ export function useHosts(): HostProfile[] {
+   const store = getHostRuntimeStore();
+   return useSyncExternalStore(
+-    (onStoreChange) => store.subscribeHostList(onStoreChange),
+-    () => store.getHosts(),
+-    () => store.getHosts(),
++    (onStoreChange) => {
++      const unsubscribeHosts = store.subscribeHostList(onStoreChange);
++      const unsubscribeAuth = subscribePolarisAuthSession(onStoreChange);
++      return () => {
++        unsubscribeHosts();
++        unsubscribeAuth();
++      };
++    },
++    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
++    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
+   );
+ }
+ 
