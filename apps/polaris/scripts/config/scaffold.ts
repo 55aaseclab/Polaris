@@ -9,6 +9,7 @@ import {
   polarisConfigDockerRoot,
   polarisNetfsLocalExportRoot,
   polarisUsersRoot,
+  repoRelativePath,
   repoRoot,
 } from "../utils/paths.js";
 
@@ -19,9 +20,9 @@ const DEMO_USER_PROFILE_ID = "100000000000000001";
 const WORKSPACE_SERVICE_PORT_START = 32000;
 const WORKSPACE_SERVICE_PORT_END = 32999;
 
-export interface UserWorkspaceDefaults {
-  dockerBaseImage: string | null;
-}
+export interface UserWorkspaceDefaults {}
+
+export type WorkspaceSubscriptionLine = "coding" | "vertical";
 
 function workspaceDataNetfsSource(project: string): Record<string, any> {
   return {
@@ -180,42 +181,40 @@ function normalizeBaseImage(value: unknown): string | null {
   return baseImage || null;
 }
 
-function readWorkspaceDefaultsDoc(userProfileId: string): Record<string, any> {
-  const doc = readUserProfileDoc(userProfileId);
-  return doc.workspace_defaults && typeof doc.workspace_defaults === "object"
-    ? (doc.workspace_defaults as Record<string, any>)
-    : {};
-}
-
 export function readUserWorkspaceDefaults(userProfileId: string): UserWorkspaceDefaults {
-  const defaults = readWorkspaceDefaultsDoc(userProfileId);
-  return {
-    dockerBaseImage: normalizeBaseImage(defaults.docker?.runtime?.base_image),
-  };
+  void userProfileId;
+  return {};
 }
 
 function writeWorkspaceDefaultsDoc(
   userProfileId: string,
   defaults: UserWorkspaceDefaults,
 ): void {
+  void defaults;
   const doc = readUserProfileDoc(userProfileId);
-  const workspaceDefaults = (doc.workspace_defaults ??= {}) as Record<string, any>;
-  const dockerDefaults = (workspaceDefaults.docker ??= {}) as Record<string, any>;
-  const dockerRuntimeDefaults = (dockerDefaults.runtime ??= {}) as Record<string, any>;
+  const workspaceDefaults =
+    doc.workspace_defaults && typeof doc.workspace_defaults === "object"
+      ? (doc.workspace_defaults as Record<string, any>)
+      : null;
+  const dockerDefaults =
+    workspaceDefaults?.docker && typeof workspaceDefaults.docker === "object"
+      ? workspaceDefaults.docker as Record<string, any>
+      : null;
+  const dockerRuntimeDefaults =
+    dockerDefaults?.runtime && typeof dockerDefaults.runtime === "object"
+      ? dockerDefaults.runtime as Record<string, any>
+      : null;
 
-  if (defaults.dockerBaseImage) {
-    dockerRuntimeDefaults.base_image = defaults.dockerBaseImage;
-  } else {
+  if (dockerRuntimeDefaults && "base_image" in dockerRuntimeDefaults) {
     delete dockerRuntimeDefaults.base_image;
   }
-
-  if (Object.keys(dockerRuntimeDefaults).length === 0) {
+  if (dockerRuntimeDefaults && Object.keys(dockerRuntimeDefaults).length === 0 && dockerDefaults) {
     delete dockerDefaults.runtime;
   }
-  if (Object.keys(dockerDefaults).length === 0) {
+  if (dockerDefaults && Object.keys(dockerDefaults).length === 0 && workspaceDefaults) {
     delete workspaceDefaults.docker;
   }
-  if (Object.keys(workspaceDefaults).length === 0) {
+  if (workspaceDefaults && Object.keys(workspaceDefaults).length === 0) {
     delete doc.workspace_defaults;
   }
 
@@ -234,14 +233,14 @@ export function resolveWorkspaceDockerBaseImage(input: {
   userProfileId: string;
   project: string;
   baseImage?: string | null;
+  line?: WorkspaceSubscriptionLine;
 }): string {
   const explicitBaseImage = normalizeBaseImage(input.baseImage);
   if (explicitBaseImage) {
     return explicitBaseImage;
   }
-  const defaultBaseImage = readUserWorkspaceDefaults(input.userProfileId).dockerBaseImage;
-  if (defaultBaseImage) {
-    return defaultBaseImage;
+  if (input.line === "vertical") {
+    return verticalWorkspaceBaseImage();
   }
   return workspaceImageRef(input.userProfileId, input.project);
 }
@@ -315,6 +314,12 @@ function allocateWorkspaceServicePort(unavailableExtra: Iterable<number> = []): 
 
 /** Vertical wanghai portal listens in-container; coding-only images do not. */
 export const WANGHAI_PORTAL_CONTAINER_PORT = "9090";
+export const DEFAULT_WANGHAI_WORKSPACE_IMAGE = "wanghai-admin-portal:latest";
+
+export function verticalWorkspaceBaseImage(): string {
+  return String(process.env.POLARIS_WANGHAI_WORKSPACE_IMAGE ?? "").trim()
+    || DEFAULT_WANGHAI_WORKSPACE_IMAGE;
+}
 
 export function isWanghaiVerticalBaseImage(baseImage: string | null | undefined): boolean {
   const image = String(baseImage ?? "").trim().toLowerCase();
@@ -526,8 +531,8 @@ export function createScaffoldUserProfile(profile: {
   return {
     ...profile,
     created,
-    profilePath: path.join("config", "users", "profiles", `${profile.id}.yaml`),
-    secretsRoot: path.join("config", "users", profile.id),
+    profilePath: repoRelativePath(import.meta.url, profilePath),
+    secretsRoot: repoRelativePath(import.meta.url, path.join(USER_SECRETS_ROOT, profile.id)),
   };
 }
 
@@ -575,6 +580,7 @@ export function scaffoldDockerWorkspace(
   userProfileId: string,
   options?: {
     baseImage?: string | null;
+    line?: WorkspaceSubscriptionLine;
   },
 ): string {
   const outputPath = workspaceConfigPath(project, "docker", userProfileId);
@@ -583,6 +589,7 @@ export function scaffoldDockerWorkspace(
     userProfileId,
     project,
     baseImage: options?.baseImage,
+    line: options?.line,
   });
   if (baseImage === workspaceImageRef(userProfileId, project)) {
     ensureWorkspaceDockerfile(userProfileId);

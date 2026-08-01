@@ -41,21 +41,19 @@ import {
   workspaceRuntimeResourceName,
   workspaceRuntimeScopeName,
 } from "../scripts/core/workspace-name.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
 const DEMO_USER_PROFILE_PATH = path.join(
-  REPO_ROOT,
-  "config",
-  "users",
+  USER_ROOT,
   "profiles",
   `${DEMO_USER_PROFILE_ID}.yaml`,
 );
 const DEMO_USER_ROOT = path.join(
-  REPO_ROOT,
-  "config",
-  "users",
+  USER_ROOT,
   DEMO_USER_PROFILE_ID,
 );
 const DEMO_GITHUB_SSH_CREDENTIAL_PATH = path.join(
@@ -69,6 +67,10 @@ const SHARED_WORKSPACE_DOCKERFILE = path.join(
   "docker",
   "workspace-prebuilt.Dockerfile",
 );
+
+function repoRelative(filePath: string): string {
+  return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
+}
 
 function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
   const digest = createHash("sha256")
@@ -300,7 +302,7 @@ test("loadWorkspace normalizes demo pod config through the TypeScript control pl
   assert.match(workspace.userProfile.id, /^\d{18}$/);
   assert.ok(workspace.userProfile.name.length > 0);
   assert.match(workspace.userProfile.email, /@/);
-  assert.ok(fs.existsSync(path.join(REPO_ROOT, "config", "users", workspace.userProfile.id, "workspaces", "demo")));
+  assert.ok(fs.existsSync(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", "demo")));
   assert.equal(workspace.backend.kind, "pod");
   assert.equal(workspace.backend.profile, "gvisor");
   assert.equal(workspace.health.readinessMode, "daemon-port");
@@ -334,8 +336,8 @@ test("runCli rejects empty argv and missing project", async () => {
 
 test("runCli user create scaffolds a user profile and default credentials", async () => {
   const userProfileId = uniqueProjectName("cli-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     const stdout = await captureStdout(async () => {
@@ -367,11 +369,10 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
   }
 });
 
-test("runCli user defaults set stores a user's default docker base image", async () => {
+test("runCli user defaults read omits the retired docker base image setting", async () => {
   const userProfileId = uniqueProjectName("cli-user-defaults");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const baseImage = "wanghai-admin-portal:latest";
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -384,43 +385,18 @@ test("runCli user defaults set stores a user's default docker base image", async
       `${userProfileId}@polaris.local`,
     ]);
 
-    const setStdout = await captureStdout(async () => {
-      await runCli([
-        "user",
-        "defaults",
-        "set",
-        userProfileId,
-        "--docker-base-image",
-        baseImage,
-      ]);
-    });
-    const setParsed = parseJsonOutput<{
-      workspaceDefaults: {
-        docker: {
-          runtime: {
-            baseImage: string | null;
-          };
-        };
-      };
-    }>(setStdout);
-    assert.equal(setParsed.workspaceDefaults.docker.runtime.baseImage, baseImage);
-
-    const storedProfile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
-    assert.equal(storedProfile.workspace_defaults?.docker?.runtime?.base_image, baseImage);
-
     const readStdout = await captureStdout(async () => {
       await runCli(["user", "defaults", "read", userProfileId]);
     });
     const readParsed = parseJsonOutput<{
-      workspaceDefaults: {
-        docker: {
-          runtime: {
-            baseImage: string | null;
-          };
-        };
-      };
+      workspaceDefaults: Record<string, never>;
     }>(readStdout);
-    assert.equal(readParsed.workspaceDefaults.docker.runtime.baseImage, baseImage);
+    assert.deepEqual(readParsed.workspaceDefaults, {});
+
+    await assert.rejects(
+      runCli(["user", "defaults", "set", userProfileId]),
+      /no longer stores a user default docker base image/i,
+    );
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
@@ -430,10 +406,10 @@ test("runCli user defaults set stores a user's default docker base image", async
 test("runCli user list returns sorted user profiles", async () => {
   const firstUserId = uniqueProjectName("cli-user-list-b");
   const secondUserId = uniqueProjectName("cli-user-list-a");
-  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
-  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
-  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
-  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+  const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(USER_ROOT, firstUserId);
+  const secondUserRoot = path.join(USER_ROOT, secondUserId);
 
   try {
     await runCli([
@@ -487,8 +463,8 @@ test("runCli user list returns sorted user profiles", async () => {
 
 test("runCli workspace list returns a user's workspace names", async () => {
   const userId = uniqueProjectName("cli-workspace-list");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces");
 
   try {
     await runCli(["user", "create", userId, "--name", "Workspace List User"]);
@@ -521,7 +497,7 @@ test("runCli workspace list returns a user's workspace names", async () => {
     assert.equal(parsed.workspaces[0]?.raw.status, null);
   } finally {
     fs.rmSync(profilePath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), { recursive: true, force: true });
+    fs.rmSync(path.join(USER_ROOT, userId), { recursive: true, force: true });
   }
 });
 
@@ -535,8 +511,8 @@ test("runCli user create adds the default RightCode codex credential when config
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT = "20";
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = "/codex,/draw";
   const userProfileId = uniqueProjectName("cli-user-codex-default");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     const stdout = await captureStdout(async () => {
@@ -595,10 +571,10 @@ test("runCli create allows the same workspace name under a different user", asyn
   const workspace = uniqueProjectName("cli-shared-workspace");
   const firstUserId = uniqueProjectName("cli-shared-user-a");
   const secondUserId = uniqueProjectName("cli-shared-user-b");
-  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
-  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
-  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
-  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
+  const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(USER_ROOT, firstUserId);
+  const secondUserRoot = path.join(USER_ROOT, secondUserId);
 
   try {
     await runCli([
@@ -643,8 +619,8 @@ test("runCli create allows the same workspace name under a different user", asyn
 test("runCli workspace create scaffolds a workspace through the namespaced command", async () => {
   const workspace = uniqueProjectName("cli-workspace-command");
   const userProfileId = uniqueProjectName("cli-workspace-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -672,13 +648,13 @@ test("runCli workspace create scaffolds a workspace through the namespaced comma
   }
 });
 
-test("runCli create uses a user's default docker base image when scaffolding a workspace", async () => {
+test("runCli create ignores a retired user default docker base image when scaffolding a workspace", async () => {
   const workspace = uniqueProjectName("cli-default-base-workspace");
   const userProfileId = uniqueProjectName("cli-default-base-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
-  const dockerfilePath = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
   const baseImage = "wanghai-admin-portal:latest";
 
   try {
@@ -691,19 +667,20 @@ test("runCli create uses a user's default docker base image when scaffolding a w
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli([
-      "user",
-      "defaults",
-      "set",
-      userProfileId,
-      "--docker-base-image",
-      baseImage,
-    ]);
+    const profile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+    profile.workspace_defaults = {
+      docker: {
+        runtime: {
+          base_image: baseImage,
+        },
+      },
+    };
+    fs.writeFileSync(profilePath, yaml.dump(profile, { lineWidth: 120, noRefs: true }), "utf8");
 
     await runCli(["create", workspace, "--user", userProfileId]);
 
     const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
-    assert.equal(doc.runtime?.base_image, baseImage);
+    assert.equal(doc.runtime?.base_image, workspaceImageRef(userProfileId, workspace));
     assert.equal(fs.existsSync(dockerfilePath), false);
   } finally {
     await cleanupCliTestUser({
@@ -714,13 +691,13 @@ test("runCli create uses a user's default docker base image when scaffolding a w
   }
 });
 
-test("runCli create --base-image overrides the user's default docker base image", async () => {
+test("runCli create --base-image still overrides a retired workspace default image", async () => {
   const workspace = uniqueProjectName("cli-override-base-workspace");
   const userProfileId = uniqueProjectName("cli-override-base-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
-  const dockerfilePath = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
   const defaultBaseImage = "wanghai-admin-portal:latest";
   const overrideBaseImage = "wanghai-admin-portal:custom";
 
@@ -734,14 +711,15 @@ test("runCli create --base-image overrides the user's default docker base image"
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli([
-      "user",
-      "defaults",
-      "set",
-      userProfileId,
-      "--docker-base-image",
-      defaultBaseImage,
-    ]);
+    const profile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+    profile.workspace_defaults = {
+      docker: {
+        runtime: {
+          base_image: defaultBaseImage,
+        },
+      },
+    };
+    fs.writeFileSync(profilePath, yaml.dump(profile, { lineWidth: 120, noRefs: true }), "utf8");
 
     const stdout = await captureStdout(async () => {
       await runCli([
@@ -773,9 +751,9 @@ test("runCli create --base-image overrides the user's default docker base image"
 test("runCli user delete removes the user profile, secrets root, and Clerk mapping", async () => {
   const userProfileId = uniqueProjectName("cli-user-delete");
   const clerkUsername = `${userProfileId}-clerk`;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
-  const userMapPath = path.join(REPO_ROOT, "config", "users", "user-map.json");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
+  const userMapPath = path.join(USER_ROOT, "user-map.json");
   const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
 
   try {
@@ -819,11 +797,11 @@ test("runCli user create rolls back scaffolded state when the Clerk mapping conf
   const firstUserId = uniqueProjectName("cli-user-conflict-a");
   const secondUserId = uniqueProjectName("cli-user-conflict-b");
   const clerkUsername = `${uniqueProjectName("cli-clerk-conflict")}-clerk`;
-  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
-  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
-  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
-  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
-  const userMapPath = path.join(REPO_ROOT, "config", "users", "user-map.json");
+  const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(USER_ROOT, firstUserId);
+  const secondUserRoot = path.join(USER_ROOT, secondUserId);
+  const userMapPath = path.join(USER_ROOT, "user-map.json");
   const originalUserMap = fs.existsSync(userMapPath) ? fs.readFileSync(userMapPath, "utf8") : null;
 
   try {
@@ -879,8 +857,8 @@ test("runCli user create rolls back scaffolded state when the Clerk mapping conf
 test("runCli user delete rejects users that still have workspace data", async () => {
   const userProfileId = uniqueProjectName("cli-user-delete-blocked");
   const workspace = uniqueProjectName("cli-user-delete-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -919,7 +897,7 @@ test("runCli delete removes a workspace without creating an archive", async () =
     "profiles",
     `${userProfileId}.yaml`,
   );
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
   const archivedRoot = path.join(userRoot, "archives", "workspaces");
 
@@ -953,8 +931,8 @@ test("runCli delete removes a workspace without creating an archive", async () =
 
 test("runCli user credential add, list, and activate manage codex credentials explicitly", async () => {
   const userProfileId = uniqueProjectName("cli-user-credential");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -1055,7 +1033,7 @@ test("runCli user credential read and write manage credential material directly"
     "profiles",
     `${userProfileId}.yaml`,
   );
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -1160,7 +1138,7 @@ test("runCli user credential add supports non-codex harness inventory entries", 
     "profiles",
     `${userProfileId}.yaml`,
   );
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -1235,8 +1213,8 @@ test("runCli user credential add supports non-codex harness inventory entries", 
 
 test("runCli user skill add, list, and remove manage declarative skill registry entries", async () => {
   const userProfileId = uniqueProjectName("cli-user-skill");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
 
   try {
     await runCli([
@@ -1423,11 +1401,11 @@ exit 0
         { force: true },
       );
       fs.rmSync(
-        path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "credentials", "claude", "claude-live"),
+        path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "credentials", "claude", "claude-live"),
         { recursive: true, force: true },
       );
       fs.rmSync(
-        path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "credentials", "claude-live.yaml"),
+        path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "credentials", "claude-live.yaml"),
         { force: true },
       );
     }
@@ -1648,7 +1626,7 @@ exit 0
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", DEMO_USER_PROFILE_ID, "workspaces", project), {
+    fs.rmSync(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "workspaces", project), {
       recursive: true,
       force: true,
     });
@@ -1658,8 +1636,8 @@ exit 0
 test("ensureCanonicalWorkspaceImage skips managed image provisioning for external base images", async () => {
   const userProfileId = uniqueProjectName("external-image-user");
   const project = uniqueProjectName("external-image-project");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const baseImage = "wanghai-admin-portal:latest";
 
   try {
@@ -1705,7 +1683,7 @@ exit 1
 
 test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the shared template", () => {
   const userProfileId = uniqueProjectName("dockerfile-sync");
-  const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
   const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
@@ -1726,7 +1704,7 @@ test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the
     );
   } finally {
     fs.utimesSync(templateDockerfile, templateStat.atime, templateStat.mtime);
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), { recursive: true, force: true });
+    fs.rmSync(path.join(USER_ROOT, userProfileId), { recursive: true, force: true });
   }
 });
 
@@ -1907,7 +1885,7 @@ test("ensureCanonicalWorkspaceImage rebuilds when the user Dockerfile is refresh
   const project = uniqueProjectName("image-refresh");
   const imageRef = workspaceImageRef(userProfileId, project);
   const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
-  const userDockerfile = path.join(REPO_ROOT, "config", "users", userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
   const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
   const sharedImageRef = sharedWorkspaceImageRefForTest(templateDockerfile);
   const templateStat = fs.statSync(templateDockerfile);
@@ -1963,7 +1941,7 @@ exit 0
   } finally {
     fs.utimesSync(templateDockerfile, templateStat.atime, templateStat.mtime);
     fs.rmSync(dockerPath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), { recursive: true, force: true });
+    fs.rmSync(path.join(USER_ROOT, userProfileId), { recursive: true, force: true });
   }
 });
 
@@ -2026,7 +2004,7 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), {
+    fs.rmSync(path.join(USER_ROOT, userProfileId), {
       recursive: true,
       force: true,
     });
@@ -2109,7 +2087,7 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userProfileId), {
+    fs.rmSync(path.join(USER_ROOT, userProfileId), {
       recursive: true,
       force: true,
     });
@@ -2128,8 +2106,8 @@ test("project ownership check rejects collisions across users", () => {
   try {
     assert.throws(() => assertNoProjectNameCollision(project), /Project name collision/);
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", "111111111111111111"), { recursive: true, force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", "222222222222222222"), { recursive: true, force: true });
+    fs.rmSync(path.join(USER_ROOT, "111111111111111111"), { recursive: true, force: true });
+    fs.rmSync(path.join(USER_ROOT, "222222222222222222"), { recursive: true, force: true });
   }
 });
 
@@ -2242,7 +2220,7 @@ exit 0
 test("status reports managed-key ssh metadata for github account profiles", async () => {
   const project = uniqueProjectName("ssh-status");
   await withTempWorkspaceSpec(project, "docker", async () => {
-    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", "ssh-status-test.yaml");
+    const profilePath = path.join(USER_ROOT, "profiles", "ssh-status-test.yaml");
     fs.writeFileSync(
       profilePath,
       yaml.dump({
@@ -2420,9 +2398,9 @@ test("workspace compatibility path derives a legacy user profile from inline git
 test("registry-backed credentials override legacy auth for the same purpose", async () => {
   const project = uniqueProjectName("credential-binding");
   const profileId = `${project}-user`;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", profileId);
-  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, profileId);
+  const registryDir = path.join(USER_ROOT, "credentials", profileId);
   await withTempWorkspaceSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
@@ -2508,8 +2486,8 @@ test("registry-backed credentials override legacy auth for the same purpose", as
 test("credential registry rejects cross-user ownership mismatches", async () => {
   const project = uniqueProjectName("credential-owner");
   const profileId = `${project}-user`;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
-  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(USER_ROOT, "credentials", profileId);
   await withTempWorkspaceSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(registryDir, { recursive: true });
@@ -2572,8 +2550,8 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
 test("credential registry rejects inline secret material", async () => {
   const project = uniqueProjectName("credential-inline-secret");
   const profileId = `${project}-user`;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
-  const registryDir = path.join(REPO_ROOT, "config", "users", "credentials", profileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const registryDir = path.join(USER_ROOT, "credentials", profileId);
   await withTempWorkspaceSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(registryDir, { recursive: true });
@@ -2637,7 +2615,7 @@ test("credential registry rejects inline secret material", async () => {
 test("provided-key user profile requires staged SSH private-key material", async () => {
   const project = uniqueProjectName("provided-key");
   await withTempWorkspaceSpec(project, "docker", async () => {
-    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", "provided-key-test.yaml");
+    const profilePath = path.join(USER_ROOT, "profiles", "provided-key-test.yaml");
     fs.writeFileSync(
       profilePath,
       yaml.dump({
@@ -2687,8 +2665,8 @@ test("provided-key user profile requires matching public-key comment", async () 
   const project = uniqueProjectName("provided-key-comment");
   await withTempWorkspaceSpec(project, "docker", async () => {
     const profileId = "provided-key-comment-test";
-    const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${profileId}.yaml`);
-    const userRoot = path.join(REPO_ROOT, "config", "users", profileId);
+    const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+    const userRoot = path.join(USER_ROOT, profileId);
     const credentialRoot = path.join(userRoot, "credentials");
     const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
     const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
@@ -2978,6 +2956,30 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
     assert.match(rendered, /paseo daemon status --json 2>\/dev\/null \|\| true/);
   });
+});
+
+test("docker vertical bootstrap starts the Wanghai portal after Paseo", async () => {
+  const project = uniqueProjectName("docker-vertical");
+  const outputPath = scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, {
+    line: "vertical",
+  });
+  const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+  const renderedOutputPath = generatedOutputPath(workspace);
+  try {
+    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    assert.ok(
+      workspace.connectivity.servicePorts.some((port) => port.containerPort === "9090"),
+    );
+    assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
+    assert.match(rendered, /curl -fsS http:\/\/127\.0\.0\.1:9090\/ >/);
+    assert.match(
+      rendered,
+      /wanghai-entrypoint pnpm --dir \/opt\/wanghai\/apps\/admin-portal run start --hostname 0\.0\.0\.0 --port 9090/,
+    );
+  } finally {
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+    fs.rmSync(renderedOutputPath, { force: true });
+  }
 });
 
 test("pod backend returns structured observations", async () => {
@@ -4324,7 +4326,10 @@ exit 0
         assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
         assert.equal(parsed.driver?.status, "running");
         assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
-        assert.equal(parsed.assets.dockerfile.path, "config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile");
+        assert.equal(
+          parsed.assets.dockerfile.path,
+          repoRelative(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")),
+        );
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
         assert.deepEqual(parsed.assets.generatedManifests.map((item) => item.file), ["docker.yaml", "pod.yaml", "kubevirt.yaml"]);
         assert.equal(parsed.assets.imageTags.find((item) => item.name === "workspace")?.tag, workspaceImageRef(DEMO_USER_PROFILE_ID, project));

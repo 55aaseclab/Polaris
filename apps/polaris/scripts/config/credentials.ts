@@ -13,7 +13,7 @@ import {
   type AgentHarness,
   type ManagedHarness,
 } from "./credential-catalog.js";
-import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -239,7 +239,10 @@ function summarizeCredentialDocument(
       ? document.purposes.map((value) => String(value)).filter(Boolean)
       : [],
     status: String(document.status ?? "unknown"),
-    registryPath: path.join("config", "users", userProfileId, "credentials", `${id}.yaml`),
+    registryPath: repoRelativePath(
+      import.meta.url,
+      credentialRegistryPathFor(userProfileId, id),
+    ),
     paths: credentialPathsFromMaterial(
       materialRefRecord(document.materialRef),
     ),
@@ -865,7 +868,10 @@ export function deleteManagedCredential(args: {
     id: args.credentialId,
     userId: args.userProfileId,
     removed,
-    registryPath: path.join("config", "users", args.userProfileId, "credentials", `${args.credentialId}.yaml`),
+    registryPath: repoRelativePath(
+      import.meta.url,
+      credentialRegistryPathFor(args.userProfileId, args.credentialId),
+    ),
     removedPaths,
   };
 }

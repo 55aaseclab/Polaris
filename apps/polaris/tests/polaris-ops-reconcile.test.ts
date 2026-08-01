@@ -10,8 +10,10 @@ import {
   workspaceSelectionPath,
   workspaceStatusPath,
 } from "../scripts/output/state-store.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
@@ -53,8 +55,8 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
 test("ops reconcile-workspaces migrates status, removes selection, and rebuilds running docker workspaces", async () => {
   const userId = uniqueName("ops-user");
   const workspace = uniqueName("ops-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const commandLogPath = path.join(os.tmpdir(), `${workspace}-docker.log`);
   try {
     await createUserCommand([userId, "--name", "Ops User", "--email", `${userId}@polaris.local`]);

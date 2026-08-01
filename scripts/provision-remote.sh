@@ -127,10 +127,6 @@ if ! grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=' '${REMOTE_ENV_FILE}' \
   upsert_env_line 'POLARIS_EXECUTOR_SHARED_SECRET' \"\$(generate_executor_secret)\" '${REMOTE_ENV_FILE}'
 fi
 
-if [ -d '${REMOTE_APP_DIR}/config/users' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/users' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
-  rsync -a '${REMOTE_APP_DIR}/config/users/' '${REMOTE_DATA_ROOT}/users/'
-fi
-
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'
 fi

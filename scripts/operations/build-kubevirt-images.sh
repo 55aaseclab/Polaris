@@ -22,7 +22,7 @@ Options:
                                 before snapshotting the VM.
   --dockerfile <path>           Dockerfile used for workspace-image rebuild.
                                 Default: user-profile Dockerfile when present,
-                                otherwise config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile
+                                otherwise <POLARIS_DATA_ROOT>/users/100000000000000001/docker/workspace-prebuilt.Dockerfile
   --context <path>              Docker build context for workspace-image rebuild.
                                 Default: repo root
   --workspace-image-output <ref>
@@ -61,11 +61,56 @@ VM_NAME="demo-vm"
 WORKSPACE_IMAGE_REF="ttl.sh/polaris-demo-debian13-1782126452:24h"
 BUILD_WORKSPACE_IMAGE=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-KUBEVIRT_SPEC_PATH="${REPO_ROOT}/config/users/100000000000000001/projects/demo/kubevirt.agent.yaml"
-DEFAULT_DOCKERFILE_PATH="${REPO_ROOT}/config/users/100000000000000001/docker/workspace-prebuilt.Dockerfile"
+ENV_FILE="${POLARIS_ENV_FILE:-${REPO_ROOT}/.env.dev}"
+POLARIS_DATA_ROOT=""
+POLARIS_USERS_ROOT=""
+KUBEVIRT_SPEC_PATH=""
+DEFAULT_DOCKERFILE_PATH=""
 DOCKERFILE_PATH=""
 BUILD_CONTEXT="${REPO_ROOT}"
 WORKSPACE_IMAGE_OUTPUT=""
+
+read_env_value() {
+  local file_path="$1"
+  local key="$2"
+
+  if [[ ! -f "${file_path}" ]]; then
+    return 1
+  fi
+
+  awk -F= -v key="${key}" '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    {
+      current_key = $1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", current_key)
+      if (current_key != key) {
+        next
+      }
+      value = substr($0, index($0, "=") + 1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^["'\'']|["'\'']$/, "", value)
+      print value
+      exit
+    }
+  ' "${file_path}"
+}
+
+resolve_polaris_data_root() {
+  local configured="${POLARIS_DATA_ROOT:-}"
+  if [[ -z "${configured}" ]]; then
+    configured="$(read_env_value "${ENV_FILE}" "POLARIS_DATA_ROOT" || true)"
+  fi
+  if [[ -z "${configured}" ]]; then
+    log "POLARIS_DATA_ROOT is required. Set it in the environment or ${ENV_FILE}."
+    exit 1
+  fi
+  if [[ "${configured}" = /* ]]; then
+    printf '%s\n' "${configured}"
+    return
+  fi
+  printf '%s\n' "${REPO_ROOT}/${configured}"
+}
 
 resolve_workspace_user_profile_id() {
   sed -n "s/^user_profile: ['\"]\\{0,1\\}\\([^'\"]*\\)['\"]\\{0,1\\}$/\\1/p" \
@@ -78,7 +123,7 @@ resolve_default_dockerfile_path() {
 
   user_profile_id="$(resolve_workspace_user_profile_id)"
   if [[ -n "${user_profile_id}" ]]; then
-    user_dockerfile="${REPO_ROOT}/config/users/${user_profile_id}/docker/workspace-prebuilt.Dockerfile"
+    user_dockerfile="${POLARIS_USERS_ROOT}/${user_profile_id}/docker/workspace-prebuilt.Dockerfile"
     if [[ -f "${user_dockerfile}" ]]; then
       printf '%s\n' "${user_dockerfile}"
       return
@@ -92,6 +137,11 @@ if [[ $# -lt 1 ]]; then
   usage
   exit 1
 fi
+
+POLARIS_DATA_ROOT="$(resolve_polaris_data_root)"
+POLARIS_USERS_ROOT="${POLARIS_DATA_ROOT}/users"
+KUBEVIRT_SPEC_PATH="${POLARIS_USERS_ROOT}/100000000000000001/workspaces/demo/kubevirt.agent.yaml"
+DEFAULT_DOCKERFILE_PATH="${POLARIS_USERS_ROOT}/100000000000000001/docker/workspace-prebuilt.Dockerfile"
 
 ROOTDISK_IMAGE_REF="$1"
 shift

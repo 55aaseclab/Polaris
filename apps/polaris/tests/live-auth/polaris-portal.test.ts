@@ -23,9 +23,11 @@ import {
   writeWorkspaceProvisionProgress,
   clearWorkspaceProvisionProgress,
 } from "../../scripts/core/portal.js";
+import { polarisUsersRoot } from "../../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
-const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
+const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
 const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
 
@@ -323,10 +325,10 @@ test("live auth portal API serves route-scoped workspaces and credentials for an
     );
   });
 
-  fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
+  fs.rmSync(path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`), {
     force: true,
   });
-  fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId), {
+  fs.rmSync(path.join(USER_ROOT, userId, "credentials", "codex", credentialId), {
     recursive: true,
     force: true,
   });
@@ -336,8 +338,8 @@ test("live auth portal API rejects cross-user access for a normal user session",
   const firstUserId = uniqueName("portal-scope-user-a");
   const secondUserId = uniqueName("portal-scope-user-b");
   const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
-    profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
-    userRoot: path.join(REPO_ROOT, "config", "users", userId),
+    profilePath: path.join(USER_ROOT, "profiles", `${userId}.yaml`),
+    userRoot: path.join(USER_ROOT, userId),
   }));
   const identity = await createLivePortalIdentity();
 
@@ -363,8 +365,8 @@ test("live auth portal API rejects cross-user access for a normal user session",
 test("live auth portal API creates a user profile and Clerk mapping via the CLI-backed flow", async () => {
   const clerkUsername = uniqueName("portal-user");
   const userProfileId = clerkUsername;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const identity = await createLivePortalIdentity(clerkUsername);
 
@@ -417,8 +419,8 @@ test("live auth portal API creates a user profile and Clerk mapping via the CLI-
 test("live auth portal API creates a user profile without a Clerk email by using a synthetic fallback email", async () => {
   const clerkUsername = uniqueName("portal-no-email");
   const userProfileId = clerkUsername;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const identity = await createLivePortalIdentity(clerkUsername);
 
@@ -470,8 +472,8 @@ test("live auth portal API creates the default RightCode codex credential when c
   process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = "/codex,/draw";
   const clerkUsername = uniqueName("portal-codex-default");
   const userProfileId = clerkUsername;
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const secretsRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const secretsRoot = path.join(USER_ROOT, userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const identity = await createLivePortalIdentity(clerkUsername);
 
@@ -532,8 +534,8 @@ test("live auth portal API creates the default RightCode codex credential when c
 test("live auth portal API deletes a user profile, user root, and Clerk mapping", async () => {
   const userProfileId = uniqueName("portal-delete-user");
   const clerkUsername = uniqueName("clerk-delete-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
 
   try {
@@ -592,8 +594,8 @@ test("live auth portal API deletes a user profile, user root, and Clerk mapping"
 test("live auth portal API resolves Clerk username mappings from the live mapping file", async () => {
   const clerkUsername = uniqueName("clerk-map");
   const userProfileId = uniqueName("portal-map-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userProfileId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userProfileId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const identity = await createLivePortalIdentity(clerkUsername);
 
@@ -640,8 +642,8 @@ test("live auth user-map writes remain consistent under concurrent async updates
   const firstUserId = uniqueName("portal-concurrent-a");
   const secondUserId = uniqueName("portal-concurrent-b");
   const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
-    profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
-    userRoot: path.join(REPO_ROOT, "config", "users", userId),
+    profilePath: path.join(USER_ROOT, "profiles", `${userId}.yaml`),
+    userRoot: path.join(USER_ROOT, userId),
   }));
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
 
@@ -700,8 +702,8 @@ test("live auth portal API rejects conflicting Clerk username registrations", as
   const secondUserId = uniqueName("portal-conflict-b");
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const cleanupTargets = [firstUserId, secondUserId].map((userId) => ({
-    profilePath: path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
-    userRoot: path.join(REPO_ROOT, "config", "users", userId),
+    profilePath: path.join(USER_ROOT, "profiles", `${userId}.yaml`),
+    userRoot: path.join(USER_ROOT, userId),
   }));
 
   try {
@@ -747,8 +749,8 @@ test("live auth portal API rejects conflicting Clerk username registrations", as
 
 test("live auth portal user creation promotes bootstrap admins automatically", async () => {
   const userId = "bootstrap-admin";
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const identity = await createLivePortalIdentity(userId);
   await withEnv("POLARIS_BOOTSTRAP_ADMIN_USERS", identity.clerkUsername, async () => {

@@ -10,6 +10,7 @@ import { createPortalServer } from "../scripts/portal/server.js";
 import { createExecutorServer } from "../scripts/executor/server.js";
 import {
   deleteUserMapEntriesForPolarisUserId,
+  readUserAccessSummary,
   upsertUserMapEntry,
   upsertUserMapUserId,
 } from "../scripts/portal/user-map.js";
@@ -49,7 +50,10 @@ import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
-import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import {
+  scaffoldDockerWorkspace,
+  workspaceConfigPath,
+} from "../scripts/config/scaffold.js";
 import {
   listOwnedWorkspaces,
   readPortalProfile,
@@ -60,6 +64,7 @@ import {
   clearWorkspaceProvisionProgress,
 } from "../scripts/core/portal.js";
 import {
+  workspacePaseoStateDir,
   workspaceSelectionPath,
   writeWorkspaceDriverSelection,
   writeWorkspaceStatus,
@@ -67,11 +72,17 @@ import {
 import { stopPortalWorkspace as stopPortalWorkspaceDirect } from "../scripts/executor/operations.js";
 import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
 import { readWorkspaceDriverSelection } from "../scripts/output/state-store.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
-const USER_MAP_PATH = path.join(REPO_ROOT, "config", "users", "user-map.json");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
+const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
 const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
+
+function repoRelative(filePath: string): string {
+  return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
+}
 
 let executorServer: import("node:http").Server | null = null;
 let executorBaseUrl = "";
@@ -393,8 +404,8 @@ async function withSyntheticMemberUser(
 ): Promise<void> {
   const userId = uniqueName("portal-member");
   const workspace = uniqueName("portal-member-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
   fs.mkdirSync(path.dirname(profilePath), { recursive: true });
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.writeFileSync(
@@ -418,7 +429,7 @@ async function withSyntheticMemberUser(
     await fn(userId, workspace);
   } finally {
     fs.rmSync(profilePath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+    fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
       force: true,
     });
@@ -428,7 +439,7 @@ async function withSyntheticMemberUser(
 test("workspace ownership is derived from the project directory", () => {
   const userId = "100000000000000001";
   const workspace = uniqueName("portal-owned");
-  const root = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const root = path.join(USER_ROOT, userId, "workspaces", workspace);
   fs.mkdirSync(root, { recursive: true });
   fs.copyFileSync(
     workspaceConfigPath("demo", "docker", userId),
@@ -517,8 +528,8 @@ test("portal workspace list refreshes status before returning", async () => {
 test("portal workspace stop writes cached status before the async refresh completes", async () => {
   const userId = uniqueName("portal-stop-cache-user");
   const workspace = uniqueName("portal-stop-cache");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Cache User", "--email", `${userId}@polaris.local`]);
     await createCommand([workspace, "--user", userId]);
@@ -576,7 +587,7 @@ test("portal workspace stop writes cached status before the async refresh comple
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     fs.rmSync(profilePath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+    fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
       force: true,
     });
@@ -586,9 +597,9 @@ test("portal workspace stop writes cached status before the async refresh comple
 test("portal workspace stop publishes stopping to the live stream before completion", async () => {
   const userId = uniqueName("portal-stop-live-user");
   const workspace = uniqueName("portal-stop-live");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Live User", "--email", `${userId}@polaris.local`]);
     await createCommand([`${workspace}@docker`, "--user", userId]);
@@ -656,9 +667,9 @@ exit 0
 test("portal workspace stop surfaces backend stop failures instead of reporting success", async () => {
   const userId = uniqueName("portal-stop-failure-user");
   const workspace = uniqueName("portal-stop-failure");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 
   try {
     await createUserCommand([userId, "--name", "Portal Stop Failure User", "--email", `${userId}@polaris.local`]);
@@ -702,7 +713,7 @@ exit 0
   } finally {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     fs.rmSync(profilePath, { force: true });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+    fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
       force: true,
     });
@@ -900,10 +911,10 @@ test("portal credential preview hides material content", async () => {
     assert.equal(preview.content, "[credential preview hidden]");
     assert.equal(preview.truncated, false);
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`), {
+    fs.rmSync(path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`), {
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId), {
+    fs.rmSync(path.join(USER_ROOT, userId, "credentials", "codex", credentialId), {
       recursive: true,
       force: true,
     });
@@ -912,8 +923,8 @@ test("portal credential preview hides material content", async () => {
 
 test("portal service creates activates and deletes a codex credential for an existing user", async () => {
   const userId = uniqueName("portal-credential-user");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 
   try {
     await createUserCommand([userId, "--name", "Portal Credential User", "--email", `${userId}@polaris.local`]);
@@ -1005,9 +1016,9 @@ test("portal service creates activates and deletes a codex credential for an exi
 test("portal service creates and deletes a codex credential for demo user 001", async () => {
   const userId = DEMO_USER_ID;
   const credentialId = uniqueName("demo-codex");
-  const registryPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", `${credentialId}.yaml`);
-  const authPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId, "auth.json");
-  const configPath = path.join(REPO_ROOT, "config", "users", userId, "credentials", "codex", credentialId, "config.toml");
+  const registryPath = path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
+  const authPath = path.join(USER_ROOT, userId, "credentials", "codex", credentialId, "auth.json");
+  const configPath = path.join(USER_ROOT, userId, "credentials", "codex", credentialId, "config.toml");
 
   try {
     const created = await createPortalCredential({
@@ -1072,8 +1083,8 @@ test("portal service creates and deletes a codex credential for demo user 001", 
 
 test("portal service lists, creates, and deletes user skill registry entries", async () => {
   const userId = uniqueName("portal-skill-user");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 
   try {
     await createUserCommand([userId, "--name", "Portal Skill User", "--email", `${userId}@polaris.local`]);
@@ -1105,7 +1116,7 @@ test("portal service lists, creates, and deletes user skill registry entries", a
 
 test("portal service exposes the credential catalog and creates a claude inventory credential", async () => {
   const userId = uniqueName("portal-claude-user");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const profilePath = path.join(
     REPO_ROOT,
     "config",
@@ -1200,7 +1211,7 @@ test("portal service exposes the credential catalog and creates a claude invento
 
 test("portal profile reads and updates", async () => {
   const userId = "100000000000000001";
-  const original = fs.readFileSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), "utf8");
+  const original = fs.readFileSync(path.join(USER_ROOT, "profiles", `${userId}.yaml`), "utf8");
 
   const profile = readPortalProfile(userId);
   assert.equal(profile?.name, "Demo User");
@@ -1214,7 +1225,7 @@ test("portal profile reads and updates", async () => {
   assert.equal(updated.githubAccount, "demo-account");
 
   fs.writeFileSync(
-    path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`),
+    path.join(USER_ROOT, "profiles", `${userId}.yaml`),
     original,
     "utf8",
   );
@@ -1232,10 +1243,10 @@ test("portal workspace detail does not leak bindings from another user with the 
   const workspace = uniqueName("shared-name");
   const firstUserId = uniqueName("portal-scope-a");
   const secondUserId = uniqueName("portal-scope-b");
-  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
-  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
-  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
-  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(USER_ROOT, firstUserId);
+  const secondUserRoot = path.join(USER_ROOT, secondUserId);
+  const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`);
 
   try {
     await createUserCommand([firstUserId, "--name", "Scope A", "--email", `${firstUserId}@polaris.local`]);
@@ -1294,10 +1305,10 @@ test("portal service can provision the same workspace name for a different user"
   const workspace = uniqueName("portal-shared-name");
   const firstUserId = uniqueName("portal-shared-a");
   const secondUserId = uniqueName("portal-shared-b");
-  const firstUserRoot = path.join(REPO_ROOT, "config", "users", firstUserId);
-  const secondUserRoot = path.join(REPO_ROOT, "config", "users", secondUserId);
-  const firstProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`);
-  const secondProfilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`);
+  const firstUserRoot = path.join(USER_ROOT, firstUserId);
+  const secondUserRoot = path.join(USER_ROOT, secondUserId);
+  const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
+  const secondProfilePath = path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`);
 
   try {
     await createUserCommand([firstUserId, "--name", "Shared A", "--email", `${firstUserId}@polaris.local`]);
@@ -1331,12 +1342,15 @@ test("portal service can provision the same workspace name for a different user"
 });
 
 test("portal workspace asset preview reads workspace files", async () => {
+  const previewPath = repoRelative(
+    path.join(USER_ROOT, DEMO_USER_ID, "workspaces", "demo", "docker.agent.yaml"),
+  );
   const payload = readUserPortalWorkspaceAssetPreview(
     DEMO_USER_ID,
     "demo",
-    "config/users/100000000000000001/workspaces/demo/docker.agent.yaml",
+    previewPath,
   );
-  assert.equal(payload.path, "config/users/100000000000000001/workspaces/demo/docker.agent.yaml");
+  assert.equal(payload.path, previewPath);
   assert.match(payload.content, /backend:/);
   assert.equal(payload.truncated, false);
 });
@@ -1351,9 +1365,9 @@ test("portal workspace asset preview reads workspace files", async () => {
 test("portal service provisions a new workspace through the CLI-backed scaffold flow", async () => {
   const userId = uniqueName("portal-workspace-user");
   const workspace = uniqueName("portal-create");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
   const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
@@ -1427,9 +1441,9 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
 test("portal service can cancel a queued or running workspace provision job", async () => {
   const userId = uniqueName("portal-cancel-user");
   const workspace = uniqueName("portal-cancel");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
   const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
@@ -1487,9 +1501,9 @@ test("portal service can cancel a queued or running workspace provision job", as
 test("portal service stops the selected workspace driver", async () => {
   const userId = uniqueName("portal-stop-user");
   const workspace = uniqueName("portal-stop");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
   const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
@@ -1580,9 +1594,9 @@ exit 0
 test("portal service can create and start a new workspace in one flow", async () => {
   const userId = uniqueName("portal-start-user");
   const workspace = uniqueName("portal-start");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
 
   try {
     await createUserCommand([userId, "--name", "Portal Start User", "--email", `${userId}@polaris.local`]);
@@ -1642,9 +1656,9 @@ exit 0
 test("portal service starts the selected workspace driver", async () => {
   const userId = uniqueName("portal-explicit-start-user");
   const workspace = uniqueName("portal-explicit-start");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
   const claudeSettings = path.join(userRoot, "credentials", "claude", "settings.json");
@@ -1733,9 +1747,9 @@ exit 0
 test("portal service binds and unbinds paseo agent credentials on the selected workspace driver", async () => {
   const userId = uniqueName("portal-paseo-bind-user");
   const workspace = uniqueName("portal-paseo-bind");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const dockerSpecPath = path.join(workspaceRoot, "docker.agent.yaml");
   const credentialId = uniqueName("portal-codex");
 
@@ -1846,7 +1860,7 @@ exit 0
 test("portal service switches the live codex credential without mutating workspace bindings", async () => {
   const userId = uniqueName("portal-live-switch-user");
   const workspace = uniqueName("portal-live-switch");
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const workspaceRoot = path.join(userRoot, "workspaces", workspace);
   const profileFile = path.join(
     REPO_ROOT,
@@ -2071,20 +2085,20 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", firstUserId), {
+    fs.rmSync(path.join(USER_ROOT, firstUserId), {
       recursive: true,
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", secondUserId), {
+    fs.rmSync(path.join(USER_ROOT, secondUserId), {
       recursive: true,
       force: true,
     });
     fs.rmSync(
-      path.join(REPO_ROOT, "config", "users", "profiles", `${firstUserId}.yaml`),
+      path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`),
       { force: true },
     );
     fs.rmSync(
-      path.join(REPO_ROOT, "config", "users", "profiles", `${secondUserId}.yaml`),
+      path.join(USER_ROOT, "profiles", `${secondUserId}.yaml`),
       { force: true },
     );
   }
@@ -2093,9 +2107,9 @@ exit 0
 test("portal service deletes a stopped workspace and removes it from the active profile index", async () => {
   const userId = DEMO_USER_ID;
   const workspace = uniqueName("portal-delete");
-  const workspaceRoot = path.join(REPO_ROOT, "config", "users", userId, "workspaces", workspace);
+  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
   const portalStateRoot = path.join(workspaceRoot, ".portal");
-  const profileFile = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
+  const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const originalProfile = fs.readFileSync(profileFile, "utf8");
 
   fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -2135,7 +2149,19 @@ test("portal service refreshes the real status when delete fails for a running w
   const userId = uniqueName("portal-archive-running-user");
   const workspace = uniqueName("portal-archive-running");
   try {
-    await createUserCommand([userId, "--name", "Portal Archive Running User", "--email", `${userId}@polaris.local`]);
+    await withEnv(
+      "POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT",
+      "node -e \"console.log(JSON.stringify({ apiKey: 'test-default-rightcode-key' }))\" --",
+      async () => {
+        await createUserCommand([
+          userId,
+          "--name",
+          "Portal Archive Running User",
+          "--email",
+          `${userId}@polaris.local`,
+        ]);
+      },
+    );
     await createCommand([workspace, "--user", userId]);
     writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
     writeWorkspaceStatus({
@@ -2192,14 +2218,14 @@ exit 0
     );
 
     const nextStatus = readWorkspaceStatus(userId, workspace);
-    assert.equal(nextStatus?.driver?.status, "deleting");
+    assert.equal(nextStatus?.driver?.status, "running");
     assert.notEqual(nextStatus?.driver?.reason, "stale delete status");
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userId), {
+    fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`), {
+    fs.rmSync(path.join(USER_ROOT, "profiles", `${userId}.yaml`), {
       force: true,
     });
   }
@@ -2264,24 +2290,61 @@ test("portal workspace summaries stay isolated for same workspace name under dif
     assert.equal(userBSummary?.status?.driver?.status, "stopping");
     assert.equal(userBSummary?.status?.details?.owner, userB);
   } finally {
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userA), {
+    fs.rmSync(path.join(USER_ROOT, userA), {
       recursive: true,
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", userB), {
+    fs.rmSync(path.join(USER_ROOT, userB), {
       recursive: true,
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userA}.yaml`), {
+    fs.rmSync(path.join(USER_ROOT, "profiles", `${userA}.yaml`), {
       force: true,
     });
-    fs.rmSync(path.join(REPO_ROOT, "config", "users", "profiles", `${userB}.yaml`), {
+    fs.rmSync(path.join(USER_ROOT, "profiles", `${userB}.yaml`), {
       force: true,
     });
   }
 });
 
-test("portal root advertises the API surface without a default user fallback", async () => {
+test("portal workspace summaries expose serverId, surfaces, and published ports", async () => {
+  const userId = uniqueName("portal-summary-user");
+  const workspace = uniqueName("portal-summary-workspace");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Portal Summary User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+    scaffoldDockerWorkspace(workspace, userId, { line: "vertical" });
+    const paseoStateRoot = workspacePaseoStateDir(workspace, userId);
+    fs.mkdirSync(paseoStateRoot, { recursive: true });
+    fs.writeFileSync(path.join(paseoStateRoot, "server-id"), "srv_summary\n", "utf8");
+
+    const summary = (await listPortalWorkspaces(userId)).find((entry) => entry.name === workspace);
+    assert.equal(summary?.serverId, "srv_summary");
+    assert.deepEqual(summary?.surfaces, ["paseo", "wanghai"]);
+    assert.deepEqual(
+      summary?.ports.map((port) => ({
+        name: port.name ?? "",
+        containerPort: port.containerPort,
+      })),
+      [
+        { name: "paseo", containerPort: "6767" },
+        { name: "wanghai", containerPort: "9090" },
+      ],
+    );
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal API metadata is served from /api without a default user fallback", async () => {
   const server = createPortalServer(0);
   await once(server, "listening");
   const address = server.address();
@@ -2289,7 +2352,7 @@ test("portal root advertises the API surface without a default user fallback", a
     throw new Error("Portal server did not expose a TCP address");
   }
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api`);
     assert.equal(response.status, 200);
     const payload = await response.json() as {
       service: string;
@@ -2305,9 +2368,157 @@ test("portal root advertises the API surface without a default user fallback", a
   }
 });
 
+test("portal serves shell documents and shell assets from the control plane", async () => {
+  const server = createPortalServer(0);
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  try {
+    const shellResponse = await fetch(`http://127.0.0.1:${address.port}/hosts`);
+    assert.equal(shellResponse.status, 200);
+    assert.match(shellResponse.headers.get("content-type") ?? "", /text\/html/);
+    assert.match(await shellResponse.text(), /<main id="app" aria-live="polite"><\/main>/);
+
+    const assetResponse = await fetch(`http://127.0.0.1:${address.port}/shell/shell.js`);
+    assert.equal(assetResponse.status, 200);
+    assert.match(assetResponse.headers.get("content-type") ?? "", /text\/javascript/);
+    assert.ok((await assetResponse.text()).includes('href="/hosts"'));
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("portal admin access updates can switch a user's subscription line", async () => {
+  const originalUserMap = fs.existsSync(USER_MAP_PATH)
+    ? fs.readFileSync(USER_MAP_PATH, "utf8")
+    : null;
+  try {
+    await withEnv("POLARIS_AUTH_MODE", "oauth2-proxy", async () => {
+      await upsertUserMapEntry("access-admin", {
+        polarisUserId: DEMO_USER_ID,
+        role: "admin",
+        plan: "pro",
+        line: "coding",
+      });
+      await upsertUserMapUserId("access-admin", {
+        polarisUserId: DEMO_USER_ID,
+        role: "admin",
+        plan: "pro",
+        line: "coding",
+      });
+      const server = createPortalServer(0);
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Portal server did not expose a TCP address");
+      }
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/api/users/${DEMO_USER_ID}/access`,
+          {
+            method: "PUT",
+            headers: {
+              "content-type": "application/json",
+              "X-Auth-Request-User": "access-admin",
+            },
+            body: JSON.stringify({ line: "vertical" }),
+          },
+        );
+        assert.equal(response.status, 200);
+        const payload = await response.json() as {
+          polarisUserId: string;
+          line: string;
+        };
+        assert.equal(payload.polarisUserId, DEMO_USER_ID);
+        assert.equal(payload.line, "vertical");
+        assert.equal(readUserAccessSummary(DEMO_USER_ID)?.line, "vertical");
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
+    });
+  } finally {
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
+test("portal access updates reject non-admin sessions", async () => {
+  const userId = uniqueName("portal-access-user");
+  const authingUsername = uniqueName("access-user");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+  const originalUserMap = fs.existsSync(USER_MAP_PATH)
+    ? fs.readFileSync(USER_MAP_PATH, "utf8")
+    : null;
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Portal Non Admin",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+    await withEnv("POLARIS_AUTH_MODE", "oauth2-proxy", async () => {
+      await upsertUserMapEntry(authingUsername, {
+        polarisUserId: userId,
+        role: "user",
+        plan: "free",
+        line: "coding",
+      });
+      await upsertUserMapUserId(authingUsername, {
+        polarisUserId: userId,
+        role: "user",
+        plan: "free",
+        line: "coding",
+      });
+      const server = createPortalServer(0);
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Portal server did not expose a TCP address");
+      }
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/api/users/${userId}/access`,
+          {
+            method: "PUT",
+            headers: {
+              "content-type": "application/json",
+              "X-Auth-Request-User": authingUsername,
+            },
+            body: JSON.stringify({ line: "vertical" }),
+          },
+        );
+        assert.equal(response.status, 403);
+        const payload = await response.json() as { error: string };
+        assert.match(payload.error, /Admin access is required/);
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
+    });
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    if (originalUserMap === null) {
+      fs.rmSync(USER_MAP_PATH, { force: true });
+    } else {
+      fs.writeFileSync(USER_MAP_PATH, originalUserMap, "utf8");
+    }
+  }
+});
+
 test("portal disabled auth mode returns a local development session without credentials", async () => {
   await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
-    await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", DEMO_USER_ID, async () => {
+    const userId = uniqueName("disabled-auth-user");
+    await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", userId, async () => {
       const server = createPortalServer(0);
       await once(server, "listening");
       const address = server.address();
@@ -2323,12 +2534,14 @@ test("portal disabled auth mode returns a local development session without cred
           authingUsername: string | null;
           polarisUserId: string | null;
           role: string | null;
+          line: string | null;
         };
         assert.equal(payload.authMode, "disabled");
         assert.equal(payload.authenticated, true);
-        assert.equal(payload.authingUsername, DEMO_USER_ID);
-        assert.equal(payload.polarisUserId, DEMO_USER_ID);
+        assert.equal(payload.authingUsername, userId);
+        assert.equal(payload.polarisUserId, userId);
         assert.equal(payload.role, "admin");
+        assert.equal(payload.line, null);
       } finally {
         server.close();
         await once(server, "close");
@@ -2375,8 +2588,8 @@ test("portal oauth2-proxy auth mode trusts forwarded username headers", async ()
 
 test("portal admin list includes mapped users", async () => {
   const userId = uniqueName("portal-admin-user");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   try {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
@@ -2453,8 +2666,8 @@ test("portal admin list includes mapping-only users", async () => {
 
 test("portal user deletion removes Clerk mappings together with the Polaris user", async () => {
   const userId = uniqueName("portal-mapped-delete");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   try {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
@@ -2526,8 +2739,8 @@ test("portal user deletion removes Clerk mappings together with the Polaris user
 
 test("portal user deletion restores profile root and mappings when filesystem deletion fails", async () => {
   const userId = uniqueName("portal-delete-rollback");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const credentialPath = path.join(userRoot, "credentials", "codex-default.yaml");
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const originalRmSync = fs.rmSync;
@@ -2594,8 +2807,8 @@ test("portal user deletion restores profile root and mappings when filesystem de
 test("portal user deletion rollback preserves unrelated user-map updates", async () => {
   const userId = uniqueName("portal-delete-preserve");
   const unrelatedUserId = uniqueName("portal-unrelated");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   const originalUserMap = fs.existsSync(USER_MAP_PATH) ? fs.readFileSync(USER_MAP_PATH, "utf8") : null;
   const originalRmSync = fs.rmSync;
   let injectedFailure = false;
@@ -2680,7 +2893,7 @@ test("portal user deletion rejects users with queued workspace provisioning", as
     "profiles",
     `${userId}.yaml`,
   );
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
 
   try {
     await createUserCommand([
@@ -2728,7 +2941,7 @@ test("portal user deletion rollback restores the lock-consistent user snapshot",
     "profiles",
     `${userId}.yaml`,
   );
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const userRoot = path.join(USER_ROOT, userId);
   const userCredentialPath = path.join(
     userRoot,
     "credentials",

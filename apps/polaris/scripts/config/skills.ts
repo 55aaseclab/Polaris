@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import type { WorkspaceSpec } from "../core/workspace.js";
-import { polarisUsersRoot } from "../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath } from "../utils/paths.js";
 
 export const SKILL_HARNESSES = [
   "codex",
@@ -93,7 +93,7 @@ function summarizeSkillDocument(
       ? document.source
       : undefined,
     selectedSkillName,
-    registryPath: path.join("config", "users", userProfileId, "skills", `${id}.yaml`),
+    registryPath: repoRelativePath(import.meta.url, skillRegistryPathFor(userProfileId, id)),
     createdAt: typeof document.createdAt === "string"
       ? document.createdAt
       : undefined,
@@ -289,7 +289,10 @@ export function removeUserSkill(args: {
     id: args.skillId,
     userId: args.userProfileId,
     removed: true,
-    registryPath: path.join("config", "users", args.userProfileId, "skills", `${args.skillId}.yaml`),
+    registryPath: repoRelativePath(
+      import.meta.url,
+      skillRegistryPathFor(args.userProfileId, args.skillId),
+    ),
   };
 }
 

@@ -14,8 +14,10 @@ import {
   writeWorkspaceStatus,
 } from "../scripts/output/state-store.js";
 import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
+import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
+const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
@@ -48,8 +50,8 @@ ${body}
 test("status refresh converges stopped docker workspace when docker exec races after stop", async () => {
   const userId = uniqueName("portal-stop-refresh-user");
   const workspace = uniqueName("portal-stop-refresh-workspace");
-  const profilePath = path.join(REPO_ROOT, "config", "users", "profiles", `${userId}.yaml`);
-  const userRoot = path.join(REPO_ROOT, "config", "users", userId);
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([
       userId,

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { withDeletedUserMapEntries } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
-import { polarisUsersRoot } from "../../utils/paths.js";
+import { polarisUsersRoot, repoRelativePath } from "../../utils/paths.js";
 import { withUserMutationLock } from "../../utils/user-mutation-lock.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -134,12 +134,12 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
           userProfile: {
             id: userProfileId,
             removed:
-              removedProfile
+            removedProfile
               || removedUserRoot
               || removedMappings.authingUsernames.length > 0
               || removedMappings.authingUserIds.length > 0,
-            profilePath: `config/users/profiles/${userProfileId}.yaml`,
-            secretsRoot: `config/users/${userProfileId}`,
+            profilePath: repoRelativePath(import.meta.url, profilePathFor(userProfileId)),
+            secretsRoot: repoRelativePath(import.meta.url, userRootFor(userProfileId)),
           },
           mappings: {
             removedAuthingUsernames: removedMappings.authingUsernames,
