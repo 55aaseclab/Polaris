@@ -3,7 +3,6 @@ import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
-import { readUserWorkspaceDefaults } from "../config/scaffold.js";
 import {
   listPortalProfiles,
   parsePortalDriverTarget,
@@ -21,7 +20,11 @@ import {
   sessionMatchesCurrentIdentity,
 } from "./auth.js";
 import { resolvePortalAuthMode } from "@qingniao/polaris-auth-server";
-import { findUserMapEntry, UserMapConflictError } from "./user-map.js";
+import {
+  findUserMapEntry,
+  normalizePolarisSubscriptionLine,
+  UserMapConflictError,
+} from "./user-map.js";
 import {
   activatePortalCredential,
   createPortalCredential,
@@ -57,12 +60,50 @@ import {
   uninstallPortalWorkspaceSkill,
   createPortalUser,
   updatePortalUserProfile,
+  updatePortalUserAccess,
   writePortalCredentialFile,
 } from "./service.js";
 import { subscribePortalWorkspaceStream } from "./workspace-live-hub.js";
 import type { PortalWorkspaceStreamEvent } from "../core/portal.js";
+import {
+  isShellDocumentPath,
+  readShellAsset,
+  shellFallbackHtml,
+} from "./shell-assets.js";
 
 type ParsedBody = Record<string, string>;
+
+function allowedWorkspaceLinesForAccessLine(accessLine: unknown): Array<"coding" | "vertical"> {
+  if (accessLine == null) {
+    return ["coding"];
+  }
+  const normalized = normalizePolarisSubscriptionLine(accessLine);
+  if (normalized === "vertical") {
+    return ["vertical"];
+  }
+  if (normalized === "coding") {
+    return ["coding"];
+  }
+  return ["coding", "vertical"];
+}
+
+function resolveRequestedWorkspaceLine(input: {
+  requested?: string | null;
+  accessLine?: string | null;
+}): "coding" | "vertical" {
+  const allowed = allowedWorkspaceLinesForAccessLine(input.accessLine);
+  const requested = String(input.requested ?? "").trim().toLowerCase();
+  if (requested) {
+    if (requested !== "coding" && requested !== "vertical") {
+      throw new Error("line must be coding or vertical");
+    }
+    if (!allowed.includes(requested)) {
+      throw new Error("The requested product line is not enabled for this user.");
+    }
+    return requested;
+  }
+  return allowed[0] ?? "coding";
+}
 
 const requestOrigins = new WeakMap<ServerResponse, string>();
 
@@ -88,6 +129,21 @@ function sendText(
   res.writeHead(statusCode, {
     "content-type": contentType,
     "content-length": Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function sendShellAsset(
+  res: ServerResponse,
+  contentType: string,
+  body: Buffer | string,
+): void {
+  res.writeHead(200, {
+    "content-type": contentType,
+    "content-length": Buffer.byteLength(body),
+    "cache-control": contentType.includes("text/html")
+      ? "no-cache"
+      : "public, max-age=300",
   });
   res.end(body);
 }
@@ -225,11 +281,14 @@ async function handleWorkspaceProvision(
   res: ServerResponse,
   userId: string,
   workspace: string,
+  line?: "coding" | "vertical",
+  body?: ParsedBody,
 ): Promise<void> {
-  const body = await readBody(req);
+  const parsedBody = body ?? await readBody(req);
   const progress = await queueProvisionWorkspace(userId, workspace, {
-    defaultDockerOnly: body.defaultDockerOnly === "true",
-    startAfterCreate: body.startAfterCreate === "true",
+    defaultDockerOnly: parsedBody.defaultDockerOnly === "true",
+    startAfterCreate: parsedBody.startAfterCreate === "true",
+    ...(line ? { line } : {}),
   });
   sendJson(res, 202, progress);
 }
@@ -516,6 +575,29 @@ async function handleProfileUpdate(
   sendJson(res, 200, updated);
 }
 
+async function handleUserAccessUpdate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  const body = await readBody(req);
+  const role = body.role === "admin" || body.role === "user" ? body.role : undefined;
+  const plan = body.plan === "free" || body.plan === "pro" ? body.plan : undefined;
+  const line =
+    body.line === "coding" || body.line === "vertical" || body.line === "both"
+      ? body.line
+      : undefined;
+  if (!role && !plan && !line) {
+    badRequest(res, "role, plan, or line is required");
+    return;
+  }
+  sendJson(res, 200, await updatePortalUserAccess(userId, {
+    ...(role ? { role } : {}),
+    ...(plan ? { plan } : {}),
+    ...(line ? { line } : {}),
+  }));
+}
+
 async function handleUserCreate(
   req: IncomingMessage,
   res: ServerResponse,
@@ -575,7 +657,9 @@ async function handleUserCreate(
       ...(session.role === "admin" && (body.plan === "free" || body.plan === "pro")
         ? { plan: body.plan }
         : {}),
-      ...(session.role === "admin" && (body.line === "coding" || body.line === "vertical")
+      ...(session.role === "admin" && (
+        body.line === "coding" || body.line === "vertical" || body.line === "both"
+      )
         ? { line: body.line }
         : {}),
     });
@@ -613,7 +697,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (req.method === "OPTIONS" && isApiPath(segments)) {
         res.writeHead(204, {
           "access-control-allow-origin": requestOrigin ?? "*",
-          "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+          "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
           "access-control-allow-headers": "authorization,content-type",
           "access-control-allow-credentials": "true",
         });
@@ -621,7 +705,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         return;
       }
 
-      if (segments.length === 0) {
+      if (segments.length === 1 && segments[0] === "api" && req.method === "GET") {
         sendJson(res, 200, {
           service: "polaris-portal-api",
           authMode: resolvePortalAuthMode(),
@@ -646,6 +730,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
             logoutUrl: String(process.env.POLARIS_AUTHING_LOGOUT_URL ?? "").trim(),
             logoutRedirectUri: String(process.env.POLARIS_AUTHING_LOGOUT_REDIRECT_URI ?? "").trim(),
+            paseoAppBaseUrl: String(process.env.POLARIS_PASEO_APP_BASE_URL ?? "").trim(),
             signInUrl: authMode === "oauth2-proxy" ? "/oauth2/start" : "",
             signOutUrl: authMode === "oauth2-proxy" ? "/oauth2/sign_out" : "",
           });
@@ -783,9 +868,20 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               sendJson(res, 409, { error: `Host '${hostName}' already exists.` });
               return;
             }
+            let requestedLine: "coding" | "vertical";
+            try {
+              requestedLine = resolveRequestedWorkspaceLine({
+                requested: body.line,
+                accessLine: session.line,
+              });
+            } catch (error) {
+              sendJson(res, 403, { error: error instanceof Error ? error.message : String(error) });
+              return;
+            }
             const provision = await queueProvisionWorkspace(userId, hostName, {
               defaultDockerOnly: true,
               startAfterCreate: true,
+              line: requestedLine,
             });
             sendJson(res, 202, provision);
             return;
@@ -821,7 +917,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           const userId = session.polarisUserId;
-          const workspaceDefaults = readUserWorkspaceDefaults(userId);
           sendJson(res, 200, {
             profile: readPortalProfile(userId),
             session: {
@@ -833,15 +928,21 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               plan: session.plan,
               line: session.line,
             },
-            workspaceDefaults: {
-              docker: {
-                runtime: {
-                  baseImage: workspaceDefaults.dockerBaseImage,
-                },
-              },
-            },
             credentials: listUserPortalCredentials(userId),
           });
+          return;
+        }
+        if (
+          segments.length === 4
+          && segments[1] === "users"
+          && segments[3] === "access"
+          && req.method === "PUT"
+        ) {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requirePortalAdmin(res, session)) {
+            return;
+          }
+          await handleUserAccessUpdate(req, res, decodeURIComponent(segments[2]));
           return;
         }
         if (segments[1] !== "users" || segments.length < 4) {
@@ -1028,7 +1129,27 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           }
         }
         if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
-          await handleWorkspaceProvision(req, res, routeUserId, workspace);
+          const body = await readBody(req);
+          let requestedLine: "coding" | "vertical" | undefined;
+          if (session.polarisUserId === routeUserId) {
+            try {
+              requestedLine = resolveRequestedWorkspaceLine({
+                requested: body.line,
+                accessLine: session.line,
+              });
+            } catch (error) {
+              sendJson(res, 403, { error: error instanceof Error ? error.message : String(error) });
+              return;
+            }
+          }
+          await handleWorkspaceProvision(
+            req,
+            res,
+            routeUserId,
+            workspace,
+            requestedLine,
+            body,
+          );
           return;
         }
         if (segments[3] === "workspaces" && segments.length === 4 && req.method === "POST") {
@@ -1052,14 +1173,47 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             });
             return;
           }
+          let requestedLine: "coding" | "vertical" | undefined;
+          if (session.polarisUserId === routeUserId) {
+            try {
+              requestedLine = resolveRequestedWorkspaceLine({
+                requested: body.line,
+                accessLine: session.line,
+              });
+            } catch (error) {
+              sendJson(res, 403, { error: error instanceof Error ? error.message : String(error) });
+              return;
+            }
+          }
           const provision = await queueProvisionWorkspace(routeUserId, workspaceName, {
             defaultDockerOnly: body.defaultDockerOnly === "true",
             startAfterCreate: body.startAfterCreate === "true",
+            ...(requestedLine ? { line: requestedLine } : {}),
           });
           sendJson(res, 202, provision);
           return;
         }
         notFound(res);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/shell/")) {
+        const asset = readShellAsset(url.pathname.slice("/shell/".length));
+        if (!asset) {
+          notFound(res);
+          return;
+        }
+        sendShellAsset(res, asset.contentType, asset.body);
+        return;
+      }
+
+      if (req.method === "GET" && isShellDocumentPath(url.pathname)) {
+        const document = readShellAsset("index.html");
+        if (document) {
+          sendShellAsset(res, document.contentType, document.body);
+          return;
+        }
+        sendShellAsset(res, "text/html; charset=utf-8", shellFallbackHtml());
         return;
       }
 

@@ -36,31 +36,28 @@ const codingHost: ShellHostSummary = {
   ],
 };
 
-test("vertical subscribers receive coding and embedded Wanghai actions", () => {
+test("vertical subscribers receive only the vertical action for vertical hosts", () => {
   assert.deepEqual(
     resolveShellHostActions({
       session: verticalSession,
       host: verticalHost,
       publicHost: "127.0.0.1",
     }),
-    [
-      { kind: "open-coding", href: "/h/srv_sample" },
-      {
-        kind: "open-wanghai",
-        href: "/v/srv_sample/wanghai",
-        portalUrl: "http://127.0.0.1:32102",
-      },
-    ],
+    [{
+      kind: "open-wanghai",
+      href: "/v/srv_sample/wanghai",
+      portalUrl: "http://127.0.0.1:32102",
+    }],
   );
 });
 
-test("coding subscribers never receive a Wanghai action", () => {
+test("coding subscribers cannot open vertical hosts", () => {
   const actions = resolveShellHostActions({
     session: { ...verticalSession, line: "coding" },
     host: verticalHost,
     publicHost: "127.0.0.1",
   });
-  assert.deepEqual(actions, [{ kind: "open-coding", href: "/h/srv_sample" }]);
+  assert.deepEqual(actions, []);
 });
 
 test("a host without a paired server cannot expose surface links", () => {
@@ -72,7 +69,7 @@ test("a host without a paired server cannot expose surface links", () => {
   assert.deepEqual(actions, []);
 });
 
-test("a stopped host cannot expose surface links even if a serverId is cached", () => {
+test("a stopped vertical host keeps only the vertical action when a serverId is cached", () => {
   const actions = resolveShellHostActions({
     session: verticalSession,
     host: {
@@ -94,13 +91,26 @@ test("a stopped host cannot expose surface links even if a serverId is cached", 
   ]);
 });
 
-test("both-line subscribers only receive Wanghai for vertical hosts", () => {
+test("both-line subscribers get exactly one surface action per host", () => {
+  assert.deepEqual(
+    resolveShellHostActions({
+      session: { ...verticalSession, line: "both" },
+      host: verticalHost,
+      publicHost: "127.0.0.1",
+    }),
+    [{
+      kind: "open-wanghai",
+      href: "/v/srv_sample/wanghai",
+      portalUrl: "http://127.0.0.1:32102",
+    }],
+  );
+
   assert.deepEqual(
     resolveShellHostActions({
       session: { ...verticalSession, line: "both" },
       host: codingHost,
       publicHost: "127.0.0.1",
     }),
-    [{ kind: "open-coding", href: "/h/srv_sample" }],
+    [{ kind: "open-coding", href: "/v/srv_sample/coding" }],
   );
 });

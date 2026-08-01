@@ -1,83 +1,38 @@
-# Paseo 的 Polaris 扩展
+# Paseo surface patches for Polaris
 
-## 概述
+`apps/paseo` holds the reproducible Polaris patch set that is applied on top of
+the upstream Paseo source tree.
 
-Paseo 是 Polaris 的唯一用户入口。
+Current architecture:
 
-本目录保留 Paseo 的构建文件、上游源码以及 Polaris 扩展补丁。
-Polaris 的产品能力应融入 Paseo 既有的信息架构、组件与交互规范，
-不新增第二套应用 shell。
+- `@qingniao/polaris-shell` owns the outer browser shell and routes such as
+  `/`, `/welcome`, `/auth/callback`, `/hosts`, and `/settings/user`.
+- `@qingniao/surface-paseo` owns the coding surface under `/h/...`.
+- `apps/polaris` serves the shell assets and proxies only `/h/...` plus Expo
+  assets to the Paseo web build.
 
-当前扩展通过 `patches/` 中按功能拆分的补丁应用于 Paseo 源码。
-`source/` 是唯一的开发事实来源；修改后必须从它重新生成活动补丁。
+This directory therefore exists to keep the Paseo coding surface reproducible,
+not to host a second Polaris control shell inside the Expo app.
 
-## 产品需求
+## Layout
 
-### 用户管理
+- `source/`: checked-in upstream Paseo source used as the patch application
+  base.
+- `patches/`: Polaris patches applied in Docker builds.
+- `Dockerfile.artifact`: builds the static Paseo web artifact with the patch
+  stack applied.
+- `Dockerfile.tool-bundle`: builds the patched Paseo server and CLI tool
+  bundle.
 
-#### 背景
+## Patch workflow
 
-用户需要在 Paseo 内查看已登录账户与其 Polaris 资产，无需进入已弃用的
-已移除的 Polaris Web 门户。
+1. Make the required change against the working Paseo source copy.
+2. Regenerate the patch files in `patches/`.
+3. Verify the patch list still applies in both Dockerfiles.
 
-#### 目标
+The source of truth for route ownership lives in:
 
-- 在设置页为已登录用户提供“用户管理”入口。
-- 未登录时不展示该入口。
-- 使用 Paseo 现有的页面、卡片、按钮与弹窗样式。
-
-#### 功能范围
-
-- 展示用户基本信息：用户名、角色、Authing ID。
-- 展示订阅信息。
-- 展示凭证资产及其可查看操作。
-- 提供退出当前 Polaris 登录的操作。
-- 工作库不在用户管理页重复展示；其管理入口属于主机页。
-
-#### 不包含
-
-- 充值能力。
-- 独立的 Polaris 用户管理 shell。
-
-### 主机管理
-
-#### 背景
-
-Polaris 的原“工作空间”在 Paseo 中统一称为“主机”。每个主机对应一个
-可由 Paseo 连接和使用的 Polaris 工作库。
-
-#### 目标
-
-- 将 Polaris 主机纳入 Paseo 的主机设置流程。
-- 用户在一个页面完成创建、连接、启动、停止和删除主机。
-- 保持 Paseo 对主机列表与连接的原有行为。
-
-#### 功能范围
-
-- 将“添加主机”改为“创建主机”。
-- 创建时填写主机名称，并在提交前校验名称格式。
-- 创建成功后等待 Polaris 准备连接信息，再自动写入 Paseo 主机列表。
-- 在主机详情页显示 Polaris driver 信息。
-- 支持启动与停止 Polaris 主机。
-- 在 Paseo 既有“危险区域”中合并主机移除与 Polaris 工作库删除。
-- 主机运行中不允许删除，并以居中错误 toast 提示先停止主机。
-- 删除成功后同时移除 Polaris 工作库和 Paseo 的主机记录。
-
-#### 不包含
-
-- Polaris 工作库归档能力。
-- 原独立的“Polaris 工作库”设置入口。
-- 对已移除 Polaris Web 门户的兼容。
-
-## 交互原则
-
-- 所有 Polaris 文案使用中文。
-- 复用 Paseo 组件，避免为 Polaris 单独实现卡片、按钮或页面框架。
-- 错误反馈使用 Paseo toast 或既有确认弹窗，不在页面中插入临时错误文本。
-- 破坏性操作必须在确认后执行；运行中的主机必须先停止。
-
-## 开发说明
-
-- `source/` 是 Paseo 上游源码及本地修改的工作目录。
-- `patches/` 保存可复现的 Polaris 改动；修改 `source/` 后必须同步更新补丁。
-- 本地开发通过仓库根目录的本地栈启动脚本运行 Paseo。
+- `packages/polaris-shell`
+- `packages/surface-coding`
+- `packages/surface-wanghai`
+- `apps/docs/site/polaris/surfaces-and-routes.md`

@@ -29,7 +29,6 @@ Owned by the outer control chrome. No agent timeline, no terminal pane.
 | `/settings` | Shell settings root (optional) |
 | `/settings/user` | User management (profile, credentials, defaults) |
 | `/hosts` | Host directory (list / create / start-stop entry) |
-| `/hosts/:hostKey` | Host summary + surface chooser |
 
 Shell may deep-link **into** surfaces; it does not own their internal paths.
 
@@ -89,9 +88,3 @@ Vertical workspace runtime (inside **that user's** container):
 paseo daemon :6767
 wanghai portal :9090
 ```
-
-## Migration notes
-
-Today many shell paths still live under patched Paseo app routes. Treat them as
-**temporarily hosted in paseo-web** until `polaris-shell` owns the routes above.
-Route tables in the three packages are the source of truth for ownership.

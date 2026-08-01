@@ -22,6 +22,9 @@ importers:
       '@qingniao/polaris-auth-server':
         specifier: workspace:*
         version: link:../../packages/polaris-auth-server
+      '@qingniao/polaris-shell':
+        specifier: workspace:*
+        version: link:../../packages/polaris-shell
       '@sentry/node':
         specifier: ^10.65.0
         version: 10.65.0(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))
@@ -70,10 +73,20 @@ importers:
         version: 5.9.3
 
   packages/polaris-shell:
+    dependencies:
+      '@qingniao/surface-paseo':
+        specifier: workspace:*
+        version: link:../surface-coding
+      '@qingniao/surface-wanghai':
+        specifier: workspace:*
+        version: link:../surface-wanghai
     devDependencies:
       '@types/node':
         specifier: ^24.0.3
         version: 24.13.2
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       tsx:
         specifier: ^4.19.4
         version: 4.22.4
@@ -81,7 +94,7 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  packages/surface-paseo:
+  packages/surface-coding:
     devDependencies:
       '@types/node':
         specifier: ^24.0.3

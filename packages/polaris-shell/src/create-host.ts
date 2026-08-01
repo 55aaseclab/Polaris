@@ -1,4 +1,6 @@
 import { paseoSurfacePath } from "@qingniao/surface-paseo";
+import { codingEmbedPath, wanghaiEmbedPath } from "./routes.js";
+import type { PolarisWorkspaceLine } from "./product.js";
 
 export const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
 
@@ -26,10 +28,36 @@ export function validatePolarisHostName(value: string): {
   };
 }
 
-export function buildCreatedHostSurfaceHref(serverId: string): string {
+export function buildCreatedHostSurfaceHref(
+  serverId: string,
+  line: PolarisWorkspaceLine,
+): string {
   const id = serverId.trim();
   if (!id) {
     throw new Error("serverId is required");
   }
-  return paseoSurfacePath("host-root", { serverId: id });
+  if (line === "vertical") {
+    return wanghaiEmbedPath(id);
+  }
+  return codingEmbedPath(id);
+}
+
+export function resolveCodingSurfaceUrl(input: {
+  href: string;
+  paseoAppBaseUrl?: string | null;
+  currentOrigin: string;
+}): string {
+  const href = input.href.trim();
+  if (!href) {
+    throw new Error("href is required");
+  }
+  const shellCodingMatch = href.match(/^\/v\/([^/]+)\/coding$/);
+  const targetHref = shellCodingMatch
+    ? paseoSurfacePath("host-root", { serverId: decodeURIComponent(shellCodingMatch[1] ?? "") })
+    : href;
+  const baseUrl = input.paseoAppBaseUrl?.trim() || input.currentOrigin.trim();
+  if (!baseUrl) {
+    throw new Error("a base URL is required");
+  }
+  return new URL(targetHref, baseUrl).toString();
 }

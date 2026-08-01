@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPaseoSurfacePath, paseoSurfacePath } from "./routes.js";
+import {
+  isPaseoSurfacePath,
+  PASEO_APP_SHELL_ROUTES_TO_REMOVE,
+  paseoSurfacePath,
+} from "./routes.js";
 
 test("paseo surface owns /h only", () => {
   assert.equal(isPaseoSurfacePath("/h/srv_1"), true);
@@ -8,6 +12,8 @@ test("paseo surface owns /h only", () => {
   assert.equal(isPaseoSurfacePath("/settings/user"), false);
   assert.equal(isPaseoSurfacePath("/welcome"), false);
   assert.equal(isPaseoSurfacePath("/hosts"), false);
+  assert.equal(isPaseoSurfacePath("/v/srv_1/wanghai"), false);
+  assert.equal(isPaseoSurfacePath("/"), false);
 });
 
 test("paseoSurfacePath builds left-right host routes", () => {
@@ -20,4 +26,8 @@ test("paseoSurfacePath builds left-right host routes", () => {
     paseoSurfacePath("agent", { serverId: "srv_a", agentId: "ag_1" }),
     "/h/srv_a/agent/ag_1",
   );
+});
+
+test("surface-coding no longer tracks welcome as a shell route to strip", () => {
+  assert.equal(PASEO_APP_SHELL_ROUTES_TO_REMOVE.includes("/welcome"), false);
 });

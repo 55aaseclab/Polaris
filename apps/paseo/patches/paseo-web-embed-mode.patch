@@ -1291,7 +1291,7 @@ new file mode 100644
 index 0000000..8db71bb
 --- /dev/null
 +++ b/packages/app/src/embed/protocol.ts
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,243 @@
 +export const PASEO_EMBED_PROTOCOL_VERSION = 1 as const;
 +export const PASEO_EMBED_READY = "paseo.embed.ready";
 +export const PASEO_EMBED_SET_CONTEXT = "paseo.embed.context.set";
