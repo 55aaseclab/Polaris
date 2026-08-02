@@ -77,6 +77,10 @@ function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
   const digest = createHash("sha256")
     .update(fs.readFileSync(dockerfilePath))
@@ -460,7 +464,7 @@ test("workspace load mounts the user Wanghai env when the file exists", async ()
     });
     fs.writeFileSync(
       path.join(userRoot, "wanghai", ".env"),
-      "WANGHAI_WORKSPACES_ROOT=/custom/workspaces\nCUSTOM_WANGHAI_FLAG=1\n",
+      "CUSTOM_WANGHAI_FLAG=1\n",
       "utf8",
     );
     const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
@@ -485,41 +489,69 @@ test("workspace load mounts the user Wanghai env when the file exists", async ()
   });
 });
 
-test("docker render bind-mounts Wanghai data roots from the user profile env", async () => {
+test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROOT", async () => {
   const project = uniqueProjectName("wanghai-profile-data-root");
   const profileId = uniqueProjectName("wanghai-profile-data-root-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const userRoot = path.join(USER_ROOT, profileId);
+  const previousHostDataRoot = process.env.POLARIS_WANGHAI_DATA_ROOT;
+  const hostDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-wanghai-host-data-"));
 
   await withTempWorkspaceSpec(project, "docker", async () => {
-    scaffoldUserProfileById({
-      id: profileId,
-      name: "Wanghai Data Root User",
-      email: "wanghai-data-root@example.com",
-    });
-    fs.writeFileSync(
-      path.join(userRoot, "wanghai", ".env"),
-      [
-        "WANGHAI_WORKSPACES_ROOT=/host/wanghai/workspaces",
-        "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
-        "CUSTOM_WANGHAI_FLAG=1",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
-    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
-    doc.user_profile = profileId;
-    delete doc.credentials;
-    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+    try {
+      process.env.POLARIS_WANGHAI_DATA_ROOT = hostDataRoot;
+      scaffoldUserProfileById({
+        id: profileId,
+        name: "Wanghai Data Root User",
+        email: "wanghai-data-root@example.com",
+      });
+      fs.writeFileSync(
+        path.join(userRoot, "wanghai", ".env"),
+        [
+          "WANGHAI_WORKSPACES_ROOT=/host/wanghai/workspaces",
+          "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
+          "CUSTOM_WANGHAI_FLAG=1",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
+      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+      doc.user_profile = profileId;
+      delete doc.credentials;
+      fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
-    assert.match(rendered, /source: "\/host\/wanghai\/workspaces"/);
-    assert.match(rendered, new RegExp(`target: "${WANGHAI_WORKSPACES_RUNTIME_ROOT.replace(/\//g, "\\/")}"`));
-    assert.match(rendered, /source: "\/host\/wanghai\/backups"/);
-    assert.match(rendered, new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`));
+      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+      const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+      const expectedWorkspacesRoot = path.join(hostDataRoot, "workspaces");
+      const expectedBackupRoot = path.join(hostDataRoot, "backups");
+      assert.match(
+        rendered,
+        new RegExp(`source: "${escapeRegExp(expectedWorkspacesRoot)}"`),
+      );
+      assert.match(
+        rendered,
+        new RegExp(`target: "${WANGHAI_WORKSPACES_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
+      );
+      assert.match(
+        rendered,
+        new RegExp(`source: "${escapeRegExp(expectedBackupRoot)}"`),
+      );
+      assert.match(
+        rendered,
+        new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
+      );
+      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/workspaces"/);
+      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/backups"/);
+    } finally {
+      if (previousHostDataRoot === undefined) {
+        delete process.env.POLARIS_WANGHAI_DATA_ROOT;
+      } else {
+        process.env.POLARIS_WANGHAI_DATA_ROOT = previousHostDataRoot;
+      }
+      fs.rmSync(hostDataRoot, { recursive: true, force: true });
+    }
   }).finally(() => {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
