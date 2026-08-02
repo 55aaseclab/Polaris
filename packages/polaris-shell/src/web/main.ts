@@ -5,7 +5,7 @@ import {
 } from "../api.js";
 import {
   buildCreatedHostSurfaceHref,
-  DEFAULT_POLARIS_PROJECT_PATH,
+  DEFAULT_POLARIS_VAULT_PATH,
   resolveCodingSurfaceUrl,
   validatePolarisHostName,
 } from "../create-host.js";
@@ -16,8 +16,8 @@ import {
   type FloatingButtonBounds,
 } from "../floating-button.js";
 import {
-  resolveAllowedWorkspaceLines,
-  type PolarisWorkspaceLine,
+  resolveAllowedVaultLines,
+  type PolarisVaultLine,
 } from "../product.js";
 import { SHELL_HOST_API } from "../hosts.js";
 import { renderPaseoEmbedPage } from "../paseo-embed.js";
@@ -276,8 +276,8 @@ async function renderWelcome(): Promise<void> {
       return;
     }
     renderShell(`<section class="hero">
-      <div class="eyebrow">Polaris workspace control</div>
-      <h1>把工作区放在正确的产品线里。</h1>
+      <div class="eyebrow">Polaris 库控制</div>
+      <h1>把库放在正确的产品线里。</h1>
       <p>登录后管理主机，并从同一个入口打开 coding 或 vertical 工作面。</p>
       <div class="actions"><button type="button" data-action="sign-in">登录</button></div>
     </section>`);
@@ -333,12 +333,12 @@ function renderHostList(hosts: ShellHostSummary[], session: ShellSession): void 
 }
 
 function createHostCard(session: Pick<ShellSession, "line">): string {
-  const allowedLines = resolveAllowedWorkspaceLines(session.line);
+  const allowedLines = resolveAllowedVaultLines(session.line);
   return `<section class="card host-create">
       <h2>创建主机</h2>
       <form class="host-create-form" data-form="create-host">
         <div class="field">
-          <input name="hostName" required maxlength="63" placeholder="例如 sample-workspace" aria-label="主机名称" />
+          <input name="hostName" required maxlength="63" placeholder="例如 sample-vault" aria-label="主机名称" />
         </div>
         <div class="host-create-options-row">
           <div class="host-create-line-group">
@@ -346,15 +346,15 @@ function createHostCard(session: Pick<ShellSession, "line">): string {
             <div class="line-options">
               ${allowedLines.map((line, index) => `<label class="check-row line-choice">
                   <input type="checkbox" name="line" value="${escapeHtml(line)}" ${index === 0 ? "checked" : ""} />
-                  <span>${escapeHtml(workspaceLineLabel(line))}</span>
+                  <span>${escapeHtml(vaultLineLabel(line))}</span>
                 </label>`).join("")}
             </div>
           </div>
           <label class="check-row create-default-choice">
             <input type="checkbox" name="createDefaultProject" checked />
             <span class="check-copy">
-              <span>创建默认项目</span>
-              <span class="muted">${escapeHtml(DEFAULT_POLARIS_PROJECT_PATH)}</span>
+              <span>创建默认库</span>
+              <span class="muted">${escapeHtml(DEFAULT_POLARIS_VAULT_PATH)}</span>
             </span>
           </label>
         </div>
@@ -379,7 +379,7 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
     <div class="card-head">
       <div>
         <h2>${escapeHtml(host.name)}</h2>
-        <p class="muted">${host.serverId ? `Paseo ${escapeHtml(host.serverId)}` : "等待工作区服务就绪"}</p>
+        <p class="muted">${host.serverId ? `Paseo ${escapeHtml(host.serverId)}` : "等待库服务就绪"}</p>
       </div>
       <span class="status ${driverStatus === "running" ? "running" : ""}">${escapeHtml(driverStatus)}</span>
     </div>
@@ -648,7 +648,7 @@ function bindCreateHostForm(session: Pick<ShellSession, "line">): void {
   const input = form.querySelector<HTMLInputElement>("input[name='hostName']");
   const lineInputs = Array.from(form.querySelectorAll<HTMLInputElement>("input[name='line']"));
   const submit = form.querySelector<HTMLButtonElement>("button[type='submit']");
-  const allowedLines = resolveAllowedWorkspaceLines(session.line);
+  const allowedLines = resolveAllowedVaultLines(session.line);
   const syncLineInputs = (source?: HTMLInputElement) => {
     if (source?.checked) {
       for (const lineInput of lineInputs) {
@@ -823,17 +823,17 @@ function subscriptionLineLabel(line: ShellSession["line"]): string {
   return "coding";
 }
 
-function workspaceLineLabel(line: PolarisWorkspaceLine): string {
+function vaultLineLabel(line: PolarisVaultLine): string {
   return line === "vertical" ? "vertical" : "coding";
 }
 
 function selectedCreateHostLine(
   lineInputs: HTMLInputElement[],
-  allowedLines: readonly PolarisWorkspaceLine[],
-): PolarisWorkspaceLine | null {
+  allowedLines: readonly PolarisVaultLine[],
+): PolarisVaultLine | null {
   for (const lineInput of lineInputs) {
-    if (lineInput.checked && allowedLines.includes(lineInput.value as PolarisWorkspaceLine)) {
-      return lineInput.value as PolarisWorkspaceLine;
+    if (lineInput.checked && allowedLines.includes(lineInput.value as PolarisVaultLine)) {
+      return lineInput.value as PolarisVaultLine;
     }
   }
   return allowedLines[0] ?? null;

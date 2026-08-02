@@ -1,19 +1,19 @@
 import path from "node:path";
-import { parseWorkspaceReference } from "../../config/load.js";
+import { parseVaultReference } from "../../config/load.js";
 import { assertProjectNameAvailableForUser } from "../../config/project-ownership.js";
 import { getBackendDriver } from "../../backends/index.js";
 import {
   listDefaultCredentialIds,
-  scaffoldDockerWorkspace,
+  scaffoldDockerVault,
   userProfileExists,
-  workspaceConfigExists,
+  vaultConfigExists,
 } from "../../config/scaffold.js";
 import { readUserAccessSummary } from "../../portal/user-map.js";
-import { ensureWorkspaceConfig } from "../../config/provision.js";
+import { ensureVaultConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRelativePath, repoRoot } from "../../utils/paths.js";
-import { withWorkspaceMutationLock } from "../../utils/workspace-lifecycle-lock.js";
-import { loadWorkspaceForProjectRef } from "./shared.js";
+import { withVaultMutationLock } from "../../utils/vault-lifecycle-lock.js";
+import { loadVaultForProjectRef } from "./shared.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -42,7 +42,7 @@ function parseCreateArgs(argv: string[]): {
   };
 }
 
-export async function createWorkspaceForUser(
+export async function createVaultForUser(
   projectRef: string,
   userProfileId: string,
   options?: {
@@ -50,19 +50,19 @@ export async function createWorkspaceForUser(
     line?: "coding" | "vertical";
   },
 ): Promise<void> {
-  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   assertProjectNameAvailableForUser(project, userProfileId);
   if (!userProfileExists(userProfileId)) {
     throw new Error(
       `User profile '${userProfileId}' was not found. Create it first with user create.`,
     );
   }
-  if (workspaceConfigExists(project, userProfileId) && options?.baseImage) {
+  if (vaultConfigExists(project, userProfileId) && options?.baseImage) {
     throw new Error(
-      `Workspace '${project}' already has saved specs for user '${userProfileId}'. --base-image applies only while scaffolding a new workspace.`,
+      `Vault '${project}' already has saved specs for user '${userProfileId}'. --base-image applies only while scaffolding a new vault.`,
     );
   }
-  if (!workspaceConfigExists(project, userProfileId)) {
+  if (!vaultConfigExists(project, userProfileId)) {
     const accessLine =
       options?.line
       ?? (readUserAccessSummary(userProfileId)?.line === "vertical" ? "vertical" : "coding");
@@ -70,7 +70,7 @@ export async function createWorkspaceForUser(
       backendHint === "pod" || backendHint === "kubevirt-vm"
         ? backendHint
         : "docker";
-    const outputPath = scaffoldDockerWorkspace(project, userProfileId, {
+    const outputPath = scaffoldDockerVault(project, userProfileId, {
       baseImage: options?.baseImage,
       line: accessLine,
     });
@@ -82,12 +82,12 @@ export async function createWorkspaceForUser(
     const backendConfigPath =
       scaffoldBackend === "docker"
         ? outputPath
-        : ensureWorkspaceConfig(requestedRef, userProfileId)?.configPath ??
+        : ensureVaultConfig(requestedRef, userProfileId)?.configPath ??
           outputPath;
     const displayConfigPath = path.isAbsolute(backendConfigPath)
       ? backendConfigPath.replace(/\\/g, "/")
       : path.resolve(REPO_ROOT, backendConfigPath).replace(/\\/g, "/");
-    logInfo("cli", "workspace-scaffolded", {
+    logInfo("cli", "vault-scaffolded", {
       project,
       backend: scaffoldBackend,
       configPath: displayConfigPath,
@@ -123,21 +123,21 @@ export async function createWorkspaceForUser(
     );
     return;
   }
-  const workspace = loadWorkspaceForProjectRef(projectRef, userProfileId);
-  logInfo("cli", "workspace-create-dispatch", {
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
+  const vault = loadVaultForProjectRef(projectRef, userProfileId);
+  logInfo("cli", "vault-create-dispatch", {
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
   });
-  await getBackendDriver(workspace.backend.kind).create(workspace);
+  await getBackendDriver(vault.backend.kind).create(vault);
 }
 
 export async function createCommand(argv: string[]): Promise<void> {
   const { projectRef, userProfileId, baseImage } = parseCreateArgs(argv);
-  const { project } = parseWorkspaceReference(projectRef);
-  await withWorkspaceMutationLock(
+  const { project } = parseVaultReference(projectRef);
+  await withVaultMutationLock(
     import.meta.url,
     userProfileId,
     project,
-    async () => createWorkspaceForUser(projectRef, userProfileId, { baseImage }),
+    async () => createVaultForUser(projectRef, userProfileId, { baseImage }),
   );
 }

@@ -1,37 +1,37 @@
-import { writeWorkspaceStatus } from "../../output/state-store.js";
-import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
+import { writeVaultStatus } from "../../output/state-store.js";
+import { buildReconcilePlan, computeVaultDrift, synthesizeVaultStatus } from "../../core/runtime-controller.js";
 import { getEvolutionSummary } from "../../evolution/runtime.js";
-import { loadExecutableWorkspaceForCommand, runWorkspaceCommandWithEvolution } from "./shared.js";
+import { loadExecutableVaultForCommand, runVaultCommandWithEvolution } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
 
 export async function reconcileCommand(project: string, userProfileId?: string): Promise<void> {
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand("reconcile", project, userProfileId);
-  const observation = await driver.inspect(workspace);
-  const drift = computeWorkspaceDrift(workspace, observation);
-  const plan = buildReconcilePlan(workspace, drift);
+  const { vault, driver } = await loadExecutableVaultForCommand("reconcile", project, userProfileId);
+  const observation = await driver.inspect(vault);
+  const drift = computeVaultDrift(vault, observation);
+  const plan = buildReconcilePlan(vault, drift);
   logInfo("cli", "reconcile-plan", {
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
     actions: plan.actions.map((action) => action.kind),
     safe: plan.safe,
   });
-  const { evolutionSessionId } = await runWorkspaceCommandWithEvolution({
-    workspace,
+  const { evolutionSessionId } = await runVaultCommandWithEvolution({
+    vault,
     command: "reconcile",
     execute: async () => {
-      await driver.executeReconcilePlan(workspace, plan);
+      await driver.executeReconcilePlan(vault, plan);
     },
     onSuccessPayload: () => ({
       reconcileActions: plan.actions.map((action) => action.kind),
     }),
   });
-  const postObservation = await driver.inspect(workspace);
-  const postDrift = computeWorkspaceDrift(workspace, postObservation);
-  const status = synthesizeWorkspaceStatus(workspace, postObservation, postDrift);
+  const postObservation = await driver.inspect(vault);
+  const postDrift = computeVaultDrift(vault, postObservation);
+  const status = synthesizeVaultStatus(vault, postObservation, postDrift);
   status.evolution = {
-    ...(await getEvolutionSummary(workspace)),
+    ...(await getEvolutionSummary(vault)),
     ...(evolutionSessionId ? { lastSessionId: evolutionSessionId } : {}),
   };
-  const outputPath = writeWorkspaceStatus(status, workspace.userProfile.id);
+  const outputPath = writeVaultStatus(status, vault.userProfile.id);
   process.stdout.write(`${JSON.stringify({ ...status, reconcilePlan: plan, statusFile: outputPath }, null, 2)}\n`);
 }

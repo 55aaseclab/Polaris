@@ -33,7 +33,7 @@ test("deploy restart fingerprints only restart changed executor or bridge servic
     fs.writeFileSync(path.join(rootDir, "apps/polaris/package.json"), "{\"name\":\"polaris\"}\n");
     fs.writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"root\"}\n");
     fs.writeFileSync(path.join(rootDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    fs.writeFileSync(path.join(rootDir, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+    fs.writeFileSync(path.join(rootDir, "pnpm-vault.yaml"), "packages:\n  - apps/*\n");
     fs.writeFileSync(path.join(rootDir, "scripts/run-polaris-executor-host.sh"), "#!/usr/bin/env bash\n");
     fs.writeFileSync(path.join(rootDir, "scripts/run-polaris-executor-bridge-proxy.sh"), "#!/usr/bin/env bash\n");
     fs.writeFileSync(envFile, "POLARIS_EXECUTOR_SHARED_SECRET=test\n");

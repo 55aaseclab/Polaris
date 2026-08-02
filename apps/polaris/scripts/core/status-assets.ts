@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { workspaceImageRef } from "../config/scaffold.js";
-import type { WorkspaceSpec, WorkspaceStatus } from "./workspace.js";
+import { vaultImageRef } from "../config/scaffold.js";
+import type { VaultSpec, VaultStatus } from "./vault.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -16,56 +16,56 @@ function userDockerfilePath(userProfileId: string): string {
     USER_ROOT,
     userProfileId,
     "docker",
-    "workspace-prebuilt.Dockerfile",
+    "vault-prebuilt.Dockerfile",
   );
 }
 
-function workspaceSpecPath(
+function vaultSpecPath(
   userProfileId: string,
-  workspace: string,
+  vault: string,
   fileName: string,
 ): string {
   return path.join(
     USER_ROOT,
     userProfileId,
-    "workspaces",
-    workspace,
+    "vaults",
+    vault,
     fileName,
   );
 }
 
-function evolutionAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus["assets"]>["evolutionFiles"] {
+function evolutionAssets(vault: VaultSpec): NonNullable<VaultStatus["assets"]>["evolutionFiles"] {
   const projectRoot = path.join(
     USER_ROOT,
-    workspace.userProfile.id,
-    "workspaces",
-    workspace.identity.projectName,
+    vault.userProfile.id,
+    "vaults",
+    vault.identity.projectName,
   );
   const userPolarisRoot = path.join(
     USER_ROOT,
-    workspace.userProfile.id,
+    vault.userProfile.id,
     "polaris",
   );
-  const runtimeWorkspaceMemory = path.join(
-    workspace.attachments.workspaceData.mountRoot,
+  const runtimeVaultMemory = path.join(
+    vault.attachments.vaultData.mountRoot,
     ".polaris",
     "MEMORY.md",
   );
   const runtimeUserMemory = path.join(
-    workspace.attachments.userIdentityState.mountRoot,
+    vault.attachments.userIdentityState.mountRoot,
     "polaris",
     "USER.md",
   );
   const runtimeSnapshot = path.join(
-    workspace.agent.runtime.evolutionRoot,
+    vault.agent.runtime.evolutionRoot,
     "sessions",
     "bootstrap",
     "memory-snapshot.md",
   );
   return [
     {
-      name: "workspace-memory",
-      path: repoRelative(runtimeWorkspaceMemory),
+      name: "vault-memory",
+      path: repoRelative(runtimeVaultMemory),
       scope: "runtime",
     },
     {
@@ -79,7 +79,7 @@ function evolutionAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus[
       scope: "runtime",
     },
     {
-      name: "workspace-memory",
+      name: "vault-memory",
       path: repoRelative(path.join(projectRoot, "state", "MEMORY.md")),
       scope: "control-plane",
       exists: fs.existsSync(path.join(projectRoot, "state", "MEMORY.md")),
@@ -105,12 +105,12 @@ function evolutionAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus[
   ];
 }
 
-export function buildStatusAssets(workspace: WorkspaceSpec): NonNullable<WorkspaceStatus["assets"]> {
-  const dockerWorkspace = workspace.identity.projectName;
-  const dockerfilePath = userDockerfilePath(workspace.userProfile.id);
-  const dockerSpec = workspaceSpecPath(workspace.userProfile.id, dockerWorkspace, "docker.agent.yaml");
-  const podSpec = workspaceSpecPath(workspace.userProfile.id, dockerWorkspace, "pod.agent.yaml");
-  const kubevirtSpec = workspaceSpecPath(workspace.userProfile.id, dockerWorkspace, "kubevirt.agent.yaml");
+export function buildStatusAssets(vault: VaultSpec): NonNullable<VaultStatus["assets"]> {
+  const dockerVault = vault.identity.projectName;
+  const dockerfilePath = userDockerfilePath(vault.userProfile.id);
+  const dockerSpec = vaultSpecPath(vault.userProfile.id, dockerVault, "docker.agent.yaml");
+  const podSpec = vaultSpecPath(vault.userProfile.id, dockerVault, "pod.agent.yaml");
+  const kubevirtSpec = vaultSpecPath(vault.userProfile.id, dockerVault, "kubevirt.agent.yaml");
 
   return {
     dockerfile: {
@@ -142,53 +142,53 @@ export function buildStatusAssets(workspace: WorkspaceSpec): NonNullable<Workspa
       {
         driver: "docker",
         file: "docker.yaml",
-        path: repoRelative(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "docker.yaml")),
-        exists: fs.existsSync(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "docker.yaml")),
+        path: repoRelative(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "docker.yaml")),
+        exists: fs.existsSync(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "docker.yaml")),
       },
       {
         driver: "pod",
         file: "pod.yaml",
-        path: repoRelative(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "pod.yaml")),
-        exists: fs.existsSync(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "pod.yaml")),
+        path: repoRelative(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "pod.yaml")),
+        exists: fs.existsSync(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "pod.yaml")),
       },
       {
         driver: "kubevirt-vm",
         file: "kubevirt.yaml",
-        path: repoRelative(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "kubevirt.yaml")),
-        exists: fs.existsSync(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", workspace.identity.projectName, "generated", "kubevirt.yaml")),
+        path: repoRelative(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "kubevirt.yaml")),
+        exists: fs.existsSync(path.join(USER_ROOT, vault.userProfile.id, "vaults", vault.identity.projectName, "generated", "kubevirt.yaml")),
       },
     ],
     imageTags: [
       {
-        name: "workspace",
-        tag: workspaceImageRef(workspace.userProfile.id, workspace.identity.projectName),
+        name: "vault",
+        tag: vaultImageRef(vault.userProfile.id, vault.identity.projectName),
       },
       {
         name: "runtime-base",
-        tag: workspace.runtime.baseImage,
+        tag: vault.runtime.baseImage,
       },
-      ...(workspace.runtime.rootdiskImage
+      ...(vault.runtime.rootdiskImage
         ? [{
             name: "rootdisk",
-            tag: workspace.runtime.rootdiskImage,
+            tag: vault.runtime.rootdiskImage,
           }]
         : []),
     ],
-    evolutionFiles: evolutionAssets(workspace),
+    evolutionFiles: evolutionAssets(vault),
     persistentVolumes: [
       {
-        name: "workspace-data",
-        sourceKind: workspace.attachments.workspaceData.source.kind,
-        sourceRef: workspace.attachments.workspaceData.source.volumeRef,
-        mountRoot: workspace.attachments.workspaceData.mountRoot,
-        durablePaths: workspace.attachments.workspaceData.durablePaths,
+        name: "vault-data",
+        sourceKind: vault.attachments.vaultData.source.kind,
+        sourceRef: vault.attachments.vaultData.source.volumeRef,
+        mountRoot: vault.attachments.vaultData.mountRoot,
+        durablePaths: vault.attachments.vaultData.durablePaths,
       },
       {
-        name: "workspace-runtime-state",
-        sourceKind: workspace.attachments.workspaceRuntimeState.source.kind,
-        sourceRef: workspace.attachments.workspaceRuntimeState.source.volumeRef,
-        mountRoot: workspace.attachments.workspaceRuntimeState.mountRoot,
-        durablePaths: workspace.attachments.workspaceRuntimeState.durablePaths,
+        name: "vault-runtime-state",
+        sourceKind: vault.attachments.vaultRuntimeState.source.kind,
+        sourceRef: vault.attachments.vaultRuntimeState.source.volumeRef,
+        mountRoot: vault.attachments.vaultRuntimeState.mountRoot,
+        durablePaths: vault.attachments.vaultRuntimeState.durablePaths,
       },
     ],
   };

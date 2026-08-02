@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { CredentialKind } from "./workspace.js";
+import type { CredentialKind } from "./vault.js";
 
 const AGENT_IDENTITY_HARNESSES = [
   "codex",

@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { listPortalProfiles, listOwnedWorkspaces, workspaceRefFromTarget } from "../../core/portal.js";
-import type { WorkspaceStatus } from "../../core/workspace.js";
+import { listPortalProfiles, listOwnedVaults, vaultRefFromTarget } from "../../core/portal.js";
+import type { VaultStatus } from "../../core/vault.js";
 import { rebuildCommand } from "./rebuild.js";
-import { synthesizeAndWriteWorkspaceStatus } from "./status.js";
+import { synthesizeAndWriteVaultStatus } from "./status.js";
 import {
-  normalizeWorkspaceStatus,
-  workspaceSelectionPath,
-  workspaceStatusPath,
-  writeWorkspaceStatus,
+  normalizeVaultStatus,
+  vaultSelectionPath,
+  vaultStatusPath,
+  writeVaultStatus,
 } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisStateRoot } from "../../utils/paths.js";
@@ -18,26 +18,26 @@ type ReconcileOptions = {
   json: boolean;
   refreshStatusOnly: boolean;
   userId?: string;
-  workspace?: string;
+  vault?: string;
 };
 
-type WorkspaceReconcileResult = {
+type VaultReconcileResult = {
   userId: string;
-  workspace: string;
+  vault: string;
   migratedStatusFile: boolean;
   removedSelectionFile: boolean;
-  refreshedDriverStatus: WorkspaceStatus["driver"] extends infer T
+  refreshedDriverStatus: VaultStatus["driver"] extends infer T
     ? T extends { status?: infer S }
       ? S | null
       : null
     : null;
-  refreshedDriverTarget: WorkspaceStatus["driver"] extends infer T
+  refreshedDriverTarget: VaultStatus["driver"] extends infer T
     ? T extends { selected?: infer S }
       ? S | null
       : null
     : null;
   rebuiltRunningDocker: boolean;
-  finalDriverStatus: WorkspaceStatus["driver"] extends infer T
+  finalDriverStatus: VaultStatus["driver"] extends infer T
     ? T extends { status?: infer S }
       ? S | null
       : null
@@ -48,7 +48,7 @@ type WorkspaceReconcileResult = {
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-workspaces [--user <userId>] [--workspace <workspace>] [--dry-run] [--refresh-status-only] [--json]",
+    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]",
   );
 }
 
@@ -81,12 +81,12 @@ function parseReconcileOptions(argv: string[]): ReconcileOptions {
       index += 1;
       continue;
     }
-    if (value === "--workspace") {
-      const workspace = argv[index + 1]?.trim();
-      if (!workspace) {
+    if (value === "--vault") {
+      const vault = argv[index + 1]?.trim();
+      if (!vault) {
         usage();
       }
-      options.workspace = workspace;
+      options.vault = vault;
       index += 1;
       continue;
     }
@@ -95,12 +95,12 @@ function parseReconcileOptions(argv: string[]): ReconcileOptions {
   return options;
 }
 
-function readRawWorkspaceStatus(filePath: string): WorkspaceStatus | null {
+function readRawVaultStatus(filePath: string): VaultStatus | null {
   if (!fs.existsSync(filePath)) {
     return null;
   }
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceStatus;
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as VaultStatus;
   } catch {
     return null;
   }
@@ -110,26 +110,26 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function migrateWorkspaceStatusFile(
+function migrateVaultStatusFile(
   userId: string,
-  workspace: string,
+  vault: string,
   dryRun: boolean,
 ): {
   migratedStatusFile: boolean;
   removedSelectionFile: boolean;
   statusFile: string;
 } {
-  const statusFile = workspaceStatusPath(workspace, userId);
-  const selectionFile = workspaceSelectionPath(workspace, userId);
-  const legacySelectionFile = path.join(polarisStateRoot(import.meta.url), `${workspace}.selection.json`);
+  const statusFile = vaultStatusPath(vault, userId);
+  const selectionFile = vaultSelectionPath(vault, userId);
+  const legacySelectionFile = path.join(polarisStateRoot(import.meta.url), `${vault}.selection.json`);
   const removedSelectionFile = fs.existsSync(selectionFile) || fs.existsSync(legacySelectionFile);
-  const rawStatus = readRawWorkspaceStatus(statusFile);
+  const rawStatus = readRawVaultStatus(statusFile);
   let migratedStatusFile = false;
   if (rawStatus) {
-    const normalized = normalizeWorkspaceStatus(rawStatus);
+    const normalized = normalizeVaultStatus(rawStatus);
     migratedStatusFile = stableJson(rawStatus) !== stableJson(normalized);
     if (!dryRun) {
-      writeWorkspaceStatus(rawStatus, userId);
+      writeVaultStatus(rawStatus, userId);
     }
   }
   if (removedSelectionFile && !dryRun) {
@@ -143,13 +143,13 @@ function migrateWorkspaceStatusFile(
   };
 }
 
-async function reconcileWorkspace(
+async function reconcileVault(
   userId: string,
-  workspace: string,
+  vault: string,
   options: ReconcileOptions,
-): Promise<WorkspaceReconcileResult> {
-  const migration = migrateWorkspaceStatusFile(userId, workspace, options.dryRun);
-  const refreshed = await synthesizeAndWriteWorkspaceStatus(workspace, userId, {
+): Promise<VaultReconcileResult> {
+  const migration = migrateVaultStatusFile(userId, vault, options.dryRun);
+  const refreshed = await synthesizeAndWriteVaultStatus(vault, userId, {
     write: !options.dryRun,
   });
   let rebuiltRunningDocker = false;
@@ -165,14 +165,14 @@ async function reconcileWorkspace(
   if (shouldRebuild) {
     rebuiltRunningDocker = true;
     if (!options.dryRun) {
-      await rebuildCommand(workspaceRefFromTarget(workspace, driverTarget), userId);
-      finalStatus = (await synthesizeAndWriteWorkspaceStatus(workspace, userId)).status;
+      await rebuildCommand(vaultRefFromTarget(vault, driverTarget), userId);
+      finalStatus = (await synthesizeAndWriteVaultStatus(vault, userId)).status;
     }
   }
 
   return {
     userId,
-    workspace,
+    vault,
     migratedStatusFile: migration.migratedStatusFile,
     removedSelectionFile: migration.removedSelectionFile,
     refreshedDriverStatus: driverStatus,
@@ -183,36 +183,36 @@ async function reconcileWorkspace(
   };
 }
 
-async function reconcileWorkspacesCommand(argv: string[]): Promise<void> {
+async function reconcileVaultsCommand(argv: string[]): Promise<void> {
   const options = parseReconcileOptions(argv);
   const userIds = options.userId
     ? [options.userId]
     : listPortalProfiles().map((profile) => profile.id);
-  const results: WorkspaceReconcileResult[] = [];
+  const results: VaultReconcileResult[] = [];
 
   for (const userId of userIds) {
-    const workspaces = listOwnedWorkspaces(userId)
-      .filter((workspace) => !options.workspace || workspace === options.workspace);
-    for (const workspace of workspaces) {
+    const vaults = listOwnedVaults(userId)
+      .filter((vault) => !options.vault || vault === options.vault);
+    for (const vault of vaults) {
       try {
-        logInfo("cli", "ops-reconcile-workspace", {
+        logInfo("cli", "ops-reconcile-vault", {
           userId,
-          workspace,
+          vault,
           dryRun: options.dryRun,
           refreshStatusOnly: options.refreshStatusOnly,
         });
-        results.push(await reconcileWorkspace(userId, workspace, options));
+        results.push(await reconcileVault(userId, vault, options));
       } catch (error) {
         results.push({
           userId,
-          workspace,
+          vault,
           migratedStatusFile: false,
           removedSelectionFile: false,
           refreshedDriverStatus: null,
           refreshedDriverTarget: null,
           rebuiltRunningDocker: false,
           finalDriverStatus: null,
-          statusFile: workspaceStatusPath(workspace, userId),
+          statusFile: vaultStatusPath(vault, userId),
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -222,7 +222,7 @@ async function reconcileWorkspacesCommand(argv: string[]): Promise<void> {
   const summary = {
     dryRun: options.dryRun,
     refreshStatusOnly: options.refreshStatusOnly,
-    workspaceCount: results.length,
+    vaultCount: results.length,
     migratedCount: results.filter((result) => result.migratedStatusFile).length,
     removedSelectionCount: results.filter((result) => result.removedSelectionFile).length,
     rebuiltCount: results.filter((result) => result.rebuiltRunningDocker).length,
@@ -237,7 +237,7 @@ async function reconcileWorkspacesCommand(argv: string[]): Promise<void> {
 
   for (const result of results) {
     const parts = [
-      `${result.userId}/${result.workspace}`,
+      `${result.userId}/${result.vault}`,
       `migrated=${result.migratedStatusFile ? "yes" : "no"}`,
       `selection-removed=${result.removedSelectionFile ? "yes" : "no"}`,
       `refreshed=${result.refreshedDriverStatus ?? "unknown"}`,
@@ -250,7 +250,7 @@ async function reconcileWorkspacesCommand(argv: string[]): Promise<void> {
     process.stdout.write(`${parts.join(" ")}\n`);
   }
   process.stdout.write(
-    `summary workspaces=${summary.workspaceCount} migrated=${summary.migratedCount} selection-removed=${summary.removedSelectionCount} rebuilt=${summary.rebuiltCount} errors=${summary.errorCount}\n`,
+    `summary vaults=${summary.vaultCount} migrated=${summary.migratedCount} selection-removed=${summary.removedSelectionCount} rebuilt=${summary.rebuiltCount} errors=${summary.errorCount}\n`,
   );
 }
 
@@ -258,8 +258,8 @@ export async function opsCommand(action: string | undefined, argv: string[]): Pr
   if (!action) {
     usage();
   }
-  if (action === "reconcile-workspaces") {
-    await reconcileWorkspacesCommand(argv);
+  if (action === "reconcile-vaults") {
+    await reconcileVaultsCommand(argv);
     return;
   }
   usage();

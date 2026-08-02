@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkspaceSpec } from "../../core/workspace.js";
+import type { VaultSpec } from "../../core/vault.js";
 import {
   dockerNetfsDevicePath,
   dockerNetfsServer,
@@ -8,25 +8,25 @@ import {
   netfsMountOptions,
   netfsResolvedPath,
   requireNetfsField,
-  workspaceDataDockerVolumeName,
+  vaultDataDockerVolumeName,
 } from "../../core/netfs.js";
 import {
-  workspaceNonPaseoToolPackageSpecs,
-  workspacePaseoPackageSpec,
-  workspaceToolCatalog,
+  vaultNonPaseoToolPackageSpecs,
+  vaultPaseoPackageSpec,
+  vaultToolCatalog,
 } from "../../core/harness-catalog.js";
 import { resolveWanghaiHostDataRoots } from "../../config/wanghai-env.js";
 import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
 } from "../../core/identity-layout.js";
-import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
+import { vaultRuntimeScopeName } from "../../core/vault-name.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
 import {
   WANGHAI_BACKUP_RUNTIME_ROOT,
-  WANGHAI_WORKSPACES_RUNTIME_ROOT,
+  WANGHAI_VAULTS_RUNTIME_ROOT,
 } from "../../config/scaffold.js";
 
 function q(value: string): string {
@@ -47,7 +47,7 @@ function volumeKey(name: string): string {
 
 function resolveDockerVolume(args: {
   fallbackName: string;
-  source: WorkspaceSpec["attachments"]["workspaceData"]["source"];
+  source: VaultSpec["attachments"]["vaultData"]["source"];
 }): { key: string; name: string } {
   const baseName = args.source.volumeRef?.trim() || args.fallbackName;
   const suffix = args.source.subPath?.trim()
@@ -60,18 +60,18 @@ function resolveDockerVolume(args: {
   };
 }
 
-function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
+function renderDockerVaultDataVolume(vault: VaultSpec): {
   mountBlock: string[];
   volumeBlock: string[];
 } {
-  const source = workspace.attachments.workspaceData.source;
+  const source = vault.attachments.vaultData.source;
   if (isNetfsSource(source)) {
     if (source.server?.trim() === "netfs.local") {
       return {
         mountBlock: [
           "      - type: bind",
           `        source: ${JSON.stringify(netfsResolvedPath(source))}`,
-          "        target: /workspace/project",
+          "        target: /vault/project",
         ],
         volumeBlock: [],
       };
@@ -79,13 +79,13 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
     const server = dockerNetfsServer(source);
     const device = dockerNetfsDevicePath(source);
     const options = [`addr=${server}`, ...netfsMountOptions(source)].join(",");
-    const volumeName = workspaceDataDockerVolumeName(workspace);
+    const volumeName = vaultDataDockerVolumeName(vault);
     const volumeToken = volumeKey(volumeName);
     return {
       mountBlock: [
         "      - type: volume",
         `        source: ${volumeToken}`,
-        "        target: /workspace/project",
+        "        target: /vault/project",
       ],
       volumeBlock: [
         `  ${volumeToken}:`,
@@ -98,30 +98,30 @@ function renderDockerWorkspaceDataVolume(workspace: WorkspaceSpec): {
       ],
     };
   }
-  const workspaceDataVolume = resolveDockerVolume({
-    fallbackName: `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-workspace-data`,
+  const vaultDataVolume = resolveDockerVolume({
+    fallbackName: `${vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)}-vault-data`,
     source,
   });
   return {
     mountBlock: [
       "      - type: volume",
-      `        source: ${workspaceDataVolume.key}`,
-      "        target: /workspace/project",
+      `        source: ${vaultDataVolume.key}`,
+      "        target: /vault/project",
     ],
     volumeBlock: [
-      `  ${workspaceDataVolume.key}:`,
-      `    name: ${workspaceDataVolume.name}`,
+      `  ${vaultDataVolume.key}:`,
+      `    name: ${vaultDataVolume.name}`,
     ],
   };
 }
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 
-function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
+function buildEvolutionBootstrapLines(vault: VaultSpec): string[] {
   const outputs = [
-    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
-    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
-    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+    [vault.evolution?.vaultMemoryFile, vault.evolution?.vaultMemoryContent],
+    [vault.evolution?.userMemoryFile, vault.evolution?.userMemoryContent],
+    [vault.evolution?.sessionSnapshotFile, vault.evolution?.sessionSnapshotContent],
   ] as Array<[string | undefined, string | undefined]>;
   return outputs.flatMap(([filePath, content]) => {
     if (!filePath || !content) {
@@ -148,8 +148,8 @@ function buildGitHubKnownHostsLines(sshRoot: string): string[] {
   ];
 }
 
-function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
-  if (!workspace.agent.enabled) {
+function buildRuntimeObserverLines(vault: VaultSpec): string[] {
+  if (!vault.agent.enabled) {
     return [];
   }
   const memoryObserverPath = path.join(
@@ -162,24 +162,24 @@ function buildRuntimeObserverLines(workspace: WorkspaceSpec): string[] {
   );
   const memoryScript = fs.readFileSync(memoryObserverPath, "utf8");
   const memoryEncoded = Buffer.from(memoryScript, "utf8").toString("base64");
-  const memoryRuntimePath = `${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.mjs`;
+  const memoryRuntimePath = `${vault.agent.runtime.evolutionRoot}/runtime-memory-observer.mjs`;
   return [
     `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(memoryRuntimePath)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(memoryEncoded)}));`)}`,
     `chmod 755 ${memoryRuntimePath}`,
-    `POLARIS_PROJECT=${q(workspace.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(workspace.userProfile.id)} POLARIS_MANAGER_ID=${q(workspace.agent.managerId)} PASEO_HOME=${workspace.runtime.home}/.paseo node ${memoryRuntimePath} > ${workspace.agent.runtime.evolutionRoot}/runtime-memory-observer.log 2>&1 &`,
+    `POLARIS_PROJECT=${q(vault.identity.projectName)} POLARIS_USER_PROFILE_ID=${q(vault.userProfile.id)} POLARIS_MANAGER_ID=${q(vault.agent.managerId)} PASEO_HOME=${vault.runtime.home}/.paseo node ${memoryRuntimePath} > ${vault.agent.runtime.evolutionRoot}/runtime-memory-observer.log 2>&1 &`,
   ];
 }
 
-function persistentPolarisToolRoot(workspace: WorkspaceSpec): string {
-  return `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
+function persistentPolarisToolRoot(vault: VaultSpec): string {
+  return `${vault.attachments.vaultRuntimeState.mountRoot}/tooling/polaris`;
 }
 
-function codexXdgRoots(workspace: WorkspaceSpec): {
+function codexXdgRoots(vault: VaultSpec): {
   config: string;
   data: string;
   state: string;
 } {
-  const base = `${workspace.attachments.userIdentityState.mountRoot}/codex-xdg`;
+  const base = `${vault.attachments.userIdentityState.mountRoot}/codex-xdg`;
   return {
     config: `${base}/config`,
     data: `${base}/data`,
@@ -187,19 +187,19 @@ function codexXdgRoots(workspace: WorkspaceSpec): {
   };
 }
 
-function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
-  const home = workspace.runtime.home;
-  const toolRoot = persistentPolarisToolRoot(workspace);
-  const xdg = codexXdgRoots(workspace);
+function buildAgentCliInstallLines(vault: VaultSpec): string[] {
+  const home = vault.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(vault);
+  const xdg = codexXdgRoots(vault);
   const imageToolRoot = `${home}/.local/polaris`;
-  const toolBinaries = workspaceToolCatalog()
+  const toolBinaries = vaultToolCatalog()
     .filter((tool) => !["codex", "claude"].includes(tool.id))
     .map((tool) => tool.binName);
   return [
     `mkdir -p ${toolRoot} /tmp/npm-cache ${home}/.local ${xdg.config} ${xdg.data} ${xdg.state}`,
     `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
-    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceNonPaseoToolPackageSpecs().join(" ")}`,
-    `if [ ! -x ${toolRoot}/bin/paseo ]; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspacePaseoPackageSpec()}; fi`,
+    `npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${vaultNonPaseoToolPackageSpecs().join(" ")}`,
+    `if [ ! -x ${toolRoot}/bin/paseo ]; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${vaultPaseoPackageSpec()}; fi`,
     ...toolBinaries.map((binary) => `ln -sf ${toolRoot}/bin/${binary} /usr/local/bin/${binary}`),
     `printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'export CODEX_HOME=${home}/.codex' 'export XDG_CONFIG_HOME=${xdg.config}' 'export XDG_DATA_HOME=${xdg.data}' 'export XDG_STATE_HOME=${xdg.state}' 'export NPM_CONFIG_PREFIX=${toolRoot}' 'export npm_config_cache=/tmp/npm-cache' 'mkdir -p ${home}/.codex /tmp/npm-cache ${xdg.config} ${xdg.data} ${xdg.state}' 'exec ${toolRoot}/bin/codex \"$@\"' > /usr/local/bin/codex`,
     "chmod 755 /usr/local/bin/codex",
@@ -208,11 +208,11 @@ function buildAgentCliInstallLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function buildAgentCliWrapperLines(workspace: WorkspaceSpec): string[] {
-  const home = workspace.runtime.home;
-  const toolRoot = persistentPolarisToolRoot(workspace);
-  const xdg = codexXdgRoots(workspace);
-  const toolBinaries = workspaceToolCatalog()
+function buildAgentCliWrapperLines(vault: VaultSpec): string[] {
+  const home = vault.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(vault);
+  const xdg = codexXdgRoots(vault);
+  const toolBinaries = vaultToolCatalog()
     .filter((tool) => !["codex", "claude"].includes(tool.id))
     .map((tool) => tool.binName);
   return [
@@ -224,23 +224,23 @@ function buildAgentCliWrapperLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function workspaceEnablesWanghaiPortal(workspace: WorkspaceSpec): boolean {
-  return workspace.connectivity.servicePorts.some((port) => {
+function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some((port) => {
     const name = (port.name ?? "").toLowerCase();
     return name === "wanghai" || String(port.containerPort) === "9090";
   });
 }
 
-function buildWanghaiDataRootMountLines(workspace: WorkspaceSpec): string[] {
-  if (!workspaceEnablesWanghaiPortal(workspace)) {
+function buildWanghaiDataRootMountLines(vault: VaultSpec): string[] {
+  if (!vaultEnablesWanghaiPortal(vault)) {
     return [];
   }
   const roots = resolveWanghaiHostDataRoots(import.meta.url);
   const mounts: Array<{ source: string; target: string }> = [];
-  if (roots.workspacesRoot) {
+  if (roots.vaultsRoot) {
     mounts.push({
-      source: roots.workspacesRoot,
-      target: WANGHAI_WORKSPACES_RUNTIME_ROOT,
+      source: roots.vaultsRoot,
+      target: WANGHAI_VAULTS_RUNTIME_ROOT,
     });
   }
   if (roots.backupRoot) {
@@ -257,17 +257,17 @@ function buildWanghaiDataRootMountLines(workspace: WorkspaceSpec): string[] {
 }
 
 /**
- * Wanghai portal runs **inside** the workspace container (not on the host).
- * Started after paseo daemon bootstrap; logs under workspace runtime state.
+ * Wanghai portal runs **inside** the vault container (not on the host).
+ * Started after paseo daemon bootstrap; logs under vault runtime state.
  */
-function buildWanghaiPortalBootstrapLines(workspace: WorkspaceSpec): string[] {
-  if (!workspaceEnablesWanghaiPortal(workspace)) {
+function buildWanghaiPortalBootstrapLines(vault: VaultSpec): string[] {
+  if (!vaultEnablesWanghaiPortal(vault)) {
     return [];
   }
-  const logFile = `${workspace.attachments.workspaceRuntimeState.mountRoot}/wanghai-portal.log`;
-  const pidFile = `${workspace.attachments.ephemeralRuntime.mountRoot}/pids/wanghai-portal.pid`;
+  const logFile = `${vault.attachments.vaultRuntimeState.mountRoot}/wanghai-portal.log`;
+  const pidFile = `${vault.attachments.ephemeralRuntime.mountRoot}/pids/wanghai-portal.pid`;
   return [
-    `mkdir -p ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.workspaceRuntimeState.mountRoot}`,
+    `mkdir -p ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.vaultRuntimeState.mountRoot}`,
     `if [ -x /usr/local/bin/wanghai-entrypoint ] && [ -d /opt/wanghai/apps/admin-portal ]; then`,
     `  if ! curl -fsS http://127.0.0.1:9090/ >/dev/null 2>&1; then`,
     `    nohup /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090 > ${logFile} 2>&1 &`,
@@ -277,15 +277,15 @@ function buildWanghaiPortalBootstrapLines(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
-  if (!workspace.agent.enabled) {
+function buildPaseoBootstrapLines(vault: VaultSpec): string[] {
+  if (!vault.agent.enabled) {
     return [];
   }
-  const home = workspace.runtime.home;
+  const home = vault.runtime.home;
   const paseoAppBaseUrl = resolveConfiguredPaseoAppBaseUrl();
   const pidFile = `${home}/.paseo/paseo.pid`;
   const daemonLog = `${home}/.paseo/daemon.log`;
-  const runtimePidFile = `${workspace.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`;
+  const runtimePidFile = `${vault.attachments.ephemeralRuntime.mountRoot}/pids/paseo.pid`;
   const configScript = [
     "import json, pathlib",
     `path = pathlib.Path(${JSON.stringify(`${home}/.paseo/config.json`)})`,
@@ -319,51 +319,51 @@ function buildPaseoBootstrapLines(workspace: WorkspaceSpec): string[] {
     `else`,
     `  paseo_sync_pairing || true`,
     `fi`,
-    ...buildRuntimeObserverLines(workspace),
+    ...buildRuntimeObserverLines(vault),
   ];
 }
 
-export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
-  const project = workspace.identity.projectName;
-  const runtimeScope = workspaceRuntimeScopeName(workspace.userProfile.id, project);
+export function renderDockerVault(vault: VaultSpec): string {
+  const project = vault.identity.projectName;
+  const runtimeScope = vaultRuntimeScopeName(vault.userProfile.id, project);
   const serviceName = runtimeScope;
-  const composeProjectName = sanitizeVolumeToken(runtimeScope).replace(/^[.-]+/, "") || "polaris-workspace";
+  const composeProjectName = sanitizeVolumeToken(runtimeScope).replace(/^[.-]+/, "") || "polaris-vault";
   const containerName = `${runtimeScope}-docker`;
-  const workspaceDataVolume = renderDockerWorkspaceDataVolume(workspace);
-  const workspaceRuntimeVolume = resolveDockerVolume({
-    fallbackName: `${runtimeScope}-workspace-runtime-state`,
-    source: workspace.attachments.workspaceRuntimeState.source,
+  const vaultDataVolume = renderDockerVaultDataVolume(vault);
+  const vaultRuntimeVolume = resolveDockerVolume({
+    fallbackName: `${runtimeScope}-vault-runtime-state`,
+    source: vault.attachments.vaultRuntimeState.source,
   });
-  const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const userScope = vault.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
   const identityVolume = resolveDockerVolume({
     fallbackName: `polaris-${userScope}-identity`,
-    source: workspace.attachments.userIdentityState.source,
+    source: vault.attachments.userIdentityState.source,
   });
-  const home = workspace.runtime.home;
-  const toolRoot = persistentPolarisToolRoot(workspace);
-  const xdg = codexXdgRoots(workspace);
+  const home = vault.runtime.home;
+  const toolRoot = persistentPolarisToolRoot(vault);
+  const xdg = codexXdgRoots(vault);
   const imageToolRoot = `${home}/.local/polaris`;
-  const sshRoot = `${workspace.attachments.userIdentityState.mountRoot}/ssh`;
+  const sshRoot = `${vault.attachments.userIdentityState.mountRoot}/ssh`;
   const identityDirs = userIdentityBootstrapDirs(
-    workspace.attachments.userIdentityState.mountRoot,
+    vault.attachments.userIdentityState.mountRoot,
   );
-  const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
+  const authBootstrapLines = vault.runtime.authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
     const storageTarget = stateStoragePathForMountPath({
       mountPath: file.mountPath,
       runtimeHome: home,
-      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      identityRoot: vault.attachments.userIdentityState.mountRoot,
     });
     const target = storageTarget ?? file.mountPath;
     const guardedWrite =
       storageTarget?.startsWith(`${sshRoot}/`)
-        && workspace.userProfile.ssh.mode === "provided-key"
+        && vault.userProfile.ssh.mode === "provided-key"
         ? `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`
         : `if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`;
     return [
       guardedWrite,
-      ...(workspace.runtime.user === "root" ? [`chown root:root ${target} || true`] : []),
+      ...(vault.runtime.user === "root" ? [`chown root:root ${target} || true`] : []),
       `chmod 600 ${target} || true`,
     ];
   });
@@ -371,54 +371,54 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
     "set -eux",
     `mkdir -p ${home}`,
     `chmod 755 ${home}`,
-    ...(workspace.runtime.bootstrapProfile === "prebuilt"
+    ...(vault.runtime.bootstrapProfile === "prebuilt"
       ? []
       : [
-          `apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ripgrep ${workspace.runtime.aptPackages.join(" ")} && rm -rf /var/lib/apt/lists/*`,
-          ...(workspace.runtime.installRustup
+          `apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ripgrep ${vault.runtime.aptPackages.join(" ")} && rm -rf /var/lib/apt/lists/*`,
+          ...(vault.runtime.installRustup
             ? ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"]
             : []),
-          ...buildAgentCliInstallLines(workspace),
+          ...buildAgentCliInstallLines(vault),
         ]),
-    `mkdir -p ${workspace.attachments.workspaceData.mountRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${workspace.attachments.ephemeralRuntime.mountRoot}/tmp ${workspace.attachments.ephemeralRuntime.mountRoot}/pids ${workspace.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
-    ...(workspace.runtime.user === "root"
-      ? [`chown -R root:root ${workspace.attachments.workspaceRuntimeState.mountRoot} ${workspace.attachments.userIdentityState.mountRoot} ${workspace.attachments.ephemeralRuntime.mountRoot}`]
+    `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${vault.attachments.vaultRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
+    ...(vault.runtime.user === "root"
+      ? [`chown -R root:root ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.userIdentityState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}`]
       : []),
     `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
-    `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/copilot ${home}/.copilot`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/pi ${home}/.pi`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
-    `ln -sfn ${workspace.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
-    `ln -sfn ${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo ${home}/.paseo`,
+    `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/vault`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/copilot ${home}/.copilot`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/pi ${home}/.pi`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
+    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
+    `ln -sfn ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${home}/.paseo`,
     `ln -sfn ${sshRoot} ${home}/.ssh`,
-    `ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/workspace`,
+    `ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/vault`,
     `ln -sfn ${toolRoot} ${home}/.local/polaris`,
-    ...buildAgentCliWrapperLines(workspace),
-    ...(workspace.profile.workspaceAlias ? [`ln -sfn ${workspace.attachments.workspaceData.mountRoot} ${home}/${workspace.profile.workspaceAlias}`] : []),
+    ...buildAgentCliWrapperLines(vault),
+    ...(vault.profile.vaultAlias ? [`ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/${vault.profile.vaultAlias}`] : []),
     ...authBootstrapLines,
     `mkdir -p ${sshRoot}`,
-    ...(workspace.runtime.user === "root" ? [`chown root:root ${sshRoot} || true`] : []),
+    ...(vault.runtime.user === "root" ? [`chown root:root ${sshRoot} || true`] : []),
     `chmod 700 ${sshRoot} || true`,
-    ...(workspace.runtime.user === "root"
+    ...(vault.runtime.user === "root"
       ? [`find ${sshRoot} -maxdepth 1 -type f -exec chown root:root {} + 2>/dev/null || true`]
       : []),
-    `find ${sshRoot} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod ${workspace.runtime.user === "root" ? "400" : "600"} {} + 2>/dev/null || true`,
+    `find ${sshRoot} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod ${vault.runtime.user === "root" ? "400" : "600"} {} + 2>/dev/null || true`,
     `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
     `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
     ...buildGitHubKnownHostsLines(sshRoot),
-    ...workspace.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
-    ...buildEvolutionBootstrapLines(workspace),
-    ...buildPaseoBootstrapLines(workspace),
-    ...buildWanghaiPortalBootstrapLines(workspace),
+    ...vault.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
+    ...buildEvolutionBootstrapLines(vault),
+    ...buildPaseoBootstrapLines(vault),
+    ...buildWanghaiPortalBootstrapLines(vault),
     "touch /tmp/.ready",
     "sleep infinity",
   ]
     .map((line) => composeEscape(line))
     .join("\n");
-  const portLines = workspace.connectivity.servicePorts
+  const portLines = vault.connectivity.servicePorts
     .map((port) => `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");
 
@@ -426,7 +426,7 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
 
 services:
   ${serviceName}:
-    image: ${workspace.runtime.baseImage}
+    image: ${vault.runtime.baseImage}
     container_name: ${containerName}
     restart: unless-stopped
     command:
@@ -437,34 +437,34 @@ ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     ports:
 ${portLines || '      - "6767:6767"'}
     environment:
-      POLARIS_EVOLUTION_ROOT: ${workspace.agent.runtime.evolutionRoot}
-      POLARIS_WORKSPACE_MEMORY_FILE: ${workspace.evolution?.workspaceMemoryFile ?? ""}
-      POLARIS_USER_MEMORY_FILE: ${workspace.evolution?.userMemoryFile ?? ""}
-      POLARIS_MEMORY_SNAPSHOT_FILE: ${workspace.evolution?.sessionSnapshotFile ?? ""}
+      POLARIS_EVOLUTION_ROOT: ${vault.agent.runtime.evolutionRoot}
+      POLARIS_VAULT_MEMORY_FILE: ${vault.evolution?.vaultMemoryFile ?? ""}
+      POLARIS_USER_MEMORY_FILE: ${vault.evolution?.userMemoryFile ?? ""}
+      POLARIS_MEMORY_SNAPSHOT_FILE: ${vault.evolution?.sessionSnapshotFile ?? ""}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-${workspaceDataVolume.mountBlock.join("\n")}
-${buildWanghaiDataRootMountLines(workspace).join("\n")}
+${vaultDataVolume.mountBlock.join("\n")}
+${buildWanghaiDataRootMountLines(vault).join("\n")}
       - type: volume
-        source: ${workspaceRuntimeVolume.key}
-        target: /workspace/state
+        source: ${vaultRuntimeVolume.key}
+        target: /vault/state
       - type: volume
         source: ${identityVolume.key}
         target: /identity
     tmpfs:
-      - /run/workspace
+      - /run/vault
 
 volumes:
-${workspaceDataVolume.volumeBlock.join("\n")}
-  ${workspaceRuntimeVolume.key}:
-    name: ${workspaceRuntimeVolume.name}
+${vaultDataVolume.volumeBlock.join("\n")}
+  ${vaultRuntimeVolume.key}:
+    name: ${vaultRuntimeVolume.name}
   ${identityVolume.key}:
     name: ${identityVolume.name}
     external: true
 `;
 }
 
-export function renderAndWriteDockerWorkspace(workspace: WorkspaceSpec): string {
-  return writeGeneratedManifest(workspace, renderDockerWorkspace(workspace));
+export function renderAndWriteDockerVault(vault: VaultSpec): string {
+  return writeGeneratedManifest(vault, renderDockerVault(vault));
 }

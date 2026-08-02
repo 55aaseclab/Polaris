@@ -1,10 +1,10 @@
 import { getBackendDriver } from "../../backends/index.js";
 import { spawnSync } from "node:child_process";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../../config/load.js";
-import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
-import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
-import type { WorkspaceCommandKind, WorkspaceSpec, WorkspaceStatus } from "../../core/workspace.js";
-import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../../config/load.js";
+import { ensureProvisionedVault, ensureVaultConfig } from "../../config/provision.js";
+import { computeVaultDrift, synthesizeVaultStatus } from "../../core/runtime-controller.js";
+import type { VaultCommandKind, VaultSpec, VaultStatus } from "../../core/vault.js";
+import { vaultRuntimeScopeName } from "../../core/vault-name.js";
 import { readKubevirtPersistedPaseoState } from "../../backends/kubevirt/driver.js";
 import {
   appendEvolutionEvent,
@@ -12,9 +12,9 @@ import {
   finalizeEvolutionSession,
   prepareEvolutionMemorySnapshot,
 } from "../../evolution/runtime.js";
-import { writeWorkspacePaseoPairing, writeWorkspacePaseoServerId } from "../../output/state-store.js";
+import { writeVaultPaseoPairing, writeVaultPaseoServerId } from "../../output/state-store.js";
 import { logDebug, logInfo, logWarn } from "../../utils/log.js";
-import { logWorkspaceEvent } from "../../utils/workspace-log.js";
+import { logVaultEvent } from "../../utils/vault-log.js";
 
 function runCheckedCapture(command: string, args: string[]): string {
   const result = spawnSync(command, args, { encoding: "utf8" });
@@ -49,20 +49,20 @@ function readJsonObject(raw: string): (Record<string, unknown> & { url: string }
   }
 }
 
-export async function persistWorkspacePaseoState(
-  workspace: WorkspaceSpec,
+export async function persistVaultPaseoState(
+  vault: VaultSpec,
 ): Promise<"persisted" | "skipped" | "stopped"> {
-  if (!workspace.agent.enabled) {
+  if (!vault.agent.enabled) {
     return "skipped";
   }
   const startedAt = Date.now();
   let serverId = "";
   let pairing: (Record<string, unknown> & { url: string }) | null = null;
-  const serverIdPath = `${workspace.agent.runtime.stateRoot}/server-id`;
-  const pairingPath = workspace.agent.runtime.pairingFile ?? `${workspace.agent.runtime.stateRoot}/pairing.json`;
+  const serverIdPath = `${vault.agent.runtime.stateRoot}/server-id`;
+  const pairingPath = vault.agent.runtime.pairingFile ?? `${vault.agent.runtime.stateRoot}/pairing.json`;
 
-  if (workspace.backend.kind === "docker") {
-    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+  if (vault.backend.kind === "docker") {
+    const scope = vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
     try {
       serverId = runCheckedCapture(
         "docker",
@@ -78,15 +78,15 @@ export async function persistWorkspacePaseoState(
       if (!isStoppedContainerExecError(error)) {
         throw error;
       }
-      logWarn("cli", "workspace-paseo-state-persist-skipped", {
-        project: workspace.identity.projectName,
-        backend: workspace.backend.kind,
+      logWarn("cli", "vault-paseo-state-persist-skipped", {
+        project: vault.identity.projectName,
+        backend: vault.backend.kind,
         reason: "container-stopped-during-paseo-state-read",
       });
       return "stopped";
     }
-  } else if (workspace.backend.kind === "pod") {
-    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+  } else if (vault.backend.kind === "pod") {
+    const scope = vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
     serverId = runCheckedCapture(
       "kubectl",
       ["-n", scope, "exec", `deployment/${scope}`, "--", "sh", "-lc", `cat ${serverIdPath} 2>/dev/null || true`],
@@ -97,16 +97,16 @@ export async function persistWorkspacePaseoState(
         ["-n", scope, "exec", `deployment/${scope}`, "--", "sh", "-lc", `cat ${pairingPath} 2>/dev/null || true`],
       ),
     );
-  } else if (workspace.backend.kind === "kubevirt-vm") {
-    const snapshot = await readKubevirtPersistedPaseoState(workspace);
+  } else if (vault.backend.kind === "kubevirt-vm") {
+    const snapshot = await readKubevirtPersistedPaseoState(vault);
     serverId = snapshot?.serverId ?? "";
     pairing = snapshot?.pairing ?? null;
   }
 
   if (!serverId || !pairing) {
-    logWarn("cli", "workspace-paseo-state-persist-skipped", {
-      project: workspace.identity.projectName,
-      backend: workspace.backend.kind,
+    logWarn("cli", "vault-paseo-state-persist-skipped", {
+      project: vault.identity.projectName,
+      backend: vault.backend.kind,
       hasServerId: Boolean(serverId),
       hasPairing: Boolean(pairing),
       elapsedMs: Date.now() - startedAt,
@@ -114,23 +114,23 @@ export async function persistWorkspacePaseoState(
     return "skipped";
   }
 
-  writeWorkspacePaseoServerId(workspace.identity.projectName, serverId, workspace.userProfile.id);
-  writeWorkspacePaseoPairing(workspace.identity.projectName, pairing, workspace.userProfile.id);
-  logInfo("cli", "workspace-paseo-state-persisted", {
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
+  writeVaultPaseoServerId(vault.identity.projectName, serverId, vault.userProfile.id);
+  writeVaultPaseoPairing(vault.identity.projectName, pairing, vault.userProfile.id);
+  logInfo("cli", "vault-paseo-state-persisted", {
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
     serverId,
     elapsedMs: Date.now() - startedAt,
   });
   return "persisted";
 }
 
-export function loadWorkspaceForProjectRef(
+export function loadVaultForProjectRef(
   projectRef: string,
   userProfileId?: string,
-): WorkspaceSpec {
-  const resolved = resolveWorkspaceConfigPath(projectRef, userProfileId);
-  return loadWorkspaceFromConfigPath(
+): VaultSpec {
+  const resolved = resolveVaultConfigPath(projectRef, userProfileId);
+  return loadVaultFromConfigPath(
     resolved.configPath,
     resolved.project,
     resolved.backendHint,
@@ -138,79 +138,79 @@ export function loadWorkspaceForProjectRef(
   );
 }
 
-export function loadWorkspaceForCommand(
-  command: WorkspaceCommandKind,
+export function loadVaultForCommand(
+  command: VaultCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): {
-  workspace: WorkspaceSpec;
+  vault: VaultSpec;
   driver: ReturnType<typeof getBackendDriver>;
 } {
-  logInfo("cli", "load-workspace", { command, projectRef, userProfileId });
-  ensureWorkspaceConfig(projectRef, userProfileId);
-  const workspace = loadWorkspaceForProjectRef(projectRef, userProfileId);
-  const driver = getBackendDriver(workspace.backend.kind);
-  logDebug("cli", "workspace-loaded", {
+  logInfo("cli", "load-vault", { command, projectRef, userProfileId });
+  ensureVaultConfig(projectRef, userProfileId);
+  const vault = loadVaultForProjectRef(projectRef, userProfileId);
+  const driver = getBackendDriver(vault.backend.kind);
+  logDebug("cli", "vault-loaded", {
     command,
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
-    profile: workspace.backend.profile,
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
+    profile: vault.backend.profile,
   });
-  return { workspace, driver };
+  return { vault, driver };
 }
 
-export async function loadExecutableWorkspaceForCommand(
-  command: WorkspaceCommandKind,
+export async function loadExecutableVaultForCommand(
+  command: VaultCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): Promise<{
-  workspace: WorkspaceSpec;
+  vault: VaultSpec;
   driver: ReturnType<typeof getBackendDriver>;
 }> {
-  ensureProvisionedWorkspace(projectRef, userProfileId);
-  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef, userProfileId);
-  const preparedWorkspace = await prepareEvolutionMemorySnapshot(workspace);
-  return { workspace: preparedWorkspace, driver };
+  ensureProvisionedVault(projectRef, userProfileId);
+  const { vault, driver } = loadVaultForCommand(command, projectRef, userProfileId);
+  const preparedVault = await prepareEvolutionMemorySnapshot(vault);
+  return { vault: preparedVault, driver };
 }
 
-export async function loadPreparedWorkspaceForCommand(
-  command: WorkspaceCommandKind,
+export async function loadPreparedVaultForCommand(
+  command: VaultCommandKind,
   projectRef: string,
   userProfileId?: string,
 ): Promise<{
-  workspace: WorkspaceSpec;
+  vault: VaultSpec;
   driver: ReturnType<typeof getBackendDriver>;
 }> {
-  const { workspace, driver } = loadWorkspaceForCommand(command, projectRef, userProfileId);
-  const preparedWorkspace = await prepareEvolutionMemorySnapshot(workspace);
-  return { workspace: preparedWorkspace, driver };
+  const { vault, driver } = loadVaultForCommand(command, projectRef, userProfileId);
+  const preparedVault = await prepareEvolutionMemorySnapshot(vault);
+  return { vault: preparedVault, driver };
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function waitForWorkspaceReady(
-  workspace: WorkspaceSpec,
+export async function waitForVaultReady(
+  vault: VaultSpec,
   timeoutMs = 120000,
   intervalMs = 1500,
 ): Promise<void> {
-  const driver = getBackendDriver(workspace.backend.kind);
+  const driver = getBackendDriver(vault.backend.kind);
   const startedAt = Date.now();
-  let lastStatus: WorkspaceStatus | null = null;
+  let lastStatus: VaultStatus | null = null;
   let probe = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
     probe += 1;
     const inspectStartedAt = Date.now();
-    const observation = await driver.inspect(workspace);
+    const observation = await driver.inspect(vault);
     const inspectElapsedMs = Date.now() - inspectStartedAt;
     let effectiveObservation = observation;
     let persistResult: "persisted" | "skipped" | "stopped" | "not-needed" = "not-needed";
     let persistElapsedMs = 0;
-    if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
+    if (vault.agent.enabled && observation.backend.exists && observation.backend.running) {
       const persistStartedAt = Date.now();
-      persistResult = await persistWorkspacePaseoState(workspace);
+      persistResult = await persistVaultPaseoState(vault);
       persistElapsedMs = Date.now() - persistStartedAt;
       if (persistResult === "stopped") {
         effectiveObservation = {
@@ -222,24 +222,24 @@ export async function waitForWorkspaceReady(
         };
       }
     }
-    const drift = computeWorkspaceDrift(workspace, effectiveObservation);
-    const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift);
+    const drift = computeVaultDrift(vault, effectiveObservation);
+    const status = synthesizeVaultStatus(vault, effectiveObservation, drift);
     lastStatus = status;
 
     logDebug("cli", "start-probe", {
-      project: workspace.identity.projectName,
-      backend: workspace.backend.kind,
+      project: vault.identity.projectName,
+      backend: vault.backend.kind,
       runtimeLifecycle: status.driver?.status,
-      paseoState: workspace.agent.enabled ? persistResult : "disabled",
+      paseoState: vault.agent.enabled ? persistResult : "disabled",
       reason: status.driver?.reason,
     });
 
-    logWorkspaceEvent("info", "readiness-probe", {
-      userId: workspace.userProfile.id,
-      workspace: workspace.identity.projectName,
-      ref: `${workspace.identity.projectName}@${workspace.backend.kind}`,
-      backend: workspace.backend.kind,
-      profile: workspace.backend.profile,
+    logVaultEvent("info", "readiness-probe", {
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
+      ref: `${vault.identity.projectName}@${vault.backend.kind}`,
+      backend: vault.backend.kind,
+      profile: vault.backend.profile,
     }, {
       probe,
       elapsedMs: Date.now() - startedAt,
@@ -249,17 +249,17 @@ export async function waitForWorkspaceReady(
       backendExists: effectiveObservation.backend.exists,
       backendRunning: effectiveObservation.backend.running,
       runtimeLifecycle: status.driver?.status,
-      paseoState: workspace.agent.enabled ? persistResult : "disabled",
+      paseoState: vault.agent.enabled ? persistResult : "disabled",
       reason: status.driver?.reason,
     });
 
     if (
       status.driver?.status === "running"
-      && (!workspace.agent.enabled || persistResult === "persisted")
+      && (!vault.agent.enabled || persistResult === "persisted")
     ) {
-      logInfo("cli", "workspace-ready", {
-        project: workspace.identity.projectName,
-        backend: workspace.backend.kind,
+      logInfo("cli", "vault-ready", {
+        project: vault.identity.projectName,
+        backend: vault.backend.kind,
       });
       return;
     }
@@ -267,51 +267,51 @@ export async function waitForWorkspaceReady(
     await sleep(intervalMs);
   }
 
-  logWarn("cli", "workspace-not-ready-before-timeout", {
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
+  logWarn("cli", "vault-not-ready-before-timeout", {
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
     runtimeLifecycle: lastStatus?.driver?.status,
     reason: lastStatus?.driver?.reason,
   });
 
   if (lastStatus) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.selected?.backend ?? "unknown"}, runtimeLifecycle=${lastStatus.driver?.status ?? "unknown"}, reason=${lastStatus.driver?.reason ?? "unknown"})`,
+      `Vault '${vault.identity.projectName}' did not become ready within ${timeoutMs}ms (${lastStatus.driver?.selected?.backend ?? "unknown"}, runtimeLifecycle=${lastStatus.driver?.status ?? "unknown"}, reason=${lastStatus.driver?.reason ?? "unknown"})`,
     );
   }
-  throw new Error(`Workspace '${workspace.identity.projectName}' did not become ready within ${timeoutMs}ms`);
+  throw new Error(`Vault '${vault.identity.projectName}' did not become ready within ${timeoutMs}ms`);
 }
 
-export async function runWorkspaceCommandWithEvolution<T>(params: {
-  workspace: WorkspaceSpec;
-  command: WorkspaceCommandKind;
+export async function runVaultCommandWithEvolution<T>(params: {
+  vault: VaultSpec;
+  command: VaultCommandKind;
   execute: () => Promise<T>;
   onSuccessPayload?: (result: T) => Record<string, unknown>;
 }): Promise<{ result: T; evolutionSessionId?: string }> {
-  const { workspace, command, execute, onSuccessPayload } = params;
-  if (!workspace.agent.enabled) {
+  const { vault, command, execute, onSuccessPayload } = params;
+  if (!vault.agent.enabled) {
     return { result: await execute() };
   }
   const sessionId = createEvolutionSessionId(command);
-  await appendEvolutionEvent(workspace, sessionId, "task-started", {
+  await appendEvolutionEvent(vault, sessionId, "task-started", {
     command,
-    backend: workspace.backend.kind,
-    project: workspace.identity.projectName,
+    backend: vault.backend.kind,
+    project: vault.identity.projectName,
   });
   try {
     const result = await execute();
-    await appendEvolutionEvent(workspace, sessionId, "task-completed", {
+    await appendEvolutionEvent(vault, sessionId, "task-completed", {
       command,
       ...(onSuccessPayload ? onSuccessPayload(result) : {}),
     });
-    await finalizeEvolutionSession(workspace, sessionId);
+    await finalizeEvolutionSession(vault, sessionId);
     return { result, evolutionSessionId: sessionId };
   } catch (error) {
-    await appendEvolutionEvent(workspace, sessionId, "task-failed", {
+    await appendEvolutionEvent(vault, sessionId, "task-failed", {
       command,
       error: error instanceof Error ? error.message : String(error),
     });
-    await finalizeEvolutionSession(workspace, sessionId);
+    await finalizeEvolutionSession(vault, sessionId);
     throw error;
   }
 }

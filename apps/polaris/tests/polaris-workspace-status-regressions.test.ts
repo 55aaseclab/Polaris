@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-test("normalizeWorkspaceStatus accepts schema-less 1.1-shaped statuses", async () => {
-  const { normalizeWorkspaceStatus } = await import(
+test("normalizeVaultStatus accepts schema-less 1.1-shaped statuses", async () => {
+  const { normalizeVaultStatus } = await import(
     `../scripts/output/state-store.ts?case=${Date.now()}-${Math.random().toString(16).slice(2)}`
   );
-  const normalized = normalizeWorkspaceStatus({
+  const normalized = normalizeVaultStatus({
     project: "demo",
     driver: {
       selected: { backend: "docker" },

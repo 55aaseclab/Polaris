@@ -1,13 +1,13 @@
-import type { AuthFile, PlainEnvVar, ServicePort, WorkspaceSpec } from "../../core/workspace.js";
+import type { AuthFile, PlainEnvVar, ServicePort, VaultSpec } from "../../core/vault.js";
 import {
   isNetfsSource,
   netfsResolvedPath,
   requireNetfsField,
 } from "../../core/netfs.js";
 import {
-  workspaceNonPaseoToolPackageSpecs,
-  workspacePaseoPackageSpec,
-  workspaceToolCatalog,
+  vaultNonPaseoToolPackageSpecs,
+  vaultPaseoPackageSpec,
+  vaultToolCatalog,
 } from "../../core/harness-catalog.js";
 import {
   stateStoragePathForMountPath,
@@ -15,46 +15,46 @@ import {
 } from "../../core/identity-layout.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
-import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
+import { vaultRuntimeScopeName } from "../../core/vault-name.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
 }
 
-function runtimeScope(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+function runtimeScope(vault: VaultSpec): string {
+  return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
 function timestamp(): string {
   return new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
 }
 
-function authFileStorageTarget(file: AuthFile, workspace: WorkspaceSpec): string {
+function authFileStorageTarget(file: AuthFile, vault: VaultSpec): string {
   return (
     stateStoragePathForMountPath({
       mountPath: file.mountPath,
-      runtimeHome: workspace.runtime.home,
-      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      runtimeHome: vault.runtime.home,
+      identityRoot: vault.attachments.userIdentityState.mountRoot,
     })
     ?? file.mountPath
   );
 }
 
-function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
-  const home = workspace.runtime.home;
-  const user = workspace.runtime.user;
-  const projectRoot = workspace.attachments.workspaceData.mountRoot;
-  const paseoRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/paseo`;
+function buildAttachmentAssemblyLines(vault: VaultSpec): string[] {
+  const home = vault.runtime.home;
+  const user = vault.runtime.user;
+  const projectRoot = vault.attachments.vaultData.mountRoot;
+  const paseoRoot = `${vault.attachments.vaultRuntimeState.mountRoot}/paseo`;
   const evolutionRoot = `${paseoRoot}/evolution`;
-  const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
-  const identityRoot = workspace.attachments.userIdentityState.mountRoot;
+  const toolRoot = `${vault.attachments.vaultRuntimeState.mountRoot}/tooling/polaris`;
+  const identityRoot = vault.attachments.userIdentityState.mountRoot;
   const sshRoot = `${identityRoot}/ssh`;
-  const runtimeRoot = workspace.attachments.ephemeralRuntime.mountRoot;
+  const runtimeRoot = vault.attachments.ephemeralRuntime.mountRoot;
   const identityDirs = userIdentityBootstrapDirs(identityRoot);
   return [
-    `          mkdir -p ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
-    `          chown -R ${user}:${user} ${projectRoot} ${workspace.attachments.workspaceRuntimeState.mountRoot} ${identityRoot} ${runtimeRoot} && \\`,
-    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/workspace && \\`,
+    `          mkdir -p ${projectRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
+    `          chown -R ${user}:${user} ${projectRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${identityRoot} ${runtimeRoot} && \\`,
+    `          rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/vault && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
     `          ln -sfn ${identityRoot}/copilot ${home}/.copilot && \\`,
@@ -65,16 +65,16 @@ function buildAttachmentAssemblyLines(workspace: WorkspaceSpec): string[] {
     `          ln -sfn ${sshRoot} ${home}/.ssh && \\`,
     `          if [ -x ${home}/.local/polaris/bin/paseo ] && [ ! -L ${home}/.local/polaris ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo && cp -a ${home}/.local/polaris/. ${toolRoot}/; fi && \\`,
     `          ln -sfn ${toolRoot} ${home}/.local/polaris && \\`,
-    `          ln -sfn ${projectRoot} ${home}/workspace && \\`,
-    ...(workspace.profile.workspaceAlias ? [`          ln -sfn ${projectRoot} ${home}/${workspace.profile.workspaceAlias} && \\`] : []),
+    `          ln -sfn ${projectRoot} ${home}/vault && \\`,
+    ...(vault.profile.vaultAlias ? [`          ln -sfn ${projectRoot} ${home}/${vault.profile.vaultAlias} && \\`] : []),
   ];
 }
 
-function buildRootProfileFixLine(workspace: WorkspaceSpec): string[] {
-  const home = workspace.runtime.home;
+function buildRootProfileFixLine(vault: VaultSpec): string[] {
+  const home = vault.runtime.home;
   const toolRoot = `${home}/.local/polaris`;
-  const codexXdgRoot = `${workspace.attachments.userIdentityState.mountRoot}/codex-xdg`;
-  const toolBinaries = workspaceToolCatalog()
+  const codexXdgRoot = `${vault.attachments.userIdentityState.mountRoot}/codex-xdg`;
+  const toolBinaries = vaultToolCatalog()
     .filter((tool) => !["codex", "claude"].includes(tool.id))
     .map((tool) => tool.binName);
   return [
@@ -89,11 +89,11 @@ function buildRootProfileFixLine(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function buildToolInstallLines(workspace: WorkspaceSpec): string[] {
-  const toolRoot = `${workspace.attachments.workspaceRuntimeState.mountRoot}/tooling/polaris`;
+function buildToolInstallLines(vault: VaultSpec): string[] {
+  const toolRoot = `${vault.attachments.vaultRuntimeState.mountRoot}/tooling/polaris`;
   return [
-    `          if command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspaceNonPaseoToolPackageSpecs().join(" ")}; fi && \\`,
-    `          if [ ! -x ${toolRoot}/bin/paseo ] && command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${workspacePaseoPackageSpec()}; fi && \\`,
+    `          if command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${vaultNonPaseoToolPackageSpecs().join(" ")}; fi && \\`,
+    `          if [ ! -x ${toolRoot}/bin/paseo ] && command -v npm >/dev/null 2>&1; then npm_config_cache=/tmp/npm-cache npm install -g --prefix ${toolRoot} ${vaultPaseoPackageSpec()}; fi && \\`,
   ];
 }
 
@@ -105,11 +105,11 @@ function buildAgentDirsLine(user: string, home: string): string[] {
   ];
 }
 
-function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: WorkspaceSpec): string[] {
+function buildAuthCopyLines(user: string, authFiles: AuthFile[], vault: VaultSpec): string[] {
   return authFiles.flatMap((item) => {
     const content = item.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
-    const target = authFileStorageTarget(item, workspace);
+    const target = authFileStorageTarget(item, vault);
     const parent = target.replace(/\/[^/]+$/, "");
     return [
       `          if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi && chown ${user}:${user} ${parent} ${target} && chmod 600 ${target} && \\`,
@@ -117,11 +117,11 @@ function buildAuthCopyLines(user: string, authFiles: AuthFile[], workspace: Work
   });
 }
 
-function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
+function buildEvolutionBootstrapLines(vault: VaultSpec): string[] {
   const outputs = [
-    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
-    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
-    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+    [vault.evolution?.vaultMemoryFile, vault.evolution?.vaultMemoryContent],
+    [vault.evolution?.userMemoryFile, vault.evolution?.userMemoryContent],
+    [vault.evolution?.sessionSnapshotFile, vault.evolution?.sessionSnapshotContent],
   ] as Array<[string | undefined, string | undefined]>;
   return outputs.flatMap(([filePath, content]) => {
     if (!filePath || !content) {
@@ -134,8 +134,8 @@ function buildEvolutionBootstrapLines(workspace: WorkspaceSpec): string[] {
   });
 }
 
-function buildSshMaterialLines(user: string, workspace: WorkspaceSpec): string[] {
-  const sshDir = `${workspace.attachments.userIdentityState.mountRoot}/ssh`;
+function buildSshMaterialLines(user: string, vault: VaultSpec): string[] {
+  const sshDir = `${vault.attachments.userIdentityState.mountRoot}/ssh`;
   if (user === "root") {
     return [
       `          mkdir -p ${sshDir} && chown root:root ${sshDir} && chmod 700 ${sshDir} && \\`,
@@ -195,55 +195,55 @@ function buildPaseoBootstrapLine(enabled: boolean, home: string): string[] {
   ];
 }
 
-function buildGitConfigLines(workspace: WorkspaceSpec): string[] {
+function buildGitConfigLines(vault: VaultSpec): string[] {
   const lines: string[] = [];
-  if (workspace.runtime.gitCoreEditor) {
-    lines.push(`          git config --global core.editor ${workspace.runtime.gitCoreEditor} && \\`);
+  if (vault.runtime.gitCoreEditor) {
+    lines.push(`          git config --global core.editor ${vault.runtime.gitCoreEditor} && \\`);
   }
   lines.push("          git config --global pull.rebase true && \\");
-  if (workspace.runtime.gitUserName) {
-    lines.push(`          git config --global user.name ${q(workspace.runtime.gitUserName)} && \\`);
+  if (vault.runtime.gitUserName) {
+    lines.push(`          git config --global user.name ${q(vault.runtime.gitUserName)} && \\`);
   }
-  if (workspace.runtime.gitUserEmail) {
-    lines.push(`          git config --global user.email ${workspace.runtime.gitUserEmail} && \\`);
+  if (vault.runtime.gitUserEmail) {
+    lines.push(`          git config --global user.email ${vault.runtime.gitUserEmail} && \\`);
   }
   return lines;
 }
 
-function buildBootstrap(workspace: WorkspaceSpec): string[] {
-  const home = workspace.runtime.home;
-  const user = workspace.runtime.user;
-  if (workspace.runtime.bootstrapProfile === "prebuilt") {
+function buildBootstrap(vault: VaultSpec): string[] {
+  const home = vault.runtime.home;
+  const user = vault.runtime.user;
+  if (vault.runtime.bootstrapProfile === "prebuilt") {
     return [
       "          set -eux && \\",
       ...buildAgentDirsLine(user, home),
-      ...buildAttachmentAssemblyLines(workspace),
-      ...buildToolInstallLines(workspace),
-      ...(user === "root" ? buildRootProfileFixLine(workspace) : []),
-      ...buildGitConfigLines(workspace),
-      ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
-      ...buildEvolutionBootstrapLines(workspace),
-      ...buildSshMaterialLines(user, workspace),
-      ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
+      ...buildAttachmentAssemblyLines(vault),
+      ...buildToolInstallLines(vault),
+      ...(user === "root" ? buildRootProfileFixLine(vault) : []),
+      ...buildGitConfigLines(vault),
+      ...buildAuthCopyLines(user, vault.runtime.authFiles, vault),
+      ...buildEvolutionBootstrapLines(vault),
+      ...buildSshMaterialLines(user, vault),
+      ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
       "          touch /tmp/.ready && sleep infinity",
     ];
   }
   return [
     "          set -eux && \\",
     ...buildAgentDirsLine(user, home),
-    ...buildAttachmentAssemblyLines(workspace),
-    ...buildToolInstallLines(workspace),
-    `          apt-get update && apt-get install -y openssh-client ripgrep ${workspace.runtime.aptPackages.join(" ")} && \\`,
-    ...buildAuthCopyLines(user, workspace.runtime.authFiles, workspace),
-    ...buildEvolutionBootstrapLines(workspace),
-    ...buildSshMaterialLines(user, workspace),
-    ...buildPaseoBootstrapLine(Boolean(workspace.runtime.agentCmd), home),
+    ...buildAttachmentAssemblyLines(vault),
+    ...buildToolInstallLines(vault),
+    `          apt-get update && apt-get install -y openssh-client ripgrep ${vault.runtime.aptPackages.join(" ")} && \\`,
+    ...buildAuthCopyLines(user, vault.runtime.authFiles, vault),
+    ...buildEvolutionBootstrapLines(vault),
+    ...buildSshMaterialLines(user, vault),
+    ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
     "          touch /tmp/.ready && sleep infinity",
   ];
 }
 
-function buildReadinessProbe(workspace: WorkspaceSpec): string[] {
-  if (workspace.health.readinessMode === "daemon-port") {
+function buildReadinessProbe(vault: VaultSpec): string[] {
+  if (vault.health.readinessMode === "daemon-port") {
     return [
       "        readinessProbe:",
       "          tcpSocket:",
@@ -265,30 +265,30 @@ function buildReadinessProbe(workspace: WorkspaceSpec): string[] {
   ];
 }
 
-function buildEnvLines(workspace: WorkspaceSpec): string[] {
+function buildEnvLines(vault: VaultSpec): string[] {
   const envLines: string[] = [];
-  for (const item of workspace.runtime.plainEnvVars as PlainEnvVar[]) {
+  for (const item of vault.runtime.plainEnvVars as PlainEnvVar[]) {
     envLines.push(`        - name: ${item.name}`);
     envLines.push(`          value: ${q(item.value)}`);
   }
-  if (workspace.runtime.agentCmd) {
+  if (vault.runtime.agentCmd) {
     envLines.push("        - name: PASEO_HOME");
-    envLines.push(`          value: ${q(`${workspace.runtime.home}/.paseo`)}`);
+    envLines.push(`          value: ${q(`${vault.runtime.home}/.paseo`)}`);
   }
-  envLines.push("        - name: POLARIS_WORKSPACE_DATA_ROOT");
-  envLines.push(`          value: ${q(workspace.attachments.workspaceData.mountRoot)}`);
-  envLines.push("        - name: POLARIS_WORKSPACE_RUNTIME_ROOT");
-  envLines.push(`          value: ${q(workspace.attachments.workspaceRuntimeState.mountRoot)}`);
+  envLines.push("        - name: POLARIS_VAULT_DATA_ROOT");
+  envLines.push(`          value: ${q(vault.attachments.vaultData.mountRoot)}`);
+  envLines.push("        - name: POLARIS_VAULT_RUNTIME_ROOT");
+  envLines.push(`          value: ${q(vault.attachments.vaultRuntimeState.mountRoot)}`);
   envLines.push("        - name: POLARIS_USER_IDENTITY_ROOT");
-  envLines.push(`          value: ${q(workspace.attachments.userIdentityState.mountRoot)}`);
+  envLines.push(`          value: ${q(vault.attachments.userIdentityState.mountRoot)}`);
   envLines.push("        - name: POLARIS_EVOLUTION_ROOT");
-  envLines.push(`          value: ${q(workspace.agent.runtime.evolutionRoot)}`);
-  envLines.push("        - name: POLARIS_WORKSPACE_MEMORY_FILE");
-  envLines.push(`          value: ${q(workspace.evolution?.workspaceMemoryFile ?? "")}`);
+  envLines.push(`          value: ${q(vault.agent.runtime.evolutionRoot)}`);
+  envLines.push("        - name: POLARIS_VAULT_MEMORY_FILE");
+  envLines.push(`          value: ${q(vault.evolution?.vaultMemoryFile ?? "")}`);
   envLines.push("        - name: POLARIS_USER_MEMORY_FILE");
-  envLines.push(`          value: ${q(workspace.evolution?.userMemoryFile ?? "")}`);
+  envLines.push(`          value: ${q(vault.evolution?.userMemoryFile ?? "")}`);
   envLines.push("        - name: POLARIS_MEMORY_SNAPSHOT_FILE");
-  envLines.push(`          value: ${q(workspace.evolution?.sessionSnapshotFile ?? "")}`);
+  envLines.push(`          value: ${q(vault.evolution?.sessionSnapshotFile ?? "")}`);
   return envLines;
 }
 
@@ -296,49 +296,49 @@ function serviceName(port: ServicePort, index: number): string {
   return port.name || (index === 0 ? "http" : `http-${index + 1}`);
 }
 
-function persistentVolumeClaims(workspace: WorkspaceSpec): Array<{
+function persistentVolumeClaims(vault: VaultSpec): Array<{
   name: string;
   size: string;
 }> {
   const claims: Array<{ name: string; size: string }> = [];
   for (const attachment of [
-    workspace.attachments.workspaceData,
-    workspace.attachments.workspaceRuntimeState,
-    workspace.attachments.userIdentityState,
+    vault.attachments.vaultData,
+    vault.attachments.vaultRuntimeState,
+    vault.attachments.userIdentityState,
   ]) {
     if (attachment.source.kind !== "persistent-volume" || !attachment.source.volumeRef) {
       continue;
     }
     claims.push({
       name: attachment.source.volumeRef,
-      size: attachment.source.volumeSize ?? workspace.resources.ephemeralStorage,
+      size: attachment.source.volumeSize ?? vault.resources.ephemeralStorage,
     });
   }
   return Array.from(new Map(claims.map((claim) => [claim.name, claim])).values());
 }
 
-export function renderPodWorkspace(workspace: WorkspaceSpec): string {
+export function renderPodVault(vault: VaultSpec): string {
   const docs: string[] = [];
   docs.push(
     [
-      `# Agent deployment: ${runtimeScope(workspace)}`,
+      `# Agent deployment: ${runtimeScope(vault)}`,
       `# Generated by polaris.ts on ${timestamp()}`,
       "",
       "apiVersion: v1",
       "kind: Namespace",
       "metadata:",
-      `  name: ${runtimeScope(workspace)}`,
+      `  name: ${runtimeScope(vault)}`,
     ].join("\n"),
   );
 
-  for (const claim of persistentVolumeClaims(workspace)) {
+  for (const claim of persistentVolumeClaims(vault)) {
     docs.push(
       [
         "apiVersion: v1",
         "kind: PersistentVolumeClaim",
         "metadata:",
         `  name: ${claim.name}`,
-        `  namespace: ${runtimeScope(workspace)}`,
+        `  namespace: ${runtimeScope(vault)}`,
         "spec:",
         "  accessModes:",
         "  - ReadWriteOnce",
@@ -353,8 +353,8 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     "apiVersion: apps/v1",
     "kind: Deployment",
     "metadata:",
-    `  name: ${runtimeScope(workspace)}`,
-    `  namespace: ${runtimeScope(workspace)}`,
+    `  name: ${runtimeScope(vault)}`,
+    `  namespace: ${runtimeScope(vault)}`,
     "spec:",
     "  progressDeadlineSeconds: 900",
     "  replicas: 1",
@@ -362,82 +362,82 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
     "    type: Recreate",
     "  selector:",
     "    matchLabels:",
-    `      app: ${runtimeScope(workspace)}`,
+    `      app: ${runtimeScope(vault)}`,
     "  template:",
     "    metadata:",
     "      labels:",
-    `        app: ${runtimeScope(workspace)}`,
+    `        app: ${runtimeScope(vault)}`,
     "    spec:",
-    `      runtimeClassName: ${workspace.backend.profile}`,
+    `      runtimeClassName: ${vault.backend.profile}`,
     "      containers:",
     "      - name: agent",
-    `        image: ${workspace.runtime.baseImage}`,
+    `        image: ${vault.runtime.baseImage}`,
     '        command: ["/bin/sh", "-c"]',
     "        args:",
     "        - |",
-    ...buildBootstrap(workspace),
-    ...buildReadinessProbe(workspace),
+    ...buildBootstrap(vault),
+    ...buildReadinessProbe(vault),
   ];
-  if (!workspace.resources.unbounded) {
+  if (!vault.resources.unbounded) {
     deploymentLines.push("        resources:");
     deploymentLines.push("          limits:");
-    deploymentLines.push(`            memory: ${q(workspace.resources.memory)}`);
-    deploymentLines.push(`            cpu: ${q(workspace.resources.cpu)}`);
-    deploymentLines.push(`            ephemeral-storage: ${q(workspace.resources.ephemeralStorage)}`);
-    if (workspace.resources.cpuRequest || workspace.resources.memoryRequest || workspace.resources.storageRequest) {
+    deploymentLines.push(`            memory: ${q(vault.resources.memory)}`);
+    deploymentLines.push(`            cpu: ${q(vault.resources.cpu)}`);
+    deploymentLines.push(`            ephemeral-storage: ${q(vault.resources.ephemeralStorage)}`);
+    if (vault.resources.cpuRequest || vault.resources.memoryRequest || vault.resources.storageRequest) {
       deploymentLines.push("          requests:");
-      if (workspace.resources.memoryRequest) deploymentLines.push(`            memory: ${q(workspace.resources.memoryRequest)}`);
-      if (workspace.resources.cpuRequest) deploymentLines.push(`            cpu: ${q(workspace.resources.cpuRequest)}`);
-      if (workspace.resources.storageRequest) deploymentLines.push(`            ephemeral-storage: ${q(workspace.resources.storageRequest)}`);
+      if (vault.resources.memoryRequest) deploymentLines.push(`            memory: ${q(vault.resources.memoryRequest)}`);
+      if (vault.resources.cpuRequest) deploymentLines.push(`            cpu: ${q(vault.resources.cpuRequest)}`);
+      if (vault.resources.storageRequest) deploymentLines.push(`            ephemeral-storage: ${q(vault.resources.storageRequest)}`);
     }
   }
   deploymentLines.push("        volumeMounts:");
-  deploymentLines.push("        - name: workspace-data");
-  deploymentLines.push(`          mountPath: ${workspace.attachments.workspaceData.mountRoot}`);
-  deploymentLines.push("        - name: workspace-runtime-state");
-  deploymentLines.push(`          mountPath: ${workspace.attachments.workspaceRuntimeState.mountRoot}`);
+  deploymentLines.push("        - name: vault-data");
+  deploymentLines.push(`          mountPath: ${vault.attachments.vaultData.mountRoot}`);
+  deploymentLines.push("        - name: vault-runtime-state");
+  deploymentLines.push(`          mountPath: ${vault.attachments.vaultRuntimeState.mountRoot}`);
   deploymentLines.push("        - name: user-identity-state");
-  deploymentLines.push(`          mountPath: ${workspace.attachments.userIdentityState.mountRoot}`);
+  deploymentLines.push(`          mountPath: ${vault.attachments.userIdentityState.mountRoot}`);
   deploymentLines.push("        - name: ephemeral-runtime");
-  deploymentLines.push(`          mountPath: ${workspace.attachments.ephemeralRuntime.mountRoot}`);
-  const envLines = buildEnvLines(workspace);
+  deploymentLines.push(`          mountPath: ${vault.attachments.ephemeralRuntime.mountRoot}`);
+  const envLines = buildEnvLines(vault);
   if (envLines.length) {
     deploymentLines.push("        env:");
     deploymentLines.push(...envLines);
   }
   deploymentLines.push("      volumes:");
-  deploymentLines.push("      - name: workspace-data");
-  if (isNetfsSource(workspace.attachments.workspaceData.source)) {
+  deploymentLines.push("      - name: vault-data");
+  if (isNetfsSource(vault.attachments.vaultData.source)) {
     deploymentLines.push("        nfs:");
     deploymentLines.push(
       `          server: ${requireNetfsField(
-        workspace.attachments.workspaceData.source.server,
+        vault.attachments.vaultData.source.server,
         "server",
-        "workspace-data",
+        "vault-data",
       )}`,
     );
     deploymentLines.push(
       `          path: ${netfsResolvedPath(
-        workspace.attachments.workspaceData.source,
+        vault.attachments.vaultData.source,
       )}`,
     );
-  } else if (workspace.attachments.workspaceData.source.kind === "persistent-volume") {
+  } else if (vault.attachments.vaultData.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
-    deploymentLines.push(`          claimName: ${workspace.attachments.workspaceData.source.volumeRef ?? workspace.storage.claimName}`);
+    deploymentLines.push(`          claimName: ${vault.attachments.vaultData.source.volumeRef ?? vault.storage.claimName}`);
   } else {
     deploymentLines.push("        emptyDir: {}");
   }
-  deploymentLines.push("      - name: workspace-runtime-state");
-  if (workspace.attachments.workspaceRuntimeState.source.kind === "persistent-volume") {
+  deploymentLines.push("      - name: vault-runtime-state");
+  if (vault.attachments.vaultRuntimeState.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
-    deploymentLines.push(`          claimName: ${workspace.attachments.workspaceRuntimeState.source.volumeRef ?? workspace.storage.claimName}`);
+    deploymentLines.push(`          claimName: ${vault.attachments.vaultRuntimeState.source.volumeRef ?? vault.storage.claimName}`);
   } else {
     deploymentLines.push("        emptyDir: {}");
   }
   deploymentLines.push("      - name: user-identity-state");
-  if (workspace.attachments.userIdentityState.source.kind === "persistent-volume") {
+  if (vault.attachments.userIdentityState.source.kind === "persistent-volume") {
     deploymentLines.push("        persistentVolumeClaim:");
-    deploymentLines.push(`          claimName: ${workspace.attachments.userIdentityState.source.volumeRef}`);
+    deploymentLines.push(`          claimName: ${vault.attachments.userIdentityState.source.volumeRef}`);
   } else {
     deploymentLines.push("        emptyDir: {}");
   }
@@ -445,26 +445,26 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   deploymentLines.push("        emptyDir: {}");
   docs.push(deploymentLines.join("\n"));
 
-  if (workspace.connectivity.exposeService && workspace.connectivity.servicePorts.length) {
+  if (vault.connectivity.exposeService && vault.connectivity.servicePorts.length) {
     const serviceLines = [
       "apiVersion: v1",
       "kind: Service",
       "metadata:",
-      `  name: ${runtimeScope(workspace)}`,
-      `  namespace: ${runtimeScope(workspace)}`,
+      `  name: ${runtimeScope(vault)}`,
+      `  namespace: ${runtimeScope(vault)}`,
       "spec:",
-      `  type: ${workspace.connectivity.serviceMode === "nodeport" ? "NodePort" : "ClusterIP"}`,
+      `  type: ${vault.connectivity.serviceMode === "nodeport" ? "NodePort" : "ClusterIP"}`,
       "  selector:",
-      `    app: ${runtimeScope(workspace)}`,
+      `    app: ${runtimeScope(vault)}`,
       "  ports:",
     ];
-    workspace.connectivity.servicePorts.forEach((port, index) => {
+    vault.connectivity.servicePorts.forEach((port, index) => {
       serviceLines.push(`  - name: ${serviceName(port, index)}`);
       serviceLines.push("    protocol: TCP");
       serviceLines.push(`    port: ${port.containerPort}`);
       serviceLines.push(`    targetPort: ${port.containerPort}`);
       serviceLines.push("    appProtocol: http");
-      if (workspace.connectivity.serviceMode === "nodeport" && port.nodePort) {
+      if (vault.connectivity.serviceMode === "nodeport" && port.nodePort) {
         serviceLines.push(`    nodePort: ${port.nodePort}`);
       }
     });
@@ -474,6 +474,6 @@ export function renderPodWorkspace(workspace: WorkspaceSpec): string {
   return `${docs.join("\n---\n")}\n`;
 }
 
-export function renderAndWritePodWorkspace(workspace: WorkspaceSpec): string {
-  return writeGeneratedManifest(workspace, renderPodWorkspace(workspace));
+export function renderAndWritePodVault(vault: VaultSpec): string {
+  return writeGeneratedManifest(vault, renderPodVault(vault));
 }

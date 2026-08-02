@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import type { WorkspaceSpec } from "../../core/workspace.js";
+import type { VaultSpec } from "../../core/vault.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
 import { kubevirtProbePassword } from "./probe-access.js";
@@ -9,31 +9,31 @@ import {
   isNetfsSource,
   netfsResolvedPath,
   requireNetfsField,
-  workspaceDataClaimName,
-  workspaceDataPersistentVolumeName,
+  vaultDataClaimName,
+  vaultDataPersistentVolumeName,
 } from "../../core/netfs.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "../../core/workspace-name.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "../../core/vault-name.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const GENERATED_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "generated", "kubevirt");
 const FALLBACK_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "kubevirt", "templates");
 
-function runtimeScope(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+function runtimeScope(vault: VaultSpec): string {
+  return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
-function vmName(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm");
+function vmName(vault: VaultSpec): string {
+  return vaultRuntimeResourceName(vault.userProfile.id, vault.identity.projectName, "vm");
 }
 
-function cloudInitSecretName(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeResourceName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+function cloudInitSecretName(vault: VaultSpec): string {
+  return vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
     "vm-cloudinit",
   );
 }
@@ -55,39 +55,39 @@ function readTemplate(preferredPath: string, fallbackPath: string): string {
 }
 
 function requireAttachmentVolumeRef(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment:
-    | "workspaceData"
-    | "workspaceRuntimeState"
+    | "vaultData"
+    | "vaultRuntimeState"
     | "userIdentityState",
 ): string {
-  const source = workspace.attachments[attachment].source;
-  if (attachment === "workspaceData" && isNetfsSource(source)) {
-    return workspaceDataClaimName(workspace);
+  const source = vault.attachments[attachment].source;
+  if (attachment === "vaultData" && isNetfsSource(source)) {
+    return vaultDataClaimName(vault);
   }
   if (source.kind !== "persistent-volume" || !source.volumeRef?.trim()) {
     throw new Error(
-      `KubeVirt render requires '${workspace.attachments[attachment].kind}' to use a dedicated persistent-volume source`,
+      `KubeVirt render requires '${vault.attachments[attachment].kind}' to use a dedicated persistent-volume source`,
     );
   }
   return source.volumeRef.trim();
 }
 
 function attachmentVolumeSize(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment:
-    | "workspaceData"
-    | "workspaceRuntimeState"
+    | "vaultData"
+    | "vaultRuntimeState"
     | "userIdentityState",
 ): string {
-  const source = workspace.attachments[attachment].source;
+  const source = vault.attachments[attachment].source;
   if (source.volumeSize?.trim()) {
     return source.volumeSize.trim();
   }
   switch (attachment) {
-    case "workspaceData":
-      return workspace.resources.ephemeralStorage;
-    case "workspaceRuntimeState":
+    case "vaultData":
+      return vault.resources.ephemeralStorage;
+    case "vaultRuntimeState":
       return "20Gi";
     case "userIdentityState":
       return "5Gi";
@@ -95,14 +95,14 @@ function attachmentVolumeSize(
 }
 
 function existingPersistentVolumeClaimName(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   claimName: string,
 ): string | null {
   const result = spawnSync(
     "kubectl",
     [
       "-n",
-      runtimeScope(workspace),
+      runtimeScope(vault),
       "get",
       "pvc",
       claimName,
@@ -115,32 +115,32 @@ function existingPersistentVolumeClaimName(
   return result.status === 0 && name ? name : null;
 }
 
-function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
+function buildPersistentVolumeClaimDocs(vault: VaultSpec): string {
   const docs: string[] = [];
-  if (isNetfsSource(workspace.attachments.workspaceData.source)) {
-    const source = workspace.attachments.workspaceData.source;
-    const claimName = workspaceDataClaimName(workspace);
-    if (!existingPersistentVolumeClaimName(workspace, claimName)) {
+  if (isNetfsSource(vault.attachments.vaultData.source)) {
+    const source = vault.attachments.vaultData.source;
+    const claimName = vaultDataClaimName(vault);
+    if (!existingPersistentVolumeClaimName(vault, claimName)) {
       docs.push([
         "apiVersion: v1",
         "kind: PersistentVolume",
         "metadata:",
-        `  name: ${workspaceDataPersistentVolumeName(workspace)}`,
+        `  name: ${vaultDataPersistentVolumeName(vault)}`,
         "spec:",
         "  accessModes:",
         "  - ReadWriteMany",
         "  capacity:",
-        `    storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+        `    storage: ${attachmentVolumeSize(vault, "vaultData")}`,
         "  persistentVolumeReclaimPolicy: Retain",
         "  storageClassName: ''",
         "  mountOptions:",
         ...((source.mountOptions?.length ? source.mountOptions : ["nfsvers=4.1", "hard", "rw"])
           .map((entry) => `  - ${entry}`)),
         "  nfs:",
-        `    server: ${requireNetfsField(source.server, "server", "workspace-data")}`,
+        `    server: ${requireNetfsField(source.server, "server", "vault-data")}`,
         `    path: ${netfsResolvedPath(source)}`,
         "  claimRef:",
-        `    namespace: ${runtimeScope(workspace)}`,
+        `    namespace: ${runtimeScope(vault)}`,
         `    name: ${claimName}`,
       ].join("\n"));
       docs.push([
@@ -148,15 +148,15 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
         "kind: PersistentVolumeClaim",
         "metadata:",
         `  name: ${claimName}`,
-        `  namespace: ${runtimeScope(workspace)}`,
+        `  namespace: ${runtimeScope(vault)}`,
         "spec:",
         "  accessModes:",
         "  - ReadWriteMany",
         "  resources:",
         "    requests:",
-        `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+        `      storage: ${attachmentVolumeSize(vault, "vaultData")}`,
         "  storageClassName: ''",
-        `  volumeName: ${workspaceDataPersistentVolumeName(workspace)}`,
+        `  volumeName: ${vaultDataPersistentVolumeName(vault)}`,
       ].join("\n"));
     }
   } else {
@@ -164,49 +164,49 @@ function buildPersistentVolumeClaimDocs(workspace: WorkspaceSpec): string {
       "apiVersion: v1",
       "kind: PersistentVolumeClaim",
       "metadata:",
-      `  name: ${requireAttachmentVolumeRef(workspace, "workspaceData")}`,
-      `  namespace: ${runtimeScope(workspace)}`,
+      `  name: ${requireAttachmentVolumeRef(vault, "vaultData")}`,
+      `  namespace: ${runtimeScope(vault)}`,
       "spec:",
       "  accessModes:",
       "  - ReadWriteOnce",
       "  resources:",
       "    requests:",
-      `      storage: ${attachmentVolumeSize(workspace, "workspaceData")}`,
+      `      storage: ${attachmentVolumeSize(vault, "vaultData")}`,
     ].join("\n"));
   }
   for (const attachment of [
-    "workspaceRuntimeState",
+    "vaultRuntimeState",
     "userIdentityState",
   ] as const) {
     docs.push([
       "apiVersion: v1",
       "kind: PersistentVolumeClaim",
       "metadata:",
-      `  name: ${requireAttachmentVolumeRef(workspace, attachment)}`,
-      `  namespace: ${runtimeScope(workspace)}`,
+      `  name: ${requireAttachmentVolumeRef(vault, attachment)}`,
+      `  namespace: ${runtimeScope(vault)}`,
       "spec:",
       "  accessModes:",
       "  - ReadWriteOnce",
       "  resources:",
       "    requests:",
-      `      storage: ${attachmentVolumeSize(workspace, attachment)}`,
+      `      storage: ${attachmentVolumeSize(vault, attachment)}`,
     ].join("\n"));
   }
   return docs.join("\n---\n");
 }
 
-function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
-  const scope = runtimeScope(workspace);
-  const virtualMachineName = vmName(workspace);
-  const cloudInitName = cloudInitSecretName(workspace);
+function replacePlaceholders(text: string, vault: VaultSpec): string {
+  const scope = runtimeScope(vault);
+  const virtualMachineName = vmName(vault);
+  const cloudInitName = cloudInitSecretName(vault);
   const paseoAppBaseUrl = resolveConfiguredPaseoAppBaseUrl();
   const rootdiskImage =
-    workspace.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
+    vault.runtime.rootdiskImage || "quay.io/containerdisks/debian:13";
   const memoryGuest =
-    workspace.resources.memory || "4Gi";
+    vault.resources.memory || "4Gi";
   const memoryRequest =
-    workspace.resources.memoryRequest || memoryGuest;
-  const declaredPorts = workspace.connectivity.servicePorts.map((port, index) => ({
+    vault.resources.memoryRequest || memoryGuest;
+  const declaredPorts = vault.connectivity.servicePorts.map((port, index) => ({
     name: port.name?.trim() || `service-${index + 1}`,
     containerPort: String(port.containerPort),
     nodePort: port.nodePort ? String(port.nodePort) : undefined,
@@ -232,7 +232,7 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
   return text
     .replaceAll(
       "__PERSISTENT_VOLUME_CLAIMS__",
-      `${buildPersistentVolumeClaimDocs(workspace)}\n`,
+      `${buildPersistentVolumeClaimDocs(vault)}\n`,
     )
     .replaceAll("__SERVICE_PORTS__", renderedServicePorts)
     .replaceAll("__INTERFACE_PORTS__", renderedInterfacePorts)
@@ -240,16 +240,16 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
     .replaceAll(`${scope}-vm-cloudinit`, cloudInitName)
     .replaceAll(`${scope}-vm`, virtualMachineName)
     .replaceAll(
-      "__WORKSPACE_DATA_VOLUME__",
-      requireAttachmentVolumeRef(workspace, "workspaceData"),
+      "__VAULT_DATA_VOLUME__",
+      requireAttachmentVolumeRef(vault, "vaultData"),
     )
     .replaceAll(
-      "__WORKSPACE_RUNTIME_STATE_VOLUME__",
-      requireAttachmentVolumeRef(workspace, "workspaceRuntimeState"),
+      "__VAULT_RUNTIME_STATE_VOLUME__",
+      requireAttachmentVolumeRef(vault, "vaultRuntimeState"),
     )
     .replaceAll(
       "__USER_IDENTITY_STATE_VOLUME__",
-      requireAttachmentVolumeRef(workspace, "userIdentityState"),
+      requireAttachmentVolumeRef(vault, "userIdentityState"),
     )
     .replaceAll("__ROOTDISK_IMAGE__", rootdiskImage)
     .replaceAll("__MEMORY_GUEST__", memoryGuest)
@@ -262,40 +262,40 @@ function replacePlaceholders(text: string, workspace: WorkspaceSpec): string {
     );
 }
 
-export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
-  if (workspace.profile.assetBaseName !== "morpheus") {
-    throw new Error(`Workspace backend 'kubevirt-vm' does not have built-in templates for profile '${workspace.profile.name}' yet`);
+export function renderKubevirtVault(vault: VaultSpec): string {
+  if (vault.profile.assetBaseName !== "morpheus") {
+    throw new Error(`Vault backend 'kubevirt-vm' does not have built-in templates for profile '${vault.profile.name}' yet`);
   }
   const cloudinitPath = path.join(
     GENERATED_KUBEVIRT_DIR,
-    `${workspace.profile.assetBaseName}-vm-cloudinit-secret.yaml`,
+    `${vault.profile.assetBaseName}-vm-cloudinit-secret.yaml`,
   );
   const vmPath = path.join(
     GENERATED_KUBEVIRT_DIR,
-    `${workspace.profile.assetBaseName}.yaml`,
+    `${vault.profile.assetBaseName}.yaml`,
   );
   const cloudinitTemplate = replacePlaceholders(
     readTemplate(
       cloudinitPath,
       path.join(FALLBACK_KUBEVIRT_DIR, "vm-cloudinit-secret.yaml"),
     ),
-    workspace,
+    vault,
   );
   const vmTemplate = replacePlaceholders(
     readTemplate(vmPath, path.join(FALLBACK_KUBEVIRT_DIR, "vm.yaml")),
-    workspace,
+    vault,
   );
-  const codexAuth = workspace.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
-  const codexConfig = workspace.runtime.authFiles.find((item) => item.key === "codex-config.toml")?.content;
+  const codexAuth = vault.runtime.authFiles.find((item) => item.key === "codex-auth.json")?.content;
+  const codexConfig = vault.runtime.authFiles.find((item) => item.key === "codex-config.toml")?.content;
   let renderedCloudinit = cloudinitTemplate
     .replace("__CODEX_AUTH_JSON_B64__", Buffer.from(codexAuth ?? "{}", "utf8").toString("base64"))
     .replace("__CODEX_CONFIG_TOML_B64__", Buffer.from(codexConfig ?? "", "utf8").toString("base64"))
     .replace("__CLAUDE_SETTINGS_JSON_B64__", Buffer.from("{}", "utf8").toString("base64"))
-    .replace("__PROBE_PASSWORD__", kubevirtProbePassword(workspace));
+    .replace("__PROBE_PASSWORD__", kubevirtProbePassword(vault));
   const evolutionOutputs = [
-    [workspace.evolution?.workspaceMemoryFile, workspace.evolution?.workspaceMemoryContent],
-    [workspace.evolution?.userMemoryFile, workspace.evolution?.userMemoryContent],
-    [workspace.evolution?.sessionSnapshotFile, workspace.evolution?.sessionSnapshotContent],
+    [vault.evolution?.vaultMemoryFile, vault.evolution?.vaultMemoryContent],
+    [vault.evolution?.userMemoryFile, vault.evolution?.userMemoryContent],
+    [vault.evolution?.sessionSnapshotFile, vault.evolution?.sessionSnapshotContent],
   ] as Array<[string | undefined, string | undefined]>;
   const writes = evolutionOutputs
     .filter(([filePath, content]) => Boolean(filePath && content))
@@ -303,13 +303,13 @@ export function renderKubevirtWorkspace(workspace: WorkspaceSpec): string {
     .join("\n");
   if (writes) {
     renderedCloudinit = renderedCloudinit.replace(
-      "      - chmod 1777 /run/workspace/tmp",
-      `      - chmod 1777 /run/workspace/tmp\n${writes}`,
+      "      - chmod 1777 /run/vault/tmp",
+      `      - chmod 1777 /run/vault/tmp\n${writes}`,
     );
   }
   return `${renderedCloudinit.trimEnd()}\n---\n${vmTemplate.trimEnd()}\n`;
 }
 
-export function renderAndWriteKubevirtWorkspace(workspace: WorkspaceSpec): string {
-  return writeGeneratedManifest(workspace, renderKubevirtWorkspace(workspace));
+export function renderAndWriteKubevirtVault(vault: VaultSpec): string {
+  return writeGeneratedManifest(vault, renderKubevirtVault(vault));
 }

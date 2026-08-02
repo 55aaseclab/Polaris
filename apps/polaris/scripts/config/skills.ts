@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import type { WorkspaceSpec } from "../core/workspace.js";
+import type { VaultSpec } from "../core/vault.js";
 import { polarisUsersRoot, repoRelativePath } from "../utils/paths.js";
 
 export const SKILL_HARNESSES = [
@@ -100,15 +100,15 @@ function summarizeSkillDocument(
   };
 }
 
-function workspaceSkillDir(
-  workspace: WorkspaceSpec,
+function vaultSkillDir(
+  vault: VaultSpec,
   harness: SkillHarness,
 ): string {
   const base =
     harness === "codex"
       ? "codex"
       : "claude";
-  return path.join(workspace.attachments.userIdentityState.mountRoot, base, "skills");
+  return path.join(vault.attachments.userIdentityState.mountRoot, base, "skills");
 }
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -296,13 +296,13 @@ export function removeUserSkill(args: {
   };
 }
 
-export function listInstalledWorkspaceSkills(args: {
-  workspace: WorkspaceSpec;
+export function listInstalledVaultSkills(args: {
+  vault: VaultSpec;
   harness?: SkillHarness;
 }): Array<{ harness: SkillHarness; skills: string[] }> {
   const harnesses = args.harness ? [args.harness] : [...SKILL_HARNESSES];
   return harnesses.map((harness) => {
-    const root = workspaceSkillDir(args.workspace, harness);
+    const root = vaultSkillDir(args.vault, harness);
     const skills = fs.existsSync(root)
       ? fs.readdirSync(root, { withFileTypes: true })
         .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
@@ -313,19 +313,19 @@ export function listInstalledWorkspaceSkills(args: {
   });
 }
 
-export function resolveWorkspaceSkillInstallRoot(
-  workspace: WorkspaceSpec,
+export function resolveVaultSkillInstallRoot(
+  vault: VaultSpec,
   harness: SkillHarness,
 ): string {
-  return workspaceSkillDir(workspace, harness);
+  return vaultSkillDir(vault, harness);
 }
 
-export function removeInstalledWorkspaceSkill(args: {
-  workspace: WorkspaceSpec;
+export function removeInstalledVaultSkill(args: {
+  vault: VaultSpec;
   harness: SkillHarness;
   skillId: string;
 }): { harness: SkillHarness; skillId: string; removed: boolean } {
-  const root = workspaceSkillDir(args.workspace, args.harness);
+  const root = vaultSkillDir(args.vault, args.harness);
   const target = path.join(root, args.skillId);
   const removed = fs.existsSync(target);
   fs.rmSync(target, { recursive: true, force: true });

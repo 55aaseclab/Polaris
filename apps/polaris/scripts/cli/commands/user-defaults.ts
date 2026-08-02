@@ -1,6 +1,6 @@
 import path from "node:path";
 import {
-  readUserWorkspaceDefaults,
+  readUserVaultDefaults,
   userProfileExists,
 } from "../../config/scaffold.js";
 import { polarisUsersRoot, repoRelativePath } from "../../utils/paths.js";
@@ -20,13 +20,13 @@ function requireUserProfile(userProfileId: string): void {
 }
 
 function renderDefaultsPayload(userProfileId: string): string {
-  const defaults = readUserWorkspaceDefaults(userProfileId);
+  const defaults = readUserVaultDefaults(userProfileId);
   return `${JSON.stringify({
     userProfile: {
       id: userProfileId,
       profilePath: repoRelativePath(import.meta.url, path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`)),
     },
-    workspaceDefaults: defaults,
+    vaultDefaults: defaults,
   }, null, 2)}\n`;
 }
 

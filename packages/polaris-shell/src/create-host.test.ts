@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCreatedHostSurfaceHref,
+  DEFAULT_POLARIS_VAULT_PATH,
   HOST_NAME_VALIDATION_MESSAGE,
   isValidPolarisHostName,
   resolveCodingSurfaceUrl,
@@ -61,4 +62,8 @@ test("resolveCodingSurfaceUrl falls back to the current origin", () => {
     }),
     "http://128.178.122.228:8787/h/srv_demo",
   );
+});
+
+test("default vault path is the new shell label", () => {
+  assert.equal(DEFAULT_POLARIS_VAULT_PATH, "/root/vault");
 });

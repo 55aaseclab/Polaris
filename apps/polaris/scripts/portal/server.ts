@@ -34,37 +34,37 @@ import {
   getPortalCredentialCatalog,
   deletePortalCredential,
   deletePortalSkill,
-  installPortalWorkspaceSkill,
-  getPortalWorkspaceDetailStatic,
-  listPortalWorkspaceSkills,
-  listPortalWorkspaceStaticState,
+  installPortalVaultSkill,
+  getPortalVaultDetailStatic,
+  listPortalVaultSkills,
+  listPortalVaultStaticState,
   readUserPortalCredentialRecord,
-  deletePortalWorkspace,
-  permanentlyDeletePortalWorkspace,
-  getPortalWorkspacePaseoDiagnostic,
-  getPortalWorkspaceDetail,
-  listPortalWorkspaces,
+  deletePortalVault,
+  permanentlyDeletePortalVault,
+  getPortalVaultPaseoDiagnostic,
+  getPortalVaultDetail,
+  listPortalVaults,
   listUserPortalCredentials,
   listUserPortalSkills,
-  refreshPortalWorkspace,
-  readUserPortalWorkspaceAssetPreview,
-  queueProvisionWorkspace,
-  rebuildPortalWorkspace,
-  restartPortalWorkspacePaseoDaemon,
-  syncPortalWorkspaceSkills,
-  startPortalWorkspace,
-  stopPortalWorkspace,
-  switchPortalWorkspace,
-  updatePortalWorkspaceSelectedDriver,
-  switchPortalWorkspaceLiveCredential,
-  uninstallPortalWorkspaceSkill,
+  refreshPortalVault,
+  readUserPortalVaultAssetPreview,
+  queueProvisionVault,
+  rebuildPortalVault,
+  restartPortalVaultPaseoDaemon,
+  syncPortalVaultSkills,
+  startPortalVault,
+  stopPortalVault,
+  switchPortalVault,
+  updatePortalVaultSelectedDriver,
+  switchPortalVaultLiveCredential,
+  uninstallPortalVaultSkill,
   createPortalUser,
   updatePortalUserProfile,
   updatePortalUserAccess,
   writePortalCredentialFile,
 } from "./service.js";
-import { subscribePortalWorkspaceStream } from "./workspace-live-hub.js";
-import type { PortalWorkspaceStreamEvent } from "../core/portal.js";
+import { subscribePortalVaultStream } from "./vault-live-hub.js";
+import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
   isShellDocumentPath,
   readShellAsset,
@@ -73,7 +73,7 @@ import {
 
 type ParsedBody = Record<string, string>;
 
-function allowedWorkspaceLinesForAccessLine(accessLine: unknown): Array<"coding" | "vertical"> {
+function allowedVaultLinesForAccessLine(accessLine: unknown): Array<"coding" | "vertical"> {
   if (accessLine == null) {
     return ["coding"];
   }
@@ -87,11 +87,11 @@ function allowedWorkspaceLinesForAccessLine(accessLine: unknown): Array<"coding"
   return ["coding", "vertical"];
 }
 
-function resolveRequestedWorkspaceLine(input: {
+function resolveRequestedVaultLine(input: {
   requested?: string | null;
   accessLine?: string | null;
 }): "coding" | "vertical" {
-  const allowed = allowedWorkspaceLinesForAccessLine(input.accessLine);
+  const allowed = allowedVaultLinesForAccessLine(input.accessLine);
   const requested = String(input.requested ?? "").trim().toLowerCase();
   if (requested) {
     if (requested !== "coding" && requested !== "vertical") {
@@ -161,7 +161,7 @@ function sendEventStreamHeaders(res: ServerResponse): void {
 
 function writeEventStreamEvent(
   res: ServerResponse,
-  event: PortalWorkspaceStreamEvent,
+  event: PortalVaultStreamEvent,
 ): void {
   res.write(`event: ${event.type}\n`);
   res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -205,13 +205,13 @@ async function readBody(req: IncomingMessage): Promise<ParsedBody> {
   return parseFormBody(raw);
 }
 
-async function handleWorkspaceLiveStream(
+async function handleVaultLiveStream(
   req: IncomingMessage,
   res: ServerResponse,
   routeUserId: string,
 ): Promise<void> {
   sendEventStreamHeaders(res);
-  const unsubscribe = subscribePortalWorkspaceStream(routeUserId, (event) => {
+  const unsubscribe = subscribePortalVaultStream(routeUserId, (event) => {
     writeEventStreamEvent(res, event);
   });
   req.on("close", () => {
@@ -242,11 +242,11 @@ function requireProfile(
   return profile;
 }
 
-async function handleWorkspaceSwitch(
+async function handleVaultSwitch(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
   const body = await readBody(req);
   const driver = body.driver?.trim();
@@ -255,15 +255,15 @@ async function handleWorkspaceSwitch(
     return;
   }
   const target = parsePortalDriverTarget(driver);
-  const result = await switchPortalWorkspace(userId, workspace, target);
+  const result = await switchPortalVault(userId, vault, target);
   sendJson(res, 200, result);
 }
 
-async function handleWorkspaceSelectedDriverUpdate(
+async function handleVaultSelectedDriverUpdate(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
   const body = await readBody(req);
   const driver = body.driver?.trim();
@@ -272,20 +272,20 @@ async function handleWorkspaceSelectedDriverUpdate(
     return;
   }
   const target = parsePortalDriverTarget(driver);
-  const result = await updatePortalWorkspaceSelectedDriver({ userId, workspace, target });
+  const result = await updatePortalVaultSelectedDriver({ userId, vault, target });
   sendJson(res, 200, result);
 }
 
-async function handleWorkspaceProvision(
+async function handleVaultProvision(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
   line?: "coding" | "vertical",
   body?: ParsedBody,
 ): Promise<void> {
   const parsedBody = body ?? await readBody(req);
-  const progress = await queueProvisionWorkspace(userId, workspace, {
+  const progress = await queueProvisionVault(userId, vault, {
     defaultDockerOnly: parsedBody.defaultDockerOnly === "true",
     startAfterCreate: parsedBody.startAfterCreate === "true",
     ...(line ? { line } : {}),
@@ -293,70 +293,70 @@ async function handleWorkspaceProvision(
   sendJson(res, 202, progress);
 }
 
-async function handleWorkspaceDelete(
+async function handleVaultDelete(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await deletePortalWorkspace(userId, workspace);
+  const result = await deletePortalVault(userId, vault);
   sendJson(res, 200, result);
 }
 
-async function handleWorkspacePermanentDelete(
+async function handleVaultPermanentDelete(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  sendJson(res, 200, await permanentlyDeletePortalWorkspace(userId, workspace));
+  sendJson(res, 200, await permanentlyDeletePortalVault(userId, vault));
 }
 
-async function handleWorkspaceStop(
+async function handleVaultStop(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await stopPortalWorkspace(userId, workspace);
+  const result = await stopPortalVault(userId, vault);
   sendJson(res, 200, result);
 }
 
-async function handleWorkspaceStart(
+async function handleVaultStart(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await startPortalWorkspace(userId, workspace);
+  const result = await startPortalVault(userId, vault);
   sendJson(res, 200, result);
 }
 
-async function handleWorkspaceRebuild(
+async function handleVaultRebuild(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await rebuildPortalWorkspace(userId, workspace);
+  const result = await rebuildPortalVault(userId, vault);
   sendJson(res, 200, result);
 }
 
-async function handleWorkspaceRefresh(
+async function handleVaultRefresh(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await refreshPortalWorkspace(userId, workspace);
+  const result = await refreshPortalVault(userId, vault);
   sendJson(res, 200, result);
 }
 
-function handleWorkspacePreview(
+function handleVaultPreview(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
   assetPath: string,
 ): void {
   try {
-    sendJson(res, 200, readUserPortalWorkspaceAssetPreview(userId, workspace, assetPath));
+    sendJson(res, 200, readUserPortalVaultAssetPreview(userId, vault, assetPath));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message === "workspace asset not found") {
+    if (message === "vault asset not found") {
       sendJson(res, 404, { error: message });
       return;
     }
@@ -364,26 +364,26 @@ function handleWorkspacePreview(
   }
 }
 
-async function handleWorkspacePaseoStatus(
+async function handleVaultPaseoStatus(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await getPortalWorkspacePaseoDiagnostic({
+  const result = await getPortalVaultPaseoDiagnostic({
     userId,
-    workspace,
+    vault,
   });
   sendJson(res, 200, result);
 }
 
-async function handleWorkspacePaseoRestart(
+async function handleVaultPaseoRestart(
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const result = await restartPortalWorkspacePaseoDaemon({
+  const result = await restartPortalVaultPaseoDaemon({
     userId,
-    workspace,
+    vault,
   });
   sendJson(res, 200, result);
 }
@@ -456,11 +456,11 @@ async function handleCredentialWrite(
   sendJson(res, 200, updated);
 }
 
-async function handleWorkspaceLiveCredentialSwitch(
+async function handleVaultLiveCredentialSwitch(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
   const body = await readBody(req);
   const harness = body.harness?.trim() || "";
@@ -469,9 +469,9 @@ async function handleWorkspaceLiveCredentialSwitch(
     badRequest(res, "harness and credentialId are required");
     return;
   }
-  const switched = await switchPortalWorkspaceLiveCredential({
+  const switched = await switchPortalVaultLiveCredential({
     userId,
-    workspace,
+    vault,
     harness: harness as ManagedHarness,
     credentialId,
   });
@@ -509,11 +509,11 @@ async function handleSkillCreate(
   sendJson(res, 201, created);
 }
 
-async function handleWorkspaceSkillAction(
+async function handleVaultSkillAction(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
-  workspace: string,
+  vault: string,
   action: "list" | "install" | "uninstall" | "sync",
 ): Promise<void> {
   const body = await readBody(req);
@@ -523,17 +523,17 @@ async function handleWorkspaceSkillAction(
     return;
   }
   if (action === "list") {
-    sendJson(res, 200, await listPortalWorkspaceSkills({
+    sendJson(res, 200, await listPortalVaultSkills({
       userId,
-      workspace,
+      vault,
       harness: harness as SkillHarness,
     }));
     return;
   }
   if (action === "sync") {
-    sendJson(res, 200, await syncPortalWorkspaceSkills({
+    sendJson(res, 200, await syncPortalVaultSkills({
       userId,
-      workspace,
+      vault,
       harness: harness as SkillHarness,
     }));
     return;
@@ -544,17 +544,17 @@ async function handleWorkspaceSkillAction(
     return;
   }
   if (action === "install") {
-    sendJson(res, 200, await installPortalWorkspaceSkill({
+    sendJson(res, 200, await installPortalVaultSkill({
       userId,
-      workspace,
+      vault,
       harness: harness as SkillHarness,
       skillId,
     }));
     return;
   }
-  sendJson(res, 200, await uninstallPortalWorkspaceSkill({
+  sendJson(res, 200, await uninstallPortalVaultSkill({
     userId,
-    workspace,
+    vault,
     harness: harness as SkillHarness,
     skillId,
   }));
@@ -712,8 +712,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           endpoints: [
             "/api/users",
             "/api/users/:userId",
-            "/api/users/:userId/workspaces",
-            "/api/users/:userId/workspaces/:workspaceName",
+            "/api/users/:userId/vaults",
+            "/api/users/:userId/vaults/:vaultName",
             "/api/users/:userId/credentials",
           ],
         });
@@ -845,7 +845,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           const userId = session.polarisUserId;
           if (segments.length === 2 && req.method === "GET") {
             sendJson(res, 200, {
-              hosts: await listPortalWorkspaces(userId),
+              hosts: await listPortalVaults(userId),
             });
             return;
           }
@@ -864,13 +864,13 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               });
               return;
             }
-            if ((await listPortalWorkspaces(userId)).some((entry) => entry.name === hostName)) {
+            if ((await listPortalVaults(userId)).some((entry) => entry.name === hostName)) {
               sendJson(res, 409, { error: `Host '${hostName}' already exists.` });
               return;
             }
             let requestedLine: "coding" | "vertical";
             try {
-              requestedLine = resolveRequestedWorkspaceLine({
+              requestedLine = resolveRequestedVaultLine({
                 requested: body.line,
                 accessLine: session.line,
               });
@@ -878,7 +878,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               sendJson(res, 403, { error: error instanceof Error ? error.message : String(error) });
               return;
             }
-            const provision = await queueProvisionWorkspace(userId, hostName, {
+            const provision = await queueProvisionVault(userId, hostName, {
               defaultDockerOnly: true,
               startAfterCreate: true,
               line: requestedLine,
@@ -889,21 +889,21 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           if (segments.length === 3) {
             const hostName = decodeURIComponent(segments[2]);
             if (req.method === "DELETE") {
-              await handleWorkspaceDelete(res, userId, hostName);
+              await handleVaultDelete(res, userId, hostName);
               return;
             }
             if (req.method === "POST") {
               const body = await readBody(req);
               if (body.action === "start") {
-                await handleWorkspaceStart(res, userId, hostName);
+                await handleVaultStart(res, userId, hostName);
                 return;
               }
               if (body.action === "stop") {
-                await handleWorkspaceStop(res, userId, hostName);
+                await handleVaultStop(res, userId, hostName);
                 return;
               }
               if (body.action === "delete") {
-                await handleWorkspacePermanentDelete(res, userId, hostName);
+                await handleVaultPermanentDelete(res, userId, hostName);
                 return;
               }
             }
@@ -961,24 +961,24 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         if (!profile) {
           return;
         }
-        if (segments.length === 5 && segments[3] === "workspaces" && segments[4] === "static" && req.method === "GET") {
-          const workspaces = await listPortalWorkspaceStaticState(routeUserId);
+        if (segments.length === 5 && segments[3] === "vaults" && segments[4] === "static" && req.method === "GET") {
+          const vaults = await listPortalVaultStaticState(routeUserId);
           sendJson(res, 200, {
             user: profile,
-            workspaces,
+            vaults,
           });
           return;
         }
-        if (segments.length === 5 && segments[3] === "workspaces" && segments[4] === "live" && req.method === "GET") {
-          await handleWorkspaceLiveStream(req, res, routeUserId);
+        if (segments.length === 5 && segments[3] === "vaults" && segments[4] === "live" && req.method === "GET") {
+          await handleVaultLiveStream(req, res, routeUserId);
           return;
         }
-        const workspace = decodeURIComponent(segments[4] ?? "");
-        if (segments.length === 4 && segments[3] === "workspaces" && req.method === "GET") {
-          const workspaces = await listPortalWorkspaces(routeUserId);
+        const vault = decodeURIComponent(segments[4] ?? "");
+        if (segments.length === 4 && segments[3] === "vaults" && req.method === "GET") {
+          const vaults = await listPortalVaults(routeUserId);
           sendJson(res, 200, {
             user: profile,
-            workspaces,
+            vaults,
           });
           return;
         }
@@ -1042,98 +1042,98 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           await handleCredentialWrite(req, res, routeUserId, credentialId, fileKey);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "detail" && req.method === "GET") {
-          sendJson(res, 200, await getPortalWorkspaceDetailStatic(routeUserId, workspace));
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "detail" && req.method === "GET") {
+          sendJson(res, 200, await getPortalVaultDetailStatic(routeUserId, vault));
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 5 && req.method === "GET") {
-          sendJson(res, 200, await getPortalWorkspaceDetail(routeUserId, workspace));
+        if (segments[3] === "vaults" && segments.length === 5 && req.method === "GET") {
+          sendJson(res, 200, await getPortalVaultDetail(routeUserId, vault));
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "preview" && req.method === "GET") {
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "preview" && req.method === "GET") {
           const assetPath = url.searchParams.get("path")?.trim() || "";
           if (!assetPath) {
             badRequest(res, "path is required");
             return;
           }
-          handleWorkspacePreview(res, routeUserId, workspace, assetPath);
+          handleVaultPreview(res, routeUserId, vault, assetPath);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 5 && req.method === "DELETE") {
-          await handleWorkspaceDelete(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 5 && req.method === "DELETE") {
+          await handleVaultDelete(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "switch" && req.method === "POST") {
-          await handleWorkspaceSwitch(req, res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "switch" && req.method === "POST") {
+          await handleVaultSwitch(req, res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "driver" && req.method === "POST") {
-          await handleWorkspaceSelectedDriverUpdate(req, res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "driver" && req.method === "POST") {
+          await handleVaultSelectedDriverUpdate(req, res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "stop" && req.method === "POST") {
-          await handleWorkspaceStop(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "stop" && req.method === "POST") {
+          await handleVaultStop(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "start" && req.method === "POST") {
-          await handleWorkspaceStart(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "start" && req.method === "POST") {
+          await handleVaultStart(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "rebuild" && req.method === "POST") {
-          await handleWorkspaceRebuild(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "rebuild" && req.method === "POST") {
+          await handleVaultRebuild(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "refresh" && req.method === "POST") {
-          await handleWorkspaceRefresh(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "refresh" && req.method === "POST") {
+          await handleVaultRefresh(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "status" && req.method === "GET") {
-          await handleWorkspacePaseoStatus(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "status" && req.method === "GET") {
+          await handleVaultPaseoStatus(res, routeUserId, vault);
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "restart" && req.method === "POST") {
-          await handleWorkspacePaseoRestart(res, routeUserId, workspace);
+        if (segments[3] === "vaults" && segments.length === 7 && segments[5] === "paseo" && segments[6] === "restart" && req.method === "POST") {
+          await handleVaultPaseoRestart(res, routeUserId, vault);
           return;
         }
         if (
-          segments[3] === "workspaces" &&
+          segments[3] === "vaults" &&
           segments.length === 8 &&
           segments[5] === "paseo" &&
           segments[6] === "credentials" &&
           segments[7] === "switch" &&
           req.method === "POST"
         ) {
-          await handleWorkspaceLiveCredentialSwitch(req, res, routeUserId, workspace);
+          await handleVaultLiveCredentialSwitch(req, res, routeUserId, vault);
           return;
         }
         if (
-          segments[3] === "workspaces" &&
+          segments[3] === "vaults" &&
           segments.length === 7 &&
           segments[5] === "skills"
         ) {
           if (segments[6] === "list" && req.method === "POST") {
-            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "list");
+            await handleVaultSkillAction(req, res, routeUserId, vault, "list");
             return;
           }
           if (segments[6] === "install" && req.method === "POST") {
-            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "install");
+            await handleVaultSkillAction(req, res, routeUserId, vault, "install");
             return;
           }
           if (segments[6] === "uninstall" && req.method === "POST") {
-            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "uninstall");
+            await handleVaultSkillAction(req, res, routeUserId, vault, "uninstall");
             return;
           }
           if (segments[6] === "sync" && req.method === "POST") {
-            await handleWorkspaceSkillAction(req, res, routeUserId, workspace, "sync");
+            await handleVaultSkillAction(req, res, routeUserId, vault, "sync");
             return;
           }
         }
-        if (segments[3] === "workspaces" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "provision" && req.method === "POST") {
           const body = await readBody(req);
           let requestedLine: "coding" | "vertical" | undefined;
           if (session.polarisUserId === routeUserId) {
             try {
-              requestedLine = resolveRequestedWorkspaceLine({
+              requestedLine = resolveRequestedVaultLine({
                 requested: body.line,
                 accessLine: session.line,
               });
@@ -1142,41 +1142,41 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               return;
             }
           }
-          await handleWorkspaceProvision(
+          await handleVaultProvision(
             req,
             res,
             routeUserId,
-            workspace,
+            vault,
             requestedLine,
             body,
           );
           return;
         }
-        if (segments[3] === "workspaces" && segments.length === 4 && req.method === "POST") {
+        if (segments[3] === "vaults" && segments.length === 4 && req.method === "POST") {
           const body = await readBody(req);
-          const workspaceName = body.workspaceName?.trim();
-          if (!workspaceName) {
-            badRequest(res, "workspaceName is required");
+          const vaultName = body.vaultName?.trim();
+          if (!vaultName) {
+            badRequest(res, "vaultName is required");
             return;
           }
           try {
-            assertProjectNameAvailableForUser(workspaceName, routeUserId);
+            assertProjectNameAvailableForUser(vaultName, routeUserId);
           } catch (error) {
             sendJson(res, 409, {
               error: error instanceof Error ? error.message : String(error),
             });
             return;
           }
-          if ((await listPortalWorkspaces(routeUserId)).some((entry) => entry.name === workspaceName)) {
+          if ((await listPortalVaults(routeUserId)).some((entry) => entry.name === vaultName)) {
             sendJson(res, 409, {
-              error: `Workspace '${workspaceName}' already exists for user ${routeUserId}.`,
+              error: `Vault '${vaultName}' already exists for user ${routeUserId}.`,
             });
             return;
           }
           let requestedLine: "coding" | "vertical" | undefined;
           if (session.polarisUserId === routeUserId) {
             try {
-              requestedLine = resolveRequestedWorkspaceLine({
+              requestedLine = resolveRequestedVaultLine({
                 requested: body.line,
                 accessLine: session.line,
               });
@@ -1185,7 +1185,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               return;
             }
           }
-          const provision = await queueProvisionWorkspace(routeUserId, workspaceName, {
+          const provision = await queueProvisionVault(routeUserId, vaultName, {
             defaultDockerOnly: body.defaultDockerOnly === "true",
             startAfterCreate: body.startAfterCreate === "true",
             ...(requestedLine ? { line: requestedLine } : {}),

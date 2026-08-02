@@ -5,18 +5,18 @@ import { randomUUID } from "node:crypto";
 
 const paseoHome = process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
 const evolutionRoot = process.env.POLARIS_EVOLUTION_ROOT || path.join(paseoHome, "evolution");
-const workspaceDataRoot = process.env.POLARIS_WORKSPACE_DATA_ROOT || "/workspace/project";
+const vaultDataRoot = process.env.POLARIS_VAULT_DATA_ROOT || "/vault/project";
 const userIdentityRoot = process.env.POLARIS_USER_IDENTITY_ROOT || "/identity";
-const workspaceMemoryFile =
-  process.env.POLARIS_WORKSPACE_MEMORY_FILE
-  || path.join(workspaceDataRoot, ".polaris", "MEMORY.md");
+const vaultMemoryFile =
+  process.env.POLARIS_VAULT_MEMORY_FILE
+  || path.join(vaultDataRoot, ".polaris", "MEMORY.md");
 const userMemoryFile =
   process.env.POLARIS_USER_MEMORY_FILE
   || path.join(userIdentityRoot, "polaris", "USER.md");
 const sessionSnapshotFile =
   process.env.POLARIS_MEMORY_SNAPSHOT_FILE
   || path.join(evolutionRoot, "sessions", "runtime", "memory-snapshot.md");
-const workspaceId = process.env.POLARIS_PROJECT || "workspace";
+const vaultId = process.env.POLARIS_PROJECT || "vault";
 const userProfileId = process.env.POLARIS_USER_PROFILE_ID || "default";
 const managerId = process.env.POLARIS_MANAGER_ID || "paseo";
 const agentsRoot = path.join(paseoHome, "agents");
@@ -158,15 +158,15 @@ function renderEntrySections(entries, target) {
   return lines.join("\n").trimEnd();
 }
 
-export function renderWorkspaceMemory(entries) {
+export function renderVaultMemory(entries) {
   return [
-    "# Polaris Workspace Memory",
+    "# Polaris Vault Memory",
     "",
-    `- Project: ${workspaceId}`,
+    `- Project: ${vaultId}`,
     `- User profile: ${userProfileId}`,
-    `- Target: workspace-memory`,
+    `- Target: vault-memory`,
     "",
-    renderEntrySections(entries, "workspace-memory"),
+    renderEntrySections(entries, "vault-memory"),
     "",
   ].join("\n");
 }
@@ -175,7 +175,7 @@ export function renderUserMemory(entries) {
   return [
     "# Polaris User Memory",
     "",
-    `- Project: ${workspaceId}`,
+    `- Project: ${vaultId}`,
     `- User profile: ${userProfileId}`,
     `- Target: user-memory`,
     "",
@@ -188,15 +188,15 @@ export function renderSessionSnapshot(entries) {
   return [
     "# Polaris Memory Snapshot",
     "",
-    `- Project: ${workspaceId}`,
+    `- Project: ${vaultId}`,
     `- User profile: ${userProfileId}`,
     `- Session: runtime`,
     `- Snapshotted at: ${new Date().toISOString()}`,
     `- Provider: disabled`,
     "",
-    "## Workspace Memory",
+    "## Vault Memory",
     "",
-    renderEntrySections(entries, "workspace-memory"),
+    renderEntrySections(entries, "vault-memory"),
     "",
     "## User Memory",
     "",
@@ -212,7 +212,7 @@ export function renderSessionSnapshot(entries) {
 function makeEvent(sessionId, kind, payload) {
   return {
     id: randomUUID(),
-    workspaceId,
+    vaultId,
     managerId,
     sessionId,
     kind,
@@ -230,9 +230,9 @@ export function buildFallbackMemoryChange(record, sessionId) {
   if (status === "error") {
     return {
       id: randomUUID(),
-      workspaceId,
+      vaultId,
       userProfileId,
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Environment",
       key: "runtime-failure-pattern",
       title: "Runtime failure recovery",
@@ -252,7 +252,7 @@ export function buildFallbackMemoryChange(record, sessionId) {
   }
   return {
     id: randomUUID(),
-    workspaceId,
+    vaultId,
     userProfileId,
     target: "user-memory",
     section: "Preferences",
@@ -299,7 +299,7 @@ async function summarizeWithCheapModel(record, sessionId) {
         {
           role: "user",
           content: JSON.stringify({
-            workspaceId,
+            vaultId,
             userProfileId,
             sessionId,
             provider: record.provider ?? "unknown",
@@ -322,9 +322,9 @@ async function summarizeWithCheapModel(record, sessionId) {
   const parsed = JSON.parse(content);
   return {
     id: randomUUID(),
-    workspaceId,
+    vaultId,
     userProfileId,
-    target: String(parsed.target || "workspace-memory"),
+    target: String(parsed.target || "vault-memory"),
     section: String(parsed.section || "Memory"),
     key: String(parsed.key || "runtime-memory"),
     title: String(parsed.title || "Runtime-derived memory"),
@@ -415,16 +415,16 @@ function listAgentRecords() {
   if (!fs.existsSync(agentsRoot)) {
     return records;
   }
-  for (const workspaceEntry of fs.readdirSync(agentsRoot, { withFileTypes: true })) {
-    if (!workspaceEntry.isDirectory()) {
+  for (const vaultEntry of fs.readdirSync(agentsRoot, { withFileTypes: true })) {
+    if (!vaultEntry.isDirectory()) {
       continue;
     }
-    const workspaceDir = path.join(agentsRoot, workspaceEntry.name);
-    for (const entry of fs.readdirSync(workspaceDir, { withFileTypes: true })) {
+    const vaultDir = path.join(agentsRoot, vaultEntry.name);
+    for (const entry of fs.readdirSync(vaultDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) {
         continue;
       }
-      const filePath = path.join(workspaceDir, entry.name);
+      const filePath = path.join(vaultDir, entry.name);
       try {
         records.push(JSON.parse(fs.readFileSync(filePath, "utf8")));
       } catch {
@@ -479,10 +479,10 @@ export async function main() {
   log("starting memory observer", {
     paseoHome,
     evolutionRoot,
-    workspaceMemoryFile,
+    vaultMemoryFile,
     userMemoryFile,
     sessionSnapshotFile,
-    workspaceId,
+    vaultId,
     userProfileId,
     managerId,
     pollIntervalMs,

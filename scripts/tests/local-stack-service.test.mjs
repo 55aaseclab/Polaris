@@ -7,7 +7,7 @@ test("local stack service starts the executor bridge proxy for docker callbacks"
   assert.match(script, /run-polaris-executor-bridge-proxy\.sh/);
   assert.match(script, /executor_bridge_proxy_pid/);
   assert.match(script, /stack\.executor-bridge\.log/);
-  assert.match(script, /docker workspaces may not report Paseo pairing metadata back to the host executor/);
+  assert.match(script, /docker vaults may not report Paseo pairing metadata back to the host executor/);
 });
 
 test("local stack service does not start a standalone admin web app", () => {
@@ -36,7 +36,7 @@ test("local stack service binds the API and executor to 0.0.0.0 by default", () 
 test("local stack service builds shell and surface packages", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
   assert.match(script, /pnpm run build:surfaces/);
-  assert.match(script, /in-container \(per workspace\): paseo daemon :6767/);
+  assert.match(script, /in-container \(per vault\): paseo daemon :6767/);
   assert.match(script, /wanghai portal :9090/);
   // Product flavor is per-user, not a single-stack env switch.
   assert.doesNotMatch(script, /EXPO_PUBLIC_POLARIS_PRODUCT/);

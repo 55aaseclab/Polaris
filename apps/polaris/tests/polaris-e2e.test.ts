@@ -5,16 +5,16 @@ import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
-import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
+import { vaultConfigPath } from "../scripts/config/scaffold.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "../scripts/core/workspace-name.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "../scripts/core/vault-name.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
-  workspaceSelectionPath,
-  writeWorkspaceDriverSelection,
+  vaultSelectionPath,
+  writeVaultDriverSelection,
 } from "../scripts/output/state-store.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
@@ -27,9 +27,9 @@ function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
 }
 
-function loadWorkspaceFromRefForTest(projectRef: string) {
-  const resolved = resolveWorkspaceConfigPath(projectRef);
-  return loadWorkspaceFromConfigPath(
+function loadVaultFromRefForTest(projectRef: string) {
+  const resolved = resolveVaultConfigPath(projectRef);
+  return loadVaultFromConfigPath(
     resolved.configPath,
     resolved.project,
     resolved.backendHint,
@@ -152,7 +152,7 @@ function removeIfExists(target: string): void {
 }
 
 function cleanupSelectionFile(project: string): void {
-  removeIfExists(workspaceSelectionPath(project, DEMO_USER_PROFILE_ID));
+  removeIfExists(vaultSelectionPath(project, DEMO_USER_PROFILE_ID));
   removeIfExists(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`));
 }
 
@@ -168,8 +168,8 @@ function parseJsonOutput<T>(stdout: string): T {
 
 function writeProjectSpec(backendDir: "pod" | "docker" | "kubevirt", project: string): string {
   const backendKind = backendDir === "kubevirt" ? "kubevirt-vm" : backendDir;
-  const sourcePath = workspaceConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
-  const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
+  const sourcePath = vaultConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
+  const outputPath = vaultConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   const source = fs.readFileSync(sourcePath, "utf8").replace(/^project: demo$/m, `project: ${project}`);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, source, "utf8");
@@ -180,7 +180,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
   const project = `e2e-create-${Date.now()}`;
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
-  const configPath = workspaceConfigPath(project, "docker", userProfileId);
+  const configPath = vaultConfigPath(project, "docker", userProfileId);
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(USER_ROOT, userProfileId);
   const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
@@ -228,7 +228,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
         assert.equal(parsed.credentials.registryRoot, repoRelative(credentialRoot));
         assert.deepEqual(parsed.credentials.defaults, ["github-ssh"]);
         assert.equal(fs.existsSync(profilePath), true);
-        assert.equal(fs.existsSync(path.join(secretsRoot, "workspaces", project)), true);
+        assert.equal(fs.existsSync(path.join(secretsRoot, "vaults", project)), true);
         assert.equal(fs.existsSync(path.join(secretsRoot, ".gitignore")), true);
         assert.equal(fs.existsSync(path.join(credentialRoot, "github-ssh.yaml")), true);
       },
@@ -245,8 +245,8 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
   const project = `e2e-create-pod-${Date.now()}`;
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
-  const dockerConfigPath = workspaceConfigPath(project, "docker", userProfileId);
-  const podConfigPath = workspaceConfigPath(project, "pod", userProfileId);
+  const dockerConfigPath = vaultConfigPath(project, "docker", userProfileId);
+  const podConfigPath = vaultConfigPath(project, "pod", userProfileId);
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(USER_ROOT, userProfileId);
   const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
@@ -285,11 +285,11 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
   }
 });
 
-test("create adapts workspace credential bindings to the user's available registry credentials", async () => {
+test("create adapts vault credential bindings to the user's available registry credentials", async () => {
   const project = `e2e-create-adaptive-${Date.now()}`;
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
-  const configPath = workspaceConfigPath(project, "docker", userProfileId);
+  const configPath = vaultConfigPath(project, "docker", userProfileId);
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(USER_ROOT, userProfileId);
   const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
@@ -382,7 +382,7 @@ test("create fails when the user has no git-auth credential", async () => {
   const project = `e2e-create-unbound-${Date.now()}`;
   const profileEmail = `${project}@polaris.local`;
   const userProfileId = `local-${project}-polaris.local`;
-  const configPath = workspaceConfigPath(project, "docker", userProfileId);
+  const configPath = vaultConfigPath(project, "docker", userProfileId);
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const secretsRoot = path.join(USER_ROOT, userProfileId);
   const credentialRoot = path.join(USER_ROOT, userProfileId, "credentials");
@@ -400,7 +400,7 @@ test("create fails when the user has no git-auth credential", async () => {
 
         await assert.rejects(
           () => runCli(["create", project, "--user", userProfileId]),
-          /Workspace create requires a git-auth credential/,
+          /Vault create requires a git-auth credential/,
         );
         assert.equal(fs.existsSync(configPath), false);
       },
@@ -417,19 +417,19 @@ test("default CLI dispatch uses status instead of apply", async () => {
   await withFakePath(
     {
       kubectl: `#!/usr/bin/env bash
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -449,7 +449,7 @@ test("backend selectors disambiguate shared project names like demo@docker", asy
   await withFakePath(
     {
       docker: `#!/usr/bin/env bash
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -475,7 +475,7 @@ exit 0
 
 test("switch stops the previous backend, starts the new backend, and updates defaults", async () => {
   const project = "demo";
-  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+  const driverSelectionPath = vaultSelectionPath(project, DEMO_USER_PROFILE_ID);
   const dockerStateFile = `/tmp/polaris-switch-basic-docker-state-${process.pid}-${Date.now()}`;
   const podStateFile = `/tmp/polaris-switch-basic-pod-state-${process.pid}-${Date.now()}`;
   cleanupSelectionFile(project);
@@ -496,7 +496,7 @@ if [[ "$*" == *" up -d"* ]]; then
   printf 'running\n' > "$state_file"
   exit 0
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -528,14 +528,14 @@ if [[ "$*" == *"rollout restart"* ]]; then
   printf 'running\n' > "$state_file"
   exit 0
 fi
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
-    printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+    printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'pod-1'
     exit 0
@@ -545,11 +545,11 @@ fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
-if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
   printf 'stopped\n' > "$state_file"
   exit 0
 fi
@@ -591,7 +591,7 @@ exit 0
 
 test("switch accepts pod driver variants such as kata", async () => {
   const project = "demo";
-  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+  const driverSelectionPath = vaultSelectionPath(project, DEMO_USER_PROFILE_ID);
   cleanupSelectionFile(project);
 
   try {
@@ -601,19 +601,19 @@ test("switch accepts pod driver variants such as kata", async () => {
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
 if [[ "$1" == "exec" || "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -630,7 +630,7 @@ exit 0
         assert.match(switched, /"selectedProfile": "kata"/);
 
         const saved = JSON.parse(
-          fs.readFileSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
+          fs.readFileSync(vaultStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
         ) as {
           driver?: {
             selected?: {
@@ -651,7 +651,7 @@ exit 0
 
 test("e2e switch chain keeps daemon connectivity across docker, pod:gvisor, pod:kata-container, and kubevirt while exposing timing from logs", async () => {
   const project = "demo";
-  const driverSelectionPath = workspaceSelectionPath(project, DEMO_USER_PROFILE_ID);
+  const driverSelectionPath = vaultSelectionPath(project, DEMO_USER_PROFILE_ID);
   const podProfilePath = path.join(REPO_ROOT, "config", "pod", "profiles", "kata-container.yaml");
   cleanupSelectionFile(project);
 
@@ -688,8 +688,8 @@ test("e2e switch chain keeps daemon connectivity across docker, pod:gvisor, pod:
       return Date.parse(match[1]);
     };
     const stopTs = extractTs(/\[cli\] switch-stop-previous-backend/);
-    const startTs = extractTs(/\[cli\] load-workspace/);
-    const readyTs = extractTs(/\[cli\] workspace-ready/);
+    const startTs = extractTs(/\[cli\] load-vault/);
+    const readyTs = extractTs(/\[cli\] vault-ready/);
     return {
       stopToStartMs: startTs - stopTs,
       startToReadyMs: readyTs - startTs,
@@ -698,7 +698,7 @@ test("e2e switch chain keeps daemon connectivity across docker, pod:gvisor, pod:
   }
 
   try {
-    writeWorkspaceDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
+    writeVaultDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
     await withFakePath(
       {
         docker: `#!/usr/bin/env bash
@@ -713,7 +713,7 @@ KUBEVIRT_EXISTS=$KUBEVIRT_EXISTS
 KUBEVIRT_RUNNING=$KUBEVIRT_RUNNING
 EOF
 }
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   [[ "$DOCKER_RUNNING" == "1" ]] && printf 'docker-id'
   exit 0
 fi
@@ -780,84 +780,84 @@ fi
 if [[ "$*" == *"wait --for=jsonpath="* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} -o json"* ]]; then
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} -o json"* ]]; then
   if [[ "$POD_EXISTS" == "1" ]]; then
-    printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+    printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   [[ "$POD_RUNNING" == "1" ]] && printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   if [[ "$POD_EXISTS" == "1" || "$KUBEVIRT_EXISTS" == "1" ]]; then
-    printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+    printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
     exit 0
   fi
   exit 1
 fi
-if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")} --replicas=0"* ]]; then
   POD_RUNNING=0
   POD_EXISTS=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"rollout restart deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"rollout restart deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   POD_RUNNING=1
   POD_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
-  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   [[ "$KUBEVIRT_RUNNING" == "1" ]] && printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
-  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
+  [[ "$KUBEVIRT_EXISTS" == "1" ]] && printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Halted"'* ]]; then
+if [[ "$*" == *"patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Halted"'* ]]; then
   KUBEVIRT_RUNNING=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Always"'* ]]; then
+if [[ "$*" == *"patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* && "$*" == *'"runStrategy":"Always"'* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt stop"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+if [[ "$*" == *"virt stop"* && "$*" == *"${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=0
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt start"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+if [[ "$*" == *"virt start"* && "$*" == *"${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"virt restart"* && "$*" == *"${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+if [[ "$*" == *"virt restart"* && "$*" == *"${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   KUBEVIRT_RUNNING=1
   KUBEVIRT_EXISTS=1
   save_state
   sleep 0.1
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   port_spec=""
   for arg in "$@"; do
     case "$arg" in
@@ -970,7 +970,7 @@ exit 0
         process.stderr.write(`[polaris-e2e] switch timings ${JSON.stringify(timingSummary)}\n`);
 
         const saved = JSON.parse(
-          fs.readFileSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
+          fs.readFileSync(vaultStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
         ) as {
           driver?: {
             selected?: {
@@ -997,9 +997,9 @@ test("logs command dispatches to each backend implementation", async () => {
   const podSpec = writeProjectSpec("pod", podProject);
   const dockerSpec = writeProjectSpec("docker", dockerProject);
   const vmSpec = writeProjectSpec("kubevirt", vmProject);
-  const podGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${podProject}@pod`));
-  const dockerGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${dockerProject}@docker`));
-  const vmGeneratedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${vmProject}@kubevirt-vm`));
+  const podGeneratedPath = generatedOutputPath(loadVaultFromRefForTest(`${podProject}@pod`));
+  const dockerGeneratedPath = generatedOutputPath(loadVaultFromRefForTest(`${dockerProject}@docker`));
+  const vmGeneratedPath = generatedOutputPath(loadVaultFromRefForTest(`${vmProject}@kubevirt-vm`));
   const traceDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-trace-"));
   const traceFile = path.join(traceDir, "commands.log");
 
@@ -1012,7 +1012,7 @@ if [[ "$*" == *"get pod -l app=${podProject}"* ]]; then
   printf '${podProject}-pod'
   exit 0
 fi
-if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, vmProject, "vm")}"* ]]; then
+if [[ "$*" == *"get pod -l vm.kubevirt.io/name=${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, vmProject, "vm")}"* ]]; then
   printf '${vmProject}-launcher'
   exit 0
 fi
@@ -1033,11 +1033,11 @@ exit 0
     const trace = fs.readFileSync(traceFile, "utf8");
     assert.match(
       trace,
-      new RegExp(`logs deployment/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, podProject)} --tail=200`),
+      new RegExp(`logs deployment/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, podProject)} --tail=200`),
     );
     assert.match(
       trace,
-      new RegExp(`compose -f .*/workspaces/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, dockerProject)}`),
+      new RegExp(`compose -f .*/vaults/${dockerProject}/generated/docker\\.yaml logs --tail 200 ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, dockerProject)}`),
     );
     assert.match(trace, new RegExp(`logs ${vmProject}-launcher --tail=200`));
   } finally {

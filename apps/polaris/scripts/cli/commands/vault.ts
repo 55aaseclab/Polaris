@@ -21,16 +21,16 @@ import { switchCommand } from "./switch.js";
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- workspace <list|create|apply|render|start|stop|restart|rebuild|status|reconcile|logs|live-switch|switch|delete|skill-list|skill-install|skill-uninstall|skill-sync> ...",
+    "Usage: pnpm --dir apps/polaris run polaris -- vault <list|create|apply|render|start|stop|restart|rebuild|status|reconcile|logs|live-switch|switch|delete|skill-list|skill-install|skill-uninstall|skill-sync> ...",
   );
 }
 
-function parseWorkspaceRef(argv: string[]): string {
-  const workspaceRef = argv[0]?.trim();
-  if (!workspaceRef) {
+function parseVaultRef(argv: string[]): string {
+  const vaultRef = argv[0]?.trim();
+  if (!vaultRef) {
     usage();
   }
-  return workspaceRef;
+  return vaultRef;
 }
 
 function parseUserProfileId(argv: string[]): string | undefined {
@@ -45,7 +45,7 @@ function parseUserProfileId(argv: string[]): string | undefined {
   return userProfileId;
 }
 
-export async function workspaceCommand(argv: string[]): Promise<void> {
+export async function vaultCommand(argv: string[]): Promise<void> {
   const [action, ...rest] = argv;
   if (!action) {
     usage();
@@ -60,39 +60,39 @@ export async function workspaceCommand(argv: string[]): Promise<void> {
     return;
   }
   if (action === "apply") {
-    await applyCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await applyCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "render") {
-    await renderCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await renderCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "start") {
-    await startCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await startCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "stop") {
-    await stopCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await stopCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "restart") {
-    await restartCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await restartCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "rebuild") {
-    await rebuildCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await rebuildCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "status") {
-    await statusCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await statusCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "reconcile") {
-    await reconcileCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await reconcileCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "logs") {
-    await logsCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await logsCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "live-switch") {
@@ -100,31 +100,31 @@ export async function workspaceCommand(argv: string[]): Promise<void> {
     return;
   }
   if (action === "switch") {
-    await switchCommand(parseWorkspaceRef(rest));
+    await switchCommand(parseVaultRef(rest));
     return;
   }
   if (action === "delete") {
-    await deleteCommand(parseWorkspaceRef(rest), parseUserProfileId(rest));
+    await deleteCommand(parseVaultRef(rest), parseUserProfileId(rest));
     return;
   }
   if (action === "skill-list") {
-    const workspaceRef = parseWorkspaceRef(rest);
-    await skillListCommand(workspaceRef, rest.slice(1));
+    const vaultRef = parseVaultRef(rest);
+    await skillListCommand(vaultRef, rest.slice(1));
     return;
   }
   if (action === "skill-install") {
-    const workspaceRef = parseWorkspaceRef(rest);
-    await skillInstallCommand(workspaceRef, rest.slice(1));
+    const vaultRef = parseVaultRef(rest);
+    await skillInstallCommand(vaultRef, rest.slice(1));
     return;
   }
   if (action === "skill-uninstall") {
-    const workspaceRef = parseWorkspaceRef(rest);
-    await skillUninstallCommand(workspaceRef, rest.slice(1));
+    const vaultRef = parseVaultRef(rest);
+    await skillUninstallCommand(vaultRef, rest.slice(1));
     return;
   }
   if (action === "skill-sync") {
-    const workspaceRef = parseWorkspaceRef(rest);
-    await skillSyncCommand(workspaceRef, rest.slice(1));
+    const vaultRef = parseVaultRef(rest);
+    await skillSyncCommand(vaultRef, rest.slice(1));
     return;
   }
 

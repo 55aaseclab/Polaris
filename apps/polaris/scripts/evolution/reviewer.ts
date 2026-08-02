@@ -24,7 +24,7 @@ function buildChange(
   const timestamp = nowIso();
   return {
     id: randomUUID(),
-    workspaceId: candidate.workspaceId,
+    vaultId: candidate.vaultId,
     userProfileId: candidate.userProfileId,
     target: params.target,
     operation: "replace",
@@ -73,11 +73,11 @@ function classifyEvent(candidate: EvolutionReviewCandidate): EvolutionMemoryChan
     || candidate.events.some((event) => event.kind === "task-failed" || event.kind === "tool-result")
   ) {
     changes.push(buildChange(candidate, {
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "run-verifier-first",
       title: "Run verifier before retrying",
-      body: "Use the verifier before repeating the same failing command in this workspace.",
+      body: "Use the verifier before repeating the same failing command in this vault.",
       reason: "Session produced a durable validation or retry workflow fact.",
       confidence: 0.68,
     }));
@@ -85,11 +85,11 @@ function classifyEvent(candidate: EvolutionReviewCandidate): EvolutionMemoryChan
 
   if (changes.length === 0 && textPayload.includes("401")) {
     changes.push(buildChange(candidate, {
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Environment",
       key: "auth-failure-pattern",
       title: "Authentication failure recovery",
-      body: "When a 401 appears, verify workspace auth material before retrying the same task.",
+      body: "When a 401 appears, verify vault auth material before retrying the same task.",
       reason: "Session exposed a durable authentication recovery fact.",
       confidence: 0.62,
     }));

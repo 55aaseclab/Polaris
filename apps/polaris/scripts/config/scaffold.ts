@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
 import { userIdentityDurablePaths } from "../core/identity-layout.js";
-import { workspaceRuntimeResourceName } from "../core/workspace-name.js";
+import { vaultRuntimeResourceName } from "../core/vault-name.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import {
   polarisConfigDockerRoot,
@@ -17,28 +17,28 @@ const REPO_ROOT = repoRoot(import.meta.url);
 const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
 const USER_PROFILES_DIR = path.join(USER_SECRETS_ROOT, "profiles");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
-const WORKSPACE_SERVICE_PORT_START = 32000;
-const WORKSPACE_SERVICE_PORT_END = 32999;
+const VAULT_SERVICE_PORT_START = 32000;
+const VAULT_SERVICE_PORT_END = 32999;
 
-export interface UserWorkspaceDefaults {}
+export interface UserVaultDefaults {}
 
-export type WorkspaceSubscriptionLine = "coding" | "vertical";
+export type VaultSubscriptionLine = "coding" | "vertical";
 
-function workspaceDataNetfsSource(project: string): Record<string, any> {
+function vaultDataNetfsSource(project: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
-    volume_ref: workspaceDataVolumeRef(DEMO_USER_PROFILE_ID, project),
+    volume_ref: vaultDataVolumeRef(DEMO_USER_PROFILE_ID, project),
     volume_size: "120Gi",
-    description: `shared workspace data for ${project}`,
+    description: `shared vault data for ${project}`,
   };
 }
 
-function workspaceDataVolumeRef(userProfileId: string, project: string): string {
-  return workspaceRuntimeResourceName(userProfileId, project, "workspace-data");
+function vaultDataVolumeRef(userProfileId: string, project: string): string {
+  return vaultRuntimeResourceName(userProfileId, project, "vault-data");
 }
 
 function sanitizeImageTagComponent(raw: string, fallback: string): string {
@@ -58,13 +58,13 @@ function neutralUserImageTagSegment(userProfileId: string): string {
   return `user-${sanitizeImageTagComponent(trimmed, "default").slice(0, 24)}`;
 }
 
-export function workspaceImageRef(userProfileId: string, project: string): string {
+export function vaultImageRef(userProfileId: string, project: string): string {
   const userSegment = neutralUserImageTagSegment(userProfileId);
-  const projectSegment = sanitizeImageTagComponent(project, "workspace").slice(0, 32);
+  const projectSegment = sanitizeImageTagComponent(project, "vault").slice(0, 32);
   return `ttl.sh/${userSegment}-${projectSegment}:24h`;
 }
 
-export function workspaceConfigPath(
+export function vaultConfigPath(
   project: string,
   backendKind: "docker" | "pod" | "kubevirt-vm" = "docker",
   userProfileId: string,
@@ -76,13 +76,13 @@ export function workspaceConfigPath(
   return path.join(
     USER_SECRETS_ROOT,
     userProfileId.trim(),
-    "workspaces",
+    "vaults",
     project,
     backendFile,
   );
 }
 
-export function workspaceConfigExists(project: string, userProfileId?: string): boolean {
+export function vaultConfigExists(project: string, userProfileId?: string): boolean {
   if (!userProfileId?.trim()) {
     assertNoProjectNameCollision(project);
   }
@@ -94,9 +94,9 @@ export function workspaceConfigExists(project: string, userProfileId?: string): 
         .map((entry) => entry.name)
       : [];
   const userScopedMatches = candidateUserIds.flatMap((candidateUserId) => [
-    workspaceConfigPath(project, "docker", candidateUserId),
-    workspaceConfigPath(project, "pod", candidateUserId),
-    workspaceConfigPath(project, "kubevirt-vm", candidateUserId),
+    vaultConfigPath(project, "docker", candidateUserId),
+    vaultConfigPath(project, "pod", candidateUserId),
+    vaultConfigPath(project, "kubevirt-vm", candidateUserId),
   ]);
   return [
     ...userScopedMatches,
@@ -181,24 +181,24 @@ function normalizeBaseImage(value: unknown): string | null {
   return baseImage || null;
 }
 
-export function readUserWorkspaceDefaults(userProfileId: string): UserWorkspaceDefaults {
+export function readUserVaultDefaults(userProfileId: string): UserVaultDefaults {
   void userProfileId;
   return {};
 }
 
-function writeWorkspaceDefaultsDoc(
+function writeVaultDefaultsDoc(
   userProfileId: string,
-  defaults: UserWorkspaceDefaults,
+  defaults: UserVaultDefaults,
 ): void {
   void defaults;
   const doc = readUserProfileDoc(userProfileId);
-  const workspaceDefaults =
-    doc.workspace_defaults && typeof doc.workspace_defaults === "object"
-      ? (doc.workspace_defaults as Record<string, any>)
+  const vaultDefaults =
+    doc.vault_defaults && typeof doc.vault_defaults === "object"
+      ? (doc.vault_defaults as Record<string, any>)
       : null;
   const dockerDefaults =
-    workspaceDefaults?.docker && typeof workspaceDefaults.docker === "object"
-      ? workspaceDefaults.docker as Record<string, any>
+    vaultDefaults?.docker && typeof vaultDefaults.docker === "object"
+      ? vaultDefaults.docker as Record<string, any>
       : null;
   const dockerRuntimeDefaults =
     dockerDefaults?.runtime && typeof dockerDefaults.runtime === "object"
@@ -211,53 +211,53 @@ function writeWorkspaceDefaultsDoc(
   if (dockerRuntimeDefaults && Object.keys(dockerRuntimeDefaults).length === 0 && dockerDefaults) {
     delete dockerDefaults.runtime;
   }
-  if (dockerDefaults && Object.keys(dockerDefaults).length === 0 && workspaceDefaults) {
-    delete workspaceDefaults.docker;
+  if (dockerDefaults && Object.keys(dockerDefaults).length === 0 && vaultDefaults) {
+    delete vaultDefaults.docker;
   }
-  if (workspaceDefaults && Object.keys(workspaceDefaults).length === 0) {
-    delete doc.workspace_defaults;
+  if (vaultDefaults && Object.keys(vaultDefaults).length === 0) {
+    delete doc.vault_defaults;
   }
 
   writeUserProfileDoc(userProfileId, doc);
 }
 
-export function setUserWorkspaceDefaults(
+export function setUserVaultDefaults(
   userProfileId: string,
-  defaults: UserWorkspaceDefaults,
-): UserWorkspaceDefaults {
-  writeWorkspaceDefaultsDoc(userProfileId, defaults);
-  return readUserWorkspaceDefaults(userProfileId);
+  defaults: UserVaultDefaults,
+): UserVaultDefaults {
+  writeVaultDefaultsDoc(userProfileId, defaults);
+  return readUserVaultDefaults(userProfileId);
 }
 
-export function resolveWorkspaceDockerBaseImage(input: {
+export function resolveVaultDockerBaseImage(input: {
   userProfileId: string;
   project: string;
   baseImage?: string | null;
-  line?: WorkspaceSubscriptionLine;
+  line?: VaultSubscriptionLine;
 }): string {
   const explicitBaseImage = normalizeBaseImage(input.baseImage);
   if (explicitBaseImage) {
     return explicitBaseImage;
   }
   if (input.line === "vertical") {
-    return verticalWorkspaceBaseImage();
+    return verticalVaultBaseImage();
   }
-  return workspaceImageRef(input.userProfileId, input.project);
+  return vaultImageRef(input.userProfileId, input.project);
 }
 
-export function isManagedWorkspaceDockerBaseImage(input: {
+export function isManagedVaultDockerBaseImage(input: {
   userProfileId: string;
   project: string;
   baseImage?: string | null;
 }): boolean {
-  return resolveWorkspaceDockerBaseImage(input) === workspaceImageRef(input.userProfileId, input.project);
+  return resolveVaultDockerBaseImage(input) === vaultImageRef(input.userProfileId, input.project);
 }
 
 function userCredentialRegistryDir(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
 }
 
-function configuredWorkspaceServicePorts(): Set<number> {
+function configuredVaultServicePorts(): Set<number> {
   const configured = new Set<number>();
   if (!fs.existsSync(USER_SECRETS_ROOT)) {
     return configured;
@@ -267,15 +267,15 @@ function configuredWorkspaceServicePorts(): Set<number> {
     if (!userEntry.isDirectory()) {
       continue;
     }
-    const workspacesRoot = path.join(USER_SECRETS_ROOT, userEntry.name, "workspaces");
-    if (!fs.existsSync(workspacesRoot)) {
+    const vaultsRoot = path.join(USER_SECRETS_ROOT, userEntry.name, "vaults");
+    if (!fs.existsSync(vaultsRoot)) {
       continue;
     }
-    for (const projectEntry of fs.readdirSync(workspacesRoot, { withFileTypes: true })) {
+    for (const projectEntry of fs.readdirSync(vaultsRoot, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) {
         continue;
       }
-      const dockerSpecPath = path.join(workspacesRoot, projectEntry.name, "docker.agent.yaml");
+      const dockerSpecPath = path.join(vaultsRoot, projectEntry.name, "docker.agent.yaml");
       if (!fs.existsSync(dockerSpecPath)) {
         continue;
       }
@@ -294,36 +294,36 @@ function configuredWorkspaceServicePorts(): Set<number> {
   return configured;
 }
 
-function allocateWorkspaceServicePort(unavailableExtra: Iterable<number> = []): string {
+function allocateVaultServicePort(unavailableExtra: Iterable<number> = []): string {
   const unavailable = new Set<number>([
-    ...configuredWorkspaceServicePorts(),
+    ...configuredVaultServicePorts(),
     ...currentlyListeningPorts(),
     ...unavailableExtra,
   ]);
 
-  for (let port = WORKSPACE_SERVICE_PORT_START; port <= WORKSPACE_SERVICE_PORT_END; port += 1) {
+  for (let port = VAULT_SERVICE_PORT_START; port <= VAULT_SERVICE_PORT_END; port += 1) {
     if (!unavailable.has(port)) {
       return String(port);
     }
   }
 
   throw new Error(
-    `No free workspace service port is available in range ${WORKSPACE_SERVICE_PORT_START}-${WORKSPACE_SERVICE_PORT_END}`,
+    `No free vault service port is available in range ${VAULT_SERVICE_PORT_START}-${VAULT_SERVICE_PORT_END}`,
   );
 }
 
 /** Vertical wanghai portal listens in-container; coding-only images do not. */
 export const WANGHAI_PORTAL_CONTAINER_PORT = "9090";
-export const DEFAULT_WANGHAI_WORKSPACE_IMAGE = "wanghai-admin-portal:latest";
+export const DEFAULT_WANGHAI_VAULT_IMAGE = "wanghai-admin-portal:latest";
 export const WANGHAI_PROFILE_ENV_FILE_KEY = "wanghai-root-env";
 export const WANGHAI_PROFILE_ENV_SOURCE_PATH = "wanghai/.env";
 export const WANGHAI_PROFILE_ENV_MOUNT_PATH = "/opt/wanghai/.env";
-export const WANGHAI_WORKSPACES_RUNTIME_ROOT = "/workspace/project/workspaces";
-export const WANGHAI_BACKUP_RUNTIME_ROOT = "/workspace/project/backups";
+export const WANGHAI_VAULTS_RUNTIME_ROOT = "/vault/project/vaults";
+export const WANGHAI_BACKUP_RUNTIME_ROOT = "/vault/project/backups";
 
-export function verticalWorkspaceBaseImage(): string {
-  return String(process.env.POLARIS_WANGHAI_WORKSPACE_IMAGE ?? "").trim()
-    || DEFAULT_WANGHAI_WORKSPACE_IMAGE;
+export function verticalVaultBaseImage(): string {
+  return String(process.env.POLARIS_WANGHAI_VAULT_IMAGE ?? "").trim()
+    || DEFAULT_WANGHAI_VAULT_IMAGE;
 }
 
 export function isWanghaiVerticalBaseImage(baseImage: string | null | undefined): boolean {
@@ -375,13 +375,13 @@ function ensureUserProfileWanghaiEnvEntry(doc: Record<string, any>): Record<stri
 }
 
 function userDockerfilePath(userProfileId: string): string {
-  return path.join(USER_SECRETS_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  return path.join(USER_SECRETS_ROOT, userProfileId, "docker", "vault-prebuilt.Dockerfile");
 }
 
-function defaultWorkspaceDockerfileTemplatePath(): string {
+function defaultVaultDockerfileTemplatePath(): string {
   return path.join(
     polarisConfigDockerRoot(import.meta.url),
-    "workspace-prebuilt.Dockerfile",
+    "vault-prebuilt.Dockerfile",
   );
 }
 
@@ -389,16 +389,16 @@ function filesHaveSameContents(leftPath: string, rightPath: string): boolean {
   return fs.readFileSync(leftPath).equals(fs.readFileSync(rightPath));
 }
 
-export function ensureWorkspaceDockerfile(userProfileId: string): string {
+export function ensureVaultDockerfile(userProfileId: string): string {
   const target = userDockerfilePath(userProfileId);
   if (fs.existsSync(target)) {
     return target;
   }
 
-  const template = defaultWorkspaceDockerfileTemplatePath();
+  const template = defaultVaultDockerfileTemplatePath();
   if (!fs.existsSync(template)) {
     throw new Error(
-      `Default workspace Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
+      `Default vault Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
     );
   }
 
@@ -407,16 +407,16 @@ export function ensureWorkspaceDockerfile(userProfileId: string): string {
   return target;
 }
 
-export function syncWorkspaceDockerfileTemplate(userProfileId: string): {
+export function syncVaultDockerfileTemplate(userProfileId: string): {
   path: string;
   created: boolean;
   refreshed: boolean;
 } {
   const target = userDockerfilePath(userProfileId);
-  const template = defaultWorkspaceDockerfileTemplatePath();
+  const template = defaultVaultDockerfileTemplatePath();
   if (!fs.existsSync(template)) {
     throw new Error(
-      `Default workspace Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
+      `Default vault Dockerfile template was not found at ${path.relative(REPO_ROOT, template)}`,
     );
   }
   if (path.resolve(target) === path.resolve(template)) {
@@ -507,7 +507,7 @@ export function listDefaultCredentialIds(userProfileId: string): string[] {
   return resolveDefaultCredentialBindings(userProfileId).defaults;
 }
 
-function requireWorkspaceGitAuth(userProfileId: string, bindings: Array<{
+function requireVaultGitAuth(userProfileId: string, bindings: Array<{
   purpose: "agent-auth" | "git-auth";
   credentialId: string;
   required: boolean;
@@ -516,7 +516,7 @@ function requireWorkspaceGitAuth(userProfileId: string, bindings: Array<{
     return;
   }
   throw new Error(
-    `Workspace create requires a git-auth credential for user '${userProfileId}'. Stage SSH credentials first.`,
+    `Vault create requires a git-auth credential for user '${userProfileId}'. Stage SSH credentials first.`,
   );
 }
 
@@ -624,36 +624,36 @@ export function userProfileExists(userProfileId: string): boolean {
   return fs.existsSync(userProfilePath(userProfileId));
 }
 
-export function scaffoldDockerWorkspace(
+export function scaffoldDockerVault(
   project: string,
   userProfileId: string,
   options?: {
     baseImage?: string | null;
-    line?: WorkspaceSubscriptionLine;
+    line?: VaultSubscriptionLine;
   },
 ): string {
-  const outputPath = workspaceConfigPath(project, "docker", userProfileId);
+  const outputPath = vaultConfigPath(project, "docker", userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const baseImage = resolveWorkspaceDockerBaseImage({
+  const baseImage = resolveVaultDockerBaseImage({
     userProfileId,
     project,
     baseImage: options?.baseImage,
     line: options?.line,
   });
-  if (baseImage === workspaceImageRef(userProfileId, project)) {
-    ensureWorkspaceDockerfile(userProfileId);
+  if (baseImage === vaultImageRef(userProfileId, project)) {
+    ensureVaultDockerfile(userProfileId);
   }
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
-  requireWorkspaceGitAuth(userProfileId, defaultCredentials.bindings);
-  const workspaceServicePort = allocateWorkspaceServicePort();
+  requireVaultGitAuth(userProfileId, defaultCredentials.bindings);
+  const vaultServicePort = allocateVaultServicePort();
   const verticalWanghai = isWanghaiVerticalBaseImage(baseImage);
   const wanghaiServicePort = verticalWanghai
-    ? allocateWorkspaceServicePort([Number.parseInt(workspaceServicePort, 10)])
+    ? allocateVaultServicePort([Number.parseInt(vaultServicePort, 10)])
     : null;
   const servicePorts: Array<Record<string, string>> = [
     {
       container_port: "6767",
-      node_port: workspaceServicePort,
+      node_port: vaultServicePort,
       name: "paseo",
     },
   ];
@@ -707,7 +707,7 @@ export function scaffoldDockerWorkspace(
       plain: verticalWanghai
         ? {
             WANGHAI_REPO_ROOT: "/opt/wanghai",
-            WANGHAI_WORKSPACES_ROOT: WANGHAI_WORKSPACES_RUNTIME_ROOT,
+            WANGHAI_VAULTS_ROOT: WANGHAI_VAULTS_RUNTIME_ROOT,
             WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
           }
         : {},
@@ -720,26 +720,26 @@ export function scaffoldDockerWorkspace(
       path: "/",
     },
     attachments: {
-      "workspace-data": {
-        scope: "workspace",
+      "vault-data": {
+        scope: "vault",
         sharing: "exclusive",
-        mount_root: "/workspace/project",
-        durable_paths: ["/workspace/project"],
-        source: workspaceDataNetfsSource(project),
+        mount_root: "/vault/project",
+        durable_paths: ["/vault/project"],
+        source: vaultDataNetfsSource(project),
       },
-      "workspace-runtime-state": {
-        scope: "workspace",
+      "vault-runtime-state": {
+        scope: "vault",
         sharing: "exclusive",
-        mount_root: "/workspace/state",
-        durable_paths: ["/workspace/state/paseo", "/workspace/state/paseo/evolution"],
+        mount_root: "/vault/state",
+        durable_paths: ["/vault/state/paseo", "/vault/state/paseo/evolution"],
         source: {
           kind: "generated-material",
-          description: `docker workspace runtime state for ${project}`,
+          description: `docker vault runtime state for ${project}`,
         },
       },
       "user-identity-state": {
         scope: "user",
-        sharing: "cross-workspace",
+        sharing: "cross-vault",
         mount_root: "/identity",
         durable_paths: userIdentityDurablePaths("/identity"),
         source: {
@@ -748,9 +748,9 @@ export function scaffoldDockerWorkspace(
         },
       },
       "ephemeral-runtime": {
-        mount_root: "/run/workspace",
-        paths: ["/run/workspace/tmp", "/run/workspace/pids", "/run/workspace/sockets"],
-        stale_artifacts: ["/root/.paseo/paseo.pid", "/run/workspace/pids/paseo.pid"],
+        mount_root: "/run/vault",
+        paths: ["/run/vault/tmp", "/run/vault/pids", "/run/vault/sockets"],
+        stale_artifacts: ["/root/.paseo/paseo.pid", "/run/vault/pids/paseo.pid"],
       },
     },
     profile: "morpheus",

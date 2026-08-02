@@ -1,11 +1,11 @@
 import {
   planOpenWanghaiPortal,
   resolveWanghaiPortalUrl,
-  type WorkspaceServicePort,
+  type VaultServicePort,
 } from "@qingniao/surface-wanghai";
 import { codingEmbedPath } from "./routes.js";
 import {
-  resolveAllowedWorkspaceLines,
+  resolveAllowedVaultLines,
 } from "./product.js";
 
 /** Session shape returned by Polaris `/api/session`. */
@@ -20,13 +20,13 @@ export interface ShellSession {
   line: "coding" | "vertical" | "both" | null;
 }
 
-/** Workspace projection consumed by the shell host directory. */
+/** Vault projection consumed by the shell host directory. */
 export interface ShellHostSummary {
   name: string;
   /** Available after the in-container Paseo daemon has paired. */
   serverId: string | null;
   surfaces: readonly string[];
-  ports: readonly WorkspaceServicePort[];
+  ports: readonly VaultServicePort[];
   status: {
     driver?: {
       status?: string;
@@ -52,7 +52,7 @@ export type ShellHostSurfaceAction =
 
 /**
  * Resolve the actions a host card may expose for the current user's product.
- * The subscription line is authoritative; a legacy workspace never enables a
+ * The subscription line is authoritative; a legacy vault never enables a
  * vertical portal for a coding subscriber by itself.
  */
 export function resolveShellHostActions(input: {
@@ -61,8 +61,8 @@ export function resolveShellHostActions(input: {
   publicHost: string;
 }): ShellHostSurfaceAction[] {
   const actions: ShellHostSurfaceAction[] = [];
-  const allowedLines = resolveAllowedWorkspaceLines(input.session.line);
-  const hostLine = resolveHostWorkspaceLine(input.host);
+  const allowedLines = resolveAllowedVaultLines(input.session.line);
+  const hostLine = resolveHostVaultLine(input.host);
   const isRunning = input.host.status?.driver?.status === "running";
 
   if (hostLine === "coding" && allowedLines.includes("coding") && input.host.serverId && isRunning) {
@@ -91,7 +91,7 @@ export function resolveShellHostActions(input: {
   return actions;
 }
 
-function resolveHostWorkspaceLine(host: ShellHostSummary): "coding" | "vertical" {
+function resolveHostVaultLine(host: ShellHostSummary): "coding" | "vertical" {
   if (host.surfaces.some((surface) => surface.trim().toLowerCase() === "wanghai")) {
     return "vertical";
   }
@@ -102,7 +102,7 @@ function resolveHostWanghaiPortalUrl(input: {
   host: ShellHostSummary;
   publicHost: string;
 }): string | null {
-  if (resolveHostWorkspaceLine(input.host) !== "vertical") {
+  if (resolveHostVaultLine(input.host) !== "vertical") {
     return null;
   }
   return resolveWanghaiPortalUrl({

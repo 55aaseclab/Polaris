@@ -1,20 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { assertValidWorkspaceProjectName } from "../core/workspace-name.js";
+import { assertValidVaultProjectName } from "../core/vault-name.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 
-function workspacesRoot(userProfileId: string): string {
-  return path.join(USER_ROOT, userProfileId, "workspaces");
+function vaultsRoot(userProfileId: string): string {
+  return path.join(USER_ROOT, userProfileId, "vaults");
 }
 
-function hasWorkspaceSavedSpec(workspaceRoot: string): boolean {
+function hasVaultSavedSpec(vaultRoot: string): boolean {
   return [
     "docker.agent.yaml",
     "pod.agent.yaml",
     "kubevirt.agent.yaml",
-  ].some((fileName) => fs.existsSync(path.join(workspaceRoot, fileName)));
+  ].some((fileName) => fs.existsSync(path.join(vaultRoot, fileName)));
 }
 
 export function projectOwners(project: string): string[] {
@@ -26,8 +26,8 @@ export function projectOwners(project: string): string[] {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .filter((userProfileId) => {
-      const projectRoot = path.join(workspacesRoot(userProfileId), project);
-      return hasWorkspaceSavedSpec(projectRoot);
+      const projectRoot = path.join(vaultsRoot(userProfileId), project);
+      return hasVaultSavedSpec(projectRoot);
     })
     .sort();
 }
@@ -43,7 +43,7 @@ export function assertNoProjectNameCollision(project: string): void {
 }
 
 export function assertProjectNameAvailable(project: string): void {
-  assertValidWorkspaceProjectName(project);
+  assertValidVaultProjectName(project);
   const owners = projectOwners(project);
   if (owners.length === 0) {
     return;
@@ -57,7 +57,7 @@ export function assertProjectNameAvailableForUser(
   project: string,
   userProfileId: string,
 ): void {
-  assertValidWorkspaceProjectName(project);
+  assertValidVaultProjectName(project);
   const owners = projectOwners(project);
   if (owners.includes(userProfileId)) {
     return;

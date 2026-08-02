@@ -1,17 +1,17 @@
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
-import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, VaultSpec } from "../../core/vault.js";
 import {
   dockerNetfsDevicePath,
   dockerNetfsServer,
   isNetfsSource,
   netfsMountOptions,
   netfsResolvedPath,
-  workspaceDataDockerVolumeName,
+  vaultDataDockerVolumeName,
 } from "../../core/netfs.js";
-import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
-import { renderAndWriteDockerWorkspace } from "./render.js";
+import { vaultRuntimeScopeName } from "../../core/vault-name.js";
+import { renderAndWriteDockerVault } from "./render.js";
 import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
 
@@ -21,7 +21,7 @@ function sanitizeDockerVolumeToken(value: string): string {
 
 function resolveDockerVolumeName(args: {
   fallbackName: string;
-  source: WorkspaceSpec["attachments"]["workspaceData"]["source"];
+  source: VaultSpec["attachments"]["vaultData"]["source"];
 }): string {
   const baseName = args.source.volumeRef?.trim() || args.fallbackName;
   const suffix = args.source.subPath?.trim()
@@ -30,20 +30,20 @@ function resolveDockerVolumeName(args: {
   return `${baseName}${suffix}`;
 }
 
-function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
-  const source = workspace.attachments.workspaceData.source;
+function ensureDockerVaultDataVolumeConfig(vault: VaultSpec): void {
+  const source = vault.attachments.vaultData.source;
   if (!isNetfsSource(source)) {
     return;
   }
   if (source.server?.trim() === "netfs.local") {
     const exportPath = netfsResolvedPath(source);
     fs.mkdirSync(exportPath, { recursive: true });
-    logInfo("docker-driver", "workspace-netfs-export-ready", {
-      project: workspace.identity.projectName,
+    logInfo("docker-driver", "vault-netfs-export-ready", {
+      project: vault.identity.projectName,
       exportPath,
     });
   }
-  const volumeName = workspaceDataDockerVolumeName(workspace);
+  const volumeName = vaultDataDockerVolumeName(vault);
   const expectedOptions = {
     device: dockerNetfsDevicePath(source),
     o: [`addr=${dockerNetfsServer(source)}`, ...netfsMountOptions(source)].join(","),
@@ -65,7 +65,7 @@ function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   } catch {
     // Fall through and recreate the volume with the rendered config.
   }
-  const existingContainer = `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-docker`;
+  const existingContainer = `${vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)}-docker`;
   const removeVolume = (): void => {
     runCommand("docker", ["volume", "rm", "-f", volumeName]);
   };
@@ -82,11 +82,11 @@ function ensureDockerWorkspaceDataVolumeConfig(workspace: WorkspaceSpec): void {
   }
 }
 
-function ensureDockerUserIdentityVolume(workspace: WorkspaceSpec): void {
-  const userScope = sanitizeDockerVolumeToken(workspace.userProfile.id);
+function ensureDockerUserIdentityVolume(vault: VaultSpec): void {
+  const userScope = sanitizeDockerVolumeToken(vault.userProfile.id);
   const volumeName = resolveDockerVolumeName({
     fallbackName: `polaris-${userScope}-identity`,
-    source: workspace.attachments.userIdentityState.source,
+    source: vault.attachments.userIdentityState.source,
   });
   const inspect = spawnSync("docker", ["volume", "inspect", volumeName], {
     encoding: "utf8",
@@ -96,26 +96,26 @@ function ensureDockerUserIdentityVolume(workspace: WorkspaceSpec): void {
   }
   runCommand("docker", ["volume", "create", volumeName]);
   logInfo("docker-driver", "user-identity-volume-created", {
-    userProfileId: workspace.userProfile.id,
+    userProfileId: vault.userProfile.id,
     volumeName,
   });
 }
 
-function ensureDockerWorkspacePrerequisites(workspace: WorkspaceSpec): void {
-  ensureDockerWorkspaceDataVolumeConfig(workspace);
-  ensureDockerUserIdentityVolume(workspace);
+function ensureDockerVaultPrerequisites(vault: VaultSpec): void {
+  ensureDockerVaultDataVolumeConfig(vault);
+  ensureDockerUserIdentityVolume(vault);
 }
 
 function runDockerComposeTimed(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   outputPath: string,
   args: string[],
 ): void {
   const startedAt = Date.now();
   runCommand("docker", ["compose", "-f", outputPath, ...args]);
   logInfo("docker-driver", "compose-command-completed", {
-    project: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
+    project: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
     args,
     elapsedMs: Date.now() - startedAt,
   });
@@ -124,50 +124,50 @@ function runDockerComposeTimed(
 export class DockerDriver implements BackendDriver {
   readonly kind = "docker" as const;
 
-  async create(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWriteDockerWorkspace(workspace);
+  async create(vault: VaultSpec): Promise<void> {
+    renderAndWriteDockerVault(vault);
   }
 
-  async start(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspacePrerequisites(workspace);
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runDockerComposeTimed(workspace, outputPath, ["up", "-d"]);
+  async start(vault: VaultSpec): Promise<void> {
+    ensureDockerVaultPrerequisites(vault);
+    const outputPath = renderAndWriteDockerVault(vault);
+    runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
   }
 
-  async stop(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runDockerComposeTimed(workspace, outputPath, ["stop"]);
+  async stop(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWriteDockerVault(vault);
+    runDockerComposeTimed(vault, outputPath, ["stop"]);
   }
 
-  async restart(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runDockerComposeTimed(workspace, outputPath, ["restart"]);
+  async restart(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWriteDockerVault(vault);
+    runDockerComposeTimed(vault, outputPath, ["restart"]);
   }
 
-  async rebuild(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspacePrerequisites(workspace);
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runDockerComposeTimed(workspace, outputPath, ["up", "-d", "--force-recreate"]);
+  async rebuild(vault: VaultSpec): Promise<void> {
+    ensureDockerVaultPrerequisites(vault);
+    const outputPath = renderAndWriteDockerVault(vault);
+    runDockerComposeTimed(vault, outputPath, ["up", "-d", "--force-recreate"]);
   }
 
-  async render(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWriteDockerWorkspace(workspace);
+  async render(vault: VaultSpec): Promise<void> {
+    renderAndWriteDockerVault(vault);
   }
 
-  async apply(workspace: WorkspaceSpec): Promise<void> {
-    ensureDockerWorkspacePrerequisites(workspace);
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runDockerComposeTimed(workspace, outputPath, ["up", "-d"]);
+  async apply(vault: VaultSpec): Promise<void> {
+    ensureDockerVaultPrerequisites(vault);
+    const outputPath = renderAndWriteDockerVault(vault);
+    runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
   }
 
-  async logs(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    runCommand("docker", ["compose", "-f", outputPath, "logs", "--tail", "200", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
+  async logs(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWriteDockerVault(vault);
+    runCommand("docker", ["compose", "-f", outputPath, "logs", "--tail", "200", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)]);
   }
 
-  async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
-    const containerId = spawnSync("docker", ["compose", "-f", outputPath, "ps", "-q", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)], { encoding: "utf8" });
+  async inspect(vault: VaultSpec): Promise<BackendObservation> {
+    const outputPath = renderAndWriteDockerVault(vault);
+    const containerId = spawnSync("docker", ["compose", "-f", outputPath, "ps", "-q", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)], { encoding: "utf8" });
     const id = (containerId.stdout || "").trim();
     const exists = Boolean(id);
     const inspect = exists
@@ -185,52 +185,52 @@ export class DockerDriver implements BackendDriver {
       return result.status === 0 ? String(result.stdout || "") : "";
     };
     const githubAuthObserved =
-      exists && running && workspace.userProfile.github.account
+      exists && running && vault.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
 
     return {
       backend: {
-        kind: workspace.backend.kind,
+        kind: vault.backend.kind,
         exists,
         running,
         detail: exists ? id : "docker container missing",
       },
       attachments: exists && running ? {
-        workspaceData: { observed: execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: workspace.attachments.workspaceData.mountRoot },
-        workspaceRuntimeState: { observed: execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: workspace.attachments.workspaceRuntimeState.mountRoot },
-        userIdentityState: { observed: execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: workspace.attachments.userIdentityState.mountRoot },
+        vaultData: { observed: execCheck(`test -d ${vault.attachments.vaultData.mountRoot}`), detail: vault.attachments.vaultData.mountRoot },
+        vaultRuntimeState: { observed: execCheck(`test -d ${vault.attachments.vaultRuntimeState.mountRoot}`), detail: vault.attachments.vaultRuntimeState.mountRoot },
+        userIdentityState: { observed: execCheck(`test -d ${vault.attachments.userIdentityState.mountRoot}`), detail: vault.attachments.userIdentityState.mountRoot },
       } : {},
-      workspaceAssembly: exists && running ? {
-        home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
-        projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
-        managerState: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },
-        evolutionState: { observed: execCheck(`test -d ${workspace.agent.runtime.evolutionRoot}`), detail: workspace.agent.runtime.evolutionRoot },
-        codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
-        claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
-        ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
-        githubAuth: workspace.userProfile.github.account
-          ? { observed: githubAuthObserved, detail: workspace.userProfile.github.account }
+      vaultAssembly: exists && running ? {
+        home: { observed: execCheck(`test -d ${vault.runtime.home}`), detail: vault.runtime.home },
+        projectRoot: { observed: execCheck(`test -L ${vault.runtime.home}/vault || test -L ${vault.runtime.home}/${vault.profile.vaultAlias ?? "vault"}`), detail: `${vault.runtime.home}/vault` },
+        managerState: { observed: execCheck(`test -L ${vault.runtime.home}/.paseo`), detail: vault.agent.runtime.stateRoot },
+        evolutionState: { observed: execCheck(`test -d ${vault.agent.runtime.evolutionRoot}`), detail: vault.agent.runtime.evolutionRoot },
+        codex: { observed: execCheck(`test -L ${vault.runtime.home}/.codex`), detail: `${vault.runtime.home}/.codex` },
+        claude: { observed: execCheck(`test -L ${vault.runtime.home}/.claude`), detail: `${vault.runtime.home}/.claude` },
+        ssh: { observed: execCheck(`test -L ${vault.runtime.home}/.ssh || test -d ${vault.runtime.home}/.ssh`), detail: `${vault.runtime.home}/.ssh` },
+        githubAuth: vault.userProfile.github.account
+          ? { observed: githubAuthObserved, detail: vault.userProfile.github.account }
           : undefined,
       } : {},
       daemon: {},
       services: {
-        declared: workspace.connectivity.servicePorts.length ? 1 : 0,
-        observed: workspace.connectivity.servicePorts.length ? (exists ? 1 : 0) : 0,
+        declared: vault.connectivity.servicePorts.length ? 1 : 0,
+        observed: vault.connectivity.servicePorts.length ? (exists ? 1 : 0) : 0,
         detail: exists ? "docker compose service is present" : "docker compose service is missing",
       },
     };
   }
 
-  async executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void> {
-    const outputPath = renderAndWriteDockerWorkspace(workspace);
+  async executeReconcilePlan(vault: VaultSpec, plan: ReconcilePlan): Promise<void> {
+    const outputPath = renderAndWriteDockerVault(vault);
     for (const action of plan.actions) {
       if (action.kind === "render") {
-        renderAndWriteDockerWorkspace(workspace);
+        renderAndWriteDockerVault(vault);
         continue;
       }
       if (action.kind === "apply") {
-        ensureDockerWorkspacePrerequisites(workspace);
+        ensureDockerVaultPrerequisites(vault);
         runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
         continue;
       }
@@ -243,7 +243,7 @@ export class DockerDriver implements BackendDriver {
         continue;
       }
       if (action.kind === "report-unrecoverable-drift") {
-        throw new Error(action.reason || "docker backend cannot repair workspace drift");
+        throw new Error(action.reason || "docker backend cannot repair vault drift");
       }
     }
   }

@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../config/provision.js";
+import { ensureCanonicalVaultImage, ensureVaultConfig } from "../config/provision.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
-import { userProfileExists, workspaceConfigExists, workspaceConfigPath } from "../config/scaffold.js";
+import { userProfileExists, vaultConfigExists, vaultConfigPath } from "../config/scaffold.js";
 import { readManagedCredentialRecord } from "../config/credentials.js";
 import {
   supportsLiveCredentialSwitch,
@@ -12,11 +12,11 @@ import {
 import {
   SKILL_HARNESSES,
   isSkillHarness,
-  listInstalledWorkspaceSkills,
+  listInstalledVaultSkills,
   listUserSkills,
   readUserSkill,
-  removeInstalledWorkspaceSkill,
-  resolveWorkspaceSkillInstallRoot,
+  removeInstalledVaultSkill,
+  resolveVaultSkillInstallRoot,
   type SkillHarness,
 } from "../config/skills.js";
 import {
@@ -24,56 +24,56 @@ import {
   stateStoragePathForMountPath,
 } from "../core/identity-layout.js";
 import {
-  loadWorkspaceDetail,
-  loadPortalWorkspaceByTarget,
-  loadWorkspaceSummary,
+  loadVaultDetail,
+  loadPortalVaultByTarget,
+  loadVaultSummary,
   type PortalDriverTarget,
-  type PortalWorkspaceDetail,
-  type PortalWorkspacePaseoDiagnostic,
-  updatePortalWorkspaceAgentBinding,
-  workspaceRefFromTarget,
+  type PortalVaultDetail,
+  type PortalVaultPaseoDiagnostic,
+  updatePortalVaultAgentBinding,
+  vaultRefFromTarget,
 } from "../core/portal.js";
-import { loadWorkspaceFromConfigPath } from "../config/load.js";
-import { createWorkspaceForUser } from "../cli/commands/create.js";
-import { performWorkspaceSwitch, type SwitchResult } from "../cli/commands/switch.js";
-import { deleteWorkspaceOwnedByUser } from "../cli/commands/delete.js";
+import { loadVaultFromConfigPath } from "../config/load.js";
+import { createVaultForUser } from "../cli/commands/create.js";
+import { performVaultSwitch, type SwitchResult } from "../cli/commands/switch.js";
+import { deleteVaultOwnedByUser } from "../cli/commands/delete.js";
 import {
-  loadExecutableWorkspaceForCommand,
-  loadWorkspaceForCommand,
+  loadExecutableVaultForCommand,
+  loadVaultForCommand,
 } from "../cli/commands/shared.js";
 import { startCommand } from "../cli/commands/start.js";
 import { statusCommand } from "../cli/commands/status.js";
 import { stopCommand } from "../cli/commands/stop.js";
 import { rebuildCommand } from "../cli/commands/rebuild.js";
-import { renderAndWriteDockerWorkspace } from "../backends/docker/render.js";
-import { renderAndWritePodWorkspace } from "../backends/pod/render.js";
-import { renderAndWriteKubevirtWorkspace } from "../backends/kubevirt/render.js";
+import { renderAndWriteDockerVault } from "../backends/docker/render.js";
+import { renderAndWritePodVault } from "../backends/pod/render.js";
+import { renderAndWriteKubevirtVault } from "../backends/kubevirt/render.js";
 import { getBackendDriver } from "../backends/index.js";
 import {
-  WORKSPACE_STATUS_SCHEMA_VERSION,
-  type WorkspaceCommandKind,
-  type WorkspaceSpec,
-  type WorkspaceStatus,
-} from "../core/workspace.js";
-import { workspaceRuntimeScopeName } from "../core/workspace-name.js";
+  VAULT_STATUS_SCHEMA_VERSION,
+  type VaultCommandKind,
+  type VaultSpec,
+  type VaultStatus,
+} from "../core/vault.js";
+import { vaultRuntimeScopeName } from "../core/vault-name.js";
 import {
   parsePaseoDaemonStatus,
 } from "../core/paseo.js";
 import {
-  writeWorkspaceLiveCredentialSelection,
-  writeWorkspacePaseoPairing,
-  writeWorkspacePaseoServerId,
-  writeWorkspaceStatus,
+  writeVaultLiveCredentialSelection,
+  writeVaultPaseoPairing,
+  writeVaultPaseoServerId,
+  writeVaultStatus,
 } from "../output/state-store.js";
 import { logError, logInfo, logWarn } from "../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
-import { logWorkspaceEvent, measureWorkspacePhase } from "../utils/workspace-log.js";
-import { notifyPortalWorkspaceLiveChange } from "../portal/workspace-live-hub.js";
+import { logVaultEvent, measureVaultPhase } from "../utils/vault-log.js";
+import { notifyPortalVaultLiveChange } from "../portal/vault-live-hub.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
-  withWorkspaceLifecycleLock,
-  withWorkspaceMutationLock,
-} from "../utils/workspace-lifecycle-lock.js";
+  withVaultLifecycleLock,
+  withVaultMutationLock,
+} from "../utils/vault-lifecycle-lock.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -81,10 +81,10 @@ const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
 
-type WorkspaceOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
+type VaultOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
-function workspaceJobKey(userId: string, workspace: string): string {
-  return `${userId.trim()}:${workspace.trim()}`;
+function vaultJobKey(userId: string, vault: string): string {
+  return `${userId.trim()}:${vault.trim()}`;
 }
 
 function provisionStepDelayMs(): number {
@@ -98,27 +98,27 @@ function provisionStepDelayMs(): number {
 
 async function maybeDelayProvisionStep(
   userId: string,
-  workspace: string,
+  vault: string,
   phase: string,
 ): Promise<void> {
   const delayMs = provisionStepDelayMs();
   if (!delayMs) {
     return;
   }
-  logInfo("executor", "workspace-provision-step-delay", {
+  logInfo("executor", "vault-provision-step-delay", {
     userId,
-    workspace,
+    vault,
     phase,
     delayMs,
   });
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-function rootKey(userId: string, workspace: string): string {
-  return `${userId}:${workspace}`;
+function rootKey(userId: string, vault: string): string {
+  return `${userId}:${vault}`;
 }
 
-function driverStatusForOperation(kind: WorkspaceOperationKind): NonNullable<WorkspaceStatus["driver"]>["status"] {
+function driverStatusForOperation(kind: VaultOperationKind): NonNullable<VaultStatus["driver"]>["status"] {
   switch (kind) {
     case "create":
       return "creating";
@@ -133,24 +133,24 @@ function driverStatusForOperation(kind: WorkspaceOperationKind): NonNullable<Wor
   }
 }
 
-function buildWorkspaceStatusFromCurrent(args: {
-  workspace: string;
-  current: WorkspaceStatus | null;
-  driverState?: Partial<Pick<NonNullable<WorkspaceStatus["driver"]>, "selected" | "status" | "reason">>;
-  paseo?: Partial<WorkspaceStatus["paseo"]>;
-  driver?: WorkspaceStatus["driver"];
-  credentials?: WorkspaceStatus["credentials"];
-  details?: WorkspaceStatus["details"];
-  evolution?: WorkspaceStatus["evolution"];
-  assets?: WorkspaceStatus["assets"];
-  attachments?: WorkspaceStatus["attachments"];
-  workspaceAssembly?: WorkspaceStatus["workspaceAssembly"];
-}): WorkspaceStatus {
+function buildVaultStatusFromCurrent(args: {
+  vault: string;
+  current: VaultStatus | null;
+  driverState?: Partial<Pick<NonNullable<VaultStatus["driver"]>, "selected" | "status" | "reason">>;
+  paseo?: Partial<VaultStatus["paseo"]>;
+  driver?: VaultStatus["driver"];
+  credentials?: VaultStatus["credentials"];
+  details?: VaultStatus["details"];
+  evolution?: VaultStatus["evolution"];
+  assets?: VaultStatus["assets"];
+  attachments?: VaultStatus["attachments"];
+  vaultAssembly?: VaultStatus["vaultAssembly"];
+}): VaultStatus {
   const currentDriver = args.current?.driver;
   const nextDriver = args.driver ?? currentDriver;
   return {
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
-    project: args.workspace,
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION,
+    project: args.vault,
     ...(nextDriver
       ? {
           driver: {
@@ -195,16 +195,16 @@ function buildWorkspaceStatusFromCurrent(args: {
     evolution: args.evolution ?? args.current?.evolution,
     assets: args.assets ?? args.current?.assets,
     attachments: args.attachments ?? args.current?.attachments,
-    workspaceAssembly: args.workspaceAssembly ?? args.current?.workspaceAssembly,
+    vaultAssembly: args.vaultAssembly ?? args.current?.vaultAssembly,
   };
 }
 
-function portalRoot(userId: string, workspace: string): string {
-  return path.join(USER_ROOT, userId, "workspaces", workspace);
+function portalRoot(userId: string, vault: string): string {
+  return path.join(USER_ROOT, userId, "vaults", vault);
 }
 
-function clearProvisionState(userId: string, workspace: string): void {
-  fs.rmSync(path.join(portalRoot(userId, workspace), "state", "provision.json"), {
+function clearProvisionState(userId: string, vault: string): void {
+  fs.rmSync(path.join(portalRoot(userId, vault), "state", "provision.json"), {
     force: true,
   });
 }
@@ -218,7 +218,7 @@ function classifyProvisionError(error: unknown): {
   if (/cancelled/i.test(message)) {
     return {
       message,
-      errorCode: "workspace-provision-cancelled",
+      errorCode: "vault-provision-cancelled",
       retryable: true,
     };
   }
@@ -229,29 +229,29 @@ function classifyProvisionError(error: unknown): {
       retryable: true,
     };
   }
-  if (/docker compose|workspace .* does not have a selected driver|Image '.*' is not available/i.test(message)) {
+  if (/docker compose|vault .* does not have a selected driver|Image '.*' is not available/i.test(message)) {
     return {
       message,
-      errorCode: "workspace-runtime-failed",
+      errorCode: "vault-runtime-failed",
       retryable: true,
     };
   }
   return {
     message,
-    errorCode: "workspace-provision-failed",
+    errorCode: "vault-provision-failed",
     retryable: true,
   };
 }
 
-function writeDirectWorkspaceStatus(
+function writeDirectVaultStatus(
   userId: string,
-  workspace: string,
-  mutate: (current: WorkspaceStatus | null) => WorkspaceStatus,
-): WorkspaceStatus {
-  const current = loadWorkspaceSummary(userId, workspace).status;
+  vault: string,
+  mutate: (current: VaultStatus | null) => VaultStatus,
+): VaultStatus {
+  const current = loadVaultSummary(userId, vault).status;
   const next = mutate(current);
-  writeWorkspaceStatus(next, userId);
-  notifyPortalWorkspaceLiveChange(userId, workspace);
+  writeVaultStatus(next, userId);
+  notifyPortalVaultLiveChange(userId, vault);
   return next;
 }
 
@@ -262,22 +262,22 @@ function isStoppedContainerStatusRefreshError(error: unknown): boolean {
   return error.message.includes("cannot exec in a stopped state");
 }
 
-function writeCachedWorkspaceStatusUpdate(args: {
+function writeCachedVaultStatusUpdate(args: {
   userId: string;
-  workspace: string;
-  mutate: (current: WorkspaceStatus | null, summary: PortalWorkspaceDetail | ReturnType<typeof loadWorkspaceSummary>) => WorkspaceStatus | null;
+  vault: string;
+  mutate: (current: VaultStatus | null, summary: PortalVaultDetail | ReturnType<typeof loadVaultSummary>) => VaultStatus | null;
   reason: string;
 }): void {
-  const summary = loadWorkspaceSummary(args.userId, args.workspace);
+  const summary = loadVaultSummary(args.userId, args.vault);
   const next = args.mutate(summary.status, summary);
   if (!next) {
     return;
   }
-  writeWorkspaceStatus(next, args.userId);
-  notifyPortalWorkspaceLiveChange(args.userId, args.workspace);
-  logInfo("executor", "workspace-status-cached", {
+  writeVaultStatus(next, args.userId);
+  notifyPortalVaultLiveChange(args.userId, args.vault);
+  logInfo("executor", "vault-status-cached", {
     userId: args.userId,
-    workspace: args.workspace,
+    vault: args.vault,
     reason: args.reason,
     runtimeLifecycle: next.driver?.status,
   });
@@ -368,33 +368,33 @@ function ensureImageRefAvailable(imageRef: string): void {
   throw new Error(`Image '${imageRef}' is not available`);
 }
 
-function loadUserWorkspace(
+function loadUserVault(
   userId: string,
-  workspace: string,
+  vault: string,
   backend: "docker" | "pod" | "kubevirt-vm",
   profileHint?: string,
-): WorkspaceSpec {
+): VaultSpec {
   const projectRef =
     backend === "pod" && profileHint
-      ? `${workspace}@${backend}:${profileHint}`
-      : `${workspace}@${backend}`;
-  const ensuredConfig = ensureWorkspaceConfig(projectRef, userId);
+      ? `${vault}@${backend}:${profileHint}`
+      : `${vault}@${backend}`;
+  const ensuredConfig = ensureVaultConfig(projectRef, userId);
   const configPath =
-    ensuredConfig?.configPath ?? workspaceConfigPath(workspace, backend, userId);
-  return loadWorkspaceFromConfigPath(
+    ensuredConfig?.configPath ?? vaultConfigPath(vault, backend, userId);
+  return loadVaultFromConfigPath(
     configPath,
-    workspace,
+    vault,
     backend,
     profileHint,
   );
 }
 
-function runWorkspaceShell(workspace: WorkspaceSpec, script: string): { stdout: string; stderr: string } {
-  const scope = workspaceRuntimeScopeName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+function runVaultShell(vault: VaultSpec, script: string): { stdout: string; stderr: string } {
+  const scope = vaultRuntimeScopeName(
+    vault.userProfile.id,
+    vault.identity.projectName,
   );
-  switch (workspace.backend.kind) {
+  switch (vault.backend.kind) {
     case "docker":
       return runChecked("docker", [
         "exec",
@@ -415,11 +415,11 @@ function runWorkspaceShell(workspace: WorkspaceSpec, script: string): { stdout: 
         script,
       ]);
     default:
-      throw new Error(`Paseo daemon diagnostics are not supported for backend '${workspace.backend.kind}' yet`);
+      throw new Error(`Paseo daemon diagnostics are not supported for backend '${vault.backend.kind}' yet`);
   }
 }
 
-function listWorkspaceSkillsScript(root: string): string {
+function listVaultSkillsScript(root: string): string {
   return [
     "set -euo pipefail",
     `if [ ! -d ${q(root)} ]; then exit 0; fi`,
@@ -427,31 +427,31 @@ function listWorkspaceSkillsScript(root: string): string {
   ].join("\n");
 }
 
-async function listInstalledWorkspaceSkillsResolved(args: {
-  workspace: WorkspaceSpec;
+async function listInstalledVaultSkillsResolved(args: {
+  vault: VaultSpec;
   harness?: SkillHarness;
 }): Promise<Array<{ harness: SkillHarness; skills: string[] }>> {
   const harnesses = args.harness ? [args.harness] : [...SKILL_HARNESSES];
   const runningSupported =
-    (args.workspace.backend.kind === "docker" || args.workspace.backend.kind === "pod");
+    (args.vault.backend.kind === "docker" || args.vault.backend.kind === "pod");
   if (!runningSupported) {
-    const installed = listInstalledWorkspaceSkills(args);
-    logInfo("executor", "workspace-skill-list-resolved", {
-      userId: args.workspace.userProfile.id,
-      workspace: args.workspace.identity.projectName,
-      backend: args.workspace.backend.kind,
+    const installed = listInstalledVaultSkills(args);
+    logInfo("executor", "vault-skill-list-resolved", {
+      userId: args.vault.userProfile.id,
+      vault: args.vault.identity.projectName,
+      backend: args.vault.backend.kind,
       mode: "host-fallback-unsupported-backend",
       installed,
     });
     return installed;
   }
-  const observation = await getBackendDriver(args.workspace.backend.kind).inspect(args.workspace);
+  const observation = await getBackendDriver(args.vault.backend.kind).inspect(args.vault);
   if (!observation.backend.exists || !observation.backend.running) {
-    const installed = listInstalledWorkspaceSkills(args);
-    logInfo("executor", "workspace-skill-list-resolved", {
-      userId: args.workspace.userProfile.id,
-      workspace: args.workspace.identity.projectName,
-      backend: args.workspace.backend.kind,
+    const installed = listInstalledVaultSkills(args);
+    logInfo("executor", "vault-skill-list-resolved", {
+      userId: args.vault.userProfile.id,
+      vault: args.vault.identity.projectName,
+      backend: args.vault.backend.kind,
       mode: "host-fallback-not-running",
       backendExists: observation.backend.exists,
       backendRunning: observation.backend.running,
@@ -460,10 +460,10 @@ async function listInstalledWorkspaceSkillsResolved(args: {
     return installed;
   }
   const installed = harnesses.map((harness) => {
-    const root = resolveWorkspaceSkillInstallRoot(args.workspace, harness);
-    const output = runWorkspaceShell(
-      args.workspace,
-      listWorkspaceSkillsScript(root),
+    const root = resolveVaultSkillInstallRoot(args.vault, harness);
+    const output = runVaultShell(
+      args.vault,
+      listVaultSkillsScript(root),
     ).stdout;
     const skills = output
       .split(/\r?\n/u)
@@ -473,17 +473,17 @@ async function listInstalledWorkspaceSkillsResolved(args: {
       .sort((left, right) => left.localeCompare(right));
     return { harness, skills };
   });
-  logInfo("executor", "workspace-skill-list-resolved", {
-    userId: args.workspace.userProfile.id,
-    workspace: args.workspace.identity.projectName,
-    backend: args.workspace.backend.kind,
+  logInfo("executor", "vault-skill-list-resolved", {
+    userId: args.vault.userProfile.id,
+    vault: args.vault.identity.projectName,
+    backend: args.vault.backend.kind,
     mode: "runtime-exec",
     installed,
   });
   return installed;
 }
 
-function removeWorkspaceSkillScript(root: string, skillId: string): string {
+function removeVaultSkillScript(root: string, skillId: string): string {
   const target = path.posix.join(root, skillId);
   return [
     "set -euo pipefail",
@@ -496,24 +496,24 @@ function removeWorkspaceSkillScript(root: string, skillId: string): string {
   ].join("\n");
 }
 
-async function removeInstalledWorkspaceSkillResolved(args: {
-  workspace: WorkspaceSpec;
+async function removeInstalledVaultSkillResolved(args: {
+  vault: VaultSpec;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{ harness: SkillHarness; skillId: string; removed: boolean }> {
   const runningSupported =
-    (args.workspace.backend.kind === "docker" || args.workspace.backend.kind === "pod");
+    (args.vault.backend.kind === "docker" || args.vault.backend.kind === "pod");
   if (!runningSupported) {
-    return removeInstalledWorkspaceSkill(args);
+    return removeInstalledVaultSkill(args);
   }
-  const observation = await getBackendDriver(args.workspace.backend.kind).inspect(args.workspace);
+  const observation = await getBackendDriver(args.vault.backend.kind).inspect(args.vault);
   if (!observation.backend.exists || !observation.backend.running) {
-    return removeInstalledWorkspaceSkill(args);
+    return removeInstalledVaultSkill(args);
   }
-  const root = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
-  const output = runWorkspaceShell(
-    args.workspace,
-    removeWorkspaceSkillScript(root, args.skillId),
+  const root = resolveVaultSkillInstallRoot(args.vault, args.harness);
+  const output = runVaultShell(
+    args.vault,
+    removeVaultSkillScript(root, args.skillId),
   ).stdout.trim();
   return {
     harness: args.harness,
@@ -522,21 +522,21 @@ async function removeInstalledWorkspaceSkillResolved(args: {
   };
 }
 
-function workspaceSkillInstallScript(args: {
-  workspace: WorkspaceSpec;
+function vaultSkillInstallScript(args: {
+  vault: VaultSpec;
   harness: SkillHarness;
   packageName: string;
   commandArgs: string[];
   skillId: string;
 }): string {
-  const installRoot = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
+  const installRoot = resolveVaultSkillInstallRoot(args.vault, args.harness);
   const assistantHome = path.posix.dirname(installRoot);
   const installTarget = path.posix.join(installRoot, args.skillId);
   const scratchHome = path.posix.join(
-    args.workspace.attachments.workspaceData.mountRoot,
+    args.vault.attachments.vaultData.mountRoot,
     ".runtime",
     "skills",
-    args.workspace.identity.projectName,
+    args.vault.identity.projectName,
     args.harness,
   );
   const commandArgs = materializedSkillCommandArgs(
@@ -606,8 +606,8 @@ function materializedSkillCommandArgs(
   ].filter(Boolean);
 }
 
-function workspaceSkillInstallDebug(args: {
-  workspace: WorkspaceSpec;
+function vaultSkillInstallDebug(args: {
+  vault: VaultSpec;
   harness: SkillHarness;
   packageName: string;
   commandArgs: string[];
@@ -619,7 +619,7 @@ function workspaceSkillInstallDebug(args: {
   finalCommandArgs: string[];
   materializationMode: "direct" | "download-copy";
 } {
-  const installRoot = resolveWorkspaceSkillInstallRoot(args.workspace, args.harness);
+  const installRoot = resolveVaultSkillInstallRoot(args.vault, args.harness);
   const assistantHome = path.posix.dirname(installRoot);
   const installTarget = path.posix.join(installRoot, args.skillId);
   const finalCommandArgs = materializedSkillCommandArgs(
@@ -636,42 +636,42 @@ function workspaceSkillInstallDebug(args: {
   };
 }
 
-function assertWorkspaceSkillRuntimeSupported(workspace: WorkspaceSpec): void {
-  if (workspace.backend.kind !== "docker" && workspace.backend.kind !== "pod") {
+function assertVaultSkillRuntimeSupported(vault: VaultSpec): void {
+  if (vault.backend.kind !== "docker" && vault.backend.kind !== "pod") {
     throw new Error(
-      `Workspace skill operations are not supported for backend '${workspace.backend.kind}'`,
+      `Vault skill operations are not supported for backend '${vault.backend.kind}'`,
     );
   }
 }
 
-async function loadRunningWorkspaceForSkillAction(args: {
-  workspaceRef: string;
+async function loadRunningVaultForSkillAction(args: {
+  vaultRef: string;
   userProfileId?: string;
-}): Promise<WorkspaceSpec> {
-  const { workspace } = loadWorkspaceForCommand(
+}): Promise<VaultSpec> {
+  const { vault } = loadVaultForCommand(
     "status",
-    args.workspaceRef,
+    args.vaultRef,
     args.userProfileId,
   );
-  assertWorkspaceSkillRuntimeSupported(workspace);
-  const observation = await getBackendDriver(workspace.backend.kind).inspect(workspace);
+  assertVaultSkillRuntimeSupported(vault);
+  const observation = await getBackendDriver(vault.backend.kind).inspect(vault);
   if (!observation.backend.exists || !observation.backend.running) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' is not running on ${workspace.backend.kind}`,
+      `Vault '${vault.identity.projectName}' is not running on ${vault.backend.kind}`,
     );
   }
-  return workspace;
+  return vault;
 }
 
-function mutateWorkspaceSkillStatus(args: {
+function mutateVaultSkillStatus(args: {
   userId: string;
-  workspace: string;
+  vault: string;
   reason: string;
   installed: Array<{ harness: SkillHarness; skills: string[] }>;
 }): void {
-  writeCachedWorkspaceStatusUpdate({
+  writeCachedVaultStatusUpdate({
     userId: args.userId,
-    workspace: args.workspace,
+    vault: args.vault,
     reason: args.reason,
     mutate: (current, summary) => {
       if (!current) {
@@ -683,9 +683,9 @@ function mutateWorkspaceSkillStatus(args: {
           installedByHarness: Object.fromEntries(
             args.installed.map((entry) => [entry.harness, entry.skills]),
           ),
-          source: "workspace-runtime-state",
+          source: "vault-runtime-state",
         },
-      } as WorkspaceStatus & {
+      } as VaultStatus & {
         skills: {
           installedByHarness: Record<string, string[]>;
           source: string;
@@ -695,17 +695,17 @@ function mutateWorkspaceSkillStatus(args: {
   });
 }
 
-function collectWorkspacePaseoDiagnostic(
+function collectVaultPaseoDiagnostic(
   userId: string,
-  workspace: string,
-): PortalWorkspacePaseoDiagnostic {
-  const summary = loadWorkspaceSummary(userId, workspace);
+  vault: string,
+): PortalVaultPaseoDiagnostic {
+  const summary = loadVaultSummary(userId, vault);
   const target = summary.status?.driver?.selected ?? null;
   if (!target) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    throw new Error(`Vault '${vault}' does not have a selected driver`);
   }
-  const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
-  const daemonStatusRaw = runWorkspaceShell(
+  const loaded = loadPortalVaultByTarget(userId, vault, target);
+  const daemonStatusRaw = runVaultShell(
     loaded,
     "PASEO_HOME=/root/.paseo paseo daemon status --json --home /root/.paseo",
   ).stdout.trim();
@@ -717,7 +717,7 @@ function collectWorkspacePaseoDiagnostic(
 }
 
 function liveRuntimeCredentialFiles(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   userId: string,
   credentialId: string,
   requestedHarness?: ManagedHarness,
@@ -748,22 +748,22 @@ function liveRuntimeCredentialFiles(
       file.mountPath?.trim()
       || defaultMountPathForCredentialFile(
         record.summary.kind,
-        workspace.runtime.home,
+        vault.runtime.home,
         file.key,
       );
     const targetPath = stateStoragePathForMountPath({
       mountPath,
-      runtimeHome: workspace.runtime.home,
-      identityRoot: workspace.attachments.userIdentityState.mountRoot,
+      runtimeHome: vault.runtime.home,
+      identityRoot: vault.attachments.userIdentityState.mountRoot,
     });
     if (
       !targetPath
       || !targetPath.startsWith(
-        `${workspace.attachments.userIdentityState.mountRoot}/`,
+        `${vault.attachments.userIdentityState.mountRoot}/`,
       )
     ) {
       throw new Error(
-        `Credential '${credentialId}' file '${file.key}' does not map into workspace identity state`,
+        `Credential '${credentialId}' file '${file.key}' does not map into vault identity state`,
       );
     }
     return {
@@ -783,7 +783,7 @@ function liveRuntimeCredentialFiles(
 }
 
 function runtimeWriteScript(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   files: Array<{ path: string; content: string }>,
 ): string {
   const payload = JSON.stringify(
@@ -792,7 +792,7 @@ function runtimeWriteScript(
       content: Buffer.from(file.content, "utf8").toString("base64"),
     })),
   );
-  const runtimeUser = workspace.runtime.user.trim() || "root";
+  const runtimeUser = vault.runtime.user.trim() || "root";
   return [
     "python3 - <<'PY'",
     "import base64, json, os, pathlib, pwd, stat",
@@ -837,24 +837,24 @@ function runtimeWriteScript(
   ].join("\n");
 }
 
-function dockerContainerName(workspace: WorkspaceSpec): string {
-  return `${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}-docker`;
+function dockerContainerName(vault: VaultSpec): string {
+  return `${vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)}-docker`;
 }
 
-function runtimeScope(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+function runtimeScope(vault: VaultSpec): string {
+  return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
-function runningPodName(workspace: WorkspaceSpec): string {
+function runningPodName(vault: VaultSpec): string {
   return runChecked(
     "kubectl",
     [
       "-n",
-      runtimeScope(workspace),
+      runtimeScope(vault),
       "get",
       "pod",
       "-l",
-      `app=${runtimeScope(workspace)}`,
+      `app=${runtimeScope(vault)}`,
       "-o",
       "jsonpath={.items[0].metadata.name}",
     ],
@@ -862,27 +862,27 @@ function runningPodName(workspace: WorkspaceSpec): string {
 }
 
 function applyLiveRuntimeFiles(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   files: Array<{ path: string; content: string }>,
 ): void {
-  const script = runtimeWriteScript(workspace, files);
-  if (workspace.backend.kind === "docker") {
-    const containerName = dockerContainerName(workspace);
+  const script = runtimeWriteScript(vault, files);
+  if (vault.backend.kind === "docker") {
+    const containerName = dockerContainerName(vault);
     runChecked("docker", ["exec", containerName, "sh", "-lc", script]);
     return;
   }
-  if (workspace.backend.kind === "pod") {
-    const podName = runningPodName(workspace);
+  if (vault.backend.kind === "pod") {
+    const podName = runningPodName(vault);
     if (!podName) {
       throw new Error(
-        `Workspace '${workspace.identity.projectName}' does not have a running pod`,
+        `Vault '${vault.identity.projectName}' does not have a running pod`,
       );
     }
     runChecked(
       "kubectl",
       [
         "-n",
-        runtimeScope(workspace),
+        runtimeScope(vault),
         "exec",
         podName,
         "--",
@@ -894,12 +894,12 @@ function applyLiveRuntimeFiles(
     return;
   }
   throw new Error(
-    `Live credential switching is not supported for backend '${workspace.backend.kind}'`,
+    `Live credential switching is not supported for backend '${vault.backend.kind}'`,
   );
 }
 
-export function switchWorkspaceLiveCredentialMaterial(input: {
-  workspace: WorkspaceSpec;
+export function switchVaultLiveCredentialMaterial(input: {
+  vault: VaultSpec;
   userId: string;
   credentialId: string;
   harness?: ManagedHarness;
@@ -909,15 +909,15 @@ export function switchWorkspaceLiveCredentialMaterial(input: {
   credentialId: string;
 } {
   const resolved = liveRuntimeCredentialFiles(
-    input.workspace,
+    input.vault,
     input.userId,
     input.credentialId,
     input.harness,
     input.requireSupported ?? false,
   );
-  applyLiveRuntimeFiles(input.workspace, resolved.files);
-  writeWorkspaceLiveCredentialSelection(
-    input.workspace.identity.projectName,
+  applyLiveRuntimeFiles(input.vault, resolved.files);
+  writeVaultLiveCredentialSelection(
+    input.vault.identity.projectName,
     resolved.harness,
     input.credentialId,
     input.userId,
@@ -928,61 +928,61 @@ export function switchWorkspaceLiveCredentialMaterial(input: {
   };
 }
 
-export async function listWorkspaceSkills(input: {
-  workspaceRef: string;
+export async function listVaultSkills(input: {
+  vaultRef: string;
   userProfileId?: string;
   harness?: SkillHarness;
 }): Promise<{
-  workspace: string;
+  vault: string;
   userId: string;
   installed: Array<{ harness: SkillHarness; skills: string[] }>;
 }> {
-  const { workspace } = loadWorkspaceForCommand(
+  const { vault } = loadVaultForCommand(
     "status",
-    input.workspaceRef,
+    input.vaultRef,
     input.userProfileId,
   );
-  const installed = await listInstalledWorkspaceSkillsResolved({
-    workspace,
+  const installed = await listInstalledVaultSkillsResolved({
+    vault,
     ...(input.harness ? { harness: input.harness } : {}),
   });
   return {
-    workspace: workspace.identity.projectName,
-    userId: workspace.userProfile.id,
+    vault: vault.identity.projectName,
+    userId: vault.userProfile.id,
     installed,
   };
 }
 
-export async function skillInstallWorkspace(input: {
-  workspaceRef: string;
+export async function skillInstallVault(input: {
+  vaultRef: string;
   userProfileId?: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   installed: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   packageName: string;
 }> {
-  const workspace = await loadRunningWorkspaceForSkillAction(input);
-  const skill = readUserSkill(workspace.userProfile.id, input.skillId);
+  const vault = await loadRunningVaultForSkillAction(input);
+  const skill = readUserSkill(vault.userProfile.id, input.skillId);
   if (skill.harness !== input.harness) {
     throw new Error(
       `Skill '${input.skillId}' belongs to harness '${skill.harness}', not '${input.harness}'`,
     );
   }
-  const debug = workspaceSkillInstallDebug({
-    workspace,
+  const debug = vaultSkillInstallDebug({
+    vault,
     harness: input.harness,
     packageName: skill.packageName,
     commandArgs: skill.args,
     skillId: skill.id,
   });
-  logInfo("executor", "workspace-skill-install-command", {
-    userId: workspace.userProfile.id,
-    workspace: workspace.identity.projectName,
+  logInfo("executor", "vault-skill-install-command", {
+    userId: vault.userProfile.id,
+    vault: vault.identity.projectName,
     harness: input.harness,
     skillId: skill.id,
     packageName: skill.packageName,
@@ -995,92 +995,92 @@ export async function skillInstallWorkspace(input: {
     installRoot: debug.installRoot,
     installTarget: debug.installTarget,
   });
-  runWorkspaceShell(
-    workspace,
-    workspaceSkillInstallScript({
-      workspace,
+  runVaultShell(
+    vault,
+    vaultSkillInstallScript({
+      vault,
       harness: input.harness,
       packageName: skill.packageName,
       commandArgs: skill.args,
       skillId: skill.id,
     }),
   );
-  const installed = await listInstalledWorkspaceSkillsResolved({
-    workspace,
+  const installed = await listInstalledVaultSkillsResolved({
+    vault,
     harness: input.harness,
   });
-  mutateWorkspaceSkillStatus({
-    userId: workspace.userProfile.id,
-    workspace: workspace.identity.projectName,
-    reason: "workspace-skill-installed",
+  mutateVaultSkillStatus({
+    userId: vault.userProfile.id,
+    vault: vault.identity.projectName,
+    reason: "vault-skill-installed",
     installed,
   });
   return {
     installed: true,
-    workspace: workspace.identity.projectName,
-    userId: workspace.userProfile.id,
+    vault: vault.identity.projectName,
+    userId: vault.userProfile.id,
     harness: input.harness,
     skillId: skill.id,
     packageName: skill.packageName,
   };
 }
 
-export async function skillUninstallWorkspace(input: {
-  workspaceRef: string;
+export async function skillUninstallVault(input: {
+  vaultRef: string;
   userProfileId?: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   uninstalled: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   removed: boolean;
 }> {
-  const workspace = await loadRunningWorkspaceForSkillAction(input);
-  const removed = await removeInstalledWorkspaceSkillResolved({
-    workspace,
+  const vault = await loadRunningVaultForSkillAction(input);
+  const removed = await removeInstalledVaultSkillResolved({
+    vault,
     harness: input.harness,
     skillId: input.skillId,
   });
-  const installed = await listInstalledWorkspaceSkillsResolved({
-    workspace,
+  const installed = await listInstalledVaultSkillsResolved({
+    vault,
     harness: input.harness,
   });
-  mutateWorkspaceSkillStatus({
-    userId: workspace.userProfile.id,
-    workspace: workspace.identity.projectName,
-    reason: "workspace-skill-uninstalled",
+  mutateVaultSkillStatus({
+    userId: vault.userProfile.id,
+    vault: vault.identity.projectName,
+    reason: "vault-skill-uninstalled",
     installed,
   });
   return {
     uninstalled: true,
-    workspace: workspace.identity.projectName,
-    userId: workspace.userProfile.id,
+    vault: vault.identity.projectName,
+    userId: vault.userProfile.id,
     harness: input.harness,
     skillId: input.skillId,
     removed: removed.removed,
   };
 }
 
-export async function skillSyncWorkspace(input: {
-  workspaceRef: string;
+export async function skillSyncVault(input: {
+  vaultRef: string;
   userProfileId?: string;
   harness: SkillHarness;
 }): Promise<{
   synced: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   installed: string[];
   removed: string[];
 }> {
-  const workspace = await loadRunningWorkspaceForSkillAction(input);
-  const declared = listUserSkills(workspace.userProfile.id)
+  const vault = await loadRunningVaultForSkillAction(input);
+  const declared = listUserSkills(vault.userProfile.id)
     .filter((skill) => skill.harness === input.harness);
-  const installedState = (await listInstalledWorkspaceSkillsResolved({
-    workspace,
+  const installedState = (await listInstalledVaultSkillsResolved({
+    vault,
     harness: input.harness,
   }))[0];
   const installedIds = new Set(installedState?.skills ?? []);
@@ -1092,16 +1092,16 @@ export async function skillSyncWorkspace(input: {
     if (installedIds.has(skill.id)) {
       continue;
     }
-    const debug = workspaceSkillInstallDebug({
-      workspace,
+    const debug = vaultSkillInstallDebug({
+      vault,
       harness: input.harness,
       packageName: skill.packageName,
       commandArgs: skill.args,
       skillId: skill.id,
     });
-    logInfo("executor", "workspace-skill-sync-install-command", {
-      userId: workspace.userProfile.id,
-      workspace: workspace.identity.projectName,
+    logInfo("executor", "vault-skill-sync-install-command", {
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
       harness: input.harness,
       skillId: skill.id,
       packageName: skill.packageName,
@@ -1114,10 +1114,10 @@ export async function skillSyncWorkspace(input: {
       installRoot: debug.installRoot,
       installTarget: debug.installTarget,
     });
-    runWorkspaceShell(
-      workspace,
-      workspaceSkillInstallScript({
-        workspace,
+    runVaultShell(
+      vault,
+      vaultSkillInstallScript({
+        vault,
         harness: input.harness,
         packageName: skill.packageName,
         commandArgs: skill.args,
@@ -1131,87 +1131,87 @@ export async function skillSyncWorkspace(input: {
     if (declaredIds.has(skillId)) {
       continue;
     }
-    await removeInstalledWorkspaceSkillResolved({
-      workspace,
+    await removeInstalledVaultSkillResolved({
+      vault,
       harness: input.harness,
       skillId,
     });
     removedNow.push(skillId);
   }
 
-  const installed = await listInstalledWorkspaceSkillsResolved({
-    workspace,
+  const installed = await listInstalledVaultSkillsResolved({
+    vault,
     harness: input.harness,
   });
-  mutateWorkspaceSkillStatus({
-    userId: workspace.userProfile.id,
-    workspace: workspace.identity.projectName,
-    reason: "workspace-skill-synced",
+  mutateVaultSkillStatus({
+    userId: vault.userProfile.id,
+    vault: vault.identity.projectName,
+    reason: "vault-skill-synced",
     installed,
   });
   return {
     synced: true,
-    workspace: workspace.identity.projectName,
-    userId: workspace.userProfile.id,
+    vault: vault.identity.projectName,
+    userId: vault.userProfile.id,
     harness: input.harness,
     installed: installedNow,
     removed: removedNow,
   };
 }
 
-function renderWorkspaceTargets(
+function renderVaultTargets(
   userId: string,
-  workspace: string,
+  vault: string,
   defaultDockerOnly = false,
 ): void {
-  const dockerWorkspace = loadUserWorkspace(userId, workspace, "docker");
-  renderAndWriteDockerWorkspace(dockerWorkspace);
+  const dockerVault = loadUserVault(userId, vault, "docker");
+  renderAndWriteDockerVault(dockerVault);
   if (defaultDockerOnly) {
     return;
   }
-  const podWorkspace = loadUserWorkspace(
+  const podVault = loadUserVault(
     userId,
-    workspace,
+    vault,
     "pod",
     "gvisor",
   );
-  renderAndWritePodWorkspace(podWorkspace);
-  const kubevirtWorkspace = loadUserWorkspace(
+  renderAndWritePodVault(podVault);
+  const kubevirtVault = loadUserVault(
     userId,
-    workspace,
+    vault,
     "kubevirt-vm",
   );
-  renderAndWriteKubevirtWorkspace(kubevirtWorkspace);
+  renderAndWriteKubevirtVault(kubevirtVault);
 }
 
-function renderWorkspaceTarget(
+function renderVaultTarget(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ): void {
   if (target.backend === "docker") {
-    renderAndWriteDockerWorkspace(loadUserWorkspace(userId, workspace, "docker"));
+    renderAndWriteDockerVault(loadUserVault(userId, vault, "docker"));
     return;
   }
   if (target.backend === "pod") {
-    renderAndWritePodWorkspace(
-      loadUserWorkspace(userId, workspace, "pod", target.profile ?? "gvisor"),
+    renderAndWritePodVault(
+      loadUserVault(userId, vault, "pod", target.profile ?? "gvisor"),
     );
     return;
   }
-  renderAndWriteKubevirtWorkspace(
-    loadUserWorkspace(userId, workspace, "kubevirt-vm"),
+  renderAndWriteKubevirtVault(
+    loadUserVault(userId, vault, "kubevirt-vm"),
   );
 }
 
-async function shouldRecycleRunningWorkspace(
+async function shouldRecycleRunningVault(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ): Promise<boolean> {
-  const loaded = loadUserWorkspace(
+  const loaded = loadUserVault(
     userId,
-    workspace,
+    vault,
     target.backend,
     target.profile,
   );
@@ -1219,98 +1219,98 @@ async function shouldRecycleRunningWorkspace(
   return Boolean(observation.backend.exists && observation.backend.running);
 }
 
-function ensureWorkspaceImageTargets(
+function ensureVaultImageTargets(
   userId: string,
-  workspace: string,
+  vault: string,
   defaultDockerOnly = false,
 ): void {
-  ensureCanonicalWorkspaceImage(`${workspace}@docker`, userId);
+  ensureCanonicalVaultImage(`${vault}@docker`, userId);
   if (defaultDockerOnly) {
     return;
   }
-  ensureCanonicalWorkspaceImage(`${workspace}@pod:gvisor`, userId);
-  ensureCanonicalWorkspaceImage(`${workspace}@kubevirt-vm`, userId);
-  const kubevirtWorkspace = loadUserWorkspace(
+  ensureCanonicalVaultImage(`${vault}@pod:gvisor`, userId);
+  ensureCanonicalVaultImage(`${vault}@kubevirt-vm`, userId);
+  const kubevirtVault = loadUserVault(
     userId,
-    workspace,
+    vault,
     "kubevirt-vm",
   );
   ensureImageRefAvailable(
-    kubevirtWorkspace.runtime.rootdiskImage ??
+    kubevirtVault.runtime.rootdiskImage ??
       "quay.io/containerdisks/debian:13",
   );
 }
 
-function ensureWorkspaceTargetSpecs(
+function ensureVaultTargetSpecs(
   userId: string,
-  workspace: string,
+  vault: string,
   defaultDockerOnly = false,
 ): void {
-  fs.mkdirSync(portalRoot(userId, workspace), { recursive: true });
-  ensureWorkspaceConfig(`${workspace}@docker`, userId);
+  fs.mkdirSync(portalRoot(userId, vault), { recursive: true });
+  ensureVaultConfig(`${vault}@docker`, userId);
   if (!defaultDockerOnly) {
-    ensureWorkspaceConfig(`${workspace}@pod:gvisor`, userId);
-    ensureWorkspaceConfig(`${workspace}@kubevirt-vm`, userId);
+    ensureVaultConfig(`${vault}@pod:gvisor`, userId);
+    ensureVaultConfig(`${vault}@kubevirt-vm`, userId);
   }
 }
 
-async function provisionWorkspaceInternal(
+async function provisionVaultInternal(
   userId: string,
-  workspace: string,
+  vault: string,
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
   },
 ): Promise<void> {
-  return withWorkspaceMutationLock(
+  return withVaultMutationLock(
     import.meta.url,
     userId,
-    workspace,
+    vault,
     async () => {
       const defaultDockerOnly = options?.defaultDockerOnly ?? false;
       const startAfterCreate = options?.startAfterCreate ?? false;
-      writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-        workspace,
+      writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+        vault,
         current,
         driverState: {
           selected: null,
           status: driverStatusForOperation("create"),
-          reason: "workspace creation in progress",
+          reason: "vault creation in progress",
         },
       }));
-      if (!fs.existsSync(workspaceConfigPath(workspace, "docker", userId))) {
-        await createWorkspaceForUser(workspace, userId);
+      if (!fs.existsSync(vaultConfigPath(vault, "docker", userId))) {
+        await createVaultForUser(vault, userId);
       }
-      await maybeDelayProvisionStep(userId, workspace, "specs");
-      ensureWorkspaceTargetSpecs(userId, workspace, defaultDockerOnly);
-      await maybeDelayProvisionStep(userId, workspace, "images");
-      ensureWorkspaceImageTargets(userId, workspace, defaultDockerOnly);
-      await maybeDelayProvisionStep(userId, workspace, "manifests");
-      renderWorkspaceTargets(userId, workspace, defaultDockerOnly);
-      await maybeDelayProvisionStep(userId, workspace, "status");
-      await captureStdout(() => statusCommand(`${workspace}@docker`, userId));
-      const summary = loadWorkspaceSummary(userId, workspace);
+      await maybeDelayProvisionStep(userId, vault, "specs");
+      ensureVaultTargetSpecs(userId, vault, defaultDockerOnly);
+      await maybeDelayProvisionStep(userId, vault, "images");
+      ensureVaultImageTargets(userId, vault, defaultDockerOnly);
+      await maybeDelayProvisionStep(userId, vault, "manifests");
+      renderVaultTargets(userId, vault, defaultDockerOnly);
+      await maybeDelayProvisionStep(userId, vault, "status");
+      await captureStdout(() => statusCommand(`${vault}@docker`, userId));
+      const summary = loadVaultSummary(userId, vault);
       if ((summary.status?.driver?.selected ?? null) === null) {
-        await maybeDelayProvisionStep(userId, workspace, "selection");
+        await maybeDelayProvisionStep(userId, vault, "selection");
       }
 
       if (startAfterCreate) {
-        await maybeDelayProvisionStep(userId, workspace, "start");
-        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-          workspace,
+        await maybeDelayProvisionStep(userId, vault, "start");
+        writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+          vault,
           current,
           driver: current?.driver,
           driverState: {
             selected: current?.driver?.selected ?? summary.status?.driver?.selected ?? { backend: "docker" },
             status: driverStatusForOperation("start"),
-            reason: "workspace start requested",
+            reason: "vault start requested",
           },
         }));
-        await startCommand(`${workspace}@docker`, userId);
+        await startCommand(`${vault}@docker`, userId);
       }
-      await maybeDelayProvisionStep(userId, workspace, "finalize");
-      const finalRef = workspaceRefFromTarget(
-        workspace,
+      await maybeDelayProvisionStep(userId, vault, "finalize");
+      const finalRef = vaultRefFromTarget(
+        vault,
         summary.status?.driver?.selected ?? { backend: "docker" },
       );
       await captureStdout(() => statusCommand(finalRef, userId));
@@ -1318,53 +1318,53 @@ async function provisionWorkspaceInternal(
   );
 }
 
-async function startWorkspaceWithoutWait(
+async function startVaultWithoutWait(
   projectRef: string,
   userProfileId?: string,
 ): Promise<void> {
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand(
+  const { vault, driver } = await loadExecutableVaultForCommand(
     "start",
     projectRef,
     userProfileId,
   );
-  await driver.start(workspace);
+  await driver.start(vault);
 }
 
-export async function refreshPortalWorkspaceStatus(
+export async function refreshPortalVaultStatus(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const key = rootKey(userId, workspace);
+  const key = rootKey(userId, vault);
   const existing = statusRefreshJobs.get(key);
   if (existing) {
     return existing;
   }
   const job = (async () => {
-    const summary = loadWorkspaceSummary(userId, workspace);
+    const summary = loadVaultSummary(userId, vault);
     const selectedDriver = summary.status?.driver?.selected ?? null;
     if (!selectedDriver) {
-      logWorkspaceEvent("warn", "status-refresh-skipped", {
+      logVaultEvent("warn", "status-refresh-skipped", {
         userId,
-        workspace,
+        vault,
       }, {
         reason: "no-selected-driver",
       });
       return;
     }
-    const ref = workspaceRefFromTarget(workspace, selectedDriver);
+    const ref = vaultRefFromTarget(vault, selectedDriver);
     if (!ref) {
-      throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+      throw new Error(`Vault '${vault}' does not have a selected driver`);
     }
-    logWorkspaceEvent("info", "status-refresh-requested", {
+    logVaultEvent("info", "status-refresh-requested", {
       userId,
-      workspace,
+      vault,
       ref,
     });
     try {
-      await measureWorkspacePhase({
+      await measureVaultPhase({
         context: {
           userId,
-          workspace,
+          vault,
           ref,
           backend: selectedDriver.backend,
           profile: selectedDriver.profile,
@@ -1372,32 +1372,32 @@ export async function refreshPortalWorkspaceStatus(
         phase: "status-refresh",
         execute: () => captureStdout(() => statusCommand(ref, userId)),
       });
-      logWorkspaceEvent("info", "status-refresh-completed", {
+      logVaultEvent("info", "status-refresh-completed", {
         userId,
-        workspace,
+        vault,
         ref,
       });
     } catch (error) {
-      logWorkspaceEvent("warn", "status-refresh-failed", {
+      logVaultEvent("warn", "status-refresh-failed", {
         userId,
-        workspace,
+        vault,
         ref,
       }, {
         reason: error instanceof Error ? error.message : String(error),
       });
       if (isStoppedContainerStatusRefreshError(error)) {
-        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-          workspace,
+        writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+          vault,
           current,
           driverState: {
             selected: current?.driver?.selected ?? null,
             status: "stopped",
-            reason: "workspace is stopped",
+            reason: "vault is stopped",
           },
         }));
-        logWorkspaceEvent("info", "status-refresh-coerced-stopped", {
+        logVaultEvent("info", "status-refresh-coerced-stopped", {
           userId,
-          workspace,
+          vault,
           ref,
         });
       }
@@ -1409,16 +1409,16 @@ export async function refreshPortalWorkspaceStatus(
   return job;
 }
 
-export async function updatePortalWorkspaceSelectedDriver(input: {
+export async function updatePortalVaultSelectedDriver(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   target: PortalDriverTarget;
 }): Promise<{ updated: true }> {
-  writeDirectWorkspaceStatus(
+  writeDirectVaultStatus(
     input.userId,
-    input.workspace,
-    (current) => buildWorkspaceStatusFromCurrent({
-      workspace: input.workspace,
+    input.vault,
+    (current) => buildVaultStatusFromCurrent({
+      vault: input.vault,
       current,
       driver: current?.driver ?? {
         selected: null,
@@ -1429,9 +1429,9 @@ export async function updatePortalWorkspaceSelectedDriver(input: {
       },
     }),
   );
-  logWorkspaceEvent("info", "workspace-selected-driver-updated", {
+  logVaultEvent("info", "vault-selected-driver-updated", {
     userId: input.userId,
-    workspace: input.workspace,
+    vault: input.vault,
   }, {
     backend: input.target.backend,
     profile: input.target.profile,
@@ -1439,79 +1439,79 @@ export async function updatePortalWorkspaceSelectedDriver(input: {
   return { updated: true };
 }
 
-export async function queueProvisionWorkspace(
+export async function queueProvisionVault(
   userId: string,
-  workspace: string,
+  vault: string,
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
     line?: "coding" | "vertical";
   },
-): Promise<{ queued: true; workspace: string }> {
+): Promise<{ queued: true; vault: string }> {
   return withUserMutationLock(import.meta.url, userId, async () => {
     if (!userProfileExists(userId)) {
       throw new Error(`User profile '${userId}' was not found. Create it first with user create.`);
     }
-    const key = rootKey(userId, workspace);
+    const key = rootKey(userId, vault);
     const existing = provisionJobs.get(key);
     if (existing) {
-      logInfo("executor", "workspace-provision-queue-reused", {
+      logInfo("executor", "vault-provision-queue-reused", {
         userId,
-        workspace,
+        vault,
       });
-      return { queued: true, workspace };
+      return { queued: true, vault };
     }
-    assertProjectNameAvailableForUser(workspace, userId);
-    if (workspaceConfigExists(workspace, userId)) {
-      throw new Error(`Workspace '${workspace}' already exists for user ${userId}.`);
+    assertProjectNameAvailableForUser(vault, userId);
+    if (vaultConfigExists(vault, userId)) {
+      throw new Error(`Vault '${vault}' already exists for user ${userId}.`);
     }
-    await createWorkspaceForUser(workspace, userId, {
+    await createVaultForUser(vault, userId, {
       ...(options?.line ? { line: options.line } : {}),
     });
-    clearProvisionState(userId, workspace);
-    logInfo("executor", "workspace-provision-queued", {
+    clearProvisionState(userId, vault);
+    logInfo("executor", "vault-provision-queued", {
       userId,
-      workspace,
+      vault,
       defaultDockerOnly: options?.defaultDockerOnly ?? false,
       startAfterCreate: options?.startAfterCreate ?? false,
       line: options?.line ?? "coding",
     });
-    void startProvisionWorkspace(userId, workspace, options);
-    return { queued: true, workspace };
+    void startProvisionVault(userId, vault, options);
+    return { queued: true, vault };
   });
 }
 
-export function startProvisionWorkspace(
+export function startProvisionVault(
   userId: string,
-  workspace: string,
+  vault: string,
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
   },
 ): Promise<void> {
-  const key = rootKey(userId, workspace);
+  const key = rootKey(userId, vault);
   const existing = provisionJobs.get(key);
   if (existing) {
     return existing;
   }
   const job = (async () => {
     try {
-      clearProvisionState(userId, workspace);
-      await provisionWorkspaceInternal(userId, workspace, options);
+      clearProvisionState(userId, vault);
+      await provisionVaultInternal(userId, vault, options);
     } catch (error) {
       const classified = classifyProvisionError(error);
-      logWorkspaceEvent("warn", "provision-failed", {
+      logVaultEvent("warn", "provision-failed", {
         userId,
-        workspace,
+        vault,
       }, {
         errorCode: classified.errorCode,
         reason: classified.message,
       });
       try {
-        await refreshPortalWorkspaceStatus(userId, workspace);
+        await refreshPortalVaultStatus(userId, vault);
       } catch (refreshError) {
-        writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-          workspace,
+        writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+          vault,
           current,
           driverState: {
             selected: current?.driver?.selected ?? null,
@@ -1519,16 +1519,16 @@ export function startProvisionWorkspace(
             reason: classified.message,
           },
         }));
-        logWorkspaceEvent("warn", "provision-failed-refresh", {
+        logVaultEvent("warn", "provision-failed-refresh", {
           userId,
-          workspace,
+          vault,
         }, {
           error: refreshError instanceof Error ? refreshError.message : String(refreshError),
         });
       }
       throw error;
     } finally {
-      clearProvisionState(userId, workspace);
+      clearProvisionState(userId, vault);
       provisionJobs.delete(key);
     }
   })();
@@ -1537,57 +1537,57 @@ export function startProvisionWorkspace(
   return job;
 }
 
-export async function switchPortalWorkspace(
+export async function switchPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ): Promise<SwitchResult> {
-  const ref = workspaceRefFromTarget(workspace, target);
-  return performWorkspaceSwitch(ref, userId);
+  const ref = vaultRefFromTarget(vault, target);
+  return performVaultSwitch(ref, userId);
 }
 
-export async function deletePortalWorkspace(
+export async function deletePortalVault(
   userId: string,
-  workspace: string,
-): Promise<{ deleted: true; workspace: string }> {
-  return permanentlyDeletePortalWorkspace(userId, workspace);
+  vault: string,
+): Promise<{ deleted: true; vault: string }> {
+  return permanentlyDeletePortalVault(userId, vault);
 }
 
-export async function permanentlyDeletePortalWorkspace(
+export async function permanentlyDeletePortalVault(
   userId: string,
-  workspace: string,
-): Promise<{ deleted: true; workspace: string }> {
-  writeDirectWorkspaceStatus(userId, workspace, (current) => buildWorkspaceStatusFromCurrent({
-    workspace,
+  vault: string,
+): Promise<{ deleted: true; vault: string }> {
+  writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+    vault,
     current,
     driverState: {
       selected: current?.driver?.selected ?? null,
       status: driverStatusForOperation("delete"),
-      reason: "workspace delete requested",
+      reason: "vault delete requested",
     },
   }));
   try {
-    return await deleteWorkspaceOwnedByUser(userId, workspace);
+    return await deleteVaultOwnedByUser(userId, vault);
   } catch (error) {
-    const summary = loadWorkspaceSummary(userId, workspace);
+    const summary = loadVaultSummary(userId, vault);
     const selectedDriver = summary.status?.driver?.selected ?? null;
     const ref = selectedDriver
-      ? workspaceRefFromTarget(workspace, selectedDriver)
+      ? vaultRefFromTarget(vault, selectedDriver)
       : null;
     const message = error instanceof Error ? error.message : String(error);
-    logWorkspaceEvent("error", "delete-failed", {
+    logVaultEvent("error", "delete-failed", {
       userId,
-      workspace,
+      vault,
       ref: ref ?? undefined,
     }, {
       error: message,
     });
     try {
-      await refreshPortalWorkspaceStatus(userId, workspace);
+      await refreshPortalVaultStatus(userId, vault);
     } catch (refreshError) {
-      logWorkspaceEvent("warn", "delete-failed-refresh", {
+      logVaultEvent("warn", "delete-failed-refresh", {
         userId,
-        workspace,
+        vault,
         ref: ref ?? undefined,
       }, {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
@@ -1597,26 +1597,26 @@ export async function permanentlyDeletePortalWorkspace(
   }
 }
 
-export async function stopPortalWorkspace(
+export async function stopPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ stopped: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
+  const summary = loadVaultSummary(userId, vault);
   const selectedDriver = summary.status?.driver?.selected ?? null;
   if (!selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    throw new Error(`Vault '${vault}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, selectedDriver);
-  writeCachedWorkspaceStatusUpdate({
+  const ref = vaultRefFromTarget(vault, selectedDriver);
+  writeCachedVaultStatusUpdate({
     userId,
-    workspace,
-    reason: "workspace-stopping",
+    vault,
+    reason: "vault-stopping",
     mutate: (current, currentSummary) => {
       if (!current) {
         return null;
       }
-      return buildWorkspaceStatusFromCurrent({
-        workspace,
+      return buildVaultStatusFromCurrent({
+        vault,
         current,
         driver: current.driver
           ? {
@@ -1628,34 +1628,34 @@ export async function stopPortalWorkspace(
         driverState: {
           selected: current.driver?.selected ?? null,
           status: driverStatusForOperation("stop"),
-          reason: "workspace stop requested",
+          reason: "vault stop requested",
         },
       });
     },
   });
-  const jobKey = workspaceJobKey(userId, workspace);
+  const jobKey = vaultJobKey(userId, vault);
   if (stopJobs.has(jobKey)) {
-    logInfo("executor", "workspace-stop-joined", {
+    logInfo("executor", "vault-stop-joined", {
       userId,
-      workspace,
+      vault,
       ref,
     });
     return { stopped: true };
   }
-    logWorkspaceEvent("info", "stop-queued", {
+    logVaultEvent("info", "stop-queued", {
       userId,
-      workspace,
+      vault,
       ref,
   });
   const job = new Promise<void>((resolve, reject) => {
     setTimeout(() => {
-      void withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-        await measureWorkspacePhase({
-          context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
-          phase: "stop-workspace",
+      void withVaultLifecycleLock(import.meta.url, userId, vault, async () => {
+        await measureVaultPhase({
+          context: { userId, vault, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+          phase: "stop-vault",
           execute: async () => {
             await stopCommand(ref, userId);
-            await refreshPortalWorkspaceStatus(userId, workspace);
+            await refreshPortalVaultStatus(userId, vault);
           },
         });
       }).then(resolve, reject);
@@ -1663,19 +1663,19 @@ export async function stopPortalWorkspace(
   })
     .catch(async (error) => {
       const message = error instanceof Error ? error.message : String(error);
-      logWorkspaceEvent("error", "stop-failed", {
+      logVaultEvent("error", "stop-failed", {
         userId,
-        workspace,
+        vault,
         ref,
       }, {
         error: message,
       });
       try {
-        await refreshPortalWorkspaceStatus(userId, workspace);
+        await refreshPortalVaultStatus(userId, vault);
       } catch (refreshError) {
-        logWorkspaceEvent("warn", "stop-failed-refresh", {
+        logVaultEvent("warn", "stop-failed-refresh", {
           userId,
-          workspace,
+          vault,
           ref,
         }, {
           error: refreshError instanceof Error ? refreshError.message : String(refreshError),
@@ -1691,28 +1691,28 @@ export async function stopPortalWorkspace(
   return { stopped: true };
 }
 
-export async function startPortalWorkspace(
+export async function startPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ started: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
+  const summary = loadVaultSummary(userId, vault);
   const selectedDriver = summary.status?.driver?.selected ?? null;
   if (!selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    throw new Error(`Vault '${vault}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, selectedDriver);
+  const ref = vaultRefFromTarget(vault, selectedDriver);
   try {
-    return await withWorkspaceLifecycleLock(import.meta.url, userId, workspace, async () => {
-      writeCachedWorkspaceStatusUpdate({
+    return await withVaultLifecycleLock(import.meta.url, userId, vault, async () => {
+      writeCachedVaultStatusUpdate({
         userId,
-        workspace,
-        reason: "workspace-starting",
+        vault,
+        reason: "vault-starting",
         mutate: (current, currentSummary) => {
           if (!current) {
             return null;
           }
-          return buildWorkspaceStatusFromCurrent({
-            workspace,
+          return buildVaultStatusFromCurrent({
+            vault,
             current,
             driver: current.driver
             ? {
@@ -1724,36 +1724,36 @@ export async function startPortalWorkspace(
             driverState: {
               selected: current.driver?.selected ?? null,
               status: driverStatusForOperation("start"),
-              reason: "workspace start requested",
+              reason: "vault start requested",
             },
           });
         },
       });
-      await measureWorkspacePhase({
-        context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
-        phase: "start-workspace",
+      await measureVaultPhase({
+        context: { userId, vault, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+        phase: "start-vault",
         execute: async () => {
           await startCommand(ref, userId);
-          await refreshPortalWorkspaceStatus(userId, workspace);
+          await refreshPortalVaultStatus(userId, vault);
         },
       });
       return { started: true };
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logWorkspaceEvent("error", "start-failed", {
+    logVaultEvent("error", "start-failed", {
       userId,
-      workspace,
+      vault,
       ref,
     }, {
       error: message,
     });
     try {
-      await refreshPortalWorkspaceStatus(userId, workspace);
+      await refreshPortalVaultStatus(userId, vault);
     } catch (refreshError) {
-      logWorkspaceEvent("warn", "start-failed-refresh", {
+      logVaultEvent("warn", "start-failed-refresh", {
         userId,
-        workspace,
+        vault,
         ref,
       }, {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
@@ -1763,27 +1763,27 @@ export async function startPortalWorkspace(
   }
 }
 
-export async function rebuildPortalWorkspace(
+export async function rebuildPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ rebuilt: true }> {
-  const summary = loadWorkspaceSummary(userId, workspace);
+  const summary = loadVaultSummary(userId, vault);
   const selectedDriver = summary.status?.driver?.selected ?? null;
   if (!selectedDriver) {
-    throw new Error(`Workspace '${workspace}' does not have a selected driver`);
+    throw new Error(`Vault '${vault}' does not have a selected driver`);
   }
-  const ref = workspaceRefFromTarget(workspace, selectedDriver);
+  const ref = vaultRefFromTarget(vault, selectedDriver);
   try {
-    writeCachedWorkspaceStatusUpdate({
+    writeCachedVaultStatusUpdate({
       userId,
-      workspace,
-      reason: "workspace-rebuilding",
+      vault,
+      reason: "vault-rebuilding",
       mutate: (current, currentSummary) => {
         if (!current) {
           return null;
         }
-        return buildWorkspaceStatusFromCurrent({
-          workspace,
+        return buildVaultStatusFromCurrent({
+          vault,
           current,
           driver: current.driver
             ? {
@@ -1795,35 +1795,35 @@ export async function rebuildPortalWorkspace(
           driverState: {
             selected: current.driver?.selected ?? null,
             status: driverStatusForOperation("rebuild"),
-            reason: "workspace rebuild requested",
+            reason: "vault rebuild requested",
           },
         });
       },
     });
-    await measureWorkspacePhase({
-      context: { userId, workspace, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
-      phase: "rebuild-workspace",
+    await measureVaultPhase({
+      context: { userId, vault, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
+      phase: "rebuild-vault",
       execute: async () => {
         await rebuildCommand(ref, userId);
-        await refreshPortalWorkspaceStatus(userId, workspace);
+        await refreshPortalVaultStatus(userId, vault);
       },
     });
     return { rebuilt: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logWorkspaceEvent("error", "rebuild-failed", {
+    logVaultEvent("error", "rebuild-failed", {
       userId,
-      workspace,
+      vault,
       ref,
     }, {
       error: message,
     });
     try {
-      await refreshPortalWorkspaceStatus(userId, workspace);
+      await refreshPortalVaultStatus(userId, vault);
     } catch (refreshError) {
-      logWorkspaceEvent("warn", "rebuild-failed-refresh", {
+      logVaultEvent("warn", "rebuild-failed-refresh", {
         userId,
-        workspace,
+        vault,
         ref,
       }, {
         error: refreshError instanceof Error ? refreshError.message : String(refreshError),
@@ -1833,9 +1833,9 @@ export async function rebuildPortalWorkspace(
   }
 }
 
-export async function switchPortalWorkspaceLiveCredential(input: {
+export async function switchPortalVaultLiveCredential(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: ManagedHarness;
   credentialId: string;
 }): Promise<{
@@ -1843,55 +1843,55 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   driver: string;
   credentialId: string;
 }> {
-  return withWorkspaceLifecycleLock(
+  return withVaultLifecycleLock(
     import.meta.url,
     input.userId,
-    input.workspace,
+    input.vault,
     async () => {
       if (!supportsLiveCredentialSwitch(input.harness)) {
         throw new Error(
           `Live credential switching is not supported for harness '${input.harness}'`,
         );
       }
-      const summary = loadWorkspaceSummary(input.userId, input.workspace);
+      const summary = loadVaultSummary(input.userId, input.vault);
       const target = summary.status?.driver?.selected ?? null;
       if (!target) {
         throw new Error(
-          `Workspace '${input.workspace}' does not have a selected driver`,
+          `Vault '${input.vault}' does not have a selected driver`,
         );
       }
-      const workspaceSpec = loadPortalWorkspaceByTarget(
+      const vaultSpec = loadPortalVaultByTarget(
         input.userId,
-        input.workspace,
+        input.vault,
         target,
       );
       if (
-        workspaceSpec.backend.kind !== "docker" &&
-        workspaceSpec.backend.kind !== "pod"
+        vaultSpec.backend.kind !== "docker" &&
+        vaultSpec.backend.kind !== "pod"
       ) {
         throw new Error(
-          `Live credential switching is not supported for backend '${workspaceSpec.backend.kind}'`,
+          `Live credential switching is not supported for backend '${vaultSpec.backend.kind}'`,
         );
       }
-      const observation = await getBackendDriver(workspaceSpec.backend.kind).inspect(
-        workspaceSpec,
+      const observation = await getBackendDriver(vaultSpec.backend.kind).inspect(
+        vaultSpec,
       );
       if (!observation.backend.exists || !observation.backend.running) {
         throw new Error(
-          `Workspace '${input.workspace}' is not running on ${workspaceSpec.backend.kind}`,
+          `Vault '${input.vault}' is not running on ${vaultSpec.backend.kind}`,
         );
       }
-      switchWorkspaceLiveCredentialMaterial({
-        workspace: workspaceSpec,
+      switchVaultLiveCredentialMaterial({
+        vault: vaultSpec,
         userId: input.userId,
         credentialId: input.credentialId,
         harness: input.harness,
         requireSupported: true,
       });
-      const ref = workspaceRefFromTarget(input.workspace, target);
-      writeCachedWorkspaceStatusUpdate({
+      const ref = vaultRefFromTarget(input.vault, target);
+      writeCachedVaultStatusUpdate({
         userId: input.userId,
-        workspace: input.workspace,
+        vault: input.vault,
         reason: "live-credential-switched",
         mutate: (current) => {
           if (!current?.credentials?.live) {
@@ -1923,7 +1923,7 @@ export async function switchPortalWorkspaceLiveCredential(input: {
           };
         },
       });
-      void refreshPortalWorkspaceStatus(input.userId, input.workspace);
+      void refreshPortalVaultStatus(input.userId, input.vault);
       return {
         switched: true,
         driver: ref,
@@ -1933,34 +1933,34 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   );
 }
 
-export async function getPortalWorkspacePaseoDiagnostic(input: {
+export async function getPortalVaultPaseoDiagnostic(input: {
   userId: string;
-  workspace: string;
-}): Promise<PortalWorkspacePaseoDiagnostic> {
-  return withWorkspaceLifecycleLock(import.meta.url, input.userId, input.workspace, async () =>
-    collectWorkspacePaseoDiagnostic(input.userId, input.workspace)
+  vault: string;
+}): Promise<PortalVaultPaseoDiagnostic> {
+  return withVaultLifecycleLock(import.meta.url, input.userId, input.vault, async () =>
+    collectVaultPaseoDiagnostic(input.userId, input.vault)
   );
 }
 
-export async function restartPortalWorkspacePaseoDaemon(input: {
+export async function restartPortalVaultPaseoDaemon(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{
   restarted: true;
-  diagnostic: PortalWorkspacePaseoDiagnostic;
+  diagnostic: PortalVaultPaseoDiagnostic;
 }> {
-  return withWorkspaceLifecycleLock(
+  return withVaultLifecycleLock(
     import.meta.url,
     input.userId,
-    input.workspace,
+    input.vault,
     async () => {
-      const summary = loadWorkspaceSummary(input.userId, input.workspace);
+      const summary = loadVaultSummary(input.userId, input.vault);
       const target = summary.status?.driver?.selected ?? null;
       if (!target) {
-        throw new Error(`Workspace '${input.workspace}' does not have a selected driver`);
+        throw new Error(`Vault '${input.vault}' does not have a selected driver`);
       }
-      const loaded = loadPortalWorkspaceByTarget(input.userId, input.workspace, target);
-      runWorkspaceShell(
+      const loaded = loadPortalVaultByTarget(input.userId, input.vault, target);
+      runVaultShell(
         loaded,
         [
           "paseo_pid=$(sed -n 's/.*\"pid\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' /root/.paseo/paseo.pid 2>/dev/null | head -n 1)",
@@ -1970,7 +1970,7 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
           "PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767",
         ].join("; "),
       );
-      const diagnostic = collectWorkspacePaseoDiagnostic(input.userId, input.workspace);
+      const diagnostic = collectVaultPaseoDiagnostic(input.userId, input.vault);
       return {
         restarted: true,
         diagnostic,
@@ -1979,7 +1979,7 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
   );
 }
 
-export async function healthCheckPortalWorkspaceExecutor(
+export async function healthCheckPortalVaultExecutor(
   baseUrl: string,
   headers: HeadersInit,
 ): Promise<void> {

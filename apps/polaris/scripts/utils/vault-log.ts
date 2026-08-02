@@ -1,22 +1,22 @@
 import { logError, logInfo, logWarn } from "./log.js";
 
-type WorkspaceLogLevel = "info" | "warn" | "error";
+type VaultLogLevel = "info" | "warn" | "error";
 
-export interface WorkspaceLogContext {
+export interface VaultLogContext {
   userId: string;
-  workspace: string;
+  vault: string;
   ref?: string;
   backend?: string;
   profile?: string;
 }
 
-function workspaceLogDetails(
-  context: WorkspaceLogContext,
+function vaultLogDetails(
+  context: VaultLogContext,
   details?: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
     userId: context.userId,
-    workspace: context.workspace,
+    vault: context.vault,
     ...(context.ref ? { ref: context.ref } : {}),
     ...(context.backend ? { backend: context.backend } : {}),
     ...(context.profile ? { profile: context.profile } : {}),
@@ -24,46 +24,46 @@ function workspaceLogDetails(
   };
 }
 
-export function logWorkspaceEvent(
-  level: WorkspaceLogLevel,
+export function logVaultEvent(
+  level: VaultLogLevel,
   event: string,
-  context: WorkspaceLogContext,
+  context: VaultLogContext,
   details?: Record<string, unknown>,
 ): void {
-  const payload = workspaceLogDetails(context, details);
+  const payload = vaultLogDetails(context, details);
   if (level === "warn") {
-    logWarn("workspace", event, payload);
+    logWarn("vault", event, payload);
     return;
   }
   if (level === "error") {
-    logError("workspace", event, payload);
+    logError("vault", event, payload);
     return;
   }
-  logInfo("workspace", event, payload);
+  logInfo("vault", event, payload);
 }
 
-export async function measureWorkspacePhase<T>(args: {
-  context: WorkspaceLogContext;
+export async function measureVaultPhase<T>(args: {
+  context: VaultLogContext;
   phase: string;
   slowMs?: number;
   execute: () => Promise<T>;
 }): Promise<T> {
   const startedAt = Date.now();
-  logWorkspaceEvent("info", "phase-started", args.context, {
+  logVaultEvent("info", "phase-started", args.context, {
     phase: args.phase,
   });
   try {
     const result = await args.execute();
     const elapsedMs = Date.now() - startedAt;
     const level = elapsedMs >= (args.slowMs ?? 2000) ? "warn" : "info";
-    logWorkspaceEvent(level, "phase-completed", args.context, {
+    logVaultEvent(level, "phase-completed", args.context, {
       phase: args.phase,
       elapsedMs,
       slow: level === "warn",
     });
     return result;
   } catch (error) {
-    logWorkspaceEvent("error", "phase-failed", args.context, {
+    logVaultEvent("error", "phase-failed", args.context, {
       phase: args.phase,
       elapsedMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),

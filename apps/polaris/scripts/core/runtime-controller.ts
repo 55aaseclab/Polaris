@@ -4,17 +4,17 @@ import type {
   BackendObservation,
   CheckStatus,
   DriftItem,
-  ResolvedWorkspaceCredentialBinding,
+  ResolvedVaultCredentialBinding,
   ReconcilePlan,
-  WorkspaceDrift,
-  WorkspaceSpec,
-  WorkspaceStatus,
-} from "./workspace.js";
-import { WORKSPACE_STATUS_SCHEMA_VERSION } from "./workspace.js";
+  VaultDrift,
+  VaultSpec,
+  VaultStatus,
+} from "./vault.js";
+import { VAULT_STATUS_SCHEMA_VERSION } from "./vault.js";
 import { supportsLiveCredentialSwitch } from "../config/credential-catalog.js";
 import {
-  readWorkspaceLiveCredentialSelections,
-  workspacePaseoStateDir,
+  readVaultLiveCredentialSelections,
+  vaultPaseoStateDir,
 } from "../output/state-store.js";
 import {
   extractOfferFragment,
@@ -22,18 +22,18 @@ import {
   resolveConfiguredPaseoAppBaseUrl,
 } from "./pairing-url.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "./workspace-name.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "./vault-name.js";
 
-function hasProvidedSshPrivateKey(workspace: WorkspaceSpec): boolean {
-  return workspace.runtime.authFiles.some((entry) => {
-    return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
+function hasProvidedSshPrivateKey(vault: VaultSpec): boolean {
+  return vault.runtime.authFiles.some((entry) => {
+    return entry.mountPath.startsWith(`${vault.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
   });
 }
 
-function readPersistedPaseoServerId(workspace: WorkspaceSpec): string | null {
-  const filePath = path.join(workspacePaseoStateDir(workspace.identity.projectName, workspace.userProfile.id), "server-id");
+function readPersistedPaseoServerId(vault: VaultSpec): string | null {
+  const filePath = path.join(vaultPaseoStateDir(vault.identity.projectName, vault.userProfile.id), "server-id");
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
@@ -41,19 +41,19 @@ function readPersistedPaseoServerId(workspace: WorkspaceSpec): string | null {
   return value || null;
 }
 
-function workspacePaseoScope(workspace: WorkspaceSpec): string {
-  return `${workspace.userProfile.id.trim()}:${workspace.identity.projectName.trim()}`;
+function vaultPaseoScope(vault: VaultSpec): string {
+  return `${vault.userProfile.id.trim()}:${vault.identity.projectName.trim()}`;
 }
 
-function readPersistedPaseoPairingUrl(workspace: WorkspaceSpec): string | null {
-  const filePath = path.join(workspacePaseoStateDir(workspace.identity.projectName, workspace.userProfile.id), "pairing.json");
+function readPersistedPaseoPairingUrl(vault: VaultSpec): string | null {
+  const filePath = path.join(vaultPaseoStateDir(vault.identity.projectName, vault.userProfile.id), "pairing.json");
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { url?: unknown };
     const raw = typeof parsed.url === "string" ? parsed.url.trim() : "";
-    return normalizePairingUrl(raw, process.env, workspacePaseoScope(workspace)) ?? null;
+    return normalizePairingUrl(raw, process.env, vaultPaseoScope(vault)) ?? null;
   } catch {
     return null;
   }
@@ -87,13 +87,13 @@ function buildReconnectTarget(
   }
 }
 
-function synthesizeWorkspacePaseoStatus(
-  workspace: WorkspaceSpec,
-  driver: Pick<NonNullable<WorkspaceStatus["driver"]>, "selected" | "status" | "reason">,
-): WorkspaceStatus["paseo"] {
-  const liveTarget = readPersistedPaseoPairingUrl(workspace);
-  const serverId = readPersistedPaseoServerId(workspace);
-  const reconnectTarget = buildReconnectTarget(serverId, liveTarget, workspacePaseoScope(workspace));
+function synthesizeVaultPaseoStatus(
+  vault: VaultSpec,
+  driver: Pick<NonNullable<VaultStatus["driver"]>, "selected" | "status" | "reason">,
+): VaultStatus["paseo"] {
+  const liveTarget = readPersistedPaseoPairingUrl(vault);
+  const serverId = readPersistedPaseoServerId(vault);
+  const reconnectTarget = buildReconnectTarget(serverId, liveTarget, vaultPaseoScope(vault));
   const reconnectMode =
     reconnectTarget && serverId
       ? "reconnectable"
@@ -133,23 +133,23 @@ function synthesizeWorkspacePaseoStatus(
 }
 
 function buildSshSelfCheck(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   observation: BackendObservation,
-): NonNullable<NonNullable<WorkspaceStatus["credentials"]>["ssh"]> {
-  const githubAccount = workspace.userProfile.github.account;
+): NonNullable<NonNullable<VaultStatus["credentials"]>["ssh"]> {
+  const githubAccount = vault.userProfile.github.account;
   if (!githubAccount) {
     return {
-      mode: workspace.userProfile.ssh.mode,
+      mode: vault.userProfile.ssh.mode,
       selfCheck: {
         state: "not-configured",
         message: "No github.account is configured in the user profile.",
       },
     };
   }
-  const githubAuthObserved = observation.workspaceAssembly.githubAuth?.observed === true;
+  const githubAuthObserved = observation.vaultAssembly.githubAuth?.observed === true;
   if (githubAuthObserved) {
     return {
-      mode: workspace.userProfile.ssh.mode,
+      mode: vault.userProfile.ssh.mode,
       githubAccount,
       selfCheck: {
         state: "ready",
@@ -157,7 +157,7 @@ function buildSshSelfCheck(
       },
     };
   }
-  if (workspace.userProfile.ssh.mode === "managed-key") {
+  if (vault.userProfile.ssh.mode === "managed-key") {
     return {
       mode: "managed-key",
       githubAccount,
@@ -167,7 +167,7 @@ function buildSshSelfCheck(
       },
     };
   }
-  if (hasProvidedSshPrivateKey(workspace)) {
+  if (hasProvidedSshPrivateKey(vault)) {
     return {
       mode: "provided-key",
       githubAccount,
@@ -194,7 +194,7 @@ function attachmentCheck(observed: BackendObservation["attachments"][keyof Backe
   return observed.observed ? { state: "ok", detail: observed.detail } : { state: "missing", detail: observed.detail };
 }
 
-function runtimeCheck(observed: BackendObservation["workspaceAssembly"][keyof BackendObservation["workspaceAssembly"]]): CheckStatus {
+function runtimeCheck(observed: BackendObservation["vaultAssembly"][keyof BackendObservation["vaultAssembly"]]): CheckStatus {
   if (!observed) {
     return { state: "unknown" };
   }
@@ -202,32 +202,32 @@ function runtimeCheck(observed: BackendObservation["workspaceAssembly"][keyof Ba
 }
 
 function expectsHarnessCredentialAssembly(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   harnessDir: ".codex" | ".claude",
 ): boolean {
-  return workspace.runtime.authFiles.some((entry) =>
-    entry.mountPath.startsWith(`${workspace.runtime.home}/${harnessDir}/`),
+  return vault.runtime.authFiles.some((entry) =>
+    entry.mountPath.startsWith(`${vault.runtime.home}/${harnessDir}/`),
   );
 }
 
 function activeCodexBinding(
-  workspace: WorkspaceSpec,
-): ResolvedWorkspaceCredentialBinding | null {
-  return workspace.resolvedCredentialBindings.find((binding) =>
+  vault: VaultSpec,
+): ResolvedVaultCredentialBinding | null {
+  return vault.resolvedCredentialBindings.find((binding) =>
     binding.purpose === "agent-auth" && binding.credential.kind === "codex-auth"
   ) ?? null;
 }
 
 function codexCredentialSource(
-  workspace: WorkspaceSpec,
-  binding: ResolvedWorkspaceCredentialBinding,
-): "workspace-binding" | "user-active" | "compatibility" {
+  vault: VaultSpec,
+  binding: ResolvedVaultCredentialBinding,
+): "vault-binding" | "user-active" | "compatibility" {
   if (
-    workspace.credentialBindings.some((configured) =>
+    vault.credentialBindings.some((configured) =>
       configured.purpose === "agent-auth" && configured.credentialId === binding.credentialId,
     )
   ) {
-    return "workspace-binding";
+    return "vault-binding";
   }
   if (binding.source === "compatibility") {
     return "compatibility";
@@ -236,16 +236,16 @@ function codexCredentialSource(
 }
 
 function credentialBindingSource(
-  workspace: WorkspaceSpec,
-  binding: ResolvedWorkspaceCredentialBinding,
-): "workspace-binding" | "user-active" | "compatibility" {
+  vault: VaultSpec,
+  binding: ResolvedVaultCredentialBinding,
+): "vault-binding" | "user-active" | "compatibility" {
   if (
-    workspace.credentialBindings.some((configured) =>
+    vault.credentialBindings.some((configured) =>
       configured.purpose === binding.purpose
       && configured.credentialId === binding.credentialId,
     )
   ) {
-    return "workspace-binding";
+    return "vault-binding";
   }
   if (binding.source === "compatibility") {
     return "compatibility";
@@ -254,17 +254,17 @@ function credentialBindingSource(
 }
 
 function activeSshBinding(
-  workspace: WorkspaceSpec,
-): ResolvedWorkspaceCredentialBinding | null {
-  return workspace.resolvedCredentialBindings.find((binding) =>
+  vault: VaultSpec,
+): ResolvedVaultCredentialBinding | null {
+  return vault.resolvedCredentialBindings.find((binding) =>
     binding.purpose === "git-auth" && binding.credential.kind === "ssh-key"
   ) ?? null;
 }
 
 function codexCredentialStatus(
-  workspace: WorkspaceSpec,
-): NonNullable<WorkspaceStatus["credentials"]>["codex"] {
-  const binding = activeCodexBinding(workspace);
+  vault: VaultSpec,
+): NonNullable<VaultStatus["credentials"]>["codex"] {
+  const binding = activeCodexBinding(vault);
   if (!binding) {
     return {
       state: "not-selected",
@@ -274,26 +274,26 @@ function codexCredentialStatus(
     state: "selected",
     credentialId: binding.credentialId,
     label: binding.credential.label,
-    source: codexCredentialSource(workspace, binding),
+    source: codexCredentialSource(vault, binding),
   };
 }
 
 function liveCredentialSelectionStatus(
-  workspace: WorkspaceSpec,
-): NonNullable<WorkspaceStatus["credentials"]>["live"] {
-  const persistedSelections = readWorkspaceLiveCredentialSelections(
-    workspace.identity.projectName,
-    workspace.userProfile.id,
+  vault: VaultSpec,
+): NonNullable<VaultStatus["credentials"]>["live"] {
+  const persistedSelections = readVaultLiveCredentialSelections(
+    vault.identity.projectName,
+    vault.userProfile.id,
   );
   const selectedByHarness: NonNullable<
-    NonNullable<WorkspaceStatus["credentials"]>["live"]
+    NonNullable<VaultStatus["credentials"]>["live"]
   >["selectedByHarness"] = {};
 
   for (const [harness, persisted] of Object.entries(persistedSelections)) {
     if (!supportsLiveCredentialSwitch(harness) || !persisted?.credentialId) {
       continue;
     }
-    const selected = workspace.credentials.find((credential) =>
+    const selected = vault.credentials.find((credential) =>
       credential.id === persisted.credentialId
       && credential.metadata?.harness === harness,
     );
@@ -307,7 +307,7 @@ function liveCredentialSelectionStatus(
     };
   }
 
-  const codex = codexCredentialStatus(workspace);
+  const codex = codexCredentialStatus(vault);
   if (
     codex?.state === "selected"
     && codex.credentialId
@@ -321,19 +321,19 @@ function liveCredentialSelectionStatus(
     };
   }
 
-  const sshBinding = activeSshBinding(workspace);
+  const sshBinding = activeSshBinding(vault);
   if (sshBinding && !selectedByHarness.ssh) {
     selectedByHarness.ssh = {
       credentialId: sshBinding.credentialId,
       label: sshBinding.credential.label,
-      source: credentialBindingSource(workspace, sshBinding),
+      source: credentialBindingSource(vault, sshBinding),
     };
   }
 
   const switchableHarnesses = Array.from(
     new Set(
       [
-        ...workspace.credentials
+        ...vault.credentials
           .map((credential) => String(credential.metadata?.harness ?? "").trim())
           .filter((harness) => supportsLiveCredentialSwitch(harness)),
         ...Object.keys(selectedByHarness).filter((harness) =>
@@ -346,7 +346,7 @@ function liveCredentialSelectionStatus(
 
   return {
     switchableHarnesses,
-    supportedHarnesses: workspace.agent.harnesses,
+    supportedHarnesses: vault.agent.harnesses,
     ...(firstSelection
       ? {
           selectedHarness: firstSelection[0],
@@ -360,36 +360,36 @@ function liveCredentialSelectionStatus(
 }
 
 function driverRuntimeKind(
-  workspace: WorkspaceSpec,
-): NonNullable<WorkspaceStatus["driver"]>["runtimeKind"] {
-  if (workspace.backend.kind === "docker") {
+  vault: VaultSpec,
+): NonNullable<VaultStatus["driver"]>["runtimeKind"] {
+  if (vault.backend.kind === "docker") {
     return "docker-container";
   }
-  if (workspace.backend.kind === "pod") {
+  if (vault.backend.kind === "pod") {
     return "kubernetes-pod";
   }
   return "kubevirt-vm";
 }
 
 function driverRuntimeRef(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   observation: BackendObservation,
 ): string {
-  const runtimeScope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
-  if (workspace.backend.kind === "docker") {
+  const runtimeScope = vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
+  if (vault.backend.kind === "docker") {
     return `container/${runtimeScope}-docker`;
   }
-  if (workspace.backend.kind === "pod") {
+  if (vault.backend.kind === "pod") {
     return observation.backend.detail?.startsWith("pod/")
       ? observation.backend.detail
       : `deployment/${runtimeScope}`;
   }
-  return `vm/${workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm")}`;
+  return `vm/${vaultRuntimeResourceName(vault.userProfile.id, vault.identity.projectName, "vm")}`;
 }
 
 function runtimeAssemblyCheck(
   expected: boolean,
-  observed: BackendObservation["workspaceAssembly"][keyof BackendObservation["workspaceAssembly"]],
+  observed: BackendObservation["vaultAssembly"][keyof BackendObservation["vaultAssembly"]],
 ): CheckStatus {
   if (!expected) {
     return { state: "unknown" };
@@ -397,33 +397,33 @@ function runtimeAssemblyCheck(
   return runtimeCheck(observed);
 }
 
-export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: BackendObservation): WorkspaceDrift {
+export function computeVaultDrift(vault: VaultSpec, observation: BackendObservation): VaultDrift {
   const items: DriftItem[] = [];
   const backendRunning = observation.backend.exists && observation.backend.running;
-  const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
-  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
+  const expectsCodexAssembly = expectsHarnessCredentialAssembly(vault, ".codex");
+  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(vault, ".claude");
 
   if (!observation.backend.exists) {
     items.push({
       kind: "backend",
-      target: workspace.backend.kind,
+      target: vault.backend.kind,
       severity: "error",
       message: "backend resource does not exist",
     });
   } else if (!observation.backend.running) {
     items.push({
       kind: "backend",
-      target: workspace.backend.kind,
+      target: vault.backend.kind,
       severity: "warning",
       message: observation.backend.detail || "backend exists but is not running",
     });
   }
 
   if (backendRunning) {
-    if (workspace.agent.enabled) {
-      const paseoStateRoot = workspacePaseoStateDir(
-        workspace.identity.projectName,
-        workspace.userProfile.id,
+    if (vault.agent.enabled) {
+      const paseoStateRoot = vaultPaseoStateDir(
+        vault.identity.projectName,
+        vault.userProfile.id,
       );
       const persistedServerIdPath = `${paseoStateRoot}/server-id`;
       const persistedPairingPath = `${paseoStateRoot}/pairing.json`;
@@ -446,9 +446,9 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     const attachmentTargets = {
-      workspaceData: workspace.attachments.workspaceData,
-      workspaceRuntimeState: workspace.attachments.workspaceRuntimeState,
-      userIdentityState: workspace.attachments.userIdentityState,
+      vaultData: vault.attachments.vaultData,
+      vaultRuntimeState: vault.attachments.vaultRuntimeState,
+      userIdentityState: vault.attachments.userIdentityState,
     } as const;
 
     for (const [key, attachment] of Object.entries(attachmentTargets)) {
@@ -465,13 +465,13 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     const runtimeTargets = [
-      { key: "projectRoot", message: "workspace project root assembly missing" },
-      { key: "managerState", message: "workspace manager assembly missing" },
-      { key: "evolutionState", message: "workspace evolution assembly missing" },
+      { key: "projectRoot", message: "vault project root assembly missing" },
+      { key: "managerState", message: "vault manager assembly missing" },
+      { key: "evolutionState", message: "vault evolution assembly missing" },
       { key: "ssh", message: "user SSH assembly missing" },
     ] as const;
     for (const target of runtimeTargets) {
-      const observed = observation.workspaceAssembly[target.key];
+      const observed = observation.vaultAssembly[target.key];
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -483,7 +483,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (expectsCodexAssembly) {
-      const observed = observation.workspaceAssembly.codex;
+      const observed = observation.vaultAssembly.codex;
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -495,7 +495,7 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
     }
 
     if (expectsClaudeAssembly) {
-      const observed = observation.workspaceAssembly.claude;
+      const observed = observation.vaultAssembly.claude;
       if (observed && !observed.observed) {
         items.push({
           kind: "runtime-assembly",
@@ -527,22 +527,22 @@ export function computeWorkspaceDrift(workspace: WorkspaceSpec, observation: Bac
   };
 }
 
-export function synthesizeWorkspaceStatus(
-  workspace: WorkspaceSpec,
+export function synthesizeVaultStatus(
+  vault: VaultSpec,
   observation: BackendObservation,
-  drift: WorkspaceDrift,
-): WorkspaceStatus {
-  const expectsCodexAssembly = expectsHarnessCredentialAssembly(workspace, ".codex");
-  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(workspace, ".claude");
+  drift: VaultDrift,
+): VaultStatus {
+  const expectsCodexAssembly = expectsHarnessCredentialAssembly(vault, ".codex");
+  const expectsClaudeAssembly = expectsHarnessCredentialAssembly(vault, ".claude");
   const backendLiveness = !observation.backend.exists
     ? "missing"
     : observation.backend.running
       ? "running"
       : "stopped";
-  const driverState: Pick<NonNullable<WorkspaceStatus["driver"]>, "selected" | "status" | "reason"> = {
+  const driverState: Pick<NonNullable<VaultStatus["driver"]>, "selected" | "status" | "reason"> = {
     selected: {
-      backend: workspace.backend.kind,
-      ...(workspace.backend.profile ? { profile: workspace.backend.profile } : {}),
+      backend: vault.backend.kind,
+      ...(vault.backend.profile ? { profile: vault.backend.profile } : {}),
     },
     status:
       backendLiveness === "running"
@@ -552,54 +552,54 @@ export function synthesizeWorkspaceStatus(
           : "unknown",
     reason: drift.items[0]?.message,
   };
-  const paseo = synthesizeWorkspacePaseoStatus(workspace, driverState);
+  const paseo = synthesizeVaultPaseoStatus(vault, driverState);
 
   return {
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
-    project: workspace.identity.projectName,
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION,
+    project: vault.identity.projectName,
     driver: {
       selected: driverState.selected,
       status: driverState.status,
       ...(driverState.reason ? { reason: driverState.reason } : {}),
-      baseImage: workspace.runtime.baseImage,
-      runtimeKind: driverRuntimeKind(workspace),
-      runtimeRef: driverRuntimeRef(workspace, observation),
-      ...(workspace.runtime.rootdiskImage
-        ? { rootdiskImage: workspace.runtime.rootdiskImage }
+      baseImage: vault.runtime.baseImage,
+      runtimeKind: driverRuntimeKind(vault),
+      runtimeRef: driverRuntimeRef(vault, observation),
+      ...(vault.runtime.rootdiskImage
+        ? { rootdiskImage: vault.runtime.rootdiskImage }
         : {}),
     },
     paseo,
     credentials: {
-      ssh: buildSshSelfCheck(workspace, observation),
-      codex: codexCredentialStatus(workspace),
-      live: liveCredentialSelectionStatus(workspace),
+      ssh: buildSshSelfCheck(vault, observation),
+      codex: codexCredentialStatus(vault),
+      live: liveCredentialSelectionStatus(vault),
     },
     details: {
       backendDetail: observation.backend.detail,
       serviceDetail: observation.services.detail,
-      agentDetail: workspace.agent.enabled
-        ? `${workspace.agent.managerId} + ${workspace.agent.harnesses.join(" + ")}`
+      agentDetail: vault.agent.enabled
+        ? `${vault.agent.managerId} + ${vault.agent.harnesses.join(" + ")}`
         : "agent integration disabled",
-      userProfileDetail: `${workspace.userProfile.id} <${workspace.userProfile.email}>`,
+      userProfileDetail: `${vault.userProfile.id} <${vault.userProfile.email}>`,
     },
     attachments: {
-      workspaceData: attachmentCheck(observation.attachments.workspaceData),
-      workspaceRuntimeState: attachmentCheck(observation.attachments.workspaceRuntimeState),
+      vaultData: attachmentCheck(observation.attachments.vaultData),
+      vaultRuntimeState: attachmentCheck(observation.attachments.vaultRuntimeState),
       userIdentityState: attachmentCheck(observation.attachments.userIdentityState),
     },
-    workspaceAssembly: {
-      home: runtimeCheck(observation.workspaceAssembly.home),
-      projectRoot: runtimeCheck(observation.workspaceAssembly.projectRoot),
-      managerState: runtimeCheck(observation.workspaceAssembly.managerState),
-      evolutionState: runtimeCheck(observation.workspaceAssembly.evolutionState),
-      codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.workspaceAssembly.codex),
-      claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.workspaceAssembly.claude),
-      ssh: runtimeCheck(observation.workspaceAssembly.ssh),
+    vaultAssembly: {
+      home: runtimeCheck(observation.vaultAssembly.home),
+      projectRoot: runtimeCheck(observation.vaultAssembly.projectRoot),
+      managerState: runtimeCheck(observation.vaultAssembly.managerState),
+      evolutionState: runtimeCheck(observation.vaultAssembly.evolutionState),
+      codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.vaultAssembly.codex),
+      claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.vaultAssembly.claude),
+      ssh: runtimeCheck(observation.vaultAssembly.ssh),
     },
   };
 }
 
-export function buildReconcilePlan(workspace: WorkspaceSpec, drift: WorkspaceDrift): ReconcilePlan {
+export function buildReconcilePlan(vault: VaultSpec, drift: VaultDrift): ReconcilePlan {
   const actions: ReconcilePlan["actions"] = [];
 
   for (const item of drift.items) {
@@ -630,8 +630,8 @@ export function buildReconcilePlan(workspace: WorkspaceSpec, drift: WorkspaceDri
   }
 
   return {
-    project: workspace.identity.projectName,
-    backend: workspace.backend.kind,
+    project: vault.identity.projectName,
+    backend: vault.backend.kind,
     safe: !drift.hasErrors || actions.every((item) => item.kind !== "report-unrecoverable-drift"),
     requiresRestart: actions.some((item) => item.kind === "restart-runtime"),
     destructive: false,

@@ -4,10 +4,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/operations/print-workspace-image-tag.sh <user-profile-id> <project>
+  ./scripts/operations/print-vault-image-tag.sh <user-profile-id> <project>
 
 Example:
-  ./scripts/operations/print-workspace-image-tag.sh 100000000000000002 morpheus
+  ./scripts/operations/print-vault-image-tag.sh 100000000000000002 morpheus
   # ttl.sh/user-002-morpheus:24h
 EOF
 }
@@ -47,4 +47,4 @@ fi
 
 printf 'ttl.sh/%s-%s:24h\n' \
   "$(user_segment "$1")" \
-  "$(sanitize_component "$2" "workspace" | cut -c1-32)"
+  "$(sanitize_component "$2" "vault" | cut -c1-32)"

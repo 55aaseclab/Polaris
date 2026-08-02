@@ -64,7 +64,7 @@ function parseHeaderValue(line: string): string | null {
 
 export function parseMemoryMarkdown(params: {
   filePath: string;
-  workspaceId: string;
+  vaultId: string;
   userProfileId?: string;
   target: EvolutionMemoryEntry["target"];
 }): EvolutionMemoryEntry[] {
@@ -113,7 +113,7 @@ export function parseMemoryMarkdown(params: {
     }
     entries.push({
       id: `${params.target}:${section}:${key}`,
-      workspaceId: params.workspaceId,
+      vaultId: params.vaultId,
       userProfileId: params.userProfileId,
       target: params.target,
       section,
@@ -172,19 +172,19 @@ export function renderMemoryMarkdown(params: {
   return lines.join("\n");
 }
 
-export function listEventsForSession(filePath: string, workspaceId: string, sessionId: string): EvolutionExecutionEvent[] {
+export function listEventsForSession(filePath: string, vaultId: string, sessionId: string): EvolutionExecutionEvent[] {
   return readJsonLines<EvolutionExecutionEvent>(filePath)
-    .filter((event) => event.workspaceId === workspaceId && event.sessionId === sessionId)
+    .filter((event) => event.vaultId === vaultId && event.sessionId === sessionId)
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 export function summarizeMemory(params: {
-  workspaceEntries: EvolutionMemoryEntry[];
+  vaultEntries: EvolutionMemoryEntry[];
   userEntries: EvolutionMemoryEntry[];
   pendingChanges: EvolutionMemoryChange[];
 }): {
   artifactCount: number;
-  activeWorkspaceArtifacts: number;
+  activeVaultArtifacts: number;
   activeUserArtifacts: number;
   latestTitles: string[];
   latestArtifacts: Array<{
@@ -199,11 +199,11 @@ export function summarizeMemory(params: {
   }>;
   pendingMemoryChanges: number;
 } {
-  const all = [...params.workspaceEntries, ...params.userEntries]
+  const all = [...params.vaultEntries, ...params.userEntries]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   return {
     artifactCount: all.length,
-    activeWorkspaceArtifacts: params.workspaceEntries.length,
+    activeVaultArtifacts: params.vaultEntries.length,
     activeUserArtifacts: params.userEntries.length,
     latestTitles: all.slice(0, 5).map((entry) => entry.title),
     latestArtifacts: all.slice(0, 5).map((entry) => {

@@ -4,27 +4,27 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
-import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
+import { deleteVaultOwnedByUser } from "../scripts/cli/commands/delete.js";
 import {
-  listPortalWorkspaceStaticSummaries,
-  loadWorkspaceDetailStatic,
-  projectPortalWorkspaceLiveStatus,
-  readWorkspaceStatus,
-  readPortalWorkspaceLiveSummary,
-  type PortalWorkspaceStreamEvent,
+  listPortalVaultStaticSummaries,
+  loadVaultDetailStatic,
+  projectPortalVaultLiveStatus,
+  readVaultStatus,
+  readPortalVaultLiveSummary,
+  type PortalVaultStreamEvent,
 } from "../scripts/core/portal.js";
 import {
-  workspaceSelectionPath,
-  workspaceStatusPath,
-  writeWorkspaceDriverSelection,
-  writeWorkspaceStatus,
+  vaultSelectionPath,
+  vaultStatusPath,
+  writeVaultDriverSelection,
+  writeVaultStatus,
 } from "../scripts/output/state-store.js";
 import {
-  queueProvisionWorkspace,
-  stopPortalWorkspace,
-  updatePortalWorkspaceSelectedDriver,
+  queueProvisionVault,
+  stopPortalVault,
+  updatePortalVaultSelectedDriver,
 } from "../scripts/executor/operations.js";
-import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
+import { subscribePortalVaultStream } from "../scripts/portal/vault-live-hub.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -38,46 +38,46 @@ function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
 }
 
-async function cleanupStartedWorkspace(userId: string, workspace: string): Promise<void> {
+async function cleanupStartedVault(userId: string, vault: string): Promise<void> {
   try {
-    await stopPortalWorkspace(userId, workspace);
+    await stopPortalVault(userId, vault);
   } catch {
     // Ignore cleanup failures so file cleanup still runs.
   }
   try {
-    await deleteWorkspaceOwnedByUser(userId, workspace);
+    await deleteVaultOwnedByUser(userId, vault);
   } catch {
     // Ignore cleanup failures so file cleanup still runs.
   }
 }
 
-async function withTempPortalWorkspace(
-  fn: (input: { userId: string; workspace: string }) => Promise<void>,
+async function withTempPortalVault(
+  fn: (input: { userId: string; vault: string }) => Promise<void>,
 ): Promise<void> {
   const userId = uniqueName("portal-live-user");
-  const workspace = uniqueName("portal-live-workspace");
+  const vault = uniqueName("portal-live-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Live User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
-    await fn({ userId, workspace });
+    await createCommand([vault, "--user", userId]);
+    await fn({ userId, vault });
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
 }
 
-test("portal workspace projections split static, live, and detail-static data", async () => {
-  await withTempPortalWorkspace(async ({ userId, workspace }) => {
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+test("portal vault projections split static, live, and detail-static data", async () => {
+  await withTempPortalVault(async ({ userId, vault }) => {
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       driver: {
         selected: { backend: "docker" },
         status: "running",
         runtimeKind: "docker-container",
-        runtimeRef: `container/${workspace}-docker`,
+        runtimeRef: `container/${vault}-docker`,
       },
       paseo: {
         daemon: "ready",
@@ -101,37 +101,37 @@ test("portal workspace projections split static, live, and detail-static data", 
       },
       evolution: {
         artifactCount: 2,
-        activeWorkspaceArtifacts: 1,
+        activeVaultArtifacts: 1,
         activeUserArtifacts: 1,
         latestTitles: ["Latest artifact"],
       },
     }, userId);
 
-    const staticSummaries = listPortalWorkspaceStaticSummaries(userId);
+    const staticSummaries = listPortalVaultStaticSummaries(userId);
     assert.equal(staticSummaries.length, 1);
-    assert.equal(staticSummaries[0]?.name, workspace);
+    assert.equal(staticSummaries[0]?.name, vault);
     assert.ok(staticSummaries[0]?.availableDrivers.some((driver) => driver.backend === "docker" && driver.available));
 
-    const liveSummary = readPortalWorkspaceLiveSummary(userId, workspace);
+    const liveSummary = readPortalVaultLiveSummary(userId, vault);
     assert.equal(liveSummary.status?.driver?.status, "running");
     assert.equal(liveSummary.status?.paseo.web, "connectable");
     assert.equal(liveSummary.status?.credentials?.live?.selectedCredentialId, "codex-rightcode");
     assert.equal("details" in (liveSummary.status ?? {}), false);
     assert.equal("assets" in (liveSummary.status ?? {}), false);
 
-    const detailStatic = loadWorkspaceDetailStatic(userId, workspace);
-    assert.equal(detailStatic.name, workspace);
+    const detailStatic = loadVaultDetailStatic(userId, vault);
+    assert.equal(detailStatic.name, vault);
     assert.ok(Array.isArray(detailStatic.availableDrivers));
     assert.ok(Array.isArray(detailStatic.credentialBindings));
     assert.ok(detailStatic.assets?.dockerfile.path);
   });
 });
 
-test("workspace live hub publishes snapshot and live updates after status writes", async () => {
-  await withTempPortalWorkspace(async ({ userId, workspace }) => {
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+test("vault live hub publishes snapshot and live updates after status writes", async () => {
+  await withTempPortalVault(async ({ userId, vault }) => {
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       driver: {
         selected: { backend: "docker" },
         status: "stopped",
@@ -146,15 +146,15 @@ test("workspace live hub publishes snapshot and live updates after status writes
       details: {},
     }, userId);
 
-    const events: PortalWorkspaceStreamEvent[] = [];
-    const unsubscribe = subscribePortalWorkspaceStream(userId, (event) => {
+    const events: PortalVaultStreamEvent[] = [];
+    const unsubscribe = subscribePortalVaultStream(userId, (event) => {
       events.push(event);
     });
     try {
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.equal(events[0]?.type, "snapshot");
-      writeWorkspaceStatus({
-        project: workspace,
+      writeVaultStatus({
+        project: vault,
         driver: {
           selected: { backend: "docker" },
           status: "running",
@@ -174,8 +174,8 @@ test("workspace live hub publishes snapshot and live updates after status writes
         const timer = setInterval(() => {
           const found = events.find((event) =>
             event.type === "live-upsert"
-            && event.workspace.name === workspace
-            && event.workspace.status?.driver?.status === "running"
+            && event.vault.name === vault
+            && event.vault.status?.driver?.status === "running"
           );
           if (found) {
             clearInterval(timer);
@@ -194,20 +194,20 @@ test("workspace live hub publishes snapshot and live updates after status writes
   });
 });
 
-test("updating selected driver creates live driver state for workspaces without a status file", async () => {
-  await withTempPortalWorkspace(async ({ userId, workspace }) => {
-    const statusPath = workspaceStatusPath(workspace, userId);
+test("updating selected driver creates live driver state for vaults without a status file", async () => {
+  await withTempPortalVault(async ({ userId, vault }) => {
+    const statusPath = vaultStatusPath(vault, userId);
     fs.rmSync(statusPath, { force: true });
 
-    const events: PortalWorkspaceStreamEvent[] = [];
-    const unsubscribe = subscribePortalWorkspaceStream(userId, (event) => {
+    const events: PortalVaultStreamEvent[] = [];
+    const unsubscribe = subscribePortalVaultStream(userId, (event) => {
       events.push(event);
     });
     try {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      await updatePortalWorkspaceSelectedDriver({
+      await updatePortalVaultSelectedDriver({
         userId,
-        workspace,
+        vault,
         target: { backend: "pod", profile: "gvisor" },
       });
 
@@ -216,9 +216,9 @@ test("updating selected driver creates live driver state for workspaces without 
         const timer = setInterval(() => {
           const found = events.find((event) =>
             event.type === "live-upsert"
-            && event.workspace.name === workspace
-            && event.workspace.status?.driver?.selected?.backend === "pod"
-            && event.workspace.status?.driver?.selected?.profile === "gvisor"
+            && event.vault.name === vault
+            && event.vault.status?.driver?.selected?.backend === "pod"
+            && event.vault.status?.driver?.selected?.profile === "gvisor"
           );
           if (found) {
             clearInterval(timer);
@@ -247,22 +247,22 @@ test("updating selected driver creates live driver state for workspaces without 
   });
 });
 
-test("workspace live stream emits starting during create-and-start flow", async () => {
+test("vault live stream emits starting during create-and-start flow", async () => {
   const userId = uniqueName("portal-live-create-user");
-  const workspace = uniqueName("portal-live-create-workspace");
+  const vault = uniqueName("portal-live-create-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   const previousDelay = process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS;
   process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS = "150";
   try {
     await createUserCommand([userId, "--name", "Portal Live Create User", "--email", `${userId}@polaris.local`]);
-    const events: PortalWorkspaceStreamEvent[] = [];
-    const unsubscribe = subscribePortalWorkspaceStream(userId, (event) => {
+    const events: PortalVaultStreamEvent[] = [];
+    const unsubscribe = subscribePortalVaultStream(userId, (event) => {
       events.push(event);
     });
     try {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      await queueProvisionWorkspace(userId, workspace, {
+      await queueProvisionVault(userId, vault, {
         defaultDockerOnly: true,
         startAfterCreate: true,
       });
@@ -272,8 +272,8 @@ test("workspace live stream emits starting during create-and-start flow", async 
         const timer = setInterval(() => {
           const hasStarting = events.some((event) =>
             event.type === "live-upsert"
-            && event.workspace.name === workspace
-            && event.workspace.status?.driver?.status === "starting"
+            && event.vault.name === vault
+            && event.vault.status?.driver?.status === "starting"
           );
           if (hasStarting) {
             clearInterval(timer);
@@ -288,8 +288,8 @@ test("workspace live stream emits starting during create-and-start flow", async 
       });
 
       const statuses = events
-        .filter((event) => event.type === "live-upsert" && event.workspace.name === workspace)
-        .map((event) => event.workspace.status?.driver?.status ?? null);
+        .filter((event) => event.type === "live-upsert" && event.vault.name === vault)
+        .map((event) => event.vault.status?.driver?.status ?? null);
       const startingIndex = statuses.indexOf("starting");
       assert.notEqual(startingIndex, -1);
       const stoppedIndex = statuses.indexOf("stopped");
@@ -299,7 +299,7 @@ test("workspace live stream emits starting during create-and-start flow", async 
       unsubscribe();
     }
   } finally {
-    await cleanupStartedWorkspace(userId, workspace);
+    await cleanupStartedVault(userId, vault);
     if (previousDelay === undefined) {
       delete process.env.POLARIS_TEST_PROVISION_STEP_DELAY_MS;
     } else {
@@ -311,7 +311,7 @@ test("workspace live stream emits starting during create-and-start flow", async 
 });
 
 test("portal live projection keeps the canonical live fields only", () => {
-  const projected = projectPortalWorkspaceLiveStatus({
+  const projected = projectPortalVaultLiveStatus({
     project: "demo",
     schemaVersion: 1.1,
     driver: {
@@ -332,7 +332,7 @@ test("portal live projection keeps the canonical live fields only", () => {
     assets: {
       dockerfile: {
         file: "Dockerfile",
-        path: repoRelative(path.join(USER_ROOT, "demo", "workspaces", "demo", "Dockerfile")),
+        path: repoRelative(path.join(USER_ROOT, "demo", "vaults", "demo", "Dockerfile")),
       },
       specs: [],
       generatedManifests: [],
@@ -348,15 +348,15 @@ test("portal live projection keeps the canonical live fields only", () => {
   assert.equal("assets" in (projected ?? {}), false);
 });
 
-test("writeWorkspaceStatus removes obsolete selection.json files", async () => {
-  await withTempPortalWorkspace(async ({ userId, workspace }) => {
-    const selectionPath = workspaceSelectionPath(workspace, userId);
+test("writeVaultStatus removes obsolete selection.json files", async () => {
+  await withTempPortalVault(async ({ userId, vault }) => {
+    const selectionPath = vaultSelectionPath(vault, userId);
     fs.mkdirSync(path.dirname(selectionPath), { recursive: true });
     fs.writeFileSync(selectionPath, `${JSON.stringify({ backend: "docker" }, null, 2)}\n`, "utf8");
     assert.equal(fs.existsSync(selectionPath), true);
 
-    writeWorkspaceStatus({
-      project: workspace,
+    writeVaultStatus({
+      project: vault,
       driver: {
         selected: { backend: "docker" },
         status: "running",
@@ -372,7 +372,7 @@ test("writeWorkspaceStatus removes obsolete selection.json files", async () => {
     }, userId);
 
     assert.equal(fs.existsSync(selectionPath), false);
-    const status = JSON.parse(fs.readFileSync(workspaceStatusPath(workspace, userId), "utf8")) as {
+    const status = JSON.parse(fs.readFileSync(vaultStatusPath(vault, userId), "utf8")) as {
       driver?: { selected?: { backend?: string } | null };
     };
     assert.equal(status.driver?.selected?.backend, "docker");

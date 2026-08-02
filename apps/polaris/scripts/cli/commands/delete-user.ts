@@ -15,8 +15,8 @@ function userRootFor(userProfileId: string): string {
   return path.join(USER_ROOT, userProfileId);
 }
 
-function activeWorkspacesRootFor(userProfileId: string): string {
-  return path.join(USER_ROOT, userProfileId, "workspaces");
+function activeVaultsRootFor(userProfileId: string): string {
+  return path.join(USER_ROOT, userProfileId, "vaults");
 }
 
 function listChildDirectories(root: string): string[] {
@@ -69,15 +69,15 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const profilePath = profilePathFor(userProfileId);
   const userRoot = userRootFor(userProfileId);
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
-    const activeWorkspaces = listChildDirectories(activeWorkspacesRootFor(userProfileId));
-    if (activeWorkspaces.length > 0) {
+    const activeVaults = listChildDirectories(activeVaultsRootFor(userProfileId));
+    if (activeVaults.length > 0) {
       throw new Error(
         [
-          `User '${userProfileId}' cannot be deleted while workspace data still exists.`,
-          activeWorkspaces.length > 0
-            ? `Active workspaces: ${activeWorkspaces.join(", ")}`
+          `User '${userProfileId}' cannot be deleted while vault data still exists.`,
+          activeVaults.length > 0
+            ? `Active vaults: ${activeVaults.join(", ")}`
             : null,
-          "Delete active workspaces first.",
+          "Delete active vaults first.",
         ].filter(Boolean).join(" "),
       );
     }

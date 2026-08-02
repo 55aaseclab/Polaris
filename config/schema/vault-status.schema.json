@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://geek-env.local/schema/workspace-status.schema.json",
-  "title": "Workspace Status",
-  "description": "Schema for persisted workspace status files. Runtime data moved into driver in schema 1.1.",
+  "$id": "https://geek-env.local/schema/vault-status.schema.json",
+  "title": "Vault Status",
+  "description": "Schema for persisted vault status files. Runtime data moved into driver in schema 1.1.",
   "oneOf": [
     {
-      "$ref": "#/$defs/workspaceStatusV1"
+      "$ref": "#/$defs/vaultStatusV1"
     },
     {
-      "$ref": "#/$defs/workspaceStatusV1_1"
+      "$ref": "#/$defs/vaultStatusV1_1"
     }
   ],
   "$defs": {
@@ -207,7 +207,7 @@
         "type": "string"
       }
     },
-    "workspaceStatusCore": {
+    "vaultStatusCore": {
       "type": "object",
       "required": [
         "project",
@@ -239,15 +239,15 @@
         "attachments": {
           "type": "object"
         },
-        "workspaceAssembly": {
+        "vaultAssembly": {
           "type": "object"
         }
       }
     },
-    "workspaceStatusV1": {
+    "vaultStatusV1": {
       "allOf": [
         {
-          "$ref": "#/$defs/workspaceStatusCore"
+          "$ref": "#/$defs/vaultStatusCore"
         },
         {
           "type": "object",
@@ -290,10 +290,10 @@
         }
       ]
     },
-    "workspaceStatusV1_1": {
+    "vaultStatusV1_1": {
       "allOf": [
         {
-          "$ref": "#/$defs/workspaceStatusCore"
+          "$ref": "#/$defs/vaultStatusCore"
         },
         {
           "type": "object",

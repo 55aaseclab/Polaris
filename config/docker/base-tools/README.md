@@ -1,6 +1,6 @@
-# Polaris Workspace Base Tools
+# Polaris Vault Base Tools
 
-This directory defines the shared tool baseline for the Polaris workspace
+This directory defines the shared tool baseline for the Polaris vault
 prebuilt image.
 
 The catalog is organized by user task, not by implementation language.

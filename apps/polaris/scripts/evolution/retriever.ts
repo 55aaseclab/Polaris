@@ -4,7 +4,7 @@ import type {
 } from "./types.js";
 
 export interface RetrievalContext {
-  workspaceId: string;
+  vaultId: string;
   userProfileId?: string;
   prompt: string;
   limit?: number;
@@ -17,7 +17,7 @@ export async function retrieveMemoryContext(
   const prompt = context.prompt.trim().toLowerCase();
   return entries
     .filter((entry) => {
-      if (entry.workspaceId !== context.workspaceId) {
+      if (entry.vaultId !== context.vaultId) {
         return false;
       }
       if (entry.target === "user-memory" && context.userProfileId && entry.userProfileId !== context.userProfileId) {
@@ -30,9 +30,9 @@ export async function retrieveMemoryContext(
       const tags = Array.isArray(metadata.tags) ? metadata.tags.map((tag) => String(tag).toLowerCase()) : [];
       const reasons: string[] = [];
       let score = entry.confidence * 100;
-      if (entry.target === "workspace-memory") {
+      if (entry.target === "vault-memory") {
         score += 8;
-        reasons.push("workspace-memory");
+        reasons.push("vault-memory");
       }
       if (context.userProfileId && entry.userProfileId === context.userProfileId) {
         score += 6;

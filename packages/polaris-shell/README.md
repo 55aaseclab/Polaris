@@ -18,8 +18,8 @@ Outer Polaris control chrome (doorway):
 
 ## Topology
 
-- Shell UI runs **outside** workspace containers (with paseo-web).
-- Wanghai server stays **in-container** for vertical workspaces.
+- Shell UI runs **outside** vault containers (with paseo-web).
+- Wanghai server stays **in-container** for vertical vaults.
 - **One stack** serves all users.
 
 ## Migration from Paseo patches

@@ -7,13 +7,13 @@ import path from "node:path";
 import { PaseoManagerAdapter } from "../scripts/evolution/adapter.js";
 import { applyCuratorResult, curateMemoryEntries } from "../scripts/evolution/curator.js";
 import { ensureDir, parseMemoryMarkdown, renderMemoryMarkdown, summarizeMemory, writePendingMemoryChanges } from "../scripts/evolution/files.js";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
 import { retrieveMemoryContext, renderMemoryEntries } from "../scripts/evolution/retriever.js";
 import { reviewExecutionCandidate } from "../scripts/evolution/reviewer.js";
 
-function loadWorkspaceFromRefForTest(projectRef: string) {
-  const resolved = resolveWorkspaceConfigPath(projectRef);
-  return loadWorkspaceFromConfigPath(
+function loadVaultFromRefForTest(projectRef: string) {
+  const resolved = resolveVaultConfigPath(projectRef);
+  return loadVaultFromConfigPath(
     resolved.configPath,
     resolved.project,
     resolved.backendHint,
@@ -27,11 +27,11 @@ test("memory retrieval renders relevant entries from markdown files", async () =
   const userPath = path.join(tempDir, "USER.md");
   try {
     fs.writeFileSync(memoryPath, [
-      "# Polaris Workspace Memory",
+      "# Polaris Vault Memory",
       "",
       "- Project: demo",
       "- User profile: user-1",
-      "- Target: workspace-memory",
+      "- Target: vault-memory",
       "",
       "## Validation",
       "",
@@ -56,11 +56,11 @@ test("memory retrieval renders relevant entries from markdown files", async () =
     ].join("\n"), "utf8");
 
     const entries = [
-      ...parseMemoryMarkdown({ filePath: memoryPath, workspaceId: "demo", userProfileId: "user-1", target: "workspace-memory" }),
-      ...parseMemoryMarkdown({ filePath: userPath, workspaceId: "demo", userProfileId: "user-1", target: "user-memory" }),
+      ...parseMemoryMarkdown({ filePath: memoryPath, vaultId: "demo", userProfileId: "user-1", target: "vault-memory" }),
+      ...parseMemoryMarkdown({ filePath: userPath, vaultId: "demo", userProfileId: "user-1", target: "user-memory" }),
     ];
     const retrieved = await retrieveMemoryContext(entries, {
-      workspaceId: "demo",
+      vaultId: "demo",
       userProfileId: "user-1",
       prompt: "verifier",
       limit: 5,
@@ -73,14 +73,14 @@ test("memory retrieval renders relevant entries from markdown files", async () =
 });
 
 test("paseo manager adapter normalizes transcript events and runtime paths", () => {
-  const workspace = loadWorkspaceFromRefForTest("demo");
+  const vault = loadVaultFromRefForTest("demo");
   const adapter = new PaseoManagerAdapter();
-  assert.equal(adapter.supports(workspace), true);
-  const runtimePaths = adapter.buildRuntimePaths(workspace);
-  assert.equal(runtimePaths.stateRoot, workspace.agent.runtime.stateRoot);
-  assert.equal(runtimePaths.evolutionRoot, workspace.agent.runtime.evolutionRoot);
+  assert.equal(adapter.supports(vault), true);
+  const runtimePaths = adapter.buildRuntimePaths(vault);
+  assert.equal(runtimePaths.stateRoot, vault.agent.runtime.stateRoot);
+  assert.equal(runtimePaths.evolutionRoot, vault.agent.runtime.evolutionRoot);
   const events = adapter.normalizeTranscript({
-    workspace,
+    vault,
     sessionId: "session-2",
     transcript: [{ timestamp: "2026-06-21T11:00:01.000Z", role: "assistant", content: "Implemented the fix and ran verification." }],
   });
@@ -89,13 +89,13 @@ test("paseo manager adapter normalizes transcript events and runtime paths", () 
 
 test("review derives pending memory changes", async () => {
   const review = await reviewExecutionCandidate({
-    workspaceId: "demo",
+    vaultId: "demo",
     userProfileId: "user-1",
     managerId: "paseo",
     sessionId: "session-1",
     events: [{
       id: "evt-1",
-      workspaceId: "demo",
+      vaultId: "demo",
       managerId: "paseo",
       sessionId: "session-1",
       kind: "task-failed",
@@ -111,9 +111,9 @@ test("curator promotes and suppresses memory entries", () => {
   const entries = [
     {
       id: "promoted-1",
-      workspaceId: "demo",
+      vaultId: "demo",
       userProfileId: "user-1",
-      target: "workspace-memory" as const,
+      target: "vault-memory" as const,
       section: "Validation",
       key: "run-verifier-first",
       title: "Run verifier before retrying",
@@ -127,9 +127,9 @@ test("curator promotes and suppresses memory entries", () => {
     },
     {
       id: "suppressed-1",
-      workspaceId: "demo",
+      vaultId: "demo",
       userProfileId: "user-1",
-      target: "workspace-memory" as const,
+      target: "vault-memory" as const,
       section: "Validation",
       key: "weak-signal",
       title: "Weak signal",
@@ -149,13 +149,13 @@ test("curator promotes and suppresses memory entries", () => {
   assert.equal(applied.find((entry) => entry.id === "suppressed-1")?.status, "suppressed");
 });
 
-test("file-first summary counts workspace, user, and pending changes", () => {
+test("file-first summary counts vault, user, and pending changes", () => {
   const now = new Date().toISOString();
-  const workspaceEntries = [{
-    id: "workspace-1",
-    workspaceId: "demo",
+  const vaultEntries = [{
+    id: "vault-1",
+    vaultId: "demo",
     userProfileId: "user-1",
-    target: "workspace-memory" as const,
+    target: "vault-memory" as const,
     section: "Validation",
     key: "run-verifier-first",
     title: "Run verifier before retrying",
@@ -169,7 +169,7 @@ test("file-first summary counts workspace, user, and pending changes", () => {
   }];
   const userEntries = [{
     id: "user-1-entry",
-    workspaceId: "demo",
+    vaultId: "demo",
     userProfileId: "user-1",
     target: "user-memory" as const,
     section: "Preferences",
@@ -185,9 +185,9 @@ test("file-first summary counts workspace, user, and pending changes", () => {
   }];
   const pending = [{
     id: "pending-1",
-    workspaceId: "demo",
+    vaultId: "demo",
     userProfileId: "user-1",
-    target: "workspace-memory" as const,
+    target: "vault-memory" as const,
     operation: "replace" as const,
     section: "Validation",
     key: "run-verifier-first",
@@ -201,9 +201,9 @@ test("file-first summary counts workspace, user, and pending changes", () => {
     status: "pending" as const,
     metadata: {},
   }];
-  const summary = summarizeMemory({ workspaceEntries, userEntries, pendingChanges: pending });
+  const summary = summarizeMemory({ vaultEntries, userEntries, pendingChanges: pending });
   assert.equal(summary.artifactCount, 2);
-  assert.equal(summary.activeWorkspaceArtifacts, 1);
+  assert.equal(summary.activeVaultArtifacts, 1);
   assert.equal(summary.activeUserArtifacts, 1);
   assert.equal(summary.pendingMemoryChanges, 1);
 });

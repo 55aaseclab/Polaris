@@ -5,48 +5,48 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import yaml from "js-yaml";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
-import { ensureCanonicalWorkspaceImage, ensureWorkspaceConfig } from "../scripts/config/provision.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
+import { ensureCanonicalVaultImage, ensureVaultConfig } from "../scripts/config/provision.js";
 import { createManagedSshCredential } from "../scripts/config/credentials.js";
 import { assertNoProjectNameCollision, assertProjectNameAvailableForUser } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import {
-  scaffoldDockerWorkspace,
+  scaffoldDockerVault,
   scaffoldUserProfileById,
-  syncWorkspaceDockerfileTemplate,
+  syncVaultDockerfileTemplate,
   WANGHAI_BACKUP_RUNTIME_ROOT,
   WANGHAI_PROFILE_ENV_FILE_KEY,
   WANGHAI_PROFILE_ENV_MOUNT_PATH,
   WANGHAI_PROFILE_ENV_SOURCE_PATH,
-  WANGHAI_WORKSPACES_RUNTIME_ROOT,
-  workspaceConfigPath,
-  workspaceImageRef,
+  WANGHAI_VAULTS_RUNTIME_ROOT,
+  vaultConfigPath,
+  vaultImageRef,
 } from "../scripts/config/scaffold.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import {
-  workspaceEvolutionStateDir,
-  workspaceLiveCredentialsPath,
-  workspacePaseoStateDir,
-  workspaceSelectionPath,
-  workspaceStatusPath,
-  writeWorkspaceDriverSelection,
-  writeWorkspaceLiveCredentialSelection,
-  writeWorkspaceStatus,
+  vaultEvolutionStateDir,
+  vaultLiveCredentialsPath,
+  vaultPaseoStateDir,
+  vaultSelectionPath,
+  vaultStatusPath,
+  writeVaultDriverSelection,
+  writeVaultLiveCredentialSelection,
+  writeVaultStatus,
 } from "../scripts/output/state-store.js";
-import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
-import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
-import { renderAndWriteKubevirtWorkspace, renderKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
+import { renderAndWritePodVault } from "../scripts/backends/pod/render.js";
+import { renderAndWriteDockerVault } from "../scripts/backends/docker/render.js";
+import { renderAndWriteKubevirtVault, renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { startCommand } from "../scripts/cli/commands/start.js";
-import { waitForWorkspaceReady } from "../scripts/cli/commands/shared.js";
-import { buildReconcilePlan, computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../scripts/core/runtime-controller.js";
+import { waitForVaultReady } from "../scripts/cli/commands/shared.js";
+import { buildReconcilePlan, computeVaultDrift, synthesizeVaultStatus } from "../scripts/core/runtime-controller.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "../scripts/core/workspace-name.js";
-import { polarisUsersRoot } from "../scripts/utils/paths.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "../scripts/core/vault-name.js";
+import { polarisNetfsLocalExportRoot, polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -61,16 +61,23 @@ const DEMO_USER_ROOT = path.join(
   USER_ROOT,
   DEMO_USER_PROFILE_ID,
 );
+const DEMO_USER_DOCKERFILE = path.join(
+  DEMO_USER_ROOT,
+  "docker",
+  "vault-prebuilt.Dockerfile",
+);
 const DEMO_GITHUB_SSH_CREDENTIAL_PATH = path.join(
   DEMO_USER_ROOT,
   "credentials",
   "github-ssh.yaml",
 );
-const SHARED_WORKSPACE_DOCKERFILE = path.join(
+const DEMO_VAULT_EXPORT_ROOT = polarisNetfsLocalExportRoot(import.meta.url);
+const DEMO_VAULT_EXPORT_PATH = path.join(DEMO_VAULT_EXPORT_ROOT, "demo");
+const SHARED_VAULT_DOCKERFILE = path.join(
   REPO_ROOT,
   "config",
   "docker",
-  "workspace-prebuilt.Dockerfile",
+  "vault-prebuilt.Dockerfile",
 );
 
 function repoRelative(filePath: string): string {
@@ -81,14 +88,27 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function sharedWorkspaceImageRefForTest(dockerfilePath: string): string {
+function sharedVaultImageRefForTest(dockerfilePath: string): string {
   const digest = createHash("sha256")
     .update(fs.readFileSync(dockerfilePath))
     .digest("hex");
-  return `ttl.sh/polaris-workspace-prebuilt-${digest.slice(0, 32)}:24h`;
+  return `ttl.sh/polaris-vault-prebuilt-${digest.slice(0, 32)}:24h`;
 }
 
-function ensureDemoWorkspaceFixtures(): void {
+function rewriteVaultDataExportRoot(configPath: string, exportRoot: string): void {
+  const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
+  const source = doc.attachments?.["vault-data"]?.source;
+  if (!source || typeof source !== "object") {
+    return;
+  }
+  if ((source as Record<string, any>).export_path === exportRoot) {
+    return;
+  }
+  (source as Record<string, any>).export_path = exportRoot;
+  fs.writeFileSync(configPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+}
+
+function ensureDemoVaultFixtures(): void {
   if (!fs.existsSync(DEMO_USER_PROFILE_PATH)) {
     scaffoldUserProfileById({
       id: DEMO_USER_PROFILE_ID,
@@ -106,21 +126,29 @@ function ensureDemoWorkspaceFixtures(): void {
     });
   }
 
-  if (!fs.existsSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID))) {
-    scaffoldDockerWorkspace("demo", DEMO_USER_PROFILE_ID);
+  syncVaultDockerfileTemplate(DEMO_USER_PROFILE_ID);
+
+  const dockerConfigPath = vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID);
+  if (!fs.existsSync(dockerConfigPath)) {
+    scaffoldDockerVault("demo", DEMO_USER_PROFILE_ID);
   }
-  if (!fs.existsSync(workspaceConfigPath("demo", "pod", DEMO_USER_PROFILE_ID))) {
-    ensureWorkspaceConfig("demo@pod:gvisor", DEMO_USER_PROFILE_ID);
-  }
-  if (!fs.existsSync(workspaceConfigPath("demo", "kubevirt-vm", DEMO_USER_PROFILE_ID))) {
-    ensureWorkspaceConfig("demo@kubevirt-vm", DEMO_USER_PROFILE_ID);
-  }
+  rewriteVaultDataExportRoot(dockerConfigPath, DEMO_VAULT_EXPORT_ROOT);
+
+  const podConfigPath = vaultConfigPath("demo", "pod", DEMO_USER_PROFILE_ID);
+  fs.rmSync(podConfigPath, { force: true });
+  ensureVaultConfig("demo@pod:gvisor", DEMO_USER_PROFILE_ID);
+  rewriteVaultDataExportRoot(podConfigPath, DEMO_VAULT_EXPORT_ROOT);
+
+  const kubevirtConfigPath = vaultConfigPath("demo", "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  fs.rmSync(kubevirtConfigPath, { force: true });
+  ensureVaultConfig("demo@kubevirt-vm", DEMO_USER_PROFILE_ID);
+  rewriteVaultDataExportRoot(kubevirtConfigPath, DEMO_VAULT_EXPORT_ROOT);
 }
 
-function loadWorkspaceFromRefForTest(projectRef: string) {
-  ensureDemoWorkspaceFixtures();
-  const resolved = resolveWorkspaceConfigPath(projectRef);
-  return loadWorkspaceFromConfigPath(
+function loadVaultFromRefForTest(projectRef: string) {
+  ensureDemoVaultFixtures();
+  const resolved = resolveVaultConfigPath(projectRef);
+  return loadVaultFromConfigPath(
     resolved.configPath,
     resolved.project,
     resolved.backendHint,
@@ -147,7 +175,7 @@ async function cleanupCliTestUser(input: {
   try {
     await runCli(["user", "delete", input.userId]);
   } catch {
-    // Some tests intentionally leave workspace/archive state behind, which
+    // Some tests intentionally leave vault/archive state behind, which
     // makes the formal delete path reject. Fall back to direct cleanup.
   } finally {
     fs.rmSync(input.profilePath, { force: true });
@@ -244,36 +272,36 @@ function uniqueProjectName(prefix: string): string {
 }
 
 function cleanupStatusFile(project: string): void {
-  fs.rmSync(workspaceStatusPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(vaultStatusPath(project, DEMO_USER_PROFILE_ID), { force: true });
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.status.json`), { force: true });
 }
 
 function cleanupDriverSelectionState(project: string): void {
   cleanupStatusFile(project);
-  fs.rmSync(workspaceSelectionPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(vaultSelectionPath(project, DEMO_USER_PROFILE_ID), { force: true });
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.selection.json`), { force: true });
 }
 
 function cleanupLiveCredentialsFile(project: string): void {
-  fs.rmSync(workspaceLiveCredentialsPath(project, DEMO_USER_PROFILE_ID), { force: true });
+  fs.rmSync(vaultLiveCredentialsPath(project, DEMO_USER_PROFILE_ID), { force: true });
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.live-credentials.json`), { force: true });
 }
 
-function loadDefaultDemoWorkspace() {
+function loadDefaultDemoVault() {
   cleanupDriverSelectionState("demo");
-  return loadWorkspaceFromRefForTest("demo");
+  return loadVaultFromRefForTest("demo");
 }
 
-async function withTempWorkspaceSpec(
+async function withTempVaultSpec(
   project: string,
   backendKind: "docker" | "pod" | "kubevirt-vm",
   fn: () => Promise<void> | void,
 ): Promise<void> {
-  ensureDemoWorkspaceFixtures();
-  const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
+  ensureDemoVaultFixtures();
+  const outputPath = vaultConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const sourcePath = workspaceConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
+  const sourcePath = vaultConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
   const doc = (yaml.load(fs.readFileSync(sourcePath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
   doc.backend = {
@@ -282,7 +310,7 @@ async function withTempWorkspaceSpec(
   };
   doc.runtime = {
     ...(doc.runtime ?? {}),
-    base_image: workspaceImageRef(DEMO_USER_PROFILE_ID, project),
+    base_image: vaultImageRef(DEMO_USER_PROFILE_ID, project),
   };
   if (backendKind === "docker") {
     doc.runtime = {
@@ -293,7 +321,7 @@ async function withTempWorkspaceSpec(
   }
 
   fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-  const generatedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${project}@${backendKind}`));
+  const generatedPath = generatedOutputPath(loadVaultFromRefForTest(`${project}@${backendKind}`));
   try {
     await fn();
   } finally {
@@ -304,33 +332,33 @@ async function withTempWorkspaceSpec(
   }
 }
 
-test("loadWorkspace normalizes demo pod config through the TypeScript control plane", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.equal(workspace.identity.projectName, "demo");
-  assert.equal(workspace.profile.name, "morpheus");
-  assert.match(workspace.userProfile.id, /^\d{18}$/);
-  assert.ok(workspace.userProfile.name.length > 0);
-  assert.match(workspace.userProfile.email, /@/);
-  assert.ok(fs.existsSync(path.join(USER_ROOT, workspace.userProfile.id, "workspaces", "demo")));
-  assert.equal(workspace.backend.kind, "pod");
-  assert.equal(workspace.backend.profile, "gvisor");
-  assert.equal(workspace.health.readinessMode, "daemon-port");
-  assert.ok(workspace.runtimeContract.staleRuntimeArtifacts.some((entry) => entry.endsWith(".paseo/paseo.pid")));
-  assert.equal(workspace.attachments.workspaceData.scope, "workspace");
-  assert.equal(workspace.attachments.workspaceRuntimeState.scope, "workspace");
-  assert.equal(workspace.attachments.userIdentityState.scope, "user");
-  assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
-  assert.equal(workspace.attachments.workspaceData.mountRoot, "/workspace/project");
-  assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
-  assert.equal(workspace.attachments.workspaceData.source.server, "netfs.local");
-  assert.equal(workspace.attachments.workspaceData.source.exportPath, "/exports/polaris/workspaces");
-  assert.equal(workspace.attachments.workspaceData.source.subPath, "demo");
-  assert.ok(!workspace.userProfile.github.account || workspace.userProfile.github.account.length > 0);
-  assert.equal(workspace.credentialBindings.length, 1);
-  assert.equal(workspace.credentialBindings[0]?.purpose, "agent-auth");
-  assert.equal(workspace.resolvedCredentialBindings[0]?.source, "registry");
-  assert.equal(workspace.resolvedCredentialBindings[0]?.attachmentKind, "user-identity-state");
+test("loadVault normalizes demo pod config through the TypeScript control plane", () => {
+  const vault = loadDefaultDemoVault();
+  assert.equal(vault.identity.projectName, "demo");
+  assert.equal(vault.profile.name, "morpheus");
+  assert.match(vault.userProfile.id, /^\d{18}$/);
+  assert.ok(vault.userProfile.name.length > 0);
+  assert.match(vault.userProfile.email, /@/);
+  assert.ok(fs.existsSync(path.join(USER_ROOT, vault.userProfile.id, "vaults", "demo")));
+  assert.equal(vault.backend.kind, "pod");
+  assert.equal(vault.backend.profile, "gvisor");
+  assert.equal(vault.health.readinessMode, "daemon-port");
+  assert.ok(vault.runtimeContract.staleRuntimeArtifacts.some((entry) => entry.endsWith(".paseo/paseo.pid")));
+  assert.equal(vault.attachments.vaultData.scope, "vault");
+  assert.equal(vault.attachments.vaultRuntimeState.scope, "vault");
+  assert.equal(vault.attachments.userIdentityState.scope, "user");
+  assert.equal(vault.attachments.userIdentityState.sharing, "cross-vault");
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
+  assert.equal(vault.attachments.vaultData.mountRoot, "/vault/project");
+  assert.equal(vault.attachments.vaultData.source.kind, "netfs");
+  assert.equal(vault.attachments.vaultData.source.server, "netfs.local");
+  assert.equal(vault.attachments.vaultData.source.exportPath, DEMO_VAULT_EXPORT_ROOT);
+  assert.equal(vault.attachments.vaultData.source.subPath, "demo");
+  assert.ok(!vault.userProfile.github.account || vault.userProfile.github.account.length > 0);
+  assert.equal(vault.credentialBindings.length, 1);
+  assert.equal(vault.credentialBindings[0]?.purpose, "git-auth");
+  assert.equal(vault.resolvedCredentialBindings[0]?.source, "registry");
+  assert.equal(vault.resolvedCredentialBindings[0]?.attachmentKind, "user-identity-state");
 });
 
 test("backend registry resolves pod driver", () => {
@@ -421,27 +449,27 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
   }
 });
 
-test("workspace load skips the optional user Wanghai env when the file is absent", async () => {
+test("vault load skips the optional user Wanghai env when the file is absent", async () => {
   const project = uniqueProjectName("wanghai-profile-missing");
   const profileId = uniqueProjectName("wanghai-profile-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const userRoot = path.join(USER_ROOT, profileId);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     scaffoldUserProfileById({
       id: profileId,
       name: "Wanghai Profile User",
       email: "wanghai-profile@example.com",
     });
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     delete doc.credentials;
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
     assert.equal(
-      workspace.runtime.authFiles.some((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY),
+      vault.runtime.authFiles.some((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY),
       false,
     );
   }).finally(() => {
@@ -450,13 +478,13 @@ test("workspace load skips the optional user Wanghai env when the file is absent
   });
 });
 
-test("workspace load mounts the user Wanghai env when the file exists", async () => {
+test("vault load mounts the user Wanghai env when the file exists", async () => {
   const project = uniqueProjectName("wanghai-profile-present");
   const profileId = uniqueProjectName("wanghai-profile-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const userRoot = path.join(USER_ROOT, profileId);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     scaffoldUserProfileById({
       id: profileId,
       name: "Wanghai Mounted User",
@@ -467,19 +495,19 @@ test("workspace load mounts the user Wanghai env when the file exists", async ()
       "CUSTOM_WANGHAI_FLAG=1\n",
       "utf8",
     );
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     delete doc.credentials;
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const wanghaiEnv = workspace.runtime.authFiles.find((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY);
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const wanghaiEnv = vault.runtime.authFiles.find((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY);
     assert.equal(wanghaiEnv?.mountPath, WANGHAI_PROFILE_ENV_MOUNT_PATH);
     assert.equal(wanghaiEnv?.sourcePath, path.join(userRoot, "wanghai", ".env"));
     assert.match(wanghaiEnv?.content || "", /CUSTOM_WANGHAI_FLAG=1/);
 
-    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
     assert.match(rendered, /if \[ ! -f \/opt\/wanghai\/\.env \]; then python3 -c /);
     assert.match(rendered, /chown root:root \/opt\/wanghai\/\.env \|\| true/);
     assert.match(rendered, /chmod 600 \/opt\/wanghai\/\.env \|\| true/);
@@ -497,7 +525,7 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
   const previousHostDataRoot = process.env.POLARIS_WANGHAI_DATA_ROOT;
   const hostDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-wanghai-host-data-"));
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     try {
       process.env.POLARIS_WANGHAI_DATA_ROOT = hostDataRoot;
       scaffoldUserProfileById({
@@ -508,31 +536,31 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
       fs.writeFileSync(
         path.join(userRoot, "wanghai", ".env"),
         [
-          "WANGHAI_WORKSPACES_ROOT=/host/wanghai/workspaces",
+          "WANGHAI_VAULTS_ROOT=/host/wanghai/vaults",
           "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
           "CUSTOM_WANGHAI_FLAG=1",
           "",
         ].join("\n"),
         "utf8",
       );
-      scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
-      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
+      const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = profileId;
       delete doc.credentials;
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-      const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
-      const expectedWorkspacesRoot = path.join(hostDataRoot, "workspaces");
+      const vault = loadVaultFromRefForTest(`${project}@docker`);
+      const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
+      const expectedVaultsRoot = path.join(hostDataRoot, "vaults");
       const expectedBackupRoot = path.join(hostDataRoot, "backups");
       assert.match(
         rendered,
-        new RegExp(`source: "${escapeRegExp(expectedWorkspacesRoot)}"`),
+        new RegExp(`source: "${escapeRegExp(expectedVaultsRoot)}"`),
       );
       assert.match(
         rendered,
-        new RegExp(`target: "${WANGHAI_WORKSPACES_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
+        new RegExp(`target: "${WANGHAI_VAULTS_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
       );
       assert.match(
         rendered,
@@ -542,7 +570,7 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
         rendered,
         new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
       );
-      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/workspaces"/);
+      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/vaults"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/backups"/);
     } finally {
       if (previousHostDataRoot === undefined) {
@@ -578,9 +606,9 @@ test("runCli user defaults read omits the retired docker base image setting", as
       await runCli(["user", "defaults", "read", userProfileId]);
     });
     const readParsed = parseJsonOutput<{
-      workspaceDefaults: Record<string, never>;
+      vaultDefaults: Record<string, never>;
     }>(readStdout);
-    assert.deepEqual(readParsed.workspaceDefaults, {});
+    assert.deepEqual(readParsed.vaultDefaults, {});
 
     await assert.rejects(
       runCli(["user", "defaults", "set", userProfileId]),
@@ -624,7 +652,7 @@ test("runCli user list returns sorted user profiles", async () => {
       await runCli(["user", "list"]);
     });
     const parsed = parseJsonOutput<{
-      users: Array<{ id: string; name: string; email: string; workspaces: string[] }>;
+      users: Array<{ id: string; name: string; email: string; vaults: string[] }>;
     }>(stdout);
 
     const listedUserIds = parsed.users.map((user) => user.id);
@@ -634,8 +662,8 @@ test("runCli user list returns sorted user profiles", async () => {
     assert.notEqual(firstIndex, -1);
     assert.notEqual(secondIndex, -1);
     assert.ok(secondIndex < firstIndex);
-    assert.deepEqual(parsed.users[firstIndex]?.workspaces, []);
-    assert.deepEqual(parsed.users[secondIndex]?.workspaces, []);
+    assert.deepEqual(parsed.users[firstIndex]?.vaults, []);
+    assert.deepEqual(parsed.users[secondIndex]?.vaults, []);
   } finally {
     await cleanupCliTestUser({
       userId: firstUserId,
@@ -650,25 +678,25 @@ test("runCli user list returns sorted user profiles", async () => {
   }
 });
 
-test("runCli workspace list returns a user's workspace names", async () => {
-  const userId = uniqueProjectName("cli-workspace-list");
+test("runCli vault list returns a user's vault names", async () => {
+  const userId = uniqueProjectName("cli-vault-list");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults");
 
   try {
-    await runCli(["user", "create", userId, "--name", "Workspace List User"]);
-    for (const workspace of ["beta", "alpha"]) {
-      const workspacePath = path.join(workspaceRoot, workspace);
-      fs.mkdirSync(workspacePath, { recursive: true });
-      fs.writeFileSync(path.join(workspacePath, "docker.agent.yaml"), "project: test\n", "utf8");
+    await runCli(["user", "create", userId, "--name", "Vault List User"]);
+    for (const vault of ["beta", "alpha"]) {
+      const vaultPath = path.join(vaultRoot, vault);
+      fs.mkdirSync(vaultPath, { recursive: true });
+      fs.writeFileSync(path.join(vaultPath, "docker.agent.yaml"), "project: test\n", "utf8");
     }
 
     const stdout = await captureStdout(async () => {
-      await runCli(["workspace", "list", "--user", userId]);
+      await runCli(["vault", "list", "--user", userId]);
     });
     const parsed = parseJsonOutput<{
       userId: string;
-      workspaces: Array<{
+      vaults: Array<{
         name: string;
         raw: {
           dockerAgentYaml: string | null;
@@ -680,10 +708,10 @@ test("runCli workspace list returns a user's workspace names", async () => {
     }>(stdout);
 
     assert.equal(parsed.userId, userId);
-    assert.deepEqual(parsed.workspaces.map((workspace) => workspace.name), ["alpha", "beta"]);
-    assert.equal(parsed.workspaces[0]?.raw.dockerAgentYaml, "project: test\n");
-    assert.equal(parsed.workspaces[0]?.raw.podAgentYaml, null);
-    assert.equal(parsed.workspaces[0]?.raw.status, null);
+    assert.deepEqual(parsed.vaults.map((vault) => vault.name), ["alpha", "beta"]);
+    assert.equal(parsed.vaults[0]?.raw.dockerAgentYaml, "project: test\n");
+    assert.equal(parsed.vaults[0]?.raw.podAgentYaml, null);
+    assert.equal(parsed.vaults[0]?.raw.status, null);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(path.join(USER_ROOT, userId), { recursive: true, force: true });
@@ -756,8 +784,8 @@ test("runCli user create adds the default RightCode codex credential when config
   }
 });
 
-test("runCli create allows the same workspace name under a different user", async () => {
-  const workspace = uniqueProjectName("cli-shared-workspace");
+test("runCli create allows the same vault name under a different user", async () => {
+  const vault = uniqueProjectName("cli-shared-vault");
   const firstUserId = uniqueProjectName("cli-shared-user-a");
   const secondUserId = uniqueProjectName("cli-shared-user-b");
   const firstProfilePath = path.join(USER_ROOT, "profiles", `${firstUserId}.yaml`);
@@ -785,10 +813,10 @@ test("runCli create allows the same workspace name under a different user", asyn
       `${secondUserId}@polaris.local`,
     ]);
 
-    await runCli(["create", workspace, "--user", firstUserId]);
-    await runCli(["create", workspace, "--user", secondUserId]);
+    await runCli(["create", vault, "--user", firstUserId]);
+    await runCli(["create", vault, "--user", secondUserId]);
     assert.equal(
-      fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
+      fs.existsSync(path.join(secondUserRoot, "vaults", vault, "docker.agent.yaml")),
       true,
     );
   } finally {
@@ -805,9 +833,9 @@ test("runCli create allows the same workspace name under a different user", asyn
   }
 });
 
-test("runCli workspace create scaffolds a workspace through the namespaced command", async () => {
-  const workspace = uniqueProjectName("cli-workspace-command");
-  const userProfileId = uniqueProjectName("cli-workspace-user");
+test("runCli vault create scaffolds a vault through the namespaced command", async () => {
+  const vault = uniqueProjectName("cli-vault-command");
+  const userProfileId = uniqueProjectName("cli-vault-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(USER_ROOT, userProfileId);
 
@@ -817,15 +845,15 @@ test("runCli workspace create scaffolds a workspace through the namespaced comma
       "create",
       userProfileId,
       "--name",
-      "CLI Workspace User",
+      "CLI Vault User",
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
 
-    await runCli(["workspace", "create", workspace, "--user", userProfileId]);
+    await runCli(["vault", "create", vault, "--user", userProfileId]);
 
     assert.equal(
-      fs.existsSync(path.join(userRoot, "workspaces", workspace, "docker.agent.yaml")),
+      fs.existsSync(path.join(userRoot, "vaults", vault, "docker.agent.yaml")),
       true,
     );
   } finally {
@@ -837,13 +865,13 @@ test("runCli workspace create scaffolds a workspace through the namespaced comma
   }
 });
 
-test("runCli create ignores a retired user default docker base image when scaffolding a workspace", async () => {
-  const workspace = uniqueProjectName("cli-default-base-workspace");
+test("runCli create ignores a retired user default docker base image when scaffolding a vault", async () => {
+  const vault = uniqueProjectName("cli-default-base-vault");
   const userProfileId = uniqueProjectName("cli-default-base-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(USER_ROOT, userProfileId);
-  const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
-  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const configPath = vaultConfigPath(vault, "docker", userProfileId);
+  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "vault-prebuilt.Dockerfile");
   const baseImage = "wanghai-admin-portal:latest";
 
   try {
@@ -857,7 +885,7 @@ test("runCli create ignores a retired user default docker base image when scaffo
       `${userProfileId}@polaris.local`,
     ]);
     const profile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
-    profile.workspace_defaults = {
+    profile.vault_defaults = {
       docker: {
         runtime: {
           base_image: baseImage,
@@ -866,10 +894,10 @@ test("runCli create ignores a retired user default docker base image when scaffo
     };
     fs.writeFileSync(profilePath, yaml.dump(profile, { lineWidth: 120, noRefs: true }), "utf8");
 
-    await runCli(["create", workspace, "--user", userProfileId]);
+    await runCli(["create", vault, "--user", userProfileId]);
 
     const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
-    assert.equal(doc.runtime?.base_image, workspaceImageRef(userProfileId, workspace));
+    assert.equal(doc.runtime?.base_image, vaultImageRef(userProfileId, vault));
     assert.equal(fs.existsSync(dockerfilePath), true);
   } finally {
     await cleanupCliTestUser({
@@ -880,13 +908,13 @@ test("runCli create ignores a retired user default docker base image when scaffo
   }
 });
 
-test("runCli create --base-image still overrides a retired workspace default image", async () => {
-  const workspace = uniqueProjectName("cli-override-base-workspace");
+test("runCli create --base-image still overrides a retired vault default image", async () => {
+  const vault = uniqueProjectName("cli-override-base-vault");
   const userProfileId = uniqueProjectName("cli-override-base-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(USER_ROOT, userProfileId);
-  const configPath = workspaceConfigPath(workspace, "docker", userProfileId);
-  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
+  const configPath = vaultConfigPath(vault, "docker", userProfileId);
+  const dockerfilePath = path.join(USER_ROOT, userProfileId, "docker", "vault-prebuilt.Dockerfile");
   const defaultBaseImage = "wanghai-admin-portal:latest";
   const overrideBaseImage = "wanghai-admin-portal:custom";
 
@@ -901,7 +929,7 @@ test("runCli create --base-image still overrides a retired workspace default ima
       `${userProfileId}@polaris.local`,
     ]);
     const profile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
-    profile.workspace_defaults = {
+    profile.vault_defaults = {
       docker: {
         runtime: {
           base_image: defaultBaseImage,
@@ -913,7 +941,7 @@ test("runCli create --base-image still overrides a retired workspace default ima
     const stdout = await captureStdout(async () => {
       await runCli([
         "create",
-        workspace,
+        vault,
         "--user",
         userProfileId,
         "--base-image",
@@ -1043,9 +1071,9 @@ test("runCli user create rolls back scaffolded state when the Clerk mapping conf
   }
 });
 
-test("runCli user delete rejects users that still have workspace data", async () => {
+test("runCli user delete rejects users that still have vault data", async () => {
   const userProfileId = uniqueProjectName("cli-user-delete-blocked");
-  const workspace = uniqueProjectName("cli-user-delete-workspace");
+  const vault = uniqueProjectName("cli-user-delete-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
   const userRoot = path.join(USER_ROOT, userProfileId);
 
@@ -1059,13 +1087,13 @@ test("runCli user delete rejects users that still have workspace data", async ()
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli(["create", workspace, "--user", userProfileId]);
+    await runCli(["create", vault, "--user", userProfileId]);
 
     await assert.rejects(
       async () => {
         await runCli(["user", "delete", userProfileId]);
       },
-      /cannot be deleted while workspace data still exists/i,
+      /cannot be deleted while vault data still exists/i,
     );
   } finally {
     await cleanupCliTestUser({
@@ -1076,9 +1104,9 @@ test("runCli user delete rejects users that still have workspace data", async ()
   }
 });
 
-test("runCli delete removes a workspace without creating an archive", async () => {
+test("runCli delete removes a vault without creating an archive", async () => {
   const userProfileId = uniqueProjectName("cli-delete-user");
-  const workspace = uniqueProjectName("cli-delete-workspace");
+  const vault = uniqueProjectName("cli-delete-vault");
   const profilePath = path.join(
     REPO_ROOT,
     "config",
@@ -1087,8 +1115,8 @@ test("runCli delete removes a workspace without creating an archive", async () =
     `${userProfileId}.yaml`,
   );
   const userRoot = path.join(USER_ROOT, userProfileId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
-  const archivedRoot = path.join(userRoot, "archives", "workspaces");
+  const vaultRoot = path.join(userRoot, "vaults", vault);
+  const archivedRoot = path.join(userRoot, "archives", "vaults");
 
   try {
     await runCli([
@@ -1100,15 +1128,15 @@ test("runCli delete removes a workspace without creating an archive", async () =
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli(["create", workspace, "--user", userProfileId]);
+    await runCli(["create", vault, "--user", userProfileId]);
 
-    await runCli(["delete", workspace]);
+    await runCli(["delete", vault]);
 
-    assert.equal(fs.existsSync(workspaceRoot), false);
+    assert.equal(fs.existsSync(vaultRoot), false);
     const archiveEntries = fs.existsSync(archivedRoot)
       ? fs.readdirSync(archivedRoot)
       : [];
-    assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${workspace}`)), false);
+    assert.equal(archiveEntries.some((entry) => entry.endsWith(`-${vault}`)), false);
   } finally {
     await cleanupCliTestUser({
       userId: userProfileId,
@@ -1504,7 +1532,7 @@ test("runCli live-switch stages non-codex material into user identity state", as
   const project = uniqueProjectName("cli-live-switch");
   const scriptLogPath = path.join(os.tmpdir(), `${project}-live-switch-script.log`);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     try {
       await runCli([
         "user",
@@ -1526,7 +1554,7 @@ test("runCli live-switch stages non-codex material into user identity state", as
       await withFakeCommands(
         {
           docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf '${project}-docker-id'
   exit 0
 fi
@@ -1543,7 +1571,7 @@ exit 0
         },
         async ({ readCommandLog }) => {
           const expectedContainerName =
-            `${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`;
+            `${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`;
           const stdout = await captureStdout(async () => {
             await runCli([
               "live-switch",
@@ -1555,12 +1583,12 @@ exit 0
           });
           const payload = parseJsonOutput<{
             switched: boolean;
-            workspace: string;
+            vault: string;
             harness: string;
             credentialId: string;
           }>(stdout);
           assert.equal(payload.switched, true);
-          assert.equal(payload.workspace, project);
+          assert.equal(payload.vault, project);
           assert.equal(payload.harness, "claude");
           assert.equal(payload.credentialId, "claude-live");
           assert.ok(
@@ -1582,7 +1610,7 @@ exit 0
           "config",
           "users",
           DEMO_USER_PROFILE_ID,
-          "workspaces",
+          "vaults",
           project,
           "state",
           "live-credentials.json",
@@ -1601,9 +1629,9 @@ exit 0
   });
 });
 
-test("writeWorkspaceStatus persists a structured state file", () => {
+test("writeVaultStatus persists a structured state file", () => {
   const project = uniqueProjectName("sample-agent");
-  const statusPath = writeWorkspaceStatus({
+  const statusPath = writeVaultStatus({
     schemaVersion: 1.1,
     project,
     driver: {
@@ -1639,15 +1667,15 @@ test("writeWorkspaceStatus persists a structured state file", () => {
   cleanupStatusFile(project);
 });
 
-test("writeWorkspaceStatus replaces stale fields instead of merging previous status", () => {
+test("writeVaultStatus replaces stale fields instead of merging previous status", () => {
   const project = uniqueProjectName("replace-status");
-  const statusPath = writeWorkspaceStatus({
+  const statusPath = writeVaultStatus({
     schemaVersion: 1.1,
     project,
     driver: {
       selected: null,
       status: "starting",
-      reason: "workspace start requested",
+      reason: "vault start requested",
     },
     paseo: {
       daemon: "absent",
@@ -1661,7 +1689,7 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
     },
   }, DEMO_USER_PROFILE_ID);
 
-  writeWorkspaceStatus({
+  writeVaultStatus({
     schemaVersion: 1.1,
     project,
     driver: {
@@ -1694,7 +1722,7 @@ test("writeWorkspaceStatus replaces stale fields instead of merging previous sta
 
 test("driver selection persists a default backend control", () => {
   const project = uniqueProjectName("driver-selection");
-  const statusPath = writeWorkspaceDriverSelection(
+  const statusPath = writeVaultDriverSelection(
     project,
     { backend: "pod", profile: "gvisor" },
     DEMO_USER_PROFILE_ID,
@@ -1708,46 +1736,46 @@ test("driver selection persists a default backend control", () => {
   cleanupStatusFile(project);
 });
 
-test("workspaceImageRef derives a neutral deterministic ttl.sh reference", () => {
+test("vaultImageRef derives a neutral deterministic ttl.sh reference", () => {
   assert.equal(
-    workspaceImageRef("100000000000000001", "example-project"),
+    vaultImageRef("100000000000000001", "example-project"),
     "ttl.sh/user-001-example-project:24h",
   );
   assert.equal(
-    workspaceImageRef("local-example-user@example.com", "Feature Preview"),
+    vaultImageRef("local-example-user@example.com", "Feature Preview"),
     "ttl.sh/user-local-example-user-examp-feature-preview:24h",
   );
 });
 
-test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of truth", () => {
+test("ensureVaultConfig synthesizes a pod spec from the docker source of truth", () => {
   const project = uniqueProjectName("synth-pod");
-  const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
-  const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+  const dockerPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  const podPath = vaultConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
 
   const sourceDoc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
   sourceDoc.project = project;
   fs.writeFileSync(dockerPath, yaml.dump(sourceDoc, { lineWidth: 120, noRefs: true }), "utf8");
 
   try {
-    const synthesized = ensureWorkspaceConfig(`${project}@pod:gvisor`);
+    const synthesized = ensureVaultConfig(`${project}@pod:gvisor`);
     assert.equal(fs.existsSync(podPath), true);
     assert.equal(synthesized?.configPath, podPath);
     const podDoc = (yaml.load(fs.readFileSync(podPath, "utf8")) ?? {}) as Record<string, any>;
     assert.equal(podDoc.backend.kind, "pod");
     assert.equal(podDoc.runtime.class, "gvisor");
     assert.equal(podDoc.runtime.base_image, sourceDoc.runtime.base_image);
-    assert.equal(podDoc.attachments["workspace-data"].source.kind, "netfs");
-    assert.equal(podDoc.attachments["workspace-data"].source.server, "netfs.local");
+    assert.equal(podDoc.attachments["vault-data"].source.kind, "netfs");
+    assert.equal(podDoc.attachments["vault-data"].source.server, "netfs.local");
     assert.equal(
-      podDoc.attachments["workspace-data"].source.export_path,
-      path.join(REPO_ROOT, "config", "exports", "workspaces"),
+      podDoc.attachments["vault-data"].source.export_path,
+      DEMO_VAULT_EXPORT_ROOT,
     );
-    assert.equal(podDoc.attachments["workspace-data"].source.sub_path, project);
+    assert.equal(podDoc.attachments["vault-data"].source.sub_path, project);
     assert.equal(
-      podDoc.attachments["workspace-runtime-state"].source.volume_ref,
-      workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-runtime-state"),
+      podDoc.attachments["vault-runtime-state"].source.volume_ref,
+      vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vault-runtime-state"),
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
@@ -1755,21 +1783,14 @@ test("ensureWorkspaceConfig synthesizes a pod spec from the docker source of tru
   }
 });
 
-test("ensureCanonicalWorkspaceImage builds the canonical docker image locally when it is missing", async () => {
+test("ensureCanonicalVaultImage builds the canonical docker image locally when it is missing", async () => {
+  ensureDemoVaultFixtures();
   const project = uniqueProjectName("image-provision");
-  const imageRef = workspaceImageRef(DEMO_USER_PROFILE_ID, project);
-  const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
-  const dockerfilePath = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    DEMO_USER_PROFILE_ID,
-    "docker",
-    "workspace-prebuilt.Dockerfile",
-  );
-  const sharedImageRef = sharedWorkspaceImageRefForTest(dockerfilePath);
+  const imageRef = vaultImageRef(DEMO_USER_PROFILE_ID, project);
+  const dockerPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  const sharedImageRef = sharedVaultImageRefForTest(DEMO_USER_DOCKERFILE);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
 
   const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
@@ -1797,32 +1818,32 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        ensureCanonicalVaultImage(`${project}@docker`);
         const commandLog = readCommandLog();
         assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
         assert.equal(commandLog[1], `pull ${sharedImageRef}`);
         assert.ok(
           commandLog.some((entry) =>
-            entry.startsWith("build ")
+          entry.startsWith("build ")
             && entry.includes(`--cache-from ${sharedImageRef}`)
             && entry.includes(`--cache-from ${imageRef}`)
-            && entry.includes(`-f ${dockerfilePath}`)
+            && entry.includes(`-f ${DEMO_USER_DOCKERFILE}`)
             && entry.includes(`-t ${sharedImageRef} .`),
-          ),
+        ),
         );
         assert.equal(commandLog.at(-1), `tag ${sharedImageRef} ${imageRef}`);
       },
     );
   } finally {
     fs.rmSync(dockerPath, { force: true });
-    fs.rmSync(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "workspaces", project), {
+    fs.rmSync(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "vaults", project), {
       recursive: true,
       force: true,
     });
   }
 });
 
-test("ensureCanonicalWorkspaceImage skips managed image provisioning for external base images", async () => {
+test("ensureCanonicalVaultImage skips managed image provisioning for external base images", async () => {
   const userProfileId = uniqueProjectName("external-image-user");
   const project = uniqueProjectName("external-image-project");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
@@ -1857,7 +1878,7 @@ exit 1
 `,
       },
       async ({ readCommandLog }) => {
-        ensureCanonicalWorkspaceImage(`${project}@docker`, userProfileId);
+        ensureCanonicalVaultImage(`${project}@docker`, userProfileId);
         assert.deepEqual(readCommandLog(), []);
       },
     );
@@ -1870,10 +1891,10 @@ exit 1
   }
 });
 
-test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the shared template", () => {
+test("syncVaultDockerfileTemplate refreshes a stale user Dockerfile from the shared template", () => {
   const userProfileId = uniqueProjectName("dockerfile-sync");
-  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
-  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
+  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "vault-prebuilt.Dockerfile");
+  const templateDockerfile = SHARED_VAULT_DOCKERFILE;
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.writeFileSync(userDockerfile, "FROM scratch\n", "utf8");
@@ -1883,7 +1904,7 @@ test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the
   fs.utimesSync(templateDockerfile, newer, newer);
 
   try {
-    const result = syncWorkspaceDockerfileTemplate(userProfileId);
+    const result = syncVaultDockerfileTemplate(userProfileId);
     assert.equal(result.created, false);
     assert.equal(result.refreshed, true);
     assert.equal(result.path, userDockerfile);
@@ -1897,8 +1918,8 @@ test("syncWorkspaceDockerfileTemplate refreshes a stale user Dockerfile from the
   }
 });
 
-test("workspace prebuilt Dockerfile delegates shared base tool installation", () => {
-  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
+test("vault prebuilt Dockerfile delegates shared base tool installation", () => {
+  const templateDockerfile = SHARED_VAULT_DOCKERFILE;
   const rendered = fs.readFileSync(templateDockerfile, "utf8");
   assert.match(rendered, /COPY config\/docker\/base-tools \/tmp\/polaris-base-tools/);
   assert.match(rendered, /RUN bash \/tmp\/polaris-base-tools\/install-base-tools\.sh/);
@@ -1920,14 +1941,14 @@ test("workspace prebuilt Dockerfile delegates shared base tool installation", ()
   );
 });
 
-test("startCommand does not provision or rebuild workspace images", async () => {
+test("startCommand does not provision or rebuild vault images", async () => {
   const project = uniqueProjectName("start-no-provision");
   const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
   const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-start-export-"));
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const dockerPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
-    doc.attachments["workspace-data"].source.export_path = exportRoot;
+    doc.attachments["vault-data"].source.export_path = exportRoot;
     fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
     const expectedIdentityVolume = `polaris-${DEMO_USER_PROFILE_ID}-identity`;
     try {
@@ -1945,7 +1966,7 @@ fi
 if [[ "$*" == *"compose"* && "$*" == *"up -d"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -1974,7 +1995,7 @@ exit 0
         async ({ readCommandLog }) => {
           await startCommand(`${project}@docker`, DEMO_USER_PROFILE_ID);
           const commands = readCommandLog();
-          const paseoRoot = workspacePaseoStateDir(project, DEMO_USER_PROFILE_ID);
+          const paseoRoot = vaultPaseoStateDir(project, DEMO_USER_PROFILE_ID);
           assert.equal(
             commands.some((entry) =>
               entry.startsWith("image inspect ")
@@ -2011,17 +2032,17 @@ exit 0
   });
 });
 
-test("waitForWorkspaceReady persists Paseo metadata before declaring runtime ready", async () => {
+test("waitForVaultReady persists Paseo metadata before declaring runtime ready", async () => {
   const project = uniqueProjectName("wait-ready-paseo-persist");
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const paseoRoot = workspacePaseoStateDir(project, DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const paseoRoot = vaultPaseoStateDir(project, DEMO_USER_PROFILE_ID);
     fs.rmSync(paseoRoot, { recursive: true, force: true });
 
     await withFakeCommands(
       {
         docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -2044,7 +2065,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        await waitForWorkspaceReady(workspace, 50, 0);
+        await waitForVaultReady(vault, 50, 0);
 
         const commands = readCommandLog();
         assert.ok(
@@ -2069,17 +2090,17 @@ exit 0
   });
 });
 
-test("ensureCanonicalWorkspaceImage rebuilds when the user Dockerfile is refreshed from the template", async () => {
+test("ensureCanonicalVaultImage rebuilds when the user Dockerfile is refreshed from the template", async () => {
   const userProfileId = uniqueProjectName("dockerfile-rebuild");
   const project = uniqueProjectName("image-refresh");
-  const imageRef = workspaceImageRef(userProfileId, project);
-  const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
-  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "workspace-prebuilt.Dockerfile");
-  const templateDockerfile = SHARED_WORKSPACE_DOCKERFILE;
-  const sharedImageRef = sharedWorkspaceImageRefForTest(templateDockerfile);
+  const imageRef = vaultImageRef(userProfileId, project);
+  const dockerPath = vaultConfigPath(project, "docker", userProfileId);
+  const userDockerfile = path.join(USER_ROOT, userProfileId, "docker", "vault-prebuilt.Dockerfile");
+  const templateDockerfile = SHARED_VAULT_DOCKERFILE;
+  const sharedImageRef = sharedVaultImageRefForTest(templateDockerfile);
   const templateStat = fs.statSync(templateDockerfile);
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
   const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
   doc.user_profile = userProfileId;
@@ -2112,7 +2133,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        ensureCanonicalVaultImage(`${project}@docker`);
         const commandLog = readCommandLog();
         assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
         assert.equal(commandLog[1], `pull ${sharedImageRef}`);
@@ -2134,21 +2155,19 @@ exit 0
   }
 });
 
-test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without matching build state", async () => {
+test("ensureCanonicalVaultImage rebuilds when a local image exists without matching build state", async () => {
   const userProfileId = uniqueProjectName("image-state-user");
   const project = uniqueProjectName("image-state-project");
-  const imageRef = workspaceImageRef(userProfileId, project);
-  const dockerPath = workspaceConfigPath(project, "docker", userProfileId);
+  const imageRef = vaultImageRef(userProfileId, project);
+  const dockerPath = vaultConfigPath(project, "docker", userProfileId);
   const userDockerfile = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
+    USER_ROOT,
     userProfileId,
     "docker",
-    "workspace-prebuilt.Dockerfile",
+    "vault-prebuilt.Dockerfile",
   );
   fs.mkdirSync(path.dirname(dockerPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), dockerPath);
   const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
   doc.project = project;
   doc.user_profile = userProfileId;
@@ -2156,10 +2175,10 @@ test("ensureCanonicalWorkspaceImage rebuilds when a local image exists without m
   fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.copyFileSync(
-    SHARED_WORKSPACE_DOCKERFILE,
+    SHARED_VAULT_DOCKERFILE,
     userDockerfile,
   );
-  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
+  const sharedImageRef = sharedVaultImageRefForTest(userDockerfile);
 
   try {
     await withFakeCommands(
@@ -2181,7 +2200,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        ensureCanonicalWorkspaceImage(`${project}@docker`);
+        ensureCanonicalVaultImage(`${project}@docker`);
         const commandLog = readCommandLog();
         assert.equal(commandLog[0], `image inspect ${sharedImageRef}`);
         assert.equal(commandLog[1], `pull ${sharedImageRef}`);
@@ -2200,32 +2219,32 @@ exit 0
   }
 });
 
-test("ensureCanonicalWorkspaceImage reuses a shared prebuilt image from another workspace with the same Dockerfile", async () => {
+test("ensureCanonicalVaultImage reuses a shared prebuilt image from another vault with the same Dockerfile", async () => {
   const userProfileId = uniqueProjectName("shared-image-user");
   const sourceProject = uniqueProjectName("shared-image-source");
   const targetProject = uniqueProjectName("shared-image-target");
-  const sourceImageRef = workspaceImageRef(userProfileId, sourceProject);
-  const targetImageRef = workspaceImageRef(userProfileId, targetProject);
-  const sourceDockerPath = workspaceConfigPath(sourceProject, "docker", userProfileId);
-  const targetDockerPath = workspaceConfigPath(targetProject, "docker", userProfileId);
+  const sourceImageRef = vaultImageRef(userProfileId, sourceProject);
+  const targetImageRef = vaultImageRef(userProfileId, targetProject);
+  const sourceDockerPath = vaultConfigPath(sourceProject, "docker", userProfileId);
+  const targetDockerPath = vaultConfigPath(targetProject, "docker", userProfileId);
   const userDockerfile = path.join(
     REPO_ROOT,
     "config",
     "users",
     userProfileId,
     "docker",
-    "workspace-prebuilt.Dockerfile",
+    "vault-prebuilt.Dockerfile",
   );
   fs.mkdirSync(path.dirname(sourceDockerPath), { recursive: true });
   fs.mkdirSync(path.dirname(targetDockerPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), sourceDockerPath);
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), targetDockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), sourceDockerPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), targetDockerPath);
   fs.mkdirSync(path.dirname(userDockerfile), { recursive: true });
   fs.copyFileSync(
-    SHARED_WORKSPACE_DOCKERFILE,
+    SHARED_VAULT_DOCKERFILE,
     userDockerfile,
   );
-  const sharedImageRef = sharedWorkspaceImageRefForTest(userDockerfile);
+  const sharedImageRef = sharedVaultImageRefForTest(userDockerfile);
   const dockerfileDigest = createHash("sha256")
     .update(fs.readFileSync(userDockerfile))
     .digest("hex");
@@ -2268,7 +2287,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        ensureCanonicalWorkspaceImage(`${targetProject}@docker`);
+        ensureCanonicalVaultImage(`${targetProject}@docker`);
         assert.deepEqual(readCommandLog(), [
           `image inspect ${sharedImageRef}`,
           `tag ${sharedImageRef} ${targetImageRef}`,
@@ -2285,8 +2304,8 @@ exit 0
 
 test("project ownership check rejects collisions across users", () => {
   const project = uniqueProjectName("collision");
-  const firstPath = workspaceConfigPath(project, "docker", "111111111111111111");
-  const secondPath = workspaceConfigPath(project, "docker", "222222222222222222");
+  const firstPath = vaultConfigPath(project, "docker", "111111111111111111");
+  const secondPath = vaultConfigPath(project, "docker", "222222222222222222");
   fs.mkdirSync(path.dirname(firstPath), { recursive: true });
   fs.mkdirSync(path.dirname(secondPath), { recursive: true });
   fs.writeFileSync(firstPath, "project: collision\n", "utf8");
@@ -2300,24 +2319,24 @@ test("project ownership check rejects collisions across users", () => {
   }
 });
 
-test("stored pod driver selection influences default workspace loading", () => {
+test("stored pod driver selection influences default vault loading", () => {
   const project = "demo";
-  writeWorkspaceDriverSelection(project, { backend: "pod", profile: "kata" }, DEMO_USER_PROFILE_ID);
+  writeVaultDriverSelection(project, { backend: "pod", profile: "kata" }, DEMO_USER_PROFILE_ID);
   try {
-    const workspace = loadWorkspaceFromRefForTest(project);
-    assert.equal(workspace.backend.kind, "pod");
-    assert.equal(workspace.backend.profile, "kata-qemu");
+    const vault = loadVaultFromRefForTest(project);
+    assert.equal(vault.backend.kind, "pod");
+    assert.equal(vault.backend.profile, "kata-qemu");
   } finally {
     cleanupDriverSelectionState(project);
   }
 });
 
-test("stored docker driver selection influences default workspace loading", () => {
+test("stored docker driver selection influences default vault loading", () => {
   const project = "demo";
-  writeWorkspaceDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
+  writeVaultDriverSelection(project, { backend: "docker" }, DEMO_USER_PROFILE_ID);
   try {
-    const workspace = loadWorkspaceFromRefForTest(project);
-    assert.equal(workspace.backend.kind, "docker");
+    const vault = loadVaultFromRefForTest(project);
+    assert.equal(vault.backend.kind, "docker");
   } finally {
     cleanupDriverSelectionState(project);
   }
@@ -2325,11 +2344,11 @@ test("stored docker driver selection influences default workspace loading", () =
 
 test("status command exposes evolution explainability details", async () => {
   const project = uniqueProjectName("explained-status");
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const evolutionDir = workspaceEvolutionStateDir(
-      workspace.identity.projectName,
-      workspace.userProfile.id,
+  await withTempVaultSpec(project, "docker", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const evolutionDir = vaultEvolutionStateDir(
+      vault.identity.projectName,
+      vault.userProfile.id,
     );
     const dbPath = path.join(evolutionDir, "store.db");
     try {
@@ -2337,10 +2356,10 @@ test("status command exposes evolution explainability details", async () => {
       const now = new Date().toISOString();
       try {
         store.upsertMemoryEntry({
-          id: "workspace-memory:Validation:run-verifier-first:test",
-          workspaceId: workspace.identity.projectName,
-          userProfileId: workspace.userProfile.id,
-          target: "workspace-memory",
+          id: "vault-memory:Validation:run-verifier-first:test",
+          vaultId: vault.identity.projectName,
+          userProfileId: vault.userProfile.id,
+          target: "vault-memory",
           section: "Validation",
           key: "run-verifier-first",
           title: "Explained lesson",
@@ -2352,7 +2371,7 @@ test("status command exposes evolution explainability details", async () => {
           updatedAt: now,
           metadata: {
             retrieval: {
-              reasons: ["workspace-memory", "matched tags: verifier"],
+              reasons: ["vault-memory", "matched tags: verifier"],
             },
             curator: {
               action: "promoted",
@@ -2395,7 +2414,7 @@ exit 0
           assert.ok(parsed.evolution?.latestArtifacts);
           assert.ok(parsed.evolution?.latestArtifacts?.some((item) => item.title === "Explained lesson"));
           const artifact = parsed.evolution?.latestArtifacts?.find((item) => item.title === "Explained lesson");
-          assert.deepEqual(artifact?.whyRetrieved, ["workspace-memory", "matched tags: verifier"]);
+          assert.deepEqual(artifact?.whyRetrieved, ["vault-memory", "matched tags: verifier"]);
           assert.equal(artifact?.curatorAction, "promoted");
           assert.equal(artifact?.whyExists, "Recovered from a successful validation workflow.");
         },
@@ -2408,7 +2427,7 @@ exit 0
 
 test("status reports managed-key ssh metadata for github account profiles", async () => {
   const project = uniqueProjectName("ssh-status");
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     const profilePath = path.join(USER_ROOT, "profiles", "ssh-status-test.yaml");
     fs.writeFileSync(
       profilePath,
@@ -2446,7 +2465,7 @@ test("status reports managed-key ssh metadata for github account profiles", asyn
       "utf8",
     );
     try {
-      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "ssh-status-test";
       delete doc.credentials;
@@ -2478,13 +2497,13 @@ test("status reports managed-key ssh metadata for github account profiles", asyn
 });
 
 test("pod render writes a TypeScript-generated manifest", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  const outputPath = renderAndWritePodWorkspace(workspace);
+  const vault = loadDefaultDemoVault();
+  const outputPath = renderAndWritePodVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
   assert.match(rendered, /Generated by polaris\.ts/);
   assert.match(rendered, /kind: Deployment/);
-  assert.match(rendered, /mountPath: \/workspace\/project/);
-  assert.match(rendered, /mountPath: \/workspace\/state/);
+  assert.match(rendered, /mountPath: \/vault\/project/);
+  assert.match(rendered, /mountPath: \/vault\/state/);
   assert.match(rendered, /mountPath: \/identity/);
   assert.doesNotMatch(rendered, /mountPath: \/ssh/);
   assert.match(rendered, /ln -sfn \/identity\/ssh \/root\/\.ssh/);
@@ -2492,60 +2511,60 @@ test("pod render writes a TypeScript-generated manifest", () => {
   assert.match(rendered, /ln -sfn \/identity\/copilot \/root\/\.copilot/);
   assert.match(rendered, /ln -sfn \/identity\/pi \/root\/\.pi/);
   assert.match(rendered, /ln -sfn \/identity\/opencode\/config \/root\/\.config\/opencode/);
-  assert.match(rendered, /ln -sfn \/workspace\/state\/paseo \/root\/\.paseo/);
+  assert.match(rendered, /ln -sfn \/vault\/state\/paseo \/root\/\.paseo/);
 });
 
-test("attachment model distinguishes durable workspace state from ephemeral runtime state", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.deepEqual(workspace.attachments.workspaceRuntimeState.durablePaths, [
-    "/workspace/state/paseo",
-    "/workspace/state/paseo/evolution",
+test("attachment model distinguishes durable vault state from ephemeral runtime state", () => {
+  const vault = loadDefaultDemoVault();
+  assert.deepEqual(vault.attachments.vaultRuntimeState.durablePaths, [
+    "/vault/state/paseo",
+    "/vault/state/paseo/evolution",
   ]);
-  assert.ok(workspace.attachments.ephemeralRuntime.staleArtifacts.includes("/run/workspace/pids/paseo.pid"));
-  assert.ok(workspace.runtimeContract.minimalInvariants.some((entry) => entry.includes("user-identity-state")));
+  assert.ok(vault.attachments.ephemeralRuntime.staleArtifacts.includes("/run/vault/pids/paseo.pid"));
+  assert.ok(vault.runtimeContract.minimalInvariants.some((entry) => entry.includes("user-identity-state")));
 });
 
-test("user identity attachments do not include workspace-scoped paseo state", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.equal(workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("paseo")), false);
-  assert.equal(workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes("paseo")), true);
+test("user identity attachments do not include vault-scoped paseo state", () => {
+  const vault = loadDefaultDemoVault();
+  assert.equal(vault.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("paseo")), false);
+  assert.equal(vault.attachments.vaultRuntimeState.durablePaths.some((entry) => entry.includes("paseo")), true);
 });
 
-test("attachment lifecycle semantics encode cross-workspace user state and exclusive workspace state", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.equal(workspace.attachments.workspaceData.sharing, "exclusive");
-  assert.equal(workspace.attachments.workspaceRuntimeState.sharing, "exclusive");
-  assert.equal(workspace.attachments.userIdentityState.sharing, "cross-workspace");
-  assert.equal(workspace.attachments.workspaceData.scope, "workspace");
-  assert.equal(workspace.attachments.userIdentityState.scope, "user");
+test("attachment lifecycle semantics encode cross-vault user state and exclusive vault state", () => {
+  const vault = loadDefaultDemoVault();
+  assert.equal(vault.attachments.vaultData.sharing, "exclusive");
+  assert.equal(vault.attachments.vaultRuntimeState.sharing, "exclusive");
+  assert.equal(vault.attachments.userIdentityState.sharing, "cross-vault");
+  assert.equal(vault.attachments.vaultData.scope, "vault");
+  assert.equal(vault.attachments.userIdentityState.scope, "user");
 });
 
 test("direct attachment config is present in migrated saved specs", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.equal(workspace.profile.name, "morpheus");
-  assert.equal(workspace.attachments.workspaceData.source.kind, "netfs");
-  assert.equal(workspace.attachments.workspaceRuntimeState.source.kind, "persistent-volume");
-  assert.equal(workspace.attachments.userIdentityState.mountRoot, "/identity");
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/copilot"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/config"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/opencode/data"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/pi/agent"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/config"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/data"));
-  assert.ok(workspace.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/state"));
+  const vault = loadDefaultDemoVault();
+  assert.equal(vault.profile.name, "morpheus");
+  assert.equal(vault.attachments.vaultData.source.kind, "netfs");
+  assert.equal(vault.attachments.vaultRuntimeState.source.kind, "persistent-volume");
+  assert.equal(vault.attachments.userIdentityState.mountRoot, "/identity");
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/ssh"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/copilot"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/opencode/config"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/opencode/data"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/pi/agent"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/config"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/data"));
+  assert.ok(vault.attachments.userIdentityState.durablePaths.includes("/identity/codex-xdg/state"));
 });
 
-test("profile defaults drive renderer behavior instead of workspace-name checks", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  assert.equal(workspace.profile.workspaceAlias, "Morpheus");
-  assert.equal(workspace.userProfile.ssh.comment, workspace.userProfile.email);
+test("profile defaults drive renderer behavior instead of vault-name checks", () => {
+  const vault = loadDefaultDemoVault();
+  assert.equal(vault.profile.vaultAlias, "Morpheus");
+  assert.equal(vault.userProfile.ssh.comment, vault.userProfile.email);
 });
 
-test("workspace compatibility path derives a legacy user profile from inline git identity", async () => {
+test("vault compatibility path derives a legacy user profile from inline git identity", async () => {
   const project = uniqueProjectName("compat-user");
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     delete doc.user_profile;
     delete doc.credentials;
@@ -2575,12 +2594,12 @@ test("workspace compatibility path derives a legacy user profile from inline git
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    assert.equal(workspace.userProfile.id, "legacy-legacy-example.com");
-    assert.equal(workspace.userProfile.name, "Legacy User");
-    assert.equal(workspace.userProfile.email, "legacy@example.com");
-    assert.equal(workspace.resolvedCredentialBindings[0]?.source, "compatibility");
-    assert.equal(workspace.resolvedCredentialBindings[0]?.purpose, "agent-auth");
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    assert.equal(vault.userProfile.id, "legacy-legacy-example.com");
+    assert.equal(vault.userProfile.name, "Legacy User");
+    assert.equal(vault.userProfile.email, "legacy@example.com");
+    assert.equal(vault.resolvedCredentialBindings[0]?.source, "compatibility");
+    assert.equal(vault.resolvedCredentialBindings[0]?.purpose, "agent-auth");
   });
 });
 
@@ -2590,7 +2609,7 @@ test("registry-backed credentials override legacy auth for the same purpose", as
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const secretsRoot = path.join(USER_ROOT, profileId);
   const registryDir = path.join(USER_ROOT, "credentials", profileId);
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(path.join(secretsRoot, "codex"), { recursive: true });
     fs.mkdirSync(path.join(secretsRoot, "claude"), { recursive: true });
@@ -2647,7 +2666,7 @@ test("registry-backed credentials override legacy auth for the same purpose", as
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -2661,10 +2680,10 @@ test("registry-backed credentials override legacy auth for the same purpose", as
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const codexAuth = workspace.runtime.authFiles.find((file) => file.key === "codex-auth.json");
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const codexAuth = vault.runtime.authFiles.find((file) => file.key === "codex-auth.json");
     assert.equal(codexAuth?.content, "{\"source\":\"registry\"}\n");
-    assert.equal(workspace.resolvedCredentialBindings[0]?.credential.id, "codex-default");
+    assert.equal(vault.resolvedCredentialBindings[0]?.credential.id, "codex-default");
   }).finally(() => {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(secretsRoot, { recursive: true, force: true });
@@ -2677,7 +2696,7 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
   const profileId = `${project}-user`;
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const registryDir = path.join(USER_ROOT, "credentials", profileId);
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(
@@ -2712,7 +2731,7 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -2727,7 +2746,7 @@ test("credential registry rejects cross-user ownership mismatches", async () => 
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
     assert.throws(
-      () => loadWorkspaceFromRefForTest(`${project}@docker`),
+      () => loadVaultFromRefForTest(`${project}@docker`),
       /must be owned by user/,
     );
   }).finally(() => {
@@ -2741,7 +2760,7 @@ test("credential registry rejects inline secret material", async () => {
   const profileId = `${project}-user`;
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const registryDir = path.join(USER_ROOT, "credentials", profileId);
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     fs.mkdirSync(path.dirname(profilePath), { recursive: true });
     fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(
@@ -2777,7 +2796,7 @@ test("credential registry rejects inline secret material", async () => {
       "utf8",
     );
 
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.user_profile = profileId;
     doc.credentials = {
@@ -2792,7 +2811,7 @@ test("credential registry rejects inline secret material", async () => {
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
     assert.throws(
-      () => loadWorkspaceFromRefForTest(`${project}@docker`),
+      () => loadVaultFromRefForTest(`${project}@docker`),
       /must externalize secret material/,
     );
   }).finally(() => {
@@ -2803,7 +2822,7 @@ test("credential registry rejects inline secret material", async () => {
 
 test("provided-key user profile requires staged SSH private-key material", async () => {
   const project = uniqueProjectName("provided-key");
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     const profilePath = path.join(USER_ROOT, "profiles", "provided-key-test.yaml");
     fs.writeFileSync(
       profilePath,
@@ -2819,7 +2838,7 @@ test("provided-key user profile requires staged SSH private-key material", async
       "utf8",
     );
     try {
-      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = "provided-key-test";
       delete doc.credentials;
@@ -2843,7 +2862,7 @@ test("provided-key user profile requires staged SSH private-key material", async
         ],
       };
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-      assert.throws(() => loadWorkspaceFromRefForTest(`${project}@docker`), /provided-key/);
+      assert.throws(() => loadVaultFromRefForTest(`${project}@docker`), /provided-key/);
     } finally {
       fs.rmSync(profilePath, { force: true });
     }
@@ -2852,7 +2871,7 @@ test("provided-key user profile requires staged SSH private-key material", async
 
 test("provided-key user profile requires matching public-key comment", async () => {
   const project = uniqueProjectName("provided-key-comment");
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     const profileId = "provided-key-comment-test";
     const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
     const userRoot = path.join(USER_ROOT, profileId);
@@ -2943,7 +2962,7 @@ test("provided-key user profile requires matching public-key comment", async () 
     fs.writeFileSync(publicKey, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey wrong@example.com\n", "utf8");
 
     try {
-      const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+      const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
       const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
       doc.user_profile = profileId;
       doc.credentials = {
@@ -2961,7 +2980,7 @@ test("provided-key user profile requires matching public-key comment", async () 
         ],
       };
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-      assert.throws(() => loadWorkspaceFromRefForTest(`${project}@docker`), /public-key comment 'expected@example.com'/);
+      assert.throws(() => loadVaultFromRefForTest(`${project}@docker`), /public-key comment 'expected@example.com'/);
     } finally {
       fs.rmSync(profilePath, { force: true });
       fs.rmSync(userRoot, { recursive: true, force: true });
@@ -2970,67 +2989,61 @@ test("provided-key user profile requires matching public-key comment", async () 
 });
 
 test("docker render keys user-scoped identity volumes by user profile id", () => {
-  const workspace = loadWorkspaceFromRefForTest("demo@docker");
-  const outputPath = renderAndWriteDockerWorkspace(workspace);
+  const vault = loadVaultFromRefForTest("demo@docker");
+  const outputPath = renderAndWriteDockerVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
-  const escapedId = workspace.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedId = vault.userProfile.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(rendered, new RegExp(`polaris-${escapedId}-identity`));
   assert.match(rendered, /external: true/);
   assert.doesNotMatch(rendered, /bootstrap-secrets/);
 });
 
 test("demo specs reuse the demo profile across docker, pod, and kubevirt backends", () => {
-  const dockerWorkspace = loadWorkspaceFromRefForTest("demo@docker");
-  const podWorkspace = loadWorkspaceFromRefForTest("demo@pod");
-  const kubevirtWorkspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
+  const dockerVault = loadVaultFromRefForTest("demo@docker");
+  const podVault = loadVaultFromRefForTest("demo@pod");
+  const kubevirtVault = loadVaultFromRefForTest("demo@kubevirt-vm");
 
-  for (const workspace of [dockerWorkspace, podWorkspace, kubevirtWorkspace]) {
-    assert.equal(workspace.identity.projectName, "demo");
-    assert.equal(workspace.userProfile.id, "100000000000000001");
-    assert.equal(workspace.userProfile.name, "Demo User");
-    assert.equal(workspace.userProfile.email, "demo@example.com");
-    assert.equal(workspace.runtime.gitUserName, "Demo User");
-    assert.equal(workspace.runtime.gitUserEmail, "demo@example.com");
+  for (const vault of [dockerVault, podVault, kubevirtVault]) {
+    assert.equal(vault.identity.projectName, "demo");
+    assert.equal(vault.userProfile.id, "100000000000000001");
+    assert.equal(vault.userProfile.name, "Demo User");
+    assert.equal(vault.userProfile.email, "demo@example.com");
+    assert.equal(vault.runtime.gitUserName, "Demo User");
+    assert.equal(vault.runtime.gitUserEmail, "demo@example.com");
   }
 
   assert.equal(
-    dockerWorkspace.attachments.workspaceData.source.volumeRef,
-    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data"),
+    dockerVault.attachments.vaultData.source.volumeRef,
+    vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vault-data"),
   );
-  assert.equal(dockerWorkspace.attachments.workspaceData.source.kind, "netfs");
-  assert.equal(podWorkspace.attachments.workspaceData.source.kind, "netfs");
-  assert.equal(kubevirtWorkspace.attachments.workspaceData.source.kind, "netfs");
+  assert.equal(dockerVault.attachments.vaultData.source.kind, "netfs");
+  assert.equal(podVault.attachments.vaultData.source.kind, "netfs");
+  assert.equal(kubevirtVault.attachments.vaultData.source.kind, "netfs");
   assert.equal(
-    podWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
-    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-runtime-state"),
+    podVault.attachments.vaultRuntimeState.source.volumeRef,
+    vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vault-runtime-state"),
   );
   assert.equal(
-    kubevirtWorkspace.attachments.workspaceRuntimeState.source.volumeRef,
-    workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-runtime-state"),
+    kubevirtVault.attachments.vaultRuntimeState.source.volumeRef,
+    vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vault-runtime-state"),
   );
 });
 
 test("docker render uses stable named volumes for reusable demo attachments", () => {
-  const workspace = loadWorkspaceFromRefForTest("demo@docker");
-  const outputPath = renderAndWriteDockerWorkspace(workspace);
+  const vault = loadVaultFromRefForTest("demo@docker");
+  const outputPath = renderAndWriteDockerVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
-  const expectedWorkspaceExport = path.join(
-    REPO_ROOT,
-    "config",
-    "exports",
-    "workspaces",
-    "demo",
-  ).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const expectedRuntimeVolumeName = `${workspaceRuntimeScopeName(
+  const expectedVaultExport = DEMO_VAULT_EXPORT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedRuntimeVolumeName = `${vaultRuntimeScopeName(
     DEMO_USER_PROFILE_ID,
     "demo",
-  )}-workspace-runtime-state`;
+  )}-vault-runtime-state`;
   const expectedRuntimeVolumePattern = expectedRuntimeVolumeName.replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&",
   );
 
-  assert.match(rendered, new RegExp(`source: "${expectedWorkspaceExport}"`));
+  assert.match(rendered, new RegExp(`source: "${expectedVaultExport}"`));
   assert.match(rendered, new RegExp(`source: ${expectedRuntimeVolumePattern}\\b`));
   assert.match(
     rendered,
@@ -3038,73 +3051,64 @@ test("docker render uses stable named volumes for reusable demo attachments", ()
   );
 });
 
-test("loadWorkspace rejects a netfs workspace-data attachment without a server", () => {
+test("loadVault rejects a netfs vault-data attachment without a server", () => {
   const project = uniqueProjectName("netfs-missing-server");
-  const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.copyFileSync(workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), outputPath);
+  fs.copyFileSync(vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID), outputPath);
 
   try {
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.project = project;
-    delete doc.attachments["workspace-data"].source.server;
+    delete doc.attachments["vault-data"].source.server;
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
     assert.throws(
-      () => loadWorkspaceFromRefForTest(`${project}@docker`),
-      /workspace-data netfs source requires a server/,
+      () => loadVaultFromRefForTest(`${project}@docker`),
+      /vault-data netfs source requires a server/,
     );
   } finally {
     fs.rmSync(outputPath, { force: true });
   }
 });
 
-test("pod render mounts demo workspace data through netfs", () => {
-  const workspace = loadWorkspaceFromRefForTest("demo@pod");
-  const outputPath = renderAndWritePodWorkspace(workspace);
+test("pod render mounts demo vault data through netfs", () => {
+  const vault = loadVaultFromRefForTest("demo@pod");
+  const outputPath = renderAndWritePodVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
-  const expectedWorkspaceExport = path.join(
-    REPO_ROOT,
-    "config",
-    "exports",
-    "workspaces",
-    "demo",
-  ).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedVaultExport = DEMO_VAULT_EXPORT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.doesNotThrow(() => yaml.loadAll(rendered));
 
-  assert.match(rendered, /- name: workspace-data\n        nfs:/);
+  assert.match(rendered, /- name: vault-data\n        nfs:/);
   assert.match(rendered, /server: netfs\.local/);
-  assert.match(rendered, new RegExp(`path: ${expectedWorkspaceExport}`));
+  assert.match(rendered, new RegExp(`path: ${expectedVaultExport}`));
 });
 
-test("kubevirt render bridges netfs workspace data through a PV and PVC", () => {
-  const workspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
-  const outputPath = renderAndWriteKubevirtWorkspace(workspace);
+test("kubevirt render bridges netfs vault data through a PV and PVC", () => {
+  const vault = loadVaultFromRefForTest("demo@kubevirt-vm");
+  const outputPath = renderAndWriteKubevirtVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
 
   assert.match(rendered, /kind: PersistentVolume/);
   assert.match(
     rendered,
-    new RegExp(`name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}-pv`),
+    new RegExp(`name: ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vault-data")}-pv`),
   );
   assert.match(rendered, /kind: PersistentVolumeClaim/);
   assert.match(
     rendered,
-    new RegExp(`name: ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "workspace-data")}`),
+    new RegExp(`name: ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vault-data")}`),
   );
   assert.match(rendered, /server: netfs\.local/);
   assert.match(
     rendered,
     new RegExp(
-      `path: ${path.join(REPO_ROOT, "config", "exports", "workspaces", "demo").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      `path: ${DEMO_VAULT_EXPORT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
     ),
   );
-  assert.match(rendered, new RegExp(`root:${kubevirtProbePassword(workspace)}`));
-  assert.match(rendered, /mount -t virtiofs workspace-runtime-state \/mnt\/polaris-shared\/workspace-runtime-state/);
+  assert.match(rendered, new RegExp(`password: ${kubevirtProbePassword(vault)}`));
+  assert.match(rendered, /mount -t virtiofs vault-runtime-state \/mnt\/polaris-shared\/vault-runtime-state/);
   assert.match(rendered, /polaris-sync-shared-state/);
-  assert.match(
-    rendered,
-    /rsync -rl --delete --no-owner --no-group --no-perms --omit-dir-times --no-times/,
-  );
+  assert.match(rendered, /run_rsync_with_mount_gid/);
   assert.doesNotMatch(rendered, /BEGIN OPENSSH PRIVATE KEY/);
   assert.doesNotMatch(rendered, /authorized_keys/);
   assert.doesNotMatch(rendered, /ssh-keygen -q -t ed25519/);
@@ -3112,8 +3116,8 @@ test("kubevirt render bridges netfs workspace data through a PV and PVC", () => 
 
 test("docker full bootstrap installs agent tooling on plain debian images", async () => {
   const project = uniqueProjectName("docker-full");
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
     doc.runtime = {
       ...(doc.runtime ?? {}),
@@ -3126,22 +3130,22 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
     };
     fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
     assert.match(
       rendered,
       /apt-get update && apt-get install -y openssh-client ca-certificates curl git nodejs npm procps python3 ripgrep neovim zsh tmux/,
     );
     assert.match(
       rendered,
-      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/workspace\/state\/tooling\/polaris @openai\/codex @anthropic-ai\/claude-code @github\/copilot opencode-ai @earendil-works\/pi-coding-agent @fission-ai\/openspec@latest pnpm skills/,
+      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/vault\/state\/tooling\/polaris @openai\/codex @anthropic-ai\/claude-code @github\/copilot opencode-ai @earendil-works\/pi-coding-agent @fission-ai\/openspec@latest pnpm skills/,
     );
     assert.match(
       rendered,
-      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/workspace\/state\/tooling\/polaris @getpaseo\/cli@latest/,
+      /npm_config_cache=\/tmp\/npm-cache npm install -g --prefix \/vault\/state\/tooling\/polaris @getpaseo\/cli@latest/,
     );
-    assert.match(rendered, /exec \/workspace\/state\/tooling\/polaris\/bin\/codex "\$\$@"/);
-    assert.match(rendered, /exec \/workspace\/state\/tooling\/polaris\/bin\/claude "\$\$@"/);
+    assert.match(rendered, /exec \/vault\/state\/tooling\/polaris\/bin\/codex "\$\$@"/);
+    assert.match(rendered, /exec \/vault\/state\/tooling\/polaris\/bin\/claude "\$\$@"/);
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
     assert.match(rendered, /paseo daemon status --json 2>\/dev\/null \|\| true/);
   });
@@ -3149,15 +3153,15 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 
 test("docker vertical bootstrap starts the Wanghai portal after Paseo", async () => {
   const project = uniqueProjectName("docker-vertical");
-  const outputPath = scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, {
+  const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
     line: "vertical",
   });
-  const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-  const renderedOutputPath = generatedOutputPath(workspace);
+  const vault = loadVaultFromRefForTest(`${project}@docker`);
+  const renderedOutputPath = generatedOutputPath(vault);
   try {
-    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
     assert.ok(
-      workspace.connectivity.servicePorts.some((port) => port.containerPort === "9090"),
+      vault.connectivity.servicePorts.some((port) => port.containerPort === "9090"),
     );
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
     assert.match(rendered, /curl -fsS http:\/\/127\.0\.0\.1:9090\/ >/);
@@ -3172,16 +3176,16 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
 });
 
 test("pod backend returns structured observations", async () => {
-  const workspace = loadDefaultDemoWorkspace();
+  const vault = loadDefaultDemoVault();
   const driver = getBackendDriver("pod");
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3204,18 +3208,18 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
 `,
     },
     async () => {
-      const observation = await driver.inspect(workspace);
+      const observation = await driver.inspect(vault);
       assert.equal(observation.backend.kind, "pod");
-      assert.ok("workspaceData" in observation.attachments);
-      assert.ok("projectRoot" in observation.workspaceAssembly);
+      assert.ok("vaultData" in observation.attachments);
+      assert.ok("projectRoot" in observation.vaultAssembly);
       assert.ok("manager" in observation.daemon);
     },
   );
@@ -3223,14 +3227,14 @@ exit 0
 
 test("runtime controller computes degraded status and reconcile plan from observations when daemon is missing", async () => {
   cleanupDriverSelectionState("demo");
-  const workspace = {
-    ...loadDefaultDemoWorkspace(),
+  const vault = {
+    ...loadDefaultDemoVault(),
     backend: {
       kind: "pod",
       profile: "gvisor",
     },
     agent: {
-      ...loadDefaultDemoWorkspace().agent,
+      ...loadDefaultDemoVault().agent,
       pairingFile: "/root/.paseo/pairing.json",
     },
   };
@@ -3239,11 +3243,11 @@ test("runtime controller computes degraded status and reconcile plan from observ
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3253,24 +3257,24 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
 `,
     },
     async () => {
-      const observation = await driver.inspect(workspace);
-      const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
-      const plan = buildReconcilePlan(workspace, drift);
+      const observation = await driver.inspect(vault);
+      const drift = computeVaultDrift(vault, observation);
+      const status = synthesizeVaultStatus(vault, observation, drift);
+      const plan = buildReconcilePlan(vault, drift);
 
       assert.equal(status.driver?.selected?.backend, "pod");
       assert.equal(status.driver?.status, "running");
       assert.equal(status.paseo.daemon, "unknown");
       assert.equal(status.paseo.web, "unavailable");
-      assert.match(status.driver?.reason || "", /workspace manager assembly missing|missing|service/i);
+      assert.match(status.driver?.reason || "", /vault manager assembly missing|missing|service/i);
       assert.ok(plan.actions.length >= 1);
       assert.ok(plan.actions.some((action) => action.kind === "restart-runtime"));
       assert.equal(plan.requiresRestart, true);
@@ -3286,11 +3290,11 @@ test("status includes the daemon pairing URL when the runtime exposes one", asyn
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3313,8 +3317,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -3334,27 +3338,27 @@ exit 0
 
 test("kubevirt status succeeds when runtime state exposes daemon pairing metadata", async () => {
   const project = uniqueProjectName("vm-pair-url");
-  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
+  await withTempVaultSpec(project, "kubevirt-vm", async () => {
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   exit 0
 fi
@@ -3369,7 +3373,7 @@ if [[ "$*" == *"guestReachable=1"* ]]; then
   printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_vmtest","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
   printf 'persistedServerId<<EOF\nsrv_vmtest\nEOF\n'
   printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bXRlc3QifQ"}\nEOF\n'
-  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  printf 'vaultDataObserved=1\nvaultRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 exit 1
@@ -3388,7 +3392,7 @@ exit 1
         paseo?: { daemon?: string; web?: string };
       }>(output);
       assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
-      assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
+      assert.equal(parsed.driver?.runtimeRef, `vm/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
       assert.equal(parsed.driver?.status, "running");
         assert.equal(parsed.paseo?.daemon, "pending");
         assert.equal(parsed.paseo?.web, "pairing-required");
@@ -3399,9 +3403,9 @@ exit 1
 
 test("kubevirt render reuses persisted daemon pairing metadata", async () => {
   const project = uniqueProjectName("vm-pair-bootstrap");
-  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
-    const rendered = renderKubevirtWorkspace(workspace);
+  await withTempVaultSpec(project, "kubevirt-vm", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@kubevirt-vm`);
+    const rendered = renderKubevirtVault(vault);
     assert.doesNotMatch(rendered, /paseo daemon pair --json/);
     assert.match(rendered, /test -f \/root\/\.paseo\/pairing\.json/);
   });
@@ -3410,16 +3414,16 @@ test("kubevirt render reuses persisted daemon pairing metadata", async () => {
 test("CLI status defaults to the status command and persists ready pod status", async () => {
   cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
-  const expectedStatusFile = workspaceStatusPath("demo", DEMO_USER_PROFILE_ID);
+  const expectedStatusFile = vaultStatusPath("demo", DEMO_USER_PROFILE_ID);
 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3442,8 +3446,8 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
 exit 0
@@ -3476,7 +3480,7 @@ exit 0
       assert.equal(parsed.driver?.selected?.profile, "gvisor");
       assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
-      assert.equal(parsed.driver?.baseImage, workspaceImageRef(DEMO_USER_PROFILE_ID, "demo"));
+      assert.equal(parsed.driver?.baseImage, vaultImageRef(DEMO_USER_PROFILE_ID, "demo"));
       assert.equal(parsed.driver?.status, "running");
       assert.equal(parsed.paseo.daemon, "pending");
       assert.equal(parsed.paseo.web, "pairing-required");
@@ -3489,13 +3493,13 @@ exit 0
 });
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
-  const base = loadDefaultDemoWorkspace();
-  const paseoStateRoot = workspacePaseoStateDir(
+  const base = loadDefaultDemoVault();
+  const paseoStateRoot = vaultPaseoStateDir(
     base.identity.projectName,
     base.userProfile.id,
   );
   fs.rmSync(paseoStateRoot, { recursive: true, force: true });
-  const workspace = {
+  const vault = {
     ...base,
     credentialBindings: base.credentialBindings.filter((binding) => binding.purpose !== "agent-auth"),
     resolvedCredentialBindings: base.resolvedCredentialBindings.filter((binding) => binding.purpose !== "agent-auth"),
@@ -3509,27 +3513,27 @@ test("status stays not-ready when no active codex credential is selected and per
   };
   const observation = {
     backend: {
-      kind: workspace.backend.kind,
+      kind: vault.backend.kind,
       exists: true,
       running: true,
       detail: "pod/pod-1",
     },
     attachments: {
-      workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
-      workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
-      userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+      vaultData: { observed: true, detail: vault.attachments.vaultData.mountRoot },
+      vaultRuntimeState: { observed: true, detail: vault.attachments.vaultRuntimeState.mountRoot },
+      userIdentityState: { observed: true, detail: vault.attachments.userIdentityState.mountRoot },
     },
-    workspaceAssembly: {
-      home: { observed: true, detail: workspace.runtime.home },
-      projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
-      managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
-      evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
-      codex: { observed: false, detail: `${workspace.runtime.home}/.codex` },
-      claude: { observed: false, detail: `${workspace.runtime.home}/.claude` },
-      ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+    vaultAssembly: {
+      home: { observed: true, detail: vault.runtime.home },
+      projectRoot: { observed: true, detail: `${vault.runtime.home}/vault` },
+      managerState: { observed: true, detail: vault.agent.runtime.stateRoot },
+      evolutionState: { observed: true, detail: vault.agent.runtime.evolutionRoot },
+      codex: { observed: false, detail: `${vault.runtime.home}/.codex` },
+      claude: { observed: false, detail: `${vault.runtime.home}/.claude` },
+      ssh: { observed: true, detail: `${vault.runtime.home}/.ssh` },
     },
     daemon: {
-      manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+      manager: { observed: true, detail: vault.agent.runtime.readyFile ?? "/tmp/.ready" },
       pairing: {
         observed: true,
         detail: "paseo daemon pair",
@@ -3543,8 +3547,8 @@ test("status stays not-ready when no active codex credential is selected and per
     },
   };
 
-  const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift);
+  const drift = computeVaultDrift(vault, observation);
+  const status = synthesizeVaultStatus(vault, observation, drift);
 
   assert.equal(drift.hasWarnings, true);
   assert.match(
@@ -3555,40 +3559,40 @@ test("status stays not-ready when no active codex credential is selected and per
   assert.equal(status.paseo.daemon, "unknown");
   assert.equal(status.paseo.web, "unavailable");
   assert.equal(status.credentials?.codex?.state, "not-selected");
-  assert.equal(status.workspaceAssembly?.codex?.state, "unknown");
+  assert.equal(status.vaultAssembly?.codex?.state, "unknown");
 });
 
 test("status is not ready until persisted Paseo metadata exists on the host state root", () => {
-  const workspace = loadDefaultDemoWorkspace();
-  const paseoStateRoot = workspacePaseoStateDir(
-    workspace.identity.projectName,
-    workspace.userProfile.id,
+  const vault = loadDefaultDemoVault();
+  const paseoStateRoot = vaultPaseoStateDir(
+    vault.identity.projectName,
+    vault.userProfile.id,
   );
   fs.rmSync(paseoStateRoot, { recursive: true, force: true });
 
   const observation = {
     backend: {
-      kind: workspace.backend.kind,
+      kind: vault.backend.kind,
       exists: true,
       running: true,
       detail: "pod/pod-1",
     },
     attachments: {
-      workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
-      workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
-      userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+      vaultData: { observed: true, detail: vault.attachments.vaultData.mountRoot },
+      vaultRuntimeState: { observed: true, detail: vault.attachments.vaultRuntimeState.mountRoot },
+      userIdentityState: { observed: true, detail: vault.attachments.userIdentityState.mountRoot },
     },
-    workspaceAssembly: {
-      home: { observed: true, detail: workspace.runtime.home },
-      projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
-      managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
-      evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
-      codex: { observed: true, detail: `${workspace.runtime.home}/.codex` },
-      claude: { observed: true, detail: `${workspace.runtime.home}/.claude` },
-      ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+    vaultAssembly: {
+      home: { observed: true, detail: vault.runtime.home },
+      projectRoot: { observed: true, detail: `${vault.runtime.home}/vault` },
+      managerState: { observed: true, detail: vault.agent.runtime.stateRoot },
+      evolutionState: { observed: true, detail: vault.agent.runtime.evolutionRoot },
+      codex: { observed: true, detail: `${vault.runtime.home}/.codex` },
+      claude: { observed: true, detail: `${vault.runtime.home}/.claude` },
+      ssh: { observed: true, detail: `${vault.runtime.home}/.ssh` },
     },
     daemon: {
-      manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+      manager: { observed: true, detail: vault.agent.runtime.readyFile ?? "/tmp/.ready" },
       pairing: {
         observed: true,
         detail: "paseo daemon pair",
@@ -3602,8 +3606,8 @@ test("status is not ready until persisted Paseo metadata exists on the host stat
     },
   };
 
-  const drift = computeWorkspaceDrift(workspace, observation);
-  const status = synthesizeWorkspaceStatus(workspace, observation, drift);
+  const drift = computeVaultDrift(vault, observation);
+  const status = synthesizeVaultStatus(vault, observation, drift);
 
   assert.equal(drift.hasWarnings, true);
   assert.match(
@@ -3625,7 +3629,7 @@ test("status exposes live credential selections per harness", async () => {
     "credentials",
   );
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     try {
       await runCli([
         "user",
@@ -3643,37 +3647,37 @@ test("status exposes live credential selections per harness", async () => {
         "--api-key",
         "claude-status-secret",
       ]);
-      writeWorkspaceLiveCredentialSelection(
+      writeVaultLiveCredentialSelection(
         project,
         "claude",
         "claude-status-live",
         DEMO_USER_PROFILE_ID,
       );
 
-      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+      const vault = loadVaultFromRefForTest(`${project}@docker`);
       const observation = {
         backend: {
-          kind: workspace.backend.kind,
+          kind: vault.backend.kind,
           exists: true,
           running: true,
           detail: "container/docker-status-live",
         },
         attachments: {
-          workspaceData: { observed: true, detail: workspace.attachments.workspaceData.mountRoot },
-          workspaceRuntimeState: { observed: true, detail: workspace.attachments.workspaceRuntimeState.mountRoot },
-          userIdentityState: { observed: true, detail: workspace.attachments.userIdentityState.mountRoot },
+          vaultData: { observed: true, detail: vault.attachments.vaultData.mountRoot },
+          vaultRuntimeState: { observed: true, detail: vault.attachments.vaultRuntimeState.mountRoot },
+          userIdentityState: { observed: true, detail: vault.attachments.userIdentityState.mountRoot },
         },
-        workspaceAssembly: {
-          home: { observed: true, detail: workspace.runtime.home },
-          projectRoot: { observed: true, detail: `${workspace.runtime.home}/workspace` },
-          managerState: { observed: true, detail: workspace.agent.runtime.stateRoot },
-          evolutionState: { observed: true, detail: workspace.agent.runtime.evolutionRoot },
-          codex: { observed: true, detail: `${workspace.runtime.home}/.codex` },
-          claude: { observed: true, detail: `${workspace.runtime.home}/.claude` },
-          ssh: { observed: true, detail: `${workspace.runtime.home}/.ssh` },
+        vaultAssembly: {
+          home: { observed: true, detail: vault.runtime.home },
+          projectRoot: { observed: true, detail: `${vault.runtime.home}/vault` },
+          managerState: { observed: true, detail: vault.agent.runtime.stateRoot },
+          evolutionState: { observed: true, detail: vault.agent.runtime.evolutionRoot },
+          codex: { observed: true, detail: `${vault.runtime.home}/.codex` },
+          claude: { observed: true, detail: `${vault.runtime.home}/.claude` },
+          ssh: { observed: true, detail: `${vault.runtime.home}/.ssh` },
         },
         daemon: {
-          manager: { observed: true, detail: workspace.agent.runtime.readyFile ?? "/tmp/.ready" },
+          manager: { observed: true, detail: vault.agent.runtime.readyFile ?? "/tmp/.ready" },
           pairing: {
             observed: true,
             detail: "paseo daemon pair",
@@ -3687,8 +3691,8 @@ test("status exposes live credential selections per harness", async () => {
         },
       };
 
-      const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
+      const drift = computeVaultDrift(vault, observation);
+      const status = synthesizeVaultStatus(vault, observation, drift);
       const switchableHarnesses = new Set(status.credentials?.live?.switchableHarnesses ?? []);
 
       assert.equal(status.credentials?.live?.selectedByHarness?.claude?.credentialId, "claude-status-live");
@@ -3762,17 +3766,17 @@ test("CLI docker lifecycle commands dispatch through compose and status artifact
   const project = uniqueProjectName("docker-lifecycle");
   const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
   const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-cli-lifecycle-"));
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const dockerPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const dockerPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
     const doc = (yaml.load(fs.readFileSync(dockerPath, "utf8")) ?? {}) as Record<string, any>;
-    doc.attachments["workspace-data"].source.export_path = exportRoot;
+    doc.attachments["vault-data"].source.export_path = exportRoot;
     fs.writeFileSync(dockerPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
     try {
       process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT = exportRoot;
       await withFakeCommands(
         {
         docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -3810,10 +3814,10 @@ exit 0
           });
 
           const commands = readCommandLog();
-          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d")));
-          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("stop")));
-          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("restart")));
-          assert.ok(commands.some((entry) => entry.includes(`/workspaces/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
+          assert.ok(commands.some((entry) => entry.includes(`/vaults/${project}/generated/docker.yaml`) && entry.includes("up -d")));
+          assert.ok(commands.some((entry) => entry.includes(`/vaults/${project}/generated/docker.yaml`) && entry.includes("stop")));
+          assert.ok(commands.some((entry) => entry.includes(`/vaults/${project}/generated/docker.yaml`) && entry.includes("restart")));
+          assert.ok(commands.some((entry) => entry.includes(`/vaults/${project}/generated/docker.yaml`) && entry.includes("up -d --force-recreate")));
 
           const parsed = parseJsonOutput<{ reconcilePlan: { actions: Array<{ kind: string }>; safe: boolean } }>(reconcileOutput);
           assert.ok(Array.isArray(parsed.reconcilePlan.actions));
@@ -3831,16 +3835,16 @@ exit 0
   });
 });
 
-test("switch migrates only small durable attachments when workspace-data is netfs", async () => {
+test("switch migrates only small durable attachments when vault-data is netfs", async () => {
   const project = uniqueProjectName("switch-netfs");
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
   cleanupDriverSelectionState(project);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const podPath = vaultConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
     try {
-      ensureWorkspaceConfig(`${project}@pod:gvisor`);
-      writeWorkspaceDriverSelection(
+      ensureVaultConfig(`${project}@pod:gvisor`);
+      writeVaultDriverSelection(
         project,
         { backend: "docker" },
         DEMO_USER_PROFILE_ID,
@@ -3853,7 +3857,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -3880,16 +3884,16 @@ exit 0
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
 if [[ "$*" == *"paseo daemon status --json"* ]]; then
@@ -3910,7 +3914,7 @@ fi
 if [[ "$*" == *"rollout restart"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
   exit 0
 fi
 exit 0
@@ -3922,12 +3926,12 @@ exit 0
           });
 
           const commands = readCommandLog();
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/vault/state/paseo/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/ssh/.")));
           assert.equal(
-            commands.some((entry) => entry.includes("/workspace/project/.")),
+            commands.some((entry) => entry.includes("/vault/project/.")),
             false,
           );
         },
@@ -3945,13 +3949,13 @@ test("switch exports durable state from the actually running backend when select
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
   cleanupDriverSelectionState(project);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
-    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const podPath = vaultConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+    const vmPath = vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
     try {
-      ensureWorkspaceConfig(`${project}@pod:gvisor`);
-      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
-      writeWorkspaceDriverSelection(
+      ensureVaultConfig(`${project}@pod:gvisor`);
+      ensureVaultConfig(`${project}@kubevirt-vm`);
+      writeVaultDriverSelection(
         project,
         { backend: "kubevirt-vm" },
         DEMO_USER_PROFILE_ID,
@@ -3964,7 +3968,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -3988,27 +3992,27 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Succeeded'
   exit 0
 fi
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '{"metadata":{"name":"${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
 if [[ "$*" == *"paseo daemon status --json"* ]]; then
@@ -4029,7 +4033,7 @@ fi
 if [[ "$*" == *"rollout restart"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"scale deployment ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
+if [[ "$*" == *"scale deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} --replicas=0"* ]]; then
   exit 0
 fi
 exit 0
@@ -4041,7 +4045,7 @@ exit 0
           });
 
           const commands = readCommandLog();
-          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/workspace/state/paseo/.")));
+          assert.ok(commands.some((entry) => entry.includes("cp docker-id:/vault/state/paseo/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/codex/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/claude/.")));
           assert.ok(commands.some((entry) => entry.includes("cp docker-id:/identity/ssh/.")));
@@ -4061,11 +4065,11 @@ test("switch imports runtime state into kubevirt before first boot without a res
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
   cleanupDriverSelectionState(project);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const vmPath = vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
     try {
-      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
-      writeWorkspaceDriverSelection(
+      ensureVaultConfig(`${project}@kubevirt-vm`);
+      writeVaultDriverSelection(
         project,
         { backend: "docker" },
         DEMO_USER_PROFILE_ID,
@@ -4078,7 +4082,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -4105,36 +4109,36 @@ exit 0
 if [[ "$*" == *"apply -f "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=condition=Ready pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
+if [[ "$*" == *"wait --for=condition=Ready pod/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
+if [[ "$*" == *"delete pod ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=delete pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
+if [[ "$*" == *"wait --for=delete pod/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   exit 0
 fi
-if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   exit 0
 fi
 if [[ "$1" == "-n" && ( "$3" == "exec" || "$3" == "cp" ) ]] || [[ "$1" == "exec" ]] || [[ "$1" == "cp" ]]; then
@@ -4148,7 +4152,7 @@ if [[ "$*" == *"guestReachable=1"* ]]; then
   printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_switch","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
   printf 'persistedServerId<<EOF\nsrv_switch\nEOF\n'
   printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9zd2l0Y2gifQ"}\nEOF\n'
-  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  printf 'vaultDataObserved=1\nvaultRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 if [[ "$*" == *"test -s "* && "$*" == *"server-id"* && "$*" == *"grep -q"* ]]; then
@@ -4172,25 +4176,25 @@ exit 1
           const commands = readCommandLog();
           const pvcImportCopyIndex = commands.findIndex((entry) =>
             entry.includes(`cp /tmp/`) === false
-              ? entry.includes(`cp`) && entry.includes(`${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}:/root/.paseo`)
+              ? entry.includes(`cp`) && entry.includes(`${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")}:/root/.paseo`)
               : false,
           );
           const generatedApplyIndex = commands.findIndex((entry) =>
-            entry.includes(`/workspaces/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
+            entry.includes(`/vaults/${project}/generated/kubevirt.yaml`) && entry.includes("apply -f"),
           );
           assert.equal(
-            commands.some((entry) => entry.includes(`patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`) && entry.includes(`"runStrategy":"Halted"`)),
+            commands.some((entry) => entry.includes(`patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`) && entry.includes(`"runStrategy":"Halted"`)),
             false,
           );
           assert.ok(
-            commands.some((entry) => entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp")),
+            commands.some((entry) => entry.includes(vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp")),
           );
           assert.ok(
-            commands.some((entry) => entry.includes(`delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")} --ignore-not-found --wait=false`)),
+            commands.some((entry) => entry.includes(`delete pod ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")} --ignore-not-found --wait=false`)),
           );
           assert.ok(generatedApplyIndex >= 0);
           const firstPvcImportCommand = commands.findIndex((entry) =>
-            entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp"),
+            entry.includes(vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-import")) && entry.includes("cp"),
           );
           assert.ok(firstPvcImportCommand >= 0);
           assert.ok(firstPvcImportCommand < generatedApplyIndex);
@@ -4210,11 +4214,11 @@ test("switch keeps the previous selection when the target backend start fails", 
   const dockerStateFile = path.join(os.tmpdir(), `${project}-docker.state`);
   cleanupDriverSelectionState(project);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const podPath = workspaceConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const podPath = vaultConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
     try {
-      ensureWorkspaceConfig(`${project}@pod`);
-      writeWorkspaceDriverSelection(
+      ensureVaultConfig(`${project}@pod`);
+      writeVaultDriverSelection(
         project,
         { backend: "docker" },
         DEMO_USER_PROFILE_ID,
@@ -4227,7 +4231,7 @@ state_file=${JSON.stringify(dockerStateFile)}
 if [[ ! -f "$state_file" ]]; then
   printf 'running\n' > "$state_file"
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   if [[ "$(cat "$state_file")" == "running" ]]; then
     printf 'docker-id'
   fi
@@ -4251,7 +4255,7 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-data-export")}"* ]]; then
+if [[ "$*" == *"get deployment ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vault-data-export")}"* ]]; then
   exit 1
 fi
 if [[ "$*" == *"apply -f "* ]]; then
@@ -4273,7 +4277,7 @@ exit 0
         },
       );
 
-      const statusPath = workspaceStatusPath(project, DEMO_USER_PROFILE_ID);
+      const statusPath = vaultStatusPath(project, DEMO_USER_PROFILE_ID);
       const parsed = JSON.parse(fs.readFileSync(statusPath, "utf8")) as {
         driver?: { selected?: { backend?: string; profile?: string } };
       };
@@ -4291,11 +4295,11 @@ test("switch exports from the selected kubevirt pvc even when the vm is already 
   const project = uniqueProjectName("switch-stopped-vm-source");
   cleanupDriverSelectionState(project);
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const vmPath = workspaceConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  await withTempVaultSpec(project, "docker", async () => {
+    const vmPath = vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
     try {
-      ensureWorkspaceConfig(`${project}@kubevirt-vm`);
-      writeWorkspaceDriverSelection(
+      ensureVaultConfig(`${project}@kubevirt-vm`);
+      writeVaultDriverSelection(
         project,
         { backend: "kubevirt-vm" },
         DEMO_USER_PROFILE_ID,
@@ -4307,7 +4311,7 @@ test("switch exports from the selected kubevirt pvc even when the vm is already 
 if [[ "$*" == *"compose"* && "$*" == *"up -d"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'docker-id'
   exit 0
 fi
@@ -4333,33 +4337,33 @@ fi
 exit 0
 `,
           kubectl: `
-if [[ "$*" == *"get deployment ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "workspace-data-export")}"* ]]; then
+if [[ "$*" == *"get deployment ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vault-data-export")}"* ]]; then
   exit 1
 fi
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf ''
   exit 0
 fi
 if [[ "$*" == *"apply -f "* && "$*" == *"pvc-export.yaml"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=condition=Ready pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
+if [[ "$*" == *"wait --for=condition=Ready pod/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
+if [[ "$*" == *"delete pod ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"wait --for=delete pod/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
+if [[ "$*" == *"wait --for=delete pod/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")}"* ]]; then
   exit 0
 fi
 if [[ "$1" == "-n" && "$3" == "cp" ]] || [[ "$1" == "cp" ]]; then
   exit 0
 fi
-if [[ "$*" == *"patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'unexpected stop' >&2
   exit 1
 fi
@@ -4373,7 +4377,7 @@ exit 0
 
           const commands = readCommandLog();
           const pvcExportIndex = commands.findIndex((entry) =>
-            entry.includes(workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")) && entry.includes(" cp "),
+            entry.includes(vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")) && entry.includes(" cp "),
           );
           const dockerUpIndex = commands.findIndex((entry) =>
             entry.includes("docker") && entry.includes("compose") && entry.includes("up -d"),
@@ -4383,10 +4387,10 @@ exit 0
           assert.ok(dockerUpIndex >= 0);
           assert.ok(pvcExportIndex < dockerUpIndex);
           assert.ok(
-            commands.some((entry) => entry.includes(`delete pod ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")} --ignore-not-found --wait=false`)),
+            commands.some((entry) => entry.includes(`delete pod ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "pvc-export")} --ignore-not-found --wait=false`)),
           );
           assert.equal(
-            commands.some((entry) => entry.includes(`patch vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)),
+            commands.some((entry) => entry.includes(`patch vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)),
             false,
           );
         },
@@ -4401,30 +4405,30 @@ exit 0
 test("kubevirt backend returns structured observations and current status semantics stay ready only when cloud-init is present", async () => {
   const project = uniqueProjectName("vm-status");
 
-  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-    const workspace = loadWorkspaceFromRefForTest(project);
+  await withTempVaultSpec(project, "kubevirt-vm", async () => {
+    const vault = loadVaultFromRefForTest(project);
     const driver = getBackendDriver("kubevirt-vm");
 
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   exit 0
 fi
@@ -4439,24 +4443,24 @@ if [[ "$*" == *"guestReachable=1"* ]]; then
   printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_ready","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
   printf 'persistedServerId<<EOF\nsrv_ready\nEOF\n'
   printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9yZWFkeSJ9"}\nEOF\n'
-  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  printf 'vaultDataObserved=1\nvaultRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 exit 1
 `,
       },
       async () => {
-        const observation = await driver.inspect(workspace);
+        const observation = await driver.inspect(vault);
         assert.equal(observation.backend.exists, true);
         assert.equal(observation.backend.running, true);
 
-        const drift = computeWorkspaceDrift(workspace, observation);
-        const status = synthesizeWorkspaceStatus(workspace, observation, drift);
+        const drift = computeVaultDrift(vault, observation);
+        const status = synthesizeVaultStatus(vault, observation, drift);
         assert.equal(status.driver?.selected?.backend, "kubevirt-vm");
         assert.equal(status.driver?.status, "running");
 
         const plan = { project, backend: "kubevirt-vm", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
-        await driver.executeReconcilePlan(workspace, plan as any);
+        await driver.executeReconcilePlan(vault, plan as any);
       },
     );
   });
@@ -4465,11 +4469,11 @@ exit 1
 test("CLI status and logs cover docker backend through fake docker compose", async () => {
   const project = uniqueProjectName("docker-status");
 
-  await withTempWorkspaceSpec(project, "docker", async () => {
+  await withTempVaultSpec(project, "docker", async () => {
     await withFakeCommands(
       {
         docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -4480,7 +4484,7 @@ fi
 if [[ "$1" == "exec" ]]; then
   exit 0
 fi
-if [[ "$*" == *"logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+if [[ "$*" == *"logs --tail 200 ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'docker logs'
   exit 0
 fi
@@ -4510,28 +4514,28 @@ exit 0
         }>(stdout);
 
         assert.equal(parsed.driver?.selected?.backend, "docker");
-        assert.equal(parsed.driver?.baseImage, loadWorkspaceFromRefForTest(`${project}@docker`).runtime.baseImage);
+        assert.equal(parsed.driver?.baseImage, loadVaultFromRefForTest(`${project}@docker`).runtime.baseImage);
         assert.equal(parsed.driver?.runtimeKind, "docker-container");
-        assert.equal(parsed.driver?.runtimeRef, `container/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
+        assert.equal(parsed.driver?.runtimeRef, `container/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`);
         assert.equal(parsed.driver?.status, "running");
-        assert.equal(parsed.assets.dockerfile.file, "workspace-prebuilt.Dockerfile");
+        assert.equal(parsed.assets.dockerfile.file, "vault-prebuilt.Dockerfile");
         assert.equal(
           parsed.assets.dockerfile.path,
-          repoRelative(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "docker", "workspace-prebuilt.Dockerfile")),
+          repoRelative(path.join(USER_ROOT, DEMO_USER_PROFILE_ID, "docker", "vault-prebuilt.Dockerfile")),
         );
         assert.deepEqual(parsed.assets.specs.map((item) => item.driver), ["docker", "pod", "kubevirt-vm"]);
         assert.deepEqual(parsed.assets.generatedManifests.map((item) => item.file), ["docker.yaml", "pod.yaml", "kubevirt.yaml"]);
-        assert.equal(parsed.assets.imageTags.find((item) => item.name === "workspace")?.tag, workspaceImageRef(DEMO_USER_PROFILE_ID, project));
-        assert.ok(parsed.assets.persistentVolumes.some((item) => item.name === "workspace-data" && item.mountRoot === "/workspace/project"));
+        assert.equal(parsed.assets.imageTags.find((item) => item.name === "vault")?.tag, vaultImageRef(DEMO_USER_PROFILE_ID, project));
+        assert.ok(parsed.assets.persistentVolumes.some((item) => item.name === "vault-data" && item.mountRoot === "/vault/project"));
         assert.deepEqual(
           parsed.assets.persistentVolumes.map((item) => item.name).sort(),
-          ["workspace-data", "workspace-runtime-state"],
+          ["vault-data", "vault-runtime-state"],
         );
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`compose`) && entry.includes(`ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
-        assert.ok(commands.some((entry) => entry.includes(`logs --tail 200 ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
+        assert.ok(commands.some((entry) => entry.includes(`compose`) && entry.includes(`ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
+        assert.ok(commands.some((entry) => entry.includes(`logs --tail 200 ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
       },
     );
   });
@@ -4540,31 +4544,31 @@ exit 0
 test("CLI status and logs cover kubevirt backend through fake kubectl", async () => {
   const project = uniqueProjectName("vm-cli");
 
-  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
+  await withTempVaultSpec(project, "kubevirt-vm", async () => {
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)} "* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   exit 0
 fi
-if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+if [[ "$1" == "-n" && "$3" == "get" && "$4" == "pod" && "$*" == *"vm.kubevirt.io/name=${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
   printf 'virt-launcher-0'
   exit 0
 fi
@@ -4580,7 +4584,7 @@ if [[ "$*" == *"guestReachable=1"* ]]; then
   printf 'daemonStatusRaw<<EOF\n{"serverId":"srv_vmcli","localDaemon":"running","connectedDaemon":"reachable"}\nEOF\n'
   printf 'persistedServerId<<EOF\nsrv_vmcli\nEOF\n'
   printf 'pairingRaw<<EOF\n{"url":"https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl92bWNsaSJ9"}\nEOF\n'
-  printf 'workspaceDataObserved=1\nworkspaceRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
+  printf 'vaultDataObserved=1\nvaultRuntimeObserved=1\nuserIdentityObserved=1\nuserSshObserved=1\nhomeObserved=1\nprojectRootObserved=1\nmanagerStateObserved=1\nevolutionStateObserved=1\ncodexObserved=1\nclaudeObserved=1\nsshObserved=1\n'
   exit 0
 fi
 exit 1
@@ -4604,13 +4608,13 @@ exit 1
 
         assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeKind, "kubevirt-vm");
-        assert.equal(parsed.driver?.runtimeRef, `vm/${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
+        assert.equal(parsed.driver?.runtimeRef, `vm/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
         assert.equal(parsed.driver?.status, "running");
         assert.ok(["pending", "ready"].includes(parsed.paseo.daemon));
 
         await runCli(["logs", project]);
         const commands = readCommandLog();
-        assert.ok(commands.some((entry) => entry.includes(`get pod -l vm.kubevirt.io/name=${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)));
+        assert.ok(commands.some((entry) => entry.includes(`get pod -l vm.kubevirt.io/name=${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)));
         assert.ok(commands.some((entry) => entry.includes("logs virt-launcher-0 --tail=200")));
       },
     );
@@ -4618,29 +4622,29 @@ exit 1
 });
 
 test("kubevirt lifecycle actions use kubectl virt and apply", async () => {
-  const workspace = loadWorkspaceFromRefForTest("demo@kubevirt-vm");
+  const vault = loadVaultFromRefForTest("demo@kubevirt-vm");
   const driver = getBackendDriver("kubevirt-vm");
 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get vm ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
+if [[ "$*" == *"get vm ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}'
   exit 0
 fi
-if [[ "$*" == *"get vmi ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm")}"* ]]; then
   printf 'Running'
   exit 0
 fi
-if [[ "$*" == *"get svc ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
   exit 0
 fi
-if [[ "$*" == *"get secret ${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
-  printf '${workspaceRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
+if [[ "$*" == *"get secret ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}"* ]]; then
+  printf '${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, "demo", "vm-cloudinit")}'
   exit 0
 fi
-if [[ "$*" == *"port-forward svc/${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* && "$*" == *":22"* ]]; then
+if [[ "$*" == *"port-forward svc/${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* && "$*" == *":22"* ]]; then
   printf 'Forwarding from 127.0.0.1:40022 -> 22\n'
   exit 0
 fi
@@ -4657,17 +4661,17 @@ exit 0
 `,
     },
     async () => {
-      await driver.apply(workspace);
-      await driver.start(workspace);
-      await driver.stop(workspace);
-      await driver.restart(workspace);
+      await driver.apply(vault);
+      await driver.start(vault);
+      await driver.stop(vault);
+      await driver.restart(vault);
     },
   );
 });
 
 test("docker backend returns structured observations and executes compose actions", async () => {
-  const base = loadDefaultDemoWorkspace();
-  const workspace = {
+  const base = loadDefaultDemoVault();
+  const vault = {
     ...base,
     backend: {
       ...base.backend,
@@ -4677,12 +4681,12 @@ test("docker backend returns structured observations and executes compose action
     },
     attachments: {
       ...base.attachments,
-      workspaceData: {
-        ...base.attachments.workspaceData,
+      vaultData: {
+        ...base.attachments.vaultData,
         source: {
           kind: "persistent-volume" as const,
-          volumeRef: "demo-workspace-data",
-          description: "test workspace data volume",
+          volumeRef: "demo-vault-data",
+          description: "test vault data volume",
         },
       },
     },
@@ -4692,7 +4696,7 @@ test("docker backend returns structured observations and executes compose action
   await withFakeCommands(
     {
       docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -4707,24 +4711,24 @@ exit 0
 `,
     },
     async () => {
-      const observation = await driver.inspect(workspace);
+      const observation = await driver.inspect(vault);
       assert.equal(observation.backend.exists, true);
       assert.equal(observation.backend.running, true);
-      const drift = computeWorkspaceDrift(workspace, observation);
-      const status = synthesizeWorkspaceStatus(workspace, observation, drift);
+      const drift = computeVaultDrift(vault, observation);
+      const status = synthesizeVaultStatus(vault, observation, drift);
       assert.equal(status.driver?.selected?.backend, "docker");
 
       const plan = { project: "demo", backend: "docker", safe: true, requiresRestart: false, destructive: false, actions: [{ kind: "render" }, { kind: "apply" }] as any[] };
-      await driver.executeReconcilePlan(workspace, plan as any);
+      await driver.executeReconcilePlan(vault, plan as any);
     },
   );
 });
 
 test("docker lifecycle actions execute through docker compose", async () => {
-  const base = loadDefaultDemoWorkspace();
+  const base = loadDefaultDemoVault();
   const previousExportRoot = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT;
   const exportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-docker-actions-"));
-  const workspace = {
+  const vault = {
     ...base,
     backend: {
       ...base.backend,
@@ -4734,20 +4738,20 @@ test("docker lifecycle actions execute through docker compose", async () => {
     },
     attachments: {
       ...base.attachments,
-      workspaceData: {
-        ...base.attachments.workspaceData,
+      vaultData: {
+        ...base.attachments.vaultData,
         source: {
-          ...base.attachments.workspaceData.source,
+          ...base.attachments.vaultData.source,
           exportPath: exportRoot,
         },
       },
     },
   };
   const driver = getBackendDriver("docker");
-  const dockerPath = workspaceConfigPath("demo", "docker", DEMO_USER_PROFILE_ID);
+  const dockerPath = vaultConfigPath("demo", "docker", DEMO_USER_PROFILE_ID);
   const originalDockerDoc = fs.readFileSync(dockerPath, "utf8");
   const dockerDoc = (yaml.load(originalDockerDoc) ?? {}) as Record<string, any>;
-  dockerDoc.attachments["workspace-data"].source.export_path = exportRoot;
+  dockerDoc.attachments["vault-data"].source.export_path = exportRoot;
   fs.writeFileSync(dockerPath, yaml.dump(dockerDoc, { lineWidth: 120, noRefs: true }), "utf8");
 
   try {
@@ -4755,7 +4759,7 @@ test("docker lifecycle actions execute through docker compose", async () => {
     await withFakeCommands(
       {
       docker: `
-if [[ "$*" == *"compose"* && "$*" == *"ps -q ${workspaceRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf 'abc123'
   exit 0
 fi
@@ -4782,12 +4786,12 @@ exit 0
 `,
       },
       async () => {
-        await driver.render(workspace);
-        await driver.apply(workspace);
-        await driver.start(workspace);
-        await driver.stop(workspace);
-        await driver.restart(workspace);
-        await driver.rebuild(workspace);
+        await driver.render(vault);
+        await driver.apply(vault);
+        await driver.start(vault);
+        await driver.stop(vault);
+        await driver.restart(vault);
+        await driver.rebuild(vault);
       },
     );
   } finally {
@@ -4802,8 +4806,8 @@ exit 0
 });
 
 test("docker lifecycle actions create missing user identity volume before compose", async () => {
-  const base = loadDefaultDemoWorkspace();
-  const workspace = {
+  const base = loadDefaultDemoVault();
+  const vault = {
     ...base,
     backend: {
       ...base.backend,
@@ -4813,12 +4817,12 @@ test("docker lifecycle actions create missing user identity volume before compos
     },
     attachments: {
       ...base.attachments,
-      workspaceData: {
-        ...base.attachments.workspaceData,
+      vaultData: {
+        ...base.attachments.vaultData,
         source: {
           kind: "persistent-volume" as const,
-          volumeRef: "demo-workspace-data",
-          description: "test workspace data volume",
+          volumeRef: "demo-vault-data",
+          description: "test vault data volume",
         },
       },
     },
@@ -4851,7 +4855,7 @@ exit 0
 `,
     },
     async ({ readCommandLog }) => {
-      await driver.start(workspace);
+      await driver.start(vault);
       const commands = readCommandLog();
       const inspectIndex = commands.findIndex((entry) =>
         entry === `volume inspect ${expectedIdentityVolume}`

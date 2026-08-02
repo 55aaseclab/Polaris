@@ -1,29 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkspaceSpec } from "../core/workspace.js";
+import type { VaultSpec } from "../core/vault.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 
-export function generatedOutputPath(workspace: WorkspaceSpec): string {
+export function generatedOutputPath(vault: VaultSpec): string {
   const backendFile =
-    workspace.backend.kind === "pod"
+    vault.backend.kind === "pod"
       ? "pod.yaml"
-      : workspace.backend.kind === "kubevirt-vm"
+      : vault.backend.kind === "kubevirt-vm"
         ? "kubevirt.yaml"
         : "docker.yaml";
   return path.join(
     USER_ROOT,
-    workspace.userProfile.id,
-    "workspaces",
-    workspace.identity.projectName,
+    vault.userProfile.id,
+    "vaults",
+    vault.identity.projectName,
     "generated",
     backendFile,
   );
 }
 
-export function writeGeneratedManifest(workspace: WorkspaceSpec, yamlText: string): string {
-  const outputPath = generatedOutputPath(workspace);
+export function writeGeneratedManifest(vault: VaultSpec, yamlText: string): string {
+  const outputPath = generatedOutputPath(vault);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, yamlText, "utf8");
   return outputPath;

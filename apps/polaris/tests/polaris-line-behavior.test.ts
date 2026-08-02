@@ -8,9 +8,9 @@ import {
   upsertUserMapEntries,
 } from "../scripts/portal/user-map.js";
 import {
-  scaffoldDockerWorkspace,
+  scaffoldDockerVault,
   scaffoldUserProfileById,
-  workspaceImageRef,
+  vaultImageRef,
 } from "../scripts/config/scaffold.js";
 import { ensureRequiredProfileCredentials } from "../scripts/config/credentials.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
@@ -42,7 +42,7 @@ test("user access summaries preserve both as an entitlement line", async () => {
   }
 });
 
-test("scaffoldDockerWorkspace ignores a retired user default docker base image", async () => {
+test("scaffoldDockerVault ignores a retired user default docker base image", async () => {
   const project = `retired-default-${process.pid}-${Date.now()}`;
   const user = scaffoldUserProfileById({
     id: `retired-default-user-${process.pid}-${Date.now()}`,
@@ -54,7 +54,7 @@ test("scaffoldDockerWorkspace ignores a retired user default docker base image",
   let outputPath = "";
   try {
     const profile = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
-    profile.workspace_defaults = {
+    profile.vault_defaults = {
       docker: {
         runtime: {
           base_image: "ttl.sh/retired-default:24h",
@@ -63,9 +63,9 @@ test("scaffoldDockerWorkspace ignores a retired user default docker base image",
     };
     fs.writeFileSync(profilePath, yaml.dump(profile, { lineWidth: 120, noRefs: true }), "utf8");
 
-    outputPath = scaffoldDockerWorkspace(project, user.id, { line: "coding" });
+    outputPath = scaffoldDockerVault(project, user.id, { line: "coding" });
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
-    assert.equal(doc.runtime?.base_image, workspaceImageRef(user.id, project));
+    assert.equal(doc.runtime?.base_image, vaultImageRef(user.id, project));
   } finally {
     if (outputPath) {
       fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });

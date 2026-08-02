@@ -1,15 +1,15 @@
-import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../core/workspace.js";
+import type { BackendObservation, ReconcilePlan, VaultSpec } from "../core/vault.js";
 
 export interface BackendDriver {
-  readonly kind: WorkspaceSpec["backend"]["kind"];
-  create(workspace: WorkspaceSpec): Promise<void>;
-  start(workspace: WorkspaceSpec): Promise<void>;
-  stop(workspace: WorkspaceSpec): Promise<void>;
-  restart(workspace: WorkspaceSpec): Promise<void>;
-  rebuild(workspace: WorkspaceSpec): Promise<void>;
-  render(workspace: WorkspaceSpec): Promise<void>;
-  apply(workspace: WorkspaceSpec): Promise<void>;
-  logs(workspace: WorkspaceSpec): Promise<void>;
-  inspect(workspace: WorkspaceSpec): Promise<BackendObservation>;
-  executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void>;
+  readonly kind: VaultSpec["backend"]["kind"];
+  create(vault: VaultSpec): Promise<void>;
+  start(vault: VaultSpec): Promise<void>;
+  stop(vault: VaultSpec): Promise<void>;
+  restart(vault: VaultSpec): Promise<void>;
+  rebuild(vault: VaultSpec): Promise<void>;
+  render(vault: VaultSpec): Promise<void>;
+  apply(vault: VaultSpec): Promise<void>;
+  logs(vault: VaultSpec): Promise<void>;
+  inspect(vault: VaultSpec): Promise<BackendObservation>;
+  executeReconcilePlan(vault: VaultSpec, plan: ReconcilePlan): Promise<void>;
 }

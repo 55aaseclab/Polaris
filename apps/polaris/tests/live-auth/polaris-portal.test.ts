@@ -14,14 +14,14 @@ import {
 } from "../../scripts/portal/user-map.js";
 import {
   listPortalAdminUsers,
-  queueProvisionWorkspace,
+  queueProvisionVault,
   createPortalCredential,
   deletePortalUser,
 } from "../../scripts/portal/service.js";
 import { createUserCommand } from "../../scripts/cli/commands/create-user.js";
 import {
-  writeWorkspaceProvisionProgress,
-  clearWorkspaceProvisionProgress,
+  writeVaultProvisionProgress,
+  clearVaultProvisionProgress,
 } from "../../scripts/core/portal.js";
 import { polarisUsersRoot } from "../../scripts/utils/paths.js";
 
@@ -253,16 +253,16 @@ async function withEnv(
   }
 }
 
-test("live auth portal API serves route-scoped workspaces and credentials for an authenticated scope", async () => {
+test("live auth portal API serves route-scoped vaults and credentials for an authenticated scope", async () => {
   const credentialId = uniqueName("portal-cred");
   const userId = DEMO_USER_ID;
 
   await withPortalServer(async (baseUrl) => {
-    const selfResponse = await fetch(`${baseUrl}/api/users/${userId}/workspaces`, {
+    const selfResponse = await fetch(`${baseUrl}/api/users/${userId}/vaults`, {
     });
     assert.equal(selfResponse.status, 200);
-    const selfPayload = await selfResponse.json() as { workspaces: Array<{ name: string }> };
-    assert.ok(selfPayload.workspaces.some((workspace) => workspace.name === "demo"));
+    const selfPayload = await selfResponse.json() as { vaults: Array<{ name: string }> };
+    assert.ok(selfPayload.vaults.some((vault) => vault.name === "demo"));
 
     const createResponse = await fetch(
       `${baseUrl}/api/users/${userId}/credentials`,
@@ -349,7 +349,7 @@ test("live auth portal API rejects cross-user access for a normal user session",
     await mapIdentityToPolarisUser(identity, { polarisUserId: firstUserId, role: "user", plan: "free" });
 
     await withPortalServerIdentity(identity, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/users/${secondUserId}/workspaces`, {
+      const response = await fetch(`${baseUrl}/api/users/${secondUserId}/vaults`, {
       });
       assert.equal(response.status, 403);
     });

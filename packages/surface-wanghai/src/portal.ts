@@ -1,12 +1,12 @@
 /**
  * Wanghai vertical surface helpers.
- * Portal **server** runs inside the workspace container on :9090.
+ * Portal **server** runs inside the vault container on :9090.
  * Outer UI only resolves the mapped URL and serves the embed route.
  */
 
 export const WANGHAI_PORTAL_CONTAINER_PORT = 9090;
 
-export interface WorkspaceServicePort {
+export interface VaultServicePort {
   name?: string;
   containerPort: string | number;
   /** Host / node port published by polaris docker/pod backend. */
@@ -17,13 +17,13 @@ export interface WorkspaceServicePort {
 export interface ResolveWanghaiPortalUrlInput {
   /** Hostname reachable from the browser (public IP or localhost). */
   publicHost: string;
-  ports: readonly WorkspaceServicePort[];
+  ports: readonly VaultServicePort[];
   protocol?: "http" | "https";
 }
 
 export function findWanghaiPortalPort(
-  ports: readonly WorkspaceServicePort[],
-): WorkspaceServicePort | null {
+  ports: readonly VaultServicePort[],
+): VaultServicePort | null {
   const byName = ports.find((port) => (port.name ?? "").toLowerCase() === "wanghai");
   if (byName) {
     return byName;

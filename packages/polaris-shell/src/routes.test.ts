@@ -3,7 +3,7 @@ import test from "node:test";
 import { codingEmbedPath, isShellPath, shellPath, wanghaiEmbedPath } from "./routes.js";
 import {
   productHasSurface,
-  resolveAllowedWorkspaceLines,
+  resolveAllowedVaultLines,
   resolveProductForUser,
 } from "./product.js";
 import { buildOpenCodingHref } from "./hosts.js";
@@ -16,7 +16,7 @@ test("shell paths cover auth user hosts only", () => {
   assert.equal(isShellPath("/hosts/demo"), true);
   assert.equal(isShellPath("/"), true);
   assert.equal(isShellPath("/h/srv_x"), false);
-  assert.equal(isShellPath("/h/srv_x/workspace/a"), false);
+  assert.equal(isShellPath("/h/srv_x/vault/a"), false);
   assert.equal(isShellPath("/settings/general"), false);
   assert.equal(isShellPath("/v/srv_1/coding"), true);
   assert.equal(isShellPath("/v/srv_1/wanghai"), true);
@@ -46,7 +46,7 @@ test("product line is coding|vertical|both; plan free|pro does not pick the line
   const fromSurfaces = resolveProductForUser({ surfaces: ["paseo", "wanghai"] });
   assert.equal(fromSurfaces.id, "polaris-vertical");
 
-  assert.deepEqual(resolveAllowedWorkspaceLines("both"), ["coding", "vertical"]);
+  assert.deepEqual(resolveAllowedVaultLines("both"), ["coding", "vertical"]);
   assert.equal(resolveProductForUser({ line: "both" }).id, "polaris-coding");
   assert.equal(
     resolveProductForUser({ line: "both", surfaces: ["paseo", "wanghai"] }).id,
