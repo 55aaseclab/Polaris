@@ -4,7 +4,7 @@ export {
   resolveWanghaiPortalUrl,
   planOpenWanghaiPortal,
   isWanghaiPortalEmbedPath,
-  type WorkspaceServicePort,
+  type VaultServicePort,
   type ResolveWanghaiPortalUrlInput,
   type WanghaiOpenPlan,
 } from "./portal.js";

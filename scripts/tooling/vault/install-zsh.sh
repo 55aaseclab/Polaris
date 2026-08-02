@@ -9,8 +9,8 @@ OH_MY_ZSH_DIR="${ZSH:-$HOME/.oh-my-zsh}"
 AUTOSUGGESTIONS_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-autosuggestions"
 SYNTAX_HIGHLIGHTING_DIR="$ZSH_CUSTOM_DIR/plugins/zsh-syntax-highlighting"
 SKIP_DEFAULT_SHELL_CHANGE="${SKIP_DEFAULT_SHELL_CHANGE:-0}"
-SOURCE_ZSHRC="${SOURCE_ZSHRC:-$REPO_ROOT/config/tooling/workspace/zsh/.zshrc}"
-SOURCE_ZSHENV="${SOURCE_ZSHENV:-$REPO_ROOT/config/tooling/workspace/zsh/.zshenv}"
+SOURCE_ZSHRC="${SOURCE_ZSHRC:-$REPO_ROOT/config/tooling/vault/zsh/.zshrc}"
+SOURCE_ZSHENV="${SOURCE_ZSHENV:-$REPO_ROOT/config/tooling/vault/zsh/.zshenv}"
 
 log() {
   printf '[%s] %s\n' "$SCRIPT_NAME" "$*"

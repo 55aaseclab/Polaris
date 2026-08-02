@@ -1,79 +1,79 @@
 import { spawnSync } from "node:child_process";
 import type { BackendDriver } from "../types.js";
-import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
-import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
+import type { BackendObservation, ReconcilePlan, VaultSpec } from "../../core/vault.js";
+import { vaultRuntimeScopeName } from "../../core/vault-name.js";
 import { runCommand } from "../../utils/shell.js";
-import { renderAndWritePodWorkspace } from "./render.js";
+import { renderAndWritePodVault } from "./render.js";
 
 export class PodDriver implements BackendDriver {
   readonly kind = "pod" as const;
 
-  async create(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWritePodWorkspace(workspace);
+  async create(vault: VaultSpec): Promise<void> {
+    renderAndWritePodVault(vault);
   }
 
-  async start(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWritePodWorkspace(workspace);
+  async start(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWritePodVault(vault);
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
-  async stop(workspace: WorkspaceSpec): Promise<void> {
-    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+  async stop(vault: VaultSpec): Promise<void> {
+    const scope = vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
     runCommand("kubectl", ["-n", scope, "scale", "deployment", scope, "--replicas=0"]);
   }
 
-  async restart(workspace: WorkspaceSpec): Promise<void> {
-    const scope = workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+  async restart(vault: VaultSpec): Promise<void> {
+    const scope = vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
     runCommand("kubectl", ["-n", scope, "rollout", "restart", "deployment", scope]);
   }
 
-  async rebuild(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWritePodWorkspace(workspace);
+  async rebuild(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWritePodVault(vault);
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
-  async render(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWritePodWorkspace(workspace);
+  async render(vault: VaultSpec): Promise<void> {
+    renderAndWritePodVault(vault);
   }
 
-  async apply(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWritePodWorkspace(workspace);
+  async apply(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWritePodVault(vault);
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
-  async logs(workspace: WorkspaceSpec): Promise<void> {
+  async logs(vault: VaultSpec): Promise<void> {
     const podNameResult = spawnSync(
       "kubectl",
-      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "pod", "-l", `app=${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "get", "pod", "-l", `app=${vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (podNameResult.stdout || "").trim();
     if (podName) {
-      runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "logs", podName, "--tail=200"]);
+      runCommand("kubectl", ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "logs", podName, "--tail=200"]);
       return;
     }
-    runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "logs", "deployment/" + workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "--tail=200"]);
+    runCommand("kubectl", ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "logs", "deployment/" + vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "--tail=200"]);
   }
 
-  async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
+  async inspect(vault: VaultSpec): Promise<BackendObservation> {
     const deployment = spawnSync(
       "kubectl",
-      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "-o", "json"],
+      ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "get", "deployment", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "-o", "json"],
       { encoding: "utf8" },
     );
     if (deployment.status !== 0 || !deployment.stdout) {
       return {
         backend: {
-          kind: workspace.backend.kind,
+          kind: vault.backend.kind,
           exists: false,
           running: false,
           detail: "deployment not found",
         },
         attachments: {},
-        workspaceAssembly: {},
+        vaultAssembly: {},
         daemon: {},
         services: {
-          declared: workspace.connectivity.servicePorts.length,
+          declared: vault.connectivity.servicePorts.length,
           observed: 0,
           detail: "no services observed",
         },
@@ -82,7 +82,7 @@ export class PodDriver implements BackendDriver {
 
     const podNameResult = spawnSync(
       "kubectl",
-      ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "pod", "-l", `app=${workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "get", "pod", "-l", `app=${vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (podNameResult.stdout || "").trim();
@@ -92,7 +92,7 @@ export class PodDriver implements BackendDriver {
       if (!podName) return false;
       const result = spawnSync(
         "kubectl",
-        ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
+        ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
         { encoding: "utf8" },
       );
       return result.status === 0;
@@ -101,80 +101,80 @@ export class PodDriver implements BackendDriver {
       if (!podName) return "";
       const result = spawnSync(
         "kubectl",
-        ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
+        ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "exec", podName, "--", "sh", "-lc", command],
         { encoding: "utf8" },
       );
       return result.status === 0 ? String(result.stdout || "") : "";
     };
 
-    const observedServices = workspace.connectivity.servicePorts.length
+    const observedServices = vault.connectivity.servicePorts.length
       ? spawnSync(
           "kubectl",
-          ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "get", "svc", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "-o", "jsonpath={.metadata.name}"],
+          ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "get", "svc", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "-o", "jsonpath={.metadata.name}"],
           { encoding: "utf8" },
         )
       : { status: 0, stdout: "", stderr: "" };
     const serviceCount = (observedServices.stdout || "").trim() ? 1 : 0;
 
     const githubAuthObserved =
-      running && workspace.userProfile.github.account
+      running && vault.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
 
     return {
       backend: {
-        kind: workspace.backend.kind,
+        kind: vault.backend.kind,
         exists: true,
         running,
         detail: podName ? `pod/${podName}` : "deployment exists but pod is not running",
       },
       attachments: running ? {
-        workspaceData: { observed: execCheck(`test -d ${workspace.attachments.workspaceData.mountRoot}`), detail: workspace.attachments.workspaceData.mountRoot },
-        workspaceRuntimeState: { observed: execCheck(`test -d ${workspace.attachments.workspaceRuntimeState.mountRoot}`), detail: workspace.attachments.workspaceRuntimeState.mountRoot },
-        userIdentityState: { observed: execCheck(`test -d ${workspace.attachments.userIdentityState.mountRoot}`), detail: workspace.attachments.userIdentityState.mountRoot },
+        vaultData: { observed: execCheck(`test -d ${vault.attachments.vaultData.mountRoot}`), detail: vault.attachments.vaultData.mountRoot },
+        vaultRuntimeState: { observed: execCheck(`test -d ${vault.attachments.vaultRuntimeState.mountRoot}`), detail: vault.attachments.vaultRuntimeState.mountRoot },
+        userIdentityState: { observed: execCheck(`test -d ${vault.attachments.userIdentityState.mountRoot}`), detail: vault.attachments.userIdentityState.mountRoot },
       } : {},
-      workspaceAssembly: running ? {
-        home: { observed: execCheck(`test -d ${workspace.runtime.home}`), detail: workspace.runtime.home },
-        projectRoot: { observed: execCheck(`test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}`), detail: `${workspace.runtime.home}/workspace` },
-        managerState: { observed: execCheck(`test -L ${workspace.runtime.home}/.paseo`), detail: workspace.agent.runtime.stateRoot },
-        evolutionState: { observed: execCheck(`test -d ${workspace.agent.runtime.evolutionRoot}`), detail: workspace.agent.runtime.evolutionRoot },
-        codex: { observed: execCheck(`test -L ${workspace.runtime.home}/.codex`), detail: `${workspace.runtime.home}/.codex` },
-        claude: { observed: execCheck(`test -L ${workspace.runtime.home}/.claude`), detail: `${workspace.runtime.home}/.claude` },
-        ssh: { observed: execCheck(`test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh`), detail: `${workspace.runtime.home}/.ssh` },
-        githubAuth: workspace.userProfile.github.account
-          ? { observed: githubAuthObserved, detail: workspace.userProfile.github.account }
+      vaultAssembly: running ? {
+        home: { observed: execCheck(`test -d ${vault.runtime.home}`), detail: vault.runtime.home },
+        projectRoot: { observed: execCheck(`test -L ${vault.runtime.home}/vault || test -L ${vault.runtime.home}/${vault.profile.vaultAlias ?? "vault"}`), detail: `${vault.runtime.home}/vault` },
+        managerState: { observed: execCheck(`test -L ${vault.runtime.home}/.paseo`), detail: vault.agent.runtime.stateRoot },
+        evolutionState: { observed: execCheck(`test -d ${vault.agent.runtime.evolutionRoot}`), detail: vault.agent.runtime.evolutionRoot },
+        codex: { observed: execCheck(`test -L ${vault.runtime.home}/.codex`), detail: `${vault.runtime.home}/.codex` },
+        claude: { observed: execCheck(`test -L ${vault.runtime.home}/.claude`), detail: `${vault.runtime.home}/.claude` },
+        ssh: { observed: execCheck(`test -L ${vault.runtime.home}/.ssh || test -d ${vault.runtime.home}/.ssh`), detail: `${vault.runtime.home}/.ssh` },
+        githubAuth: vault.userProfile.github.account
+          ? { observed: githubAuthObserved, detail: vault.userProfile.github.account }
           : undefined,
       } : {},
       daemon: {},
       services: {
-        declared: workspace.connectivity.servicePorts.length ? 1 : 0,
+        declared: vault.connectivity.servicePorts.length ? 1 : 0,
         observed: serviceCount,
         detail: `observed ${serviceCount} service objects`,
       },
     };
   }
 
-  async executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void> {
+  async executeReconcilePlan(vault: VaultSpec, plan: ReconcilePlan): Promise<void> {
     for (const action of plan.actions) {
       if (action.kind === "render") {
-        renderAndWritePodWorkspace(workspace);
+        renderAndWritePodVault(vault);
         continue;
       }
       if (action.kind === "apply") {
-        const outputPath = renderAndWritePodWorkspace(workspace);
+        const outputPath = renderAndWritePodVault(vault);
         runCommand("kubectl", ["apply", "-f", outputPath]);
         continue;
       }
       if (action.kind === "restart-runtime") {
-        runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "rollout", "restart", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
+        runCommand("kubectl", ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "rollout", "restart", "deployment", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)]);
         continue;
       }
       if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
-        runCommand("kubectl", ["-n", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName), "rollout", "restart", "deployment", workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName)]);
+        runCommand("kubectl", ["-n", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName), "rollout", "restart", "deployment", vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName)]);
         continue;
       }
       if (action.kind === "report-unrecoverable-drift") {
-        throw new Error(action.reason || "pod backend cannot repair workspace drift");
+        throw new Error(action.reason || "pod backend cannot repair vault drift");
       }
     }
   }

@@ -3,16 +3,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
 import {
-  scaffoldDockerWorkspace,
-  verticalWorkspaceBaseImage,
-  workspaceConfigPath,
+  scaffoldDockerVault,
+  verticalVaultBaseImage,
+  vaultConfigPath,
 } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
-import { renderAndWriteDockerWorkspace } from "../scripts/backends/docker/render.js";
-import { renderAndWritePodWorkspace } from "../scripts/backends/pod/render.js";
-import { renderKubevirtWorkspace } from "../scripts/backends/kubevirt/render.js";
+import { renderAndWriteDockerVault } from "../scripts/backends/docker/render.js";
+import { renderAndWritePodVault } from "../scripts/backends/pod/render.js";
+import { renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
 import {
   applyPairingUrlScope,
   extractOfferFragment,
@@ -22,9 +22,9 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const DEMO_USER_PROFILE_ID = "100000000000000001";
 
-function loadWorkspaceFromRefForTest(projectRef: string) {
-  const resolved = resolveWorkspaceConfigPath(projectRef);
-  return loadWorkspaceFromConfigPath(
+function loadVaultFromRefForTest(projectRef: string) {
+  const resolved = resolveVaultConfigPath(projectRef);
+  return loadVaultFromConfigPath(
     resolved.configPath,
     resolved.project,
     resolved.backendHint,
@@ -32,15 +32,15 @@ function loadWorkspaceFromRefForTest(projectRef: string) {
   );
 }
 
-async function withTempWorkspaceSpec(
+async function withTempVaultSpec(
   project: string,
   backendKind: "docker" | "pod" | "kubevirt-vm",
   fn: () => Promise<void> | void,
 ): Promise<void> {
-  const outputPath = workspaceConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
+  const outputPath = vaultConfigPath(project, backendKind, DEMO_USER_PROFILE_ID);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const sourcePath = workspaceConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
+  const sourcePath = vaultConfigPath("demo", backendKind, DEMO_USER_PROFILE_ID);
   const doc = (yaml.load(fs.readFileSync(sourcePath, "utf8")) ?? {}) as Record<string, unknown>;
   doc.project = project;
   doc.backend = {
@@ -49,7 +49,7 @@ async function withTempWorkspaceSpec(
   };
 
   fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
-  const generatedPath = generatedOutputPath(loadWorkspaceFromRefForTest(`${project}@${backendKind}`));
+  const generatedPath = generatedOutputPath(loadVaultFromRefForTest(`${project}@${backendKind}`));
   try {
     await fn();
   } finally {
@@ -71,7 +71,7 @@ test("normalizePairingUrl rewrites the offer onto the configured Paseo app base 
 
 test("vertical docker scaffold selects the Wanghai image, surfaces, and dual ports", () => {
   const project = `vertical-scaffold-${process.pid}-${Date.now()}`;
-  const outputPath = scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, {
+  const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
     line: "vertical",
   });
   try {
@@ -86,7 +86,7 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
       };
     };
 
-    assert.equal(doc.runtime?.base_image, verticalWorkspaceBaseImage());
+    assert.equal(doc.runtime?.base_image, verticalVaultBaseImage());
     assert.deepEqual(doc.surfaces, ["paseo", "wanghai"]);
     assert.deepEqual(
       (doc.service?.ports ?? []).map((entry) => ({
@@ -129,9 +129,9 @@ test("docker render persists the configured Paseo app base URL into the runtime 
   process.env.POLARIS_PASEO_APP_BASE_URL = "http://portal.example.test:8082";
   const project = `pairing-docker-${process.pid}-${Date.now()}`;
   try {
-    await withTempWorkspaceSpec(project, "docker", async () => {
-      const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-      const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    await withTempVaultSpec(project, "docker", async () => {
+      const vault = loadVaultFromRefForTest(`${project}@docker`);
+      const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
       assert.match(rendered, /baseUrl\\"\] = \\"http:\/\/portal\.example\.test:8082\\"/);
     });
   } finally {
@@ -145,9 +145,9 @@ test("docker render persists the configured Paseo app base URL into the runtime 
 
 test("docker render disables default Paseo voice features in the runtime config bootstrap", async () => {
   const project = `pairing-docker-voice-${process.pid}-${Date.now()}`;
-  await withTempWorkspaceSpec(project, "docker", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
-    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+  await withTempVaultSpec(project, "docker", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
     assert.ok(
       rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
     );
@@ -162,9 +162,9 @@ test("pod render persists the configured Paseo app base URL into the runtime con
   process.env.POLARIS_PASEO_APP_BASE_URL = "http://portal.example.test:8082";
   const project = `pairing-pod-${process.pid}-${Date.now()}`;
   try {
-    await withTempWorkspaceSpec(project, "pod", async () => {
-      const workspace = loadWorkspaceFromRefForTest(`${project}@pod`);
-      const rendered = fs.readFileSync(renderAndWritePodWorkspace(workspace), "utf8");
+    await withTempVaultSpec(project, "pod", async () => {
+      const vault = loadVaultFromRefForTest(`${project}@pod`);
+      const rendered = fs.readFileSync(renderAndWritePodVault(vault), "utf8");
       assert.match(rendered, /baseUrl\\"\] = \\"http:\/\/portal\.example\.test:8082\\"/);
     });
   } finally {
@@ -178,9 +178,9 @@ test("pod render persists the configured Paseo app base URL into the runtime con
 
 test("pod render disables default Paseo voice features in the runtime config bootstrap", async () => {
   const project = `pairing-pod-voice-${process.pid}-${Date.now()}`;
-  await withTempWorkspaceSpec(project, "pod", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@pod`);
-    const rendered = fs.readFileSync(renderAndWritePodWorkspace(workspace), "utf8");
+  await withTempVaultSpec(project, "pod", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@pod`);
+    const rendered = fs.readFileSync(renderAndWritePodVault(vault), "utf8");
     assert.ok(
       rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
     );
@@ -195,9 +195,9 @@ test("kubevirt render persists the configured Paseo app base URL into cloud-init
   process.env.POLARIS_PASEO_APP_BASE_URL = "http://portal.example.test:8082";
   const project = `pairing-vm-${process.pid}-${Date.now()}`;
   try {
-    await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-      const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
-      const rendered = renderKubevirtWorkspace(workspace);
+    await withTempVaultSpec(project, "kubevirt-vm", async () => {
+      const vault = loadVaultFromRefForTest(`${project}@kubevirt-vm`);
+      const rendered = renderKubevirtVault(vault);
       assert.match(rendered, /data\.setdefault\("app", \{\}\)\["baseUrl"\] = "http:\/\/portal\.example\.test:8082";/);
     });
   } finally {
@@ -211,9 +211,9 @@ test("kubevirt render persists the configured Paseo app base URL into cloud-init
 
 test("kubevirt render disables default Paseo voice features in cloud-init bootstrap", async () => {
   const project = `pairing-vm-voice-${process.pid}-${Date.now()}`;
-  await withTempWorkspaceSpec(project, "kubevirt-vm", async () => {
-    const workspace = loadWorkspaceFromRefForTest(`${project}@kubevirt-vm`);
-    const rendered = renderKubevirtWorkspace(workspace);
+  await withTempVaultSpec(project, "kubevirt-vm", async () => {
+    const vault = loadVaultFromRefForTest(`${project}@kubevirt-vm`);
+    const rendered = renderKubevirtVault(vault);
     assert.ok(
       rendered.includes('data.setdefault(\\"features\\", {}).setdefault(\\"dictation\\", {})[\\"enabled\\"] = False'),
     );

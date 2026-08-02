@@ -41,9 +41,9 @@ spec:
               ports:
 __INTERFACE_PORTS__
           filesystems:
-            - name: workspace-data
+            - name: vault-data
               virtiofs: {}
-            - name: workspace-runtime-state
+            - name: vault-runtime-state
               virtiofs: {}
             - name: user-identity-state
               virtiofs: {}
@@ -58,12 +58,12 @@ __INTERFACE_PORTS__
         - name: rootdisk
           containerDisk:
             image: __ROOTDISK_IMAGE__
-        - name: workspace-data
+        - name: vault-data
           persistentVolumeClaim:
-            claimName: __WORKSPACE_DATA_VOLUME__
-        - name: workspace-runtime-state
+            claimName: __VAULT_DATA_VOLUME__
+        - name: vault-runtime-state
           persistentVolumeClaim:
-            claimName: __WORKSPACE_RUNTIME_STATE_VOLUME__
+            claimName: __VAULT_RUNTIME_STATE_VOLUME__
         - name: user-identity-state
           persistentVolumeClaim:
             claimName: __USER_IDENTITY_STATE_VOLUME__

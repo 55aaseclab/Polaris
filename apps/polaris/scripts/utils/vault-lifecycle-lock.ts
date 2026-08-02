@@ -3,64 +3,64 @@ import path from "node:path";
 import { polarisUsersRoot } from "./paths.js";
 import { withUserMutationLock } from "./user-mutation-lock.js";
 
-const DEFAULT_WORKSPACE_LIFECYCLE_LOCK_TTL_MS = 30_000;
-const DEFAULT_WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_BUFFER_MS = 5_000;
+const DEFAULT_VAULT_LIFECYCLE_LOCK_TTL_MS = 30_000;
+const DEFAULT_VAULT_LIFECYCLE_LOCK_TIMEOUT_BUFFER_MS = 5_000;
 
-function workspaceLifecycleLocksRoot(importMetaUrl: string): string {
+function vaultLifecycleLocksRoot(importMetaUrl: string): string {
   return path.join(
     polarisUsersRoot(importMetaUrl),
     ".locks",
-    "workspace-lifecycle",
+    "vault-lifecycle",
   );
 }
 
-function workspaceLifecycleLockTtlMs(): number {
+function vaultLifecycleLockTtlMs(): number {
   const configured = Number(
-    process.env.POLARIS_WORKSPACE_LIFECYCLE_LOCK_TTL_MS ?? "",
+    process.env.POLARIS_VAULT_LIFECYCLE_LOCK_TTL_MS ?? "",
   );
   if (Number.isFinite(configured) && configured >= 100) {
     return Math.floor(configured);
   }
-  return DEFAULT_WORKSPACE_LIFECYCLE_LOCK_TTL_MS;
+  return DEFAULT_VAULT_LIFECYCLE_LOCK_TTL_MS;
 }
 
-function workspaceLifecycleLockTimeoutMs(): number {
+function vaultLifecycleLockTimeoutMs(): number {
   return (
-    workspaceLifecycleLockTtlMs() +
-    DEFAULT_WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_BUFFER_MS
+    vaultLifecycleLockTtlMs() +
+    DEFAULT_VAULT_LIFECYCLE_LOCK_TIMEOUT_BUFFER_MS
   );
 }
 
-function normalizeWorkspaceLockSegment(value: string): string {
+function normalizeVaultLockSegment(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
-    throw new Error("workspace is required for the Polaris workspace lifecycle lock");
+    throw new Error("vault is required for the Polaris vault lifecycle lock");
   }
   return trimmed.replace(/[^a-zA-Z0-9_.-]+/g, "-");
 }
 
-function workspaceLifecycleLockName(userId: string, workspace: string): string {
-  return `${userId.trim()}--${normalizeWorkspaceLockSegment(workspace)}`;
+function vaultLifecycleLockName(userId: string, vault: string): string {
+  return `${userId.trim()}--${normalizeVaultLockSegment(vault)}`;
 }
 
-function workspaceLifecycleLockPath(
+function vaultLifecycleLockPath(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
 ): string {
   return path.join(
-    workspaceLifecycleLocksRoot(importMetaUrl),
-    `${workspaceLifecycleLockName(userId, workspace)}.lock`,
+    vaultLifecycleLocksRoot(importMetaUrl),
+    `${vaultLifecycleLockName(userId, vault)}.lock`,
   );
 }
 
-function workspaceLifecycleHeartbeatPath(
+function vaultLifecycleHeartbeatPath(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
 ): string {
   return path.join(
-    workspaceLifecycleLockPath(importMetaUrl, userId, workspace),
+    vaultLifecycleLockPath(importMetaUrl, userId, vault),
     "heartbeat",
   );
 }
@@ -72,12 +72,12 @@ function sleepMs(ms: number): Promise<void> {
 async function touchHeartbeat(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const heartbeatPath = workspaceLifecycleHeartbeatPath(
+  const heartbeatPath = vaultLifecycleHeartbeatPath(
     importMetaUrl,
     userId,
-    workspace,
+    vault,
   );
   const now = new Date();
   try {
@@ -94,14 +94,14 @@ async function touchHeartbeat(
 function startHeartbeat(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
 ): NodeJS.Timeout {
   const intervalMs = Math.max(
     100,
-    Math.min(1_000, Math.floor(workspaceLifecycleLockTtlMs() / 4)),
+    Math.min(1_000, Math.floor(vaultLifecycleLockTtlMs() / 4)),
   );
   const timer = setInterval(() => {
-    void touchHeartbeat(importMetaUrl, userId, workspace).catch(() => {
+    void touchHeartbeat(importMetaUrl, userId, vault).catch(() => {
       // Ignore release races while the lock is being removed.
     });
   }, intervalMs);
@@ -112,14 +112,14 @@ function startHeartbeat(
 async function tryClearStaleLock(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<boolean> {
-  const heartbeatPath = workspaceLifecycleHeartbeatPath(
+  const heartbeatPath = vaultLifecycleHeartbeatPath(
     importMetaUrl,
     userId,
-    workspace,
+    vault,
   );
-  const lockPath = workspaceLifecycleLockPath(importMetaUrl, userId, workspace);
+  const lockPath = vaultLifecycleLockPath(importMetaUrl, userId, vault);
   try {
     const stats = await fs.promises.stat(heartbeatPath).catch(async (error) => {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
@@ -127,7 +127,7 @@ async function tryClearStaleLock(
       }
       throw error;
     });
-    if (Date.now() - stats.mtimeMs < workspaceLifecycleLockTtlMs()) {
+    if (Date.now() - stats.mtimeMs < vaultLifecycleLockTtlMs()) {
       return false;
     }
   } catch (error) {
@@ -140,32 +140,32 @@ async function tryClearStaleLock(
   return true;
 }
 
-export async function withWorkspaceLifecycleLock<T>(
+export async function withVaultLifecycleLock<T>(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
   fn: () => Promise<T>,
 ): Promise<T> {
   const normalizedUserId = userId.trim();
   if (!normalizedUserId) {
-    throw new Error("userId is required for the Polaris workspace lifecycle lock");
+    throw new Error("userId is required for the Polaris vault lifecycle lock");
   }
-  const normalizedWorkspace = normalizeWorkspaceLockSegment(workspace);
-  const lockPath = workspaceLifecycleLockPath(
+  const normalizedVault = normalizeVaultLockSegment(vault);
+  const lockPath = vaultLifecycleLockPath(
     importMetaUrl,
     normalizedUserId,
-    normalizedWorkspace,
+    normalizedVault,
   );
   await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
   const startedAt = Date.now();
-  const timeoutMs = workspaceLifecycleLockTimeoutMs();
+  const timeoutMs = vaultLifecycleLockTimeoutMs();
   for (;;) {
     try {
       await fs.promises.mkdir(lockPath);
       await touchHeartbeat(
         importMetaUrl,
         normalizedUserId,
-        normalizedWorkspace,
+        normalizedVault,
       );
       break;
     } catch (error) {
@@ -175,11 +175,11 @@ export async function withWorkspaceLifecycleLock<T>(
       await tryClearStaleLock(
         importMetaUrl,
         normalizedUserId,
-        normalizedWorkspace,
+        normalizedVault,
       );
       if (Date.now() - startedAt >= timeoutMs) {
         throw new Error(
-          `Timed out waiting for the Polaris workspace lifecycle lock for '${normalizedUserId}:${normalizedWorkspace}'`,
+          `Timed out waiting for the Polaris vault lifecycle lock for '${normalizedUserId}:${normalizedVault}'`,
         );
       }
       await sleepMs(25);
@@ -189,7 +189,7 @@ export async function withWorkspaceLifecycleLock<T>(
   const heartbeat = startHeartbeat(
     importMetaUrl,
     normalizedUserId,
-    normalizedWorkspace,
+    normalizedVault,
   );
   try {
     return await fn();
@@ -199,13 +199,13 @@ export async function withWorkspaceLifecycleLock<T>(
   }
 }
 
-export async function withWorkspaceMutationLock<T>(
+export async function withVaultMutationLock<T>(
   importMetaUrl: string,
   userId: string,
-  workspace: string,
+  vault: string,
   fn: () => Promise<T>,
 ): Promise<T> {
   return withUserMutationLock(importMetaUrl, userId, async () =>
-    withWorkspaceLifecycleLock(importMetaUrl, userId, workspace, fn)
+    withVaultLifecycleLock(importMetaUrl, userId, vault, fn)
   );
 }

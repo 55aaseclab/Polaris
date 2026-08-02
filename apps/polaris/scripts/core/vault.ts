@@ -1,6 +1,6 @@
 export type BackendKind = "pod" | "kubevirt-vm" | "docker";
 export type PodProfile = "gvisor" | "kata-qemu" | "kata-clh" | "kata-qemu-tdx";
-export type WorkspaceCommandKind =
+export type VaultCommandKind =
   | "create"
   | "start"
   | "stop"
@@ -11,22 +11,22 @@ export type WorkspaceCommandKind =
   | "render"
   | "apply"
   | "logs";
-export type WorkspaceOperationKind =
+export type VaultOperationKind =
   | "create"
   | "start"
   | "stop"
   | "rebuild"
   | "delete";
-export type DurableAttachmentKind = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
-export type AttachmentScope = "workspace" | "user";
-export type AttachmentSharing = "exclusive" | "cross-workspace";
+export type DurableAttachmentKind = "vault-data" | "vault-runtime-state" | "user-identity-state";
+export type AttachmentScope = "vault" | "user";
+export type AttachmentSharing = "exclusive" | "cross-vault";
 export type AttachmentSourceKind =
   | "persistent-volume"
   | "secret-material"
   | "generated-material"
   | "legacy-backend"
   | "netfs";
-export type DirectAttachmentConfigKey = "workspace-data" | "workspace-runtime-state" | "user-identity-state";
+export type DirectAttachmentConfigKey = "vault-data" | "vault-runtime-state" | "user-identity-state";
 
 export interface PlainEnvVar {
   name: string;
@@ -46,14 +46,14 @@ export interface ServicePort {
   name?: string;
 }
 
-export interface WorkspaceIdentity {
+export interface VaultIdentity {
   projectName: string;
 }
 
-export interface WorkspaceProfile {
+export interface VaultProfile {
   name: string;
   assetBaseName: string;
-  workspaceAlias?: string;
+  vaultAlias?: string;
   defaults: {
     runtime?: {
       baseImage?: string;
@@ -72,7 +72,7 @@ export interface UserProfile {
   name: string;
   email: string;
   secretsRoot: string;
-  workspaces: string[];
+  vaults: string[];
   github: {
     account?: string;
   };
@@ -123,28 +123,28 @@ export interface Credential {
   status: string;
 }
 
-export interface WorkspaceCredentialBinding {
+export interface VaultCredentialBinding {
   purpose: string;
   credentialId: string;
   required: boolean;
 }
 
-export interface ResolvedWorkspaceCredentialBinding
-  extends WorkspaceCredentialBinding {
+export interface ResolvedVaultCredentialBinding
+  extends VaultCredentialBinding {
   source: "registry" | "compatibility";
   credential: Credential;
   attachmentKind: "user-identity-state";
   authFiles: AuthFile[];
 }
 
-export interface WorkspaceBackend {
+export interface VaultBackend {
   kind: BackendKind;
   profile: string;
   specFiles: string[];
   dockerRuntimeMode: "disabled" | "legacy";
 }
 
-export interface WorkspaceStorage {
+export interface VaultStorage {
   persistState: boolean;
   claimName: string;
   durablePaths: string[];
@@ -192,8 +192,8 @@ export interface DirectEphemeralRuntimeConfig {
 }
 
 export interface DirectAttachmentConfig {
-  "workspace-data": DirectDurableAttachmentConfig;
-  "workspace-runtime-state": DirectDurableAttachmentConfig;
+  "vault-data": DirectDurableAttachmentConfig;
+  "vault-runtime-state": DirectDurableAttachmentConfig;
   "user-identity-state": DirectDurableAttachmentConfig;
   "ephemeral-runtime": DirectEphemeralRuntimeConfig;
 }
@@ -204,14 +204,14 @@ export interface EphemeralRuntimeState {
   staleArtifacts: string[];
 }
 
-export interface WorkspaceAttachments {
-  workspaceData: DurableAttachment;
-  workspaceRuntimeState: DurableAttachment;
+export interface VaultAttachments {
+  vaultData: DurableAttachment;
+  vaultRuntimeState: DurableAttachment;
   userIdentityState: DurableAttachment;
   ephemeralRuntime: EphemeralRuntimeState;
 }
 
-export interface WorkspaceResources {
+export interface VaultResources {
   cpu: string;
   memory: string;
   ephemeralStorage: string;
@@ -221,7 +221,7 @@ export interface WorkspaceResources {
   unbounded: boolean;
 }
 
-export interface WorkspaceRuntime {
+export interface VaultRuntime {
   baseImage: string;
   rootdiskImage?: string;
   user: string;
@@ -240,7 +240,7 @@ export interface WorkspaceRuntime {
   authFiles: AuthFile[];
 }
 
-export interface WorkspaceAgentContract {
+export interface VaultAgentContract {
   enabled: boolean;
   managerId: "none" | "paseo" | "generic-daemon";
   contractVersion: "v1";
@@ -265,7 +265,7 @@ export interface WorkspaceAgentContract {
   };
 }
 
-export interface WorkspaceConnectivity {
+export interface VaultConnectivity {
   exposeService: boolean;
   serviceMode: "nodeport" | "ingress";
   servicePorts: ServicePort[];
@@ -273,45 +273,45 @@ export interface WorkspaceConnectivity {
   servicePath: string;
 }
 
-export interface WorkspaceRuntimeContract {
+export interface VaultRuntimeContract {
   minimalInvariants: string[];
   staleRuntimeArtifacts: string[];
 }
 
-export interface WorkspaceHealthPolicy {
+export interface VaultHealthPolicy {
   readinessMode: "ready-file" | "daemon-port";
   requiresDaemon: boolean;
 }
 
-export interface WorkspaceLifecycle {
-  actions: WorkspaceCommandKind[];
+export interface VaultLifecycle {
+  actions: VaultCommandKind[];
 }
 
-export interface WorkspaceSpec {
-  identity: WorkspaceIdentity;
-  profile: WorkspaceProfile;
+export interface VaultSpec {
+  identity: VaultIdentity;
+  profile: VaultProfile;
   userProfile: UserProfile;
   credentials: Credential[];
-  credentialBindings: WorkspaceCredentialBinding[];
-  resolvedCredentialBindings: ResolvedWorkspaceCredentialBinding[];
-  backend: WorkspaceBackend;
-  storage: WorkspaceStorage;
-  attachments: WorkspaceAttachments;
-  resources: WorkspaceResources;
-  runtime: WorkspaceRuntime;
-  agent: WorkspaceAgentContract;
-  connectivity: WorkspaceConnectivity;
-  lifecycle: WorkspaceLifecycle;
-  runtimeContract: WorkspaceRuntimeContract;
-  health: WorkspaceHealthPolicy;
+  credentialBindings: VaultCredentialBinding[];
+  resolvedCredentialBindings: ResolvedVaultCredentialBinding[];
+  backend: VaultBackend;
+  storage: VaultStorage;
+  attachments: VaultAttachments;
+  resources: VaultResources;
+  runtime: VaultRuntime;
+  agent: VaultAgentContract;
+  connectivity: VaultConnectivity;
+  lifecycle: VaultLifecycle;
+  runtimeContract: VaultRuntimeContract;
+  health: VaultHealthPolicy;
   evolution?: {
-    workspaceMemoryFile: string;
-    workspaceMemoryContent: string;
+    vaultMemoryFile: string;
+    vaultMemoryContent: string;
     userMemoryFile: string;
     userMemoryContent: string;
     sessionSnapshotFile: string;
     sessionSnapshotContent: string;
-    controlPlaneWorkspaceMemoryPath?: string;
+    controlPlaneVaultMemoryPath?: string;
     controlPlaneUserMemoryPath?: string;
     controlPlaneSessionSnapshotPath?: string;
     controlPlanePendingMemoryPath?: string;
@@ -319,19 +319,19 @@ export interface WorkspaceSpec {
   };
 }
 
-export const WORKSPACE_STATUS_SCHEMA_VERSION_V1 = 1 as const;
-export const WORKSPACE_STATUS_SCHEMA_VERSION_V1_1 = 1.1 as const;
-export const WORKSPACE_STATUS_SCHEMA_VERSION = WORKSPACE_STATUS_SCHEMA_VERSION_V1_1;
-export type WorkspaceStatusSchemaVersion =
-  | typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1
-  | typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1_1;
+export const VAULT_STATUS_SCHEMA_VERSION_V1 = 1 as const;
+export const VAULT_STATUS_SCHEMA_VERSION_V1_1 = 1.1 as const;
+export const VAULT_STATUS_SCHEMA_VERSION = VAULT_STATUS_SCHEMA_VERSION_V1_1;
+export type VaultStatusSchemaVersion =
+  | typeof VAULT_STATUS_SCHEMA_VERSION_V1
+  | typeof VAULT_STATUS_SCHEMA_VERSION_V1_1;
 
-export interface WorkspaceStatusDriverTarget {
+export interface VaultStatusDriverTarget {
   backend: "docker" | "pod" | "kubevirt-vm";
   profile?: string;
 }
 
-export type WorkspaceDriverStatus =
+export type VaultDriverStatus =
   | "absent"
   | "creating"
   | "starting"
@@ -344,12 +344,12 @@ export type WorkspaceDriverStatus =
   | "failed"
   | "unknown";
 
-export interface WorkspaceStatus {
-  schemaVersion?: WorkspaceStatusSchemaVersion;
+export interface VaultStatus {
+  schemaVersion?: VaultStatusSchemaVersion;
   project: string;
   driver?: {
-    selected: WorkspaceStatusDriverTarget | null;
-    status: WorkspaceDriverStatus;
+    selected: VaultStatusDriverTarget | null;
+    status: VaultDriverStatus;
     reason?: string;
     baseImage?: string;
     runtimeKind?: "docker-container" | "kubernetes-pod" | "kubevirt-vm";
@@ -377,7 +377,7 @@ export interface WorkspaceStatus {
       state: "selected" | "not-selected";
       credentialId?: string;
       label?: string;
-      source?: "workspace-binding" | "user-active" | "compatibility";
+      source?: "vault-binding" | "user-active" | "compatibility";
     };
     live?: {
       supportedHarnesses: string[];
@@ -385,11 +385,11 @@ export interface WorkspaceStatus {
       selectedHarness?: string;
       selectedCredentialId?: string;
       selectedCredentialLabel?: string;
-      source?: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+      source?: "runtime-state" | "vault-binding" | "user-active" | "compatibility";
       selectedByHarness?: Record<string, {
         credentialId: string;
         label: string;
-        source: "runtime-state" | "workspace-binding" | "user-active" | "compatibility";
+        source: "runtime-state" | "vault-binding" | "user-active" | "compatibility";
       }>;
     };
   };
@@ -400,7 +400,7 @@ export interface WorkspaceStatus {
   details: Record<string, string | undefined>;
   evolution?: {
     artifactCount: number;
-    activeWorkspaceArtifacts: number;
+    activeVaultArtifacts: number;
     activeUserArtifacts: number;
     latestTitles: string[];
     latestArtifacts?: Array<{
@@ -453,7 +453,7 @@ export interface WorkspaceStatus {
     }>;
   };
   attachments?: Record<string, CheckStatus>;
-  workspaceAssembly?: Record<string, CheckStatus>;
+  vaultAssembly?: Record<string, CheckStatus>;
 }
 
 export interface ObservationItem {
@@ -476,11 +476,11 @@ export interface BackendObservation {
     detail?: string;
   };
   attachments: {
-    workspaceData?: ObservationItem;
-    workspaceRuntimeState?: ObservationItem;
+    vaultData?: ObservationItem;
+    vaultRuntimeState?: ObservationItem;
     userIdentityState?: ObservationItem;
   };
-  workspaceAssembly: {
+  vaultAssembly: {
     home?: ObservationItem;
     projectRoot?: ObservationItem;
     managerState?: ObservationItem;
@@ -508,7 +508,7 @@ export interface DriftItem {
   message: string;
 }
 
-export interface WorkspaceDrift {
+export interface VaultDrift {
   items: DriftItem[];
   hasErrors: boolean;
   hasWarnings: boolean;

@@ -1,9 +1,9 @@
 import { isSkillHarness, type SkillHarness } from "../../config/skills.js";
 import {
-  listWorkspaceSkills,
-  skillInstallWorkspace,
-  skillSyncWorkspace,
-  skillUninstallWorkspace,
+  listVaultSkills,
+  skillInstallVault,
+  skillSyncVault,
+  skillUninstallVault,
 } from "../../executor/operations.js";
 
 function parseFlag(argv: string[], flag: string): string | undefined {
@@ -21,13 +21,13 @@ function parseHarness(argv: string[]): SkillHarness {
 }
 
 export async function skillListCommand(
-  workspaceRef: string,
+  vaultRef: string,
   argv: string[],
 ): Promise<void> {
   const userProfileId = parseFlag(argv, "--user");
   const harness = parseHarness(argv);
-  const result = await listWorkspaceSkills({
-    workspaceRef,
+  const result = await listVaultSkills({
+    vaultRef,
     userProfileId,
     harness,
   });
@@ -35,19 +35,19 @@ export async function skillListCommand(
 }
 
 export async function skillInstallCommand(
-  workspaceRef: string,
+  vaultRef: string,
   argv: string[],
 ): Promise<void> {
   const skillId = argv[0]?.trim();
   if (!skillId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- skill-install <workspaceRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- skill-install <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
     );
   }
   const userProfileId = parseFlag(argv, "--user");
   const harness = parseHarness(argv);
-  const result = await skillInstallWorkspace({
-    workspaceRef,
+  const result = await skillInstallVault({
+    vaultRef,
     userProfileId,
     harness,
     skillId,
@@ -56,19 +56,19 @@ export async function skillInstallCommand(
 }
 
 export async function skillUninstallCommand(
-  workspaceRef: string,
+  vaultRef: string,
   argv: string[],
 ): Promise<void> {
   const skillId = argv[0]?.trim();
   if (!skillId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- skill-uninstall <workspaceRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- skill-uninstall <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
     );
   }
   const userProfileId = parseFlag(argv, "--user");
   const harness = parseHarness(argv);
-  const result = await skillUninstallWorkspace({
-    workspaceRef,
+  const result = await skillUninstallVault({
+    vaultRef,
     userProfileId,
     harness,
     skillId,
@@ -77,13 +77,13 @@ export async function skillUninstallCommand(
 }
 
 export async function skillSyncCommand(
-  workspaceRef: string,
+  vaultRef: string,
   argv: string[],
 ): Promise<void> {
   const userProfileId = parseFlag(argv, "--user");
   const harness = parseHarness(argv);
-  const result = await skillSyncWorkspace({
-    workspaceRef,
+  const result = await skillSyncVault({
+    vaultRef,
     userProfileId,
     harness,
   });

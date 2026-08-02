@@ -9,7 +9,7 @@ export type EvolutionEventKind =
 
 export interface EvolutionExecutionEvent {
   id: string;
-  workspaceId: string;
+  vaultId: string;
   managerId: string;
   sessionId: string;
   turnId?: string;
@@ -18,14 +18,14 @@ export interface EvolutionExecutionEvent {
   payload: Record<string, unknown>;
 }
 
-export type EvolutionMemoryTarget = "workspace-memory" | "user-memory";
+export type EvolutionMemoryTarget = "vault-memory" | "user-memory";
 export type EvolutionMemoryOperation = "add" | "replace" | "remove";
 export type EvolutionMemoryStatus = "active" | "archived" | "suppressed";
 export type EvolutionMemoryChangeStatus = "pending" | "approved" | "rejected" | "applied";
 
 export interface EvolutionMemoryEntry {
   id: string;
-  workspaceId: string;
+  vaultId: string;
   userProfileId?: string;
   target: EvolutionMemoryTarget;
   section: string;
@@ -47,7 +47,7 @@ export interface EvolutionMemoryCandidate {
 
 export interface EvolutionMemoryChange {
   id: string;
-  workspaceId: string;
+  vaultId: string;
   userProfileId?: string;
   target: EvolutionMemoryTarget;
   operation: EvolutionMemoryOperation;
@@ -65,7 +65,7 @@ export interface EvolutionMemoryChange {
 }
 
 export interface EvolutionReviewCandidate {
-  workspaceId: string;
+  vaultId: string;
   userProfileId: string;
   managerId: string;
   sessionId: string;
@@ -77,7 +77,7 @@ export interface EvolutionReviewResult {
 }
 
 export interface EvolutionMemoryQuery {
-  workspaceId: string;
+  vaultId: string;
   userProfileId?: string;
   target?: EvolutionMemoryTarget;
   section?: string;

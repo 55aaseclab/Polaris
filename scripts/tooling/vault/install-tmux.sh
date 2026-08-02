@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 DEFAULT_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_ROOT="${REPO_ROOT:-$DEFAULT_REPO_ROOT}"
-SOURCE_TMUX_CONF="${SOURCE_TMUX_CONF:-$REPO_ROOT/config/tooling/workspace/tmux/.tmux.conf}"
+SOURCE_TMUX_CONF="${SOURCE_TMUX_CONF:-$REPO_ROOT/config/tooling/vault/tmux/.tmux.conf}"
 TARGET_TMUX_CONF="${TARGET_TMUX_CONF:-$HOME/.tmux.conf}"
 TPM_DIR="${TPM_DIR:-$HOME/.tmux/plugins/tpm}"
 SKIP_PACKAGE_INSTALL="${SKIP_PACKAGE_INSTALL:-0}"

@@ -2,37 +2,37 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getBackendDriver } from "../../backends/index.js";
-import { parseWorkspaceReference } from "../../config/load.js";
-import { ensureProvisionedWorkspace, ensureWorkspaceConfig } from "../../config/provision.js";
+import { parseVaultReference } from "../../config/load.js";
+import { ensureProvisionedVault, ensureVaultConfig } from "../../config/provision.js";
 import {
-  WORKSPACE_STATUS_SCHEMA_VERSION,
-  type WorkspaceSpec,
-} from "../../core/workspace.js";
+  VAULT_STATUS_SCHEMA_VERSION,
+  type VaultSpec,
+} from "../../core/vault.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "../../core/workspace-name.js";
-import { writeWorkspaceStatus } from "../../output/state-store.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "../../core/vault-name.js";
+import { writeVaultStatus } from "../../output/state-store.js";
 import { logInfo } from "../../utils/log.js";
-import { withWorkspaceLifecycleLock } from "../../utils/workspace-lifecycle-lock.js";
-import { loadExecutableWorkspaceForCommand, loadWorkspaceForProjectRef, waitForWorkspaceReady } from "./shared.js";
-import { loadWorkspaceSummary } from "../../core/portal.js";
+import { withVaultLifecycleLock } from "../../utils/vault-lifecycle-lock.js";
+import { loadExecutableVaultForCommand, loadVaultForProjectRef, waitForVaultReady } from "./shared.js";
+import { loadVaultSummary } from "../../core/portal.js";
 
-const SUPPORTED_BACKENDS: Array<WorkspaceSpec["backend"]["kind"]> = [
+const SUPPORTED_BACKENDS: Array<VaultSpec["backend"]["kind"]> = [
   "docker",
   "pod",
   "kubevirt-vm",
 ];
 
-function loadWorkspaceForBackend(
+function loadVaultForBackend(
   project: string,
-  backend: WorkspaceSpec["backend"]["kind"],
+  backend: VaultSpec["backend"]["kind"],
   userProfileId?: string,
-): WorkspaceSpec | null {
+): VaultSpec | null {
   try {
-    ensureWorkspaceConfig(`${project}@${backend}`, userProfileId);
-    const workspace = loadWorkspaceForProjectRef(`${project}@${backend}`, userProfileId);
-    return workspace.backend.kind === backend ? workspace : null;
+    ensureVaultConfig(`${project}@${backend}`, userProfileId);
+    const vault = loadVaultForProjectRef(`${project}@${backend}`, userProfileId);
+    return vault.backend.kind === backend ? vault : null;
   } catch (error) {
     if (error instanceof Error && /Config not found/.test(error.message)) {
       return null;
@@ -41,20 +41,20 @@ function loadWorkspaceForBackend(
   }
 }
 
-function workspaceRefForSelection(project: string, backend: WorkspaceSpec["backend"]["kind"], profile?: string): string {
+function vaultRefForSelection(project: string, backend: VaultSpec["backend"]["kind"], profile?: string): string {
   return backend === "pod" && profile
     ? `${project}@${backend}:${profile}`
     : `${project}@${backend}`;
 }
 
-function runtimeScope(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+function runtimeScope(vault: VaultSpec): string {
+  return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
-function runtimeResource(workspace: WorkspaceSpec, suffix: string): string {
-  return workspaceRuntimeResourceName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+function runtimeResource(vault: VaultSpec, suffix: string): string {
+  return vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
     suffix,
   );
 }
@@ -64,45 +64,45 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function waitForBackendRunning(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   timeoutMs = 120000,
   intervalMs = 1500,
 ): Promise<void> {
-  const driver = getBackendDriver(workspace.backend.kind);
+  const driver = getBackendDriver(vault.backend.kind);
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const observation = await driver.inspect(workspace);
+    const observation = await driver.inspect(vault);
     if (
       observation.backend.exists &&
       observation.backend.running &&
       observation.backend.detail &&
-      canAccessAttachmentEndpoint(workspace, observation.backend.detail)
+      canAccessAttachmentEndpoint(vault, observation.backend.detail)
     ) {
       return;
     }
     await sleep(intervalMs);
   }
   throw new Error(
-    `Workspace '${workspace.identity.projectName}' backend '${workspace.backend.kind}' did not start within ${timeoutMs}ms`,
+    `Vault '${vault.identity.projectName}' backend '${vault.backend.kind}' did not start within ${timeoutMs}ms`,
   );
 }
 
 async function waitForBackendStopped(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   timeoutMs = 120000,
   intervalMs = 1500,
 ): Promise<void> {
-  const driver = getBackendDriver(workspace.backend.kind);
+  const driver = getBackendDriver(vault.backend.kind);
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const observation = await driver.inspect(workspace);
+    const observation = await driver.inspect(vault);
     if (!observation.backend.running) {
       return;
     }
     await sleep(intervalMs);
   }
   throw new Error(
-    `Workspace '${workspace.identity.projectName}' backend '${workspace.backend.kind}' did not stop within ${timeoutMs}ms`,
+    `Vault '${vault.identity.projectName}' backend '${vault.backend.kind}' did not stop within ${timeoutMs}ms`,
   );
 }
 
@@ -110,19 +110,19 @@ type AttachmentEndpoint =
   | { kind: "docker"; containerId: string }
   | { kind: "pod"; namespace: string; podName: string };
 
-function resolveAttachmentEndpoint(workspace: WorkspaceSpec, detail: string): AttachmentEndpoint | null {
-  if (workspace.backend.kind === "docker") {
+function resolveAttachmentEndpoint(vault: VaultSpec, detail: string): AttachmentEndpoint | null {
+  if (vault.backend.kind === "docker") {
     const containerId = detail.trim();
     return containerId ? { kind: "docker", containerId } : null;
   }
-  if (workspace.backend.kind === "pod") {
+  if (vault.backend.kind === "pod") {
     const prefix = "pod/";
     if (!detail.startsWith(prefix)) {
       return null;
     }
     const podName = detail.slice(prefix.length).trim();
     return podName
-      ? { kind: "pod", namespace: runtimeScope(workspace), podName }
+      ? { kind: "pod", namespace: runtimeScope(vault), podName }
       : null;
   }
   return null;
@@ -140,33 +140,33 @@ function runChecked(command: string, args: string[]): void {
   }
 }
 
-function workspaceDataExportDeploymentName(workspace: WorkspaceSpec): string {
-  return runtimeResource(workspace, "workspace-data-export");
+function vaultDataExportDeploymentName(vault: VaultSpec): string {
+  return runtimeResource(vault, "vault-data-export");
 }
 
-function hasWorkspaceDataExportDeployment(workspace: WorkspaceSpec): boolean {
-  const deploymentName = workspaceDataExportDeploymentName(workspace);
+function hasVaultDataExportDeployment(vault: VaultSpec): boolean {
+  const deploymentName = vaultDataExportDeploymentName(vault);
   const result = spawnSync(
     "kubectl",
-    ["-n", runtimeScope(workspace), "get", "deployment", deploymentName, "-o", "jsonpath={.metadata.name}"],
+    ["-n", runtimeScope(vault), "get", "deployment", deploymentName, "-o", "jsonpath={.metadata.name}"],
     { encoding: "utf8" },
   );
   return result.status === 0 && Boolean((result.stdout || "").trim());
 }
 
-async function setWorkspaceDataExportDesiredState(workspace: WorkspaceSpec, running: boolean): Promise<void> {
-  if (!hasWorkspaceDataExportDeployment(workspace)) {
+async function setVaultDataExportDesiredState(vault: VaultSpec, running: boolean): Promise<void> {
+  if (!hasVaultDataExportDeployment(vault)) {
     return;
   }
-  const deploymentName = workspaceDataExportDeploymentName(workspace);
+  const deploymentName = vaultDataExportDeploymentName(vault);
   const replicas = running ? "1" : "0";
-  logInfo("cli", "switch-workspace-data-export", {
-    project: workspace.identity.projectName,
+  logInfo("cli", "switch-vault-data-export", {
+    project: vault.identity.projectName,
     deployment: deploymentName,
     replicas: Number(replicas),
   });
-  runChecked("kubectl", ["-n", runtimeScope(workspace), "scale", "deployment", deploymentName, `--replicas=${replicas}`]);
-  runChecked("kubectl", ["-n", runtimeScope(workspace), "rollout", "status", `deployment/${deploymentName}`, "--timeout=180s"]);
+  runChecked("kubectl", ["-n", runtimeScope(vault), "scale", "deployment", deploymentName, `--replicas=${replicas}`]);
+  runChecked("kubectl", ["-n", runtimeScope(vault), "rollout", "status", `deployment/${deploymentName}`, "--timeout=180s"]);
 }
 
 function switchScratchRoot(): string {
@@ -175,8 +175,8 @@ function switchScratchRoot(): string {
   return preferred;
 }
 
-function canAccessAttachmentEndpoint(workspace: WorkspaceSpec, detail: string): boolean {
-  const endpoint = resolveAttachmentEndpoint(workspace, detail);
+function canAccessAttachmentEndpoint(vault: VaultSpec, detail: string): boolean {
+  const endpoint = resolveAttachmentEndpoint(vault, detail);
   if (!endpoint) {
     return false;
   }
@@ -187,15 +187,15 @@ function canAccessAttachmentEndpoint(workspace: WorkspaceSpec, detail: string): 
 }
 
 async function waitForKubevirtAttachmentRelease(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   timeoutMs = 120000,
   intervalMs = 1500,
 ): Promise<void> {
-  if (workspace.backend.kind !== "kubevirt-vm") {
+  if (vault.backend.kind !== "kubevirt-vm") {
     return;
   }
-  const namespace = runtimeScope(workspace);
-  const virtualMachineName = runtimeResource(workspace, "vm");
+  const namespace = runtimeScope(vault);
+  const virtualMachineName = runtimeResource(vault, "vm");
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const vmi = spawnSync(
@@ -224,18 +224,18 @@ async function waitForKubevirtAttachmentRelease(
     }
     await sleep(intervalMs);
   }
-  throw new Error(`KubeVirt volumes for '${workspace.identity.projectName}' were not released within ${timeoutMs}ms`);
+  throw new Error(`KubeVirt volumes for '${vault.identity.projectName}' were not released within ${timeoutMs}ms`);
 }
 
-type MigratedAttachment = "workspaceRuntimeState" | "userIdentityState";
+type MigratedAttachment = "vaultRuntimeState" | "userIdentityState";
 
 const MIGRATED_ATTACHMENTS: MigratedAttachment[] = [
-  "workspaceRuntimeState",
+  "vaultRuntimeState",
   "userIdentityState",
 ];
 
 const PRE_RESTART_ATTACHMENTS: MigratedAttachment[] = [
-  "workspaceRuntimeState",
+  "vaultRuntimeState",
   "userIdentityState",
 ];
 
@@ -243,25 +243,25 @@ const POST_RESTART_ATTACHMENTS: MigratedAttachment[] = [
   "userIdentityState",
 ];
 
-function attachmentRootPath(workspace: WorkspaceSpec, attachment: MigratedAttachment): string {
+function attachmentRootPath(vault: VaultSpec, attachment: MigratedAttachment): string {
   switch (attachment) {
-    case "workspaceRuntimeState":
-      return workspace.attachments.workspaceRuntimeState.mountRoot;
+    case "vaultRuntimeState":
+      return vault.attachments.vaultRuntimeState.mountRoot;
     case "userIdentityState":
-      return workspace.attachments.userIdentityState.mountRoot;
+      return vault.attachments.userIdentityState.mountRoot;
   }
 }
 
 function kubevirtAttachmentClaimName(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment: MigratedAttachment,
 ): string {
   const source = (() => {
     switch (attachment) {
-      case "workspaceRuntimeState":
-        return workspace.attachments.workspaceRuntimeState.source;
+      case "vaultRuntimeState":
+        return vault.attachments.vaultRuntimeState.source;
       case "userIdentityState":
-        return workspace.attachments.userIdentityState.source;
+        return vault.attachments.userIdentityState.source;
     }
   })();
   if (source.kind !== "persistent-volume" || !source.volumeRef?.trim()) {
@@ -274,8 +274,8 @@ function kubevirtAttachmentClaimName(
 
 function kubevirtAttachmentVolumeName(attachment: MigratedAttachment): string {
   switch (attachment) {
-    case "workspaceRuntimeState":
-      return "workspace-runtime-state";
+    case "vaultRuntimeState":
+      return "vault-runtime-state";
     case "userIdentityState":
       return "user-identity-state";
   }
@@ -285,27 +285,27 @@ function attachmentExportDir(root: string, attachment: MigratedAttachment): stri
   return path.join(root, attachment);
 }
 
-function attachmentDataPath(workspace: WorkspaceSpec, attachment: MigratedAttachment): string {
-  return attachmentRootPath(workspace, attachment);
+function attachmentDataPath(vault: VaultSpec, attachment: MigratedAttachment): string {
+  return attachmentRootPath(vault, attachment);
 }
 
 function kubevirtAttachmentDataPath(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment: MigratedAttachment,
 ): string {
-  return attachmentDataPath(workspace, attachment);
+  return attachmentDataPath(vault, attachment);
 }
 
 function attachmentDurablePaths(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment: MigratedAttachment,
 ): string[] {
   const durablePaths = (() => {
     switch (attachment) {
-      case "workspaceRuntimeState":
-        return workspace.attachments.workspaceRuntimeState.durablePaths;
+      case "vaultRuntimeState":
+        return vault.attachments.vaultRuntimeState.durablePaths;
       case "userIdentityState":
-        return workspace.attachments.userIdentityState.durablePaths;
+        return vault.attachments.userIdentityState.durablePaths;
     }
   })();
   const sorted = [...durablePaths].sort((a, b) => a.length - b.length);
@@ -326,7 +326,7 @@ function relativeDurablePath(root: string, durablePath: string): string {
 }
 
 function pruneExportedAttachmentState(attachment: MigratedAttachment, dir: string): void {
-  if (attachment !== "workspaceRuntimeState") {
+  if (attachment !== "vaultRuntimeState") {
     return;
   }
   for (const relativePath of [
@@ -347,22 +347,22 @@ function sanitizeVolumeToken(value: string): string {
 }
 
 function resolveDockerAttachmentVolumeName(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment: MigratedAttachment,
 ): string {
   const source = (() => {
     switch (attachment) {
-      case "workspaceRuntimeState":
-        return workspace.attachments.workspaceRuntimeState.source;
+      case "vaultRuntimeState":
+        return vault.attachments.vaultRuntimeState.source;
       case "userIdentityState":
-        return workspace.attachments.userIdentityState.source;
+        return vault.attachments.userIdentityState.source;
     }
   })();
-  const userScope = workspace.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  const userScope = vault.userProfile.id.replace(/[^a-zA-Z0-9_.-]/g, "-");
   const fallbackName = (() => {
     switch (attachment) {
-      case "workspaceRuntimeState":
-        return runtimeResource(workspace, "workspace-runtime-state");
+      case "vaultRuntimeState":
+        return runtimeResource(vault, "vault-runtime-state");
       case "userIdentityState":
         return `polaris-${userScope}-identity`;
     }
@@ -379,16 +379,16 @@ function ensureDockerVolume(name: string): void {
 }
 
 function importSwitchStateIntoDockerVolumes(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   exportRoot: string,
   attachments: MigratedAttachment[],
 ): void {
   for (const attachment of attachments) {
-    const volumeName = resolveDockerAttachmentVolumeName(workspace, attachment);
+    const volumeName = resolveDockerAttachmentVolumeName(vault, attachment);
     ensureDockerVolume(volumeName);
     const exportDir = attachmentExportDir(exportRoot, attachment);
-    const rootPath = attachmentDataPath(workspace, attachment);
-    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+    const rootPath = attachmentDataPath(vault, attachment);
+    for (const durablePath of attachmentDurablePaths(vault, attachment)) {
       const relativePath = relativeDurablePath(rootPath, durablePath);
       const localSource = relativePath === "."
         ? exportDir
@@ -422,23 +422,23 @@ function importSwitchStateIntoDockerVolumes(
 }
 
 function normalizeImportedAttachmentOwnershipCommand(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   attachment: MigratedAttachment,
 ): string {
-  const owner = workspace.runtime.user === "root"
+  const owner = vault.runtime.user === "root"
     ? "0:0"
-    : `${workspace.runtime.user}:${workspace.runtime.user}`;
-  const durablePaths = attachmentDurablePaths(workspace, attachment)
+    : `${vault.runtime.user}:${vault.runtime.user}`;
+  const durablePaths = attachmentDurablePaths(vault, attachment)
     .map((entry) => `if [ -e ${shellSingleQuote(entry)} ]; then chown -R ${owner} ${shellSingleQuote(entry)}; fi`);
   return durablePaths.join(" ; ");
 }
 
 function normalizeImportedAttachmentOwnership(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   endpoint: AttachmentEndpoint,
   attachment: MigratedAttachment,
 ): void {
-  const command = normalizeImportedAttachmentOwnershipCommand(workspace, attachment);
+  const command = normalizeImportedAttachmentOwnershipCommand(vault, attachment);
   if (!command.trim()) {
     return;
   }
@@ -485,12 +485,12 @@ function deleteTransferPod(namespace: string, podName: string): void {
   );
 }
 
-async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | null> {
+async function exportSwitchState(vault: VaultSpec): Promise<string | null> {
   const exportRoot = fs.mkdtempSync(path.join(switchScratchRoot(), "state-"));
-  if (workspace.backend.kind === "kubevirt-vm") {
-    await waitForKubevirtAttachmentRelease(workspace);
-    const namespace = runtimeScope(workspace);
-    const pvcPodName = runtimeResource(workspace, "pvc-export");
+  if (vault.backend.kind === "kubevirt-vm") {
+    await waitForKubevirtAttachmentRelease(vault);
+    const namespace = runtimeScope(vault);
+    const pvcPodName = runtimeResource(vault, "pvc-export");
     const manifestPath = path.join(exportRoot, "pvc-export.yaml");
     const manifestLines = [
       "apiVersion: v1",
@@ -508,13 +508,13 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
     ];
     for (const attachment of MIGRATED_ATTACHMENTS) {
       manifestLines.push(`        - name: ${kubevirtAttachmentVolumeName(attachment)}`);
-      manifestLines.push(`          mountPath: ${attachmentRootPath(workspace, attachment)}`);
+      manifestLines.push(`          mountPath: ${attachmentRootPath(vault, attachment)}`);
     }
     manifestLines.push("  volumes:");
     for (const attachment of MIGRATED_ATTACHMENTS) {
       manifestLines.push(`    - name: ${kubevirtAttachmentVolumeName(attachment)}`);
       manifestLines.push("      persistentVolumeClaim:");
-      manifestLines.push(`        claimName: ${kubevirtAttachmentClaimName(workspace, attachment)}`);
+      manifestLines.push(`        claimName: ${kubevirtAttachmentClaimName(vault, attachment)}`);
     }
     manifestLines.push("");
     fs.writeFileSync(
@@ -528,8 +528,8 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
       for (const attachment of MIGRATED_ATTACHMENTS) {
         const exportDir = attachmentExportDir(exportRoot, attachment);
         fs.mkdirSync(exportDir, { recursive: true });
-        const rootPath = kubevirtAttachmentDataPath(workspace, attachment);
-        for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+        const rootPath = kubevirtAttachmentDataPath(vault, attachment);
+        for (const durablePath of attachmentDurablePaths(vault, attachment)) {
           const relativePath = relativeDurablePath(rootPath, durablePath);
           const localTarget = relativePath === "."
             ? exportDir
@@ -548,8 +548,8 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
     return exportRoot;
   }
 
-  const driver = getBackendDriver(workspace.backend.kind);
-  const observation = await driver.inspect(workspace);
+  const driver = getBackendDriver(vault.backend.kind);
+  const observation = await driver.inspect(vault);
   if (!observation.backend.exists) {
     return null;
   }
@@ -560,7 +560,7 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
   if (!observation.backend.detail) {
     return null;
   }
-  const endpoint = resolveAttachmentEndpoint(workspace, observation.backend.detail);
+  const endpoint = resolveAttachmentEndpoint(vault, observation.backend.detail);
   if (!endpoint) {
     return null;
   }
@@ -568,8 +568,8 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
   for (const attachment of MIGRATED_ATTACHMENTS) {
     const exportDir = attachmentExportDir(exportRoot, attachment);
     fs.mkdirSync(exportDir, { recursive: true });
-    const rootPath = attachmentDataPath(workspace, attachment);
-    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+    const rootPath = attachmentDataPath(vault, attachment);
+    for (const durablePath of attachmentDurablePaths(vault, attachment)) {
       const relativePath = relativeDurablePath(rootPath, durablePath);
       const localTarget = relativePath === "."
         ? exportDir
@@ -588,17 +588,17 @@ async function exportSwitchState(workspace: WorkspaceSpec): Promise<string | nul
 }
 
 async function importSwitchState(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   exportRoot: string,
   attachments: MigratedAttachment[],
 ): Promise<void> {
-  if (workspace.backend.kind === "docker") {
-    importSwitchStateIntoDockerVolumes(workspace, exportRoot, attachments);
+  if (vault.backend.kind === "docker") {
+    importSwitchStateIntoDockerVolumes(vault, exportRoot, attachments);
     return;
   }
-  if (workspace.backend.kind === "kubevirt-vm") {
-    const namespace = runtimeScope(workspace);
-    const pvcPodName = runtimeResource(workspace, "pvc-import");
+  if (vault.backend.kind === "kubevirt-vm") {
+    const namespace = runtimeScope(vault);
+    const pvcPodName = runtimeResource(vault, "pvc-import");
     const manifestPath = path.join(exportRoot, "pvc-import.yaml");
     const manifestLines = [
       "apiVersion: v1",
@@ -616,13 +616,13 @@ async function importSwitchState(
     ];
     for (const attachment of attachments) {
       manifestLines.push(`        - name: ${kubevirtAttachmentVolumeName(attachment)}`);
-      manifestLines.push(`          mountPath: ${attachmentRootPath(workspace, attachment)}`);
+      manifestLines.push(`          mountPath: ${attachmentRootPath(vault, attachment)}`);
     }
     manifestLines.push("  volumes:");
     for (const attachment of attachments) {
       manifestLines.push(`    - name: ${kubevirtAttachmentVolumeName(attachment)}`);
       manifestLines.push("      persistentVolumeClaim:");
-      manifestLines.push(`        claimName: ${kubevirtAttachmentClaimName(workspace, attachment)}`);
+      manifestLines.push(`        claimName: ${kubevirtAttachmentClaimName(vault, attachment)}`);
     }
     manifestLines.push("");
     fs.writeFileSync(
@@ -640,8 +640,8 @@ async function importSwitchState(
       };
       for (const attachment of attachments) {
         const exportDir = attachmentExportDir(exportRoot, attachment);
-        const rootPath = kubevirtAttachmentDataPath(workspace, attachment);
-        for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+        const rootPath = kubevirtAttachmentDataPath(vault, attachment);
+        for (const durablePath of attachmentDurablePaths(vault, attachment)) {
           const relativePath = relativeDurablePath(rootPath, durablePath);
           const localSource = relativePath === "."
             ? exportDir
@@ -652,28 +652,28 @@ async function importSwitchState(
           runChecked("kubectl", ["-n", namespace, "exec", pvcPodName, "--", "sh", "-lc", `mkdir -p '${durablePath}'`]);
           runChecked("kubectl", ["-n", namespace, "cp", `${localSource}/.`, `${pvcPodName}:${durablePath}`]);
         }
-        normalizeImportedAttachmentOwnership(workspace, importEndpoint, attachment);
+        normalizeImportedAttachmentOwnership(vault, importEndpoint, attachment);
       }
     } finally {
       deleteTransferPod(namespace, pvcPodName);
     }
     return;
   }
-  await waitForBackendRunning(workspace);
-  const driver = getBackendDriver(workspace.backend.kind);
-  const observation = await driver.inspect(workspace);
+  await waitForBackendRunning(vault);
+  const driver = getBackendDriver(vault.backend.kind);
+  const observation = await driver.inspect(vault);
   if (!observation.backend.detail) {
-    throw new Error(`Could not resolve switch-state target for backend '${workspace.backend.kind}'`);
+    throw new Error(`Could not resolve switch-state target for backend '${vault.backend.kind}'`);
   }
-  const endpoint = resolveAttachmentEndpoint(workspace, observation.backend.detail);
+  const endpoint = resolveAttachmentEndpoint(vault, observation.backend.detail);
   if (!endpoint) {
-    throw new Error(`Could not resolve switch-state target for backend '${workspace.backend.kind}'`);
+    throw new Error(`Could not resolve switch-state target for backend '${vault.backend.kind}'`);
   }
 
   for (const attachment of attachments) {
     const exportDir = attachmentExportDir(exportRoot, attachment);
-    const rootPath = attachmentDataPath(workspace, attachment);
-    for (const durablePath of attachmentDurablePaths(workspace, attachment)) {
+    const rootPath = attachmentDataPath(vault, attachment);
+    for (const durablePath of attachmentDurablePaths(vault, attachment)) {
       const relativePath = relativeDurablePath(rootPath, durablePath);
       const localSource = relativePath === "."
         ? exportDir
@@ -687,26 +687,26 @@ async function importSwitchState(
         runChecked("kubectl", ["-n", endpoint.namespace, "cp", `${localSource}/.`, `${endpoint.podName}:${durablePath}`]);
       }
     }
-    normalizeImportedAttachmentOwnership(workspace, endpoint, attachment);
+    normalizeImportedAttachmentOwnership(vault, endpoint, attachment);
   }
 }
 
 async function stopCompetingBackends(
   project: string,
-  targetBackend: WorkspaceSpec["backend"]["kind"],
+  targetBackend: VaultSpec["backend"]["kind"],
   userProfileId?: string,
-): Promise<WorkspaceSpec["backend"]["kind"][]> {
-  const stopped: WorkspaceSpec["backend"]["kind"][] = [];
+): Promise<VaultSpec["backend"]["kind"][]> {
+  const stopped: VaultSpec["backend"]["kind"][] = [];
   for (const backend of SUPPORTED_BACKENDS) {
     if (backend === targetBackend) {
       continue;
     }
-    const workspace = loadWorkspaceForBackend(project, backend, userProfileId);
-    if (!workspace) {
+    const vault = loadVaultForBackend(project, backend, userProfileId);
+    if (!vault) {
       continue;
     }
-    const driver = getBackendDriver(workspace.backend.kind);
-    const observation = await driver.inspect(workspace);
+    const driver = getBackendDriver(vault.backend.kind);
+    const observation = await driver.inspect(vault);
     if (!observation.backend.exists) {
       continue;
     }
@@ -718,8 +718,8 @@ async function stopCompetingBackends(
       fromBackend: backend,
       toBackend: targetBackend,
     });
-    await driver.stop(workspace);
-    await waitForBackendStopped(workspace);
+    await driver.stop(vault);
+    await waitForBackendStopped(vault);
     stopped.push(backend);
   }
   return stopped;
@@ -727,86 +727,86 @@ async function stopCompetingBackends(
 
 async function runningBackendsForProject(
   project: string,
-  targetBackend: WorkspaceSpec["backend"]["kind"],
+  targetBackend: VaultSpec["backend"]["kind"],
   userProfileId?: string,
 ): Promise<Array<{
-  backend: WorkspaceSpec["backend"]["kind"];
-  workspace: WorkspaceSpec;
+  backend: VaultSpec["backend"]["kind"];
+  vault: VaultSpec;
 }>> {
   const running: Array<{
-    backend: WorkspaceSpec["backend"]["kind"];
-    workspace: WorkspaceSpec;
+    backend: VaultSpec["backend"]["kind"];
+    vault: VaultSpec;
   }> = [];
   for (const backend of SUPPORTED_BACKENDS) {
     if (backend === targetBackend) {
       continue;
     }
-    const workspace = loadWorkspaceForBackend(project, backend, userProfileId);
-    if (!workspace) {
+    const vault = loadVaultForBackend(project, backend, userProfileId);
+    if (!vault) {
       continue;
     }
-    const observation = await getBackendDriver(workspace.backend.kind).inspect(workspace);
+    const observation = await getBackendDriver(vault.backend.kind).inspect(vault);
     if (!observation.backend.running) {
       continue;
     }
-    running.push({ backend, workspace });
+    running.push({ backend, vault });
   }
   return running;
 }
 
 export interface SwitchResult {
   project: string;
-  previousBackend: WorkspaceSpec["backend"]["kind"] | null;
+  previousBackend: VaultSpec["backend"]["kind"] | null;
   previousProfile: string | null;
-  selectedBackend: WorkspaceSpec["backend"]["kind"];
+  selectedBackend: VaultSpec["backend"]["kind"];
   selectedProfile: string | null;
-  stoppedBackends: WorkspaceSpec["backend"]["kind"][];
+  stoppedBackends: VaultSpec["backend"]["kind"][];
   selectionFile: string | null;
 }
 
-export async function performWorkspaceSwitch(
+export async function performVaultSwitch(
   projectRef: string,
   userProfileId?: string,
 ): Promise<SwitchResult> {
-  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
     throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
   }
   const runSwitch = async (): Promise<SwitchResult> => {
-    ensureProvisionedWorkspace(projectRef, userProfileId);
+    ensureProvisionedVault(projectRef, userProfileId);
     const targetRef = backendHint === "pod" && profileHint
       ? `${project}@${backendHint}:${profileHint}`
       : `${project}@${backendHint}`;
-    ensureWorkspaceConfig(targetRef, userProfileId);
-    const previewWorkspace = loadWorkspaceForProjectRef(targetRef, userProfileId);
-    await getBackendDriver(previewWorkspace.backend.kind).render(previewWorkspace);
+    ensureVaultConfig(targetRef, userProfileId);
+    const previewVault = loadVaultForProjectRef(targetRef, userProfileId);
+    await getBackendDriver(previewVault.backend.kind).render(previewVault);
 
-    const previousSelection = loadWorkspaceSummary(userProfileId ?? "", project).status?.driver?.selected ?? null;
+    const previousSelection = loadVaultSummary(userProfileId ?? "", project).status?.driver?.selected ?? null;
     const previousBackend = previousSelection?.backend;
-    const previousSelectionWorkspace = previousBackend
-      ? loadWorkspaceForBackend(project, previousBackend, userProfileId)
+    const previousSelectionVault = previousBackend
+      ? loadVaultForBackend(project, previousBackend, userProfileId)
       : null;
     const runningBackends = await runningBackendsForProject(
       project,
       backendHint,
       userProfileId,
     );
-    const selectedRunningWorkspace = previousBackend
-      ? runningBackends.find((entry) => entry.backend === previousBackend)?.workspace ?? null
+    const selectedRunningVault = previousBackend
+      ? runningBackends.find((entry) => entry.backend === previousBackend)?.vault ?? null
       : null;
-    const selectedExportableWorkspace =
-      previousSelectionWorkspace &&
+    const selectedExportableVault =
+      previousSelectionVault &&
       previousBackend &&
       previousBackend !== backendHint &&
-      (selectedRunningWorkspace !== null || previousBackend === "kubevirt-vm")
-        ? previousSelectionWorkspace
+      (selectedRunningVault !== null || previousBackend === "kubevirt-vm")
+        ? previousSelectionVault
         : null;
-    const previousWorkspace = selectedExportableWorkspace
-      ?? selectedRunningWorkspace
-      ?? (runningBackends.length === 1 ? runningBackends[0]?.workspace ?? null : null);
-    const effectivePreviousBackend = previousWorkspace?.backend.kind ?? previousBackend ?? null;
+    const previousVault = selectedExportableVault
+      ?? selectedRunningVault
+      ?? (runningBackends.length === 1 ? runningBackends[0]?.vault ?? null : null);
+    const effectivePreviousBackend = previousVault?.backend.kind ?? previousBackend ?? null;
     const shouldStopBeforeExport =
-      previousWorkspace &&
+      previousVault &&
       effectivePreviousBackend &&
       effectivePreviousBackend !== backendHint &&
       effectivePreviousBackend === "kubevirt-vm";
@@ -814,29 +814,29 @@ export async function performWorkspaceSwitch(
       ? await stopCompetingBackends(project, backendHint, userProfileId)
       : [];
     const exportedSwitchState =
-      previousWorkspace &&
+      previousVault &&
       effectivePreviousBackend &&
       effectivePreviousBackend !== backendHint
-        ? await exportSwitchState(previousWorkspace)
+        ? await exportSwitchState(previousVault)
         : null;
     const finalizedStoppedBackends = shouldStopBeforeExport
       ? stoppedBackends
       : await stopCompetingBackends(project, backendHint, userProfileId);
-    const { workspace, driver } = await loadExecutableWorkspaceForCommand(
+    const { vault, driver } = await loadExecutableVaultForCommand(
       "start",
       targetRef,
       userProfileId,
     );
-    await setWorkspaceDataExportDesiredState(workspace, backendHint === "docker");
-    const readyTimeoutMs = workspace.backend.kind === "kubevirt-vm"
+    await setVaultDataExportDesiredState(vault, backendHint === "docker");
+    const readyTimeoutMs = vault.backend.kind === "kubevirt-vm"
       ? 600000
-      : workspace.backend.kind === "docker"
+      : vault.backend.kind === "docker"
         ? 120000
         : 45000;
     try {
       if (
         exportedSwitchState &&
-        (workspace.backend.kind === "docker" || workspace.backend.kind === "kubevirt-vm")
+        (vault.backend.kind === "docker" || vault.backend.kind === "kubevirt-vm")
       ) {
         logInfo("cli", "switch-migrate-small-state", {
           project,
@@ -844,30 +844,30 @@ export async function performWorkspaceSwitch(
           toBackend: backendHint,
           phase: "pre-start",
         });
-        await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+        await importSwitchState(vault, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
       }
-      await driver.start(workspace);
-      if (exportedSwitchState && workspace.backend.kind === "pod") {
+      await driver.start(vault);
+      if (exportedSwitchState && vault.backend.kind === "pod") {
         logInfo("cli", "switch-migrate-small-state", {
           project,
           fromBackend: effectivePreviousBackend,
           toBackend: backendHint,
         });
-        await importSwitchState(workspace, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
-        await driver.restart(workspace);
-        await importSwitchState(workspace, exportedSwitchState, POST_RESTART_ATTACHMENTS);
+        await importSwitchState(vault, exportedSwitchState, PRE_RESTART_ATTACHMENTS);
+        await driver.restart(vault);
+        await importSwitchState(vault, exportedSwitchState, POST_RESTART_ATTACHMENTS);
       }
-      await waitForWorkspaceReady(workspace, readyTimeoutMs);
-      const summary = loadWorkspaceSummary(userProfileId ?? "", project);
+      await waitForVaultReady(vault, readyTimeoutMs);
+      const summary = loadVaultSummary(userProfileId ?? "", project);
       const currentStatus = summary.status;
       const selectedDriver = {
         backend: backendHint,
-        ...(backendHint === "pod" && (profileHint ?? workspace.backend.profile)
-          ? { profile: profileHint ?? workspace.backend.profile }
+        ...(backendHint === "pod" && (profileHint ?? vault.backend.profile)
+          ? { profile: profileHint ?? vault.backend.profile }
           : {}),
       };
-      writeWorkspaceStatus({
-        schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
+      writeVaultStatus({
+        schemaVersion: VAULT_STATUS_SCHEMA_VERSION,
         project,
         paseo: currentStatus?.paseo ?? {
           daemon: "unknown",
@@ -895,7 +895,7 @@ export async function performWorkspaceSwitch(
       previousBackend: effectivePreviousBackend ?? null,
       previousProfile: previousSelection?.profile ?? null,
       selectedBackend: backendHint,
-      selectedProfile: backendHint === "pod" ? (profileHint ?? workspace.backend.profile) : null,
+      selectedProfile: backendHint === "pod" ? (profileHint ?? vault.backend.profile) : null,
       stoppedBackends: finalizedStoppedBackends,
       selectionFile: null,
     };
@@ -903,7 +903,7 @@ export async function performWorkspaceSwitch(
   if (!userProfileId?.trim()) {
     return runSwitch();
   }
-  return withWorkspaceLifecycleLock(
+  return withVaultLifecycleLock(
     import.meta.url,
     userProfileId,
     project,
@@ -912,6 +912,6 @@ export async function performWorkspaceSwitch(
 }
 
 export async function switchCommand(projectRef: string): Promise<void> {
-  const result = await performWorkspaceSwitch(projectRef);
+  const result = await performVaultSwitch(projectRef);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }

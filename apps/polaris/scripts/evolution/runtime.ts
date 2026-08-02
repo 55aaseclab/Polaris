@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { WorkspaceSpec } from "../core/workspace.js";
-import { workspaceEvolutionStateDir } from "../output/state-store.js";
+import type { VaultSpec } from "../core/vault.js";
+import { vaultEvolutionStateDir } from "../output/state-store.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 import { applyCuratorResult } from "./curator.js";
 import {
@@ -26,90 +26,90 @@ import type {
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 
-function userPolarisStateDir(workspace: WorkspaceSpec): string {
-  return path.join(USER_ROOT, workspace.userProfile.id, "polaris");
+function userPolarisStateDir(vault: VaultSpec): string {
+  return path.join(USER_ROOT, vault.userProfile.id, "polaris");
 }
 
-function workspaceMemoryStateDir(workspace: WorkspaceSpec): string {
-  return workspaceEvolutionStateDir(
-    workspace.identity.projectName,
-    workspace.userProfile.id,
+function vaultMemoryStateDir(vault: VaultSpec): string {
+  return vaultEvolutionStateDir(
+    vault.identity.projectName,
+    vault.userProfile.id,
   );
 }
 
-function workspaceDataMemoryDir(workspace: WorkspaceSpec): string {
-  return `${workspace.attachments.workspaceData.mountRoot}/.polaris`;
+function vaultDataMemoryDir(vault: VaultSpec): string {
+  return `${vault.attachments.vaultData.mountRoot}/.polaris`;
 }
 
-function runtimeSessionsDir(workspace: WorkspaceSpec): string {
-  return `${workspace.agent.runtime.evolutionRoot}/sessions`;
+function runtimeSessionsDir(vault: VaultSpec): string {
+  return `${vault.agent.runtime.evolutionRoot}/sessions`;
 }
 
-function eventsFilePath(workspace: WorkspaceSpec): string {
-  return path.join(workspaceMemoryStateDir(workspace), "execution-events.jsonl");
+function eventsFilePath(vault: VaultSpec): string {
+  return path.join(vaultMemoryStateDir(vault), "execution-events.jsonl");
 }
 
-export function controlPlaneEvolutionDbPath(workspace: WorkspaceSpec): string {
-  return path.join(workspaceMemoryStateDir(workspace), "store.db");
+export function controlPlaneEvolutionDbPath(vault: VaultSpec): string {
+  return path.join(vaultMemoryStateDir(vault), "store.db");
 }
 
 function memoryWritePolicy(): "auto" | "stage" {
   return process.env.POLARIS_MEMORY_WRITE_POLICY === "auto" ? "auto" : "stage";
 }
 
-function providerFilePath(workspace: WorkspaceSpec): string {
-  return path.join(userPolarisStateDir(workspace), "provider-memory.json");
+function providerFilePath(vault: VaultSpec): string {
+  return path.join(userPolarisStateDir(vault), "provider-memory.json");
 }
 
-export function controlPlaneWorkspaceMemoryPath(workspace: WorkspaceSpec): string {
-  return path.join(workspaceMemoryStateDir(workspace), "MEMORY.md");
+export function controlPlaneVaultMemoryPath(vault: VaultSpec): string {
+  return path.join(vaultMemoryStateDir(vault), "MEMORY.md");
 }
 
-export function controlPlaneUserMemoryPath(workspace: WorkspaceSpec): string {
-  return path.join(userPolarisStateDir(workspace), "USER.md");
+export function controlPlaneUserMemoryPath(vault: VaultSpec): string {
+  return path.join(userPolarisStateDir(vault), "USER.md");
 }
 
-export function controlPlanePendingMemoryPath(workspace: WorkspaceSpec): string {
-  return path.join(workspaceMemoryStateDir(workspace), "pending-memory.json");
+export function controlPlanePendingMemoryPath(vault: VaultSpec): string {
+  return path.join(vaultMemoryStateDir(vault), "pending-memory.json");
 }
 
-export function controlPlaneSessionSnapshotPath(workspace: WorkspaceSpec, sessionId = "bootstrap"): string {
-  return path.join(workspaceMemoryStateDir(workspace), "sessions", sessionId, "memory-snapshot.md");
+export function controlPlaneSessionSnapshotPath(vault: VaultSpec, sessionId = "bootstrap"): string {
+  return path.join(vaultMemoryStateDir(vault), "sessions", sessionId, "memory-snapshot.md");
 }
 
-function runtimeWorkspaceMemoryPath(workspace: WorkspaceSpec): string {
-  return `${workspaceDataMemoryDir(workspace)}/MEMORY.md`;
+function runtimeVaultMemoryPath(vault: VaultSpec): string {
+  return `${vaultDataMemoryDir(vault)}/MEMORY.md`;
 }
 
-function runtimeUserMemoryPath(workspace: WorkspaceSpec): string {
-  return `${workspace.attachments.userIdentityState.mountRoot}/polaris/USER.md`;
+function runtimeUserMemoryPath(vault: VaultSpec): string {
+  return `${vault.attachments.userIdentityState.mountRoot}/polaris/USER.md`;
 }
 
-function runtimeSessionSnapshotPath(workspace: WorkspaceSpec, sessionId = "bootstrap"): string {
-  return `${runtimeSessionsDir(workspace)}/${sessionId}/memory-snapshot.md`;
+function runtimeSessionSnapshotPath(vault: VaultSpec, sessionId = "bootstrap"): string {
+  return `${runtimeSessionsDir(vault)}/${sessionId}/memory-snapshot.md`;
 }
 
-function writeWorkspaceMemoryFile(workspace: WorkspaceSpec, entries: EvolutionMemoryEntry[]): string {
-  const filePath = controlPlaneWorkspaceMemoryPath(workspace);
+function writeVaultMemoryFile(vault: VaultSpec, entries: EvolutionMemoryEntry[]): string {
+  const filePath = controlPlaneVaultMemoryPath(vault);
   ensureDir(path.dirname(filePath));
   const content = renderMemoryMarkdown({
-    heading: "Polaris Workspace Memory",
-    project: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
-    targetLabel: "workspace-memory",
+    heading: "Polaris Vault Memory",
+    project: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
+    targetLabel: "vault-memory",
     entries,
   });
   fs.writeFileSync(filePath, content, "utf8");
   return content;
 }
 
-function writeUserMemoryFile(workspace: WorkspaceSpec, entries: EvolutionMemoryEntry[]): string {
-  const filePath = controlPlaneUserMemoryPath(workspace);
+function writeUserMemoryFile(vault: VaultSpec, entries: EvolutionMemoryEntry[]): string {
+  const filePath = controlPlaneUserMemoryPath(vault);
   ensureDir(path.dirname(filePath));
   const content = renderMemoryMarkdown({
     heading: "Polaris User Memory",
-    project: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
+    project: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
     targetLabel: "user-memory",
     entries,
   });
@@ -118,24 +118,24 @@ function writeUserMemoryFile(workspace: WorkspaceSpec, entries: EvolutionMemoryE
 }
 
 function renderSessionSnapshot(params: {
-  workspace: WorkspaceSpec;
+  vault: VaultSpec;
   sessionId: string;
-  workspaceMemory: string;
+  vaultMemory: string;
   userMemory: string;
   providerMemory: string;
 }): string {
   return [
     "# Polaris Memory Snapshot",
     "",
-    `- Project: ${params.workspace.identity.projectName}`,
-    `- User profile: ${params.workspace.userProfile.id}`,
+    `- Project: ${params.vault.identity.projectName}`,
+    `- User profile: ${params.vault.userProfile.id}`,
     `- Session: ${params.sessionId}`,
     `- Snapshotted at: ${nowIso()}`,
     `- Provider: ${params.providerMemory === "_No external memory provider configured._" ? "disabled" : "enabled"}`,
     "",
-    "## Workspace Memory",
+    "## Vault Memory",
     "",
-    params.workspaceMemory,
+    params.vaultMemory,
     "",
     "## User Memory",
     "",
@@ -148,8 +148,8 @@ function renderSessionSnapshot(params: {
   ].join("\n");
 }
 
-function writeSessionSnapshot(workspace: WorkspaceSpec, sessionId: string, content: string): void {
-  const filePath = controlPlaneSessionSnapshotPath(workspace, sessionId);
+function writeSessionSnapshot(vault: VaultSpec, sessionId: string, content: string): void {
+  const filePath = controlPlaneSessionSnapshotPath(vault, sessionId);
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, content, "utf8");
 }
@@ -158,8 +158,8 @@ function shouldPersistChange(change: EvolutionMemoryChange): boolean {
   return change.confidence >= 0.55;
 }
 
-function writeProviderMirror(workspace: WorkspaceSpec, entries: EvolutionMemoryEntry[]): void {
-  const providerPath = providerFilePath(workspace);
+function writeProviderMirror(vault: VaultSpec, entries: EvolutionMemoryEntry[]): void {
+  const providerPath = providerFilePath(vault);
   ensureDir(path.dirname(providerPath));
   const current = readProviderMemory(providerPath);
   const next = [...current];
@@ -174,37 +174,37 @@ function writeProviderMirror(workspace: WorkspaceSpec, entries: EvolutionMemoryE
   writeJsonFile(providerPath, next);
 }
 
-function writePendingMemoryFile(workspace: WorkspaceSpec, store: EvolutionStore): void {
-  writeJsonFile(controlPlanePendingMemoryPath(workspace), store.listPendingMemoryChanges(workspace.identity.projectName));
+function writePendingMemoryFile(vault: VaultSpec, store: EvolutionStore): void {
+  writeJsonFile(controlPlanePendingMemoryPath(vault), store.listPendingMemoryChanges(vault.identity.projectName));
 }
 
-function mirrorEventsFile(workspace: WorkspaceSpec, store: EvolutionStore): void {
-  const events = store.listEventsForWorkspace(workspace.identity.projectName);
-  const filePath = eventsFilePath(workspace);
+function mirrorEventsFile(vault: VaultSpec, store: EvolutionStore): void {
+  const events = store.listEventsForVault(vault.identity.projectName);
+  const filePath = eventsFilePath(vault);
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, events.map((event) => JSON.stringify(event)).join("\n") + (events.length ? "\n" : ""), "utf8");
 }
 
-function importMarkdownMemoryIfNeeded(workspace: WorkspaceSpec, store: EvolutionStore): void {
-  const workspaceId = workspace.identity.projectName;
-  const userProfileId = workspace.userProfile.id;
-  const hasWorkspaceEntries = store.queryMemoryEntries({
-    workspaceId,
-    target: "workspace-memory",
+function importMarkdownMemoryIfNeeded(vault: VaultSpec, store: EvolutionStore): void {
+  const vaultId = vault.identity.projectName;
+  const userProfileId = vault.userProfile.id;
+  const hasVaultEntries = store.queryMemoryEntries({
+    vaultId,
+    target: "vault-memory",
     limit: 1,
   }).length > 0;
   const hasUserEntries = store.queryMemoryEntries({
-    workspaceId,
+    vaultId,
     userProfileId,
     target: "user-memory",
     limit: 1,
   }).length > 0;
-  if (!hasWorkspaceEntries) {
+  if (!hasVaultEntries) {
     const entries = parseMemoryMarkdown({
-      filePath: controlPlaneWorkspaceMemoryPath(workspace),
-      workspaceId,
+      filePath: controlPlaneVaultMemoryPath(vault),
+      vaultId,
       userProfileId,
-      target: "workspace-memory",
+      target: "vault-memory",
     });
     for (const entry of entries) {
       store.upsertMemoryEntry(entry);
@@ -212,8 +212,8 @@ function importMarkdownMemoryIfNeeded(workspace: WorkspaceSpec, store: Evolution
   }
   if (!hasUserEntries) {
     const entries = parseMemoryMarkdown({
-      filePath: controlPlaneUserMemoryPath(workspace),
-      workspaceId,
+      filePath: controlPlaneUserMemoryPath(vault),
+      vaultId,
       userProfileId,
       target: "user-memory",
     });
@@ -225,7 +225,7 @@ function importMarkdownMemoryIfNeeded(workspace: WorkspaceSpec, store: Evolution
 
 function applyMemoryChange(store: EvolutionStore, change: EvolutionMemoryChange): EvolutionMemoryEntry | null {
   if (change.operation === "remove") {
-    const existing = store.findActiveMemoryEntry(change.workspaceId, change.target, change.key);
+    const existing = store.findActiveMemoryEntry(change.vaultId, change.target, change.key);
     if (existing) {
       store.archiveMemoryEntries([existing.id]);
     }
@@ -235,13 +235,13 @@ function applyMemoryChange(store: EvolutionStore, change: EvolutionMemoryChange)
   if (!change.candidate) {
     return null;
   }
-  const existing = store.findActiveMemoryEntry(change.workspaceId, change.target, change.key);
+  const existing = store.findActiveMemoryEntry(change.vaultId, change.target, change.key);
   if (existing) {
     store.archiveMemoryEntries([existing.id]);
   }
   const nextEntry: EvolutionMemoryEntry = {
     id: `${change.target}:${change.section}:${change.key}:${randomUUID()}`,
-    workspaceId: change.workspaceId,
+    vaultId: change.vaultId,
     userProfileId: change.userProfileId,
     target: change.target,
     section: change.section,
@@ -266,64 +266,64 @@ function applyMemoryChange(store: EvolutionStore, change: EvolutionMemoryChange)
 }
 
 export async function prepareEvolutionMemorySnapshot(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   sessionId = "bootstrap",
-): Promise<WorkspaceSpec> {
-  if (!workspace.agent.enabled || !workspace.agent.capabilities.supportsRetrieval) {
-    return workspace;
+): Promise<VaultSpec> {
+  if (!vault.agent.enabled || !vault.agent.capabilities.supportsRetrieval) {
+    return vault;
   }
-  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(workspace));
+  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(vault));
   try {
-  importMarkdownMemoryIfNeeded(workspace, store);
-  const workspaceEntries = store.queryMemoryEntries({
-    workspaceId: workspace.identity.projectName,
-    target: "workspace-memory",
+  importMarkdownMemoryIfNeeded(vault, store);
+  const vaultEntries = store.queryMemoryEntries({
+    vaultId: vault.identity.projectName,
+    target: "vault-memory",
     limit: 200,
   });
   const userEntries = store.queryMemoryEntries({
-    workspaceId: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
+    vaultId: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
     target: "user-memory",
     limit: 200,
   });
-  const providerEntries = readProviderMemory(providerFilePath(workspace));
-  const retrievedWorkspace = await retrieveMemoryContext(workspaceEntries, {
-    workspaceId: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
+  const providerEntries = readProviderMemory(providerFilePath(vault));
+  const retrievedVault = await retrieveMemoryContext(vaultEntries, {
+    vaultId: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
     prompt: "",
     limit: 12,
   });
   const retrievedUser = await retrieveMemoryContext(userEntries, {
-    workspaceId: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
+    vaultId: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
     prompt: "",
     limit: 12,
   });
-  const workspaceContent = writeWorkspaceMemoryFile(workspace, retrievedWorkspace);
-  const userContent = writeUserMemoryFile(workspace, retrievedUser);
+  const vaultContent = writeVaultMemoryFile(vault, retrievedVault);
+  const userContent = writeUserMemoryFile(vault, retrievedUser);
   const snapshotContent = renderSessionSnapshot({
-    workspace,
+    vault,
     sessionId,
-    workspaceMemory: workspaceContent,
+    vaultMemory: vaultContent,
     userMemory: userContent,
     providerMemory: renderProviderMemory(providerEntries),
   });
-  writeSessionSnapshot(workspace, sessionId, snapshotContent);
-  writePendingMemoryFile(workspace, store);
+  writeSessionSnapshot(vault, sessionId, snapshotContent);
+  writePendingMemoryFile(vault, store);
   return {
-    ...workspace,
+    ...vault,
     evolution: {
-      workspaceMemoryFile: runtimeWorkspaceMemoryPath(workspace),
-      workspaceMemoryContent: workspaceContent,
-      userMemoryFile: runtimeUserMemoryPath(workspace),
+      vaultMemoryFile: runtimeVaultMemoryPath(vault),
+      vaultMemoryContent: vaultContent,
+      userMemoryFile: runtimeUserMemoryPath(vault),
       userMemoryContent: userContent,
-      sessionSnapshotFile: runtimeSessionSnapshotPath(workspace, sessionId),
+      sessionSnapshotFile: runtimeSessionSnapshotPath(vault, sessionId),
       sessionSnapshotContent: snapshotContent,
-      controlPlaneWorkspaceMemoryPath: controlPlaneWorkspaceMemoryPath(workspace),
-      controlPlaneUserMemoryPath: controlPlaneUserMemoryPath(workspace),
-      controlPlaneSessionSnapshotPath: controlPlaneSessionSnapshotPath(workspace, sessionId),
-      controlPlanePendingMemoryPath: controlPlanePendingMemoryPath(workspace),
-      artifactCount: retrievedWorkspace.length + retrievedUser.length,
+      controlPlaneVaultMemoryPath: controlPlaneVaultMemoryPath(vault),
+      controlPlaneUserMemoryPath: controlPlaneUserMemoryPath(vault),
+      controlPlaneSessionSnapshotPath: controlPlaneSessionSnapshotPath(vault, sessionId),
+      controlPlanePendingMemoryPath: controlPlanePendingMemoryPath(vault),
+      artifactCount: retrievedVault.length + retrievedUser.length,
     },
   };
   } finally {
@@ -336,46 +336,46 @@ export function createEvolutionSessionId(command: string): string {
 }
 
 export async function appendEvolutionEvent(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   sessionId: string,
   kind: EvolutionExecutionEvent["kind"],
   payload: Record<string, unknown>,
 ): Promise<void> {
-  if (!workspace.agent.enabled) {
+  if (!vault.agent.enabled) {
     return;
   }
   const event = {
     id: randomUUID(),
-    workspaceId: workspace.identity.projectName,
-    managerId: workspace.agent.managerId,
+    vaultId: vault.identity.projectName,
+    managerId: vault.agent.managerId,
     sessionId,
     kind,
     timestamp: nowIso(),
     payload,
   };
-  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(workspace));
+  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(vault));
   try {
     store.recordEvent(event);
   } finally {
     store.close();
   }
-  appendJsonLine(eventsFilePath(workspace), event);
+  appendJsonLine(eventsFilePath(vault), event);
 }
 
 export async function finalizeEvolutionSession(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   sessionId: string,
 ): Promise<void> {
-  if (!workspace.agent.enabled || !workspace.agent.capabilities.supportsReview) {
+  if (!vault.agent.enabled || !vault.agent.capabilities.supportsReview) {
     return;
   }
-  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(workspace));
+  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(vault));
   try {
-  const events = store.listEventsForSession(workspace.identity.projectName, sessionId);
+  const events = store.listEventsForSession(vault.identity.projectName, sessionId);
   const review = await reviewExecutionCandidate({
-    workspaceId: workspace.identity.projectName,
-    userProfileId: workspace.userProfile.id,
-    managerId: workspace.agent.managerId,
+    vaultId: vault.identity.projectName,
+    userProfileId: vault.userProfile.id,
+    managerId: vault.agent.managerId,
     sessionId,
     events,
   });
@@ -398,36 +398,36 @@ export async function finalizeEvolutionSession(
     }
   }
   if (autoApplied.length > 0) {
-    const workspaceEntries = applyCuratorResult(store.queryMemoryEntries({
-      workspaceId: workspace.identity.projectName,
-      target: "workspace-memory",
+    const vaultEntries = applyCuratorResult(store.queryMemoryEntries({
+      vaultId: vault.identity.projectName,
+      target: "vault-memory",
       limit: 200,
     }));
     const userEntries = applyCuratorResult(store.queryMemoryEntries({
-      workspaceId: workspace.identity.projectName,
-      userProfileId: workspace.userProfile.id,
+      vaultId: vault.identity.projectName,
+      userProfileId: vault.userProfile.id,
       target: "user-memory",
       limit: 200,
     }));
-    for (const entry of [...workspaceEntries, ...userEntries]) {
+    for (const entry of [...vaultEntries, ...userEntries]) {
       store.upsertMemoryEntry(entry);
     }
-    writeWorkspaceMemoryFile(workspace, workspaceEntries.filter((entry) => entry.status === "active"));
-    writeUserMemoryFile(workspace, userEntries.filter((entry) => entry.status === "active"));
-    writeProviderMirror(workspace, autoApplied);
+    writeVaultMemoryFile(vault, vaultEntries.filter((entry) => entry.status === "active"));
+    writeUserMemoryFile(vault, userEntries.filter((entry) => entry.status === "active"));
+    writeProviderMirror(vault, autoApplied);
   }
-  writePendingMemoryFile(workspace, store);
-  mirrorEventsFile(workspace, store);
+  writePendingMemoryFile(vault, store);
+  mirrorEventsFile(vault, store);
   } finally {
     store.close();
   }
 }
 
 export async function getEvolutionSummary(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
 ): Promise<{
   artifactCount: number;
-  activeWorkspaceArtifacts: number;
+  activeVaultArtifacts: number;
   activeUserArtifacts: number;
   latestTitles: string[];
   latestArtifacts: Array<{
@@ -442,9 +442,9 @@ export async function getEvolutionSummary(
   }>;
   pendingMemoryChanges: number;
 }> {
-  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(workspace));
+  const store = await EvolutionStore.open(controlPlaneEvolutionDbPath(vault));
   try {
-    return store.summarize(workspace.identity.projectName, workspace.userProfile.id);
+    return store.summarize(vault.identity.projectName, vault.userProfile.id);
   } finally {
     store.close();
   }

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
-import type { Credential } from "../core/workspace.js";
+import type { Credential } from "../core/vault.js";
 import {
   defaultCredentialLabel,
   defaultCredentialProviderName,

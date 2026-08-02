@@ -10,7 +10,7 @@ fi
 REMOTE_HOST="$1"
 REMOTE_APP_DIR="${2:-/srv/polaris/app}"
 REMOTE_DATA_ROOT="${3:-/srv/polaris/data}"
-REMOTE_NETFS_EXPORT_ROOT="${4:-/exports/polaris/workspaces}"
+REMOTE_NETFS_EXPORT_ROOT="${4:-/exports/polaris/vaults}"
 REMOTE_ENV_FILE="/etc/polaris/polaris.env"
 REMOTE_ENV_DIR="$(dirname "${REMOTE_ENV_FILE}")"
 REMOTE_ACTIVE_COLOR_FILE="${REMOTE_ENV_DIR}/active-color"
@@ -55,10 +55,10 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/workspaces' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
-\${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/workspaces' '${REMOTE_NETFS_EXPORT_ROOT}'
-\${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/workspaces ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
-  printf '%s\n' '${REMOTE_DATA_ROOT}/workspaces ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
+\${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
+\${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
+  printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
 \${SUDO} grep -qs \"${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)\" /etc/exports || \
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra

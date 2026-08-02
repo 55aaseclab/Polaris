@@ -1,5 +1,5 @@
-import type { DurableAttachment, WorkspaceSpec } from "./workspace.js";
-import { workspaceRuntimeScopeName } from "./workspace-name.js";
+import type { DurableAttachment, VaultSpec } from "./vault.js";
+import { vaultRuntimeScopeName } from "./vault-name.js";
 
 type AttachmentSource = DurableAttachment["source"];
 
@@ -24,7 +24,7 @@ export function dockerNetfsServer(source: AttachmentSource): string {
   const server = requireNetfsField(
     source.server,
     "server",
-    "workspace-data",
+    "vault-data",
   );
   return server === "netfs.local" ? "127.0.0.1" : server;
 }
@@ -46,32 +46,32 @@ export function requireNetfsField(
 }
 
 export function netfsResolvedPath(source: AttachmentSource): string {
-  const exportPath = requireNetfsField(source.exportPath, "exportPath", "workspace-data");
+  const exportPath = requireNetfsField(source.exportPath, "exportPath", "vault-data");
   const base = exportPath.endsWith("/") ? exportPath.slice(0, -1) : exportPath;
   const subPath = trimSlashes(source.subPath?.trim() ?? "");
   return subPath ? `${base}/${subPath}` : base;
 }
 
-export function workspaceDataClaimName(workspace: WorkspaceSpec): string {
-  const runtimeScope = workspaceRuntimeScopeName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+export function vaultDataClaimName(vault: VaultSpec): string {
+  const runtimeScope = vaultRuntimeScopeName(
+    vault.userProfile.id,
+    vault.identity.projectName,
   );
-  return workspace.attachments.workspaceData.source.volumeRef?.trim()
-    || `${runtimeScope}-workspace-data`;
+  return vault.attachments.vaultData.source.volumeRef?.trim()
+    || `${runtimeScope}-vault-data`;
 }
 
-export function workspaceDataDockerVolumeName(workspace: WorkspaceSpec): string {
-  const runtimeScope = workspaceRuntimeScopeName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+export function vaultDataDockerVolumeName(vault: VaultSpec): string {
+  const runtimeScope = vaultRuntimeScopeName(
+    vault.userProfile.id,
+    vault.identity.projectName,
   );
-  return workspace.attachments.workspaceData.source.volumeRef?.trim()
-    || `${runtimeScope}-workspace-data`;
+  return vault.attachments.vaultData.source.volumeRef?.trim()
+    || `${runtimeScope}-vault-data`;
 }
 
-export function workspaceDataPersistentVolumeName(
-  workspace: WorkspaceSpec,
+export function vaultDataPersistentVolumeName(
+  vault: VaultSpec,
 ): string {
-  return `${workspaceDataClaimName(workspace)}-pv`;
+  return `${vaultDataClaimName(vault)}-pv`;
 }

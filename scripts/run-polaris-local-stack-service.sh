@@ -29,7 +29,7 @@ SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-0.0.0.0}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
 EXECUTOR_HOST="${POLARIS_EXECUTOR_HOST:-0.0.0.0}"
 EXECUTOR_PORT="${POLARIS_EXECUTOR_PORT:-8788}"
-# paseo-web runs OUTSIDE workspace containers (shared coding UI capability).
+# paseo-web runs OUTSIDE vault containers (shared coding UI capability).
 # Expo `--host lan` already exposes it beyond loopback.
 PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
 LOG_DIR=".runtime/paseo"
@@ -71,7 +71,7 @@ fi
 
 echo "[polaris-local-stack] auth_mode=${POLARIS_AUTH_MODE}" >&2
 echo "[polaris-local-stack] outer: polaris API :${SERVER_PORT}, executor :${EXECUTOR_PORT}, paseo-web :${PASEO_PORT}" >&2
-echo "[polaris-local-stack] in-container (per workspace): paseo daemon :6767; vertical workspaces also wanghai portal :9090" >&2
+echo "[polaris-local-stack] in-container (per vault): paseo daemon :6767; vertical vaults also wanghai portal :9090" >&2
 
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
 pnpm --filter polaris exec tsx watch scripts/polaris.ts server "${SERVER_PORT}" "${SERVER_HOST}" \
@@ -90,7 +90,7 @@ if command -v socat >/dev/null 2>&1 && ip -4 addr show docker0 >/dev/null 2>&1; 
     2> >(tee "${LOG_DIR}/stack.executor-bridge.err.log" >&2) &
   executor_bridge_proxy_pid=$!
 else
-  echo "[polaris-local-stack] executor bridge proxy not started; docker workspaces may not report Paseo pairing metadata back to the host executor" >&2
+  echo "[polaris-local-stack] executor bridge proxy not started; docker vaults may not report Paseo pairing metadata back to the host executor" >&2
 fi
 
 # Outer shared coding UI. It owns /h/... only; polaris-shell is served by the

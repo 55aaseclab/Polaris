@@ -15,65 +15,65 @@ import {
   upsertUserMapUserId,
 } from "../scripts/portal/user-map.js";
 import { withUserMutationLock } from "../scripts/utils/user-mutation-lock.js";
-import { withWorkspaceLifecycleLock } from "../scripts/utils/workspace-lifecycle-lock.js";
+import { withVaultLifecycleLock } from "../scripts/utils/vault-lifecycle-lock.js";
 import {
   activatePortalCredential,
-  bindPortalWorkspaceAgent,
-  cancelPortalWorkspaceProvision,
+  bindPortalVaultAgent,
+  cancelPortalVaultProvision,
   createPortalCredential,
   createPortalSkill,
-  deletePortalWorkspace,
+  deletePortalVault,
   deletePortalCredential,
   deletePortalSkill,
   deletePortalUser,
   getPortalCredentialCatalog,
-  getPortalWorkspaceDetail,
+  getPortalVaultDetail,
   listPortalAdminUsers,
-  listPortalWorkspaces,
+  listPortalVaults,
   listUserPortalCredentials,
   readUserPortalCredentialRecord,
   listUserPortalSkills,
-  queueProvisionWorkspace,
+  queueProvisionVault,
   readUserPortalCredentialPreview,
-  readUserPortalWorkspaceAssetPreview,
-  reportPortalWorkspaceStatus,
-  startPortalWorkspace,
-  stopPortalWorkspace,
-  switchPortalWorkspace,
-  switchPortalWorkspaceLiveCredential,
-  syncPortalWorkspaceSkills,
-  unbindPortalWorkspaceAgent,
-  installPortalWorkspaceSkill,
-  listPortalWorkspaceSkills,
-  uninstallPortalWorkspaceSkill,
+  readUserPortalVaultAssetPreview,
+  reportPortalVaultStatus,
+  startPortalVault,
+  stopPortalVault,
+  switchPortalVault,
+  switchPortalVaultLiveCredential,
+  syncPortalVaultSkills,
+  unbindPortalVaultAgent,
+  installPortalVaultSkill,
+  listPortalVaultSkills,
+  uninstallPortalVaultSkill,
 } from "../scripts/portal/service.js";
-import { subscribePortalWorkspaceStream } from "../scripts/portal/workspace-live-hub.js";
+import { subscribePortalVaultStream } from "../scripts/portal/vault-live-hub.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
-import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
+import { deleteVaultOwnedByUser } from "../scripts/cli/commands/delete.js";
 import {
-  scaffoldDockerWorkspace,
+  scaffoldDockerVault,
   scaffoldUserProfileById,
-  workspaceConfigPath,
+  vaultConfigPath,
 } from "../scripts/config/scaffold.js";
 import {
-  listOwnedWorkspaces,
+  listOwnedVaults,
   readPortalProfile,
-  readWorkspaceProvisionProgress,
-  readWorkspaceStatus,
+  readVaultProvisionProgress,
+  readVaultStatus,
   updatePortalProfile,
-  writeWorkspaceProvisionProgress,
-  clearWorkspaceProvisionProgress,
+  writeVaultProvisionProgress,
+  clearVaultProvisionProgress,
 } from "../scripts/core/portal.js";
 import {
-  workspacePaseoStateDir,
-  workspaceSelectionPath,
-  writeWorkspaceDriverSelection,
-  writeWorkspaceStatus,
+  vaultPaseoStateDir,
+  vaultSelectionPath,
+  writeVaultDriverSelection,
+  writeVaultStatus,
 } from "../scripts/output/state-store.js";
-import { stopPortalWorkspace as stopPortalWorkspaceDirect } from "../scripts/executor/operations.js";
-import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
-import { readWorkspaceDriverSelection } from "../scripts/output/state-store.js";
+import { stopPortalVault as stopPortalVaultDirect } from "../scripts/executor/operations.js";
+import { vaultRuntimeScopeName } from "../scripts/core/vault-name.js";
+import { readVaultDriverSelection } from "../scripts/output/state-store.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -242,16 +242,16 @@ async function waitFor<T>(
   throw new Error(`Timed out after ${timeoutMs}ms`);
 }
 
-async function waitForProvisionDone(userId: string, workspace: string) {
+async function waitForProvisionDone(userId: string, vault: string) {
   return waitFor(() => {
-    const progress = readWorkspaceProvisionProgress(userId, workspace);
+    const progress = readVaultProvisionProgress(userId, vault);
     return progress?.done ? progress : null;
   });
 }
 
-async function waitForWorkspaceStatusFile(userId: string, workspace: string) {
+async function waitForVaultStatusFile(userId: string, vault: string) {
   return waitFor(() => {
-    const status = readWorkspaceStatus(userId, workspace);
+    const status = readVaultStatus(userId, vault);
     return status ? status : null;
   });
 }
@@ -266,17 +266,17 @@ async function waitForCommandLogMatch(
   });
 }
 
-async function cleanupWorkspaceRuntime(
+async function cleanupVaultRuntime(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
   try {
-    await stopPortalWorkspaceDirect(userId, workspace);
+    await stopPortalVaultDirect(userId, vault);
   } catch {
     // Ignore cleanup failures so filesystem cleanup still runs.
   }
   try {
-    await deleteWorkspaceOwnedByUser(userId, workspace);
+    await deleteVaultOwnedByUser(userId, vault);
   } catch {
     // Ignore cleanup failures so tests do not mask the original assertion.
   }
@@ -402,21 +402,21 @@ async function withEnv(
 }
 
 async function withSyntheticMemberUser(
-  fn: (userId: string, workspace: string) => Promise<void>,
+  fn: (userId: string, vault: string) => Promise<void>,
 ): Promise<void> {
   const userId = uniqueName("portal-member");
-  const workspace = uniqueName("portal-member-workspace");
+  const vault = uniqueName("portal-member-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(vaultRoot, { recursive: true });
   fs.writeFileSync(
     profilePath,
     yaml.dump({
       id: userId,
       name: "Portal Member",
       email: `${userId}@polaris.local`,
-      workspaces: [workspace],
+      vaults: [vault],
       github: {
         account: null,
       },
@@ -428,7 +428,7 @@ async function withSyntheticMemberUser(
     "utf8",
   );
   try {
-    await fn(userId, workspace);
+    await fn(userId, vault);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(path.join(USER_ROOT, userId), {
@@ -438,17 +438,17 @@ async function withSyntheticMemberUser(
   }
 }
 
-test("workspace ownership is derived from the project directory", () => {
+test("vault ownership is derived from the project directory", () => {
   const userId = "100000000000000001";
-  const workspace = uniqueName("portal-owned");
-  const root = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vault = uniqueName("portal-owned");
+  const root = path.join(USER_ROOT, userId, "vaults", vault);
   fs.mkdirSync(root, { recursive: true });
   fs.copyFileSync(
-    workspaceConfigPath("demo", "docker", userId),
+    vaultConfigPath("demo", "docker", userId),
     path.join(root, "docker.agent.yaml"),
   );
   try {
-    assert.ok(listOwnedWorkspaces(userId).includes(workspace));
+    assert.ok(listOwnedVaults(userId).includes(vault));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -456,10 +456,10 @@ test("workspace ownership is derived from the project directory", () => {
 
 test("portal provisioning progress persists across reads", () => {
   const userId = DEMO_USER_ID;
-  const workspace = uniqueName("portal-progress");
+  const vault = uniqueName("portal-progress");
   const progress = {
     userId,
-    workspace,
+    vault,
     phase: "images",
     step: 2,
     totalSteps: 6,
@@ -469,80 +469,80 @@ test("portal provisioning progress persists across reads", () => {
     done: false,
   };
   try {
-    writeWorkspaceProvisionProgress(userId, workspace, progress);
-    assert.deepEqual(readWorkspaceProvisionProgress(userId, workspace), progress);
+    writeVaultProvisionProgress(userId, vault, progress);
+    assert.deepEqual(readVaultProvisionProgress(userId, vault), progress);
   } finally {
-    clearWorkspaceProvisionProgress(userId, workspace);
+    clearVaultProvisionProgress(userId, vault);
   }
 });
 
-test("portal workspace detail returns cached detail without triggering a backend refresh", async () => {
+test("portal vault detail returns cached detail without triggering a backend refresh", async () => {
   await withFakePath(
     {
       docker: "#!/bin/sh\nexit 0\n",
       kubectl: "#!/bin/sh\nexit 0\n",
     },
     async ({ readCommandLog }) => {
-      const previousSelection = readWorkspaceDriverSelection("demo", DEMO_USER_ID);
+      const previousSelection = readVaultDriverSelection("demo", DEMO_USER_ID);
       try {
-        writeWorkspaceDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
-        const detail = await getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+        writeVaultDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
+        const detail = await getPortalVaultDetail(DEMO_USER_ID, "demo");
         assert.equal(detail.name, "demo");
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.equal(readCommandLog().length, 0);
       } finally {
         if (previousSelection) {
-          writeWorkspaceDriverSelection("demo", previousSelection, DEMO_USER_ID);
+          writeVaultDriverSelection("demo", previousSelection, DEMO_USER_ID);
         } else {
-          fs.rmSync(workspaceSelectionPath("demo", DEMO_USER_ID), { force: true });
+          fs.rmSync(vaultSelectionPath("demo", DEMO_USER_ID), { force: true });
         }
       }
     },
   );
 });
 
-test("portal workspace list refreshes status before returning", async () => {
+test("portal vault list refreshes status before returning", async () => {
   await withFakePath(
     {
       docker: "#!/bin/sh\nexit 0\n",
       kubectl: "#!/bin/sh\nexit 0\n",
     },
     async ({ readCommandLog }) => {
-      const previousSelection = readWorkspaceDriverSelection("demo", DEMO_USER_ID);
+      const previousSelection = readVaultDriverSelection("demo", DEMO_USER_ID);
       try {
-        writeWorkspaceDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
-        const workspaces = await listPortalWorkspaces(DEMO_USER_ID);
-        const demoWorkspace = workspaces.find((workspace) => workspace.name === "demo");
-        assert.ok(demoWorkspace);
+        writeVaultDriverSelection("demo", { backend: "docker" }, DEMO_USER_ID);
+        const vaults = await listPortalVaults(DEMO_USER_ID);
+        const demoVault = vaults.find((vault) => vault.name === "demo");
+        assert.ok(demoVault);
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.equal(readCommandLog().length, 0);
       } finally {
         if (previousSelection) {
-          writeWorkspaceDriverSelection("demo", previousSelection, DEMO_USER_ID);
+          writeVaultDriverSelection("demo", previousSelection, DEMO_USER_ID);
         } else {
-          fs.rmSync(workspaceSelectionPath("demo", DEMO_USER_ID), { force: true });
+          fs.rmSync(vaultSelectionPath("demo", DEMO_USER_ID), { force: true });
         }
       }
     },
   );
 });
 
-test("portal workspace stop writes cached status before the async refresh completes", async () => {
+test("portal vault stop writes cached status before the async refresh completes", async () => {
   const userId = uniqueName("portal-stop-cache-user");
-  const workspace = uniqueName("portal-stop-cache");
+  const vault = uniqueName("portal-stop-cache");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Cache User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+    await createCommand([vault, "--user", userId]);
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       driver: {
         backend: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
-        runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
+        runtimeRef: `container/${vaultRuntimeScopeName(userId, vault)}-docker`,
       },
       runtime: {
         selectedDriver: { backend: "docker" },
@@ -578,8 +578,8 @@ test("portal workspace stop writes cached status before the async refresh comple
           return true;
         }) as typeof process.stderr.write;
         try {
-          await stopPortalWorkspaceDirect(userId, workspace);
-          const cachedStatus = readWorkspaceStatus(userId, workspace);
+          await stopPortalVaultDirect(userId, vault);
+          const cachedStatus = readVaultStatus(userId, vault);
           assert.equal(cachedStatus?.driver?.status, "stopped");
         } finally {
           process.stderr.write = originalWrite;
@@ -587,7 +587,7 @@ test("portal workspace stop writes cached status before the async refresh comple
       },
     );
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
@@ -596,18 +596,18 @@ test("portal workspace stop writes cached status before the async refresh comple
   }
 });
 
-test("portal workspace stop publishes stopping to the live stream before completion", async () => {
+test("portal vault stop publishes stopping to the live stream before completion", async () => {
   const userId = uniqueName("portal-stop-live-user");
-  const workspace = uniqueName("portal-stop-live");
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vault = uniqueName("portal-stop-live");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Live User", "--email", `${userId}@polaris.local`]);
-    await createCommand([`${workspace}@docker`, "--user", userId]);
-    writeWorkspaceStatus({
+    await createCommand([`${vault}@docker`, "--user", userId]);
+    writeVaultStatus({
       schemaVersion: 1.1,
-      project: workspace,
+      project: vault,
       driver: {
         selected: { backend: "docker" },
         status: "running",
@@ -641,16 +641,16 @@ exit 0
       },
       async () => {
         const events: Array<{ status: string | null }> = [];
-        const unsubscribe = subscribePortalWorkspaceStream(userId, (event) => {
-          if (event.type === "live-upsert" && event.workspace.name === workspace) {
+        const unsubscribe = subscribePortalVaultStream(userId, (event) => {
+          if (event.type === "live-upsert" && event.vault.name === vault) {
             events.push({
-              status: event.workspace.status?.driver?.status ?? null,
+              status: event.vault.status?.driver?.status ?? null,
             });
           }
         });
         try {
           await new Promise((resolve) => setTimeout(resolve, 50));
-          await stopPortalWorkspace(userId, workspace);
+          await stopPortalVault(userId, vault);
           await waitFor(() => {
             return events.some((event) => event.status === "stopping") ? true : null;
           });
@@ -660,24 +660,24 @@ exit 0
       },
     );
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
-test("portal workspace stop surfaces backend stop failures instead of reporting success", async () => {
+test("portal vault stop surfaces backend stop failures instead of reporting success", async () => {
   const userId = uniqueName("portal-stop-failure-user");
-  const workspace = uniqueName("portal-stop-failure");
+  const vault = uniqueName("portal-stop-failure");
   const userRoot = path.join(USER_ROOT, userId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
 
   try {
     await createUserCommand([userId, "--name", "Portal Stop Failure User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
-    writeWorkspaceStatus({
-      project: workspace,
+    await createCommand([vault, "--user", userId]);
+    writeVaultStatus({
+      project: vault,
       schemaVersion: 1.1,
       driver: {
         selected: { backend: "docker" },
@@ -707,13 +707,13 @@ exit 0
       },
       async () => {
         await assert.rejects(
-          stopPortalWorkspace(userId, workspace),
+          stopPortalVault(userId, vault),
           /stop failed|docker compose/i,
         );
       },
     );
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(path.join(USER_ROOT, userId), {
       recursive: true,
@@ -856,14 +856,14 @@ test("user mutation lock serializes same-user writers", async () => {
   ]);
 });
 
-test("workspace lifecycle lock serializes same-workspace writers", async () => {
-  const userId = uniqueName("portal-workspace-lock-user");
-  const workspace = uniqueName("portal-workspace-lock");
+test("vault lifecycle lock serializes same-vault writers", async () => {
+  const userId = uniqueName("portal-vault-lock-user");
+  const vault = uniqueName("portal-vault-lock");
   const events: string[] = [];
-  const first = withWorkspaceLifecycleLock(
+  const first = withVaultLifecycleLock(
     import.meta.url,
     userId,
-    workspace,
+    vault,
     async () => {
       events.push("first:start");
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -871,10 +871,10 @@ test("workspace lifecycle lock serializes same-workspace writers", async () => {
     },
   );
   await new Promise((resolve) => setTimeout(resolve, 25));
-  const second = withWorkspaceLifecycleLock(
+  const second = withVaultLifecycleLock(
     import.meta.url,
     userId,
-    workspace,
+    vault,
     async () => {
       events.push("second:start");
       events.push("second:end");
@@ -936,7 +936,7 @@ test("portal service lists and reads profile auth files for user settings", () =
     });
     fs.writeFileSync(
       path.join(userRoot, "wanghai", ".env"),
-      "WANGHAI_WORKSPACES_ROOT=/workspace/project/workspaces\nPORTAL_PROFILE_AUTH=1\n",
+      "WANGHAI_VAULTS_ROOT=/vault/project/vaults\nPORTAL_PROFILE_AUTH=1\n",
       "utf8",
     );
 
@@ -1276,16 +1276,16 @@ test("portal profile reads and updates", async () => {
   );
 });
 
-test("portal workspace detail loads for a user-scoped workspace", async () => {
-  const payload = await getPortalWorkspaceDetail(DEMO_USER_ID, "demo");
+test("portal vault detail loads for a user-scoped vault", async () => {
+  const payload = await getPortalVaultDetail(DEMO_USER_ID, "demo");
   assert.equal(payload.name, "demo");
   assert.ok(Array.isArray(payload.availableDrivers));
   assert.ok(payload.availableDrivers.some((driver) => driver.backend === "docker"));
   assert.ok(Array.isArray(payload.credentialBindings));
 });
 
-test("portal workspace detail does not leak bindings from another user with the same workspace name", async () => {
-  const workspace = uniqueName("shared-name");
+test("portal vault detail does not leak bindings from another user with the same vault name", async () => {
+  const vault = uniqueName("shared-name");
   const firstUserId = uniqueName("portal-scope-a");
   const secondUserId = uniqueName("portal-scope-b");
   const firstUserRoot = path.join(USER_ROOT, firstUserId);
@@ -1296,11 +1296,11 @@ test("portal workspace detail does not leak bindings from another user with the 
   try {
     await createUserCommand([firstUserId, "--name", "Scope A", "--email", `${firstUserId}@polaris.local`]);
     await createUserCommand([secondUserId, "--name", "Scope B", "--email", `${secondUserId}@polaris.local`]);
-    await createCommand([workspace, "--user", firstUserId]);
+    await createCommand([vault, "--user", firstUserId]);
 
-    const firstSpecPath = path.join(firstUserRoot, "workspaces", workspace, "docker.agent.yaml");
-    const secondWorkspaceRoot = path.join(secondUserRoot, "workspaces", workspace);
-    const secondSpecPath = path.join(secondWorkspaceRoot, "docker.agent.yaml");
+    const firstSpecPath = path.join(firstUserRoot, "vaults", vault, "docker.agent.yaml");
+    const secondVaultRoot = path.join(secondUserRoot, "vaults", vault);
+    const secondSpecPath = path.join(secondVaultRoot, "docker.agent.yaml");
     const firstSpec = (yaml.load(fs.readFileSync(firstSpecPath, "utf8")) ?? {}) as Record<string, unknown>;
     const firstCredentials = typeof firstSpec.credentials === "object" && firstSpec.credentials
       ? { ...(firstSpec.credentials as Record<string, unknown>) }
@@ -1319,7 +1319,7 @@ test("portal workspace detail does not leak bindings from another user with the 
     };
     fs.writeFileSync(firstSpecPath, yaml.dump(firstSpec, { lineWidth: 120, noRefs: true }), "utf8");
 
-    fs.mkdirSync(secondWorkspaceRoot, { recursive: true });
+    fs.mkdirSync(secondVaultRoot, { recursive: true });
     const secondSpec = JSON.parse(JSON.stringify(firstSpec)) as Record<string, unknown>;
     secondSpec.user_profile = secondUserId;
     secondSpec.credentials = {
@@ -1334,7 +1334,7 @@ test("portal workspace detail does not leak bindings from another user with the 
     };
     fs.writeFileSync(secondSpecPath, yaml.dump(secondSpec, { lineWidth: 120, noRefs: true }), "utf8");
 
-    const payload = await getPortalWorkspaceDetail(secondUserId, workspace);
+    const payload = await getPortalVaultDetail(secondUserId, vault);
     assert.deepEqual(payload.credentialBindings, [
       { purpose: "git-auth", credentialId: "github-ssh", required: false },
     ]);
@@ -1346,8 +1346,8 @@ test("portal workspace detail does not leak bindings from another user with the 
   }
 });
 
-test("portal service can provision the same workspace name for a different user", async () => {
-  const workspace = uniqueName("portal-shared-name");
+test("portal service can provision the same vault name for a different user", async () => {
+  const vault = uniqueName("portal-shared-name");
   const firstUserId = uniqueName("portal-shared-a");
   const secondUserId = uniqueName("portal-shared-b");
   const firstUserRoot = path.join(USER_ROOT, firstUserId);
@@ -1358,27 +1358,27 @@ test("portal service can provision the same workspace name for a different user"
   try {
     await createUserCommand([firstUserId, "--name", "Shared A", "--email", `${firstUserId}@polaris.local`]);
     await createUserCommand([secondUserId, "--name", "Shared B", "--email", `${secondUserId}@polaris.local`]);
-    await createCommand([workspace, "--user", firstUserId]);
+    await createCommand([vault, "--user", firstUserId]);
 
     await withFakePath(
       {
         docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
       },
       async () => {
-        await queueProvisionWorkspace(secondUserId, workspace, {
+        await queueProvisionVault(secondUserId, vault, {
           defaultDockerOnly: true,
           startAfterCreate: false,
         });
-        const finalStatus = await waitForWorkspaceStatusFile(secondUserId, workspace);
+        const finalStatus = await waitForVaultStatusFile(secondUserId, vault);
         assert.notEqual(finalStatus.driver?.status, "running");
         assert.equal(
-          fs.existsSync(path.join(secondUserRoot, "workspaces", workspace, "docker.agent.yaml")),
+          fs.existsSync(path.join(secondUserRoot, "vaults", vault, "docker.agent.yaml")),
           true,
         );
       },
     );
   } finally {
-    clearWorkspaceProvisionProgress(secondUserId, workspace);
+    clearVaultProvisionProgress(secondUserId, vault);
     fs.rmSync(firstProfilePath, { force: true });
     fs.rmSync(secondProfilePath, { force: true });
     fs.rmSync(firstUserRoot, { recursive: true, force: true });
@@ -1386,11 +1386,11 @@ test("portal service can provision the same workspace name for a different user"
   }
 });
 
-test("portal workspace asset preview reads workspace files", async () => {
+test("portal vault asset preview reads vault files", async () => {
   const previewPath = repoRelative(
-    path.join(USER_ROOT, DEMO_USER_ID, "workspaces", "demo", "docker.agent.yaml"),
+    path.join(USER_ROOT, DEMO_USER_ID, "vaults", "demo", "docker.agent.yaml"),
   );
-  const payload = readUserPortalWorkspaceAssetPreview(
+  const payload = readUserPortalVaultAssetPreview(
     DEMO_USER_ID,
     "demo",
     previewPath,
@@ -1407,10 +1407,10 @@ test("portal workspace asset preview reads workspace files", async () => {
 
 
 
-test("portal service provisions a new workspace through the CLI-backed scaffold flow", async () => {
-  const userId = uniqueName("portal-workspace-user");
-  const workspace = uniqueName("portal-create");
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+test("portal service provisions a new vault through the CLI-backed scaffold flow", async () => {
+  const userId = uniqueName("portal-vault-user");
+  const vault = uniqueName("portal-create");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
@@ -1419,7 +1419,7 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
   const privateKey = path.join(userRoot, "credentials", "ssh", "id_ed25519");
   const publicKey = path.join(userRoot, "credentials", "ssh", "id_ed25519.pub");
   try {
-    await createUserCommand([userId, "--name", "Portal Workspace User", "--email", `${userId}@polaris.local`]);
+    await createUserCommand([userId, "--name", "Portal Vault User", "--email", `${userId}@polaris.local`]);
     fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
     fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
     fs.mkdirSync(path.dirname(privateKey), { recursive: true });
@@ -1432,9 +1432,9 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
       `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
       "utf8",
     );
-    writeWorkspaceProvisionProgress(userId, workspace, {
+    writeVaultProvisionProgress(userId, vault, {
       userId,
-      workspace,
+      vault,
       phase: "error",
       step: 6,
       totalSteps: 7,
@@ -1450,29 +1450,29 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
         docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
       },
       async () => {
-        const payload = await queueProvisionWorkspace(userId, workspace);
-        assert.equal(payload.workspace, workspace);
+        const payload = await queueProvisionVault(userId, vault);
+        assert.equal(payload.vault, vault);
         assert.equal(payload.queued, true);
-        const finalStatus = await waitForWorkspaceStatusFile(userId, workspace);
+        const finalStatus = await waitForVaultStatusFile(userId, vault);
         assert.notEqual(finalStatus.driver?.status, "running");
       },
     );
 
-    const workspaceStatusPath = path.join(workspaceRoot, "state", "status.json");
-    assert.equal(fs.existsSync(workspaceStatusPath), true);
-    const finalStatus = JSON.parse(fs.readFileSync(workspaceStatusPath, "utf8")) as {
+    const vaultStatusPath = path.join(vaultRoot, "state", "status.json");
+    assert.equal(fs.existsSync(vaultStatusPath), true);
+    const finalStatus = JSON.parse(fs.readFileSync(vaultStatusPath, "utf8")) as {
       runtime?: { lifecycle?: string };
     };
     assert.notEqual(finalStatus.runtime?.lifecycle, "running");
 
-    assert.equal(fs.existsSync(path.join(workspaceRoot, "docker.agent.yaml")), true);
-    assert.equal(fs.existsSync(path.join(workspaceRoot, "pod.agent.yaml")), true);
-    assert.equal(fs.existsSync(path.join(workspaceRoot, "kubevirt.agent.yaml")), true);
+    assert.equal(fs.existsSync(path.join(vaultRoot, "docker.agent.yaml")), true);
+    assert.equal(fs.existsSync(path.join(vaultRoot, "pod.agent.yaml")), true);
+    assert.equal(fs.existsSync(path.join(vaultRoot, "kubevirt.agent.yaml")), true);
 
-    assert.ok((await listPortalWorkspaces(userId)).some((entry) => entry.name === workspace));
+    assert.ok((await listPortalVaults(userId)).some((entry) => entry.name === vault));
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
+    clearVaultProvisionProgress(userId, vault);
     fs.rmSync(codexAuth, { force: true });
     fs.rmSync(codexConfig, { force: true });
     fs.rmSync(claudeSettings, { force: true });
@@ -1483,10 +1483,10 @@ test("portal service provisions a new workspace through the CLI-backed scaffold 
   }
 });
 
-test("portal service can cancel a queued or running workspace provision job", async () => {
+test("portal service can cancel a queued or running vault provision job", async () => {
   const userId = uniqueName("portal-cancel-user");
-  const workspace = uniqueName("portal-cancel");
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vault = uniqueName("portal-cancel");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
@@ -1516,23 +1516,23 @@ test("portal service can cancel a queued or running workspace provision job", as
           docker: "#!/bin/sh\nif [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then exit 0; fi\nif [ \"$1\" = \"pull\" ]; then exit 0; fi\nexit 0\n",
         },
         async () => {
-          await queueProvisionWorkspace(userId, workspace);
-          await cancelPortalWorkspaceProvision(userId, workspace);
+          await queueProvisionVault(userId, vault);
+          await cancelPortalVaultProvision(userId, vault);
 
           const finalProgress = await waitFor(() => {
-            const progress = readWorkspaceProvisionProgress(userId, workspace);
+            const progress = readVaultProvisionProgress(userId, vault);
             return progress?.done ? progress : null;
           }, { timeoutMs: 10000 });
           assert.equal(finalProgress.status, "cancelled");
           assert.equal(finalProgress.phase, "cancelled");
-          assert.equal(finalProgress.errorCode, "workspace-provision-cancelled");
+          assert.equal(finalProgress.errorCode, "vault-provision-cancelled");
           assert.equal(finalProgress.retryable, true);
         },
       );
     });
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    clearWorkspaceProvisionProgress(userId, workspace);
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
+    clearVaultProvisionProgress(userId, vault);
     fs.rmSync(codexAuth, { force: true });
     fs.rmSync(codexConfig, { force: true });
     fs.rmSync(claudeSettings, { force: true });
@@ -1543,11 +1543,11 @@ test("portal service can cancel a queued or running workspace provision job", as
   }
 });
 
-test("portal service stops the selected workspace driver", async () => {
+test("portal service stops the selected vault driver", async () => {
   const userId = uniqueName("portal-stop-user");
-  const workspace = uniqueName("portal-stop");
+  const vault = uniqueName("portal-stop");
   const userRoot = path.join(USER_ROOT, userId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
@@ -1557,7 +1557,7 @@ test("portal service stops the selected workspace driver", async () => {
 
   try {
     await createUserCommand([userId, "--name", "Portal Stop User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
+    await createCommand([vault, "--user", userId]);
     fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
     fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
     fs.mkdirSync(path.dirname(privateKey), { recursive: true });
@@ -1570,9 +1570,9 @@ test("portal service stops the selected workspace driver", async () => {
       `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
       "utf8",
     );
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       runtime: {
         selectedDriver: { backend: "docker" },
         lifecycle: "running",
@@ -1608,7 +1608,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        const payload = await stopPortalWorkspace(userId, workspace);
+        const payload = await stopPortalVault(userId, vault);
         assert.equal(payload.stopped, true);
         await waitForCommandLogMatch(
           readCommandLog,
@@ -1636,10 +1636,10 @@ exit 0
   }
 });
 
-test("portal service can create and start a new workspace in one flow", async () => {
+test("portal service can create and start a new vault in one flow", async () => {
   const userId = uniqueName("portal-start-user");
-  const workspace = uniqueName("portal-start");
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
+  const vault = uniqueName("portal-start");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
 
@@ -1669,12 +1669,12 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        await queueProvisionWorkspace(userId, workspace, {
+        await queueProvisionVault(userId, vault, {
           defaultDockerOnly: true,
           startAfterCreate: true,
         });
         const finalStatus = await waitFor(() => {
-          const status = readWorkspaceStatus(userId, workspace);
+          const status = readVaultStatus(userId, vault);
           return status?.driver?.status === "running" ? status : null;
         });
         assert.equal(finalStatus.driver?.selected?.backend, "docker");
@@ -1691,18 +1691,18 @@ exit 0
       },
     );
   } finally {
-    await cleanupWorkspaceRuntime(userId, workspace);
-    clearWorkspaceProvisionProgress(userId, workspace);
+    await cleanupVaultRuntime(userId, vault);
+    clearVaultProvisionProgress(userId, vault);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
-test("portal service starts the selected workspace driver", async () => {
+test("portal service starts the selected vault driver", async () => {
   const userId = uniqueName("portal-explicit-start-user");
-  const workspace = uniqueName("portal-explicit-start");
+  const vault = uniqueName("portal-explicit-start");
   const userRoot = path.join(USER_ROOT, userId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const codexAuth = path.join(userRoot, "credentials", "codex", "auth.json");
   const codexConfig = path.join(userRoot, "credentials", "codex", "config.toml");
@@ -1712,7 +1712,7 @@ test("portal service starts the selected workspace driver", async () => {
 
   try {
     await createUserCommand([userId, "--name", "Portal Explicit Start User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
+    await createCommand([vault, "--user", userId]);
     fs.mkdirSync(path.dirname(codexAuth), { recursive: true });
     fs.mkdirSync(path.dirname(claudeSettings), { recursive: true });
     fs.mkdirSync(path.dirname(privateKey), { recursive: true });
@@ -1725,13 +1725,13 @@ test("portal service starts the selected workspace driver", async () => {
       `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey ${userId}@polaris.local\n`,
       "utf8",
     );
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       runtime: {
         selectedDriver: { backend: "docker" },
         lifecycle: "stopped",
-        reason: "workspace is stopped",
+        reason: "vault is stopped",
       },
       paseo: {
         daemon: "absent",
@@ -1772,7 +1772,7 @@ exit 0
 `,
       },
       async ({ readCommandLog }) => {
-        const payload = await startPortalWorkspace(userId, workspace);
+        const payload = await startPortalVault(userId, vault);
         assert.equal(payload.started, true);
         const commandLog = readCommandLog();
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")));
@@ -1781,7 +1781,7 @@ exit 0
       },
     );
   } finally {
-    await cleanupWorkspaceRuntime(userId, workspace);
+    await cleanupVaultRuntime(userId, vault);
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
     fs.rmSync(privateKey, { force: true });
@@ -1789,13 +1789,13 @@ exit 0
   }
 });
 
-test("portal service binds and unbinds paseo agent credentials on the selected workspace driver", async () => {
+test("portal service binds and unbinds paseo agent credentials on the selected vault driver", async () => {
   const userId = uniqueName("portal-paseo-bind-user");
-  const workspace = uniqueName("portal-paseo-bind");
+  const vault = uniqueName("portal-paseo-bind");
   const userRoot = path.join(USER_ROOT, userId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
-  const dockerSpecPath = path.join(workspaceRoot, "docker.agent.yaml");
+  const dockerSpecPath = path.join(vaultRoot, "docker.agent.yaml");
   const credentialId = uniqueName("portal-codex");
 
   try {
@@ -1832,12 +1832,12 @@ exit 0
 `,
       },
       async () => {
-        await queueProvisionWorkspace(userId, workspace, {
+        await queueProvisionVault(userId, vault, {
           defaultDockerOnly: true,
           startAfterCreate: true,
         });
         const finalStatus = await waitFor(() => {
-          const status = readWorkspaceStatus(userId, workspace);
+          const status = readVaultStatus(userId, vault);
           return status?.driver?.status === "running" ? status : null;
         });
         assert.equal(finalStatus.driver?.status, "running");
@@ -1852,9 +1852,9 @@ exit 0
           apiKey: "test-api-key",
         });
 
-        const bindPayload = await bindPortalWorkspaceAgent({
+        const bindPayload = await bindPortalVaultAgent({
           userId,
-          workspace,
+          vault,
           driver: { backend: "docker" },
           credentialId,
         });
@@ -1874,9 +1874,9 @@ exit 0
             { purpose: "git-auth", credentialId: "github-ssh", required: false },
           ]);
 
-        const unbindPayload = await unbindPortalWorkspaceAgent({
+        const unbindPayload = await unbindPortalVaultAgent({
           userId,
-          workspace,
+          vault,
           driver: { backend: "docker" },
         });
           assert.equal(unbindPayload.enabled, false);
@@ -1895,18 +1895,18 @@ exit 0
       },
     );
   } finally {
-    await cleanupWorkspaceRuntime(userId, workspace);
-    clearWorkspaceProvisionProgress(userId, workspace);
+    await cleanupVaultRuntime(userId, vault);
+    clearVaultProvisionProgress(userId, vault);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
-test("portal service switches the live codex credential without mutating workspace bindings", async () => {
+test("portal service switches the live codex credential without mutating vault bindings", async () => {
   const userId = uniqueName("portal-live-switch-user");
-  const workspace = uniqueName("portal-live-switch");
+  const vault = uniqueName("portal-live-switch");
   const userRoot = path.join(USER_ROOT, userId);
-  const workspaceRoot = path.join(userRoot, "workspaces", workspace);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
   const profileFile = path.join(
     REPO_ROOT,
     "config",
@@ -1914,7 +1914,7 @@ test("portal service switches the live codex credential without mutating workspa
     "profiles",
     `${userId}.yaml`,
   );
-  const liveStatePath = path.join(workspaceRoot, "state", "live-credentials.json");
+  const liveStatePath = path.join(vaultRoot, "state", "live-credentials.json");
 
   try {
     await createUserCommand([
@@ -1962,12 +1962,12 @@ exit 0
         const scriptLogPath = path.join(os.tmpdir(), "portal-live-switch-script.log");
         fs.rmSync(scriptLogPath, { force: true });
 
-        await queueProvisionWorkspace(userId, workspace, {
+        await queueProvisionVault(userId, vault, {
           defaultDockerOnly: true,
           startAfterCreate: true,
         });
         const finalStatus = await waitFor(() => {
-          const status = readWorkspaceStatus(userId, workspace);
+          const status = readVaultStatus(userId, vault);
           return status?.driver?.status === "running" ? status : null;
         });
         assert.equal(finalStatus.driver?.status, "running");
@@ -1991,9 +1991,9 @@ exit 0
           apiKey: "claude-api-key",
         });
 
-        const payload = await switchPortalWorkspaceLiveCredential({
+        const payload = await switchPortalVaultLiveCredential({
           userId,
-          workspace,
+          vault,
           harness: "codex",
           credentialId: "codex-live",
         });
@@ -2001,9 +2001,9 @@ exit 0
           assert.equal(payload.harness, "codex");
           assert.equal(payload.credential.id, "codex-live");
 
-        const claudePayload = await switchPortalWorkspaceLiveCredential({
+        const claudePayload = await switchPortalVaultLiveCredential({
           userId,
-          workspace,
+          vault,
           harness: "claude",
           credentialId: "claude-live",
         });
@@ -2018,7 +2018,7 @@ exit 0
         assert.equal(liveState.codex?.credentialId, "codex-live");
         assert.equal(liveState.claude?.credentialId, "claude-live");
         assert.equal(
-          fs.readFileSync(path.join(workspaceRoot, "docker.agent.yaml"), "utf8").includes("codex-live"),
+          fs.readFileSync(path.join(vaultRoot, "docker.agent.yaml"), "utf8").includes("codex-live"),
           false,
         );
         const commandLog = readCommandLog();
@@ -2036,17 +2036,17 @@ exit 0
       },
     );
   } finally {
-    await cleanupWorkspaceRuntime(userId, workspace);
+    await cleanupVaultRuntime(userId, vault);
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
-    clearWorkspaceProvisionProgress(userId, workspace);
+    clearVaultProvisionProgress(userId, vault);
   }
 });
 
-test("portal service switches the same workspace name for a different user", async () => {
+test("portal service switches the same vault name for a different user", async () => {
   const firstUserId = uniqueName("portal-switch-scope-a");
   const secondUserId = uniqueName("portal-switch-scope-b");
-  const workspace = uniqueName("portal-switch-shared");
+  const vault = uniqueName("portal-switch-shared");
 
   try {
     await createUserCommand([
@@ -2063,10 +2063,10 @@ test("portal service switches the same workspace name for a different user", asy
       "--email",
       `${secondUserId}@polaris.local`,
     ]);
-    await createCommand([workspace, "--user", firstUserId]);
-    await createCommand([workspace, "--user", secondUserId]);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, firstUserId);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, secondUserId);
+    await createCommand([vault, "--user", firstUserId]);
+    await createCommand([vault, "--user", secondUserId]);
+    writeVaultDriverSelection(vault, { backend: "docker" }, firstUserId);
+    writeVaultDriverSelection(vault, { backend: "docker" }, secondUserId);
 
     await withFakePath(
       {
@@ -2111,20 +2111,20 @@ exit 0
 `,
       },
       async () => {
-        const result = await switchPortalWorkspace(
+        const result = await switchPortalVault(
           secondUserId,
-          workspace,
+          vault,
           { backend: "pod", profile: "gvisor" },
         );
-        assert.equal(result.project, workspace);
+        assert.equal(result.project, vault);
         assert.equal(result.selectedBackend, "pod");
         assert.equal(result.selectedProfile, "gvisor");
         assert.deepEqual(
-          readWorkspaceStatus(secondUserId, workspace)?.driver?.selected,
+          readVaultStatus(secondUserId, vault)?.driver?.selected,
           { backend: "pod", profile: "gvisor" },
         );
         assert.deepEqual(
-          readWorkspaceStatus(firstUserId, workspace)?.driver?.selected,
+          readVaultStatus(firstUserId, vault)?.driver?.selected,
           { backend: "docker" },
         );
       },
@@ -2149,21 +2149,21 @@ exit 0
   }
 });
 
-test("portal service deletes a stopped workspace and removes it from the active profile index", async () => {
+test("portal service deletes a stopped vault and removes it from the active profile index", async () => {
   const userId = DEMO_USER_ID;
-  const workspace = uniqueName("portal-delete");
-  const workspaceRoot = path.join(USER_ROOT, userId, "workspaces", workspace);
-  const portalStateRoot = path.join(workspaceRoot, ".portal");
+  const vault = uniqueName("portal-delete");
+  const vaultRoot = path.join(USER_ROOT, userId, "vaults", vault);
+  const portalStateRoot = path.join(vaultRoot, ".portal");
   const profileFile = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const originalProfile = fs.readFileSync(profileFile, "utf8");
 
-  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(vaultRoot, { recursive: true });
   fs.mkdirSync(portalStateRoot, { recursive: true });
   fs.writeFileSync(
     path.join(portalStateRoot, "provision.json"),
     JSON.stringify({
       userId,
-      workspace,
+      vault,
       phase: "error",
       step: 6,
       totalSteps: 7,
@@ -2177,22 +2177,22 @@ test("portal service deletes a stopped workspace and removes it from the active 
   );
 
   try {
-    const payload = await deletePortalWorkspace(userId, workspace);
+    const payload = await deletePortalVault(userId, vault);
     assert.equal(payload.deleted, true);
-    assert.equal(payload.workspace, workspace);
+    assert.equal(payload.vault, vault);
 
-    assert.equal(fs.existsSync(workspaceRoot), false);
+    assert.equal(fs.existsSync(vaultRoot), false);
     assert.equal(fs.existsSync(portalStateRoot), false);
   } finally {
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    fs.rmSync(vaultRoot, { recursive: true, force: true });
     fs.rmSync(portalStateRoot, { recursive: true, force: true });
     fs.writeFileSync(profileFile, originalProfile, "utf8");
   }
 });
 
-test("portal service refreshes the real status when delete fails for a running workspace", async () => {
+test("portal service refreshes the real status when delete fails for a running vault", async () => {
   const userId = uniqueName("portal-archive-running-user");
-  const workspace = uniqueName("portal-archive-running");
+  const vault = uniqueName("portal-archive-running");
   try {
     await withEnv(
       "POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT",
@@ -2207,15 +2207,15 @@ test("portal service refreshes the real status when delete fails for a running w
         ]);
       },
     );
-    await createCommand([workspace, "--user", userId]);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: workspace,
+    await createCommand([vault, "--user", userId]);
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: vault,
       driver: {
         backend: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
-        runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
+        runtimeRef: `container/${vaultRuntimeScopeName(userId, vault)}-docker`,
       },
       operation: {
         kind: "delete",
@@ -2240,7 +2240,7 @@ test("portal service refreshes the real status when delete fails for a running w
       {
         docker: `#!/bin/sh
 if [ "$1" = "compose" ] && [ "$4" = "ps" ]; then
-  printf '%s\n' '{"Name":"${workspaceRuntimeScopeName(userId, workspace)}-docker","State":"running"}'
+  printf '%s\n' '{"Name":"${vaultRuntimeScopeName(userId, vault)}-docker","State":"running"}'
   exit 0
 fi
 if [ "$1" = "inspect" ]; then
@@ -2256,13 +2256,13 @@ exit 0
       },
       async () => {
         await assert.rejects(
-          deletePortalWorkspace(userId, workspace),
+          deletePortalVault(userId, vault),
           /Stop it before deleting/,
         );
       },
     );
 
-    const nextStatus = readWorkspaceStatus(userId, workspace);
+    const nextStatus = readVaultStatus(userId, vault);
     assert.equal(nextStatus?.driver?.status, "running");
     assert.notEqual(nextStatus?.driver?.reason, "stale delete status");
   } finally {
@@ -2276,19 +2276,19 @@ exit 0
   }
 });
 
-test("portal workspace summaries stay isolated for same workspace name under different users", async () => {
-  const workspace = uniqueName("shared-portal-workspace");
+test("portal vault summaries stay isolated for same vault name under different users", async () => {
+  const vault = uniqueName("shared-portal-vault");
   const userA = uniqueName("portal-scope-user-a");
   const userB = uniqueName("portal-scope-user-b");
   try {
     await createUserCommand([userA, "--name", "Portal Scope User A", "--email", `${userA}@polaris.local`]);
     await createUserCommand([userB, "--name", "Portal Scope User B", "--email", `${userB}@polaris.local`]);
-    await createCommand([workspace, "--user", userA]);
-    await createCommand([workspace, "--user", userB]);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userA);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userB);
-    writeWorkspaceStatus({
-      project: workspace,
+    await createCommand([vault, "--user", userA]);
+    await createCommand([vault, "--user", userB]);
+    writeVaultDriverSelection(vault, { backend: "docker" }, userA);
+    writeVaultDriverSelection(vault, { backend: "docker" }, userB);
+    writeVaultStatus({
+      project: vault,
       runtime: {
         selectedDriver: { backend: "docker" },
         lifecycle: "running",
@@ -2304,8 +2304,8 @@ test("portal workspace summaries stay isolated for same workspace name under dif
         owner: userA,
       },
     }, userA);
-    writeWorkspaceStatus({
-      project: workspace,
+    writeVaultStatus({
+      project: vault,
       operation: {
         kind: "stop",
         updatedAt: new Date().toISOString(),
@@ -2313,7 +2313,7 @@ test("portal workspace summaries stay isolated for same workspace name under dif
       runtime: {
         selectedDriver: { backend: "docker" },
         lifecycle: "stopped",
-        reason: "workspace is stopped",
+        reason: "vault is stopped",
       },
       paseo: {
         daemon: "absent",
@@ -2327,8 +2327,8 @@ test("portal workspace summaries stay isolated for same workspace name under dif
       },
     }, userB);
 
-    const userASummary = (await listPortalWorkspaces(userA)).find((entry) => entry.name === workspace);
-    const userBSummary = (await listPortalWorkspaces(userB)).find((entry) => entry.name === workspace);
+    const userASummary = (await listPortalVaults(userA)).find((entry) => entry.name === vault);
+    const userBSummary = (await listPortalVaults(userB)).find((entry) => entry.name === vault);
 
     assert.equal(userASummary?.status?.driver?.status, "running");
     assert.equal(userASummary?.status?.details?.owner, userA);
@@ -2352,9 +2352,9 @@ test("portal workspace summaries stay isolated for same workspace name under dif
   }
 });
 
-test("portal workspace summaries expose serverId, surfaces, and published ports", async () => {
+test("portal vault summaries expose serverId, surfaces, and published ports", async () => {
   const userId = uniqueName("portal-summary-user");
-  const workspace = uniqueName("portal-summary-workspace");
+  const vault = uniqueName("portal-summary-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   try {
@@ -2365,12 +2365,12 @@ test("portal workspace summaries expose serverId, surfaces, and published ports"
       "--email",
       `${userId}@polaris.local`,
     ]);
-    scaffoldDockerWorkspace(workspace, userId, { line: "vertical" });
-    const paseoStateRoot = workspacePaseoStateDir(workspace, userId);
+    scaffoldDockerVault(vault, userId, { line: "vertical" });
+    const paseoStateRoot = vaultPaseoStateDir(vault, userId);
     fs.mkdirSync(paseoStateRoot, { recursive: true });
     fs.writeFileSync(path.join(paseoStateRoot, "server-id"), "srv_summary\n", "utf8");
 
-    const summary = (await listPortalWorkspaces(userId)).find((entry) => entry.name === workspace);
+    const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
     assert.equal(summary?.serverId, "srv_summary");
     assert.deepEqual(summary?.surfaces, ["paseo", "wanghai"]);
     assert.deepEqual(
@@ -2406,7 +2406,7 @@ test("portal API metadata is served from /api without a default user fallback", 
     };
     assert.equal(payload.service, "polaris-portal-api");
     assert.equal(payload.authMode, "authing-browser-session");
-    assert.ok(payload.endpoints.includes("/api/users/:userId/workspaces"));
+    assert.ok(payload.endpoints.includes("/api/users/:userId/vaults"));
   } finally {
     server.close();
     await once(server, "close");
@@ -2645,7 +2645,7 @@ test("portal admin list includes mapped users", async () => {
         id: userId,
         name: "Portal Admin Target",
         email: `${userId}@polaris.local`,
-        workspaces: [],
+        vaults: [],
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -2731,7 +2731,7 @@ test("portal user deletion removes Clerk mappings together with the Polaris user
         id: userId,
         name: "Mapped Delete Target",
         email: `${userId}@polaris.local`,
-        workspaces: [],
+        vaults: [],
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -2799,7 +2799,7 @@ test("portal user deletion restores profile root and mappings when filesystem de
         id: userId,
         name: "Rollback Target",
         email: `${userId}@polaris.local`,
-        workspaces: [],
+        vaults: [],
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -2866,7 +2866,7 @@ test("portal user deletion rollback preserves unrelated user-map updates", async
         id: userId,
         name: "Preserve Target",
         email: `${userId}@polaris.local`,
-        workspaces: [],
+        vaults: [],
       }, { lineWidth: 120, noRefs: true }),
       "utf8",
     );
@@ -2928,9 +2928,9 @@ test("portal user deletion rollback preserves unrelated user-map updates", async
   }
 });
 
-test("portal user deletion rejects users with queued workspace provisioning", async () => {
+test("portal user deletion rejects users with queued vault provisioning", async () => {
   const userId = uniqueName("portal-delete-queued-user");
-  const workspace = uniqueName("portal-delete-queued-workspace");
+  const vault = uniqueName("portal-delete-queued-vault");
   const profilePath = path.join(
     REPO_ROOT,
     "config",
@@ -2948,16 +2948,16 @@ test("portal user deletion rejects users with queued workspace provisioning", as
       "--email",
       `${userId}@polaris.local`,
     ]);
-    writeWorkspaceProvisionProgress(userId, workspace, {
+    writeVaultProvisionProgress(userId, vault, {
       jobId: uniqueName("queued-job"),
       userId,
-      workspace,
+      vault,
       status: "queued",
       phase: "queued",
       step: 0,
       totalSteps: 7,
       percent: 0,
-      message: "workspace provisioning queued",
+      message: "vault provisioning queued",
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       done: false,
@@ -2966,12 +2966,12 @@ test("portal user deletion rejects users with queued workspace provisioning", as
 
     await assert.rejects(
       () => deletePortalUser(userId),
-      /workspace data still exists|queued/i,
+      /vault data still exists|queued/i,
     );
     assert.equal(fs.existsSync(profilePath), true);
     assert.equal(fs.existsSync(userRoot), true);
   } finally {
-    clearWorkspaceProvisionProgress(userId, workspace);
+    clearVaultProvisionProgress(userId, vault);
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }

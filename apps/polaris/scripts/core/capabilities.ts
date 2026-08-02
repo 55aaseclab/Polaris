@@ -1,5 +1,5 @@
-import type { WorkspaceSpec } from "./workspace.js";
-import { assertValidWorkspaceProjectName } from "./workspace-name.js";
+import type { VaultSpec } from "./vault.js";
+import { assertValidVaultProjectName } from "./vault-name.js";
 
 const POD_PROFILES = new Set(["gvisor", "kata-qemu", "kata-clh", "kata-qemu-tdx"]);
 
@@ -15,32 +15,32 @@ function parsePublicKeyComment(raw: string | undefined): string {
   return parts.length >= 3 ? parts.slice(2).join(" ") : "";
 }
 
-export function validateWorkspace(workspace: WorkspaceSpec): void {
-  if (!workspace.identity.projectName) {
-    throw new Error("Workspace project name is required");
+export function validateVault(vault: VaultSpec): void {
+  if (!vault.identity.projectName) {
+    throw new Error("Vault project name is required");
   }
-  assertValidWorkspaceProjectName(workspace.identity.projectName);
-  if (!workspace.userProfile.id) {
-    throw new Error("Workspace user profile id is required");
+  assertValidVaultProjectName(vault.identity.projectName);
+  if (!vault.userProfile.id) {
+    throw new Error("Vault user profile id is required");
   }
-  if (!workspace.userProfile.name) {
-    throw new Error("Workspace user profile name is required");
+  if (!vault.userProfile.name) {
+    throw new Error("Vault user profile name is required");
   }
-  if (!workspace.userProfile.email) {
-    throw new Error("Workspace user profile email is required");
+  if (!vault.userProfile.email) {
+    throw new Error("Vault user profile email is required");
   }
-  for (const binding of workspace.credentialBindings) {
-    const resolvedBinding = workspace.resolvedCredentialBindings.find((entry) => {
+  for (const binding of vault.credentialBindings) {
+    const resolvedBinding = vault.resolvedCredentialBindings.find((entry) => {
       return entry.purpose === binding.purpose && entry.credentialId === binding.credentialId;
     });
     if (!resolvedBinding && binding.required) {
       throw new Error(`Required credential binding '${binding.purpose}' could not be resolved`);
     }
   }
-  for (const binding of workspace.resolvedCredentialBindings) {
-    if (binding.credential.userId !== workspace.userProfile.id) {
+  for (const binding of vault.resolvedCredentialBindings) {
+    if (binding.credential.userId !== vault.userProfile.id) {
       throw new Error(
-        `Credential '${binding.credential.id}' must belong to workspace user '${workspace.userProfile.id}'`,
+        `Credential '${binding.credential.id}' must belong to vault user '${vault.userProfile.id}'`,
       );
     }
     if (binding.authFiles.length === 0 && binding.required) {
@@ -50,66 +50,66 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     }
   }
 
-  if (!workspace.attachments.workspaceData.mountRoot) {
-    throw new Error("workspace-data must declare a mount root");
+  if (!vault.attachments.vaultData.mountRoot) {
+    throw new Error("vault-data must declare a mount root");
   }
-  if (!workspace.attachments.workspaceRuntimeState.mountRoot) {
-    throw new Error("workspace-runtime-state must declare a mount root");
+  if (!vault.attachments.vaultRuntimeState.mountRoot) {
+    throw new Error("vault-runtime-state must declare a mount root");
   }
-  if (!workspace.attachments.userIdentityState.mountRoot) {
+  if (!vault.attachments.userIdentityState.mountRoot) {
     throw new Error("user-identity-state must declare a mount root");
   }
-  if (!workspace.attachments.ephemeralRuntime.mountRoot) {
+  if (!vault.attachments.ephemeralRuntime.mountRoot) {
     throw new Error("ephemeral-runtime must declare a mount root");
   }
 
-  if (workspace.attachments.workspaceData.scope !== "workspace" || workspace.attachments.workspaceData.sharing !== "exclusive") {
-    throw new Error("workspace-data must remain workspace-scoped and non-shared");
+  if (vault.attachments.vaultData.scope !== "vault" || vault.attachments.vaultData.sharing !== "exclusive") {
+    throw new Error("vault-data must remain vault-scoped and non-shared");
   }
-  if (workspace.attachments.workspaceRuntimeState.scope !== "workspace" || workspace.attachments.workspaceRuntimeState.sharing !== "exclusive") {
-    throw new Error("workspace-runtime-state must remain workspace-scoped and non-shared");
+  if (vault.attachments.vaultRuntimeState.scope !== "vault" || vault.attachments.vaultRuntimeState.sharing !== "exclusive") {
+    throw new Error("vault-runtime-state must remain vault-scoped and non-shared");
   }
-  if (workspace.attachments.userIdentityState.scope !== "user" || workspace.attachments.userIdentityState.sharing !== "cross-workspace") {
-    throw new Error("user-identity-state must remain user-scoped and cross-workspace");
+  if (vault.attachments.userIdentityState.scope !== "user" || vault.attachments.userIdentityState.sharing !== "cross-vault") {
+    throw new Error("user-identity-state must remain user-scoped and cross-vault");
   }
-  if (workspace.attachments.workspaceRuntimeState.source.kind === "netfs") {
-    throw new Error("workspace-runtime-state must not use a netfs source");
+  if (vault.attachments.vaultRuntimeState.source.kind === "netfs") {
+    throw new Error("vault-runtime-state must not use a netfs source");
   }
-  if (workspace.attachments.userIdentityState.source.kind === "netfs") {
+  if (vault.attachments.userIdentityState.source.kind === "netfs") {
     throw new Error("user-identity-state must not use a netfs source");
   }
-  if (workspace.attachments.workspaceData.source.kind === "netfs") {
-    if (!workspace.attachments.workspaceData.source.server?.trim()) {
-      throw new Error("workspace-data netfs source requires a server");
+  if (vault.attachments.vaultData.source.kind === "netfs") {
+    if (!vault.attachments.vaultData.source.server?.trim()) {
+      throw new Error("vault-data netfs source requires a server");
     }
-    if (!workspace.attachments.workspaceData.source.exportPath?.trim()) {
-      throw new Error("workspace-data netfs source requires an export path");
+    if (!vault.attachments.vaultData.source.exportPath?.trim()) {
+      throw new Error("vault-data netfs source requires an export path");
     }
   }
-  const managerStateToken = terminalPathToken(workspace.agent.runtime.stateRoot);
-  const evolutionStateToken = terminalPathToken(workspace.agent.runtime.evolutionRoot);
+  const managerStateToken = terminalPathToken(vault.agent.runtime.stateRoot);
+  const evolutionStateToken = terminalPathToken(vault.agent.runtime.evolutionRoot);
   if (
-    workspace.agent.enabled &&
-    workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes(managerStateToken)) === false
+    vault.agent.enabled &&
+    vault.attachments.vaultRuntimeState.durablePaths.some((entry) => entry.includes(managerStateToken)) === false
   ) {
-    throw new Error("workspace-runtime-state must contain the durable manager state path");
+    throw new Error("vault-runtime-state must contain the durable manager state path");
   }
   if (
-    workspace.agent.enabled &&
-    workspace.attachments.workspaceRuntimeState.durablePaths.some((entry) => entry.includes(evolutionStateToken)) === false
+    vault.agent.enabled &&
+    vault.attachments.vaultRuntimeState.durablePaths.some((entry) => entry.includes(evolutionStateToken)) === false
   ) {
-    throw new Error("workspace-runtime-state must contain the durable evolution state path");
+    throw new Error("vault-runtime-state must contain the durable evolution state path");
   }
-  if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/")) === false) {
+  if (vault.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/")) === false) {
     throw new Error("user-identity-state must expose identity attachment roots");
   }
-  if (workspace.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/ssh")) === false) {
+  if (vault.attachments.userIdentityState.durablePaths.some((entry) => entry.includes("/identity/ssh")) === false) {
     throw new Error("user-identity-state must expose the shared SSH attachment root");
   }
-  if (workspace.attachments.ephemeralRuntime.staleArtifacts.length === 0) {
+  if (vault.attachments.ephemeralRuntime.staleArtifacts.length === 0) {
     throw new Error("ephemeral-runtime must define stale artifact cleanup targets");
   }
-  for (const authFile of workspace.runtime.authFiles) {
+  for (const authFile of vault.runtime.authFiles) {
     if (!authFile.content && !authFile.sourcePath) {
       throw new Error(`Auth file '${authFile.key}' must define inline content or a source path`);
     }
@@ -118,24 +118,24 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
     }
   }
 
-  if (workspace.agent.enabled) {
-    if (workspace.agent.managerId === "none") {
-      throw new Error("Agent-enabled workspaces require a manager id");
+  if (vault.agent.enabled) {
+    if (vault.agent.managerId === "none") {
+      throw new Error("Agent-enabled vaults require a manager id");
     }
-    if (!workspace.agent.capabilities.supportsEventStream) {
-      throw new Error("Agent-enabled workspaces require manager event stream support");
+    if (!vault.agent.capabilities.supportsEventStream) {
+      throw new Error("Agent-enabled vaults require manager event stream support");
     }
-    if (!workspace.agent.capabilities.supportsTranscriptReplay) {
-      throw new Error("Agent-enabled workspaces require transcript replay support");
+    if (!vault.agent.capabilities.supportsTranscriptReplay) {
+      throw new Error("Agent-enabled vaults require transcript replay support");
     }
   }
 
-  if (workspace.userProfile.ssh.mode === "provided-key") {
-    const sshPrivateKey = workspace.runtime.authFiles.find((entry) => {
-      return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
+  if (vault.userProfile.ssh.mode === "provided-key") {
+    const sshPrivateKey = vault.runtime.authFiles.find((entry) => {
+      return entry.mountPath.startsWith(`${vault.runtime.home}/.ssh/`) && !entry.mountPath.endsWith(".pub");
     });
-    const sshPublicKey = workspace.runtime.authFiles.find((entry) => {
-      return entry.mountPath.startsWith(`${workspace.runtime.home}/.ssh/`) && entry.mountPath.endsWith(".pub");
+    const sshPublicKey = vault.runtime.authFiles.find((entry) => {
+      return entry.mountPath.startsWith(`${vault.runtime.home}/.ssh/`) && entry.mountPath.endsWith(".pub");
     });
     if (!sshPrivateKey) {
       throw new Error("User profile SSH mode 'provided-key' requires staged private-key material");
@@ -144,25 +144,25 @@ export function validateWorkspace(workspace: WorkspaceSpec): void {
       throw new Error("User profile SSH mode 'provided-key' requires staged public-key material");
     }
     const publicKeyComment = parsePublicKeyComment(sshPublicKey.content);
-    if (publicKeyComment !== workspace.userProfile.ssh.comment) {
+    if (publicKeyComment !== vault.userProfile.ssh.comment) {
       throw new Error(
-        `User profile SSH mode 'provided-key' requires public-key comment '${workspace.userProfile.ssh.comment}', got '${publicKeyComment || "missing"}'`,
+        `User profile SSH mode 'provided-key' requires public-key comment '${vault.userProfile.ssh.comment}', got '${publicKeyComment || "missing"}'`,
       );
     }
   }
 
-  if (workspace.backend.kind === "pod") {
-    if (!POD_PROFILES.has(workspace.backend.profile)) {
-      throw new Error(`Workspace backend 'pod' requires a supported profile; got ${workspace.backend.profile}`);
+  if (vault.backend.kind === "pod") {
+    if (!POD_PROFILES.has(vault.backend.profile)) {
+      throw new Error(`Vault backend 'pod' requires a supported profile; got ${vault.backend.profile}`);
     }
-    for (const envVar of workspace.runtime.plainEnvVars) {
-      if (envVar.value.includes("/workspace/")) {
-        throw new Error(`Workspace backend 'pod' cannot set env var ${envVar.name} to a /workspace path`);
+    for (const envVar of vault.runtime.plainEnvVars) {
+      if (envVar.value.includes("/vault/")) {
+        throw new Error(`Vault backend 'pod' cannot set env var ${envVar.name} to a /vault path`);
       }
     }
   }
 
-  if (workspace.health.requiresDaemon !== workspace.agent.capabilities.requiresDaemon) {
-    throw new Error("Workspace health daemon requirement must match manager capabilities");
+  if (vault.health.requiresDaemon !== vault.agent.capabilities.requiresDaemon) {
+    throw new Error("Vault health daemon requirement must match manager capabilities");
   }
 }

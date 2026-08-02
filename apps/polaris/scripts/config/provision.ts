@@ -2,9 +2,9 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import yaml from "js-yaml";
-import { parseWorkspaceReference } from "./load.js";
-import { syncWorkspaceDockerfileTemplate, workspaceConfigPath, workspaceImageRef } from "./scaffold.js";
-import { workspaceRuntimeResourceName } from "../core/workspace-name.js";
+import { parseVaultReference } from "./load.js";
+import { syncVaultDockerfileTemplate, vaultConfigPath, vaultImageRef } from "./scaffold.js";
+import { vaultRuntimeResourceName } from "../core/vault-name.js";
 import { logInfo } from "../utils/log.js";
 import {
   polarisNetfsLocalExportRoot,
@@ -18,27 +18,27 @@ const USER_ROOT = polarisUsersRoot(import.meta.url);
 
 type BackendKind = "docker" | "pod" | "kubevirt-vm";
 
-function workspaceDataNetfsSource(project: string, userProfileId: string): Record<string, any> {
+function vaultDataNetfsSource(project: string, userProfileId: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
     sub_path: project,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
-    volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-data"),
+    volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-data"),
     volume_size: "120Gi",
-    description: `shared workspace data for ${project}`,
+    description: `shared vault data for ${project}`,
   };
 }
 
-interface WorkspaceConfigMatch {
+interface VaultConfigMatch {
   userProfileId: string;
   project: string;
   backendKind: BackendKind;
   configPath: string;
 }
 
-interface WorkspaceImageBuildState {
+interface VaultImageBuildState {
   imageRef: string;
   sharedImageRef: string;
   dockerfileDigest: string;
@@ -55,11 +55,11 @@ function sanitizeImageTagSegment(raw: string): string {
     || "default";
 }
 
-function sharedWorkspaceImageRef(dockerfileDigest: string): string {
-  return `ttl.sh/polaris-workspace-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:24h`;
+function sharedVaultImageRef(dockerfileDigest: string): string {
+  return `ttl.sh/polaris-vault-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:24h`;
 }
 
-function configMatches(project: string, userProfileId?: string): WorkspaceConfigMatch[] {
+function configMatches(project: string, userProfileId?: string): VaultConfigMatch[] {
   if (!fs.existsSync(USER_ROOT)) {
     return [];
   }
@@ -74,7 +74,7 @@ function configMatches(project: string, userProfileId?: string): WorkspaceConfig
     .flatMap((candidateUserId) =>
       (["docker", "pod", "kubevirt-vm"] as const)
         .map((backendKind) => {
-          const configPath = workspaceConfigPath(project, backendKind, candidateUserId);
+          const configPath = vaultConfigPath(project, backendKind, candidateUserId);
           return fs.existsSync(configPath)
             ? {
                 userProfileId: candidateUserId,
@@ -84,7 +84,7 @@ function configMatches(project: string, userProfileId?: string): WorkspaceConfig
               }
             : null;
         })
-        .filter(Boolean) as WorkspaceConfigMatch[],
+        .filter(Boolean) as VaultConfigMatch[],
     )
     .sort((left, right) => left.configPath.localeCompare(right.configPath));
 }
@@ -93,11 +93,11 @@ function findConfig(
   project: string,
   backendKind: BackendKind,
   userProfileId?: string,
-): WorkspaceConfigMatch | null {
+): VaultConfigMatch | null {
   return configMatches(project, userProfileId).find((match) => match.backendKind === backendKind) ?? null;
 }
 
-function bestSourceConfig(project: string, userProfileId?: string): WorkspaceConfigMatch | null {
+function bestSourceConfig(project: string, userProfileId?: string): VaultConfigMatch | null {
   const matches = configMatches(project, userProfileId);
   return matches.find((match) => match.backendKind === "docker") ?? matches[0] ?? null;
 }
@@ -138,21 +138,21 @@ function synthesizeAttachments(
   backendKind: BackendKind,
 ): void {
   const attachments = ((doc.attachments ??= {}) as Record<string, any>);
-  const workspaceData = ((attachments["workspace-data"] ??= {}) as Record<string, any>);
-  const workspaceRuntimeState = ((attachments["workspace-runtime-state"] ??= {}) as Record<string, any>);
+  const vaultData = ((attachments["vault-data"] ??= {}) as Record<string, any>);
+  const vaultRuntimeState = ((attachments["vault-runtime-state"] ??= {}) as Record<string, any>);
   const userIdentityState = ((attachments["user-identity-state"] ??= {}) as Record<string, any>);
 
   if (backendKind === "kubevirt-vm") {
-    workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
-    workspaceRuntimeState.source = {
+    vaultData.source = vaultDataNetfsSource(project, userProfileId);
+    vaultRuntimeState.source = {
       kind: "persistent-volume",
-      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
+      volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
       volume_size: "20Gi",
-      description: `reusable workspace runtime state for ${project}`,
+      description: `reusable vault runtime state for ${project}`,
     };
     userIdentityState.source = {
       kind: "persistent-volume",
-      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "user-identity-state"),
+      volume_ref: vaultRuntimeResourceName(userProfileId, project, "user-identity-state"),
       volume_size: "5Gi",
       description: `persistent user identity state for ${project}`,
     };
@@ -160,12 +160,12 @@ function synthesizeAttachments(
   }
 
   if (backendKind === "pod") {
-    workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
-    workspaceRuntimeState.source = {
+    vaultData.source = vaultDataNetfsSource(project, userProfileId);
+    vaultRuntimeState.source = {
       kind: "persistent-volume",
-      volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
+      volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
       volume_size: "20Gi",
-      description: `reusable workspace runtime state for ${project}`,
+      description: `reusable vault runtime state for ${project}`,
     };
     userIdentityState.source ??= {
       kind: "secret-material",
@@ -174,12 +174,12 @@ function synthesizeAttachments(
     return;
   }
 
-  workspaceData.source = workspaceDataNetfsSource(project, userProfileId);
-  workspaceRuntimeState.source = {
+  vaultData.source = vaultDataNetfsSource(project, userProfileId);
+  vaultRuntimeState.source = {
     kind: "persistent-volume",
-    volume_ref: workspaceRuntimeResourceName(userProfileId, project, "workspace-runtime-state"),
+    volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
     volume_size: "20Gi",
-    description: `reusable ${backendKind} workspace runtime state for ${project}`,
+    description: `reusable ${backendKind} vault runtime state for ${project}`,
   };
   userIdentityState.source ??= {
     kind: "secret-material",
@@ -205,7 +205,7 @@ function synthesizeConfigDoc(
   doc.runtime = {
     ...(doc.runtime ?? {}),
     class: backendKind === "docker" ? "docker" : profileHint || "gvisor",
-    base_image: doc.runtime?.base_image ?? workspaceImageRef(userProfileId, project),
+    base_image: doc.runtime?.base_image ?? vaultImageRef(userProfileId, project),
     user: doc.runtime?.user ?? "root",
     privileged: doc.runtime?.privileged ?? null,
     docker_enabled: doc.runtime?.docker_enabled ?? true,
@@ -239,11 +239,11 @@ function synthesizeConfigDoc(
   return doc;
 }
 
-export function ensureWorkspaceConfig(
+export function ensureVaultConfig(
   projectRef: string,
   userProfileId?: string,
-): WorkspaceConfigMatch | null {
-  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+): VaultConfigMatch | null {
+  const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   if (!backendHint) {
     return null;
   }
@@ -259,7 +259,7 @@ export function ensureWorkspaceConfig(
   }
 
   const sourceDoc = readConfigDoc(source.configPath);
-  const outputPath = workspaceConfigPath(project, backendHint, source.userProfileId);
+  const outputPath = vaultConfigPath(project, backendHint, source.userProfileId);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const synthesized = synthesizeConfigDoc(
     sourceDoc,
@@ -269,7 +269,7 @@ export function ensureWorkspaceConfig(
     profileHint,
   );
   fs.writeFileSync(outputPath, yaml.dump(synthesized, { lineWidth: 120, noRefs: true }), "utf8");
-  logInfo("provision", "workspace-config-synthesized", {
+  logInfo("provision", "vault-config-synthesized", {
     project,
     backend: backendHint,
     sourceBackend: source.backendKind,
@@ -301,7 +301,7 @@ function canPullImage(imageRef: string): boolean {
   }
 }
 
-function workspaceImageBuildStatePath(source: WorkspaceConfigMatch): string {
+function vaultImageBuildStatePath(source: VaultConfigMatch): string {
   return path.join(path.dirname(source.configPath), "state", "image-build.json");
 }
 
@@ -312,36 +312,36 @@ function digestFile(filePath: string): string {
     .digest("hex");
 }
 
-function readWorkspaceImageBuildState(
-  source: WorkspaceConfigMatch,
-): WorkspaceImageBuildState | null {
-  const statePath = workspaceImageBuildStatePath(source);
+function readVaultImageBuildState(
+  source: VaultConfigMatch,
+): VaultImageBuildState | null {
+  const statePath = vaultImageBuildStatePath(source);
   if (!fs.existsSync(statePath)) {
     return null;
   }
   try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8")) as WorkspaceImageBuildState;
+    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8")) as VaultImageBuildState;
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
   }
 }
 
-function writeWorkspaceImageBuildState(
-  source: WorkspaceConfigMatch,
-  state: WorkspaceImageBuildState,
+function writeVaultImageBuildState(
+  source: VaultConfigMatch,
+  state: VaultImageBuildState,
 ): void {
-  const statePath = workspaceImageBuildStatePath(source);
+  const statePath = vaultImageBuildStatePath(source);
   fs.mkdirSync(path.dirname(statePath), { recursive: true });
   fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
-function buildSharedWorkspaceImage(args: {
+function buildSharedVaultImage(args: {
   dockerfilePath: string;
   sharedImageRef: string;
   cacheRefs: string[];
 }): void {
-  logInfo("provision", "workspace-shared-image-build", {
+  logInfo("provision", "vault-shared-image-build", {
     sharedImageRef: args.sharedImageRef,
     dockerfile: path.relative(REPO_ROOT, args.dockerfilePath),
     cacheRefs: args.cacheRefs,
@@ -354,18 +354,18 @@ function buildSharedWorkspaceImage(args: {
   runCommand("docker", commandArgs);
 }
 
-function tagWorkspaceImage(sharedImageRef: string, imageRef: string): void {
+function tagVaultImage(sharedImageRef: string, imageRef: string): void {
   if (sharedImageRef === imageRef) {
     return;
   }
-  logInfo("provision", "workspace-image-tag", {
+  logInfo("provision", "vault-image-tag", {
     sharedImageRef,
     imageRef,
   });
   runCommand("docker", ["tag", sharedImageRef, imageRef]);
 }
 
-function allRecordedWorkspaceImageRefs(dockerfileDigest: string): string[] {
+function allRecordedVaultImageRefs(dockerfileDigest: string): string[] {
   if (!fs.existsSync(USER_ROOT)) {
     return [];
   }
@@ -374,22 +374,22 @@ function allRecordedWorkspaceImageRefs(dockerfileDigest: string): string[] {
     if (!userEntry.isDirectory()) {
       continue;
     }
-    const workspacesRoot = path.join(USER_ROOT, userEntry.name, "workspaces");
-    if (!fs.existsSync(workspacesRoot)) {
+    const vaultsRoot = path.join(USER_ROOT, userEntry.name, "vaults");
+    if (!fs.existsSync(vaultsRoot)) {
       continue;
     }
-    for (const workspaceEntry of fs.readdirSync(workspacesRoot, { withFileTypes: true })) {
-      if (!workspaceEntry.isDirectory()) {
+    for (const vaultEntry of fs.readdirSync(vaultsRoot, { withFileTypes: true })) {
+      if (!vaultEntry.isDirectory()) {
         continue;
       }
-      const statePath = path.join(workspacesRoot, workspaceEntry.name, "state", "image-build.json");
+      const statePath = path.join(vaultsRoot, vaultEntry.name, "state", "image-build.json");
       if (!fs.existsSync(statePath)) {
         continue;
       }
       try {
         const parsed = JSON.parse(
           fs.readFileSync(statePath, "utf8"),
-        ) as Partial<WorkspaceImageBuildState>;
+        ) as Partial<VaultImageBuildState>;
         if (parsed.dockerfileDigest !== dockerfileDigest) {
           continue;
         }
@@ -407,22 +407,22 @@ function allRecordedWorkspaceImageRefs(dockerfileDigest: string): string[] {
   return [...refs];
 }
 
-export function ensureCanonicalWorkspaceImage(
+export function ensureCanonicalVaultImage(
   projectRef: string,
   userProfileId?: string,
 ): void {
-  const { project } = parseWorkspaceReference(projectRef);
-  const ensured = ensureWorkspaceConfig(projectRef, userProfileId);
+  const { project } = parseVaultReference(projectRef);
+  const ensured = ensureVaultConfig(projectRef, userProfileId);
   const source = ensured ?? bestSourceConfig(project, userProfileId);
   if (!source) {
     return;
   }
 
   const sourceDoc = readConfigDoc(source.configPath);
-  const imageRef = workspaceImageRef(source.userProfileId, source.project);
+  const imageRef = vaultImageRef(source.userProfileId, source.project);
   const configuredBaseImage = String(sourceDoc.runtime?.base_image ?? "").trim();
   if (configuredBaseImage && configuredBaseImage !== imageRef) {
-    logInfo("provision", "workspace-image-external", {
+    logInfo("provision", "vault-image-external", {
       project: source.project,
       userProfileId: source.userProfileId,
       imageRef: configuredBaseImage,
@@ -431,17 +431,17 @@ export function ensureCanonicalWorkspaceImage(
     return;
   }
 
-  const dockerfileState = syncWorkspaceDockerfileTemplate(source.userProfileId);
+  const dockerfileState = syncVaultDockerfileTemplate(source.userProfileId);
   const dockerfileDigest = digestFile(dockerfileState.path);
-  const sharedImageRef = sharedWorkspaceImageRef(dockerfileDigest);
-  const recordedBuild = readWorkspaceImageBuildState(source);
+  const sharedImageRef = sharedVaultImageRef(dockerfileDigest);
+  const recordedBuild = readVaultImageBuildState(source);
   const buildStateMatches =
     recordedBuild?.imageRef === imageRef
     && recordedBuild?.sharedImageRef === sharedImageRef
     && recordedBuild?.dockerfileDigest === dockerfileDigest
     && recordedBuild?.dockerfilePath === path.relative(REPO_ROOT, dockerfileState.path);
   const recordBuild = (): void => {
-    writeWorkspaceImageBuildState(source, {
+    writeVaultImageBuildState(source, {
       imageRef,
       sharedImageRef,
       dockerfileDigest,
@@ -456,31 +456,31 @@ export function ensureCanonicalWorkspaceImage(
   const dockerfile = dockerfileState.path;
   if (!fs.existsSync(dockerfile)) {
     throw new Error(
-      `Canonical workspace image '${imageRef}' is missing and no Dockerfile was found at ${path.relative(REPO_ROOT, dockerfile)}`,
+      `Canonical vault image '${imageRef}' is missing and no Dockerfile was found at ${path.relative(REPO_ROOT, dockerfile)}`,
     );
   }
 
   if (hasLocalImage(sharedImageRef) || canPullImage(sharedImageRef)) {
-    logInfo("provision", "workspace-image-reused", {
+    logInfo("provision", "vault-image-reused", {
       project: source.project,
       userProfileId: source.userProfileId,
       imageRef,
       sharedImageRef,
       dockerfile: path.relative(REPO_ROOT, dockerfile),
       reason: buildStateMatches
-        ? "workspace-image-missing"
+        ? "vault-image-missing"
         : dockerfileState.refreshed
           ? "dockerfile-template-refreshed"
           : recordedBuild
             ? "dockerfile-digest-changed"
             : "image-build-state-missing",
     });
-    tagWorkspaceImage(sharedImageRef, imageRef);
+    tagVaultImage(sharedImageRef, imageRef);
     recordBuild();
     return;
   }
 
-  logInfo("provision", "workspace-image-build", {
+  logInfo("provision", "vault-image-build", {
     project: source.project,
     userProfileId: source.userProfileId,
     imageRef,
@@ -494,16 +494,16 @@ export function ensureCanonicalWorkspaceImage(
         ? (recordedBuild ? "dockerfile-digest-changed" : "image-build-state-missing")
         : "image-missing",
   });
-  buildSharedWorkspaceImage({
+  buildSharedVaultImage({
     dockerfilePath: dockerfile,
     sharedImageRef,
-    cacheRefs: [sharedImageRef, imageRef, ...allRecordedWorkspaceImageRefs(dockerfileDigest)],
+    cacheRefs: [sharedImageRef, imageRef, ...allRecordedVaultImageRefs(dockerfileDigest)],
   });
-  tagWorkspaceImage(sharedImageRef, imageRef);
+  tagVaultImage(sharedImageRef, imageRef);
   recordBuild();
 }
 
-export function ensureProvisionedWorkspace(projectRef: string, userProfileId?: string): void {
-  ensureWorkspaceConfig(projectRef, userProfileId);
-  ensureCanonicalWorkspaceImage(projectRef, userProfileId);
+export function ensureProvisionedVault(projectRef: string, userProfileId?: string): void {
+  ensureVaultConfig(projectRef, userProfileId);
+  ensureCanonicalVaultImage(projectRef, userProfileId);
 }

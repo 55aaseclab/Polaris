@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   selectRuntimeMemoryEntries,
-  renderWorkspaceMemory,
+  renderVaultMemory,
   renderUserMemory,
   renderSessionSnapshot,
   buildFallbackMemoryChange,
@@ -16,7 +16,7 @@ test("runtime memory observer selects bounded memory entries by confidence and r
   const entries = [
     {
       id: "a",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "low",
       title: "Low",
@@ -27,7 +27,7 @@ test("runtime memory observer selects bounded memory entries by confidence and r
     },
     {
       id: "b",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "high-old",
       title: "High old",
@@ -38,7 +38,7 @@ test("runtime memory observer selects bounded memory entries by confidence and r
     },
     {
       id: "c",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "high-new",
       title: "High new",
@@ -56,7 +56,7 @@ test("runtime memory observer deduplicates equivalent memory entries", () => {
   const entries = [
     {
       id: "a",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "run-verifier-first",
       title: "Run verifier before retrying",
@@ -67,7 +67,7 @@ test("runtime memory observer deduplicates equivalent memory entries", () => {
     },
     {
       id: "b",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "run-verifier-first",
       title: "Run verifier before retrying",
@@ -81,11 +81,11 @@ test("runtime memory observer deduplicates equivalent memory entries", () => {
   assert.equal(selected.length, 1);
 });
 
-test("runtime memory observer renders workspace memory and snapshot", () => {
+test("runtime memory observer renders vault memory and snapshot", () => {
   const entries = [
     {
       id: "a",
-      target: "workspace-memory",
+      target: "vault-memory",
       section: "Validation",
       key: "run-verifier-first",
       title: "Run verifier before retrying",
@@ -106,11 +106,11 @@ test("runtime memory observer renders workspace memory and snapshot", () => {
       updatedAt: "2026-06-23T00:00:00.000Z",
     },
   ];
-  assert.match(renderWorkspaceMemory(entries), /Polaris Workspace Memory/);
+  assert.match(renderVaultMemory(entries), /Polaris Vault Memory/);
   assert.match(renderUserMemory(entries), /Polaris User Memory/);
   const snapshot = renderSessionSnapshot(entries);
   assert.match(snapshot, /Polaris Memory Snapshot/);
-  assert.match(snapshot, /Workspace Memory/);
+  assert.match(snapshot, /Vault Memory/);
   assert.match(snapshot, /User Memory/);
 });
 
@@ -121,11 +121,11 @@ test("runtime memory observer fallback memory stays memory-oriented", () => {
       title: "Fix auth wiring",
       lastStatus: "error",
       lastError: "401 Unauthorized",
-      cwd: "/workspace/project",
+      cwd: "/vault/project",
     },
     "session-1",
   );
-  assert.equal(memory.target, "workspace-memory");
+  assert.equal(memory.target, "vault-memory");
   assert.match(memory.title, /Runtime failure recovery/);
 });
 
@@ -145,7 +145,7 @@ test("runtime memory observer derives memory capture from daemon-owned agent rec
   const record = {
     id: "agent-1",
     provider: "codex",
-    cwd: "/workspace/project",
+    cwd: "/vault/project",
     title: "fix auth wiring",
     lastStatus: "idle",
     lastError: null,
@@ -163,7 +163,7 @@ test("runtime memory observer infers completion when the first poll already sees
   const record = {
     id: "agent-short",
     provider: "codex",
-    cwd: "/workspace/project",
+    cwd: "/vault/project",
     title: "short successful run",
     lastStatus: "idle",
     lastError: null,
@@ -180,11 +180,11 @@ test("runtime memory observer infers completion when the first poll already sees
   assert.equal(derived.memoryEntry?.target, "user-memory");
 });
 
-test("runtime memory observer emits task-failed and workspace memory for error transitions", async () => {
+test("runtime memory observer emits task-failed and vault memory for error transitions", async () => {
   const record = {
     id: "agent-error",
     provider: "codex",
-    cwd: "/workspace/project",
+    cwd: "/vault/project",
     title: "broken auth wiring",
     lastStatus: "error",
     lastError: "401 Unauthorized",
@@ -195,6 +195,6 @@ test("runtime memory observer emits task-failed and workspace memory for error t
   const derived = await deriveAgentObservationUpdate("running", record);
   assert.equal(derived.sessionId, "session-error");
   assert.deepEqual(derived.events.map((event) => event.kind), ["task-output", "task-failed"]);
-  assert.equal(derived.memoryEntry?.target, "workspace-memory");
+  assert.equal(derived.memoryEntry?.target, "vault-memory");
   assert.match(derived.memoryEntry?.body || "", /401 Unauthorized/);
 });

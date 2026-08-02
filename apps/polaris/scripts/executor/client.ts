@@ -2,12 +2,12 @@ import type { SwitchResult } from "../cli/commands/switch.js";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import type { SkillHarness } from "../config/skills.js";
 import type {
-  PortalWorkspacePaseoDiagnostic,
+  PortalVaultPaseoDiagnostic,
 } from "../core/portal.js";
 import type { PortalDriverTarget } from "../core/portal.js";
-import type { WorkspaceStatus } from "../core/workspace.js";
+import type { VaultStatus } from "../core/vault.js";
 import {
-  healthCheckPortalWorkspaceExecutor,
+  healthCheckPortalVaultExecutor,
 } from "./operations.js";
 import { logInfo, logWarn } from "../utils/log.js";
 
@@ -74,7 +74,7 @@ async function ensureExecutorHealthy(
     return;
   }
   const inFlight = (async () => {
-    await healthCheckPortalWorkspaceExecutor(baseUrl, headers);
+    await healthCheckPortalVaultExecutor(baseUrl, headers);
   })();
   executorHealthCache.set(cacheKey, {
     okUntil: 0,
@@ -112,7 +112,7 @@ async function executorRequest<T>(
   const requestBody = typeof init.body === "string"
     ? init.body
     : null;
-  if (pathname === "/workspaces/status/refresh") {
+  if (pathname === "/vaults/status/refresh") {
     logInfo("executor-client", "request-started", {
       requestId,
       pathname,
@@ -131,7 +131,7 @@ async function executorRequest<T>(
       : error instanceof Error
         ? error.message
         : String(error);
-    if (pathname === "/workspaces/status/refresh") {
+    if (pathname === "/vaults/status/refresh") {
       logWarn("executor-client", "request-failed", {
         requestId,
         pathname,
@@ -145,7 +145,7 @@ async function executorRequest<T>(
   }
   if (!response.ok) {
     const responseBody = await response.text();
-    if (pathname === "/workspaces/status/refresh") {
+    if (pathname === "/vaults/status/refresh") {
       logWarn("executor-client", "request-rejected", {
         requestId,
         pathname,
@@ -158,7 +158,7 @@ async function executorRequest<T>(
       describeExecutorEndpointFailure(baseUrl, pathname, response, responseBody),
     );
   }
-  if (pathname === "/workspaces/status/refresh") {
+  if (pathname === "/vaults/status/refresh") {
     logInfo("executor-client", "request-completed", {
       requestId,
       pathname,
@@ -169,15 +169,15 @@ async function executorRequest<T>(
   return (await response.json()) as T;
 }
 
-export async function queueProvisionWorkspace(input: {
+export async function queueProvisionVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   defaultDockerOnly?: boolean;
   startAfterCreate?: boolean;
   line?: "coding" | "vertical";
-}): Promise<{ queued: true; workspace: string }> {
+}): Promise<{ queued: true; vault: string }> {
   return executorRequest(
-    "/workspaces/provision",
+    "/vaults/provision",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -185,12 +185,12 @@ export async function queueProvisionWorkspace(input: {
   );
 }
 
-export async function refreshPortalWorkspaceStatus(input: {
+export async function refreshPortalVaultStatus(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{ refreshed: true }> {
   return executorRequest(
-    "/workspaces/status/refresh",
+    "/vaults/status/refresh",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -198,13 +198,13 @@ export async function refreshPortalWorkspaceStatus(input: {
   );
 }
 
-export async function switchPortalWorkspace(input: {
+export async function switchPortalVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   target: PortalDriverTarget;
 }): Promise<SwitchResult> {
   return executorRequest(
-    "/workspaces/switch",
+    "/vaults/switch",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -212,13 +212,13 @@ export async function switchPortalWorkspace(input: {
   );
 }
 
-export async function updatePortalWorkspaceSelectedDriver(input: {
+export async function updatePortalVaultSelectedDriver(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   target: PortalDriverTarget;
 }): Promise<{ updated: true }> {
   return executorRequest(
-    "/workspaces/driver",
+    "/vaults/driver",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -226,15 +226,15 @@ export async function updatePortalWorkspaceSelectedDriver(input: {
   );
 }
 
-export async function deletePortalWorkspace(input: {
+export async function deletePortalVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{
   deleted: true;
-  workspace: string;
+  vault: string;
 }> {
   return executorRequest(
-    "/workspaces",
+    "/vaults",
     {
       method: "DELETE",
       body: JSON.stringify(input),
@@ -242,12 +242,12 @@ export async function deletePortalWorkspace(input: {
   );
 }
 
-export async function permanentlyDeletePortalWorkspace(input: {
+export async function permanentlyDeletePortalVault(input: {
   userId: string;
-  workspace: string;
-}): Promise<{ deleted: true; workspace: string }> {
+  vault: string;
+}): Promise<{ deleted: true; vault: string }> {
   return executorRequest(
-    "/workspaces/hard-delete",
+    "/vaults/hard-delete",
     {
       method: "DELETE",
       body: JSON.stringify(input),
@@ -255,12 +255,12 @@ export async function permanentlyDeletePortalWorkspace(input: {
   );
 }
 
-export async function stopPortalWorkspace(input: {
+export async function stopPortalVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{ stopped: true }> {
   return executorRequest(
-    "/workspaces/stop",
+    "/vaults/stop",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -268,12 +268,12 @@ export async function stopPortalWorkspace(input: {
   );
 }
 
-export async function startPortalWorkspace(input: {
+export async function startPortalVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{ started: true }> {
   return executorRequest(
-    "/workspaces/start",
+    "/vaults/start",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -281,12 +281,12 @@ export async function startPortalWorkspace(input: {
   );
 }
 
-export async function rebuildPortalWorkspace(input: {
+export async function rebuildPortalVault(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{ rebuilt: true }> {
   return executorRequest(
-    "/workspaces/rebuild",
+    "/vaults/rebuild",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -294,9 +294,9 @@ export async function rebuildPortalWorkspace(input: {
   );
 }
 
-export async function switchPortalWorkspaceLiveCredential(input: {
+export async function switchPortalVaultLiveCredential(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: ManagedHarness;
   credentialId: string;
 }): Promise<{
@@ -305,7 +305,7 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   credentialId: string;
 }> {
   return executorRequest(
-    "/workspaces/credentials/live/switch",
+    "/vaults/credentials/live/switch",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -313,12 +313,12 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   );
 }
 
-export async function getPortalWorkspacePaseoDiagnostic(input: {
+export async function getPortalVaultPaseoDiagnostic(input: {
   userId: string;
-  workspace: string;
-}): Promise<PortalWorkspacePaseoDiagnostic> {
+  vault: string;
+}): Promise<PortalVaultPaseoDiagnostic> {
   return executorRequest(
-    "/workspaces/paseo/status",
+    "/vaults/paseo/status",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -326,15 +326,15 @@ export async function getPortalWorkspacePaseoDiagnostic(input: {
   );
 }
 
-export async function restartPortalWorkspacePaseoDaemon(input: {
+export async function restartPortalVaultPaseoDaemon(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }): Promise<{
   restarted: true;
-  diagnostic: PortalWorkspacePaseoDiagnostic;
+  diagnostic: PortalVaultPaseoDiagnostic;
 }> {
   return executorRequest(
-    "/workspaces/paseo/restart",
+    "/vaults/paseo/restart",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -342,17 +342,17 @@ export async function restartPortalWorkspacePaseoDaemon(input: {
   );
 }
 
-export async function listPortalWorkspaceSkills(input: {
+export async function listPortalVaultSkills(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
 }): Promise<{
-  workspace: string;
+  vault: string;
   userId: string;
   installed: Array<{ harness: SkillHarness; skills: string[] }>;
 }> {
   return executorRequest(
-    "/workspaces/skills/list",
+    "/vaults/skills/list",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -360,21 +360,21 @@ export async function listPortalWorkspaceSkills(input: {
   );
 }
 
-export async function installPortalWorkspaceSkill(input: {
+export async function installPortalVaultSkill(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   installed: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   packageName: string;
 }> {
   return executorRequest(
-    "/workspaces/skills/install",
+    "/vaults/skills/install",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -382,21 +382,21 @@ export async function installPortalWorkspaceSkill(input: {
   );
 }
 
-export async function uninstallPortalWorkspaceSkill(input: {
+export async function uninstallPortalVaultSkill(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   uninstalled: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   removed: boolean;
 }> {
   return executorRequest(
-    "/workspaces/skills/uninstall",
+    "/vaults/skills/uninstall",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -404,20 +404,20 @@ export async function uninstallPortalWorkspaceSkill(input: {
   );
 }
 
-export async function syncPortalWorkspaceSkills(input: {
+export async function syncPortalVaultSkills(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
 }): Promise<{
   synced: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   installed: string[];
   removed: string[];
 }> {
   return executorRequest(
-    "/workspaces/skills/sync",
+    "/vaults/skills/sync",
     {
       method: "POST",
       body: JSON.stringify(input),

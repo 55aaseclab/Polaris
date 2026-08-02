@@ -73,7 +73,7 @@ export function polarisNetfsLocalExportRoot(importMetaUrl: string): string {
   if (configured) {
     return configured;
   }
-  return path.join(polarisDataRoot(importMetaUrl), "exports", "workspaces");
+  return path.join(polarisDataRoot(importMetaUrl), "exports", "vaults");
 }
 
 export function polarisWanghaiDataRoot(importMetaUrl: string): string {

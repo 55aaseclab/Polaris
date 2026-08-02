@@ -1,15 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import type { BackendDriver } from "../types.js";
-import type { BackendObservation, ReconcilePlan, WorkspaceSpec } from "../../core/workspace.js";
-import { renderAndWriteKubevirtWorkspace } from "./render.js";
+import type { BackendObservation, ReconcilePlan, VaultSpec } from "../../core/vault.js";
+import { renderAndWriteKubevirtVault } from "./render.js";
 import { runCommand } from "../../utils/shell.js";
-import { workspaceDataClaimName } from "../../core/netfs.js";
+import { vaultDataClaimName } from "../../core/netfs.js";
 import { kubevirtProbePassword } from "./probe-access.js";
 import {
-  workspaceRuntimeResourceName,
-  workspaceRuntimeScopeName,
-} from "../../core/workspace-name.js";
+  vaultRuntimeResourceName,
+  vaultRuntimeScopeName,
+} from "../../core/vault-name.js";
 
 function hasKubectlVirt(): boolean {
   const result = spawnSync("kubectl", ["virt", "--help"], { encoding: "utf8" });
@@ -36,18 +36,18 @@ function terminateChildProcess(child: ReturnType<typeof spawn>): void {
   child.kill("SIGTERM");
 }
 
-function runtimeScope(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeScopeName(workspace.userProfile.id, workspace.identity.projectName);
+function runtimeScope(vault: VaultSpec): string {
+  return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
-function vmName(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeResourceName(workspace.userProfile.id, workspace.identity.projectName, "vm");
+function vmName(vault: VaultSpec): string {
+  return vaultRuntimeResourceName(vault.userProfile.id, vault.identity.projectName, "vm");
 }
 
-function cloudInitSecretName(workspace: WorkspaceSpec): string {
-  return workspaceRuntimeResourceName(
-    workspace.userProfile.id,
-    workspace.identity.projectName,
+function cloudInitSecretName(vault: VaultSpec): string {
+  return vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
     "vm-cloudinit",
   );
 }
@@ -150,17 +150,17 @@ function kubevirtProbeShellCommand(command: string): string {
 }
 
 function kubevirtNodeSshEndpoint(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   serviceName: string,
 ): { host: string; port: number } | null {
   const vmiNode = spawnSync(
     "kubectl",
     [
       "-n",
-      runtimeScope(workspace),
+      runtimeScope(vault),
       "get",
       "vmi",
-      vmName(workspace),
+      vmName(vault),
       "-o",
       "jsonpath={.status.nodeName}",
     ],
@@ -189,7 +189,7 @@ function kubevirtNodeSshEndpoint(
     "kubectl",
     [
       "-n",
-      runtimeScope(workspace),
+      runtimeScope(vault),
       "get",
       "svc",
       serviceName,
@@ -209,7 +209,7 @@ function kubevirtNodeSshEndpoint(
 function runKubevirtSshPass(args: {
   host: string;
   port: number;
-  workspace: WorkspaceSpec;
+  vault: VaultSpec;
   command: string;
   timeoutMs?: number;
 }): { ok: boolean; stdout: string } {
@@ -217,7 +217,7 @@ function runKubevirtSshPass(args: {
     "sshpass",
     [
       "-p",
-      kubevirtProbePassword(args.workspace),
+      kubevirtProbePassword(args.vault),
       "ssh",
       "-o",
       "StrictHostKeyChecking=no",
@@ -247,17 +247,17 @@ function runKubevirtSshPass(args: {
 }
 
 async function runKubevirtSshCommand(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   serviceName: string,
   command: string,
   timeoutMs?: number,
 ): Promise<{ ok: boolean; stdout: string }> {
-  const directEndpoint = kubevirtNodeSshEndpoint(workspace, serviceName);
+  const directEndpoint = kubevirtNodeSshEndpoint(vault, serviceName);
   if (directEndpoint) {
     const directResult = runKubevirtSshPass({
       host: directEndpoint.host,
       port: directEndpoint.port,
-      workspace,
+      vault,
       command,
       timeoutMs,
     });
@@ -270,7 +270,7 @@ async function runKubevirtSshCommand(
   let child: ReturnType<typeof spawn> | undefined;
   try {
     child = await waitForPortForwardReady(
-      runtimeScope(workspace),
+      runtimeScope(vault),
       serviceName,
       localPort,
       22,
@@ -279,7 +279,7 @@ async function runKubevirtSshCommand(
       "sshpass",
       [
         "-p",
-        kubevirtProbePassword(workspace),
+        kubevirtProbePassword(vault),
         "ssh",
         "-o",
         "StrictHostKeyChecking=no",
@@ -316,42 +316,42 @@ async function runKubevirtSshCommand(
 }
 
 async function waitForKubevirtSshReachable(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   serviceName: string,
   timeoutMs = 120000,
   intervalMs = 2000,
 ): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const result = await runKubevirtSshCommand(workspace, serviceName, "true");
+    const result = await runKubevirtSshCommand(vault, serviceName, "true");
     if (result.ok) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error(`KubeVirt SSH probe did not become reachable for ${workspace.identity.projectName} within ${timeoutMs}ms`);
+  throw new Error(`KubeVirt SSH probe did not become reachable for ${vault.identity.projectName} within ${timeoutMs}ms`);
 }
 
 async function ensureKubevirtGuestRuntime(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
 ): Promise<void> {
-  const serviceName = kubevirtServiceName(workspace);
+  const serviceName = kubevirtServiceName(vault);
   if (!serviceName) {
-    throw new Error(`No KubeVirt service found for ${workspace.identity.projectName}`);
+    throw new Error(`No KubeVirt service found for ${vault.identity.projectName}`);
   }
-  await waitForKubevirtSshReachable(workspace, serviceName);
+  await waitForKubevirtSshReachable(vault, serviceName);
 
   const waitForDaemonReady = async (timeoutMs: number): Promise<boolean> => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       const readyCheck = await runKubevirtSshCommand(
-        workspace,
+        vault,
         serviceName,
         [
           "set -eu",
-          `test -s ${workspace.agent.runtime.stateRoot}/server-id`,
-          `test -f ${normalizeKubevirtCommandRef(workspace)}`,
-          `grep -q '"url"[[:space:]]*:' ${normalizeKubevirtCommandRef(workspace)}`,
+          `test -s ${vault.agent.runtime.stateRoot}/server-id`,
+          `test -f ${normalizeKubevirtCommandRef(vault)}`,
+          `grep -q '"url"[[:space:]]*:' ${normalizeKubevirtCommandRef(vault)}`,
         ].join("\n"),
         10000,
       );
@@ -368,28 +368,28 @@ async function ensureKubevirtGuestRuntime(
   }
 
   const result = await runKubevirtSshCommand(
-    workspace,
+    vault,
     serviceName,
     "systemctl restart polaris-runtime-bootstrap.service",
     300000,
   );
   if (!result.ok) {
-    throw new Error(`Failed to restart Polaris runtime bootstrap in VM ${workspace.identity.projectName}`);
+    throw new Error(`Failed to restart Polaris runtime bootstrap in VM ${vault.identity.projectName}`);
   }
 
   if (await waitForDaemonReady(120000)) {
     return;
   }
 
-  throw new Error(`Polaris runtime bootstrap did not make the daemon ready in VM ${workspace.identity.projectName}`);
+  throw new Error(`Polaris runtime bootstrap did not make the daemon ready in VM ${vault.identity.projectName}`);
 }
 
 interface KubevirtRuntimeSnapshot {
   guestReachable: boolean;
   persistedServerId: string | null;
   pairingRaw: string;
-  workspaceDataObserved: boolean;
-  workspaceRuntimeObserved: boolean;
+  vaultDataObserved: boolean;
+  vaultRuntimeObserved: boolean;
   userIdentityObserved: boolean;
   homeObserved: boolean;
   projectRootObserved: boolean;
@@ -401,37 +401,37 @@ interface KubevirtRuntimeSnapshot {
 }
 
 async function collectKubevirtRuntimeSnapshot(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   serviceName: string,
 ): Promise<KubevirtRuntimeSnapshot> {
   const command = [
     "set -eu",
     "printf 'guestReachable=1\\n'",
     "printf 'persistedServerId<<EOF\\n'",
-    `cat ${workspace.agent.runtime.stateRoot}/server-id 2>/dev/null || true`,
+    `cat ${vault.agent.runtime.stateRoot}/server-id 2>/dev/null || true`,
     "printf 'EOF\\n'",
     "printf 'pairingRaw<<EOF\\n'",
-    `cat ${normalizeKubevirtCommandRef(workspace)} 2>/dev/null || true`,
+    `cat ${normalizeKubevirtCommandRef(vault)} 2>/dev/null || true`,
     "printf 'EOF\\n'",
-    `test -d ${workspace.attachments.workspaceData.mountRoot} && echo workspaceDataObserved=1 || echo workspaceDataObserved=0`,
-    `test -d ${workspace.attachments.workspaceRuntimeState.mountRoot} && echo workspaceRuntimeObserved=1 || echo workspaceRuntimeObserved=0`,
-    `test -d ${workspace.attachments.userIdentityState.mountRoot} && echo userIdentityObserved=1 || echo userIdentityObserved=0`,
-    `test -d ${workspace.runtime.home} && echo homeObserved=1 || echo homeObserved=0`,
-    `if test -L ${workspace.runtime.home}/workspace || test -L ${workspace.runtime.home}/${workspace.profile.workspaceAlias ?? "workspace"}; then echo projectRootObserved=1; else echo projectRootObserved=0; fi`,
-    `test -L ${workspace.runtime.home}/.paseo && echo managerStateObserved=1 || echo managerStateObserved=0`,
-    `test -d ${workspace.agent.runtime.evolutionRoot} && echo evolutionStateObserved=1 || echo evolutionStateObserved=0`,
-    `test -L ${workspace.runtime.home}/.codex && echo codexObserved=1 || echo codexObserved=0`,
-    `test -L ${workspace.runtime.home}/.claude && echo claudeObserved=1 || echo claudeObserved=0`,
-    `if test -L ${workspace.runtime.home}/.ssh || test -d ${workspace.runtime.home}/.ssh; then echo sshObserved=1; else echo sshObserved=0; fi`,
+    `test -d ${vault.attachments.vaultData.mountRoot} && echo vaultDataObserved=1 || echo vaultDataObserved=0`,
+    `test -d ${vault.attachments.vaultRuntimeState.mountRoot} && echo vaultRuntimeObserved=1 || echo vaultRuntimeObserved=0`,
+    `test -d ${vault.attachments.userIdentityState.mountRoot} && echo userIdentityObserved=1 || echo userIdentityObserved=0`,
+    `test -d ${vault.runtime.home} && echo homeObserved=1 || echo homeObserved=0`,
+    `if test -L ${vault.runtime.home}/vault || test -L ${vault.runtime.home}/${vault.profile.vaultAlias ?? "vault"}; then echo projectRootObserved=1; else echo projectRootObserved=0; fi`,
+    `test -L ${vault.runtime.home}/.paseo && echo managerStateObserved=1 || echo managerStateObserved=0`,
+    `test -d ${vault.agent.runtime.evolutionRoot} && echo evolutionStateObserved=1 || echo evolutionStateObserved=0`,
+    `test -L ${vault.runtime.home}/.codex && echo codexObserved=1 || echo codexObserved=0`,
+    `test -L ${vault.runtime.home}/.claude && echo claudeObserved=1 || echo claudeObserved=0`,
+    `if test -L ${vault.runtime.home}/.ssh || test -d ${vault.runtime.home}/.ssh; then echo sshObserved=1; else echo sshObserved=0; fi`,
   ].join("\n");
-  const result = await runKubevirtSshCommand(workspace, serviceName, command);
+  const result = await runKubevirtSshCommand(vault, serviceName, command);
   if (!result.ok) {
     return {
       guestReachable: false,
       persistedServerId: null,
       pairingRaw: "",
-      workspaceDataObserved: false,
-      workspaceRuntimeObserved: false,
+      vaultDataObserved: false,
+      vaultRuntimeObserved: false,
       userIdentityObserved: false,
       homeObserved: false,
       projectRootObserved: false,
@@ -470,8 +470,8 @@ async function collectKubevirtRuntimeSnapshot(
     guestReachable: flag("guestReachable"),
     persistedServerId: block("persistedServerId") || null,
     pairingRaw: block("pairingRaw"),
-    workspaceDataObserved: flag("workspaceDataObserved"),
-    workspaceRuntimeObserved: flag("workspaceRuntimeObserved"),
+    vaultDataObserved: flag("vaultDataObserved"),
+    vaultRuntimeObserved: flag("vaultRuntimeObserved"),
     userIdentityObserved: flag("userIdentityObserved"),
     homeObserved: flag("homeObserved"),
     projectRootObserved: flag("projectRootObserved"),
@@ -483,20 +483,20 @@ async function collectKubevirtRuntimeSnapshot(
   };
 }
 
-export async function readKubevirtPersistedPaseoState(workspace: WorkspaceSpec): Promise<{
+export async function readKubevirtPersistedPaseoState(vault: VaultSpec): Promise<{
   serverId: string;
   pairing: Record<string, unknown> & { url: string };
 } | null> {
   const service = spawnSync(
     "kubectl",
-    ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"],
+    ["-n", runtimeScope(vault), "get", "svc", runtimeScope(vault), "-o", "jsonpath={.metadata.name}"],
     { encoding: "utf8" },
   );
   const serviceName = String(service.stdout || "").trim();
   if (service.status !== 0 || !serviceName) {
     return null;
   }
-  const snapshot = await collectKubevirtRuntimeSnapshot(workspace, serviceName);
+  const snapshot = await collectKubevirtRuntimeSnapshot(vault, serviceName);
   if (!snapshot.guestReachable || !snapshot.persistedServerId) {
     return null;
   }
@@ -517,39 +517,39 @@ export async function readKubevirtPersistedPaseoState(workspace: WorkspaceSpec):
 }
 
 function normalizeKubevirtCommandRef(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
 ): string {
-  return workspace.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json";
+  return vault.agent.runtime.pairingFile ?? "/root/.paseo/pairing.json";
 }
 
-function patchVmRunStrategy(workspace: WorkspaceSpec, runStrategy: "Always" | "Halted"): void {
+function patchVmRunStrategy(vault: VaultSpec, runStrategy: "Always" | "Halted"): void {
   runCommand("kubectl", [
     "-n",
-    runtimeScope(workspace),
+    runtimeScope(vault),
     "patch",
     "vm",
-    vmName(workspace),
+    vmName(vault),
     "--type=merge",
     "-p",
     JSON.stringify({ spec: { runStrategy } }),
   ]);
 }
 
-function runVmLifecycleAction(workspace: WorkspaceSpec, action: "start" | "stop" | "restart"): void {
+function runVmLifecycleAction(vault: VaultSpec, action: "start" | "stop" | "restart"): void {
   if (hasKubectlVirt()) {
-    runCommand("kubectl", ["virt", action, "-n", runtimeScope(workspace), vmName(workspace)]);
+    runCommand("kubectl", ["virt", action, "-n", runtimeScope(vault), vmName(vault)]);
     return;
   }
   if (action === "start") {
-    patchVmRunStrategy(workspace, "Always");
+    patchVmRunStrategy(vault, "Always");
     return;
   }
   if (action === "stop") {
-    patchVmRunStrategy(workspace, "Halted");
+    patchVmRunStrategy(vault, "Halted");
     return;
   }
-  patchVmRunStrategy(workspace, "Halted");
-  patchVmRunStrategy(workspace, "Always");
+  patchVmRunStrategy(vault, "Halted");
+  patchVmRunStrategy(vault, "Always");
 }
 
 function extractPairingUrl(raw: string): string | undefined {
@@ -561,10 +561,10 @@ function extractPairingUrl(raw: string): string | undefined {
   }
 }
 
-function kubevirtServiceName(workspace: WorkspaceSpec): string | null {
+function kubevirtServiceName(vault: VaultSpec): string | null {
   const service = spawnSync(
     "kubectl",
-    ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"],
+    ["-n", runtimeScope(vault), "get", "svc", runtimeScope(vault), "-o", "jsonpath={.metadata.name}"],
     { encoding: "utf8" },
   );
   const name = (service.stdout || "").trim();
@@ -572,18 +572,18 @@ function kubevirtServiceName(workspace: WorkspaceSpec): string | null {
 }
 
 async function syncKubevirtGuestState(
-  workspace: WorkspaceSpec,
+  vault: VaultSpec,
   mode: "sync-in" | "sync-out",
 ): Promise<void> {
   const vmi = spawnSync(
     "kubectl",
-    ["-n", runtimeScope(workspace), "get", "vmi", vmName(workspace), "-o", "jsonpath={.status.phase}"],
+    ["-n", runtimeScope(vault), "get", "vmi", vmName(vault), "-o", "jsonpath={.status.phase}"],
     { encoding: "utf8" },
   );
   if ((vmi.stdout || "").trim() !== "Running") {
     return;
   }
-  const serviceName = kubevirtServiceName(workspace);
+  const serviceName = kubevirtServiceName(vault);
   if (!serviceName) {
     return;
   }
@@ -591,168 +591,168 @@ async function syncKubevirtGuestState(
 if ! test -x /usr/local/bin/polaris-sync-shared-state; then exit 0; fi
 /usr/local/bin/polaris-sync-shared-state ${mode}`;
   const result = await runKubevirtSshCommand(
-    workspace,
+    vault,
     serviceName,
     command,
   );
   if (!result.ok) {
-    throw new Error(`Failed to ${mode} VM shared state for ${workspace.identity.projectName}`);
+    throw new Error(`Failed to ${mode} VM shared state for ${vault.identity.projectName}`);
   }
 }
 
 export class KubevirtDriver implements BackendDriver {
   readonly kind = "kubevirt-vm" as const;
 
-  async create(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWriteKubevirtWorkspace(workspace);
+  async create(vault: VaultSpec): Promise<void> {
+    renderAndWriteKubevirtVault(vault);
   }
 
-  async start(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWriteKubevirtWorkspace(workspace);
+  async start(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWriteKubevirtVault(vault);
     runCommand("kubectl", ["apply", "-f", outputPath]);
-    runVmLifecycleAction(workspace, "start");
-    await ensureKubevirtGuestRuntime(workspace);
+    runVmLifecycleAction(vault, "start");
+    await ensureKubevirtGuestRuntime(vault);
   }
 
-  async stop(workspace: WorkspaceSpec): Promise<void> {
-    await syncKubevirtGuestState(workspace, "sync-out");
-    runVmLifecycleAction(workspace, "stop");
+  async stop(vault: VaultSpec): Promise<void> {
+    await syncKubevirtGuestState(vault, "sync-out");
+    runVmLifecycleAction(vault, "stop");
   }
 
-  async restart(workspace: WorkspaceSpec): Promise<void> {
-    await syncKubevirtGuestState(workspace, "sync-out");
-    runVmLifecycleAction(workspace, "restart");
+  async restart(vault: VaultSpec): Promise<void> {
+    await syncKubevirtGuestState(vault, "sync-out");
+    runVmLifecycleAction(vault, "restart");
   }
 
-  async rebuild(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWriteKubevirtWorkspace(workspace);
+  async rebuild(vault: VaultSpec): Promise<void> {
+    renderAndWriteKubevirtVault(vault);
   }
 
-  async render(workspace: WorkspaceSpec): Promise<void> {
-    renderAndWriteKubevirtWorkspace(workspace);
+  async render(vault: VaultSpec): Promise<void> {
+    renderAndWriteKubevirtVault(vault);
   }
 
-  async apply(workspace: WorkspaceSpec): Promise<void> {
-    const outputPath = renderAndWriteKubevirtWorkspace(workspace);
+  async apply(vault: VaultSpec): Promise<void> {
+    const outputPath = renderAndWriteKubevirtVault(vault);
     runCommand("kubectl", ["apply", "-f", outputPath]);
   }
 
-  async logs(workspace: WorkspaceSpec): Promise<void> {
+  async logs(vault: VaultSpec): Promise<void> {
     const launcher = spawnSync(
       "kubectl",
-      ["-n", runtimeScope(workspace), "get", "pod", "-l", `vm.kubevirt.io/name=${vmName(workspace)}`, "-o", "jsonpath={.items[0].metadata.name}"],
+      ["-n", runtimeScope(vault), "get", "pod", "-l", `vm.kubevirt.io/name=${vmName(vault)}`, "-o", "jsonpath={.items[0].metadata.name}"],
       { encoding: "utf8" },
     );
     const podName = (launcher.stdout || "").trim();
     if (!podName) {
-      throw new Error(`No KubeVirt launcher pod found for ${workspace.identity.projectName}`);
+      throw new Error(`No KubeVirt launcher pod found for ${vault.identity.projectName}`);
     }
-    runCommand("kubectl", ["-n", runtimeScope(workspace), "logs", podName, "--tail=200"]);
+    runCommand("kubectl", ["-n", runtimeScope(vault), "logs", podName, "--tail=200"]);
   }
 
-  async inspect(workspace: WorkspaceSpec): Promise<BackendObservation> {
+  async inspect(vault: VaultSpec): Promise<BackendObservation> {
     const vm = spawnSync(
       "kubectl",
-      ["-n", runtimeScope(workspace), "get", "vm", vmName(workspace), "-o", "jsonpath={.metadata.name}"],
+      ["-n", runtimeScope(vault), "get", "vm", vmName(vault), "-o", "jsonpath={.metadata.name}"],
       { encoding: "utf8" },
     );
     const exists = vm.status === 0 && Boolean((vm.stdout || "").trim());
     const vmi = exists
-      ? spawnSync("kubectl", ["-n", runtimeScope(workspace), "get", "vmi", vmName(workspace), "-o", "jsonpath={.status.phase}"], { encoding: "utf8" })
+      ? spawnSync("kubectl", ["-n", runtimeScope(vault), "get", "vmi", vmName(vault), "-o", "jsonpath={.status.phase}"], { encoding: "utf8" })
       : { status: 1, stdout: "", stderr: "" };
     const phase = (vmi.stdout || "").trim();
     const running = phase === "Running";
-    const service = workspace.connectivity.servicePorts.length
-      ? spawnSync("kubectl", ["-n", runtimeScope(workspace), "get", "svc", runtimeScope(workspace), "-o", "jsonpath={.metadata.name}"], { encoding: "utf8" })
+    const service = vault.connectivity.servicePorts.length
+      ? spawnSync("kubectl", ["-n", runtimeScope(vault), "get", "svc", runtimeScope(vault), "-o", "jsonpath={.metadata.name}"], { encoding: "utf8" })
       : { status: 0, stdout: "", stderr: "" };
     const serviceName = (service.stdout || "").trim();
     const serviceCount = serviceName ? 1 : 0;
     const cloudInit = spawnSync(
       "kubectl",
-      ["-n", runtimeScope(workspace), "get", "secret", cloudInitSecretName(workspace), "-o", "jsonpath={.metadata.name}"],
+      ["-n", runtimeScope(vault), "get", "secret", cloudInitSecretName(vault), "-o", "jsonpath={.metadata.name}"],
       { encoding: "utf8" },
     );
     const cloudInitPresent = cloudInit.status === 0 && Boolean((cloudInit.stdout || "").trim());
-    const workspaceDataVolume = workspaceDataClaimName(workspace);
-    const workspaceRuntimeStateVolume =
-      workspace.attachments.workspaceRuntimeState.source.volumeRef ??
-      workspace.storage.claimName;
+    const vaultDataVolume = vaultDataClaimName(vault);
+    const vaultRuntimeStateVolume =
+      vault.attachments.vaultRuntimeState.source.volumeRef ??
+      vault.storage.claimName;
     const userIdentityStateVolume =
-      workspace.attachments.userIdentityState.source.volumeRef ?? "missing";
+      vault.attachments.userIdentityState.source.volumeRef ?? "missing";
     const runtimeSnapshot =
       exists && running && serviceName.length > 0
-        ? await collectKubevirtRuntimeSnapshot(workspace, serviceName)
+        ? await collectKubevirtRuntimeSnapshot(vault, serviceName)
         : null;
     const guestReachable = runtimeSnapshot?.guestReachable ?? false;
     const persistedServerId =
-      workspace.agent.enabled && guestReachable
+      vault.agent.enabled && guestReachable
         ? runtimeSnapshot?.persistedServerId ?? null
         : null;
     const pairingUrl =
-      workspace.agent.enabled && guestReachable
+      vault.agent.enabled && guestReachable
         ? extractPairingUrl(runtimeSnapshot?.pairingRaw ?? "")
         : undefined;
     return {
       backend: {
-        kind: workspace.backend.kind,
+        kind: vault.backend.kind,
         exists,
         running,
         detail: exists ? (running ? `vmi phase ${phase}` : `vm exists, vmi phase ${phase || "missing"}`) : "vm object missing",
       },
       attachments: {
-        workspaceData: exists
-          ? { observed: runtimeSnapshot?.workspaceDataObserved ?? false, detail: `pvc/${workspaceDataVolume} -> ${workspace.attachments.workspaceData.mountRoot}` }
+        vaultData: exists
+          ? { observed: runtimeSnapshot?.vaultDataObserved ?? false, detail: `pvc/${vaultDataVolume} -> ${vault.attachments.vaultData.mountRoot}` }
           : undefined,
-        workspaceRuntimeState: exists
-          ? { observed: runtimeSnapshot?.workspaceRuntimeObserved ?? false, detail: `pvc/${workspaceRuntimeStateVolume} -> ${workspace.attachments.workspaceRuntimeState.mountRoot}` }
+        vaultRuntimeState: exists
+          ? { observed: runtimeSnapshot?.vaultRuntimeObserved ?? false, detail: `pvc/${vaultRuntimeStateVolume} -> ${vault.attachments.vaultRuntimeState.mountRoot}` }
           : undefined,
         userIdentityState: exists
-          ? { observed: runtimeSnapshot?.userIdentityObserved ?? false, detail: `pvc/${userIdentityStateVolume} -> ${workspace.attachments.userIdentityState.mountRoot}` }
+          ? { observed: runtimeSnapshot?.userIdentityObserved ?? false, detail: `pvc/${userIdentityStateVolume} -> ${vault.attachments.userIdentityState.mountRoot}` }
           : undefined,
       },
-      workspaceAssembly: exists && running
+      vaultAssembly: exists && running
         ? {
-            home: { observed: runtimeSnapshot?.homeObserved ?? false, detail: workspace.runtime.home },
-            projectRoot: { observed: runtimeSnapshot?.projectRootObserved ?? false, detail: `${workspace.runtime.home}/workspace` },
-            managerState: { observed: runtimeSnapshot?.managerStateObserved ?? false, detail: workspace.agent.runtime.stateRoot },
-            evolutionState: { observed: runtimeSnapshot?.evolutionStateObserved ?? false, detail: workspace.agent.runtime.evolutionRoot },
-            codex: { observed: runtimeSnapshot?.codexObserved ?? false, detail: `${workspace.runtime.home}/.codex` },
-            claude: { observed: runtimeSnapshot?.claudeObserved ?? false, detail: `${workspace.runtime.home}/.claude` },
-            ssh: { observed: runtimeSnapshot?.sshObserved ?? false, detail: `${workspace.runtime.home}/.ssh` },
+            home: { observed: runtimeSnapshot?.homeObserved ?? false, detail: vault.runtime.home },
+            projectRoot: { observed: runtimeSnapshot?.projectRootObserved ?? false, detail: `${vault.runtime.home}/vault` },
+            managerState: { observed: runtimeSnapshot?.managerStateObserved ?? false, detail: vault.agent.runtime.stateRoot },
+            evolutionState: { observed: runtimeSnapshot?.evolutionStateObserved ?? false, detail: vault.agent.runtime.evolutionRoot },
+            codex: { observed: runtimeSnapshot?.codexObserved ?? false, detail: `${vault.runtime.home}/.codex` },
+            claude: { observed: runtimeSnapshot?.claudeObserved ?? false, detail: `${vault.runtime.home}/.claude` },
+            ssh: { observed: runtimeSnapshot?.sshObserved ?? false, detail: `${vault.runtime.home}/.ssh` },
           }
         : {},
       daemon: {},
       services: {
-        declared: workspace.connectivity.servicePorts.length ? 1 : 0,
+        declared: vault.connectivity.servicePorts.length ? 1 : 0,
         observed: serviceCount,
         detail: serviceCount ? "service object present" : "service object missing",
       },
     };
   }
 
-  async executeReconcilePlan(workspace: WorkspaceSpec, plan: ReconcilePlan): Promise<void> {
+  async executeReconcilePlan(vault: VaultSpec, plan: ReconcilePlan): Promise<void> {
     for (const action of plan.actions) {
       if (action.kind === "render") {
-        renderAndWriteKubevirtWorkspace(workspace);
+        renderAndWriteKubevirtVault(vault);
         continue;
       }
       if (action.kind === "apply") {
-        const outputPath = renderAndWriteKubevirtWorkspace(workspace);
+        const outputPath = renderAndWriteKubevirtVault(vault);
         runCommand("kubectl", ["apply", "-f", outputPath]);
         continue;
       }
       if (action.kind === "restart-runtime") {
-        await syncKubevirtGuestState(workspace, "sync-out");
-        runVmLifecycleAction(workspace, "restart");
+        await syncKubevirtGuestState(vault, "sync-out");
+        runVmLifecycleAction(vault, "restart");
         continue;
       }
       if (action.kind === "repair-runtime-assembly" || action.kind === "clean-ephemeral-runtime") {
-        await syncKubevirtGuestState(workspace, "sync-out");
-        runVmLifecycleAction(workspace, "restart");
+        await syncKubevirtGuestState(vault, "sync-out");
+        runVmLifecycleAction(vault, "restart");
         continue;
       }
       if (action.kind === "report-unrecoverable-drift") {
-        throw new Error(action.reason || "kubevirt backend cannot repair workspace drift");
+        throw new Error(action.reason || "kubevirt backend cannot repair vault drift");
       }
     }
   }

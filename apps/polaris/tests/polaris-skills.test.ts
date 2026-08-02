@@ -6,16 +6,16 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
-import { loadWorkspaceFromConfigPath, resolveWorkspaceConfigPath } from "../scripts/config/load.js";
-import { workspaceConfigPath } from "../scripts/config/scaffold.js";
+import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
+import { vaultConfigPath } from "../scripts/config/scaffold.js";
 import {
   addUserSkill,
   createSkillsCliDescriptor,
   listUserSkills,
-  listInstalledWorkspaceSkills,
+  listInstalledVaultSkills,
   removeUserSkill,
-  removeInstalledWorkspaceSkill,
-  resolveWorkspaceSkillInstallRoot,
+  removeInstalledVaultSkill,
+  resolveVaultSkillInstallRoot,
 } from "../scripts/config/skills.js";
 import {
   createPortalSkill,
@@ -377,9 +377,9 @@ test("skill registry supports claude harness entries", async () => {
   }
 });
 
-test("workspace skill helpers list and remove installed codex and claude skills", () => {
+test("vault skill helpers list and remove installed codex and claude skills", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-skill-root-"));
-  const fakeWorkspace = {
+  const fakeVault = {
     attachments: {
       userIdentityState: {
         mountRoot: root,
@@ -392,20 +392,20 @@ test("workspace skill helpers list and remove installed codex and claude skills"
     fs.mkdirSync(path.join(root, "claude", "skills", "claude-review"), { recursive: true });
 
     assert.equal(
-      resolveWorkspaceSkillInstallRoot(fakeWorkspace, "codex"),
+      resolveVaultSkillInstallRoot(fakeVault, "codex"),
       path.join(root, "codex", "skills"),
     );
     assert.equal(
-      resolveWorkspaceSkillInstallRoot(fakeWorkspace, "claude"),
+      resolveVaultSkillInstallRoot(fakeVault, "claude"),
       path.join(root, "claude", "skills"),
     );
 
-    const listed = listInstalledWorkspaceSkills({ workspace: fakeWorkspace });
+    const listed = listInstalledVaultSkills({ vault: fakeVault });
     assert.ok(listed.some((entry) => entry.harness === "codex" && entry.skills.includes("use-polaris")));
     assert.ok(listed.some((entry) => entry.harness === "claude" && entry.skills.includes("claude-review")));
 
-    const removed = removeInstalledWorkspaceSkill({
-      workspace: fakeWorkspace,
+    const removed = removeInstalledVaultSkill({
+      vault: fakeVault,
       harness: "claude",
       skillId: "claude-review",
     });

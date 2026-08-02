@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { VaultServicePort } from "./index.js";
 import {
   findWanghaiPortalPort,
   planOpenWanghaiPortal,
@@ -9,14 +10,15 @@ import {
 } from "./portal.js";
 
 test("finds wanghai port by name or container port", () => {
+  const ports: VaultServicePort[] = [
+    { name: "paseo", containerPort: 6767, nodePort: 32001 },
+    { name: "wanghai", containerPort: 9090, nodePort: 32002 },
+  ];
   assert.equal(
     findWanghaiPortalPort([{ name: "paseo", containerPort: 6767, nodePort: 32001 }]),
     null,
   );
-  const named = findWanghaiPortalPort([
-    { name: "paseo", containerPort: 6767, nodePort: 32001 },
-    { name: "wanghai", containerPort: 9090, nodePort: 32002 },
-  ]);
+  const named = findWanghaiPortalPort(ports);
   assert.equal(named?.nodePort, 32002);
   const byPort = findWanghaiPortalPort([
     { containerPort: WANGHAI_PORTAL_CONTAINER_PORT, nodePort: 32100 },

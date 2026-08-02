@@ -1,13 +1,13 @@
 import path from "node:path";
 import {
   WANGHAI_BACKUP_RUNTIME_ROOT,
-  WANGHAI_WORKSPACES_RUNTIME_ROOT,
+  WANGHAI_VAULTS_RUNTIME_ROOT,
 } from "./scaffold.js";
 import { polarisWanghaiDataRoot } from "../utils/paths.js";
 
 export interface WanghaiHostDataRoots {
   backupRoot: string;
-  workspacesRoot: string;
+  vaultsRoot: string;
 }
 
 export function resolveConfiguredWanghaiDataRoot(importMetaUrl: string): string {
@@ -17,7 +17,7 @@ export function resolveConfiguredWanghaiDataRoot(importMetaUrl: string): string 
 export function resolveWanghaiHostDataRoots(importMetaUrl: string): WanghaiHostDataRoots {
   const root = resolveConfiguredWanghaiDataRoot(importMetaUrl);
   return {
-    workspacesRoot: path.join(root, path.basename(WANGHAI_WORKSPACES_RUNTIME_ROOT)),
+    vaultsRoot: path.join(root, path.basename(WANGHAI_VAULTS_RUNTIME_ROOT)),
     backupRoot: path.join(root, path.basename(WANGHAI_BACKUP_RUNTIME_ROOT)),
   };
 }

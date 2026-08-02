@@ -5,16 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import { createExecutorServer } from "../scripts/executor/server.js";
-import { stopPortalWorkspace } from "../scripts/portal/service.js";
+import { stopPortalVault } from "../scripts/portal/service.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
-  workspaceSelectionPath,
-  workspaceStatusPath,
-  writeWorkspaceDriverSelection,
-  writeWorkspaceStatus,
+  vaultSelectionPath,
+  vaultStatusPath,
+  writeVaultDriverSelection,
+  writeVaultStatus,
 } from "../scripts/output/state-store.js";
-import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
+import { vaultRuntimeScopeName } from "../scripts/core/vault-name.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -84,25 +84,25 @@ test.after(async () => {
   }
 });
 
-test("portal workspace stop waits for backend completion and converges both workspaces", async () => {
+test("portal vault stop waits for backend completion and converges both vaults", async () => {
   const userId = uniqueName("portal-stop-concurrent-user");
-  const firstWorkspace = uniqueName("portal-stop-concurrent-a");
-  const secondWorkspace = uniqueName("portal-stop-concurrent-b");
+  const firstVault = uniqueName("portal-stop-concurrent-a");
+  const secondVault = uniqueName("portal-stop-concurrent-b");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   try {
     await createUserCommand([userId, "--name", "Portal Stop Concurrent User", "--email", `${userId}@polaris.local`]);
-    await createCommand([firstWorkspace, "--user", userId]);
-    await createCommand([secondWorkspace, "--user", userId]);
-    writeWorkspaceDriverSelection(firstWorkspace, { backend: "docker" }, userId);
-    writeWorkspaceDriverSelection(secondWorkspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus({
-      project: firstWorkspace,
+    await createCommand([firstVault, "--user", userId]);
+    await createCommand([secondVault, "--user", userId]);
+    writeVaultDriverSelection(firstVault, { backend: "docker" }, userId);
+    writeVaultDriverSelection(secondVault, { backend: "docker" }, userId);
+    writeVaultStatus({
+      project: firstVault,
       driver: {
         backend: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
-        runtimeRef: `container/${workspaceRuntimeScopeName(userId, firstWorkspace)}-docker`,
+        runtimeRef: `container/${vaultRuntimeScopeName(userId, firstVault)}-docker`,
       },
       runtime: {
         selectedDriver: { backend: "docker" },
@@ -119,13 +119,13 @@ test("portal workspace stop waits for backend completion and converges both work
       },
       details: {},
     }, userId);
-    writeWorkspaceStatus({
-      project: secondWorkspace,
+    writeVaultStatus({
+      project: secondVault,
       driver: {
         backend: "docker",
         baseImage: "ttl.sh/example:24h",
         runtimeKind: "docker-container",
-        runtimeRef: `container/${workspaceRuntimeScopeName(userId, secondWorkspace)}-docker`,
+        runtimeRef: `container/${vaultRuntimeScopeName(userId, secondVault)}-docker`,
       },
       runtime: {
         selectedDriver: { backend: "docker" },
@@ -151,8 +151,8 @@ test("portal workspace stop waits for backend completion and converges both work
       async () => {
         const startedAt = Date.now();
         await Promise.all([
-          stopPortalWorkspace(userId, firstWorkspace),
-          stopPortalWorkspace(userId, secondWorkspace),
+          stopPortalVault(userId, firstVault),
+          stopPortalVault(userId, secondVault),
         ]);
         const elapsedMs = Date.now() - startedAt;
         assert.ok(
@@ -160,18 +160,18 @@ test("portal workspace stop waits for backend completion and converges both work
           `expected stop requests to wait for backend stop completion, received ${elapsedMs}ms`,
         );
         const firstStatus = JSON.parse(
-          fs.readFileSync(workspaceStatusPath(firstWorkspace, userId), "utf8"),
+          fs.readFileSync(vaultStatusPath(firstVault, userId), "utf8"),
         ) as { driver?: { status?: string } };
         const secondStatus = JSON.parse(
-          fs.readFileSync(workspaceStatusPath(secondWorkspace, userId), "utf8"),
+          fs.readFileSync(vaultStatusPath(secondVault, userId), "utf8"),
         ) as { driver?: { status?: string } };
         assert.equal(firstStatus.driver?.status, "stopped");
         assert.equal(secondStatus.driver?.status, "stopped");
       },
     );
   } finally {
-    fs.rmSync(workspaceSelectionPath(firstWorkspace, userId), { force: true });
-    fs.rmSync(workspaceSelectionPath(secondWorkspace, userId), { force: true });
+    fs.rmSync(vaultSelectionPath(firstVault, userId), { force: true });
+    fs.rmSync(vaultSelectionPath(secondVault, userId), { force: true });
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }

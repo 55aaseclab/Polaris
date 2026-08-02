@@ -1,8 +1,8 @@
 import { getBackendDriver } from "../../backends/index.js";
 import { isManagedHarness, type ManagedHarness } from "../../config/credential-catalog.js";
-import { switchWorkspaceLiveCredentialMaterial } from "../../executor/operations.js";
+import { switchVaultLiveCredentialMaterial } from "../../executor/operations.js";
 import { logInfo } from "../../utils/log.js";
-import { loadWorkspaceForCommand } from "./shared.js";
+import { loadVaultForCommand } from "./shared.js";
 import { statusCommand } from "./status.js";
 
 function parseFlag(argv: string[], flag: string): string | undefined {
@@ -12,23 +12,23 @@ function parseFlag(argv: string[], flag: string): string | undefined {
 }
 
 function parseLiveSwitchArgs(argv: string[]): {
-  workspaceRef: string;
+  vaultRef: string;
   credentialId: string;
   harness?: ManagedHarness;
 } {
-  const workspaceRef = argv[0]?.trim();
+  const vaultRef = argv[0]?.trim();
   const credentialId = argv[1]?.trim();
   const harnessValue = parseFlag(argv, "--harness")?.trim().toLowerCase();
-  if (!workspaceRef || !credentialId) {
+  if (!vaultRef || !credentialId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- live-switch <workspaceRef> <credentialId> [--harness <ssh|codex|claude|copilot|opencode|pi>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- live-switch <vaultRef> <credentialId> [--harness <ssh|codex|claude|copilot|opencode|pi>]",
     );
   }
   if (harnessValue && !isManagedHarness(harnessValue)) {
     throw new Error(`Unsupported harness '${harnessValue}'`);
   }
   return {
-    workspaceRef,
+    vaultRef,
     credentialId,
     ...(harnessValue ? { harness: harnessValue as ManagedHarness } : {}),
   };
@@ -61,30 +61,30 @@ async function captureStdout<T>(
 }
 
 export async function liveSwitchCommand(argv: string[]): Promise<void> {
-  const { workspaceRef, credentialId, harness } = parseLiveSwitchArgs(argv);
-  const { workspace } = loadWorkspaceForCommand("status", workspaceRef);
-  if (workspace.backend.kind !== "docker" && workspace.backend.kind !== "pod") {
+  const { vaultRef, credentialId, harness } = parseLiveSwitchArgs(argv);
+  const { vault } = loadVaultForCommand("status", vaultRef);
+  if (vault.backend.kind !== "docker" && vault.backend.kind !== "pod") {
     throw new Error(
-      `Live credential switching is not supported for backend '${workspace.backend.kind}'`,
+      `Live credential switching is not supported for backend '${vault.backend.kind}'`,
     );
   }
-  const observation = await getBackendDriver(workspace.backend.kind).inspect(workspace);
+  const observation = await getBackendDriver(vault.backend.kind).inspect(vault);
   if (!observation.backend.exists || !observation.backend.running) {
     throw new Error(
-      `Workspace '${workspace.identity.projectName}' is not running on ${workspace.backend.kind}`,
+      `Vault '${vault.identity.projectName}' is not running on ${vault.backend.kind}`,
     );
   }
-  const switched = switchWorkspaceLiveCredentialMaterial({
-    workspace,
-    userId: workspace.userProfile.id,
+  const switched = switchVaultLiveCredentialMaterial({
+    vault,
+    userId: vault.userProfile.id,
     credentialId,
     harness,
     requireSupported: true,
   });
-  await captureStdout(() => statusCommand(workspaceRef));
-  logInfo("cli", "workspace-live-credential-switched", {
-    userProfileId: workspace.userProfile.id,
-    workspace: workspace.identity.projectName,
+  await captureStdout(() => statusCommand(vaultRef));
+  logInfo("cli", "vault-live-credential-switched", {
+    userProfileId: vault.userProfile.id,
+    vault: vault.identity.projectName,
     harness: switched.harness,
     credentialId,
   });
@@ -92,7 +92,7 @@ export async function liveSwitchCommand(argv: string[]): Promise<void> {
     `${JSON.stringify(
       {
         switched: true,
-        workspace: workspace.identity.projectName,
+        vault: vault.identity.projectName,
         harness: switched.harness,
         credentialId,
       },

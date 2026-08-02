@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { listOwnedWorkspaces } from "../../core/portal.js";
+import { listOwnedVaults } from "../../core/portal.js";
 import { polarisUsersRoot } from "../../utils/paths.js";
 
 function readRawText(filePath: string): string | null {
@@ -23,8 +23,8 @@ function readRawJson(filePath: string): unknown | null {
   }
 }
 
-function readRawWorkspace(userId: string, name: string): Record<string, unknown> {
-  const root = path.join(polarisUsersRoot(import.meta.url), userId, "workspaces", name);
+function readRawVault(userId: string, name: string): Record<string, unknown> {
+  const root = path.join(polarisUsersRoot(import.meta.url), userId, "vaults", name);
   return {
     name,
     raw: {
@@ -38,7 +38,7 @@ function readRawWorkspace(userId: string, name: string): Record<string, unknown>
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- workspace list --user <userProfileId>",
+    "Usage: pnpm --dir apps/polaris run polaris -- vault list --user <userProfileId>",
   );
 }
 
@@ -53,6 +53,6 @@ export async function listCommand(argv: string[]): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     userId,
-    workspaces: listOwnedWorkspaces(userId).map((name) => readRawWorkspace(userId, name)),
+    vaults: listOwnedVaults(userId).map((name) => readRawVault(userId, name)),
   }, null, 2)}\n`);
 }

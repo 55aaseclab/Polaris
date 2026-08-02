@@ -10,22 +10,22 @@ import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { parsePortalDriverTarget } from "../core/portal.js";
 import { logError, logInfo, logWarn } from "../utils/log.js";
 import {
-  deletePortalWorkspace,
-  getPortalWorkspacePaseoDiagnostic,
-  permanentlyDeletePortalWorkspace,
-  queueProvisionWorkspace,
-  refreshPortalWorkspaceStatus,
-  rebuildPortalWorkspace,
-  restartPortalWorkspacePaseoDaemon,
-  updatePortalWorkspaceSelectedDriver,
-  skillInstallWorkspace,
-  skillSyncWorkspace,
-  skillUninstallWorkspace,
-  startPortalWorkspace,
-  stopPortalWorkspace,
-  switchPortalWorkspace,
-  switchPortalWorkspaceLiveCredential,
-  listWorkspaceSkills,
+  deletePortalVault,
+  getPortalVaultPaseoDiagnostic,
+  permanentlyDeletePortalVault,
+  queueProvisionVault,
+  refreshPortalVaultStatus,
+  rebuildPortalVault,
+  restartPortalVaultPaseoDaemon,
+  updatePortalVaultSelectedDriver,
+  skillInstallVault,
+  skillSyncVault,
+  skillUninstallVault,
+  startPortalVault,
+  stopPortalVault,
+  switchPortalVault,
+  switchPortalVaultLiveCredential,
+  listVaultSkills,
 } from "./operations.js";
 
 type JsonObject = Record<string, unknown>;
@@ -52,8 +52,8 @@ function readHeader(req: IncomingMessage, name: string): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function isWorkspaceStatusRefreshRequest(req: IncomingMessage, url: URL): boolean {
-  return req.method === "POST" && url.pathname === "/workspaces/status/refresh";
+function isVaultStatusRefreshRequest(req: IncomingMessage, url: URL): boolean {
+  return req.method === "POST" && url.pathname === "/vaults/status/refresh";
 }
 
 function authenticateExecutorRequest(req: IncomingMessage): boolean {
@@ -122,7 +122,7 @@ export function createExecutorServer(
       }
       const url = new URL(req.url, `http://${host}:${port}`);
       const requestId = readHeader(req, "x-polaris-request-id") ?? "";
-      if (isWorkspaceStatusRefreshRequest(req, url)) {
+      if (isVaultStatusRefreshRequest(req, url)) {
         logInfo("executor-server", "request-received", {
           requestId,
           pathname: url.pathname,
@@ -135,11 +135,11 @@ export function createExecutorServer(
         });
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/provision") {
+      if (req.method === "POST" && url.pathname === "/vaults/provision") {
         const body = await readBody(req);
-        const result = await queueProvisionWorkspace(
+        const result = await queueProvisionVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
           {
             defaultDockerOnly: body.defaultDockerOnly === true,
             startAfterCreate: body.startAfterCreate === true,
@@ -152,18 +152,18 @@ export function createExecutorServer(
 
       if (
         req.method === "POST" &&
-        url.pathname === "/workspaces/status/refresh"
+        url.pathname === "/vaults/status/refresh"
       ) {
         const body = await readBody(req);
         logInfo("executor-server", "request-body", {
           requestId,
           pathname: url.pathname,
           userId: typeof body.userId === "string" ? body.userId : null,
-          workspace: typeof body.workspace === "string" ? body.workspace : null,
+          vault: typeof body.vault === "string" ? body.vault : null,
         });
-        await refreshPortalWorkspaceStatus(
+        await refreshPortalVaultStatus(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         logInfo("executor-server", "request-completed", {
           requestId,
@@ -173,7 +173,7 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/switch") {
+      if (req.method === "POST" && url.pathname === "/vaults/switch") {
         const body = await readBody(req);
         const targetValue = body.target;
         const target =
@@ -195,16 +195,16 @@ export function createExecutorServer(
                 .filter(Boolean)
                 .join(":"),
             );
-        const result = await switchPortalWorkspace(
+        const result = await switchPortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
           target,
         );
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/driver") {
+      if (req.method === "POST" && url.pathname === "/vaults/driver") {
         const body = await readBody(req);
         const targetValue = body.target;
         const target =
@@ -226,60 +226,60 @@ export function createExecutorServer(
                 .filter(Boolean)
                 .join(":"),
             );
-        const result = await updatePortalWorkspaceSelectedDriver({
+        const result = await updatePortalVaultSelectedDriver({
           userId: readRequiredString(body, "userId"),
-          workspace: readRequiredString(body, "workspace"),
+          vault: readRequiredString(body, "vault"),
           target,
         });
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "DELETE" && url.pathname === "/workspaces") {
+      if (req.method === "DELETE" && url.pathname === "/vaults") {
         const body = await readBody(req);
-        const result = await deletePortalWorkspace(
+        const result = await deletePortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "DELETE" && url.pathname === "/workspaces/hard-delete") {
+      if (req.method === "DELETE" && url.pathname === "/vaults/hard-delete") {
         const body = await readBody(req);
-        const result = await permanentlyDeletePortalWorkspace(
+        const result = await permanentlyDeletePortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/stop") {
+      if (req.method === "POST" && url.pathname === "/vaults/stop") {
         const body = await readBody(req);
-        const result = await stopPortalWorkspace(
+        const result = await stopPortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/start") {
+      if (req.method === "POST" && url.pathname === "/vaults/start") {
         const body = await readBody(req);
-        const result = await startPortalWorkspace(
+        const result = await startPortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         sendJson(res, 200, result);
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/rebuild") {
+      if (req.method === "POST" && url.pathname === "/vaults/rebuild") {
         const body = await readBody(req);
-        const result = await rebuildPortalWorkspace(
+        const result = await rebuildPortalVault(
           readRequiredString(body, "userId"),
-          readRequiredString(body, "workspace"),
+          readRequiredString(body, "vault"),
         );
         sendJson(res, 200, result);
         return;
@@ -287,12 +287,12 @@ export function createExecutorServer(
 
       if (
         req.method === "POST" &&
-        url.pathname === "/workspaces/credentials/live/switch"
+        url.pathname === "/vaults/credentials/live/switch"
       ) {
         const body = await readBody(req);
-        const result = await switchPortalWorkspaceLiveCredential({
+        const result = await switchPortalVaultLiveCredential({
           userId: readRequiredString(body, "userId"),
-          workspace: readRequiredString(body, "workspace"),
+          vault: readRequiredString(body, "vault"),
           harness: readRequiredString(body, "harness") as ManagedHarness,
           credentialId: readRequiredString(body, "credentialId"),
         });
@@ -300,14 +300,14 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/skills/list") {
+      if (req.method === "POST" && url.pathname === "/vaults/skills/list") {
         const body = await readBody(req);
         const harness = readRequiredString(body, "harness");
         if (!isSkillHarness(harness)) {
           throw new Error(`Unsupported skill harness '${harness}'`);
         }
-        const result = await listWorkspaceSkills({
-          workspaceRef: readRequiredString(body, "workspace"),
+        const result = await listVaultSkills({
+          vaultRef: readRequiredString(body, "vault"),
           userProfileId: readRequiredString(body, "userId"),
           harness: harness as SkillHarness,
         });
@@ -315,30 +315,14 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/skills/install") {
+      if (req.method === "POST" && url.pathname === "/vaults/skills/install") {
         const body = await readBody(req);
         const harness = readRequiredString(body, "harness");
         if (!isSkillHarness(harness)) {
           throw new Error(`Unsupported skill harness '${harness}'`);
         }
-        const result = await skillInstallWorkspace({
-          workspaceRef: readRequiredString(body, "workspace"),
-          userProfileId: readRequiredString(body, "userId"),
-          harness: harness as SkillHarness,
-          skillId: readRequiredString(body, "skillId"),
-        });
-        sendJson(res, 200, result);
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/workspaces/skills/uninstall") {
-        const body = await readBody(req);
-        const harness = readRequiredString(body, "harness");
-        if (!isSkillHarness(harness)) {
-          throw new Error(`Unsupported skill harness '${harness}'`);
-        }
-        const result = await skillUninstallWorkspace({
-          workspaceRef: readRequiredString(body, "workspace"),
+        const result = await skillInstallVault({
+          vaultRef: readRequiredString(body, "vault"),
           userProfileId: readRequiredString(body, "userId"),
           harness: harness as SkillHarness,
           skillId: readRequiredString(body, "skillId"),
@@ -347,14 +331,30 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/skills/sync") {
+      if (req.method === "POST" && url.pathname === "/vaults/skills/uninstall") {
         const body = await readBody(req);
         const harness = readRequiredString(body, "harness");
         if (!isSkillHarness(harness)) {
           throw new Error(`Unsupported skill harness '${harness}'`);
         }
-        const result = await skillSyncWorkspace({
-          workspaceRef: readRequiredString(body, "workspace"),
+        const result = await skillUninstallVault({
+          vaultRef: readRequiredString(body, "vault"),
+          userProfileId: readRequiredString(body, "userId"),
+          harness: harness as SkillHarness,
+          skillId: readRequiredString(body, "skillId"),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/vaults/skills/sync") {
+        const body = await readBody(req);
+        const harness = readRequiredString(body, "harness");
+        if (!isSkillHarness(harness)) {
+          throw new Error(`Unsupported skill harness '${harness}'`);
+        }
+        const result = await skillSyncVault({
+          vaultRef: readRequiredString(body, "vault"),
           userProfileId: readRequiredString(body, "userId"),
           harness: harness as SkillHarness,
         });
@@ -362,11 +362,11 @@ export function createExecutorServer(
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/workspaces/paseo/status") {
+      if (req.method === "POST" && url.pathname === "/vaults/paseo/status") {
         const body = await readBody(req);
-        const result = await getPortalWorkspacePaseoDiagnostic({
+        const result = await getPortalVaultPaseoDiagnostic({
           userId: readRequiredString(body, "userId"),
-          workspace: readRequiredString(body, "workspace"),
+          vault: readRequiredString(body, "vault"),
         });
         sendJson(res, 200, result);
         return;
@@ -374,12 +374,12 @@ export function createExecutorServer(
 
       if (
         req.method === "POST" &&
-        url.pathname === "/workspaces/paseo/restart"
+        url.pathname === "/vaults/paseo/restart"
       ) {
         const body = await readBody(req);
-        const result = await restartPortalWorkspacePaseoDaemon({
+        const result = await restartPortalVaultPaseoDaemon({
           userId: readRequiredString(body, "userId"),
-          workspace: readRequiredString(body, "workspace"),
+          vault: readRequiredString(body, "vault"),
         });
         sendJson(res, 200, result);
         return;

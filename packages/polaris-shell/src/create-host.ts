@@ -1,8 +1,8 @@
 import { paseoSurfacePath } from "@qingniao/surface-paseo";
 import { codingEmbedPath, wanghaiEmbedPath } from "./routes.js";
-import type { PolarisWorkspaceLine } from "./product.js";
+import type { PolarisVaultLine } from "./product.js";
 
-export const DEFAULT_POLARIS_PROJECT_PATH = "/root/workspace";
+export const DEFAULT_POLARIS_VAULT_PATH = "/root/vault";
 
 export const HOST_NAME_VALIDATION_MESSAGE =
   "名称需为 1–63 位小写字母、数字或连字符，并且包含字母";
@@ -30,7 +30,7 @@ export function validatePolarisHostName(value: string): {
 
 export function buildCreatedHostSurfaceHref(
   serverId: string,
-  line: PolarisWorkspaceLine,
+  line: PolarisVaultLine,
 ): string {
   const id = serverId.trim();
   if (!id) {

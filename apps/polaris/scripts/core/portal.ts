@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import {
-  loadWorkspaceFromConfigPath,
+  loadVaultFromConfigPath,
   readUserProfileAuthFiles,
 } from "../config/load.js";
 import {
@@ -17,12 +17,12 @@ import {
   normalizePairingUrl,
 } from "./pairing-url.js";
 import {
-  normalizeWorkspaceStatus,
-  workspaceStateDir,
-  workspaceStatusPath,
+  normalizeVaultStatus,
+  vaultStateDir,
+  vaultStatusPath,
 } from "../output/state-store.js";
-import type { Credential, ServicePort, WorkspaceStatus } from "./workspace.js";
-import type { AuthFile } from "./workspace.js";
+import type { Credential, ServicePort, VaultStatus } from "./vault.js";
+import type { AuthFile } from "./vault.js";
 import { WANGHAI_PROFILE_ENV_FILE_KEY } from "../config/scaffold.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
@@ -42,7 +42,7 @@ export interface PortalProfileSummary {
   id: string;
   name: string;
   email: string;
-  workspaces: string[];
+  vaults: string[];
 }
 
 export interface PortalProfileDetail extends PortalProfileSummary {
@@ -105,43 +105,43 @@ export interface PortalSkillSummary {
   createdAt?: string;
 }
 
-export interface PortalWorkspaceAssetPreview {
+export interface PortalVaultAssetPreview {
   path: string;
   content: string;
   truncated: boolean;
 }
 
-export interface PortalWorkspaceStaticSummary {
+export interface PortalVaultStaticSummary {
   name: string;
   availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
 }
 
-export interface PortalWorkspaceLiveStatus {
-  schemaVersion?: WorkspaceStatus["schemaVersion"];
-  driver?: WorkspaceStatus["driver"];
-  paseo: WorkspaceStatus["paseo"];
-  credentials?: Pick<NonNullable<WorkspaceStatus["credentials"]>, "live">;
-  evolution?: WorkspaceStatus["evolution"];
+export interface PortalVaultLiveStatus {
+  schemaVersion?: VaultStatus["schemaVersion"];
+  driver?: VaultStatus["driver"];
+  paseo: VaultStatus["paseo"];
+  credentials?: Pick<NonNullable<VaultStatus["credentials"]>, "live">;
+  evolution?: VaultStatus["evolution"];
 }
 
-export interface PortalWorkspaceLiveSummary {
+export interface PortalVaultLiveSummary {
   name: string;
-  status: PortalWorkspaceLiveStatus | null;
+  status: PortalVaultLiveStatus | null;
 }
 
-export interface PortalWorkspaceSummary {
+export interface PortalVaultSummary {
   name: string;
-  /** Surface capabilities read from the workspace's selected runtime spec. */
+  /** Surface capabilities read from the vault's selected runtime spec. */
   surfaces: string[];
   /** Published ports needed by outer shell surfaces. */
   ports: ServicePort[];
   /** Available once the in-container Paseo daemon finishes pairing. */
   serverId: string | null;
   drivers: PortalDriverTarget[];
-  status: WorkspaceStatus | null;
+  status: VaultStatus | null;
 }
 
-export interface PortalWorkspaceDetailStatic {
+export interface PortalVaultDetailStatic {
   name: string;
   availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
   credentialBindings: Array<{
@@ -149,13 +149,13 @@ export interface PortalWorkspaceDetailStatic {
     credentialId: string;
     required: boolean;
   }>;
-  assets?: WorkspaceStatus["assets"];
-  attachments?: WorkspaceStatus["attachments"];
-  workspaceAssembly?: WorkspaceStatus["workspaceAssembly"];
+  assets?: VaultStatus["assets"];
+  attachments?: VaultStatus["attachments"];
+  vaultAssembly?: VaultStatus["vaultAssembly"];
 }
 
-export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
-  resolvedWorkspace: WorkspaceStatus | null;
+export interface PortalVaultDetail extends PortalVaultSummary {
+  resolvedVault: VaultStatus | null;
   availableDrivers: Array<PortalDriverTarget & { available: boolean }>;
   credentialBindings: Array<{
     purpose: string;
@@ -164,7 +164,7 @@ export interface PortalWorkspaceDetail extends PortalWorkspaceSummary {
   }>;
 }
 
-export interface PortalWorkspaceAgentBindingResult {
+export interface PortalVaultAgentBindingResult {
   enabled: boolean;
   driver: string;
   restarted: boolean;
@@ -175,7 +175,7 @@ export interface PortalWorkspaceAgentBindingResult {
   }>;
 }
 
-export interface PortalWorkspacePaseoDiagnostic {
+export interface PortalVaultPaseoDiagnostic {
   daemonStatusRaw: string;
   daemonStatus: {
     serverId: string;
@@ -184,27 +184,27 @@ export interface PortalWorkspacePaseoDiagnostic {
   } | null;
 }
 
-export type PortalWorkspaceStreamEvent =
+export type PortalVaultStreamEvent =
   | {
     type: "snapshot";
-    staticWorkspaces: PortalWorkspaceStaticSummary[];
-    liveWorkspaces: PortalWorkspaceLiveSummary[];
+    staticVaults: PortalVaultStaticSummary[];
+    liveVaults: PortalVaultLiveSummary[];
   }
   | {
     type: "static-upsert";
-    workspace: PortalWorkspaceStaticSummary;
+    vault: PortalVaultStaticSummary;
   }
   | {
     type: "static-remove";
-    workspace: string;
+    vault: string;
   }
   | {
     type: "live-upsert";
-    workspace: PortalWorkspaceLiveSummary;
+    vault: PortalVaultLiveSummary;
   }
   | {
     type: "live-remove";
-    workspace: string;
+    vault: string;
   }
   | {
     type: "heartbeat";
@@ -218,24 +218,24 @@ export const PORTAL_DRIVER_TARGETS: PortalDriverTarget[] = [
   { backend: "kubevirt-vm" },
 ];
 
-function userWorkspacesRoot(userId: string): string {
-  return path.join(USER_ROOT, userId, "workspaces");
+function userVaultsRoot(userId: string): string {
+  return path.join(USER_ROOT, userId, "vaults");
 }
 
-function workspaceRoot(userId: string, workspace: string): string {
-  return path.join(userWorkspacesRoot(userId), workspace);
+function vaultRoot(userId: string, vault: string): string {
+  return path.join(userVaultsRoot(userId), vault);
 }
 
-function workspacePaseoStateRoot(userId: string, workspace: string): string {
-  return path.join(workspaceStateDir(workspace, userId), "paseo");
+function vaultPaseoStateRoot(userId: string, vault: string): string {
+  return path.join(vaultStateDir(vault, userId), "paseo");
 }
 
-function workspaceProvisionProgressPath(userId: string, workspace: string): string {
-  return path.join(workspaceRoot(userId, workspace), "state", "provision.json");
+function vaultProvisionProgressPath(userId: string, vault: string): string {
+  return path.join(vaultRoot(userId, vault), "state", "provision.json");
 }
 
-function readPersistedPaseoServerId(userId: string, workspace: string): string | null {
-  const filePath = path.join(workspacePaseoStateRoot(userId, workspace), "server-id");
+function readPersistedPaseoServerId(userId: string, vault: string): string | null {
+  const filePath = path.join(vaultPaseoStateRoot(userId, vault), "server-id");
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
@@ -243,15 +243,15 @@ function readPersistedPaseoServerId(userId: string, workspace: string): string |
   return value || null;
 }
 
-function readPersistedPaseoPairingUrl(userId: string, workspace: string): string | null {
-  const filePath = path.join(workspacePaseoStateRoot(userId, workspace), "pairing.json");
+function readPersistedPaseoPairingUrl(userId: string, vault: string): string | null {
+  const filePath = path.join(vaultPaseoStateRoot(userId, vault), "pairing.json");
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { url?: unknown };
     const raw = typeof parsed.url === "string" ? parsed.url.trim() : "";
-    return normalizePairingUrl(raw, process.env, workspacePaseoScope(userId, workspace)) ?? null;
+    return normalizePairingUrl(raw, process.env, vaultPaseoScope(userId, vault)) ?? null;
   } catch {
     return null;
   }
@@ -261,7 +261,7 @@ function credentialRegistryPath(userId: string, credentialId: string): string {
   return path.join(USER_ROOT, userId, "credentials", `${credentialId}.yaml`);
 }
 
-function workspaceBackendFile(target: PortalDriverTarget): string {
+function vaultBackendFile(target: PortalDriverTarget): string {
   if (target.backend === "pod") {
     return "pod.agent.yaml";
   }
@@ -271,26 +271,26 @@ function workspaceBackendFile(target: PortalDriverTarget): string {
   return "docker.agent.yaml";
 }
 
-function workspaceConfigFilePath(
+function vaultConfigFilePath(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ): string {
-  return path.join(workspaceRoot(userId, workspace), workspaceBackendFile(target));
+  return path.join(vaultRoot(userId, vault), vaultBackendFile(target));
 }
 
-export function loadPortalWorkspaceByTarget(
+export function loadPortalVaultByTarget(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ) {
-  const configPath = workspaceConfigFilePath(userId, workspace, target);
+  const configPath = vaultConfigFilePath(userId, vault, target);
   if (!fs.existsSync(configPath)) {
-    throw new Error(`Workspace config '${path.relative(REPO_ROOT, configPath)}' was not found`);
+    throw new Error(`Vault config '${path.relative(REPO_ROOT, configPath)}' was not found`);
   }
-  return loadWorkspaceFromConfigPath(
+  return loadVaultFromConfigPath(
     configPath,
-    workspace,
+    vault,
     target.backend,
     target.profile,
   );
@@ -312,26 +312,26 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-export function readWorkspaceProvisionProgress(
+export function readVaultProvisionProgress(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Record<string, unknown> | null {
-  return readJson<Record<string, unknown>>(workspaceProvisionProgressPath(userId, workspace));
+  return readJson<Record<string, unknown>>(vaultProvisionProgressPath(userId, vault));
 }
 
-export function writeWorkspaceProvisionProgress(
+export function writeVaultProvisionProgress(
   userId: string,
-  workspace: string,
+  vault: string,
   value: Record<string, unknown>,
 ): void {
-  writeJson(workspaceProvisionProgressPath(userId, workspace), value);
+  writeJson(vaultProvisionProgressPath(userId, vault), value);
 }
 
-export function clearWorkspaceProvisionProgress(
+export function clearVaultProvisionProgress(
   userId: string,
-  workspace: string,
+  vault: string,
 ): void {
-  fs.rmSync(workspaceProvisionProgressPath(userId, workspace), { force: true });
+  fs.rmSync(vaultProvisionProgressPath(userId, vault), { force: true });
 }
 
 function readYAML(filePath: string): Record<string, unknown> | null {
@@ -379,10 +379,10 @@ export function formatDriverTarget(target: PortalDriverTarget): string {
     : target.backend;
 }
 
-export function workspaceRefFromTarget(workspace: string, target: PortalDriverTarget): string {
+export function vaultRefFromTarget(vault: string, target: PortalDriverTarget): string {
   return target.backend === "pod" && target.profile
-    ? `${workspace}@pod:${target.profile}`
-    : `${workspace}@${target.backend}`;
+    ? `${vault}@pod:${target.profile}`
+    : `${vault}@${target.backend}`;
 }
 
 export function listPortalProfiles(): PortalProfileSummary[] {
@@ -399,7 +399,7 @@ export function listPortalProfiles(): PortalProfileSummary[] {
         id,
         name: String(data.name ?? ""),
         email: String(data.email ?? ""),
-        workspaces: listOwnedWorkspaces(id),
+        vaults: listOwnedVaults(id),
       };
     })
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -414,7 +414,7 @@ export function readPortalProfile(userId: string): PortalProfileDetail | null {
     id: userId,
     name: String(data.name ?? ""),
     email: String(data.email ?? ""),
-    workspaces: listOwnedWorkspaces(userId),
+    vaults: listOwnedVaults(userId),
     githubAccount: typeof data.github === "object" && data.github
       ? String((data.github as Record<string, unknown>).account ?? "") || undefined
       : undefined,
@@ -500,8 +500,8 @@ export function resolvePolarisUserIdFromIdentity(params: {
   return null;
 }
 
-export function listOwnedWorkspaces(userId: string): string[] {
-  const root = userWorkspacesRoot(userId);
+export function listOwnedVaults(userId: string): string[] {
+  const root = userVaultsRoot(userId);
   if (!fs.existsSync(root)) {
     return [];
   }
@@ -510,29 +510,29 @@ export function listOwnedWorkspaces(userId: string): string[] {
     .filter((entry) => entry.isDirectory())
     .filter((entry) =>
       PORTAL_DRIVER_TARGETS.some((target) =>
-        fs.existsSync(path.join(root, entry.name, workspaceBackendFile(target))),
+        fs.existsSync(path.join(root, entry.name, vaultBackendFile(target))),
       ),
     )
     .map((entry) => entry.name)
     .sort((left, right) => left.localeCompare(right));
 }
 
-export function listWorkspaceDriverTargets(userId: string, workspace: string): Array<PortalDriverTarget & { available: boolean }> {
-  const root = workspaceRoot(userId, workspace);
+export function listVaultDriverTargets(userId: string, vault: string): Array<PortalDriverTarget & { available: boolean }> {
+  const root = vaultRoot(userId, vault);
   return PORTAL_DRIVER_TARGETS.map((target) => ({
     ...target,
-    available: fs.existsSync(path.join(root, workspaceBackendFile(target))),
+    available: fs.existsSync(path.join(root, vaultBackendFile(target))),
   }));
 }
 
-export function readWorkspaceStatus(userId: string, workspace: string): WorkspaceStatus | null {
-  const status = readJson<WorkspaceStatus>(workspaceStatusPath(workspace, userId));
-  return status ? normalizeWorkspaceStatus(status) : null;
+export function readVaultStatus(userId: string, vault: string): VaultStatus | null {
+  const status = readJson<VaultStatus>(vaultStatusPath(vault, userId));
+  return status ? normalizeVaultStatus(status) : null;
 }
 
-export function projectPortalWorkspaceLiveStatus(
-  status: WorkspaceStatus | null,
-): PortalWorkspaceLiveStatus | null {
+export function projectPortalVaultLiveStatus(
+  status: VaultStatus | null,
+): PortalVaultLiveStatus | null {
   if (!status) {
     return null;
   }
@@ -551,35 +551,35 @@ export function projectPortalWorkspaceLiveStatus(
   };
 }
 
-export function readPortalWorkspaceLiveSummary(
+export function readPortalVaultLiveSummary(
   userId: string,
-  workspace: string,
-): PortalWorkspaceLiveSummary {
+  vault: string,
+): PortalVaultLiveSummary {
   return {
-    name: workspace,
-    status: projectPortalWorkspaceLiveStatus(readWorkspaceStatus(userId, workspace)),
+    name: vault,
+    status: projectPortalVaultLiveStatus(readVaultStatus(userId, vault)),
   };
 }
 
-export function listPortalWorkspaceStaticSummaries(
+export function listPortalVaultStaticSummaries(
   userId: string,
-): PortalWorkspaceStaticSummary[] {
-  return listOwnedWorkspaces(userId).map((workspace) => ({
-    name: workspace,
-    availableDrivers: listWorkspaceDriverTargets(userId, workspace),
+): PortalVaultStaticSummary[] {
+  return listOwnedVaults(userId).map((vault) => ({
+    name: vault,
+    availableDrivers: listVaultDriverTargets(userId, vault),
   }));
 }
 
-export function listPortalWorkspaceLiveSummaries(
+export function listPortalVaultLiveSummaries(
   userId: string,
-): PortalWorkspaceLiveSummary[] {
-  return listOwnedWorkspaces(userId).map((workspace) =>
-    readPortalWorkspaceLiveSummary(userId, workspace)
+): PortalVaultLiveSummary[] {
+  return listOwnedVaults(userId).map((vault) =>
+    readPortalVaultLiveSummary(userId, vault)
   );
 }
 
-function workspacePaseoScope(userId: string, workspace: string): string {
-  return `${userId.trim()}:${workspace.trim()}`;
+function vaultPaseoScope(userId: string, vault: string): string {
+  return `${userId.trim()}:${vault.trim()}`;
 }
 
 function inferPortalCredentialHarness(
@@ -764,9 +764,9 @@ function credentialMaterialStatus(userId: string, paths: string[], declaredStatu
   return declaredStatus;
 }
 
-function normalizeWorkspaceAssets(
-  assets: NonNullable<WorkspaceStatus["assets"]> | undefined,
-): NonNullable<WorkspaceStatus["assets"]> | undefined {
+function normalizeVaultAssets(
+  assets: NonNullable<VaultStatus["assets"]> | undefined,
+): NonNullable<VaultStatus["assets"]> | undefined {
   if (!assets) {
     return assets;
   }
@@ -787,16 +787,16 @@ function normalizeWorkspaceAssets(
   };
 }
 
-function augmentWorkspaceStatusAssets(
+function augmentVaultStatusAssets(
   userId: string,
-  workspace: string,
-  status: WorkspaceStatus | null,
-): WorkspaceStatus | null {
+  vault: string,
+  status: VaultStatus | null,
+): VaultStatus | null {
   if (!status) {
     return null;
   }
   const assets = status.assets as
-    | (NonNullable<WorkspaceStatus["assets"]> & { evolutionFiles?: Array<unknown> })
+    | (NonNullable<VaultStatus["assets"]> & { evolutionFiles?: Array<unknown> })
     | undefined;
   let nextStatus = status;
   if (!assets || !Array.isArray(assets.evolutionFiles) || assets.evolutionFiles.length === 0) {
@@ -808,7 +808,7 @@ function augmentWorkspaceStatusAssets(
     ].filter(Boolean) as PortalDriverTarget[];
     for (const target of preferredTargets) {
       try {
-        const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+        const loaded = loadPortalVaultByTarget(userId, vault, target);
         const nextAssets = buildStatusAssets(loaded);
         nextStatus = {
           ...nextStatus,
@@ -826,32 +826,32 @@ function augmentWorkspaceStatusAssets(
   if (nextStatus.assets) {
     return {
       ...nextStatus,
-      assets: normalizeWorkspaceAssets(nextStatus.assets),
+      assets: normalizeVaultAssets(nextStatus.assets),
     };
   }
   return nextStatus;
 }
 
-export function readPortalWorkspaceAssetPreview(
+export function readPortalVaultAssetPreview(
   userId: string,
-  workspace: string,
+  vault: string,
   assetPath: string,
-): PortalWorkspaceAssetPreview {
+): PortalVaultAssetPreview {
   const trimmed = assetPath.trim();
   if (!trimmed) {
-    throw new Error("workspace asset path is required");
+    throw new Error("vault asset path is required");
   }
   const userRoot = path.resolve(path.join(USER_ROOT, userId));
-  const workspaceDir = path.resolve(workspaceRoot(userId, workspace));
-  if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
-    throw new Error(`workspace '${workspace}' not found for user '${userId}'`);
+  const vaultDir = path.resolve(vaultRoot(userId, vault));
+  if (!fs.existsSync(vaultDir) || !fs.statSync(vaultDir).isDirectory()) {
+    throw new Error(`vault '${vault}' not found for user '${userId}'`);
   }
   const absolute = path.resolve(REPO_ROOT, trimmed);
   if (absolute !== userRoot && !absolute.startsWith(`${userRoot}${path.sep}`)) {
-    throw new Error("workspace asset path must stay within the user root");
+    throw new Error("vault asset path must stay within the user root");
   }
   if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
-    throw new Error("workspace asset not found");
+    throw new Error("vault asset not found");
   }
   const raw = fs.readFileSync(absolute);
   if (raw.includes(0)) {
@@ -872,27 +872,27 @@ export function readPortalWorkspaceAssetPreview(
   };
 }
 
-export function loadWorkspaceSummary(userId: string, workspace: string): PortalWorkspaceSummary {
-  const status = augmentWorkspaceStatusAssets(
+export function loadVaultSummary(userId: string, vault: string): PortalVaultSummary {
+  const status = augmentVaultStatusAssets(
     userId,
-    workspace,
-    readWorkspaceStatus(userId, workspace),
+    vault,
+    readVaultStatus(userId, vault),
   );
-  const runtime = loadPortalWorkspaceRuntimeSurface(userId, workspace, status);
+  const runtime = loadPortalVaultRuntimeSurface(userId, vault, status);
   return {
-    name: workspace,
+    name: vault,
     surfaces: runtime.surfaces,
     ports: runtime.ports,
-    serverId: readPersistedPaseoServerId(userId, workspace),
+    serverId: readPersistedPaseoServerId(userId, vault),
     drivers: PORTAL_DRIVER_TARGETS,
     status,
   };
 }
 
-function loadPortalWorkspaceRuntimeSurface(
+function loadPortalVaultRuntimeSurface(
   userId: string,
-  workspace: string,
-  status: WorkspaceStatus | null,
+  vault: string,
+  status: VaultStatus | null,
 ): {
   surfaces: string[];
   ports: ServicePort[];
@@ -905,7 +905,7 @@ function loadPortalWorkspaceRuntimeSurface(
   ].filter(Boolean) as PortalDriverTarget[];
   for (const target of targets) {
     try {
-      const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+      const loaded = loadPortalVaultByTarget(userId, vault, target);
       const ports = loaded.connectivity.servicePorts;
       return {
         surfaces: ports.some((port) =>
@@ -925,17 +925,17 @@ function loadPortalWorkspaceRuntimeSurface(
   };
 }
 
-export function loadWorkspaceDetailStatic(
+export function loadVaultDetailStatic(
   userId: string,
-  workspace: string,
-): PortalWorkspaceDetailStatic {
-  const liveSummary = readPortalWorkspaceLiveSummary(userId, workspace);
-  const statusWithAssets = augmentWorkspaceStatusAssets(
+  vault: string,
+): PortalVaultDetailStatic {
+  const liveSummary = readPortalVaultLiveSummary(userId, vault);
+  const statusWithAssets = augmentVaultStatusAssets(
     userId,
-    workspace,
-    readWorkspaceStatus(userId, workspace),
+    vault,
+    readVaultStatus(userId, vault),
   );
-  let bindings: PortalWorkspaceDetailStatic["credentialBindings"] = [];
+  let bindings: PortalVaultDetailStatic["credentialBindings"] = [];
   const preferredTargets = [
     liveSummary.status?.driver?.selected ?? null,
     { backend: "docker" as const },
@@ -944,7 +944,7 @@ export function loadWorkspaceDetailStatic(
   ].filter(Boolean) as PortalDriverTarget[];
   for (const target of preferredTargets) {
     try {
-      const loaded = loadPortalWorkspaceByTarget(userId, workspace, target);
+      const loaded = loadPortalVaultByTarget(userId, vault, target);
       bindings = loaded.resolvedCredentialBindings.map((binding) => ({
         purpose: binding.purpose,
         credentialId: binding.credentialId,
@@ -956,31 +956,31 @@ export function loadWorkspaceDetailStatic(
     }
   }
   return {
-    name: workspace,
-    availableDrivers: listWorkspaceDriverTargets(userId, workspace),
+    name: vault,
+    availableDrivers: listVaultDriverTargets(userId, vault),
     credentialBindings: bindings,
     ...(statusWithAssets?.assets ? { assets: statusWithAssets.assets } : {}),
     ...(statusWithAssets?.attachments ? { attachments: statusWithAssets.attachments } : {}),
-    ...(statusWithAssets?.workspaceAssembly
-      ? { workspaceAssembly: statusWithAssets.workspaceAssembly }
+    ...(statusWithAssets?.vaultAssembly
+      ? { vaultAssembly: statusWithAssets.vaultAssembly }
       : {}),
   };
 }
 
-export function loadWorkspaceDetail(userId: string, workspace: string): PortalWorkspaceDetail {
-  const summary = loadWorkspaceSummary(userId, workspace);
-  const staticDetail = loadWorkspaceDetailStatic(userId, workspace);
+export function loadVaultDetail(userId: string, vault: string): PortalVaultDetail {
+  const summary = loadVaultSummary(userId, vault);
+  const staticDetail = loadVaultDetailStatic(userId, vault);
   return {
     ...summary,
-    resolvedWorkspace: summary.status,
+    resolvedVault: summary.status,
     availableDrivers: staticDetail.availableDrivers,
     credentialBindings: staticDetail.credentialBindings,
   };
 }
 
-export function updatePortalWorkspaceAgentBinding(input: {
+export function updatePortalVaultAgentBinding(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   target: PortalDriverTarget;
   credentialId?: string;
   enabled: boolean;
@@ -992,10 +992,10 @@ export function updatePortalWorkspaceAgentBinding(input: {
     required: boolean;
   }>;
 } {
-  const configPath = workspaceConfigFilePath(input.userId, input.workspace, input.target);
+  const configPath = vaultConfigFilePath(input.userId, input.vault, input.target);
   const current = readYAML(configPath);
   if (!current) {
-    throw new Error(`Workspace config '${path.relative(REPO_ROOT, configPath)}' was not found`);
+    throw new Error(`Vault config '${path.relative(REPO_ROOT, configPath)}' was not found`);
   }
 
   const rawCredentials = typeof current.credentials === "object" && current.credentials

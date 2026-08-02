@@ -12,7 +12,7 @@ export type PolarisSurfaceId = "paseo" | "wanghai";
 /** Subscription product line (coding agent vs vertical industry). */
 export type PolarisSubscriptionLine = "coding" | "vertical" | "both";
 
-export type PolarisWorkspaceLine = "coding" | "vertical";
+export type PolarisVaultLine = "coding" | "vertical";
 
 /**
  * Feature richness within a line. Currently unused for gating but must remain
@@ -24,14 +24,14 @@ export type PolarisProductId = "polaris-coding" | "polaris-vertical";
 
 export interface PolarisProductDefinition {
   id: PolarisProductId;
-  line: PolarisWorkspaceLine;
+  line: PolarisVaultLine;
   /** Outer UI surfaces the shell should offer this user. */
   surfaces: readonly PolarisSurfaceId[];
   /**
-   * Default in-container runtime when this user creates a matching workspace.
+   * Default in-container runtime when this user creates a matching vault.
    * paseo-web stays outside; wanghai server stays inside the container.
    */
-  workspaceRuntime: {
+  vaultRuntime: {
     paseoDaemon: boolean;
     wanghaiPortal: boolean;
   };
@@ -42,7 +42,7 @@ export const POLARIS_PRODUCTS: Record<PolarisProductId, PolarisProductDefinition
     id: "polaris-coding",
     line: "coding",
     surfaces: ["paseo"],
-    workspaceRuntime: {
+    vaultRuntime: {
       paseoDaemon: true,
       wanghaiPortal: false,
     },
@@ -51,7 +51,7 @@ export const POLARIS_PRODUCTS: Record<PolarisProductId, PolarisProductDefinition
     id: "polaris-vertical",
     line: "vertical",
     surfaces: ["paseo", "wanghai"],
-    workspaceRuntime: {
+    vaultRuntime: {
       paseoDaemon: true,
       wanghaiPortal: true,
     },
@@ -69,7 +69,7 @@ export interface ResolveProductForUserInput {
    */
   productId?: string | null;
   /**
-   * Surfaces already present on a workspace (e.g. created with wanghai image).
+   * Surfaces already present on a vault (e.g. created with wanghai image).
    * Does not change the user's subscription line permanently.
    */
   surfaces?: readonly string[] | null;
@@ -104,7 +104,7 @@ export function resolveProductForUser(
     return POLARIS_PRODUCTS["polaris-coding"];
   }
 
-  // Workspace-level surfaces are a fallback when line is not on the session yet.
+  // Vault-level surfaces are a fallback when line is not on the session yet.
   const surfaces = (input.surfaces ?? [])
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
@@ -161,9 +161,9 @@ export function normalizePlanTier(value: string | null | undefined): PolarisPlan
   return value?.trim().toLowerCase() === "pro" ? "pro" : "free";
 }
 
-export function normalizeWorkspaceLine(
+export function normalizeVaultLine(
   value: string | null | undefined,
-): PolarisWorkspaceLine | null {
+): PolarisVaultLine | null {
   const normalized = normalizeSubscriptionLine(value);
   if (normalized === "coding" || normalized === "vertical") {
     return normalized;
@@ -171,9 +171,9 @@ export function normalizeWorkspaceLine(
   return null;
 }
 
-export function resolveAllowedWorkspaceLines(
+export function resolveAllowedVaultLines(
   line: string | null | undefined,
-): PolarisWorkspaceLine[] {
+): PolarisVaultLine[] {
   const normalized = normalizeSubscriptionLine(line);
   if (normalized === "both") {
     return ["coding", "vertical"];
@@ -187,13 +187,13 @@ export function resolveAllowedWorkspaceLines(
   return ["coding"];
 }
 
-export function resolveDefaultWorkspaceLine(
+export function resolveDefaultVaultLine(
   line: string | null | undefined,
-): PolarisWorkspaceLine {
-  return resolveAllowedWorkspaceLines(line)[0] ?? "coding";
+): PolarisVaultLine {
+  return resolveAllowedVaultLines(line)[0] ?? "coding";
 }
 
-function productForLine(line: PolarisWorkspaceLine): PolarisProductDefinition {
+function productForLine(line: PolarisVaultLine): PolarisProductDefinition {
   return line === "vertical"
     ? POLARIS_PRODUCTS["polaris-vertical"]
     : POLARIS_PRODUCTS["polaris-coding"];

@@ -6,14 +6,14 @@ import path from "node:path";
 
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
-import { refreshPortalWorkspaceStatus } from "../scripts/executor/operations.js";
+import { refreshPortalVaultStatus } from "../scripts/executor/operations.js";
 import {
-  workspaceSelectionPath,
-  workspaceStatusPath,
-  writeWorkspaceDriverSelection,
-  writeWorkspaceStatus,
+  vaultSelectionPath,
+  vaultStatusPath,
+  writeVaultDriverSelection,
+  writeVaultStatus,
 } from "../scripts/output/state-store.js";
-import { workspaceRuntimeScopeName } from "../scripts/core/workspace-name.js";
+import { vaultRuntimeScopeName } from "../scripts/core/vault-name.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -47,9 +47,9 @@ ${body}
   }
 }
 
-test("status refresh converges stopped docker workspace when docker exec races after stop", async () => {
+test("status refresh converges stopped docker vault when docker exec races after stop", async () => {
   const userId = uniqueName("portal-stop-refresh-user");
-  const workspace = uniqueName("portal-stop-refresh-workspace");
+  const vault = uniqueName("portal-stop-refresh-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   try {
@@ -60,16 +60,16 @@ test("status refresh converges stopped docker workspace when docker exec races a
       "--email",
       `${userId}@polaris.local`,
     ]);
-    await createCommand([workspace, "--user", userId]);
-    writeWorkspaceDriverSelection(workspace, { backend: "docker" }, userId);
-    writeWorkspaceStatus(
+    await createCommand([vault, "--user", userId]);
+    writeVaultDriverSelection(vault, { backend: "docker" }, userId);
+    writeVaultStatus(
       {
-        project: workspace,
+        project: vault,
         driver: {
           backend: "docker",
           baseImage: "ttl.sh/example:24h",
           runtimeKind: "docker-container",
-          runtimeRef: `container/${workspaceRuntimeScopeName(userId, workspace)}-docker`,
+          runtimeRef: `container/${vaultRuntimeScopeName(userId, vault)}-docker`,
         },
         operation: {
           kind: "stop",
@@ -116,18 +116,18 @@ exit 0
         kubectl: "exit 0\n",
       },
       async () => {
-        await refreshPortalWorkspaceStatus(userId, workspace);
+        await refreshPortalVaultStatus(userId, vault);
       },
     );
 
     const status = JSON.parse(
-      fs.readFileSync(workspaceStatusPath(workspace, userId), "utf8"),
+      fs.readFileSync(vaultStatusPath(vault, userId), "utf8"),
     ) as {
       driver?: { status?: string; reason?: string };
     };
     assert.equal(status.driver?.status, "stopped");
   } finally {
-    fs.rmSync(workspaceSelectionPath(workspace, userId), { force: true });
+    fs.rmSync(vaultSelectionPath(vault, userId), { force: true });
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }

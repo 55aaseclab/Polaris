@@ -15,19 +15,19 @@ Options:
                                 Default: demo
   --vm-name <name>              KubeVirt VM name to snapshot.
                                 Default: demo-vm
-  --workspace-image <ref>       Workspace OCI image that should be the source lineage
+  --vault-image <ref>       Vault OCI image that should be the source lineage
                                 for the VM environment.
                                 Default: ttl.sh/polaris-demo-debian13-1782126452:24h
-  --build-workspace-image       Rebuild the workspace OCI image from the Dockerfile
+  --build-vault-image       Rebuild the vault OCI image from the Dockerfile
                                 before snapshotting the VM.
-  --dockerfile <path>           Dockerfile used for workspace-image rebuild.
+  --dockerfile <path>           Dockerfile used for vault-image rebuild.
                                 Default: user-profile Dockerfile when present,
-                                otherwise <POLARIS_DATA_ROOT>/users/100000000000000001/docker/workspace-prebuilt.Dockerfile
-  --context <path>              Docker build context for workspace-image rebuild.
+                                otherwise <POLARIS_DATA_ROOT>/users/100000000000000001/docker/vault-prebuilt.Dockerfile
+  --context <path>              Docker build context for vault-image rebuild.
                                 Default: repo root
-  --workspace-image-output <ref>
-                                Tag to assign when rebuilding the workspace OCI image.
-                                Default: value of --workspace-image
+  --vault-image-output <ref>
+                                Tag to assign when rebuilding the vault OCI image.
+                                Default: value of --vault-image
 
 Examples:
   ./scripts/operations/build-kubevirt-images.sh \
@@ -35,12 +35,12 @@ Examples:
 
   ./scripts/operations/build-kubevirt-images.sh \
     ttl.sh/polaris-demo-kubevirt-rootdisk-1234567890:24h \
-    --build-workspace-image \
-    --workspace-image-output ttl.sh/polaris-demo-debian13-1234567890:24h
+    --build-vault-image \
+    --vault-image-output ttl.sh/polaris-demo-debian13-1234567890:24h
 
 Behavior:
-  1. Optionally rebuild the workspace OCI image from the shared Dockerfile.
-  2. Verify the running VM is using the expected workspace-image lineage through
+  1. Optionally rebuild the vault OCI image from the shared Dockerfile.
+  2. Verify the running VM is using the expected vault-image lineage through
      the saved Polaris KubeVirt spec.
   3. Snapshot the running VM rootdisk qcow2, flatten its backing chain inside the
      launcher pod, and package the standalone qcow2 as a KubeVirt-compatible
@@ -48,7 +48,7 @@ Behavior:
 
 Notes:
   - This script still snapshots a running VM rootdisk, but it now treats the
-    Dockerfile-driven workspace image as the source of truth for the environment
+    Dockerfile-driven vault image as the source of truth for the environment
     lineage instead of an arbitrary live VM state.
   - The VM you snapshot should already have completed any one-time provisioning
     you want baked into the KubeVirt rootdisk.
@@ -58,8 +58,8 @@ EOF
 ROOTDISK_IMAGE_REF=""
 NAMESPACE="demo"
 VM_NAME="demo-vm"
-WORKSPACE_IMAGE_REF="ttl.sh/polaris-demo-debian13-1782126452:24h"
-BUILD_WORKSPACE_IMAGE=0
+VAULT_IMAGE_REF="ttl.sh/polaris-demo-debian13-1782126452:24h"
+BUILD_VAULT_IMAGE=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${POLARIS_ENV_FILE:-${REPO_ROOT}/.env.dev}"
 POLARIS_DATA_ROOT=""
@@ -68,7 +68,7 @@ KUBEVIRT_SPEC_PATH=""
 DEFAULT_DOCKERFILE_PATH=""
 DOCKERFILE_PATH=""
 BUILD_CONTEXT="${REPO_ROOT}"
-WORKSPACE_IMAGE_OUTPUT=""
+VAULT_IMAGE_OUTPUT=""
 
 read_env_value() {
   local file_path="$1"
@@ -112,7 +112,7 @@ resolve_polaris_data_root() {
   printf '%s\n' "${REPO_ROOT}/${configured}"
 }
 
-resolve_workspace_user_profile_id() {
+resolve_vault_user_profile_id() {
   sed -n "s/^user_profile: ['\"]\\{0,1\\}\\([^'\"]*\\)['\"]\\{0,1\\}$/\\1/p" \
     "${KUBEVIRT_SPEC_PATH}" | head -n 1
 }
@@ -121,9 +121,9 @@ resolve_default_dockerfile_path() {
   local user_profile_id
   local user_dockerfile
 
-  user_profile_id="$(resolve_workspace_user_profile_id)"
+  user_profile_id="$(resolve_vault_user_profile_id)"
   if [[ -n "${user_profile_id}" ]]; then
-    user_dockerfile="${POLARIS_USERS_ROOT}/${user_profile_id}/docker/workspace-prebuilt.Dockerfile"
+    user_dockerfile="${POLARIS_USERS_ROOT}/${user_profile_id}/docker/vault-prebuilt.Dockerfile"
     if [[ -f "${user_dockerfile}" ]]; then
       printf '%s\n' "${user_dockerfile}"
       return
@@ -140,8 +140,8 @@ fi
 
 POLARIS_DATA_ROOT="$(resolve_polaris_data_root)"
 POLARIS_USERS_ROOT="${POLARIS_DATA_ROOT}/users"
-KUBEVIRT_SPEC_PATH="${POLARIS_USERS_ROOT}/100000000000000001/workspaces/demo/kubevirt.agent.yaml"
-DEFAULT_DOCKERFILE_PATH="${POLARIS_USERS_ROOT}/100000000000000001/docker/workspace-prebuilt.Dockerfile"
+KUBEVIRT_SPEC_PATH="${POLARIS_USERS_ROOT}/100000000000000001/vaults/demo/kubevirt.agent.yaml"
+DEFAULT_DOCKERFILE_PATH="${POLARIS_USERS_ROOT}/100000000000000001/docker/vault-prebuilt.Dockerfile"
 
 ROOTDISK_IMAGE_REF="$1"
 shift
@@ -156,12 +156,12 @@ while [[ $# -gt 0 ]]; do
       VM_NAME="$2"
       shift 2
       ;;
-    --workspace-image)
-      WORKSPACE_IMAGE_REF="$2"
+    --vault-image)
+      VAULT_IMAGE_REF="$2"
       shift 2
       ;;
-    --build-workspace-image)
-      BUILD_WORKSPACE_IMAGE=1
+    --build-vault-image)
+      BUILD_VAULT_IMAGE=1
       shift
       ;;
     --dockerfile)
@@ -172,8 +172,8 @@ while [[ $# -gt 0 ]]; do
       BUILD_CONTEXT="$2"
       shift 2
       ;;
-    --workspace-image-output)
-      WORKSPACE_IMAGE_OUTPUT="$2"
+    --vault-image-output)
+      VAULT_IMAGE_OUTPUT="$2"
       shift 2
       ;;
     -h|--help)
@@ -188,8 +188,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${WORKSPACE_IMAGE_OUTPUT}" ]]; then
-  WORKSPACE_IMAGE_OUTPUT="${WORKSPACE_IMAGE_REF}"
+if [[ -z "${VAULT_IMAGE_OUTPUT}" ]]; then
+  VAULT_IMAGE_OUTPUT="${VAULT_IMAGE_REF}"
 fi
 
 if [[ -z "${DOCKERFILE_PATH}" ]]; then
@@ -208,19 +208,19 @@ need_cmd docker
 need_cmd qemu-img
 need_cmd 7z
 
-if [[ "${BUILD_WORKSPACE_IMAGE}" == "1" ]]; then
-  log "Rebuilding workspace OCI image ${WORKSPACE_IMAGE_OUTPUT} from ${DOCKERFILE_PATH}..."
-  docker build -f "${DOCKERFILE_PATH}" -t "${WORKSPACE_IMAGE_OUTPUT}" "${BUILD_CONTEXT}"
-  if [[ "${WORKSPACE_IMAGE_OUTPUT}" == *"/"* || "${WORKSPACE_IMAGE_OUTPUT}" == *":"* ]]; then
-    log "Pushing workspace OCI image ${WORKSPACE_IMAGE_OUTPUT}..."
-    docker push "${WORKSPACE_IMAGE_OUTPUT}"
+if [[ "${BUILD_VAULT_IMAGE}" == "1" ]]; then
+  log "Rebuilding vault OCI image ${VAULT_IMAGE_OUTPUT} from ${DOCKERFILE_PATH}..."
+  docker build -f "${DOCKERFILE_PATH}" -t "${VAULT_IMAGE_OUTPUT}" "${BUILD_CONTEXT}"
+  if [[ "${VAULT_IMAGE_OUTPUT}" == *"/"* || "${VAULT_IMAGE_OUTPUT}" == *":"* ]]; then
+    log "Pushing vault OCI image ${VAULT_IMAGE_OUTPUT}..."
+    docker push "${VAULT_IMAGE_OUTPUT}"
   fi
-  WORKSPACE_IMAGE_REF="${WORKSPACE_IMAGE_OUTPUT}"
+  VAULT_IMAGE_REF="${VAULT_IMAGE_OUTPUT}"
 fi
 
 SPEC_BASE_IMAGE="$(sed -n "s/^  base_image: //p" "${KUBEVIRT_SPEC_PATH}" | head -n 1 | tr -d '\r')"
-if [[ -n "${SPEC_BASE_IMAGE}" && "${SPEC_BASE_IMAGE}" != "${WORKSPACE_IMAGE_REF}" ]]; then
-  log "warning: kubevirt saved spec base_image is '${SPEC_BASE_IMAGE}', but requested workspace-image is '${WORKSPACE_IMAGE_REF}'"
+if [[ -n "${SPEC_BASE_IMAGE}" && "${SPEC_BASE_IMAGE}" != "${VAULT_IMAGE_REF}" ]]; then
+  log "warning: kubevirt saved spec base_image is '${SPEC_BASE_IMAGE}', but requested vault-image is '${VAULT_IMAGE_REF}'"
   log "warning: snapshot provenance may not match the current saved spec unless you update the spec first"
 fi
 

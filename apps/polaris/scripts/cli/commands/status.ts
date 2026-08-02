@@ -1,17 +1,17 @@
 import {
-  normalizeWorkspaceStatus,
-  workspaceStatusPath,
-  writeWorkspaceStatus,
+  normalizeVaultStatus,
+  vaultStatusPath,
+  writeVaultStatus,
 } from "../../output/state-store.js";
-import { computeWorkspaceDrift, synthesizeWorkspaceStatus } from "../../core/runtime-controller.js";
+import { computeVaultDrift, synthesizeVaultStatus } from "../../core/runtime-controller.js";
 import { buildStatusAssets } from "../../core/status-assets.js";
-import type { WorkspaceStatus } from "../../core/workspace.js";
+import type { VaultStatus } from "../../core/vault.js";
 import { appendEvolutionEvent, createEvolutionSessionId, finalizeEvolutionSession, getEvolutionSummary } from "../../evolution/runtime.js";
-import { loadWorkspaceForCommand, persistWorkspacePaseoState } from "./shared.js";
+import { loadVaultForCommand, persistVaultPaseoState } from "./shared.js";
 import { logInfo } from "../../utils/log.js";
-import { measureWorkspacePhase } from "../../utils/workspace-log.js";
+import { measureVaultPhase } from "../../utils/vault-log.js";
 
-export async function synthesizeAndWriteWorkspaceStatus(
+export async function synthesizeAndWriteVaultStatus(
   project: string,
   userProfileId?: string,
   options?: {
@@ -19,23 +19,23 @@ export async function synthesizeAndWriteWorkspaceStatus(
   },
 ): Promise<{
   outputPath: string;
-  status: WorkspaceStatus;
+  status: VaultStatus;
 }> {
-  const { workspace, driver } = loadWorkspaceForCommand("status", project, userProfileId);
-  const evolutionSessionId = workspace.agent.enabled ? createEvolutionSessionId("status") : undefined;
-  const observation = await measureWorkspacePhase({
+  const { vault, driver } = loadVaultForCommand("status", project, userProfileId);
+  const evolutionSessionId = vault.agent.enabled ? createEvolutionSessionId("status") : undefined;
+  const observation = await measureVaultPhase({
     context: {
-      userId: workspace.userProfile.id,
-      workspace: workspace.identity.projectName,
-      backend: workspace.backend.kind,
-      profile: workspace.backend.profile,
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
+      backend: vault.backend.kind,
+      profile: vault.backend.profile,
     },
-    phase: "inspect-workspace",
-    execute: () => driver.inspect(workspace),
+    phase: "inspect-vault",
+    execute: () => driver.inspect(vault),
   });
   let effectiveObservation = observation;
-  if (workspace.agent.enabled && observation.backend.exists && observation.backend.running) {
-    const persistResult = await persistWorkspacePaseoState(workspace);
+  if (vault.agent.enabled && observation.backend.exists && observation.backend.running) {
+    const persistResult = await persistVaultPaseoState(vault);
     if (persistResult === "stopped") {
       effectiveObservation = {
         ...observation,
@@ -46,37 +46,37 @@ export async function synthesizeAndWriteWorkspaceStatus(
       };
     }
   }
-  const drift = computeWorkspaceDrift(workspace, effectiveObservation);
-  const status = synthesizeWorkspaceStatus(workspace, effectiveObservation, drift);
-  status.assets = buildStatusAssets(workspace);
+  const drift = computeVaultDrift(vault, effectiveObservation);
+  const status = synthesizeVaultStatus(vault, effectiveObservation, drift);
+  status.assets = buildStatusAssets(vault);
   if (evolutionSessionId) {
-    await appendEvolutionEvent(workspace, evolutionSessionId, "task-completed", {
+    await appendEvolutionEvent(vault, evolutionSessionId, "task-completed", {
       command: "status",
       runtimeLifecycle: status.driver?.status,
       reason: status.driver?.reason,
     });
-    await finalizeEvolutionSession(workspace, evolutionSessionId);
+    await finalizeEvolutionSession(vault, evolutionSessionId);
     status.evolution = {
-      ...(await getEvolutionSummary(workspace)),
+      ...(await getEvolutionSummary(vault)),
       lastSessionId: evolutionSessionId,
     };
   }
-  const outputPath = workspaceStatusPath(status.project, workspace.userProfile.id);
+  const outputPath = vaultStatusPath(status.project, vault.userProfile.id);
   if (options?.write === false) {
     return {
       outputPath,
-      status: normalizeWorkspaceStatus(status),
+      status: normalizeVaultStatus(status),
     };
   }
-  writeWorkspaceStatus(status, workspace.userProfile.id);
+  writeVaultStatus(status, vault.userProfile.id);
   return {
     outputPath,
-    status: normalizeWorkspaceStatus(status),
+    status: normalizeVaultStatus(status),
   };
 }
 
 export async function statusCommand(project: string, userProfileId?: string): Promise<void> {
-  const { outputPath, status } = await synthesizeAndWriteWorkspaceStatus(project, userProfileId);
+  const { outputPath, status } = await synthesizeAndWriteVaultStatus(project, userProfileId);
   logInfo("cli", "status-synthesized", {
     project: status.project,
     backend: status.driver?.selected?.backend,

@@ -1,24 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  WORKSPACE_STATUS_SCHEMA_VERSION_V1,
-  WORKSPACE_STATUS_SCHEMA_VERSION_V1_1,
-  WORKSPACE_STATUS_SCHEMA_VERSION,
-  type WorkspaceStatusSchemaVersion,
-  type WorkspaceStatus,
-} from "../core/workspace.js";
+  VAULT_STATUS_SCHEMA_VERSION_V1,
+  VAULT_STATUS_SCHEMA_VERSION_V1_1,
+  VAULT_STATUS_SCHEMA_VERSION,
+  type VaultStatusSchemaVersion,
+  type VaultStatus,
+} from "../core/vault.js";
 import { assertNoProjectNameCollision } from "../config/project-ownership.js";
 import { polarisStateRoot, polarisUsersRoot } from "../utils/paths.js";
 
 const LEGACY_STATE_DIR = polarisStateRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 
-export interface WorkspaceDriverSelection {
+export interface VaultDriverSelection {
   backend: "docker" | "pod" | "kubevirt-vm";
   profile?: string;
 }
 
-export interface WorkspaceLiveCredentialSelectionState {
+export interface VaultLiveCredentialSelectionState {
   harness: string;
   credentialId: string;
   updatedAt: string;
@@ -29,7 +29,7 @@ function projectRoot(project: string, userProfileId?: string): string | null {
     const candidate = path.join(
       USER_ROOT,
       userProfileId.trim(),
-      "workspaces",
+      "vaults",
       project,
     );
     return fs.existsSync(candidate) ? candidate : null;
@@ -43,86 +43,86 @@ function projectRoot(project: string, userProfileId?: string): string | null {
   const matches = fs
     .readdirSync(USER_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(USER_ROOT, entry.name, "workspaces", project))
+    .map((entry) => path.join(USER_ROOT, entry.name, "vaults", project))
     .filter((candidate) => fs.existsSync(candidate))
     .sort();
 
   return matches[0] ?? null;
 }
 
-export function workspaceStateDir(project: string, userProfileId?: string): string {
+export function vaultStateDir(project: string, userProfileId?: string): string {
   const root = projectRoot(project, userProfileId);
   return root ? path.join(root, "state") : LEGACY_STATE_DIR;
 }
 
-export function workspaceStatusPath(project: string, userProfileId?: string): string {
-  const stateDir = workspaceStateDir(project, userProfileId);
+export function vaultStatusPath(project: string, userProfileId?: string): string {
+  const stateDir = vaultStateDir(project, userProfileId);
   if (stateDir === LEGACY_STATE_DIR) {
     return path.join(stateDir, `${project}.status.json`);
   }
   return path.join(stateDir, "status.json");
 }
 
-export function workspaceSelectionPath(project: string, userProfileId?: string): string {
-  const stateDir = workspaceStateDir(project, userProfileId);
+export function vaultSelectionPath(project: string, userProfileId?: string): string {
+  const stateDir = vaultStateDir(project, userProfileId);
   if (stateDir === LEGACY_STATE_DIR) {
     return path.join(stateDir, `${project}.selection.json`);
   }
   return path.join(stateDir, "selection.json");
 }
 
-export function workspaceLiveCredentialsPath(
+export function vaultLiveCredentialsPath(
   project: string,
   userProfileId?: string,
 ): string {
-  const stateDir = workspaceStateDir(project, userProfileId);
+  const stateDir = vaultStateDir(project, userProfileId);
   if (stateDir === LEGACY_STATE_DIR) {
     return path.join(stateDir, `${project}.live-credentials.json`);
   }
   return path.join(stateDir, "live-credentials.json");
 }
 
-function legacyWorkspaceStatusPath(project: string): string {
+function legacyVaultStatusPath(project: string): string {
   return path.join(LEGACY_STATE_DIR, `${project}.status.json`);
 }
 
-function legacyWorkspaceSelectionPath(project: string): string {
+function legacyVaultSelectionPath(project: string): string {
   return path.join(LEGACY_STATE_DIR, `${project}.selection.json`);
 }
 
-function legacyWorkspaceLiveCredentialsPath(project: string): string {
+function legacyVaultLiveCredentialsPath(project: string): string {
   return path.join(LEGACY_STATE_DIR, `${project}.live-credentials.json`);
 }
 
-export function workspaceEvolutionStateDir(project: string, userProfileId?: string): string {
-  return path.join(workspaceStateDir(project, userProfileId), "evolution");
+export function vaultEvolutionStateDir(project: string, userProfileId?: string): string {
+  return path.join(vaultStateDir(project, userProfileId), "evolution");
 }
 
-export function workspacePaseoStateDir(project: string, userProfileId?: string): string {
-  return path.join(workspaceStateDir(project, userProfileId), "paseo");
+export function vaultPaseoStateDir(project: string, userProfileId?: string): string {
+  return path.join(vaultStateDir(project, userProfileId), "paseo");
 }
 
-function readWorkspaceStatusFile(filePath: string): WorkspaceStatus | null {
+function readVaultStatusFile(filePath: string): VaultStatus | null {
   if (!fs.existsSync(filePath)) {
     return null;
   }
   try {
-    return normalizeWorkspaceStatus(
-      JSON.parse(fs.readFileSync(filePath, "utf8")) as WorkspaceStatus,
+    return normalizeVaultStatus(
+      JSON.parse(fs.readFileSync(filePath, "utf8")) as VaultStatus,
     );
   } catch {
     return null;
   }
 }
 
-function readStoredWorkspaceStatus(project: string, userProfileId?: string): WorkspaceStatus | null {
+function readStoredVaultStatus(project: string, userProfileId?: string): VaultStatus | null {
   const candidates = [
-    workspaceStatusPath(project, userProfileId),
-    legacyWorkspaceStatusPath(project),
+    vaultStatusPath(project, userProfileId),
+    legacyVaultStatusPath(project),
   ].filter((candidate, index, entries) => entries.indexOf(candidate) === index);
 
   for (const filePath of candidates) {
-    const status = readWorkspaceStatusFile(filePath);
+    const status = readVaultStatusFile(filePath);
     if (status) {
       return status;
     }
@@ -130,14 +130,14 @@ function readStoredWorkspaceStatus(project: string, userProfileId?: string): Wor
   return null;
 }
 
-type WorkspaceStatusV1Driver = NonNullable<WorkspaceStatus["driver"]> & {
+type VaultStatusV1Driver = NonNullable<VaultStatus["driver"]> & {
   backend?: "docker" | "pod" | "kubevirt-vm";
   profile?: string;
 };
 
-type WorkspaceStatusV1 = Omit<WorkspaceStatus, "schemaVersion" | "driver"> & {
-  schemaVersion?: typeof WORKSPACE_STATUS_SCHEMA_VERSION_V1;
-  driver?: WorkspaceStatusV1Driver;
+type VaultStatusV1 = Omit<VaultStatus, "schemaVersion" | "driver"> & {
+  schemaVersion?: typeof VAULT_STATUS_SCHEMA_VERSION_V1;
+  driver?: VaultStatusV1Driver;
   operation?: {
     kind: "create" | "start" | "stop" | "rebuild" | "delete";
     updatedAt: string;
@@ -157,8 +157,8 @@ type WorkspaceStatusV1 = Omit<WorkspaceStatus, "schemaVersion" | "driver"> & {
 };
 
 function upgradeLegacyRuntimeLifecycle(
-  status: WorkspaceStatusV1,
-): NonNullable<WorkspaceStatusV1["runtime"]>["lifecycle"] {
+  status: VaultStatusV1,
+): NonNullable<VaultStatusV1["runtime"]>["lifecycle"] {
   if (status.runtime?.lifecycle) {
     return status.runtime.lifecycle;
   }
@@ -174,7 +174,7 @@ function upgradeLegacyRuntimeLifecycle(
   }
 }
 
-function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceStatus["driver"]>["status"] {
+function upgradeDriverStatus(status: VaultStatusV1): NonNullable<VaultStatus["driver"]>["status"] {
   switch (status.operation?.kind) {
     case "create":
       return "creating";
@@ -201,9 +201,9 @@ function upgradeDriverStatus(status: WorkspaceStatusV1): NonNullable<WorkspaceSt
   }
 }
 
-function downgradeDriverStatus(status: NonNullable<WorkspaceStatus["driver"]>["status"]): {
-  runtimeLifecycle: NonNullable<WorkspaceStatusV1["runtime"]>["lifecycle"];
-  operation?: WorkspaceStatusV1["operation"];
+function downgradeDriverStatus(status: NonNullable<VaultStatus["driver"]>["status"]): {
+  runtimeLifecycle: NonNullable<VaultStatusV1["runtime"]>["lifecycle"];
+  operation?: VaultStatusV1["operation"];
 } {
   switch (status) {
     case "creating":
@@ -229,7 +229,7 @@ function downgradeDriverStatus(status: NonNullable<WorkspaceStatus["driver"]>["s
   }
 }
 
-function upgradeWorkspaceStatusV1ToV1_1(status: WorkspaceStatusV1): WorkspaceStatus {
+function upgradeVaultStatusV1ToV1_1(status: VaultStatusV1): VaultStatus {
   const legacyDriver = status.driver;
   const selectedDriver =
     (legacyDriver?.backend
@@ -244,7 +244,7 @@ function upgradeWorkspaceStatusV1ToV1_1(status: WorkspaceStatusV1): WorkspaceSta
   const driverReason = status.runtime?.reason ?? status.health?.reason;
   return {
     ...status,
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION_V1_1,
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION_V1_1,
     driver: {
       ...(status.driver ?? {}),
       selected: selectedDriver,
@@ -254,11 +254,11 @@ function upgradeWorkspaceStatusV1ToV1_1(status: WorkspaceStatusV1): WorkspaceSta
   };
 }
 
-function isWorkspaceStatusV1_1Shape(status: WorkspaceStatus): boolean {
-  if ((status.schemaVersion ?? null) === WORKSPACE_STATUS_SCHEMA_VERSION_V1_1) {
+function isVaultStatusV1_1Shape(status: VaultStatus): boolean {
+  if ((status.schemaVersion ?? null) === VAULT_STATUS_SCHEMA_VERSION_V1_1) {
     return true;
   }
-  if ((status.schemaVersion ?? null) === WORKSPACE_STATUS_SCHEMA_VERSION_V1) {
+  if ((status.schemaVersion ?? null) === VAULT_STATUS_SCHEMA_VERSION_V1) {
     return false;
   }
   const driver = status.driver as Record<string, unknown> | undefined;
@@ -274,7 +274,7 @@ function isWorkspaceStatusV1_1Shape(status: WorkspaceStatus): boolean {
   return false;
 }
 
-function downgradeWorkspaceStatusV1_1ToV1(status: WorkspaceStatus): WorkspaceStatusV1 {
+function downgradeVaultStatusV1_1ToV1(status: VaultStatus): VaultStatusV1 {
   const selectedDriver = status.driver?.selected ?? null;
   const downgradedStatus = downgradeDriverStatus(status.driver?.status ?? "unknown");
   const driver = status.driver
@@ -299,7 +299,7 @@ function downgradeWorkspaceStatusV1_1ToV1(status: WorkspaceStatus): WorkspaceSta
   }
   return {
     ...status,
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION_V1,
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION_V1,
     ...(driver ? { driver } : {}),
     ...(downgradedStatus.operation ? { operation: downgradedStatus.operation } : {}),
     runtime: {
@@ -312,19 +312,19 @@ function downgradeWorkspaceStatusV1_1ToV1(status: WorkspaceStatus): WorkspaceSta
   };
 }
 
-export function normalizeWorkspaceStatus(
-  status: WorkspaceStatus,
-  targetSchemaVersion: WorkspaceStatusSchemaVersion = WORKSPACE_STATUS_SCHEMA_VERSION,
-): WorkspaceStatus {
+export function normalizeVaultStatus(
+  status: VaultStatus,
+  targetSchemaVersion: VaultStatusSchemaVersion = VAULT_STATUS_SCHEMA_VERSION,
+): VaultStatus {
   const upgraded =
-    !isWorkspaceStatusV1_1Shape(status)
-      ? upgradeWorkspaceStatusV1ToV1_1(status as WorkspaceStatusV1)
+    !isVaultStatusV1_1Shape(status)
+      ? upgradeVaultStatusV1ToV1_1(status as VaultStatusV1)
       : status;
-  if (targetSchemaVersion === WORKSPACE_STATUS_SCHEMA_VERSION_V1) {
-    return downgradeWorkspaceStatusV1_1ToV1(upgraded) as WorkspaceStatus;
+  if (targetSchemaVersion === VAULT_STATUS_SCHEMA_VERSION_V1) {
+    return downgradeVaultStatusV1_1ToV1(upgraded) as VaultStatus;
   }
-  const legacyDriver = (upgraded as WorkspaceStatus & {
-    driver?: WorkspaceStatusV1Driver;
+  const legacyDriver = (upgraded as VaultStatus & {
+    driver?: VaultStatusV1Driver;
   }).driver;
   const selectedDriver =
     upgraded.driver?.selected
@@ -343,7 +343,7 @@ export function normalizeWorkspaceStatus(
       : undefined;
   const next = {
     ...upgraded,
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION_V1_1,
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION_V1_1,
     ...(upgraded.driver
       ? {
           driver: {
@@ -355,7 +355,7 @@ export function normalizeWorkspaceStatus(
         }
       : {}),
     details: upgraded.details ?? {},
-  } as WorkspaceStatus & Record<string, unknown>;
+  } as VaultStatus & Record<string, unknown>;
   if (next.driver && "backend" in (next.driver as Record<string, unknown>)) {
     delete (next.driver as Record<string, unknown>).backend;
   }
@@ -371,30 +371,30 @@ export function normalizeWorkspaceStatus(
   return next;
 }
 
-export function writeWorkspaceStatus(
-  status: WorkspaceStatus,
+export function writeVaultStatus(
+  status: VaultStatus,
   userProfileId?: string,
-  targetSchemaVersion: WorkspaceStatusSchemaVersion = WORKSPACE_STATUS_SCHEMA_VERSION,
+  targetSchemaVersion: VaultStatusSchemaVersion = VAULT_STATUS_SCHEMA_VERSION,
 ): string {
-  const outputPath = workspaceStatusPath(status.project, userProfileId);
-  const next = normalizeWorkspaceStatus(status, targetSchemaVersion);
+  const outputPath = vaultStatusPath(status.project, userProfileId);
+  const next = normalizeVaultStatus(status, targetSchemaVersion);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  fs.rmSync(workspaceSelectionPath(status.project, userProfileId), { force: true });
-  fs.rmSync(legacyWorkspaceSelectionPath(status.project), { force: true });
-  if (outputPath !== legacyWorkspaceStatusPath(status.project)) {
-    fs.rmSync(legacyWorkspaceStatusPath(status.project), { force: true });
+  fs.rmSync(vaultSelectionPath(status.project, userProfileId), { force: true });
+  fs.rmSync(legacyVaultSelectionPath(status.project), { force: true });
+  if (outputPath !== legacyVaultStatusPath(status.project)) {
+    fs.rmSync(legacyVaultStatusPath(status.project), { force: true });
   }
   return outputPath;
 }
 
-export function writeWorkspacePaseoServerId(
+export function writeVaultPaseoServerId(
   project: string,
   serverId: string,
   userProfileId?: string,
 ): string {
   const outputPath = path.join(
-    workspacePaseoStateDir(project, userProfileId),
+    vaultPaseoStateDir(project, userProfileId),
     "server-id",
   );
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -402,13 +402,13 @@ export function writeWorkspacePaseoServerId(
   return outputPath;
 }
 
-export function writeWorkspacePaseoPairing(
+export function writeVaultPaseoPairing(
   project: string,
   pairing: Record<string, unknown> & { url: string },
   userProfileId?: string,
 ): string {
   const outputPath = path.join(
-    workspacePaseoStateDir(project, userProfileId),
+    vaultPaseoStateDir(project, userProfileId),
     "pairing.json",
   );
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -416,8 +416,8 @@ export function writeWorkspacePaseoPairing(
   return outputPath;
 }
 
-export function readWorkspaceDriverSelection(project: string, userProfileId?: string): WorkspaceDriverSelection | null {
-  const selected = readStoredWorkspaceStatus(project, userProfileId)?.driver?.selected;
+export function readVaultDriverSelection(project: string, userProfileId?: string): VaultDriverSelection | null {
+  const selected = readStoredVaultStatus(project, userProfileId)?.driver?.selected;
   if (!selected) {
     return null;
   }
@@ -430,14 +430,14 @@ export function readWorkspaceDriverSelection(project: string, userProfileId?: st
   return selected;
 }
 
-export function writeWorkspaceDriverSelection(
+export function writeVaultDriverSelection(
   project: string,
-  selection: WorkspaceDriverSelection,
+  selection: VaultDriverSelection,
   userProfileId?: string,
 ): string {
-  const current = readStoredWorkspaceStatus(project, userProfileId);
-  const outputPath = writeWorkspaceStatus({
-    schemaVersion: WORKSPACE_STATUS_SCHEMA_VERSION,
+  const current = readStoredVaultStatus(project, userProfileId);
+  const outputPath = writeVaultStatus({
+    schemaVersion: VAULT_STATUS_SCHEMA_VERSION,
     project,
     paseo: current?.paseo ?? {
       daemon: "unknown",
@@ -453,18 +453,18 @@ export function writeWorkspaceDriverSelection(
       selected: selection,
     },
   }, userProfileId);
-  fs.rmSync(workspaceSelectionPath(project, userProfileId), { force: true });
-  fs.rmSync(legacyWorkspaceSelectionPath(project), { force: true });
+  fs.rmSync(vaultSelectionPath(project, userProfileId), { force: true });
+  fs.rmSync(legacyVaultSelectionPath(project), { force: true });
   return outputPath;
 }
 
-export function readWorkspaceLiveCredentialSelections(
+export function readVaultLiveCredentialSelections(
   project: string,
   userProfileId?: string,
-): Record<string, WorkspaceLiveCredentialSelectionState> {
+): Record<string, VaultLiveCredentialSelectionState> {
   const candidates = [
-    workspaceLiveCredentialsPath(project, userProfileId),
-    legacyWorkspaceLiveCredentialsPath(project),
+    vaultLiveCredentialsPath(project, userProfileId),
+    legacyVaultLiveCredentialsPath(project),
   ].filter((candidate, index, entries) => entries.indexOf(candidate) === index);
 
   for (const filePath of candidates) {
@@ -474,7 +474,7 @@ export function readWorkspaceLiveCredentialSelections(
     try {
       const parsed = JSON.parse(
         fs.readFileSync(filePath, "utf8"),
-      ) as Record<string, WorkspaceLiveCredentialSelectionState>;
+      ) as Record<string, VaultLiveCredentialSelectionState>;
       return Object.fromEntries(
         Object.entries(parsed).filter(([, value]) => {
           return Boolean(
@@ -492,14 +492,14 @@ export function readWorkspaceLiveCredentialSelections(
   return {};
 }
 
-export function writeWorkspaceLiveCredentialSelection(
+export function writeVaultLiveCredentialSelection(
   project: string,
   harness: string,
   credentialId: string,
   userProfileId?: string,
 ): string {
-  const outputPath = workspaceLiveCredentialsPath(project, userProfileId);
-  const current = readWorkspaceLiveCredentialSelections(project, userProfileId);
+  const outputPath = vaultLiveCredentialsPath(project, userProfileId);
+  const current = readVaultLiveCredentialSelections(project, userProfileId);
   current[harness] = {
     harness,
     credentialId,
@@ -507,24 +507,24 @@ export function writeWorkspaceLiveCredentialSelection(
   };
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(current, null, 2)}\n`, "utf8");
-  if (outputPath !== legacyWorkspaceLiveCredentialsPath(project)) {
-    fs.rmSync(legacyWorkspaceLiveCredentialsPath(project), { force: true });
+  if (outputPath !== legacyVaultLiveCredentialsPath(project)) {
+    fs.rmSync(legacyVaultLiveCredentialsPath(project), { force: true });
   }
   return outputPath;
 }
 
-export function clearWorkspaceLiveCredentialSelection(
+export function clearVaultLiveCredentialSelection(
   project: string,
   harness: string,
   userProfileId?: string,
 ): void {
-  const outputPath = workspaceLiveCredentialsPath(project, userProfileId);
-  const current = readWorkspaceLiveCredentialSelections(project, userProfileId);
+  const outputPath = vaultLiveCredentialsPath(project, userProfileId);
+  const current = readVaultLiveCredentialSelections(project, userProfileId);
   delete current[harness];
   if (Object.keys(current).length === 0) {
     fs.rmSync(outputPath, { force: true });
-    if (outputPath !== legacyWorkspaceLiveCredentialsPath(project)) {
-      fs.rmSync(legacyWorkspaceLiveCredentialsPath(project), { force: true });
+    if (outputPath !== legacyVaultLiveCredentialsPath(project)) {
+      fs.rmSync(legacyVaultLiveCredentialsPath(project), { force: true });
     }
     return;
   }

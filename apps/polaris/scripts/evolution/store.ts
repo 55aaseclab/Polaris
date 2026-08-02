@@ -59,7 +59,7 @@ export class EvolutionStore {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS execution_events (
         id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
         manager_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         turn_id TEXT,
@@ -70,7 +70,7 @@ export class EvolutionStore {
 
       CREATE TABLE IF NOT EXISTS memory_entries (
         id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
         user_profile_id TEXT,
         target TEXT NOT NULL,
         section_name TEXT NOT NULL,
@@ -87,7 +87,7 @@ export class EvolutionStore {
 
       CREATE TABLE IF NOT EXISTS pending_memory_changes (
         id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
         user_profile_id TEXT,
         target TEXT NOT NULL,
         operation TEXT NOT NULL,
@@ -104,14 +104,14 @@ export class EvolutionStore {
         metadata_json TEXT NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS idx_execution_events_workspace_session
-        ON execution_events(workspace_id, session_id, timestamp);
-      CREATE INDEX IF NOT EXISTS idx_memory_entries_workspace_target
-        ON memory_entries(workspace_id, target, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_execution_events_vault_session
+        ON execution_events(vault_id, session_id, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_memory_entries_vault_target
+        ON memory_entries(vault_id, target, status, updated_at);
       CREATE INDEX IF NOT EXISTS idx_memory_entries_user_target
         ON memory_entries(user_profile_id, target, status, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_pending_memory_changes_workspace_status
-        ON pending_memory_changes(workspace_id, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_pending_memory_changes_vault_status
+        ON pending_memory_changes(vault_id, status, updated_at);
     `);
     this.flush();
   }
@@ -129,12 +129,12 @@ export class EvolutionStore {
   recordEvent(event: EvolutionExecutionEvent): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO execution_events (
-        id, workspace_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
+        id, vault_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run([
       event.id,
-      event.workspaceId,
+      event.vaultId,
       event.managerId,
       event.sessionId,
       event.turnId ?? null,
@@ -146,20 +146,20 @@ export class EvolutionStore {
     this.flush();
   }
 
-  listEventsForSession(workspaceId: string, sessionId: string): EvolutionExecutionEvent[] {
+  listEventsForSession(vaultId: string, sessionId: string): EvolutionExecutionEvent[] {
     const stmt = this.db.prepare(`
-      SELECT id, workspace_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
+      SELECT id, vault_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
       FROM execution_events
-      WHERE workspace_id = ? AND session_id = ?
+      WHERE vault_id = ? AND session_id = ?
       ORDER BY timestamp ASC
     `);
-    stmt.bind([workspaceId, sessionId]);
+    stmt.bind([vaultId, sessionId]);
     const rows: EvolutionExecutionEvent[] = [];
     while (stmt.step()) {
       const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
       rows.push({
         id: String(row.id),
-        workspaceId: String(row.workspace_id),
+        vaultId: String(row.vault_id),
         managerId: String(row.manager_id),
         sessionId: String(row.session_id),
         turnId: row.turn_id ? String(row.turn_id) : undefined,
@@ -172,20 +172,20 @@ export class EvolutionStore {
     return rows;
   }
 
-  listEventsForWorkspace(workspaceId: string): EvolutionExecutionEvent[] {
+  listEventsForVault(vaultId: string): EvolutionExecutionEvent[] {
     const stmt = this.db.prepare(`
-      SELECT id, workspace_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
+      SELECT id, vault_id, manager_id, session_id, turn_id, kind, timestamp, payload_json
       FROM execution_events
-      WHERE workspace_id = ?
+      WHERE vault_id = ?
       ORDER BY timestamp ASC
     `);
-    stmt.bind([workspaceId]);
+    stmt.bind([vaultId]);
     const rows: EvolutionExecutionEvent[] = [];
     while (stmt.step()) {
       const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
       rows.push({
         id: String(row.id),
-        workspaceId: String(row.workspace_id),
+        vaultId: String(row.vault_id),
         managerId: String(row.manager_id),
         sessionId: String(row.session_id),
         turnId: row.turn_id ? String(row.turn_id) : undefined,
@@ -201,13 +201,13 @@ export class EvolutionStore {
   upsertMemoryEntry(entry: EvolutionMemoryEntry): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO memory_entries (
-        id, workspace_id, user_profile_id, target, section_name, entry_key, title, body,
+        id, vault_id, user_profile_id, target, section_name, entry_key, title, body,
         confidence, status, source_session_id, created_at, updated_at, metadata_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run([
       entry.id,
-      entry.workspaceId,
+      entry.vaultId,
       entry.userProfileId ?? null,
       entry.target,
       entry.section,
@@ -226,10 +226,10 @@ export class EvolutionStore {
   }
 
   queryMemoryEntries(query: EvolutionMemoryQuery): EvolutionMemoryEntry[] {
-    const clauses = ["status = 'active'", "workspace_id = ?"];
-    const params: SqlScalar[] = [query.workspaceId];
+    const clauses = ["status = 'active'", "vault_id = ?"];
+    const params: SqlScalar[] = [query.vaultId];
     if (query.userProfileId) {
-      clauses.push("(target = 'workspace-memory' OR user_profile_id = ?)");
+      clauses.push("(target = 'vault-memory' OR user_profile_id = ?)");
       params.push(query.userProfileId);
     }
     if (query.target) {
@@ -247,7 +247,7 @@ export class EvolutionStore {
     }
     params.push(query.limit ?? 20);
     const stmt = this.db.prepare(`
-      SELECT id, workspace_id, user_profile_id, target, section_name, entry_key, title, body,
+      SELECT id, vault_id, user_profile_id, target, section_name, entry_key, title, body,
              confidence, status, source_session_id, created_at, updated_at, metadata_json
       FROM memory_entries
       WHERE ${clauses.join(" AND ")}
@@ -260,7 +260,7 @@ export class EvolutionStore {
       const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
       rows.push({
         id: String(row.id),
-        workspaceId: String(row.workspace_id),
+        vaultId: String(row.vault_id),
         userProfileId: row.user_profile_id ? String(row.user_profile_id) : undefined,
         target: String(row.target) as EvolutionMemoryEntry["target"],
         section: String(row.section_name),
@@ -279,8 +279,8 @@ export class EvolutionStore {
     return rows;
   }
 
-  findActiveMemoryEntry(workspaceId: string, target: EvolutionMemoryEntry["target"], key: string): EvolutionMemoryEntry | null {
-    const rows = this.queryMemoryEntries({ workspaceId, target, limit: 100 }).filter((entry) => entry.key === key);
+  findActiveMemoryEntry(vaultId: string, target: EvolutionMemoryEntry["target"], key: string): EvolutionMemoryEntry | null {
+    const rows = this.queryMemoryEntries({ vaultId, target, limit: 100 }).filter((entry) => entry.key === key);
     return rows[0] ?? null;
   }
 
@@ -301,14 +301,14 @@ export class EvolutionStore {
   savePendingMemoryChange(change: EvolutionMemoryChange): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO pending_memory_changes (
-        id, workspace_id, user_profile_id, target, operation, section_name, entry_key,
+        id, vault_id, user_profile_id, target, operation, section_name, entry_key,
         candidate_json, reason, confidence, source_session_id, source_run_ids_json,
         created_at, updated_at, status, metadata_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run([
       change.id,
-      change.workspaceId,
+      change.vaultId,
       change.userProfileId ?? null,
       change.target,
       change.operation,
@@ -328,15 +328,15 @@ export class EvolutionStore {
     this.flush();
   }
 
-  listPendingMemoryChanges(workspaceId: string, status?: EvolutionMemoryChange["status"]): EvolutionMemoryChange[] {
-    const clauses = ["workspace_id = ?"];
-    const params: SqlScalar[] = [workspaceId];
+  listPendingMemoryChanges(vaultId: string, status?: EvolutionMemoryChange["status"]): EvolutionMemoryChange[] {
+    const clauses = ["vault_id = ?"];
+    const params: SqlScalar[] = [vaultId];
     if (status) {
       clauses.push("status = ?");
       params.push(status);
     }
     const stmt = this.db.prepare(`
-      SELECT id, workspace_id, user_profile_id, target, operation, section_name, entry_key,
+      SELECT id, vault_id, user_profile_id, target, operation, section_name, entry_key,
              candidate_json, reason, confidence, source_session_id, source_run_ids_json,
              created_at, updated_at, status, metadata_json
       FROM pending_memory_changes
@@ -349,7 +349,7 @@ export class EvolutionStore {
       const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
       rows.push({
         id: String(row.id),
-        workspaceId: String(row.workspace_id),
+        vaultId: String(row.vault_id),
         userProfileId: row.user_profile_id ? String(row.user_profile_id) : undefined,
         target: String(row.target) as EvolutionMemoryChange["target"],
         operation: String(row.operation) as EvolutionMemoryChange["operation"],
@@ -381,9 +381,9 @@ export class EvolutionStore {
     this.flush();
   }
 
-  summarize(workspaceId: string, userProfileId?: string): {
+  summarize(vaultId: string, userProfileId?: string): {
     artifactCount: number;
-    activeWorkspaceArtifacts: number;
+    activeVaultArtifacts: number;
     activeUserArtifacts: number;
     latestTitles: string[];
     latestArtifacts: Array<{
@@ -398,14 +398,14 @@ export class EvolutionStore {
     }>;
     pendingMemoryChanges: number;
   } {
-    const workspaceEntries = this.queryMemoryEntries({ workspaceId, target: "workspace-memory", limit: 1000 });
+    const vaultEntries = this.queryMemoryEntries({ vaultId, target: "vault-memory", limit: 1000 });
     const userEntries = userProfileId
-      ? this.queryMemoryEntries({ workspaceId, userProfileId, target: "user-memory", limit: 1000 })
+      ? this.queryMemoryEntries({ vaultId, userProfileId, target: "user-memory", limit: 1000 })
       : [];
-    const all = [...workspaceEntries, ...userEntries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const all = [...vaultEntries, ...userEntries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return {
       artifactCount: all.length,
-      activeWorkspaceArtifacts: workspaceEntries.length,
+      activeVaultArtifacts: vaultEntries.length,
       activeUserArtifacts: userEntries.length,
       latestTitles: all.slice(0, 5).map((entry) => entry.title),
       latestArtifacts: all.slice(0, 5).map((entry) => {
@@ -434,7 +434,7 @@ export class EvolutionStore {
             : undefined,
         };
       }),
-      pendingMemoryChanges: this.listPendingMemoryChanges(workspaceId, "pending").length,
+      pendingMemoryChanges: this.listPendingMemoryChanges(vaultId, "pending").length,
     };
   }
 }

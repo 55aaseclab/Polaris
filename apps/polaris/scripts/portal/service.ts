@@ -20,35 +20,35 @@ import {
 } from "../config/credential-catalog.js";
 import {
   credentialCatalog,
-  clearWorkspaceProvisionProgress,
+  clearVaultProvisionProgress,
   listPortalProfiles,
-  listPortalWorkspaceStaticSummaries,
+  listPortalVaultStaticSummaries,
   readPortalProfile,
-  listOwnedWorkspaces,
+  listOwnedVaults,
   listPortalCredentials,
   readPortalProfileAuthCredentialRecord,
-  writeWorkspaceProvisionProgress,
-  readPortalWorkspaceAssetPreview,
-  loadWorkspaceDetailStatic,
-  loadWorkspaceDetail,
-  loadWorkspaceSummary,
+  writeVaultProvisionProgress,
+  readPortalVaultAssetPreview,
+  loadVaultDetailStatic,
+  loadVaultDetail,
+  loadVaultSummary,
   updatePortalProfile,
-  updatePortalWorkspaceAgentBinding,
-  workspaceRefFromTarget,
+  updatePortalVaultAgentBinding,
+  vaultRefFromTarget,
   type PortalCredentialSummary,
   type PortalCredentialCatalog,
   type PortalCredentialRecord,
   type PortalSkillSummary,
-  type PortalWorkspaceAssetPreview,
-  type PortalWorkspaceAgentBindingResult,
+  type PortalVaultAssetPreview,
+  type PortalVaultAgentBindingResult,
   type PortalDriverTarget,
-  type PortalWorkspaceDetail,
-  type PortalWorkspaceDetailStatic,
+  type PortalVaultDetail,
+  type PortalVaultDetailStatic,
   type PortalProfileSummary,
-  type PortalWorkspaceStaticSummary,
-  type PortalWorkspaceSummary,
+  type PortalVaultStaticSummary,
+  type PortalVaultSummary,
 } from "../core/portal.js";
-import type { WorkspaceStatus } from "../core/workspace.js";
+import type { VaultStatus } from "../core/vault.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
@@ -60,43 +60,43 @@ import {
 import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
-  deletePortalWorkspace as deletePortalWorkspaceExecutor,
-  getPortalWorkspacePaseoDiagnostic as getPortalWorkspacePaseoDiagnosticExecutor,
-  permanentlyDeletePortalWorkspace as permanentlyDeletePortalWorkspaceExecutor,
-  queueProvisionWorkspace as queueProvisionWorkspaceExecutor,
-  refreshPortalWorkspaceStatus as refreshPortalWorkspaceStatusExecutor,
-  rebuildPortalWorkspace as rebuildPortalWorkspaceExecutor,
-  restartPortalWorkspacePaseoDaemon as restartPortalWorkspacePaseoDaemonExecutor,
-  updatePortalWorkspaceSelectedDriver as updatePortalWorkspaceSelectedDriverExecutor,
-  installPortalWorkspaceSkill as installPortalWorkspaceSkillExecutor,
-  listPortalWorkspaceSkills as listPortalWorkspaceSkillsExecutor,
-  startPortalWorkspace as startPortalWorkspaceExecutor,
-  stopPortalWorkspace as stopPortalWorkspaceExecutor,
-  switchPortalWorkspace as switchPortalWorkspaceExecutor,
-  switchPortalWorkspaceLiveCredential as switchPortalWorkspaceLiveCredentialExecutor,
-  syncPortalWorkspaceSkills as syncPortalWorkspaceSkillsExecutor,
-  uninstallPortalWorkspaceSkill as uninstallPortalWorkspaceSkillExecutor,
+  deletePortalVault as deletePortalVaultExecutor,
+  getPortalVaultPaseoDiagnostic as getPortalVaultPaseoDiagnosticExecutor,
+  permanentlyDeletePortalVault as permanentlyDeletePortalVaultExecutor,
+  queueProvisionVault as queueProvisionVaultExecutor,
+  refreshPortalVaultStatus as refreshPortalVaultStatusExecutor,
+  rebuildPortalVault as rebuildPortalVaultExecutor,
+  restartPortalVaultPaseoDaemon as restartPortalVaultPaseoDaemonExecutor,
+  updatePortalVaultSelectedDriver as updatePortalVaultSelectedDriverExecutor,
+  installPortalVaultSkill as installPortalVaultSkillExecutor,
+  listPortalVaultSkills as listPortalVaultSkillsExecutor,
+  startPortalVault as startPortalVaultExecutor,
+  stopPortalVault as stopPortalVaultExecutor,
+  switchPortalVault as switchPortalVaultExecutor,
+  switchPortalVaultLiveCredential as switchPortalVaultLiveCredentialExecutor,
+  syncPortalVaultSkills as syncPortalVaultSkillsExecutor,
+  uninstallPortalVaultSkill as uninstallPortalVaultSkillExecutor,
 } from "../executor/client.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
 
-function rootKey(userId: string, workspace: string): string {
-  return `${userId}:${workspace}`;
+function rootKey(userId: string, vault: string): string {
+  return `${userId}:${vault}`;
 }
 
-async function refreshPortalWorkspaceStatus(
+async function refreshPortalVaultStatus(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<void> {
-  const key = rootKey(userId, workspace);
+  const key = rootKey(userId, vault);
   const existing = statusRefreshJobs.get(key);
   if (existing) {
     return existing;
   }
   const job = (async () => {
     try {
-      await refreshPortalWorkspaceStatusExecutor({ userId, workspace });
+      await refreshPortalVaultStatusExecutor({ userId, vault });
     } finally {
       statusRefreshJobs.delete(key);
     }
@@ -105,15 +105,15 @@ async function refreshPortalWorkspaceStatus(
   return job;
 }
 
-export async function listPortalWorkspaces(userId: string): Promise<PortalWorkspaceSummary[]> {
-  const workspaces = listOwnedWorkspaces(userId);
-  return workspaces.map((workspace) => loadWorkspaceSummary(userId, workspace));
+export async function listPortalVaults(userId: string): Promise<PortalVaultSummary[]> {
+  const vaults = listOwnedVaults(userId);
+  return vaults.map((vault) => loadVaultSummary(userId, vault));
 }
 
-export async function listPortalWorkspaceStaticState(
+export async function listPortalVaultStaticState(
   userId: string,
-): Promise<PortalWorkspaceStaticSummary[]> {
-  return listPortalWorkspaceStaticSummaries(userId);
+): Promise<PortalVaultStaticSummary[]> {
+  return listPortalVaultStaticSummaries(userId);
 }
 
 export function listPortalAdminUsers(): Array<
@@ -159,7 +159,7 @@ export function listPortalAdminUsers(): Array<
         id: userId,
         name: "",
         email: "",
-        workspaces: listOwnedWorkspaces(userId),
+        vaults: listOwnedVaults(userId),
       };
       const baseAccess = access ?? {
         polarisUserId: userId,
@@ -181,18 +181,18 @@ export function listPortalAdminUsers(): Array<
     });
 }
 
-export async function getPortalWorkspaceDetail(
+export async function getPortalVaultDetail(
   userId: string,
-  workspace: string,
-) : Promise<PortalWorkspaceDetail> {
-  return loadWorkspaceDetail(userId, workspace);
+  vault: string,
+) : Promise<PortalVaultDetail> {
+  return loadVaultDetail(userId, vault);
 }
 
-export async function getPortalWorkspaceDetailStatic(
+export async function getPortalVaultDetailStatic(
   userId: string,
-  workspace: string,
-): Promise<PortalWorkspaceDetailStatic> {
-  return loadWorkspaceDetailStatic(userId, workspace);
+  vault: string,
+): Promise<PortalVaultDetailStatic> {
+  return loadVaultDetailStatic(userId, vault);
 }
 
 export function listUserPortalCredentials(
@@ -233,18 +233,18 @@ export function readUserPortalCredentialRecord(
   }
 }
 
-export function readUserPortalWorkspaceAssetPreview(
+export function readUserPortalVaultAssetPreview(
   userId: string,
-  workspace: string,
+  vault: string,
   assetPath: string,
-): PortalWorkspaceAssetPreview {
-  return readPortalWorkspaceAssetPreview(userId, workspace, assetPath);
+): PortalVaultAssetPreview {
+  return readPortalVaultAssetPreview(userId, vault, assetPath);
 }
 
 export function readUserPortalCredentialPreview(
   userId: string,
   assetPath: string,
-): PortalWorkspaceAssetPreview {
+): PortalVaultAssetPreview {
   const normalized = assetPath.replace(/\\/g, "/").trim();
   if (!normalized.startsWith("credentials/")) {
     throw new Error("credential preview path must stay under credentials/");
@@ -337,102 +337,102 @@ export async function createPortalCredential(input: {
   });
 }
 
-export async function listPortalWorkspaceSkills(input: {
+export async function listPortalVaultSkills(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
 }): Promise<{
-  workspace: string;
+  vault: string;
   userId: string;
   installed: Array<{ harness: SkillHarness; skills: string[] }>;
 }> {
-  return listPortalWorkspaceSkillsExecutor(input);
+  return listPortalVaultSkillsExecutor(input);
 }
 
-export async function installPortalWorkspaceSkill(input: {
+export async function installPortalVaultSkill(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   installed: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   packageName: string;
 }> {
-  return installPortalWorkspaceSkillExecutor(input);
+  return installPortalVaultSkillExecutor(input);
 }
 
-export async function uninstallPortalWorkspaceSkill(input: {
+export async function uninstallPortalVaultSkill(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
   skillId: string;
 }): Promise<{
   uninstalled: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   skillId: string;
   removed: boolean;
 }> {
-  return uninstallPortalWorkspaceSkillExecutor(input);
+  return uninstallPortalVaultSkillExecutor(input);
 }
 
-export async function syncPortalWorkspaceSkills(input: {
+export async function syncPortalVaultSkills(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: SkillHarness;
 }): Promise<{
   synced: true;
-  workspace: string;
+  vault: string;
   userId: string;
   harness: SkillHarness;
   installed: string[];
   removed: string[];
 }> {
-  return syncPortalWorkspaceSkillsExecutor(input);
+  return syncPortalVaultSkillsExecutor(input);
 }
 
-export async function bindPortalWorkspaceAgent(input: {
+export async function bindPortalVaultAgent(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   driver: PortalDriverTarget;
   credentialId: string;
-}): Promise<PortalWorkspaceAgentBindingResult> {
-  const updated = updatePortalWorkspaceAgentBinding({
+}): Promise<PortalVaultAgentBindingResult> {
+  const updated = updatePortalVaultAgentBinding({
     userId: input.userId,
-    workspace: input.workspace,
+    vault: input.vault,
     target: input.driver,
     credentialId: input.credentialId,
     enabled: true,
   });
-  await refreshPortalWorkspaceStatus(input.userId, input.workspace);
+  await refreshPortalVaultStatus(input.userId, input.vault);
   return {
     enabled: true,
-    driver: workspaceRefFromTarget(input.workspace, input.driver),
+    driver: vaultRefFromTarget(input.vault, input.driver),
     restarted: true,
     credentialBindings: updated.credentialBindings,
   };
 }
 
-export async function unbindPortalWorkspaceAgent(input: {
+export async function unbindPortalVaultAgent(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   driver: PortalDriverTarget;
-}): Promise<PortalWorkspaceAgentBindingResult> {
-  const updated = updatePortalWorkspaceAgentBinding({
+}): Promise<PortalVaultAgentBindingResult> {
+  const updated = updatePortalVaultAgentBinding({
     userId: input.userId,
-    workspace: input.workspace,
+    vault: input.vault,
     target: input.driver,
     enabled: false,
   });
-  await refreshPortalWorkspaceStatus(input.userId, input.workspace);
+  await refreshPortalVaultStatus(input.userId, input.vault);
   return {
     enabled: false,
-    driver: workspaceRefFromTarget(input.workspace, input.driver),
+    driver: vaultRefFromTarget(input.vault, input.driver),
     restarted: true,
     credentialBindings: updated.credentialBindings,
   };
@@ -492,108 +492,108 @@ export async function writePortalCredentialFile(input: {
   });
 }
 
-export async function queueProvisionWorkspace(
+export async function queueProvisionVault(
   userId: string,
-  workspace: string,
+  vault: string,
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
     line?: "coding" | "vertical";
   },
 ) {
-  return queueProvisionWorkspaceExecutor({
+  return queueProvisionVaultExecutor({
     userId,
-    workspace,
+    vault,
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
     line: options?.line,
   });
 }
 
-export async function cancelPortalWorkspaceProvision(
+export async function cancelPortalVaultProvision(
   userId: string,
-  workspace: string,
-): Promise<{ cancelled: true; workspace: string }> {
-  writeWorkspaceProvisionProgress(userId, workspace, {
+  vault: string,
+): Promise<{ cancelled: true; vault: string }> {
+  writeVaultProvisionProgress(userId, vault, {
     userId,
-    workspace,
+    vault,
     phase: "cancelled",
     status: "cancelled",
-    message: "workspace provision cancelled",
-    errorCode: "workspace-provision-cancelled",
+    message: "vault provision cancelled",
+    errorCode: "vault-provision-cancelled",
     retryable: true,
     done: true,
     updatedAt: new Date().toISOString(),
   });
   return {
     cancelled: true,
-    workspace,
+    vault,
   };
 }
 
-export async function switchPortalWorkspace(
+export async function switchPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
   target: PortalDriverTarget,
 ) {
-  return switchPortalWorkspaceExecutor({ userId, workspace, target });
+  return switchPortalVaultExecutor({ userId, vault, target });
 }
 
-export async function deletePortalWorkspace(
+export async function deletePortalVault(
   userId: string,
-  workspace: string,
-): Promise<{ deleted: true; workspace: string }> {
-  return deletePortalWorkspaceExecutor({ userId, workspace });
+  vault: string,
+): Promise<{ deleted: true; vault: string }> {
+  return deletePortalVaultExecutor({ userId, vault });
 }
 
-export async function permanentlyDeletePortalWorkspace(
+export async function permanentlyDeletePortalVault(
   userId: string,
-  workspace: string,
-): Promise<{ deleted: true; workspace: string }> {
-  return permanentlyDeletePortalWorkspaceExecutor({ userId, workspace });
+  vault: string,
+): Promise<{ deleted: true; vault: string }> {
+  return permanentlyDeletePortalVaultExecutor({ userId, vault });
 }
 
 
-export async function stopPortalWorkspace(
+export async function stopPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ stopped: true }> {
-  return stopPortalWorkspaceExecutor({ userId, workspace });
+  return stopPortalVaultExecutor({ userId, vault });
 }
 
-export async function startPortalWorkspace(
+export async function startPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ started: true }> {
-  return startPortalWorkspaceExecutor({ userId, workspace });
+  return startPortalVaultExecutor({ userId, vault });
 }
 
-export async function rebuildPortalWorkspace(
+export async function rebuildPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ rebuilt: true }> {
-  return rebuildPortalWorkspaceExecutor({ userId, workspace });
+  return rebuildPortalVaultExecutor({ userId, vault });
 }
 
-export async function updatePortalWorkspaceSelectedDriver(input: {
+export async function updatePortalVaultSelectedDriver(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   target: PortalDriverTarget;
 }): Promise<{ updated: true }> {
-  return updatePortalWorkspaceSelectedDriverExecutor(input);
+  return updatePortalVaultSelectedDriverExecutor(input);
 }
 
-export async function refreshPortalWorkspace(
+export async function refreshPortalVault(
   userId: string,
-  workspace: string,
+  vault: string,
 ): Promise<{ refreshed: true }> {
-  await refreshPortalWorkspaceStatus(userId, workspace);
+  await refreshPortalVaultStatus(userId, vault);
   return { refreshed: true };
 }
 
-export async function switchPortalWorkspaceLiveCredential(input: {
+export async function switchPortalVaultLiveCredential(input: {
   userId: string;
-  workspace: string;
+  vault: string;
   harness: ManagedHarness;
   credentialId: string;
 }): Promise<{
@@ -612,7 +612,7 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   if (!isManagedHarness(input.harness)) {
     throw new Error(`Unsupported harness '${input.harness}'`);
   }
-  await switchPortalWorkspaceLiveCredentialExecutor(input);
+  await switchPortalVaultLiveCredentialExecutor(input);
   return {
     switched: true,
     harness: input.harness,
@@ -620,18 +620,18 @@ export async function switchPortalWorkspaceLiveCredential(input: {
   };
 }
 
-export async function getPortalWorkspacePaseoDiagnostic(input: {
+export async function getPortalVaultPaseoDiagnostic(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }) {
-  return getPortalWorkspacePaseoDiagnosticExecutor(input);
+  return getPortalVaultPaseoDiagnosticExecutor(input);
 }
 
-export async function restartPortalWorkspacePaseoDaemon(input: {
+export async function restartPortalVaultPaseoDaemon(input: {
   userId: string;
-  workspace: string;
+  vault: string;
 }) {
-  return restartPortalWorkspacePaseoDaemonExecutor(input);
+  return restartPortalVaultPaseoDaemonExecutor(input);
 }
 
 export async function createPortalUser(input: {

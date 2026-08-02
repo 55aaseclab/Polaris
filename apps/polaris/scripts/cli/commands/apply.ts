@@ -1,12 +1,12 @@
-import { loadExecutableWorkspaceForCommand, runWorkspaceCommandWithEvolution } from "./shared.js";
+import { loadExecutableVaultForCommand, runVaultCommandWithEvolution } from "./shared.js";
 
 export async function applyCommand(project: string, userProfileId?: string): Promise<void> {
-  const { workspace, driver } = await loadExecutableWorkspaceForCommand("apply", project, userProfileId);
-  await runWorkspaceCommandWithEvolution({
-    workspace,
+  const { vault, driver } = await loadExecutableVaultForCommand("apply", project, userProfileId);
+  await runVaultCommandWithEvolution({
+    vault,
     command: "apply",
     execute: async () => {
-      await driver.apply(workspace);
+      await driver.apply(vault);
     },
   });
 }

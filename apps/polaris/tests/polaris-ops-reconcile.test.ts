@@ -7,8 +7,8 @@ import { runCli } from "../scripts/cli/main.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {
-  workspaceSelectionPath,
-  workspaceStatusPath,
+  vaultSelectionPath,
+  vaultStatusPath,
 } from "../scripts/output/state-store.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
@@ -52,22 +52,22 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
   }
 }
 
-test("ops reconcile-workspaces migrates status, removes selection, and rebuilds running docker workspaces", async () => {
+test("ops reconcile-vaults migrates status, removes selection, and rebuilds running docker vaults", async () => {
   const userId = uniqueName("ops-user");
-  const workspace = uniqueName("ops-workspace");
+  const vault = uniqueName("ops-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
-  const commandLogPath = path.join(os.tmpdir(), `${workspace}-docker.log`);
+  const commandLogPath = path.join(os.tmpdir(), `${vault}-docker.log`);
   try {
     await createUserCommand([userId, "--name", "Ops User", "--email", `${userId}@polaris.local`]);
-    await createCommand([workspace, "--user", userId]);
+    await createCommand([vault, "--user", userId]);
 
-    const statusPath = workspaceStatusPath(workspace, userId);
-    const selectionPath = workspaceSelectionPath(workspace, userId);
+    const statusPath = vaultStatusPath(vault, userId);
+    const selectionPath = vaultSelectionPath(vault, userId);
     fs.mkdirSync(path.dirname(statusPath), { recursive: true });
     fs.writeFileSync(statusPath, `${JSON.stringify({
       schemaVersion: 1,
-      project: workspace,
+      project: vault,
       driver: {
         backend: "docker",
       },
@@ -110,16 +110,16 @@ exit 0
         const output = await captureStdout(async () => {
           await runCli([
             "ops",
-            "reconcile-workspaces",
+            "reconcile-vaults",
             "--user",
             userId,
-            "--workspace",
-            workspace,
+            "--vault",
+            vault,
             "--json",
           ]);
         });
         const parsed = JSON.parse(output) as {
-          workspaceCount: number;
+          vaultCount: number;
           migratedCount: number;
           removedSelectionCount: number;
           rebuiltCount: number;
@@ -130,7 +130,7 @@ exit 0
             finalDriverStatus: string | null;
           }>;
         };
-        assert.equal(parsed.workspaceCount, 1);
+        assert.equal(parsed.vaultCount, 1);
         assert.equal(parsed.migratedCount, 1);
         assert.equal(parsed.removedSelectionCount, 1);
         assert.equal(parsed.rebuiltCount, 1);

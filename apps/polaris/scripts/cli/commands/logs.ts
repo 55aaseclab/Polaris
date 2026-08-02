@@ -1,6 +1,6 @@
-import { loadWorkspaceForCommand } from "./shared.js";
+import { loadVaultForCommand } from "./shared.js";
 
 export async function logsCommand(project: string, userProfileId?: string): Promise<void> {
-  const { workspace, driver } = loadWorkspaceForCommand("logs", project, userProfileId);
-  await driver.logs(workspace);
+  const { vault, driver } = loadVaultForCommand("logs", project, userProfileId);
+  await driver.logs(vault);
 }

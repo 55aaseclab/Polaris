@@ -3,7 +3,7 @@ FROM node:22-bookworm AS build
 
 RUN npm install -g pnpm@10.33.0
 
-WORKDIR /workspace
+WORKDIR /vault
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -31,19 +31,19 @@ RUN --mount=type=cache,target=/pnpm/store \
 
 FROM node:22-bookworm
 
-WORKDIR /workspace
+WORKDIR /vault
 
 ENV NODE_ENV=production
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY --from=build /workspace/node_modules ./node_modules
+COPY --from=build /vault/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
-COPY --from=build /workspace/packages/polaris-auth-server ./packages/polaris-auth-server
-COPY --from=build /workspace/packages/polaris-shell ./packages/polaris-shell
-COPY --from=build /workspace/packages/surface-coding ./packages/surface-coding
-COPY --from=build /workspace/packages/surface-wanghai ./packages/surface-wanghai
-COPY --from=build /workspace/apps/polaris/node_modules ./apps/polaris/node_modules
-COPY --from=build /workspace/apps/polaris/dist ./apps/polaris/dist
+COPY --from=build /vault/packages/polaris-auth-server ./packages/polaris-auth-server
+COPY --from=build /vault/packages/polaris-shell ./packages/polaris-shell
+COPY --from=build /vault/packages/surface-coding ./packages/surface-coding
+COPY --from=build /vault/packages/surface-wanghai ./packages/surface-wanghai
+COPY --from=build /vault/apps/polaris/node_modules ./apps/polaris/node_modules
+COPY --from=build /vault/apps/polaris/dist ./apps/polaris/dist
 
 EXPOSE 8787
 

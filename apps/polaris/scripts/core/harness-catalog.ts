@@ -5,7 +5,7 @@ export interface HarnessToolDefinition {
   harness: boolean;
 }
 
-const WORKSPACE_TOOL_CATALOG: HarnessToolDefinition[] = [
+const VAULT_TOOL_CATALOG: HarnessToolDefinition[] = [
   {
     id: "paseo",
     packageName: "@getpaseo/cli@latest",
@@ -62,28 +62,28 @@ const WORKSPACE_TOOL_CATALOG: HarnessToolDefinition[] = [
   },
 ];
 
-export function workspaceToolCatalog(): HarnessToolDefinition[] {
-  return [...WORKSPACE_TOOL_CATALOG];
+export function vaultToolCatalog(): HarnessToolDefinition[] {
+  return [...VAULT_TOOL_CATALOG];
 }
 
-export function workspaceHarnessIds(): Array<"codex" | "claude" | "copilot" | "opencode" | "pi"> {
-  return WORKSPACE_TOOL_CATALOG.filter((tool) => tool.harness).map((tool) => tool.id) as Array<
+export function vaultHarnessIds(): Array<"codex" | "claude" | "copilot" | "opencode" | "pi"> {
+  return VAULT_TOOL_CATALOG.filter((tool) => tool.harness).map((tool) => tool.id) as Array<
     "codex" | "claude" | "copilot" | "opencode" | "pi"
   >;
 }
 
-export function workspaceToolPackageSpecs(): string[] {
-  return WORKSPACE_TOOL_CATALOG.map((tool) => tool.packageName);
+export function vaultToolPackageSpecs(): string[] {
+  return VAULT_TOOL_CATALOG.map((tool) => tool.packageName);
 }
 
-export function workspaceNonPaseoToolPackageSpecs(): string[] {
-  return WORKSPACE_TOOL_CATALOG
+export function vaultNonPaseoToolPackageSpecs(): string[] {
+  return VAULT_TOOL_CATALOG
     .filter((tool) => tool.id !== "paseo")
     .map((tool) => tool.packageName);
 }
 
-export function workspacePaseoPackageSpec(): string {
-  const paseo = WORKSPACE_TOOL_CATALOG.find((tool) => tool.id === "paseo");
+export function vaultPaseoPackageSpec(): string {
+  const paseo = VAULT_TOOL_CATALOG.find((tool) => tool.id === "paseo");
   if (!paseo) {
     throw new Error("Paseo tool definition is missing.");
   }

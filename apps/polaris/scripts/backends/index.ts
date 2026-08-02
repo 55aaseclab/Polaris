@@ -12,7 +12,7 @@ const registry = new Map<string, BackendDriver>([
 export function getBackendDriver(kind: string): BackendDriver {
   const driver = registry.get(kind);
   if (!driver) {
-    throw new Error(`Workspace backend '${kind}' is not supported`);
+    throw new Error(`Vault backend '${kind}' is not supported`);
   }
   return driver;
 }

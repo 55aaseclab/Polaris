@@ -2,30 +2,30 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import type {
-  WorkspaceSpec,
+  VaultSpec,
   PlainEnvVar,
   AuthFile,
   ServicePort,
-  WorkspaceAttachments,
+  VaultAttachments,
   DurableAttachment,
   DirectAttachmentConfig,
   DirectDurableAttachmentConfig,
   DirectEphemeralRuntimeConfig,
-  WorkspaceProfile,
-  WorkspaceAgentContract,
+  VaultProfile,
+  VaultAgentContract,
   UserProfile,
   Credential,
   CredentialKind,
-  WorkspaceCredentialBinding,
-  ResolvedWorkspaceCredentialBinding,
-} from "../core/workspace.js";
-import { validateWorkspace } from "../core/capabilities.js";
-import { workspaceHarnessIds } from "../core/harness-catalog.js";
+  VaultCredentialBinding,
+  ResolvedVaultCredentialBinding,
+} from "../core/vault.js";
+import { validateVault } from "../core/capabilities.js";
+import { vaultHarnessIds } from "../core/harness-catalog.js";
 import {
   defaultMountPathForCredentialFile,
   userIdentityDurablePaths,
 } from "../core/identity-layout.js";
-import { readWorkspaceDriverSelection } from "../output/state-store.js";
+import { readVaultDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import {
   wanghaiProfileEnvAuthFile,
@@ -38,11 +38,11 @@ import { polarisUsersRoot, repoRelativePath, repoRoot } from "../utils/paths.js"
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
 
-const BUILTIN_PROFILES: Record<string, WorkspaceProfile> = {
+const BUILTIN_PROFILES: Record<string, VaultProfile> = {
   morpheus: {
     name: "morpheus",
     assetBaseName: "morpheus",
-    workspaceAlias: "Morpheus",
+    vaultAlias: "Morpheus",
     defaults: {
       runtime: {
         baseImage: "ttl.sh/polaris-demo-debian13-1782126452:24h",
@@ -67,9 +67,9 @@ const SUPPORTED_CREDENTIAL_KINDS = new Set<CredentialKind>([
   "cloud-token",
 ]);
 
-export function parseWorkspaceReference(projectRef: string): {
+export function parseVaultReference(projectRef: string): {
   project: string;
-  backendHint?: WorkspaceSpec["backend"]["kind"];
+  backendHint?: VaultSpec["backend"]["kind"];
   profileHint?: string;
 } {
   const match = /^(.+?)@((?:pod)|(?:docker)|(?:kubevirt-vm))(?:[:]([a-zA-Z0-9_.-]+))?$/.exec(projectRef.trim());
@@ -78,20 +78,20 @@ export function parseWorkspaceReference(projectRef: string): {
   }
   return {
     project: match[1],
-    backendHint: match[2] as WorkspaceSpec["backend"]["kind"],
+    backendHint: match[2] as VaultSpec["backend"]["kind"],
     profileHint: match[3] ? String(match[3]) : undefined,
   };
 }
 
 function resolveBackendHint(
   project: string,
-  explicitHint?: WorkspaceSpec["backend"]["kind"],
+  explicitHint?: VaultSpec["backend"]["kind"],
   userProfileId?: string,
-): WorkspaceSpec["backend"]["kind"] | undefined {
+): VaultSpec["backend"]["kind"] | undefined {
   if (explicitHint) {
     return explicitHint;
   }
-  return readWorkspaceDriverSelection(project, userProfileId)?.backend;
+  return readVaultDriverSelection(project, userProfileId)?.backend;
 }
 
 function resolveProfileHint(
@@ -102,7 +102,7 @@ function resolveProfileHint(
   if (explicitHint) {
     return explicitHint;
   }
-  return readWorkspaceDriverSelection(project, userProfileId)?.profile;
+  return readVaultDriverSelection(project, userProfileId)?.profile;
 }
 
 function loadPodProfileDefaults(profileName: string): { backendProfile?: string } {
@@ -118,11 +118,11 @@ function loadPodProfileDefaults(profileName: string): { backendProfile?: string 
 
 function specCandidates(
   project: string,
-  backendHint?: WorkspaceSpec["backend"]["kind"],
+  backendHint?: VaultSpec["backend"]["kind"],
   userProfileId?: string,
 ): string[] {
   const userScopedSpecs = (
-    backendKind: WorkspaceSpec["backend"]["kind"] | "kubevirt",
+    backendKind: VaultSpec["backend"]["kind"] | "kubevirt",
   ): string[] => {
     const backendFile =
       backendKind === "kubevirt-vm" || backendKind === "kubevirt"
@@ -137,7 +137,7 @@ function specCandidates(
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name);
     return candidateUserIds.map((candidateUserId) =>
-      path.join(USER_SECRETS_ROOT, candidateUserId, "workspaces", project, backendFile)
+      path.join(USER_SECRETS_ROOT, candidateUserId, "vaults", project, backendFile)
     );
   };
   const preferredBackend =
@@ -157,7 +157,7 @@ function specCandidates(
   ]));
 }
 
-function resolveWorkspaceProfile(rawProfile: unknown, projectName: string): WorkspaceProfile {
+function resolveVaultProfile(rawProfile: unknown, projectName: string): VaultProfile {
   const profileName =
     typeof rawProfile === "string" && rawProfile.trim()
       ? rawProfile.trim()
@@ -166,7 +166,7 @@ function resolveWorkspaceProfile(rawProfile: unknown, projectName: string): Work
         : "morpheus";
   const profile = BUILTIN_PROFILES[profileName];
   if (!profile) {
-    throw new Error(`Unknown workspace profile '${profileName}'`);
+    throw new Error(`Unknown vault profile '${profileName}'`);
   }
   return profile;
 }
@@ -179,8 +179,8 @@ function userCredentialRegistryDir(userProfileId: string): string {
   return path.join(USER_SECRETS_ROOT, userProfileId, "credentials");
 }
 
-function listUserWorkspaceDirs(userProfileId: string): string[] {
-  const root = path.join(USER_SECRETS_ROOT, userProfileId, "workspaces");
+function listUserVaultDirs(userProfileId: string): string[] {
+  const root = path.join(USER_SECRETS_ROOT, userProfileId, "vaults");
   if (!fs.existsSync(root)) {
     return [];
   }
@@ -208,7 +208,7 @@ function buildCompatibilityUserProfile(args: {
     name,
     email,
     secretsRoot: repoRelativePath(import.meta.url, path.join(USER_SECRETS_ROOT, id)),
-    workspaces: [],
+    vaults: [],
     github: {},
     ssh: {
       mode: "managed-key",
@@ -262,7 +262,7 @@ function normalizeCredentialMetadata(
 
 function credentialKindAttachmentKind(
   _kind: CredentialKind,
-): ResolvedWorkspaceCredentialBinding["attachmentKind"] {
+): ResolvedVaultCredentialBinding["attachmentKind"] {
   return "user-identity-state";
 }
 
@@ -423,7 +423,7 @@ function credentialFilesToAuthFiles(
 
 function normalizeCredentialBindings(
   rawBindings: unknown,
-): WorkspaceCredentialBinding[] {
+): VaultCredentialBinding[] {
   if (!Array.isArray(rawBindings)) {
     return [];
   }
@@ -480,18 +480,18 @@ function buildCompatibilityCredentials(
 }
 
 function resolveCredentialBindings(args: {
-  directBindings: WorkspaceCredentialBinding[];
+  directBindings: VaultCredentialBinding[];
   registryCredentials: Credential[];
   compatibilityCredentials: Credential[];
-}): ResolvedWorkspaceCredentialBinding[] {
+}): ResolvedVaultCredentialBinding[] {
   const registryById = new Map(args.registryCredentials.map((credential) => [credential.id, credential]));
-  const resolved: ResolvedWorkspaceCredentialBinding[] = [];
+  const resolved: ResolvedVaultCredentialBinding[] = [];
 
   for (const binding of args.directBindings) {
     const credential = registryById.get(binding.credentialId);
     if (!credential) {
       throw new Error(
-        `Workspace binding '${binding.purpose}' references unknown credential '${binding.credentialId}'`,
+        `Vault binding '${binding.purpose}' references unknown credential '${binding.credentialId}'`,
       );
     }
     if (!credential.purposes.includes(binding.purpose)) {
@@ -616,7 +616,7 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
       name: String(data.name ?? ""),
       email: String(data.email ?? ""),
       secretsRoot: repoRelativePath(import.meta.url, path.join(USER_SECRETS_ROOT, profileId)),
-      workspaces: listUserWorkspaceDirs(profileId),
+      vaults: listUserVaultDirs(profileId),
       github: {
         account: data.github?.account
           ? String(data.github.account)
@@ -666,8 +666,8 @@ function normalizeDirectDurableAttachmentConfig(raw: unknown): DirectDurableAtta
   }
   const entry = raw as Record<string, unknown>;
   return {
-    scope: entry.scope === "user" ? "user" : "workspace",
-    sharing: entry.sharing === "cross-workspace" ? "cross-workspace" : "exclusive",
+    scope: entry.scope === "user" ? "user" : "vault",
+    sharing: entry.sharing === "cross-vault" ? "cross-vault" : "exclusive",
     mountRoot: String(entry.mount_root ?? ""),
     durablePaths: Array.isArray(entry.durable_paths) ? entry.durable_paths.map((item) => String(item)) : [],
     source: {
@@ -702,46 +702,46 @@ function normalizeDirectAttachmentConfig(raw: unknown): DirectAttachmentConfig |
     return null;
   }
   const attachments = raw as Record<string, unknown>;
-  const workspaceData = normalizeDirectDurableAttachmentConfig(attachments["workspace-data"]);
-  const workspaceRuntimeState = normalizeDirectDurableAttachmentConfig(attachments["workspace-runtime-state"]);
+  const vaultData = normalizeDirectDurableAttachmentConfig(attachments["vault-data"]);
+  const vaultRuntimeState = normalizeDirectDurableAttachmentConfig(attachments["vault-runtime-state"]);
   const userIdentityState = normalizeDirectDurableAttachmentConfig(attachments["user-identity-state"]);
   const ephemeralRuntime = normalizeDirectEphemeralRuntimeConfig(attachments["ephemeral-runtime"]);
-  if (!workspaceData || !workspaceRuntimeState || !userIdentityState || !ephemeralRuntime) {
+  if (!vaultData || !vaultRuntimeState || !userIdentityState || !ephemeralRuntime) {
     return null;
   }
   return {
-    "workspace-data": workspaceData,
-    "workspace-runtime-state": workspaceRuntimeState,
+    "vault-data": vaultData,
+    "vault-runtime-state": vaultRuntimeState,
     "user-identity-state": userIdentityState,
     "ephemeral-runtime": ephemeralRuntime,
   };
 }
 
-function buildWorkspaceAttachmentsFromDirectConfig(config: DirectAttachmentConfig): WorkspaceAttachments {
+function buildVaultAttachmentsFromDirectConfig(config: DirectAttachmentConfig): VaultAttachments {
   const identityDurablePaths = Array.from(new Set([
     ...config["user-identity-state"].durablePaths,
     ...userIdentityDurablePaths(config["user-identity-state"].mountRoot),
   ]));
   const runtimeDurablePaths = Array.from(new Set([
-    ...config["workspace-runtime-state"].durablePaths,
-    `${config["workspace-runtime-state"].mountRoot.replace(/\/+$/, "")}/paseo/evolution`,
+    ...config["vault-runtime-state"].durablePaths,
+    `${config["vault-runtime-state"].mountRoot.replace(/\/+$/, "")}/paseo/evolution`,
   ]));
   return {
-    workspaceData: buildAttachment(
-      "workspace-data",
-      config["workspace-data"].scope,
-      config["workspace-data"].sharing,
-      config["workspace-data"].mountRoot,
-      config["workspace-data"].durablePaths,
-      config["workspace-data"].source,
+    vaultData: buildAttachment(
+      "vault-data",
+      config["vault-data"].scope,
+      config["vault-data"].sharing,
+      config["vault-data"].mountRoot,
+      config["vault-data"].durablePaths,
+      config["vault-data"].source,
     ),
-    workspaceRuntimeState: buildAttachment(
-      "workspace-runtime-state",
-      config["workspace-runtime-state"].scope,
-      config["workspace-runtime-state"].sharing,
-      config["workspace-runtime-state"].mountRoot,
+    vaultRuntimeState: buildAttachment(
+      "vault-runtime-state",
+      config["vault-runtime-state"].scope,
+      config["vault-runtime-state"].sharing,
+      config["vault-runtime-state"].mountRoot,
       runtimeDurablePaths,
-      config["workspace-runtime-state"].source,
+      config["vault-runtime-state"].source,
     ),
     userIdentityState: buildAttachment(
       "user-identity-state",
@@ -765,45 +765,45 @@ function translateLegacyAttachments(args: {
   persistState: boolean;
   claimName: string;
   authFiles: AuthFile[];
-  backendKind: WorkspaceSpec["backend"]["kind"];
-}): WorkspaceAttachments {
-  const workspaceVolumeSource = args.persistState
+  backendKind: VaultSpec["backend"]["kind"];
+}): VaultAttachments {
+  const vaultVolumeSource = args.persistState
     ? {
         kind: "persistent-volume" as const,
         volumeRef: args.claimName,
-        description: `workspace-scoped persistent storage for ${args.projectName}`,
+        description: `vault-scoped persistent storage for ${args.projectName}`,
       }
     : {
         kind: "generated-material" as const,
-        description: `ephemeral workspace storage for ${args.projectName}`,
+        description: `ephemeral vault storage for ${args.projectName}`,
       };
   const identityFiles = args.authFiles;
 
   return {
-    workspaceData: buildAttachment(
-      "workspace-data",
-      "workspace",
+    vaultData: buildAttachment(
+      "vault-data",
+      "vault",
       "exclusive",
-      "/workspace/project",
-      ["/workspace/project"],
-      workspaceVolumeSource,
+      "/vault/project",
+      ["/vault/project"],
+      vaultVolumeSource,
     ),
-    workspaceRuntimeState: buildAttachment(
-      "workspace-runtime-state",
-      "workspace",
+    vaultRuntimeState: buildAttachment(
+      "vault-runtime-state",
+      "vault",
       "exclusive",
-      "/workspace/state",
-      ["/workspace/state/paseo", "/workspace/state/paseo/evolution"],
+      "/vault/state",
+      ["/vault/state/paseo", "/vault/state/paseo/evolution"],
       {
-        ...workspaceVolumeSource,
+        ...vaultVolumeSource,
         subPath: "state",
-        description: `workspace runtime state for ${args.projectName}`,
+        description: `vault runtime state for ${args.projectName}`,
       },
     ),
     userIdentityState: buildAttachment(
       "user-identity-state",
       "user",
-      "cross-workspace",
+      "cross-vault",
       "/identity",
       userIdentityDurablePaths("/identity"),
       {
@@ -814,9 +814,9 @@ function translateLegacyAttachments(args: {
       },
     ),
     ephemeralRuntime: {
-      mountRoot: "/run/workspace",
-      paths: ["/run/workspace/tmp", "/run/workspace/pids", "/run/workspace/sockets"],
-      staleArtifacts: ["/run/workspace/pids/paseo.pid"],
+      mountRoot: "/run/vault",
+      paths: ["/run/vault/tmp", "/run/vault/pids", "/run/vault/sockets"],
+      staleArtifacts: ["/run/vault/pids/paseo.pid"],
     },
   };
 }
@@ -858,7 +858,7 @@ function normalizeAgentKind(rawKind: unknown): string {
   return kind;
 }
 
-function buildAgentContract(home: string, agentKind: string): WorkspaceAgentContract {
+function buildAgentContract(home: string, agentKind: string): VaultAgentContract {
   const enabled = true;
   const stateRoot = `${home}/.paseo`;
   const evolutionRoot = `${stateRoot}/evolution`;
@@ -876,14 +876,14 @@ function buildAgentContract(home: string, agentKind: string): WorkspaceAgentCont
       requiresDaemon: true,
       supportsPairing: true,
     },
-    harnesses: workspaceHarnessIds(),
+    harnesses: vaultHarnessIds(),
     runtime: {
       stateRoot,
       evolutionRoot,
       daemonAddress: "0.0.0.0:6767",
       readyFile: "/tmp/.ready",
       pairingFile: `${stateRoot}/pairing.json`,
-      staleRuntimeArtifacts: [`${stateRoot}/paseo.pid`, "/run/workspace/pids/paseo.pid"],
+      staleRuntimeArtifacts: [`${stateRoot}/paseo.pid`, "/run/vault/pids/paseo.pid"],
     },
   };
 }
@@ -921,16 +921,16 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
   return [];
 }
 
-export function resolveWorkspaceConfigPath(
+export function resolveVaultConfigPath(
   projectRef: string,
   userProfileId?: string,
 ): {
   configPath: string;
   project: string;
-  backendHint?: WorkspaceSpec["backend"]["kind"];
+  backendHint?: VaultSpec["backend"]["kind"];
   profileHint?: string;
 } {
-  const { project, backendHint, profileHint } = parseWorkspaceReference(projectRef);
+  const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   if (!userProfileId?.trim()) {
     assertNoProjectNameCollision(project);
   }
@@ -949,12 +949,12 @@ export function resolveWorkspaceConfigPath(
   };
 }
 
-export function loadWorkspaceFromConfigPath(
+export function loadVaultFromConfigPath(
   configPath: string,
   project = "",
-  backendHint?: WorkspaceSpec["backend"]["kind"],
+  backendHint?: VaultSpec["backend"]["kind"],
   profileHint?: string,
-): WorkspaceSpec {
+): VaultSpec {
   const data = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
   const backend = (data.backend ?? {}) as Record<string, unknown>;
   const runtime = (data.runtime ?? {}) as Record<string, unknown>;
@@ -966,7 +966,7 @@ export function loadWorkspaceFromConfigPath(
   const service = (data.service ?? {}) as Record<string, unknown>;
 
   const projectName = String(data.project ?? project);
-  const profile = resolveWorkspaceProfile(data.profile, projectName);
+  const profile = resolveVaultProfile(data.profile, projectName);
   const runtimeUser = String(runtime.user ?? "");
   const toolingGitUserName = tooling.git_user_name ? String(tooling.git_user_name) : undefined;
   const toolingGitUserEmail = tooling.git_user_email ? String(tooling.git_user_email) : undefined;
@@ -977,18 +977,18 @@ export function loadWorkspaceFromConfigPath(
     gitUserName: toolingGitUserName,
     gitUserEmail: toolingGitUserEmail,
   });
-  const backendKind = String(backend.kind ?? "pod") as WorkspaceSpec["backend"]["kind"];
+  const backendKind = String(backend.kind ?? "pod") as VaultSpec["backend"]["kind"];
   const podProfileDefaults = backendKind === "pod" && profileHint
     ? loadPodProfileDefaults(profileHint)
     : {};
-  const workspaceAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
+  const vaultAuthFiles = normalizeAuthFiles(auth.files, path.dirname(configPath));
   const registryCredentials = loadUserCredentials(userProfile.id, home);
   const directCredentialBindings = normalizeCredentialBindings(
     (data.credentials as Record<string, unknown> | undefined)?.bindings,
   );
   const compatibilityUserProfile = {
     ...userProfile,
-    authFiles: mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles),
+    authFiles: mergeAuthFiles(vaultAuthFiles, userProfile.authFiles),
   };
   const compatibilityCredentials = buildCompatibilityCredentials(
     compatibilityUserProfile,
@@ -1007,10 +1007,10 @@ export function loadWorkspaceFromConfigPath(
   const persistState = Boolean(agent.persist_state ?? true);
   const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
   const directAttachmentConfig = normalizeDirectAttachmentConfig(data.attachments);
-  const compatibilityAuthFiles = mergeAuthFiles(workspaceAuthFiles, userProfile.authFiles);
+  const compatibilityAuthFiles = mergeAuthFiles(vaultAuthFiles, userProfile.authFiles);
   const runtimeAuthFiles = mergeAuthFiles(boundAuthFiles, compatibilityAuthFiles);
   const attachments = directAttachmentConfig
-    ? buildWorkspaceAttachmentsFromDirectConfig(directAttachmentConfig)
+    ? buildVaultAttachmentsFromDirectConfig(directAttachmentConfig)
     : translateLegacyAttachments({
         projectName,
         home,
@@ -1021,7 +1021,7 @@ export function loadWorkspaceFromConfigPath(
     });
   const agentContract = buildAgentContract(home, agentKind);
 
-  const workspace: WorkspaceSpec = {
+  const vault: VaultSpec = {
     identity: { projectName },
     profile,
     userProfile,
@@ -1040,8 +1040,8 @@ export function loadWorkspaceFromConfigPath(
       persistState,
       claimName,
       durablePaths: [
-        ...attachments.workspaceData.durablePaths,
-        ...attachments.workspaceRuntimeState.durablePaths,
+        ...attachments.vaultData.durablePaths,
+        ...attachments.vaultRuntimeState.durablePaths,
         ...attachments.userIdentityState.durablePaths,
       ]
     },
@@ -1087,8 +1087,8 @@ export function loadWorkspaceFromConfigPath(
     runtimeContract: {
       minimalInvariants: [
         `runtime home SHALL resolve to ${home}`,
-        `${agentContract.runtime.stateRoot} SHALL assemble from workspace-runtime-state`,
-        `${agentContract.runtime.evolutionRoot} SHALL assemble from workspace-runtime-state`,
+        `${agentContract.runtime.stateRoot} SHALL assemble from vault-runtime-state`,
+        `${agentContract.runtime.evolutionRoot} SHALL assemble from vault-runtime-state`,
         `${home}/.codex, ${home}/.claude, ${home}/.copilot, ${home}/.pi, and OpenCode runtime state SHALL assemble from user-identity-state`,
         `Codex XDG config/data/state SHALL assemble from user-identity-state`,
         `${home}/.ssh SHALL assemble from user-identity-state with strict key permissions`,
@@ -1101,6 +1101,6 @@ export function loadWorkspaceFromConfigPath(
     }
   };
 
-  validateWorkspace(workspace);
-  return workspace;
+  validateVault(vault);
+  return vault;
 }

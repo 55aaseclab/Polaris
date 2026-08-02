@@ -2,7 +2,7 @@ import { createCommand } from "./commands/create.js";
 import { createUserCommand } from "./commands/create-user.js";
 import { deleteUserCommand } from "./commands/delete-user.js";
 import { userCommand } from "./commands/user.js";
-import { workspaceCommand } from "./commands/workspace.js";
+import { vaultCommand } from "./commands/vault.js";
 import { applyCommand } from "./commands/apply.js";
 import { renderCommand } from "./commands/render.js";
 import { startCommand } from "./commands/start.js";
@@ -26,10 +26,10 @@ import {
 } from "./commands/skill.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "workspace", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor", "ops"]);
+const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "vault", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor", "ops"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|workspace|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor|ops> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|vault|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor|ops> ...");
 }
 
 function extractUserProfileId(argv: string[]): string | undefined {
@@ -66,8 +66,8 @@ export async function runCli(argv: string[]): Promise<void> {
     await userCommand(argv.slice(1));
     return;
   }
-  if (first === "workspace") {
-    await workspaceCommand(argv.slice(1));
+  if (first === "vault") {
+    await vaultCommand(argv.slice(1));
     return;
   }
   if (first === "create-user") {
