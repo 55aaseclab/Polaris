@@ -56,15 +56,29 @@ export function polarisStateRoot(importMetaUrl: string): string {
   return path.join(polarisDataRoot(importMetaUrl), "state");
 }
 
-export function polarisNetfsLocalExportRoot(importMetaUrl: string): string {
+function resolveOptionalConfiguredPath(importMetaUrl: string, envKey: string): string | null {
   const root = repoRoot(importMetaUrl);
-  const configured = process.env.POLARIS_NETFS_LOCAL_EXPORT_ROOT?.trim();
+  const configured = process.env[envKey]?.trim()
+    || (readEnvFileValue(path.join(root, ".env.dev"), envKey) ?? "");
   if (configured) {
     return path.isAbsolute(configured)
       ? configured
       : path.resolve(root, configured);
   }
+  return null;
+}
+
+export function polarisNetfsLocalExportRoot(importMetaUrl: string): string {
+  const configured = resolveOptionalConfiguredPath(importMetaUrl, "POLARIS_NETFS_LOCAL_EXPORT_ROOT");
+  if (configured) {
+    return configured;
+  }
   return path.join(polarisDataRoot(importMetaUrl), "exports", "workspaces");
+}
+
+export function polarisWanghaiDataRoot(importMetaUrl: string): string {
+  return resolveOptionalConfiguredPath(importMetaUrl, "POLARIS_WANGHAI_DATA_ROOT")
+    ?? path.join(polarisDataRoot(importMetaUrl), "wanghai");
 }
 
 export function polarisConfigDockerRoot(importMetaUrl: string): string {

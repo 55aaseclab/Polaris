@@ -29,5 +29,8 @@ test("paseoSurfacePath builds left-right host routes", () => {
 });
 
 test("surface-coding no longer tracks welcome as a shell route to strip", () => {
-  assert.equal(PASEO_APP_SHELL_ROUTES_TO_REMOVE.includes("/welcome"), false);
+  assert.deepEqual(
+    [...PASEO_APP_SHELL_ROUTES_TO_REMOVE],
+    ["/", "/auth/callback", "/settings", "/settings/user", "/hosts", "/v"],
+  );
 });

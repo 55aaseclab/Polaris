@@ -15,7 +15,7 @@ import {
   workspacePaseoPackageSpec,
   workspaceToolCatalog,
 } from "../../core/harness-catalog.js";
-import { resolveWanghaiProfileDataRoots } from "../../config/wanghai-env.js";
+import { resolveWanghaiHostDataRoots } from "../../config/wanghai-env.js";
 import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
@@ -235,7 +235,7 @@ function buildWanghaiDataRootMountLines(workspace: WorkspaceSpec): string[] {
   if (!workspaceEnablesWanghaiPortal(workspace)) {
     return [];
   }
-  const roots = resolveWanghaiProfileDataRoots(workspace.runtime.authFiles);
+  const roots = resolveWanghaiHostDataRoots(import.meta.url);
   const mounts: Array<{ source: string; target: string }> = [];
   if (roots.workspacesRoot) {
     mounts.push({
