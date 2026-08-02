@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
-import { loadWorkspaceFromConfigPath } from "../config/load.js";
+import {
+  loadWorkspaceFromConfigPath,
+  readUserProfileAuthFiles,
+} from "../config/load.js";
 import {
   MANAGED_HARNESSES,
   PRESET_SOURCE_COMMIT,
@@ -19,6 +22,8 @@ import {
   workspaceStatusPath,
 } from "../output/state-store.js";
 import type { Credential, ServicePort, WorkspaceStatus } from "./workspace.js";
+import type { AuthFile } from "./workspace.js";
+import { WANGHAI_PROFILE_ENV_FILE_KEY } from "../config/scaffold.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -61,6 +66,7 @@ export interface PortalCredentialSummary {
   active: boolean;
   liveSwitchSupported: boolean;
   presetId?: string;
+  readOnly?: boolean;
 }
 
 export interface PortalCredentialCatalog {
@@ -593,45 +599,129 @@ function inferPortalCredentialHarness(
   return undefined;
 }
 
+const PROFILE_AUTH_CREDENTIAL_ID_PREFIX = "profile-auth:";
+
+function profileAuthCredentialId(file: AuthFile): string {
+  return `${PROFILE_AUTH_CREDENTIAL_ID_PREFIX}${file.key}`;
+}
+
+function portalRelativeUserPath(userId: string, filePath: string | undefined): string {
+  const normalized = String(filePath ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const userRoot = path.resolve(USER_ROOT, userId);
+  const absolute = path.resolve(normalized);
+  if (absolute === userRoot || absolute.startsWith(`${userRoot}${path.sep}`)) {
+    return path.relative(userRoot, absolute).replace(/\\/g, "/");
+  }
+  return normalized.replace(/\\/g, "/");
+}
+
+function inferPortalProfileAuthKind(file: AuthFile): Credential["kind"] {
+  if (file.mountPath.includes("/.ssh/")) {
+    return "ssh-key";
+  }
+  if (file.mountPath.includes("/.codex/") || file.key === "codex-auth.json") {
+    return "codex-auth";
+  }
+  if (file.key.endsWith(".json")) {
+    return "api-key";
+  }
+  return "cloud-token";
+}
+
+function portalProfileAuthLabel(file: AuthFile): string {
+  if (file.key === WANGHAI_PROFILE_ENV_FILE_KEY) {
+    return "Wanghai .env";
+  }
+  return file.key;
+}
+
+function summarizePortalProfileAuthFile(
+  userId: string,
+  file: AuthFile,
+): PortalCredentialSummary {
+  const kind = inferPortalProfileAuthKind(file);
+  const harness = inferPortalCredentialHarness(kind, {});
+  const sourcePath = portalRelativeUserPath(userId, file.sourcePath);
+  const paths = [sourcePath || file.mountPath].filter(Boolean);
+  return {
+    id: profileAuthCredentialId(file),
+    kind,
+    label: portalProfileAuthLabel(file),
+    purposes: ["profile-auth-file"],
+    status: file.content !== undefined ? "ready" : "error",
+    paths,
+    harness,
+    active: false,
+    liveSwitchSupported: false,
+    readOnly: true,
+  };
+}
+
+function listPortalProfileAuthCredentials(userId: string): PortalCredentialSummary[] {
+  return readUserProfileAuthFiles(userId).map((file) => summarizePortalProfileAuthFile(userId, file));
+}
+
+export function readPortalProfileAuthCredentialRecord(
+  userId: string,
+  credentialId: string,
+): PortalCredentialRecord | null {
+  const file = readUserProfileAuthFiles(userId).find((entry) => profileAuthCredentialId(entry) === credentialId);
+  if (!file) {
+    return null;
+  }
+  return {
+    credential: summarizePortalProfileAuthFile(userId, file),
+    files: [{
+      key: file.key,
+      sourcePath: portalRelativeUserPath(userId, file.sourcePath) || file.mountPath,
+      mountPath: file.mountPath,
+      content: file.content ?? "",
+    }],
+  };
+}
+
 export function listPortalCredentials(userId: string): PortalCredentialSummary[] {
   const credentialsRoot = path.join(USER_ROOT, userId, "credentials");
-  if (!fs.existsSync(credentialsRoot)) {
-    return [];
-  }
-  return fs
-    .readdirSync(credentialsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
-    .map((entry) => {
-      const data = readYAML(path.join(credentialsRoot, entry.name)) ?? {};
-      const material = data.materialRef as Record<string, unknown> | undefined;
-      const metadata = typeof data.metadata === "object" && data.metadata
-        ? data.metadata as Record<string, unknown>
-        : {};
-      const files = Array.isArray(material?.files)
-        ? material?.files as Array<Record<string, unknown>>
-        : [];
-      const paths = files.map((file) => String(file.source_path ?? file.sourcePath ?? file.key ?? "" )).filter(Boolean);
-      const status = credentialMaterialStatus(userId, paths, String(data.status ?? "unknown"));
-      const kind = String(data.kind ?? "unknown") as Credential["kind"];
-      const harness = inferPortalCredentialHarness(kind, metadata);
-      return {
-        id: String(data.id ?? entry.name.replace(/\.ya?ml$/, "")),
-        kind,
-        label: String(data.label ?? entry.name),
-        purposes: Array.isArray(data.purposes)
-          ? data.purposes.map((value) => String(value)).filter(Boolean)
-          : [],
-        status,
-        paths,
-        harness,
-        providerName: typeof metadata.providerName === "string" ? metadata.providerName : undefined,
-        baseUrl: typeof metadata.baseUrl === "string" ? metadata.baseUrl : undefined,
-        active: metadata.active === true,
-        liveSwitchSupported: metadata.liveSwitchSupported === true
-          || (typeof harness === "string" && supportsLiveCredentialSwitch(harness)),
-        presetId: typeof metadata.presetId === "string" ? metadata.presetId : undefined,
-      };
-    })
+  const managed = !fs.existsSync(credentialsRoot)
+    ? []
+    : fs
+      .readdirSync(credentialsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
+      .map((entry) => {
+        const data = readYAML(path.join(credentialsRoot, entry.name)) ?? {};
+        const material = data.materialRef as Record<string, unknown> | undefined;
+        const metadata = typeof data.metadata === "object" && data.metadata
+          ? data.metadata as Record<string, unknown>
+          : {};
+        const files = Array.isArray(material?.files)
+          ? material?.files as Array<Record<string, unknown>>
+          : [];
+        const paths = files.map((file) => String(file.source_path ?? file.sourcePath ?? file.key ?? "" )).filter(Boolean);
+        const status = credentialMaterialStatus(userId, paths, String(data.status ?? "unknown"));
+        const kind = String(data.kind ?? "unknown") as Credential["kind"];
+        const harness = inferPortalCredentialHarness(kind, metadata);
+        return {
+          id: String(data.id ?? entry.name.replace(/\.ya?ml$/, "")),
+          kind,
+          label: String(data.label ?? entry.name),
+          purposes: Array.isArray(data.purposes)
+            ? data.purposes.map((value) => String(value)).filter(Boolean)
+            : [],
+          status,
+          paths,
+          harness,
+          providerName: typeof metadata.providerName === "string" ? metadata.providerName : undefined,
+          baseUrl: typeof metadata.baseUrl === "string" ? metadata.baseUrl : undefined,
+          active: metadata.active === true,
+          liveSwitchSupported: metadata.liveSwitchSupported === true
+            || (typeof harness === "string" && supportsLiveCredentialSwitch(harness)),
+          presetId: typeof metadata.presetId === "string" ? metadata.presetId : undefined,
+        };
+      });
+  return [...managed, ...listPortalProfileAuthCredentials(userId)]
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 

@@ -315,6 +315,11 @@ function allocateWorkspaceServicePort(unavailableExtra: Iterable<number> = []): 
 /** Vertical wanghai portal listens in-container; coding-only images do not. */
 export const WANGHAI_PORTAL_CONTAINER_PORT = "9090";
 export const DEFAULT_WANGHAI_WORKSPACE_IMAGE = "wanghai-admin-portal:latest";
+export const WANGHAI_PROFILE_ENV_FILE_KEY = "wanghai-root-env";
+export const WANGHAI_PROFILE_ENV_SOURCE_PATH = "wanghai/.env";
+export const WANGHAI_PROFILE_ENV_MOUNT_PATH = "/opt/wanghai/.env";
+export const WANGHAI_WORKSPACES_RUNTIME_ROOT = "/workspace/project/workspaces";
+export const WANGHAI_BACKUP_RUNTIME_ROOT = "/workspace/project/backups";
 
 export function verticalWorkspaceBaseImage(): string {
   return String(process.env.POLARIS_WANGHAI_WORKSPACE_IMAGE ?? "").trim()
@@ -327,6 +332,46 @@ export function isWanghaiVerticalBaseImage(baseImage: string | null | undefined)
     return false;
   }
   return image.includes("wanghai-admin-portal") || /(^|\/)wanghai([:@]|$)/.test(image);
+}
+
+export function wanghaiProfileEnvAuthFile(): {
+  key: string;
+  mount_path: string;
+  source_path: string;
+  optional: true;
+} {
+  return {
+    key: WANGHAI_PROFILE_ENV_FILE_KEY,
+    mount_path: WANGHAI_PROFILE_ENV_MOUNT_PATH,
+    source_path: WANGHAI_PROFILE_ENV_SOURCE_PATH,
+    optional: true,
+  };
+}
+
+function ensureUserProfileWanghaiEnvEntry(doc: Record<string, any>): Record<string, any> {
+  const auth = doc.auth && typeof doc.auth === "object"
+    ? doc.auth as Record<string, any>
+    : {};
+  const files = Array.isArray(auth.files) ? [...auth.files] : [];
+  const hasWanghaiEnvEntry = files.some((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return false;
+    }
+    const file = entry as Record<string, unknown>;
+    return String(file.key ?? "").trim() === WANGHAI_PROFILE_ENV_FILE_KEY
+      || String(file.mount_path ?? "").trim() === WANGHAI_PROFILE_ENV_MOUNT_PATH
+      || String(file.source_path ?? "").trim() === WANGHAI_PROFILE_ENV_SOURCE_PATH;
+  });
+  if (!hasWanghaiEnvEntry) {
+    files.push(wanghaiProfileEnvAuthFile());
+  }
+  return {
+    ...doc,
+    auth: {
+      ...auth,
+      files,
+    },
+  };
 }
 
 function userDockerfilePath(userProfileId: string): string {
@@ -478,6 +523,7 @@ function requireWorkspaceGitAuth(userProfileId: string, bindings: Array<{
 function writeUserSecretsLayout(userProfileId: string): void {
   const secretsRoot = path.join(USER_SECRETS_ROOT, userProfileId);
   fs.mkdirSync(path.join(secretsRoot, "credentials", "ssh"), { recursive: true });
+  fs.mkdirSync(path.join(secretsRoot, "wanghai"), { recursive: true });
   fs.writeFileSync(path.join(secretsRoot, ".gitignore"), "*\n!.gitignore\n", "utf8");
 }
 
@@ -496,13 +542,10 @@ export function createScaffoldUserProfile(profile: {
 } {
   const profilePath = userProfilePath(profile.id);
   const created = fs.existsSync(profilePath) === false;
-
-  if (created) {
-    fs.mkdirSync(USER_PROFILES_DIR, { recursive: true });
-    fs.mkdirSync(userCredentialRegistryDir(profile.id), { recursive: true });
-    fs.writeFileSync(
-      profilePath,
-      yaml.dump({
+  fs.mkdirSync(USER_PROFILES_DIR, { recursive: true });
+  fs.mkdirSync(userCredentialRegistryDir(profile.id), { recursive: true });
+  const profileDoc = created
+    ? {
         id: profile.id,
         name: profile.name,
         email: profile.email,
@@ -521,10 +564,16 @@ export function createScaffoldUserProfile(profile: {
             },
           }
           : {}),
-      }, { lineWidth: 120, noRefs: true }),
-      "utf8",
-    );
-  }
+      }
+    : (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+  fs.writeFileSync(
+    profilePath,
+    yaml.dump(
+      ensureUserProfileWanghaiEnvEntry(profileDoc),
+      { lineWidth: 120, noRefs: true },
+    ),
+    "utf8",
+  );
 
   writeUserSecretsLayout(profile.id);
 
@@ -658,8 +707,8 @@ export function scaffoldDockerWorkspace(
       plain: verticalWanghai
         ? {
             WANGHAI_REPO_ROOT: "/opt/wanghai",
-            WANGHAI_WORKSPACES_ROOT: "/workspace/project/workspaces",
-            WANGHAI_BACKUP_ROOT: "/workspace/project/backups",
+            WANGHAI_WORKSPACES_ROOT: WANGHAI_WORKSPACES_RUNTIME_ROOT,
+            WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
           }
         : {},
     },

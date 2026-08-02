@@ -15,6 +15,7 @@ import {
   workspacePaseoPackageSpec,
   workspaceToolCatalog,
 } from "../../core/harness-catalog.js";
+import { resolveWanghaiProfileDataRoots } from "../../config/wanghai-env.js";
 import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
@@ -23,6 +24,10 @@ import { workspaceRuntimeScopeName } from "../../core/workspace-name.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
+import {
+  WANGHAI_BACKUP_RUNTIME_ROOT,
+  WANGHAI_WORKSPACES_RUNTIME_ROOT,
+} from "../../config/scaffold.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
@@ -226,6 +231,31 @@ function workspaceEnablesWanghaiPortal(workspace: WorkspaceSpec): boolean {
   });
 }
 
+function buildWanghaiDataRootMountLines(workspace: WorkspaceSpec): string[] {
+  if (!workspaceEnablesWanghaiPortal(workspace)) {
+    return [];
+  }
+  const roots = resolveWanghaiProfileDataRoots(workspace.runtime.authFiles);
+  const mounts: Array<{ source: string; target: string }> = [];
+  if (roots.workspacesRoot) {
+    mounts.push({
+      source: roots.workspacesRoot,
+      target: WANGHAI_WORKSPACES_RUNTIME_ROOT,
+    });
+  }
+  if (roots.backupRoot) {
+    mounts.push({
+      source: roots.backupRoot,
+      target: WANGHAI_BACKUP_RUNTIME_ROOT,
+    });
+  }
+  return mounts.flatMap((mount) => [
+    "      - type: bind",
+    `        source: ${JSON.stringify(mount.source)}`,
+    `        target: ${JSON.stringify(mount.target)}`,
+  ]);
+}
+
 /**
  * Wanghai portal runs **inside** the workspace container (not on the host).
  * Started after paseo daemon bootstrap; logs under workspace runtime state.
@@ -320,16 +350,14 @@ export function renderDockerWorkspace(workspace: WorkspaceSpec): string {
   const authBootstrapLines = workspace.runtime.authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
-    const target = stateStoragePathForMountPath({
+    const storageTarget = stateStoragePathForMountPath({
       mountPath: file.mountPath,
       runtimeHome: home,
       identityRoot: workspace.attachments.userIdentityState.mountRoot,
     });
-    if (!target) {
-      return [];
-    }
+    const target = storageTarget ?? file.mountPath;
     const guardedWrite =
-      target.startsWith(`${sshRoot}/`)
+      storageTarget?.startsWith(`${sshRoot}/`)
         && workspace.userProfile.ssh.mode === "provided-key"
         ? `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`
         : `if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`;
@@ -417,6 +445,7 @@ ${portLines || '      - "6767:6767"'}
       - "host.docker.internal:host-gateway"
     volumes:
 ${workspaceDataVolume.mountBlock.join("\n")}
+${buildWanghaiDataRootMountLines(workspace).join("\n")}
       - type: volume
         source: ${workspaceRuntimeVolume.key}
         target: /workspace/state
