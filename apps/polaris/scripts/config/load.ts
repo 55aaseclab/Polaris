@@ -27,6 +27,12 @@ import {
 } from "../core/identity-layout.js";
 import { readWorkspaceDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
+import {
+  wanghaiProfileEnvAuthFile,
+  WANGHAI_PROFILE_ENV_FILE_KEY,
+  WANGHAI_PROFILE_ENV_MOUNT_PATH,
+  WANGHAI_PROFILE_ENV_SOURCE_PATH,
+} from "./scaffold.js";
 import { polarisUsersRoot, repoRelativePath, repoRoot } from "../utils/paths.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -562,6 +568,33 @@ function resolveAuthSourcePath(sourcePath: string, baseDir: string): string {
   return path.isAbsolute(sourcePath) ? sourcePath : path.resolve(baseDir, sourcePath);
 }
 
+function withOptionalWanghaiProfileEnv(rawFiles: unknown): Record<string, unknown>[] {
+  const files = Array.isArray(rawFiles)
+    ? rawFiles.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
+    : [];
+  const hasWanghaiEnvEntry = files.some((entry) => {
+    return String(entry.key ?? "").trim() === WANGHAI_PROFILE_ENV_FILE_KEY
+      || String(entry.mount_path ?? "").trim() === WANGHAI_PROFILE_ENV_MOUNT_PATH
+      || String(entry.source_path ?? "").trim() === WANGHAI_PROFILE_ENV_SOURCE_PATH;
+  });
+  if (hasWanghaiEnvEntry) {
+    return files;
+  }
+  return [...files, wanghaiProfileEnvAuthFile()];
+}
+
+export function readUserProfileAuthFiles(profileId: string): AuthFile[] {
+  const profilePath = userProfilePath(profileId);
+  if (!fs.existsSync(profilePath)) {
+    return [];
+  }
+  const data = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as Record<string, any>;
+  return normalizeAuthFiles(
+    withOptionalWanghaiProfileEnv(data.auth?.files),
+    path.join(USER_SECRETS_ROOT, profileId),
+  );
+}
+
 function resolveUserProfile(rawUserProfile: unknown, args: {
   runtimeUser: string;
   gitUserName?: string;
@@ -599,7 +632,7 @@ function resolveUserProfile(rawUserProfile: unknown, args: {
         codex: String(data.agent_identity?.codex ?? "default"),
         claude: String(data.agent_identity?.claude ?? "default"),
       },
-      authFiles: normalizeAuthFiles(data.auth?.files, path.join(USER_SECRETS_ROOT, profileId)),
+      authFiles: readUserProfileAuthFiles(profileId),
     };
   }
   return buildCompatibilityUserProfile(args);
@@ -792,17 +825,28 @@ function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] 
   const files = Array.isArray(rawFiles) ? rawFiles : [];
   return files
     .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"))
-    .map((entry) => ({
-      key: String(entry.key ?? ""),
-      mountPath: String(entry.mount_path ?? ""),
-      content:
+    .flatMap((entry) => {
+      const key = String(entry.key ?? "");
+      const mountPath = String(entry.mount_path ?? "");
+      const sourcePath = entry.source_path
+        ? resolveAuthSourcePath(String(entry.source_path), baseDir)
+        : undefined;
+      const content =
         entry.content
           ? String(entry.content)
-          : entry.source_path && fs.existsSync(resolveAuthSourcePath(String(entry.source_path), baseDir))
-            ? fs.readFileSync(resolveAuthSourcePath(String(entry.source_path), baseDir), "utf8")
-            : undefined,
-      sourcePath: entry.source_path ? resolveAuthSourcePath(String(entry.source_path), baseDir) : undefined
-    }))
+          : sourcePath && fs.existsSync(sourcePath)
+            ? fs.readFileSync(sourcePath, "utf8")
+            : undefined;
+      if (entry.optional === true && sourcePath && content === undefined) {
+        return [];
+      }
+      return [{
+        key,
+        mountPath,
+        content,
+        sourcePath,
+      }];
+    })
     .filter((entry) => entry.key && entry.mountPath);
 }
 

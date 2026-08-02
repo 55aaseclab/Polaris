@@ -26,6 +26,7 @@ import {
   readPortalProfile,
   listOwnedWorkspaces,
   listPortalCredentials,
+  readPortalProfileAuthCredentialRecord,
   writeWorkspaceProvisionProgress,
   readPortalWorkspaceAssetPreview,
   loadWorkspaceDetailStatic,
@@ -214,14 +215,22 @@ export function readUserPortalCredentialRecord(
   userId: string,
   credentialId: string,
 ): PortalCredentialRecord {
-  const record = readManagedCredentialRecord({
-    userProfileId: userId,
-    credentialId,
-  });
-  return {
-    credential: record.summary,
-    files: record.files,
-  };
+  try {
+    const record = readManagedCredentialRecord({
+      userProfileId: userId,
+      credentialId,
+    });
+    return {
+      credential: record.summary,
+      files: record.files,
+    };
+  } catch (error) {
+    const profileRecord = readPortalProfileAuthCredentialRecord(userId, credentialId);
+    if (profileRecord) {
+      return profileRecord;
+    }
+    throw error;
+  }
 }
 
 export function readUserPortalWorkspaceAssetPreview(

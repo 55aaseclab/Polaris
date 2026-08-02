@@ -14,6 +14,11 @@ import {
   scaffoldDockerWorkspace,
   scaffoldUserProfileById,
   syncWorkspaceDockerfileTemplate,
+  WANGHAI_BACKUP_RUNTIME_ROOT,
+  WANGHAI_PROFILE_ENV_FILE_KEY,
+  WANGHAI_PROFILE_ENV_MOUNT_PATH,
+  WANGHAI_PROFILE_ENV_SOURCE_PATH,
+  WANGHAI_WORKSPACES_RUNTIME_ROOT,
   workspaceConfigPath,
   workspaceImageRef,
 } from "../scripts/config/scaffold.js";
@@ -334,6 +339,36 @@ test("runCli rejects empty argv and missing project", async () => {
   await assert.rejects(() => runCli(["status"]), /Usage:/);
 });
 
+test("scaffoldUserProfileById adds the optional Wanghai env profile entry", () => {
+  const userProfileId = uniqueProjectName("wanghai-profile-scaffold");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
+
+  try {
+    scaffoldUserProfileById({
+      id: userProfileId,
+      name: "Wanghai Scaffold User",
+      email: "wanghai-scaffold@example.com",
+    });
+    const profileDoc = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as {
+      auth?: { files?: Array<Record<string, unknown>> };
+    };
+    assert.equal(fs.existsSync(path.join(userRoot, "wanghai")), true);
+    assert.deepEqual(
+      profileDoc.auth?.files?.find((entry) => entry.key === WANGHAI_PROFILE_ENV_FILE_KEY),
+      {
+        key: WANGHAI_PROFILE_ENV_FILE_KEY,
+        mount_path: WANGHAI_PROFILE_ENV_MOUNT_PATH,
+        source_path: WANGHAI_PROFILE_ENV_SOURCE_PATH,
+        optional: true,
+      },
+    );
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("runCli user create scaffolds a user profile and default credentials", async () => {
   const userProfileId = uniqueProjectName("cli-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
@@ -363,10 +398,132 @@ test("runCli user create scaffolds a user profile and default credentials", asyn
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "github-ssh.yaml")), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519")), true);
     assert.equal(fs.existsSync(path.join(userRoot, "credentials", "ssh", "github-ssh", "id_ed25519.pub")), true);
+    assert.equal(fs.existsSync(path.join(userRoot, "wanghai")), true);
+    const profileDoc = (yaml.load(fs.readFileSync(profilePath, "utf8")) ?? {}) as {
+      auth?: { files?: Array<Record<string, unknown>> };
+    };
+    assert.deepEqual(
+      profileDoc.auth?.files?.find((entry) => entry.key === WANGHAI_PROFILE_ENV_FILE_KEY),
+      {
+        key: WANGHAI_PROFILE_ENV_FILE_KEY,
+        mount_path: WANGHAI_PROFILE_ENV_MOUNT_PATH,
+        source_path: WANGHAI_PROFILE_ENV_SOURCE_PATH,
+        optional: true,
+      },
+    );
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
+});
+
+test("workspace load skips the optional user Wanghai env when the file is absent", async () => {
+  const project = uniqueProjectName("wanghai-profile-missing");
+  const profileId = uniqueProjectName("wanghai-profile-user");
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, profileId);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    scaffoldUserProfileById({
+      id: profileId,
+      name: "Wanghai Profile User",
+      email: "wanghai-profile@example.com",
+    });
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    delete doc.credentials;
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    assert.equal(
+      workspace.runtime.authFiles.some((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY),
+      false,
+    );
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  });
+});
+
+test("workspace load mounts the user Wanghai env when the file exists", async () => {
+  const project = uniqueProjectName("wanghai-profile-present");
+  const profileId = uniqueProjectName("wanghai-profile-user");
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, profileId);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    scaffoldUserProfileById({
+      id: profileId,
+      name: "Wanghai Mounted User",
+      email: "wanghai-mounted@example.com",
+    });
+    fs.writeFileSync(
+      path.join(userRoot, "wanghai", ".env"),
+      "WANGHAI_WORKSPACES_ROOT=/custom/workspaces\nCUSTOM_WANGHAI_FLAG=1\n",
+      "utf8",
+    );
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    delete doc.credentials;
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    const wanghaiEnv = workspace.runtime.authFiles.find((file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY);
+    assert.equal(wanghaiEnv?.mountPath, WANGHAI_PROFILE_ENV_MOUNT_PATH);
+    assert.equal(wanghaiEnv?.sourcePath, path.join(userRoot, "wanghai", ".env"));
+    assert.match(wanghaiEnv?.content || "", /CUSTOM_WANGHAI_FLAG=1/);
+
+    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    assert.match(rendered, /if \[ ! -f \/opt\/wanghai\/\.env \]; then python3 -c /);
+    assert.match(rendered, /chown root:root \/opt\/wanghai\/\.env \|\| true/);
+    assert.match(rendered, /chmod 600 \/opt\/wanghai\/\.env \|\| true/);
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  });
+});
+
+test("docker render bind-mounts Wanghai data roots from the user profile env", async () => {
+  const project = uniqueProjectName("wanghai-profile-data-root");
+  const profileId = uniqueProjectName("wanghai-profile-data-root-user");
+  const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, profileId);
+
+  await withTempWorkspaceSpec(project, "docker", async () => {
+    scaffoldUserProfileById({
+      id: profileId,
+      name: "Wanghai Data Root User",
+      email: "wanghai-data-root@example.com",
+    });
+    fs.writeFileSync(
+      path.join(userRoot, "wanghai", ".env"),
+      [
+        "WANGHAI_WORKSPACES_ROOT=/host/wanghai/workspaces",
+        "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
+        "CUSTOM_WANGHAI_FLAG=1",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    scaffoldDockerWorkspace(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
+    const outputPath = workspaceConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, any>;
+    doc.user_profile = profileId;
+    delete doc.credentials;
+    fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
+
+    const workspace = loadWorkspaceFromRefForTest(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerWorkspace(workspace), "utf8");
+    assert.match(rendered, /source: "\/host\/wanghai\/workspaces"/);
+    assert.match(rendered, new RegExp(`target: "${WANGHAI_WORKSPACES_RUNTIME_ROOT.replace(/\//g, "\\/")}"`));
+    assert.match(rendered, /source: "\/host\/wanghai\/backups"/);
+    assert.match(rendered, new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`));
+  }).finally(() => {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  });
 });
 
 test("runCli user defaults read omits the retired docker base image setting", async () => {
@@ -681,7 +838,7 @@ test("runCli create ignores a retired user default docker base image when scaffo
 
     const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
     assert.equal(doc.runtime?.base_image, workspaceImageRef(userProfileId, workspace));
-    assert.equal(fs.existsSync(dockerfilePath), false);
+    assert.equal(fs.existsSync(dockerfilePath), true);
   } finally {
     await cleanupCliTestUser({
       userId: userProfileId,

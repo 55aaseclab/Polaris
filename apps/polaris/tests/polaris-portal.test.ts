@@ -31,6 +31,7 @@ import {
   listPortalAdminUsers,
   listPortalWorkspaces,
   listUserPortalCredentials,
+  readUserPortalCredentialRecord,
   listUserPortalSkills,
   queueProvisionWorkspace,
   readUserPortalCredentialPreview,
@@ -52,6 +53,7 @@ import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import { deleteWorkspaceOwnedByUser } from "../scripts/cli/commands/delete.js";
 import {
   scaffoldDockerWorkspace,
+  scaffoldUserProfileById,
   workspaceConfigPath,
 } from "../scripts/config/scaffold.js";
 import {
@@ -918,6 +920,49 @@ test("portal credential preview hides material content", async () => {
       recursive: true,
       force: true,
     });
+  }
+});
+
+test("portal service lists and reads profile auth files for user settings", () => {
+  const userId = uniqueName("portal-profile-auth");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+
+  try {
+    scaffoldUserProfileById({
+      id: userId,
+      name: "Portal Profile Auth User",
+      email: "portal-profile-auth@example.com",
+    });
+    fs.writeFileSync(
+      path.join(userRoot, "wanghai", ".env"),
+      "WANGHAI_WORKSPACES_ROOT=/workspace/project/workspaces\nPORTAL_PROFILE_AUTH=1\n",
+      "utf8",
+    );
+
+    const credential = listUserPortalCredentials(userId).find((entry) =>
+      entry.paths.includes("wanghai/.env")
+    );
+    assert.ok(credential);
+    assert.equal(credential?.label, "Wanghai .env");
+    assert.equal(credential?.status, "ready");
+    assert.equal(credential?.readOnly, true);
+
+    const record = readUserPortalCredentialRecord(userId, credential?.id || "");
+    assert.equal(record.credential.id, credential?.id);
+    assert.deepEqual(record.files.map((file) => ({
+      key: file.key,
+      sourcePath: file.sourcePath,
+      mountPath: file.mountPath,
+    })), [{
+      key: "wanghai-root-env",
+      sourcePath: "wanghai/.env",
+      mountPath: "/opt/wanghai/.env",
+    }]);
+    assert.match(record.files[0]?.content || "", /PORTAL_PROFILE_AUTH=1/);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
   }
 });
 
