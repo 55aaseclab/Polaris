@@ -6,6 +6,7 @@ test("remote deploy restarts Polaris through a host systemd service", () => {
   const script = fs.readFileSync("scripts/deploy-polaris.sh", "utf8");
   assert.match(script, /systemctl enable "polaris-server@\$\{target_color\}\.service"/);
   assert.match(script, /systemctl restart "polaris-server@\$\{target_color\}\.service"/);
+  assert.match(script, /pnpm run build/);
   assert.doesNotMatch(script, /POLARIS_SERVER_UID/);
   assert.doesNotMatch(script, /POLARIS_SERVER_GID/);
 });
@@ -15,6 +16,21 @@ test("remote provision installs a host Polaris systemd unit", () => {
   assert.match(script, /polaris-server@\.service/);
   assert.match(script, /EnvironmentFile=-.*polaris-server-%i\.env/);
   assert.match(script, /ExecStart=\/bin\/bash .*scripts\/run-polaris-server-host\.sh/);
+  assert.match(script, /sites-available\/polaris-gateway\.conf/);
+  assert.match(script, /proxy_pass \\\$polaris_upstream;/);
+});
+
+test("remote provision reuses an existing Docker install instead of forcing docker.io", () => {
+  const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  assert.match(script, /if ! command -v docker >/);
+  assert.match(script, /docker-ce docker-ce-cli containerd\.io docker-compose-plugin/);
+  assert.doesNotMatch(script, /apt-get install -y docker\.io docker-compose-plugin nginx/);
+});
+
+test("remote provision writes the remote Wanghai data root", () => {
+  const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  assert.match(script, /POLARIS_WANGHAI_DATA_ROOT/);
+  assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
 
 test("bluegreen compose keeps only the web stack in Docker", () => {
