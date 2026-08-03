@@ -211,12 +211,16 @@ function navigate(path: string, replace = false): void {
   void render();
 }
 
-async function resolvePaseoUrl(path: string): Promise<string> {
+async function resolvePaseoUrl(
+  path: string,
+  reconnectTarget?: string | null,
+): Promise<string> {
   const config = await authingConfig().catch(() => null);
   return resolveCodingSurfaceUrl({
     href: path,
     paseoAppBaseUrl: config?.paseoAppBaseUrl,
     currentOrigin: location.origin,
+    reconnectTarget,
   });
 }
 
@@ -492,7 +496,10 @@ async function renderCodingSurface(serverId: string): Promise<void> {
     navigate("/hosts", true);
     return;
   }
-  const paseoUrl = await resolvePaseoUrl(`/v/${encodeURIComponent(serverId)}/coding`);
+  const paseoUrl = await resolvePaseoUrl(
+    `/v/${encodeURIComponent(serverId)}/coding`,
+    host.status?.paseo?.reconnectTarget ?? null,
+  );
   setShellScrollRoot(false);
   app.innerHTML = renderPaseoEmbedPage({
     hostName: host.name,
