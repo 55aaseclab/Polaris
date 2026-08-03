@@ -3,6 +3,7 @@ import {
   type ShellHostSummary,
   type ShellSession,
 } from "../api.js";
+import { normalizeAuthingLoginErrorMessage, AUTHING_LOGIN_ERROR_MESSAGE } from "../auth-errors.js";
 import {
   buildCreatedHostSurfaceHref,
   DEFAULT_POLARIS_VAULT_PATH,
@@ -21,6 +22,14 @@ import {
 } from "../product.js";
 import { SHELL_HOST_API } from "../hosts.js";
 import { renderPaseoEmbedPage } from "../paseo-embed.js";
+import { createPkceChallenge } from "../pkce.js";
+import { buildPortalRequestHeaders } from "../request-headers.js";
+import {
+  clearTransientValue,
+  readTransientValue,
+  writeTransientValue,
+} from "../transient-auth.js";
+import { resolveWelcomeAction } from "../welcome.js";
 import { renderWanghaiEmbedPage } from "../wanghai-embed.js";
 
 const SESSION_TOKEN_KEY = "polaris_authing_session";
@@ -94,17 +103,46 @@ function requiredElement(id: string): HTMLElement {
   return element;
 }
 
+function readCookieValue(key: string): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${key}=`));
+  if (!entry) {
+    return null;
+  }
+  return decodeURIComponent(entry.slice(key.length + 1).trim()) || null;
+}
+
+function cookieAttributes(): string {
+  return `path=/; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
+}
+
+function writeCookieValue(key: string, value: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.cookie = `${key}=${encodeURIComponent(value)}; ${cookieAttributes()}`;
+}
+
+function clearCookieValue(key: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.cookie = `${key}=; Max-Age=0; ${cookieAttributes()}`;
+}
+
 function token(): string | null {
-  const value = sessionStorage.getItem(SESSION_TOKEN_KEY)?.trim();
+  const value = sessionStorage.getItem(SESSION_TOKEN_KEY)?.trim()
+    || readCookieValue(SESSION_TOKEN_KEY)?.trim();
   return value ? value.replace(/^Bearer\s+/i, "") : null;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  const authToken = token();
-  if (authToken) {
-    headers.set("authorization", `Bearer ${authToken}`);
-  }
+  const headers = buildPortalRequestHeaders(init?.headers, token());
   if (init?.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
@@ -124,6 +162,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function loadSession(): Promise<ShellSession | null> {
   try {
     const session = await request<ShellSession>("/session");
@@ -131,6 +173,20 @@ async function loadSession(): Promise<ShellSession | null> {
     return session;
   } catch (error) {
     if (isApiError(error) && (error.status === 401 || error.status === 403)) {
+      if (token()) {
+        await delay(250);
+        try {
+          const session = await request<ShellSession>("/session");
+          currentSession = session;
+          return session;
+        } catch (retryError) {
+          if (isApiError(retryError) && (retryError.status === 401 || retryError.status === 403)) {
+            currentSession = null;
+            return null;
+          }
+          throw retryError;
+        }
+      }
       currentSession = null;
       return null;
     }
@@ -265,22 +321,28 @@ async function render(): Promise<void> {
 }
 
 async function renderWelcome(): Promise<void> {
-  renderLoading("正在检查登录状态…");
   try {
     const session = await loadSession();
-    if (session?.authenticated) {
+    const config = session?.authenticated ? null : await authingConfig();
+    const action = resolveWelcomeAction({
+      authMode: config?.authMode ?? session?.authMode ?? "authing-browser-session",
+      session,
+    });
+    if (action === "navigate-hosts") {
+      if (session?.authenticated && !session.polarisUserId) {
+        await ensureCurrentUser(session);
+      }
+      navigate("/hosts", true);
+      return;
+    }
+    if (action === "ensure-user-and-hosts") {
       if (!session.polarisUserId) {
         await ensureCurrentUser(session);
       }
       navigate("/hosts", true);
       return;
     }
-    renderShell(`<section class="hero">
-      <div class="eyebrow">Polaris 库控制</div>
-      <h1>把库放在正确的产品线里。</h1>
-      <p>登录后管理主机，并从同一个入口打开 coding 或 vertical 工作面。</p>
-      <div class="actions"><button type="button" data-action="sign-in">登录</button></div>
-    </section>`);
+    await beginSignIn(config ?? undefined);
   } catch (error) {
     renderError(error);
   }
@@ -299,9 +361,9 @@ async function renderAuthCallback(): Promise<void> {
     }
     navigate(returnPath === "/welcome" ? "/hosts" : returnPath, true);
   } catch (error) {
+    const message = normalizeAuthingLoginErrorMessage(error);
     renderShell(`<section class="hero">
-      <h1>登录未完成</h1>
-      <p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
+      <h1>${escapeHtml(message)}</h1>
       <div class="actions"><button type="button" data-action="sign-in">重新登录</button></div>
     </section>`);
   }
@@ -843,24 +905,6 @@ function planLabel(plan: ShellSession["plan"]): string {
   return plan === "pro" ? "pro" : "free";
 }
 
-function transientValue(key: string): string | null {
-  const sessionValue = sessionStorage.getItem(key)?.trim();
-  if (sessionValue) {
-    return sessionValue;
-  }
-  return localStorage.getItem(key)?.trim() || null;
-}
-
-function writeTransientValue(key: string, value: string): void {
-  sessionStorage.setItem(key, value);
-  localStorage.setItem(key, value);
-}
-
-function clearTransientValue(key: string): void {
-  sessionStorage.removeItem(key);
-  localStorage.removeItem(key);
-}
-
 function base64Url(bytes: Uint8Array): string {
   let value = "";
   for (const byte of bytes) {
@@ -875,11 +919,6 @@ function randomBytes(length: number): Uint8Array {
   return bytes;
 }
 
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return base64Url(new Uint8Array(digest));
-}
-
 function fallbackCallbackUrl(): string {
   return `${location.origin}/auth/callback`;
 }
@@ -888,8 +927,8 @@ async function authingConfig(): Promise<AuthingConfig> {
   return request<AuthingConfig>("/authing-config");
 }
 
-async function beginSignIn(): Promise<void> {
-  const config = await authingConfig();
+async function beginSignIn(prefetchedConfig?: AuthingConfig): Promise<void> {
+  const config = prefetchedConfig ?? await authingConfig();
   writeTransientValue(RETURN_PATH_KEY, `${location.pathname}${location.search}`);
   if (config.authMode === "disabled") {
     navigate("/hosts", true);
@@ -911,14 +950,15 @@ async function beginSignIn(): Promise<void> {
   writeTransientValue(PKCE_VERIFIER_KEY, verifier);
   writeTransientValue(PKCE_STATE_KEY, state);
   const authorizationUrl = new URL(config.authorizationUrl);
+  const pkce = await createPkceChallenge(verifier);
   authorizationUrl.search = new URLSearchParams({
     client_id: config.appId,
     response_type: "code",
     scope: "openid profile email username phone",
     redirect_uri: redirectUri,
     state,
-    code_challenge: await pkceChallenge(verifier),
-    code_challenge_method: "S256",
+    code_challenge: pkce.value,
+    code_challenge_method: pkce.method,
   }).toString();
   location.assign(authorizationUrl.toString());
 }
@@ -931,32 +971,34 @@ async function completeSignIn(): Promise<string> {
     clearTransientValue(PKCE_VERIFIER_KEY);
     clearTransientValue(PKCE_STATE_KEY);
     clearTransientValue(REDIRECT_URI_KEY);
-    return transientValue(RETURN_PATH_KEY) || "/hosts";
+    return readTransientValue(RETURN_PATH_KEY) || "/hosts";
   }
-  const verifier = transientValue(PKCE_VERIFIER_KEY);
-  const state = transientValue(PKCE_STATE_KEY);
+  const verifier = readTransientValue(PKCE_VERIFIER_KEY);
+  const state = readTransientValue(PKCE_STATE_KEY);
   if (!code || !verifier || params.get("state") !== state) {
-    throw new Error("Authing 登录状态无效，请重新登录");
+    throw new Error(AUTHING_LOGIN_ERROR_MESSAGE);
   }
   const result = await request<{ token?: string; idToken?: string }>("/auth/callback", {
     method: "POST",
     body: JSON.stringify({
       code,
       codeVerifier: verifier,
-      redirectUri: transientValue(REDIRECT_URI_KEY) || fallbackCallbackUrl(),
+      redirectUri: readTransientValue(REDIRECT_URI_KEY) || fallbackCallbackUrl(),
     }),
   });
   if (!result.token?.trim()) {
-    throw new Error("Authing 登录未完成");
+    throw new Error(AUTHING_LOGIN_ERROR_MESSAGE);
   }
   sessionStorage.setItem(SESSION_TOKEN_KEY, result.token.trim());
+  writeCookieValue(SESSION_TOKEN_KEY, result.token.trim());
   if (result.idToken?.trim()) {
     sessionStorage.setItem(ID_TOKEN_KEY, result.idToken.trim());
+    writeCookieValue(ID_TOKEN_KEY, result.idToken.trim());
   }
   clearTransientValue(PKCE_VERIFIER_KEY);
   clearTransientValue(PKCE_STATE_KEY);
   clearTransientValue(REDIRECT_URI_KEY);
-  const returnPath = transientValue(RETURN_PATH_KEY) || "/hosts";
+  const returnPath = readTransientValue(RETURN_PATH_KEY) || "/hosts";
   clearTransientValue(RETURN_PATH_KEY);
   return returnPath;
 }
@@ -978,9 +1020,12 @@ async function ensureCurrentUser(session: ShellSession): Promise<void> {
 
 async function signOut(): Promise<void> {
   const config = await authingConfig().catch(() => null);
-  const idToken = sessionStorage.getItem(ID_TOKEN_KEY)?.trim();
+  const idToken = sessionStorage.getItem(ID_TOKEN_KEY)?.trim()
+    || readCookieValue(ID_TOKEN_KEY)?.trim();
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
   sessionStorage.removeItem(ID_TOKEN_KEY);
+  clearCookieValue(SESSION_TOKEN_KEY);
+  clearCookieValue(ID_TOKEN_KEY);
   currentSession = null;
   if (config?.authMode === "oauth2-proxy") {
     const url = new URL(config.signOutUrl || "/oauth2/sign_out", location.origin);

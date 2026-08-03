@@ -1,5 +1,4 @@
 import type { IncomingMessage } from "node:http";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 
 export type PortalAuthMode = "authing-browser-session" | "oauth2-proxy" | "disabled";
 /** Feature richness tier (free/pro). Not product line. */
@@ -52,7 +51,6 @@ function requiredAuthingEnv(
     | "POLARIS_AUTHING_APP_ID"
     | "POLARIS_AUTHING_APP_SECRET"
     | "POLARIS_AUTHING_ISSUER"
-    | "POLARIS_AUTHING_JWKS_URL"
     | "POLARIS_AUTHING_TOKEN_URL",
 ): string {
   const value = String(process.env[name] ?? "").trim();
@@ -116,29 +114,23 @@ export function resolveAuthingUsername(user: {
   );
 }
 
+export function resolveAuthingPhoneNumber(user: {
+  phone?: string;
+  phone_number?: string;
+  phoneNumber?: string;
+}): string | null {
+  const normalized = String(
+    user.phoneNumber ?? user.phone_number ?? user.phone ?? "",
+  ).trim();
+  return normalized || null;
+}
+
 function authingIssuer(): string {
   return requiredAuthingEnv("POLARIS_AUTHING_ISSUER").replace(/\/+$/, "");
 }
 
 function authingIssuerMeUrl(): string {
   return `${authingIssuer()}/me`;
-}
-
-let authingJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function resolveAuthingJwks() {
-  if (!authingJwks) {
-    authingJwks = createRemoteJWKSet(new URL(requiredAuthingEnv("POLARIS_AUTHING_JWKS_URL")));
-  }
-  return authingJwks;
-}
-
-async function verifyAuthingToken(token: string): Promise<AuthingClaims> {
-  const { payload } = await jwtVerify(token, resolveAuthingJwks(), {
-    issuer: authingIssuer(),
-    audience: requiredAuthingEnv("POLARIS_AUTHING_APP_ID"),
-  });
-  return payload as AuthingClaims;
 }
 
 async function readAuthingUser(accessToken: string): Promise<AuthingClaims> {
@@ -272,7 +264,7 @@ export async function exchangeAuthingAuthorizationCode(input: {
     throw new PortalAuthError("Authing 用户信息未补全，请先完成用户名补全", 409);
   }
   return {
-    token: idToken,
+    token: accessToken,
     idToken,
   };
 }
@@ -298,7 +290,7 @@ export async function authenticatePortalIdentity(
   }
   let verified: AuthingClaims;
   try {
-    verified = await verifyAuthingToken(token);
+    verified = await readAuthingUser(token);
   } catch (error) {
     if (error instanceof PortalAuthError) {
       throw error;
@@ -313,6 +305,6 @@ export async function authenticatePortalIdentity(
     authMode: "authing-browser-session",
     authingUserId,
     authingUsername: resolveAuthingUsername(verified),
-    authingPhoneNumber: String(verified.phoneNumber ?? "").trim() || null,
+    authingPhoneNumber: resolveAuthingPhoneNumber(verified),
   };
 }

@@ -29,8 +29,6 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
-const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
-
 let executorServer: import("node:http").Server | null = null;
 const previousExecutorEnv = new Map<string, string | undefined>();
 
@@ -52,11 +50,9 @@ function uniquePassword(): string {
 test.before(async () => {
   for (const name of [
     "POLARIS_EXECUTOR_BASE_URL",
-    "POLARIS_EXECUTOR_SHARED_SECRET",
   ]) {
     previousExecutorEnv.set(name, process.env[name]);
   }
-  process.env.POLARIS_EXECUTOR_SHARED_SECRET = EXECUTOR_TEST_SECRET;
   executorServer = createExecutorServer(0);
   await once(executorServer, "listening");
   const address = executorServer.address();

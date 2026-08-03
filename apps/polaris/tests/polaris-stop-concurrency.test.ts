@@ -19,7 +19,6 @@ import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_ROOT = polarisUsersRoot(import.meta.url);
-const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
 const previousExecutorEnv = new Map<string, string | undefined>();
 
 let executorServer: import("node:http").Server | null = null;
@@ -55,11 +54,9 @@ ${body}
 test.before(async () => {
   for (const name of [
     "POLARIS_EXECUTOR_BASE_URL",
-    "POLARIS_EXECUTOR_SHARED_SECRET",
   ]) {
     previousExecutorEnv.set(name, process.env[name]);
   }
-  process.env.POLARIS_EXECUTOR_SHARED_SECRET = EXECUTOR_TEST_SECRET;
   executorServer = createExecutorServer(0);
   await once(executorServer, "listening");
   const address = executorServer.address();

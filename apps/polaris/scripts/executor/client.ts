@@ -23,14 +23,9 @@ function executorBaseUrl(): string | null {
 }
 
 function executorHeaders(): HeadersInit {
-  const headers: Record<string, string> = {
+  return {
     "content-type": "application/json",
   };
-  const secret = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim();
-  if (secret) {
-    headers["x-polaris-executor-secret"] = secret;
-  }
-  return headers;
 }
 
 function describeExecutorEndpointFailure(
@@ -47,11 +42,7 @@ function describeExecutorEndpointFailure(
     ].join(" ");
   }
   if (response.status === 403) {
-    return [
-      `Polaris executor endpoint '${baseUrl}${pathname}' rejected the request with 403.`,
-      "Check POLARIS_EXECUTOR_SHARED_SECRET on both the portal and executor processes.",
-      `Response body: ${responseBody}`,
-    ].join(" ");
+    return `Polaris executor endpoint '${baseUrl}${pathname}' rejected the request with 403: ${responseBody}`;
   }
   return `Polaris executor request failed (${response.status} ${response.statusText}) for ${pathname}: ${responseBody}`;
 }
@@ -62,7 +53,6 @@ async function ensureExecutorHealthy(
 ): Promise<void> {
   const cacheKey = JSON.stringify({
     baseUrl,
-    secret: process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim() ?? "",
   });
   const cached = executorHealthCache.get(cacheKey);
   const now = Date.now();

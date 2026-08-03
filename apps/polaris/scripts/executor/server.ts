@@ -56,16 +56,7 @@ function isVaultStatusRefreshRequest(req: IncomingMessage, url: URL): boolean {
   return req.method === "POST" && url.pathname === "/vaults/status/refresh";
 }
 
-function authenticateExecutorRequest(req: IncomingMessage): boolean {
-  const expected = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim();
-  return readHeader(req, "x-polaris-executor-secret") === expected;
-}
-
 function assertExecutorConfiguration(host: string): void {
-  const secret = process.env.POLARIS_EXECUTOR_SHARED_SECRET?.trim();
-  if (!secret) {
-    throw new Error("POLARIS_EXECUTOR_SHARED_SECRET is required to start the Polaris executor");
-  }
   if (host !== EXECUTOR_LOOPBACK_HOST) {
     throw new Error(
       `Polaris executor must bind to ${EXECUTOR_LOOPBACK_HOST}, received '${host}'`,
@@ -110,10 +101,6 @@ export function createExecutorServer(
     try {
       if (req.method === "GET" && req.url === "/health") {
         sendJson(res, 200, { ok: true });
-        return;
-      }
-      if (!authenticateExecutorRequest(req)) {
-        sendJson(res, 403, { error: "Forbidden" });
         return;
       }
       if (!req.url) {

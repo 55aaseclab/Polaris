@@ -80,7 +80,6 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
-const EXECUTOR_TEST_SECRET = "polaris-executor-test-secret";
 
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
@@ -108,11 +107,9 @@ function uniquePassword(): string {
 test.before(async () => {
   for (const name of [
     "POLARIS_EXECUTOR_BASE_URL",
-    "POLARIS_EXECUTOR_SHARED_SECRET",
   ]) {
     previousExecutorEnv.set(name, process.env[name]);
   }
-  process.env.POLARIS_EXECUTOR_SHARED_SECRET = EXECUTOR_TEST_SECRET;
   executorServer = createExecutorServer(0);
   await once(executorServer, "listening");
   const address = executorServer.address();
@@ -2424,12 +2421,29 @@ test("portal serves shell documents and shell assets from the control plane", as
     const shellResponse = await fetch(`http://127.0.0.1:${address.port}/hosts`);
     assert.equal(shellResponse.status, 200);
     assert.match(shellResponse.headers.get("content-type") ?? "", /text\/html/);
-    assert.match(await shellResponse.text(), /<main id="app" aria-live="polite"><\/main>/);
+    const shellHtml = await shellResponse.text();
+    assert.match(shellHtml, /<main id="app" aria-live="polite"><\/main>/);
+    assert.match(shellHtml, /\/shell\/shell\.css\?v=/);
+    assert.match(shellHtml, /\/shell\/shell\.js\?v=/);
 
     const assetResponse = await fetch(`http://127.0.0.1:${address.port}/shell/shell.js`);
     assert.equal(assetResponse.status, 200);
     assert.match(assetResponse.headers.get("content-type") ?? "", /text\/javascript/);
     assert.ok((await assetResponse.text()).includes('href="/hosts"'));
+
+    const shellHeadResponse = await fetch(`http://127.0.0.1:${address.port}/hosts`, {
+      method: "HEAD",
+    });
+    assert.equal(shellHeadResponse.status, 200);
+    assert.match(shellHeadResponse.headers.get("content-type") ?? "", /text\/html/);
+    assert.equal(await shellHeadResponse.text(), "");
+
+    const assetHeadResponse = await fetch(`http://127.0.0.1:${address.port}/shell/shell.js`, {
+      method: "HEAD",
+    });
+    assert.equal(assetHeadResponse.status, 200);
+    assert.match(assetHeadResponse.headers.get("content-type") ?? "", /text\/javascript/);
+    assert.equal(await assetHeadResponse.text(), "");
   } finally {
     server.close();
     await once(server, "close");
