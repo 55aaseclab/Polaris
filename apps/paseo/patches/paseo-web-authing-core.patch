@@ -1,171 +1,40 @@
-diff --git a/packages/app/src/app/auth/callback.tsx b/packages/app/src/app/auth/callback.tsx
-new file mode 100644
-index 0000000..926a44c
---- /dev/null
-+++ b/packages/app/src/app/auth/callback.tsx
-@@ -0,0 +1,142 @@
-+import { useEffect, useRef, useState } from "react";
-+import { ActivityIndicator, Text, View } from "react-native";
-+import { useRouter } from "expo-router";
-+import { StyleSheet, useUnistyles } from "react-native-unistyles";
-+import { Button } from "@/components/ui/button";
-+import {
-+  beginPolarisSignIn,
-+  clearPolarisSignIn,
-+  completePolarisSignIn,
-+  getPolarisAuthToken,
-+  polarisApiBaseUrl,
-+  publishPolarisAuthSession,
-+} from "@/lib/polaris-authing";
-+import { resolvePostLoginHref, syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
-+import { getHostRuntimeStore } from "@/runtime/host-runtime";
-+
-+const incompleteUserMessage = "Authing 用户信息未补全，请先完成用户名补全";
-+
-+interface PolarisSessionResponse {
-+  authingUserId: string;
-+  authingUsername: string | null;
-+  polarisUserId: string | null;
-+}
-+
-+async function fetchPolarisSession(token: string): Promise<PolarisSessionResponse> {
-+  const response = await fetch(`${polarisApiBaseUrl()}/session`, {
-+    headers: { authorization: `Bearer ${token}` },
-+  });
-+  const body = await response.json().catch(() => ({}));
-+  if (!response.ok) {
-+    throw new Error(typeof body.error === "string" ? body.error : "无法加载 Polaris 会话");
-+  }
-+  return body as PolarisSessionResponse;
-+}
-+
-+async function ensurePolarisUser(token: string): Promise<void> {
-+  const session = await fetchPolarisSession(token);
-+  if (session.polarisUserId) {
-+    return;
-+  }
-+  const userProfileId = session.authingUsername?.trim();
-+  if (!userProfileId) {
-+    throw new Error(incompleteUserMessage);
-+  }
-+  const response = await fetch(`${polarisApiBaseUrl()}/users`, {
-+    method: "POST",
-+    headers: {
-+      authorization: `Bearer ${token}`,
-+      "content-type": "application/json",
-+    },
-+    body: JSON.stringify({
-+      userProfileId,
-+      authingUsername: session.authingUsername ?? "",
-+      authingUserId: session.authingUserId,
-+    }),
-+  });
-+  const body = await response.json().catch(() => ({}));
-+  if (!response.ok) {
-+    throw new Error(typeof body.error === "string" ? body.error : "无法创建 Polaris 用户");
-+  }
-+}
-+
-+export default function PolarisAuthCallbackRoute() {
-+  const router = useRouter();
-+  const { theme } = useUnistyles();
-+  const handledRef = useRef(false);
-+  const [error, setError] = useState<string | null>(null);
-+
-+  useEffect(() => {
-+    if (handledRef.current) return;
-+    handledRef.current = true;
-+    let disposed = false;
-+    void completePolarisSignIn()
-+      .then(async (returnPath) => {
-+        const token = getPolarisAuthToken();
-+        if (!token) {
-+          throw new Error("Authing 登录未完成");
-+        }
-+        const store = getHostRuntimeStore();
-+        // The token now identifies the newly authenticated user. Drop every
-+        // in-memory Host from the prior account before fetching this account's
-+        // authorized workspace list.
-+        await store.resetPolarisHostsForCurrentUser();
-+        await ensurePolarisUser(token);
-+        // Publish before host sync so useHosts is not filtered empty mid-flight.
-+        publishPolarisAuthSession();
-+        const synced = await syncPolarisHostsOnce({
-+          token,
-+          upsertFromOfferUrl: (url, label) => {
-+            if (getPolarisAuthToken() !== token) {
-+              throw new Error("Polaris 登录已切换");
-+            }
-+            return store.upsertConnectionFromOfferUrl(url, label);
-+          },
-+        }).catch((syncError) => {
-+          console.warn("[auth/callback] polaris host sync failed", syncError);
-+          return {
-+            serverIds: [] as string[],
-+            preferredServerId: null,
-+            preferredHref: null,
-+          };
-+        });
-+        if (disposed) return;
-+        const href = resolvePostLoginHref({
-+          preferredHref: synced.preferredHref,
-+          returnPath,
-+        });
-+        router.replace(href as never);
-+      })
-+      .catch((reason) => {
-+        if (disposed) return;
-+        const message = reason instanceof Error ? reason.message : String(reason);
-+        setError(message);
-+        clearPolarisSignIn();
-+      });
-+
-+    return () => {
-+      disposed = true;
-+    };
-+  }, [router]);
-+
-+  return (
-+    <View style={styles.container}>
-+      {error ? (
-+        <View style={styles.errorContent}>
-+          <Text style={styles.error}>{error}</Text>
-+          <Button size="sm" variant="secondary" onPress={beginPolarisSignIn}>
-+            重新登录
-+          </Button>
-+        </View>
-+      ) : (
-+        <ActivityIndicator color={theme.colors.foregroundMuted} />
-+      )}
-+    </View>
-+  );
-+}
-+
-+const styles = StyleSheet.create((theme) => ({
-+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.spacing[6] },
-+  errorContent: { alignItems: "center", gap: theme.spacing[3] },
-+  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm, textAlign: "center" },
-+}));
 diff --git a/packages/app/src/app/paseo.tsx b/packages/app/src/app/paseo.tsx
 new file mode 100644
-index 0000000..c509066
+index 0000000..00feb5d
 --- /dev/null
 +++ b/packages/app/src/app/paseo.tsx
-@@ -0,0 +1,14 @@
-+import { Redirect } from "expo-router";
+@@ -0,0 +1,12 @@
++import { useEffect } from "react";
++import { polarisShellWelcomeHref } from "@/lib/polaris-authing";
 +
 +export default function PaseoAliasRoute() {
-+  if (typeof window !== "undefined") {
++  useEffect(() => {
 +    const search = window.location.search ?? "";
 +    const hash = window.location.hash ?? "";
-+    if (search || hash) {
-+      window.location.replace(`/welcome${search}${hash}`);
-+      return null;
-+    }
-+  }
++    window.location.replace(`${polarisShellWelcomeHref()}${search}${hash}`);
++  }, []);
 +
-+  return <Redirect href="/welcome" />;
++  return null;
 +}
+diff --git a/packages/app/src/app/welcome.tsx b/packages/app/src/app/welcome.tsx
+index a3a29cd..bec0622 100644
+--- a/packages/app/src/app/welcome.tsx
++++ b/packages/app/src/app/welcome.tsx
+@@ -1,5 +1,12 @@
+-import { WelcomeScreen } from "@/components/welcome-screen";
++import { useEffect } from "react";
++import { polarisShellWelcomeHref } from "@/lib/polaris-authing";
+ 
+ export default function WelcomeRoute() {
+-  return <WelcomeScreen />;
++  useEffect(() => {
++    const search = window.location.search ?? "";
++    const hash = window.location.hash ?? "";
++    window.location.replace(`${polarisShellWelcomeHref()}${search}${hash}`);
++  }, []);
++
++  return null;
+ }
 diff --git a/packages/app/src/app/settings/user.tsx b/packages/app/src/app/settings/user.tsx
 new file mode 100644
 index 0000000..501131b
