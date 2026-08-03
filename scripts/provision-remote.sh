@@ -30,8 +30,60 @@ fi
 APP_USER=\"\$(id -un)\"
 APP_GROUP=\"\$(id -gn)\"
 
+install_root_file() {
+  local target=\"\$1\"
+  local temp_file
+  temp_file=\"\$(mktemp)\"
+  cat > \"\${temp_file}\"
+  if [ -n \"\${SUDO}\" ]; then
+    \${SUDO} install -m 0644 \"\${temp_file}\" \"\${target}\"
+  else
+    install -m 0644 \"\${temp_file}\" \"\${target}\"
+  fi
+  rm -f \"\${temp_file}\"
+}
+
+upsert_env_line() {
+  local key=\"\$1\"
+  local value=\"\$2\"
+  local file=\"\$3\"
+  local temp_file
+  temp_file=\"\$(mktemp)\"
+  awk -v key=\"\${key}\" -v value=\"\${value}\" '
+    BEGIN { updated = 0 }
+    index(\$0, key \"=\") == 1 {
+      print key \"=\" value
+      updated = 1
+      next
+    }
+    { print }
+    END {
+      if (updated == 0) {
+        print key \"=\" value
+      }
+    }
+  ' \"\${file}\" > \"\${temp_file}\"
+  if [ -n \"\${SUDO}\" ]; then
+    \${SUDO} install -m 0644 \"\${temp_file}\" \"\${file}\"
+  else
+    install -m 0644 \"\${temp_file}\" \"\${file}\"
+  fi
+  rm -f \"\${temp_file}\"
+}
+
 \${SUDO} apt-get update
-\${SUDO} apt-get install -y docker.io docker-compose-plugin nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind
+\${SUDO} apt-get install -y nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind
+
+if ! command -v docker >/dev/null 2>&1; then
+  if apt-cache policy docker-ce | awk '/Candidate:/ { print \$2 }' | grep -vq '^(none)\$'; then
+    \${SUDO} apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  else
+    \${SUDO} apt-get install -y docker.io docker-compose-plugin
+  fi
+elif ! docker compose version >/dev/null 2>&1; then
+  \${SUDO} apt-get install -y docker-compose-plugin
+fi
+
 \${SUDO} systemctl enable --now docker
 \${SUDO} systemctl enable --now nginx
 \${SUDO} systemctl enable --now rpcbind
@@ -57,7 +109,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
 \${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
 \${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
   printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
@@ -83,7 +135,7 @@ fi
 APP_USER=\"\$(id -un)\"
 APP_GROUP=\"\$(id -gn)\"
 
-write_root_file() {
+install_root_file() {
   local target=\"\$1\"
   local temp_file
   temp_file=\"\$(mktemp)\"
@@ -130,6 +182,7 @@ fi
 
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'
@@ -143,7 +196,32 @@ if [ ! -f '${REMOTE_UPSTREAM_FILE}' ]; then
   \${SUDO} cp '${REMOTE_APP_DIR}/deploy/nginx/polaris-upstream.blue.conf' '${REMOTE_UPSTREAM_FILE}'
 fi
 
-write_root_file /etc/systemd/system/polaris-server@.service <<EOF
+install_root_file /etc/nginx/sites-available/polaris-gateway.conf <<EOF
+server {
+  listen 80 default_server;
+  listen [::]:80 default_server;
+  server_name _;
+
+  include ${REMOTE_UPSTREAM_FILE};
+
+  location / {
+    proxy_pass \\\$polaris_upstream;
+    proxy_http_version 1.1;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    proxy_set_header Host \\\$host;
+    proxy_set_header X-Real-IP \\\$remote_addr;
+    proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \\\$scheme;
+  }
+}
+EOF
+
+\${SUDO} rm -f /etc/nginx/sites-enabled/default
+\${SUDO} ln -sfn /etc/nginx/sites-available/polaris-gateway.conf /etc/nginx/sites-enabled/polaris-gateway.conf
+
+install_root_file /etc/systemd/system/polaris-server@.service <<EOF
 [Unit]
 Description=Polaris server (%i)
 After=network-online.target docker.service
@@ -165,7 +243,7 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
-write_root_file /etc/systemd/system/polaris-container-runtime-cleanup.service <<EOF
+install_root_file /etc/systemd/system/polaris-container-runtime-cleanup.service <<EOF
 [Unit]
 Description=Polaris remote container runtime cleanup
 After=docker.service containerd.service
@@ -179,7 +257,7 @@ Environment=LEASE_RETENTION_HOURS=24
 Environment=DOCKER_PRUNE_UNTIL=24h
 EOF
 
-write_root_file /etc/systemd/system/polaris-container-runtime-cleanup.timer <<EOF
+install_root_file /etc/systemd/system/polaris-container-runtime-cleanup.timer <<EOF
 [Unit]
 Description=Run Polaris remote container runtime cleanup daily
 
@@ -195,6 +273,8 @@ EOF
 \${SUDO} systemctl daemon-reload
 \${SUDO} systemctl enable polaris-container-runtime-cleanup.timer
 \${SUDO} systemctl restart polaris-container-runtime-cleanup.timer
+\${SUDO} nginx -t
+\${SUDO} systemctl reload nginx
 
 nginx_dump=\"\$(\${SUDO} nginx -T 2>/dev/null || true)\"
 missing=0

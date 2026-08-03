@@ -45,7 +45,7 @@ source "${temp_env}"
 set +a
 
 pnpm install --frozen-lockfile
-pnpm --filter polaris run build
+pnpm run build
 polaris_bluegreen_privileged install -m 0644 "${temp_env}" "${server_env_file}"
 polaris_bluegreen_privileged systemctl enable "polaris-server@${target_color}.service"
 polaris_bluegreen_privileged systemctl restart "polaris-server@${target_color}.service"
