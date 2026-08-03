@@ -13,6 +13,12 @@ source "${ROOT_DIR}/scripts/lib/polaris-bluegreen.sh"
 
 cd "${ROOT_DIR}"
 
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+else
+  SUDO="sudo"
+fi
+
 polaris_bluegreen_require_env_file "${ENV_FILE}"
 
 active_color="$(polaris_bluegreen_active_color "${ACTIVE_COLOR_FILE}")"

@@ -7,13 +7,18 @@ UPSTREAM_FILE="${3:-/etc/nginx/snippets/polaris-gateway-upstream.conf}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/deploy/docker-compose.polaris-bluegreen.yml"
+ENV_DIR="$(dirname "${ENV_FILE}")"
 
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/lib/polaris-bluegreen.sh"
-# shellcheck disable=SC1091
-source "${ROOT_DIR}/scripts/lib/polaris-deploy-restart.sh"
 
 cd "${ROOT_DIR}"
+
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+else
+  SUDO="sudo"
+fi
 
 polaris_bluegreen_require_env_file "${ENV_FILE}"
 
@@ -22,13 +27,12 @@ set -a
 source "${ENV_FILE}"
 set +a
 export POLARIS_ENV_FILE="${ENV_FILE}"
-export POLARIS_SERVER_UID="${POLARIS_SERVER_UID:-$(id -u)}"
-export POLARIS_SERVER_GID="${POLARIS_SERVER_GID:-$(id -g)}"
 
 active_color="$(polaris_bluegreen_active_color "${ACTIVE_COLOR_FILE}")"
 target_color="$(polaris_bluegreen_inactive_color "${active_color}")"
 project_name="$(polaris_bluegreen_project_name "${target_color}")"
 target_port="$(polaris_bluegreen_nginx_port "${target_color}")"
+server_env_file="${ENV_DIR}/polaris-server-${target_color}.env"
 temp_env="$(mktemp)"
 
 trap 'rm -f "${temp_env}"' EXIT
@@ -42,21 +46,9 @@ set +a
 
 pnpm install --frozen-lockfile
 pnpm --filter polaris run build
-
-executor_fingerprint="$(
-  polaris_deploy_executor_fingerprint "${ROOT_DIR}" "${ENV_FILE}"
-)"
-bridge_fingerprint="$(
-  polaris_deploy_bridge_fingerprint "${ROOT_DIR}"
-)"
-restart_executor=false
-restart_bridge=false
-if polaris_deploy_service_changed "${ROOT_DIR}" "polaris-executor" "${executor_fingerprint}"; then
-  restart_executor=true
-fi
-if polaris_deploy_service_changed "${ROOT_DIR}" "polaris-executor-bridge-proxy" "${bridge_fingerprint}"; then
-  restart_bridge=true
-fi
+polaris_bluegreen_privileged install -m 0644 "${temp_env}" "${server_env_file}"
+polaris_bluegreen_privileged systemctl enable "polaris-server@${target_color}.service"
+polaris_bluegreen_privileged systemctl restart "polaris-server@${target_color}.service"
 
 docker compose \
   -f "${COMPOSE_FILE}" \
@@ -73,21 +65,9 @@ docker compose \
   --env-file "${temp_env}" \
   up -d --no-deps --force-recreate nginx
 
-if [ "${restart_executor}" = true ]; then
-  systemctl restart polaris-executor.service
-fi
-if [ "${restart_bridge}" = true ]; then
-  systemctl restart polaris-executor-bridge-proxy.service
-fi
-
-polaris_deploy_record_fingerprint "${ROOT_DIR}" "polaris-executor" "${executor_fingerprint}"
-polaris_deploy_record_fingerprint "${ROOT_DIR}" "polaris-executor-bridge-proxy" "${bridge_fingerprint}"
-
 polaris_bluegreen_wait_for_stack "${target_port}"
 polaris_bluegreen_switch_upstream "${target_color}" "${UPSTREAM_FILE}" "${ACTIVE_COLOR_FILE}"
 
 echo "active_color=${target_color}"
 echo "project=${project_name}"
 echo "port=${target_port}"
-echo "restart_executor=${restart_executor}"
-echo "restart_bridge=${restart_bridge}"

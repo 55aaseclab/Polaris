@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { once } from "node:events";
-import { createExecutorServer } from "../scripts/executor/server.js";
 import { stopPortalVault } from "../scripts/portal/service.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
@@ -19,9 +17,6 @@ import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_ROOT = polarisUsersRoot(import.meta.url);
-const previousExecutorEnv = new Map<string, string | undefined>();
-
-let executorServer: import("node:http").Server | null = null;
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;
@@ -50,36 +45,6 @@ ${body}
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
-
-test.before(async () => {
-  for (const name of [
-    "POLARIS_EXECUTOR_BASE_URL",
-  ]) {
-    previousExecutorEnv.set(name, process.env[name]);
-  }
-  executorServer = createExecutorServer(0);
-  await once(executorServer, "listening");
-  const address = executorServer.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Executor server did not expose a TCP address");
-  }
-  process.env.POLARIS_EXECUTOR_BASE_URL = `http://127.0.0.1:${address.port}`;
-});
-
-test.after(async () => {
-  if (executorServer) {
-    executorServer.close();
-    await once(executorServer, "close");
-    executorServer = null;
-  }
-  for (const [name, value] of previousExecutorEnv.entries()) {
-    if (value === undefined) {
-      delete process.env[name];
-    } else {
-      process.env[name] = value;
-    }
-  }
-});
 
 test("portal vault stop waits for backend completion and converges both vaults", async () => {
   const userId = uniqueName("portal-stop-concurrent-user");

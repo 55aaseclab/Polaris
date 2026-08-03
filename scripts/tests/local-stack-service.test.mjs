@@ -2,12 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("local stack service starts the executor bridge proxy for docker callbacks", () => {
+test("local stack service does not start a standalone executor or bridge proxy", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
-  assert.match(script, /run-polaris-executor-bridge-proxy\.sh/);
-  assert.match(script, /executor_bridge_proxy_pid/);
-  assert.match(script, /stack\.executor-bridge\.log/);
-  assert.match(script, /docker vaults may not report Paseo pairing metadata back to the host executor/);
+  assert.doesNotMatch(script, /scripts\/polaris\.ts executor/);
+  assert.doesNotMatch(script, /run-polaris-executor-bridge-proxy\.sh/);
+  assert.doesNotMatch(script, /executor_bridge_proxy_pid/);
+  assert.doesNotMatch(script, /stack\.executor-bridge\.log/);
+  assert.doesNotMatch(script, /stack\.executor\.log/);
 });
 
 test("local stack service does not start a standalone admin web app", () => {
@@ -27,10 +28,11 @@ test("local stack service runs Paseo with Fast Refresh instead of a web artifact
   assert.doesNotMatch(script, /paseo_local_build_tool_bundle/);
 });
 
-test("local stack service binds the API and executor to 0.0.0.0 by default", () => {
+test("local stack service binds the API to 0.0.0.0 by default", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
   assert.match(script, /SERVER_HOST="\$\{POLARIS_SERVER_BIND_HOST:-0\.0\.0\.0\}"/);
-  assert.match(script, /EXECUTOR_HOST="\$\{POLARIS_EXECUTOR_HOST:-0\.0\.0\.0\}"/);
+  assert.doesNotMatch(script, /EXECUTOR_HOST=/);
+  assert.doesNotMatch(script, /EXECUTOR_PORT=/);
 });
 
 test("local stack service builds shell and surface packages", () => {
