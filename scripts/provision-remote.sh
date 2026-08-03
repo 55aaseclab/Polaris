@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
-  echo "Usage: $0 <remote-host> [remote-app-dir] [remote-data-root] [remote-netfs-export-root]" >&2
+  echo "Usage: $0 <remote-host> [remote-app-dir] [remote-data-root] [remote-netfs-export-root] [local-wanghai-dir] [remote-wanghai-dir]" >&2
   echo "Prereqs: ssh access, sudo-capable remote user, host-level nginx gateway, and real production secrets ready for the remote env file." >&2
   exit 1
 fi
@@ -11,6 +11,8 @@ REMOTE_HOST="$1"
 REMOTE_APP_DIR="${2:-/srv/polaris/app}"
 REMOTE_DATA_ROOT="${3:-/srv/polaris/data}"
 REMOTE_NETFS_EXPORT_ROOT="${4:-/exports/polaris/vaults}"
+LOCAL_WANGHAI_DIR="${5:-}"
+REMOTE_WANGHAI_DIR="${6:-/opt/wanghai}"
 REMOTE_ENV_FILE="/etc/polaris/polaris.env"
 REMOTE_ENV_DIR="$(dirname "${REMOTE_ENV_FILE}")"
 REMOTE_ACTIVE_COLOR_FILE="${REMOTE_ENV_DIR}/active-color"
@@ -18,6 +20,15 @@ REMOTE_UPSTREAM_FILE="/etc/nginx/snippets/polaris-gateway-upstream.conf"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -z "${LOCAL_WANGHAI_DIR}" ] && [ -d "${ROOT_DIR}/../wanghai" ]; then
+  LOCAL_WANGHAI_DIR="${ROOT_DIR}/../wanghai"
+fi
+
+if [ ! -f "${LOCAL_WANGHAI_DIR}/scripts/build-admin-portal-image.sh" ]; then
+  echo "Missing Wanghai source. Pass [local-wanghai-dir] or place the repo at ../wanghai." >&2
+  exit 1
+fi
 
 cd "${ROOT_DIR}"
 
@@ -109,14 +120,14 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_NETFS_EXPORT_ROOT}' /etc/nginx/snippets
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
 \${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
 \${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
   printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
 \${SUDO} grep -qs \"${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)\" /etc/exports || \
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra
-\${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}'
+\${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}' '${REMOTE_WANGHAI_DIR}'
 "
 
 rsync -az \
@@ -125,6 +136,22 @@ rsync -az \
 rsync -az \
   -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
+rsync -az --delete --delete-excluded \
+  --exclude ".git" \
+  --exclude ".cache" \
+  --exclude ".cert" \
+  --exclude ".env" \
+  --exclude ".env.*" \
+  --exclude "node_modules" \
+  --exclude ".next*" \
+  --exclude ".paseo" \
+  --exclude ".runtime" \
+  --exclude ".tmp" \
+  --exclude ".pnpm-store" \
+  --exclude ".turbo" \
+  --exclude "/workspaces/***" \
+  -e "${RSYNC_RSH}" \
+  "${LOCAL_WANGHAI_DIR}/" "${REMOTE_HOST}:${REMOTE_WANGHAI_DIR}/"
 
 ssh "${REMOTE_HOST}" "set -euo pipefail
 if [ \"\$(id -u)\" -eq 0 ]; then
@@ -183,6 +210,7 @@ fi
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_WANGHAI_VAULT_IMAGE' 'wanghai-admin-portal:latest' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'
@@ -273,6 +301,12 @@ EOF
 \${SUDO} systemctl daemon-reload
 \${SUDO} systemctl enable polaris-container-runtime-cleanup.timer
 \${SUDO} systemctl restart polaris-container-runtime-cleanup.timer
+\${SUDO} docker build \
+  -f '${REMOTE_APP_DIR}/config/docker/vault-prebuilt.Dockerfile' \
+  -t 'polaris-workspace-prebuilt:latest' \
+  '${REMOTE_APP_DIR}'
+cd '${REMOTE_WANGHAI_DIR}'
+bash ./scripts/build-admin-portal-image.sh 'wanghai-admin-portal:latest'
 \${SUDO} nginx -t
 \${SUDO} systemctl reload nginx
 

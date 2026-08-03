@@ -33,6 +33,18 @@ test("remote provision writes the remote Wanghai data root", () => {
   assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
 
+test("remote provision bootstraps the Wanghai source tree and image", () => {
+  const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  assert.match(script, /rsync -az --delete --delete-excluded/);
+  assert.match(script, /--exclude ".next\*"/);
+  assert.match(script, /--exclude "\/workspaces\/\*\*\*"/);
+  assert.match(script, /\$\{LOCAL_WANGHAI_DIR\}\//);
+  assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_WANGHAI_DIR\}\//);
+  assert.match(script, /build-admin-portal-image\.sh/);
+  assert.match(script, /polaris-workspace-prebuilt:latest/);
+  assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE/);
+});
+
 test("bluegreen compose keeps only the web stack in Docker", () => {
   const compose = fs.readFileSync("deploy/docker-compose.polaris-bluegreen.yml", "utf8");
   assert.match(compose, /^\s*paseo-app:/m);
