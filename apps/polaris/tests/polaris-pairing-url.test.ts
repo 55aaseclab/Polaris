@@ -8,6 +8,9 @@ import {
   scaffoldDockerVault,
   verticalVaultBaseImage,
   vaultConfigPath,
+  WANGHAI_BACKUP_RUNTIME_ROOT,
+  WANGHAI_CACHE_RUNTIME_ROOT,
+  WANGHAI_VAULTS_RUNTIME_ROOT,
 } from "../scripts/config/scaffold.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerVault } from "../scripts/backends/docker/render.js";
@@ -76,6 +79,7 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
   });
   try {
     const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as {
+      env?: { plain?: Record<string, unknown> };
       runtime?: { base_image?: unknown };
       surfaces?: unknown;
       service?: {
@@ -88,6 +92,12 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
 
     assert.equal(doc.runtime?.base_image, verticalVaultBaseImage());
     assert.deepEqual(doc.surfaces, ["paseo", "wanghai"]);
+    assert.deepEqual(doc.env?.plain, {
+      WANGHAI_REPO_ROOT: "/opt/wanghai",
+      WANGHAI_VAULTS_ROOT: WANGHAI_VAULTS_RUNTIME_ROOT,
+      WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
+      WANGHAI_CACHE_ROOT: WANGHAI_CACHE_RUNTIME_ROOT,
+    });
     assert.deepEqual(
       (doc.service?.ports ?? []).map((entry) => ({
         containerPort: String(entry.container_port ?? ""),

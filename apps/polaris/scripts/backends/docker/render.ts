@@ -26,6 +26,7 @@ import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
 import {
   WANGHAI_BACKUP_RUNTIME_ROOT,
+  WANGHAI_CACHE_RUNTIME_ROOT,
   WANGHAI_VAULTS_RUNTIME_ROOT,
 } from "../../config/scaffold.js";
 
@@ -247,6 +248,12 @@ function buildWanghaiDataRootMountLines(vault: VaultSpec): string[] {
     mounts.push({
       source: roots.backupRoot,
       target: WANGHAI_BACKUP_RUNTIME_ROOT,
+    });
+  }
+  if (roots.cacheRoot) {
+    mounts.push({
+      source: roots.cacheRoot,
+      target: WANGHAI_CACHE_RUNTIME_ROOT,
     });
   }
   return mounts.flatMap((mount) => [

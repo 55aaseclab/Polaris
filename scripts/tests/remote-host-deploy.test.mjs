@@ -31,6 +31,7 @@ test("remote provision writes the remote Wanghai data root", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   assert.match(script, /POLARIS_WANGHAI_DATA_ROOT/);
   assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
+  assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai\/cache'/);
 });
 
 test("remote provision bootstraps the Wanghai source tree and image", () => {
