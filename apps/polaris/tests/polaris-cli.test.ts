@@ -1757,6 +1757,13 @@ test("vaultImageRef derives a neutral deterministic ttl.sh reference", () => {
     vaultImageRef("local-example-user@example.com", "Feature Preview"),
     "ttl.sh/user-local-example-user-examp-feature-preview:24h",
   );
+  assert.equal(
+    vaultImageRef(
+      "portal-live-create-user-267278-1785764441231",
+      "portal-live-create-vault-267278-1785764441231",
+    ),
+    "ttl.sh/user-portal-live-create-user-portal-live-create-vault-267278:24h",
+  );
 });
 
 test("ensureVaultConfig synthesizes a pod spec from the docker source of truth", () => {

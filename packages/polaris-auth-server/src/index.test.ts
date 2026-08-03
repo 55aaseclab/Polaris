@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   authenticatePortalIdentity,
   exchangeAuthingAuthorizationCode,
+  PortalAuthError,
 } from "./index.js";
 
 function withEnv(
@@ -130,6 +131,32 @@ test("authenticatePortalIdentity resolves identity from Authing user info withou
       } finally {
         globalThis.fetch = originalFetch;
       }
+    },
+  );
+});
+
+test("exchangeAuthingAuthorizationCode reports missing Authing config as a server error", async () => {
+  await withEnv(
+    {
+      POLARIS_AUTHING_APP_ID: "app-id",
+      POLARIS_AUTHING_APP_SECRET: undefined,
+      POLARIS_AUTHING_ISSUER: "https://auth.example/oidc",
+      POLARIS_AUTHING_TOKEN_URL: "https://auth.example/oidc/token",
+    },
+    async () => {
+      await assert.rejects(
+        () => exchangeAuthingAuthorizationCode({
+          code: "auth-code",
+          codeVerifier: "pkce-verifier",
+          redirectUri: "https://app.example/auth/callback",
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof PortalAuthError);
+          assert.equal(error.statusCode, 500);
+          assert.match(error.message, /POLARIS_AUTHING_APP_SECRET is required/i);
+          return true;
+        },
+      );
     },
   );
 });
