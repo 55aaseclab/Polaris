@@ -137,6 +137,7 @@ function sendShellAsset(
   res: ServerResponse,
   contentType: string,
   body: Buffer | string,
+  method: string,
 ): void {
   res.writeHead(200, {
     "content-type": contentType,
@@ -145,6 +146,10 @@ function sendShellAsset(
       ? "no-cache"
       : "public, max-age=300",
   });
+  if (method === "HEAD") {
+    res.end();
+    return;
+  }
   res.end(body);
 }
 
@@ -1197,23 +1202,23 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         return;
       }
 
-      if (req.method === "GET" && url.pathname.startsWith("/shell/")) {
+      if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/shell/")) {
         const asset = readShellAsset(url.pathname.slice("/shell/".length));
         if (!asset) {
           notFound(res);
           return;
         }
-        sendShellAsset(res, asset.contentType, asset.body);
+        sendShellAsset(res, asset.contentType, asset.body, req.method);
         return;
       }
 
-      if (req.method === "GET" && isShellDocumentPath(url.pathname)) {
+      if ((req.method === "GET" || req.method === "HEAD") && isShellDocumentPath(url.pathname)) {
         const document = readShellAsset("index.html");
         if (document) {
-          sendShellAsset(res, document.contentType, document.body);
+          sendShellAsset(res, document.contentType, document.body, req.method);
           return;
         }
-        sendShellAsset(res, "text/html; charset=utf-8", shellFallbackHtml());
+        sendShellAsset(res, "text/html; charset=utf-8", shellFallbackHtml(), req.method);
         return;
       }
 
