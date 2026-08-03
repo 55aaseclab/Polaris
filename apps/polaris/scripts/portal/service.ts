@@ -68,15 +68,15 @@ import {
   rebuildPortalVault as rebuildPortalVaultExecutor,
   restartPortalVaultPaseoDaemon as restartPortalVaultPaseoDaemonExecutor,
   updatePortalVaultSelectedDriver as updatePortalVaultSelectedDriverExecutor,
-  installPortalVaultSkill as installPortalVaultSkillExecutor,
-  listPortalVaultSkills as listPortalVaultSkillsExecutor,
+  skillInstallVault as installPortalVaultSkillExecutor,
+  listVaultSkills as listPortalVaultSkillsExecutor,
   startPortalVault as startPortalVaultExecutor,
   stopPortalVault as stopPortalVaultExecutor,
   switchPortalVault as switchPortalVaultExecutor,
   switchPortalVaultLiveCredential as switchPortalVaultLiveCredentialExecutor,
-  syncPortalVaultSkills as syncPortalVaultSkillsExecutor,
-  uninstallPortalVaultSkill as uninstallPortalVaultSkillExecutor,
-} from "../executor/client.js";
+  skillSyncVault as syncPortalVaultSkillsExecutor,
+  skillUninstallVault as uninstallPortalVaultSkillExecutor,
+} from "../runtime/operations.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
@@ -96,7 +96,7 @@ async function refreshPortalVaultStatus(
   }
   const job = (async () => {
     try {
-      await refreshPortalVaultStatusExecutor({ userId, vault });
+      await refreshPortalVaultStatusExecutor(userId, vault);
     } finally {
       statusRefreshJobs.delete(key);
     }
@@ -346,7 +346,11 @@ export async function listPortalVaultSkills(input: {
   userId: string;
   installed: Array<{ harness: SkillHarness; skills: string[] }>;
 }> {
-  return listPortalVaultSkillsExecutor(input);
+  return listPortalVaultSkillsExecutor({
+    vaultRef: input.vault,
+    userProfileId: input.userId,
+    harness: input.harness,
+  });
 }
 
 export async function installPortalVaultSkill(input: {
@@ -362,7 +366,12 @@ export async function installPortalVaultSkill(input: {
   skillId: string;
   packageName: string;
 }> {
-  return installPortalVaultSkillExecutor(input);
+  return installPortalVaultSkillExecutor({
+    vaultRef: input.vault,
+    userProfileId: input.userId,
+    harness: input.harness,
+    skillId: input.skillId,
+  });
 }
 
 export async function uninstallPortalVaultSkill(input: {
@@ -378,7 +387,12 @@ export async function uninstallPortalVaultSkill(input: {
   skillId: string;
   removed: boolean;
 }> {
-  return uninstallPortalVaultSkillExecutor(input);
+  return uninstallPortalVaultSkillExecutor({
+    vaultRef: input.vault,
+    userProfileId: input.userId,
+    harness: input.harness,
+    skillId: input.skillId,
+  });
 }
 
 export async function syncPortalVaultSkills(input: {
@@ -393,7 +407,11 @@ export async function syncPortalVaultSkills(input: {
   installed: string[];
   removed: string[];
 }> {
-  return syncPortalVaultSkillsExecutor(input);
+  return syncPortalVaultSkillsExecutor({
+    vaultRef: input.vault,
+    userProfileId: input.userId,
+    harness: input.harness,
+  });
 }
 
 export async function bindPortalVaultAgent(input: {
@@ -501,9 +519,7 @@ export async function queueProvisionVault(
     line?: "coding" | "vertical";
   },
 ) {
-  return queueProvisionVaultExecutor({
-    userId,
-    vault,
+  return queueProvisionVaultExecutor(userId, vault, {
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
     line: options?.line,
@@ -536,21 +552,21 @@ export async function switchPortalVault(
   vault: string,
   target: PortalDriverTarget,
 ) {
-  return switchPortalVaultExecutor({ userId, vault, target });
+  return switchPortalVaultExecutor(userId, vault, target);
 }
 
 export async function deletePortalVault(
   userId: string,
   vault: string,
 ): Promise<{ deleted: true; vault: string }> {
-  return deletePortalVaultExecutor({ userId, vault });
+  return deletePortalVaultExecutor(userId, vault);
 }
 
 export async function permanentlyDeletePortalVault(
   userId: string,
   vault: string,
 ): Promise<{ deleted: true; vault: string }> {
-  return permanentlyDeletePortalVaultExecutor({ userId, vault });
+  return permanentlyDeletePortalVaultExecutor(userId, vault);
 }
 
 
@@ -558,21 +574,21 @@ export async function stopPortalVault(
   userId: string,
   vault: string,
 ): Promise<{ stopped: true }> {
-  return stopPortalVaultExecutor({ userId, vault });
+  return stopPortalVaultExecutor(userId, vault);
 }
 
 export async function startPortalVault(
   userId: string,
   vault: string,
 ): Promise<{ started: true }> {
-  return startPortalVaultExecutor({ userId, vault });
+  return startPortalVaultExecutor(userId, vault);
 }
 
 export async function rebuildPortalVault(
   userId: string,
   vault: string,
 ): Promise<{ rebuilt: true }> {
-  return rebuildPortalVaultExecutor({ userId, vault });
+  return rebuildPortalVaultExecutor(userId, vault);
 }
 
 export async function updatePortalVaultSelectedDriver(input: {

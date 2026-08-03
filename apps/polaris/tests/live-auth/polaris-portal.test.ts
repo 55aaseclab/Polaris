@@ -2,11 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { once } from "node:events";
 import yaml from "js-yaml";
 import { createClerkClient } from "@clerk/backend";
 import { createPortalServer } from "../../scripts/portal/server.js";
-import { createExecutorServer } from "../../scripts/executor/server.js";
 import {
   deleteUserMapEntriesForPolarisUserId,
   upsertUserMapEntry,
@@ -29,8 +27,6 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
-let executorServer: import("node:http").Server | null = null;
-const previousExecutorEnv = new Map<string, string | undefined>();
 
 interface LivePortalIdentity {
   clerkUserId: string;
@@ -46,36 +42,6 @@ function uniqueName(prefix: string): string {
 function uniquePassword(): string {
   return `PolarisPortal!${Date.now()}aa`;
 }
-
-test.before(async () => {
-  for (const name of [
-    "POLARIS_EXECUTOR_BASE_URL",
-  ]) {
-    previousExecutorEnv.set(name, process.env[name]);
-  }
-  executorServer = createExecutorServer(0);
-  await once(executorServer, "listening");
-  const address = executorServer.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Executor server did not expose a TCP address");
-  }
-  process.env.POLARIS_EXECUTOR_BASE_URL = `http://127.0.0.1:${address.port}`;
-});
-
-test.after(async () => {
-  if (executorServer) {
-    executorServer.close();
-    await once(executorServer, "close");
-    executorServer = null;
-  }
-  for (const [name, value] of previousExecutorEnv.entries()) {
-    if (value === undefined) {
-      delete process.env[name];
-    } else {
-      process.env[name] = value;
-    }
-  }
-});
 
 function clerkSecretKey(): string {
   const value = process.env.CLERK_SECRET_KEY?.trim();

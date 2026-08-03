@@ -4,7 +4,7 @@ import {
   skillInstallVault,
   skillSyncVault,
   skillUninstallVault,
-} from "../../executor/operations.js";
+} from "../../runtime/operations.js";
 
 function parseFlag(argv: string[], flag: string): string | undefined {
   const index = argv.findIndex((value) => value === flag);

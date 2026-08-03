@@ -16,7 +16,6 @@ import { liveSwitchCommand } from "./commands/live-switch.js";
 import { switchCommand } from "./commands/switch.js";
 import { portalCommand } from "./commands/portal.js";
 import { deleteCommand } from "./commands/delete.js";
-import { executorCommand } from "./commands/executor.js";
 import { opsCommand } from "./commands/ops.js";
 import {
   skillInstallCommand,
@@ -26,10 +25,10 @@ import {
 } from "./commands/skill.js";
 import { logInfo } from "../utils/log.js";
 
-const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "vault", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "executor", "ops"]);
+const COMMANDS = new Set(["create", "create-user", "delete-user", "user", "vault", "skill-list", "skill-install", "skill-uninstall", "skill-sync", "start", "stop", "restart", "rebuild", "apply", "render", "status", "reconcile", "logs", "live-switch", "switch", "delete", "portal", "server", "ops"]);
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|vault|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|executor|ops> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|vault|skill-list|skill-install|skill-uninstall|skill-sync|create-user|delete-user|create|status|start|stop|restart|rebuild|apply|render|reconcile|logs|live-switch|switch|delete|portal|server|ops> ...");
 }
 
 function extractUserProfileId(argv: string[]): string | undefined {
@@ -52,10 +51,6 @@ export async function runCli(argv: string[]): Promise<void> {
   const [first, second] = argv;
   if (first === "portal" || first === "server") {
     await portalCommand(second, argv[2]);
-    return;
-  }
-  if (first === "executor") {
-    await executorCommand(second, argv[2]);
     return;
   }
   if (first === "ops") {

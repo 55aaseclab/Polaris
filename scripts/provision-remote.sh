@@ -27,9 +27,11 @@ if [ \"\$(id -u)\" -eq 0 ]; then
 else
   SUDO='sudo'
 fi
+APP_USER=\"\$(id -un)\"
+APP_GROUP=\"\$(id -gn)\"
 
 \${SUDO} apt-get update
-\${SUDO} apt-get install -y docker.io docker-compose-plugin nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind socat
+\${SUDO} apt-get install -y docker.io docker-compose-plugin nginx rsync curl git ca-certificates gnupg nfs-kernel-server rpcbind
 \${SUDO} systemctl enable --now docker
 \${SUDO} systemctl enable --now nginx
 \${SUDO} systemctl enable --now rpcbind
@@ -62,7 +64,7 @@ fi
 \${SUDO} grep -qs \"${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)\" /etc/exports || \
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra
-\${SUDO} chown -R \"\$(id -un)\":\"\$(id -gn)\" '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}'
+\${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}'
 "
 
 rsync -az \
@@ -70,15 +72,30 @@ rsync -az \
   ./.env.prod.example "${REMOTE_HOST}:${REMOTE_APP_DIR}/.env.prod.example"
 rsync -az \
   -e "${RSYNC_RSH}" \
-  ./scripts/run-polaris-executor-host.sh "${REMOTE_HOST}:${REMOTE_APP_DIR}/scripts/run-polaris-executor-host.sh"
-rsync -az \
-  -e "${RSYNC_RSH}" \
-  ./scripts/run-polaris-executor-bridge-proxy.sh "${REMOTE_HOST}:${REMOTE_APP_DIR}/scripts/run-polaris-executor-bridge-proxy.sh"
-rsync -az \
-  -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
 
 ssh "${REMOTE_HOST}" "set -euo pipefail
+if [ \"\$(id -u)\" -eq 0 ]; then
+  SUDO=''
+else
+  SUDO='sudo'
+fi
+APP_USER=\"\$(id -un)\"
+APP_GROUP=\"\$(id -gn)\"
+
+write_root_file() {
+  local target=\"\$1\"
+  local temp_file
+  temp_file=\"\$(mktemp)\"
+  cat > \"\${temp_file}\"
+  if [ -n \"\${SUDO}\" ]; then
+    \${SUDO} install -m 0644 \"\${temp_file}\" \"\${target}\"
+  else
+    install -m 0644 \"\${temp_file}\" \"\${target}\"
+  fi
+  rm -f \"\${temp_file}\"
+}
+
 upsert_env_line() {
   local key=\"\$1\"
   local value=\"\$2\"
@@ -99,82 +116,56 @@ upsert_env_line() {
       }
     }
   ' \"\${file}\" > \"\${temp_file}\"
-  mv \"\${temp_file}\" \"\${file}\"
-}
-
-generate_executor_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 32
-    return 0
+  if [ -n \"\${SUDO}\" ]; then
+    \${SUDO} install -m 0644 \"\${temp_file}\" \"\${file}\"
+  else
+    install -m 0644 \"\${temp_file}\" \"\${file}\"
   fi
-  python3 - <<'PY'
-import secrets
-print(secrets.token_hex(32))
-PY
+  rm -f \"\${temp_file}\"
 }
 
 if [ ! -f '${REMOTE_ENV_FILE}' ]; then
-  cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+  \${SUDO} cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
 fi
 
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
-upsert_env_line 'POLARIS_EXECUTOR_HOST' '127.0.0.1' '${REMOTE_ENV_FILE}'
-
-if ! grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=' '${REMOTE_ENV_FILE}' \
-  || grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=$' '${REMOTE_ENV_FILE}' \
-  || grep -q '^POLARIS_EXECUTOR_SHARED_SECRET=change-me-to-a-long-random-secret$' '${REMOTE_ENV_FILE}'; then
-  upsert_env_line 'POLARIS_EXECUTOR_SHARED_SECRET' \"\$(generate_executor_secret)\" '${REMOTE_ENV_FILE}'
-fi
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'
 fi
 
 if [ ! -f '${REMOTE_ACTIVE_COLOR_FILE}' ]; then
-  printf 'blue\n' > '${REMOTE_ACTIVE_COLOR_FILE}'
+  printf 'blue\n' | \${SUDO} tee '${REMOTE_ACTIVE_COLOR_FILE}' >/dev/null
 fi
 
 if [ ! -f '${REMOTE_UPSTREAM_FILE}' ]; then
-  cp '${REMOTE_APP_DIR}/deploy/nginx/polaris-upstream.blue.conf' '${REMOTE_UPSTREAM_FILE}'
+  \${SUDO} cp '${REMOTE_APP_DIR}/deploy/nginx/polaris-upstream.blue.conf' '${REMOTE_UPSTREAM_FILE}'
 fi
 
-cat > /etc/systemd/system/polaris-executor.service <<EOF
+write_root_file /etc/systemd/system/polaris-server@.service <<EOF
 [Unit]
-Description=Polaris host executor
-After=network.target docker.service
-Wants=docker.service
+Description=Polaris server (%i)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple
+User=\${APP_USER}
+Group=\${APP_GROUP}
 WorkingDirectory=${REMOTE_APP_DIR}
-Environment=POLARIS_ENV_FILE=${REMOTE_ENV_FILE}
-ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/run-polaris-executor-host.sh ${REMOTE_ENV_FILE}
+Environment=NODE_ENV=production
+EnvironmentFile=${REMOTE_ENV_FILE}
+EnvironmentFile=-${REMOTE_ENV_DIR}/polaris-server-%i.env
+ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/run-polaris-server-host.sh
 Restart=always
-RestartSec=5
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/polaris-executor-bridge-proxy.service <<EOF
-[Unit]
-Description=Polaris executor bridge proxy
-After=network.target docker.service polaris-executor.service
-Wants=docker.service polaris-executor.service
-
-[Service]
-Type=simple
-WorkingDirectory=${REMOTE_APP_DIR}
-ExecStart=/bin/bash ${REMOTE_APP_DIR}/scripts/run-polaris-executor-bridge-proxy.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/systemd/system/polaris-container-runtime-cleanup.service <<EOF
+write_root_file /etc/systemd/system/polaris-container-runtime-cleanup.service <<EOF
 [Unit]
 Description=Polaris remote container runtime cleanup
 After=docker.service containerd.service
@@ -188,7 +179,7 @@ Environment=LEASE_RETENTION_HOURS=24
 Environment=DOCKER_PRUNE_UNTIL=24h
 EOF
 
-cat > /etc/systemd/system/polaris-container-runtime-cleanup.timer <<EOF
+write_root_file /etc/systemd/system/polaris-container-runtime-cleanup.timer <<EOF
 [Unit]
 Description=Run Polaris remote container runtime cleanup daily
 
@@ -201,15 +192,11 @@ Unit=polaris-container-runtime-cleanup.service
 WantedBy=timers.target
 EOF
 
-systemctl daemon-reload
-systemctl enable polaris-executor.service
-systemctl enable polaris-executor-bridge-proxy.service
-systemctl enable polaris-container-runtime-cleanup.timer
-systemctl restart polaris-executor.service
-systemctl restart polaris-executor-bridge-proxy.service
-systemctl restart polaris-container-runtime-cleanup.timer
+\${SUDO} systemctl daemon-reload
+\${SUDO} systemctl enable polaris-container-runtime-cleanup.timer
+\${SUDO} systemctl restart polaris-container-runtime-cleanup.timer
 
-nginx_dump=\"\$(nginx -T 2>/dev/null || true)\"
+nginx_dump=\"\$(\${SUDO} nginx -T 2>/dev/null || true)\"
 missing=0
 
 if ! printf '%s\n' \"\$nginx_dump\" | grep -Fq 'include ${REMOTE_UPSTREAM_FILE};'; then

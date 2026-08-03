@@ -22,18 +22,16 @@ Paseo runs through its Expo web development server in this stack. Changes under
 On the first run only, its shared package dependencies are compiled when their
 upstream `dist` entry points are absent.
 
-When you start `polaris server` or `polaris executor` outside the local stack
-wrapper, keep the same runtime data root in every process. In local
-development that usually means exporting:
+When you start `polaris server` outside the local stack wrapper, keep the same
+runtime data root in every process. In local development that usually means
+exporting:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
-POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 ```
 
-If the server and executor point at different `POLARIS_DATA_ROOT` values, the
-portal can show workspace state that the executor cannot resolve.
+If different host processes point at different `POLARIS_DATA_ROOT` values, the
+portal can show workspace state that another process cannot resolve.
 
 Local development uses `.env.dev`.
 Polaris test commands also source `.env.dev` and use the same configured
@@ -47,8 +45,6 @@ POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
 POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 POLARIS_SERVER_PORT=8787
-POLARIS_EXECUTOR_PORT=8788
-POLARIS_EXECUTOR_SHARED_SECRET=change-this-to-a-long-random-secret
 POLARIS_PUBLIC_BASE_URL=http://HOST_IP:8081
 POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
 POLARIS_AUTHING_APP_ID=your-authing-app-id
@@ -69,8 +65,6 @@ POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
 POLARIS_SERVER_BIND_HOST=127.0.0.1
 POLARIS_SERVER_PORT=8787
-POLARIS_EXECUTOR_BASE_URL=http://127.0.0.1:8788
-POLARIS_EXECUTOR_SHARED_SECRET=test-executor-shared-secret
 POLARIS_AUTHING_APP_ID=your-authing-app-id
 POLARIS_AUTHING_APP_SECRET=your-authing-app-secret
 POLARIS_AUTHING_ISSUER=https://your-tenant.authing.cn/oidc
@@ -90,7 +84,7 @@ The repo developer CLI entry point is:
 pnpm --dir apps/polaris run polaris --
 ```
 
-Use it for workspace, user, credential, skill, server, and executor commands
+Use it for workspace, user, credential, skill, and server commands
 while working from the repo.
 
 Telemetry can be enabled with `PostHog` and `Sentry`.
@@ -154,6 +148,9 @@ Production uses `.env.prod`.
 
 Production data lives under `POLARIS_DATA_ROOT` instead of the repo checkout.
 
+Remote production runs `polaris-server` as a host systemd service.
+Docker keeps only the blue/green web stack (`paseo-app` and `nginx`).
+
 The current default is:
 
 ```bash
@@ -166,10 +163,9 @@ Optional access bootstrap:
 POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 ```
 
-Executor requirements:
+Runtime note:
 
-- `POLARIS_EXECUTOR_SHARED_SECRET` is required
-- the executor binds only to `127.0.0.1`
+- workspace lifecycle operations run in-process inside `polaris-server`
 
 Polaris now separates workspace archive from workspace delete.
 

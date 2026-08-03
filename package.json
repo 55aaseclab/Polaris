@@ -5,7 +5,6 @@
   "scripts": {
     "polaris": "pnpm --filter polaris run polaris",
     "polaris:server": "pnpm --filter polaris run server",
-    "polaris:executor": "pnpm --filter polaris run executor",
     "paseo:embed": "pnpm --filter @paseo/embed run build",
     "paseo:embed-demo": "pnpm --filter paseo-embed-demo run dev",
     "test:paseo-embed": "pnpm --filter @paseo/embed run test",

@@ -41,6 +41,14 @@ polaris_bluegreen_project_name() {
   printf 'polaris-%s\n' "${color}"
 }
 
+polaris_bluegreen_privileged() {
+  if [ -n "${SUDO:-}" ]; then
+    "${SUDO}" "$@"
+    return
+  fi
+  "$@"
+}
+
 polaris_bluegreen_nginx_port() {
   local color="$1"
   if [ "${color}" = "blue" ]; then
@@ -135,14 +143,14 @@ polaris_bluegreen_switch_upstream() {
   fi
 
   printf 'set $polaris_upstream http://127.0.0.1:%s;\n' "$(polaris_bluegreen_nginx_port "${color}")" > "${next_file}"
-  install -m 0644 "${next_file}" "${upstream_file}"
+  polaris_bluegreen_privileged install -m 0644 "${next_file}" "${upstream_file}"
   rm -f "${next_file}"
 
-  if ! nginx -t || ! nginx -s reload; then
+  if ! polaris_bluegreen_privileged nginx -t || ! polaris_bluegreen_privileged nginx -s reload; then
     if [ -s "${backup_file}" ]; then
-      install -m 0644 "${backup_file}" "${upstream_file}"
-      nginx -t >/dev/null 2>&1 || true
-      nginx -s reload >/dev/null 2>&1 || true
+      polaris_bluegreen_privileged install -m 0644 "${backup_file}" "${upstream_file}"
+      polaris_bluegreen_privileged nginx -t >/dev/null 2>&1 || true
+      polaris_bluegreen_privileged nginx -s reload >/dev/null 2>&1 || true
     fi
     rm -f "${backup_file}"
     echo "Failed to switch nginx upstream to ${color}" >&2
@@ -150,5 +158,5 @@ polaris_bluegreen_switch_upstream() {
   fi
 
   rm -f "${backup_file}"
-  printf '%s\n' "${color}" > "${active_color_file}"
+  printf '%s\n' "${color}" | polaris_bluegreen_privileged tee "${active_color_file}" >/dev/null
 }

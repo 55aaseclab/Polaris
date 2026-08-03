@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
-import { refreshPortalVaultStatus } from "../scripts/executor/operations.js";
+import { refreshPortalVaultStatus } from "../scripts/runtime/operations.js";
 import {
   vaultSelectionPath,
   vaultStatusPath,

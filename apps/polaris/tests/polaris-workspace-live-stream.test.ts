@@ -23,7 +23,7 @@ import {
   queueProvisionVault,
   stopPortalVault,
   updatePortalVaultSelectedDriver,
-} from "../scripts/executor/operations.js";
+} from "../scripts/runtime/operations.js";
 import { subscribePortalVaultStream } from "../scripts/portal/vault-live-hub.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
