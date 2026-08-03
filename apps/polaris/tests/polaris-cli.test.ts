@@ -11,6 +11,7 @@ import { createManagedSshCredential } from "../scripts/config/credentials.js";
 import { assertNoProjectNameCollision, assertProjectNameAvailableForUser } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import {
+  WANGHAI_CACHE_RUNTIME_ROOT,
   scaffoldDockerVault,
   scaffoldUserProfileById,
   syncVaultDockerfileTemplate,
@@ -538,6 +539,7 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
         [
           "WANGHAI_VAULTS_ROOT=/host/wanghai/vaults",
           "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
+          "WANGHAI_CACHE_ROOT=/host/wanghai/cache",
           "CUSTOM_WANGHAI_FLAG=1",
           "",
         ].join("\n"),
@@ -554,6 +556,7 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
       const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
       const expectedVaultsRoot = path.join(hostDataRoot, "vaults");
       const expectedBackupRoot = path.join(hostDataRoot, "backups");
+      const expectedCacheRoot = path.join(hostDataRoot, "cache");
       assert.match(
         rendered,
         new RegExp(`source: "${escapeRegExp(expectedVaultsRoot)}"`),
@@ -570,8 +573,17 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
         rendered,
         new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
       );
+      assert.match(
+        rendered,
+        new RegExp(`source: "${escapeRegExp(expectedCacheRoot)}"`),
+      );
+      assert.match(
+        rendered,
+        new RegExp(`target: "${WANGHAI_CACHE_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
+      );
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/vaults"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/backups"/);
+      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/cache"/);
     } finally {
       if (previousHostDataRoot === undefined) {
         delete process.env.POLARIS_WANGHAI_DATA_ROOT;

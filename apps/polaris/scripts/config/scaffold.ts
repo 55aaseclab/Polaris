@@ -320,6 +320,7 @@ export const WANGHAI_PROFILE_ENV_SOURCE_PATH = "wanghai/.env";
 export const WANGHAI_PROFILE_ENV_MOUNT_PATH = "/opt/wanghai/.env";
 export const WANGHAI_VAULTS_RUNTIME_ROOT = "/vault/project/vaults";
 export const WANGHAI_BACKUP_RUNTIME_ROOT = "/vault/project/backups";
+export const WANGHAI_CACHE_RUNTIME_ROOT = "/vault/project/cache";
 
 export function verticalVaultBaseImage(): string {
   return String(process.env.POLARIS_WANGHAI_VAULT_IMAGE ?? "").trim()
@@ -709,6 +710,7 @@ export function scaffoldDockerVault(
             WANGHAI_REPO_ROOT: "/opt/wanghai",
             WANGHAI_VAULTS_ROOT: WANGHAI_VAULTS_RUNTIME_ROOT,
             WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
+            WANGHAI_CACHE_ROOT: WANGHAI_CACHE_RUNTIME_ROOT,
           }
         : {},
     },
