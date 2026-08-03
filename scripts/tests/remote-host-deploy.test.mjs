@@ -47,3 +47,10 @@ test("host Polaris launcher reads bind host and port from the environment", () =
   assert.match(script, /POLARIS_SERVER_BIND_HOST/);
   assert.match(script, /apps\/polaris\/dist\/scripts\/polaris\.js/);
 });
+
+test("bluegreen nginx keeps /paseo assets on the Paseo app", () => {
+  const template = fs.readFileSync("docker/nginx/templates/default.conf.template", "utf8");
+  assert.match(template, /location = \/paseo \{\s+return 301 \/paseo\/;/m);
+  assert.match(template, /location \^~ \/paseo\/ \{\s+proxy_pass http:\/\/paseo_app\/;/m);
+  assert.doesNotMatch(template, /location \^~ \/paseo\/ \{\s+return 302 \/hosts;/m);
+});

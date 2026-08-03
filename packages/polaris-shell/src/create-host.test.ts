@@ -64,6 +64,32 @@ test("resolveCodingSurfaceUrl falls back to the current origin", () => {
   );
 });
 
+test("resolveCodingSurfaceUrl preserves reconnect scope and offer on the current gateway origin", () => {
+  assert.equal(
+    resolveCodingSurfaceUrl({
+      href: "/v/srv_demo/coding",
+      paseoAppBaseUrl: "https://polaris.example/paseo",
+      currentOrigin: "http://m00e04c1b76c0.dyn.epfl.ch",
+      reconnectTarget:
+        "https://polaris.example/paseo/h/srv_demo?scope=user%3Ademo#offer=opaque-offer",
+    }),
+    "http://m00e04c1b76c0.dyn.epfl.ch/h/srv_demo?scope=user%3Ademo#offer=opaque-offer",
+  );
+});
+
+test("resolveCodingSurfaceUrl keeps the dedicated same-host Paseo port when reconnecting locally", () => {
+  assert.equal(
+    resolveCodingSurfaceUrl({
+      href: "/v/srv_demo/coding",
+      paseoAppBaseUrl: "http://127.0.0.1:8082",
+      currentOrigin: "http://127.0.0.1:8787",
+      reconnectTarget:
+        "http://127.0.0.1:8082/h/srv_demo?scope=user%3Ademo#offer=opaque-offer",
+    }),
+    "http://127.0.0.1:8082/h/srv_demo?scope=user%3Ademo#offer=opaque-offer",
+  );
+});
+
 test("default vault path is the new shell label", () => {
   assert.equal(DEFAULT_POLARIS_VAULT_PATH, "/root/vault");
 });
