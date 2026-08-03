@@ -699,32 +699,45 @@ test("portal API rejects unauthenticated admin access", async () => {
   }
 });
 
-test("portal API reports auth configuration errors as server errors", async () => {
-  const previous = process.env.CLERK_SECRET_KEY;
-  delete process.env.CLERK_SECRET_KEY;
-  const server = createPortalServer(0);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Portal server did not expose a TCP address");
-  }
-  try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/session`, {
-      headers: {
-        authorization: "Bearer fake-token",
+test("portal API rejects invalid Authing sessions", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    assert.equal(url, "https://auth.example/oidc/me");
+    const headers = new Headers(init?.headers ?? {});
+    assert.equal(headers.get("authorization"), "Bearer fake-token");
+    return new Response(
+      JSON.stringify({ message: "invalid token" }),
+      {
+        status: 401,
+        headers: { "content-type": "application/json" },
       },
+    );
+  }) as typeof fetch;
+  try {
+    await withEnv("POLARIS_AUTHING_ISSUER", "https://auth.example/oidc", async () => {
+      const server = createPortalServer(0);
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Portal server did not expose a TCP address");
+      }
+      try {
+        const response = await originalFetch(`http://127.0.0.1:${address.port}/api/session`, {
+          headers: {
+            authorization: "Bearer fake-token",
+          },
+        });
+        assert.equal(response.status, 401);
+        const payload = await response.json() as { error?: string };
+        assert.match(payload.error ?? "", /Authing user info request failed/i);
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
     });
-    assert.equal(response.status, 500);
-    const payload = await response.json() as { error?: string };
-    assert.match(payload.error ?? "", /POLARIS_AUTHING_APP_SECRET is required/i);
   } finally {
-    server.close();
-    await once(server, "close");
-    if (previous === undefined) {
-      delete process.env.CLERK_SECRET_KEY;
-    } else {
-      process.env.CLERK_SECRET_KEY = previous;
-    }
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -1217,24 +1230,31 @@ test("portal service exposes the credential catalog and creates a claude invento
 
 test("portal profile reads and updates", async () => {
   const userId = "100000000000000001";
-  const original = fs.readFileSync(path.join(USER_ROOT, "profiles", `${userId}.yaml`), "utf8");
+  const profileFilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const original = fs.readFileSync(profileFilePath, "utf8");
+  const originalDoc = (yaml.load(original) ?? {}) as {
+    email?: unknown;
+    github?: { account?: unknown };
+    name?: unknown;
+    ssh?: { comment?: unknown };
+  };
 
-  const profile = readPortalProfile(userId);
-  assert.equal(profile?.name, "Demo User");
-  const updated = updatePortalProfile(userId, {
-    name: "Demo User Updated",
-    email: "demo@example.com",
-    githubAccount: "demo-account",
-    sshComment: "demo@example.com",
-  });
-  assert.equal(updated.name, "Demo User Updated");
-  assert.equal(updated.githubAccount, "demo-account");
+  try {
+    const profile = readPortalProfile(userId);
+    assert.equal(profile?.name, String(originalDoc.name ?? ""));
+    assert.equal(profile?.email, String(originalDoc.email ?? ""));
 
-  fs.writeFileSync(
-    path.join(USER_ROOT, "profiles", `${userId}.yaml`),
-    original,
-    "utf8",
-  );
+    const updated = updatePortalProfile(userId, {
+      name: "Demo User Updated",
+      email: "demo@example.com",
+      githubAccount: "demo-account",
+      sshComment: "demo@example.com",
+    });
+    assert.equal(updated.name, "Demo User Updated");
+    assert.equal(updated.githubAccount, "demo-account");
+  } finally {
+    fs.writeFileSync(profileFilePath, original, "utf8");
+  }
 });
 
 test("portal vault detail loads for a user-scoped vault", async () => {
@@ -2909,13 +2929,7 @@ test("portal user deletion rollback preserves unrelated user-map updates", async
 test("portal user deletion rejects users with queued vault provisioning", async () => {
   const userId = uniqueName("portal-delete-queued-user");
   const vault = uniqueName("portal-delete-queued-vault");
-  const profilePath = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    "profiles",
-    `${userId}.yaml`,
-  );
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
 
   try {
@@ -2957,13 +2971,7 @@ test("portal user deletion rejects users with queued vault provisioning", async 
 
 test("portal user deletion rollback restores the lock-consistent user snapshot", async () => {
   const userId = uniqueName("portal-delete-rollback-user");
-  const profilePath = path.join(
-    REPO_ROOT,
-    "config",
-    "users",
-    "profiles",
-    `${userId}.yaml`,
-  );
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
   const userRoot = path.join(USER_ROOT, userId);
   const userCredentialPath = path.join(
     userRoot,

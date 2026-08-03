@@ -41,13 +41,20 @@ function vaultDataVolumeRef(userProfileId: string, project: string): string {
   return vaultRuntimeResourceName(userProfileId, project, "vault-data");
 }
 
-function sanitizeImageTagComponent(raw: string, fallback: string): string {
+function sanitizeImageTagComponent(
+  raw: string,
+  fallback: string,
+  maxLength?: number,
+): string {
   const sanitized = raw
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return sanitized || fallback;
+  const bounded = maxLength === undefined
+    ? sanitized
+    : sanitized.slice(0, maxLength).replace(/^-+|-+$/g, "");
+  return bounded || fallback;
 }
 
 function neutralUserImageTagSegment(userProfileId: string): string {
@@ -55,12 +62,12 @@ function neutralUserImageTagSegment(userProfileId: string): string {
   if (/^\d+$/.test(trimmed)) {
     return `user-${trimmed.slice(-3).padStart(3, "0")}`;
   }
-  return `user-${sanitizeImageTagComponent(trimmed, "default").slice(0, 24)}`;
+  return `user-${sanitizeImageTagComponent(trimmed, "default", 24)}`;
 }
 
 export function vaultImageRef(userProfileId: string, project: string): string {
   const userSegment = neutralUserImageTagSegment(userProfileId);
-  const projectSegment = sanitizeImageTagComponent(project, "vault").slice(0, 32);
+  const projectSegment = sanitizeImageTagComponent(project, "vault", 32);
   return `ttl.sh/${userSegment}-${projectSegment}:24h`;
 }
 
