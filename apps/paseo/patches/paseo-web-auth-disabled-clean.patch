@@ -62,396 +62,15 @@ index e0649f6..eeeeb71 100644
    });
  
    if (startupRoute.kind === "redirect") {
-diff --git a/packages/app/src/components/welcome-screen.tsx b/packages/app/src/components/welcome-screen.tsx
-index 8f22c48..ac89531 100644
---- a/packages/app/src/components/welcome-screen.tsx
-+++ b/packages/app/src/components/welcome-screen.tsx
-@@ -1,30 +1,19 @@
--import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
--import { useTranslation } from "react-i18next";
--import { Pressable, Text, View, ScrollView } from "react-native";
--import { useRouter } from "expo-router";
-+import { useEffect, useMemo, useRef } from "react";
-+import { Text, View, ScrollView } from "react-native";
-+import { Redirect, useRouter } from "expo-router";
- import { StyleSheet, useUnistyles } from "react-native-unistyles";
--import { QrCode, Link2, ClipboardPaste, ExternalLink, Settings } from "lucide-react-native";
- import { useSafeAreaInsets } from "react-native-safe-area-context";
--import type { HostProfile } from "@/types/host-connection";
--import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
--import { AddHostModal } from "./add-host-modal";
--import { PairLinkModal } from "./pair-link-modal";
-+import { getHostRuntimeStore } from "@/runtime/host-runtime";
- import { Button } from "@/components/ui/button";
--import { resolveAppVersion } from "@/utils/app-version";
--import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
- import { buildHostRootRoute } from "@/utils/host-routes";
-+import {
-+  beginPolarisSignIn,
-+  getPolarisAuthToken,
-+  isPolarisAuthDisabled,
-+  usePolarisAuthSession,
-+} from "@/lib/polaris-authing";
-+import { syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
- import { PaseoLogo } from "@/components/icons/paseo-logo";
--import { openExternalUrl } from "@/utils/open-external-url";
--import { isWeb, isNative } from "@/constants/platform";
--
--interface WelcomeAction {
--  key: "scan-qr" | "direct-connection" | "paste-pairing-link";
--  label: string;
--  testID: string;
--  primary: boolean;
--  icon: typeof QrCode;
--  onPress: () => void;
--}
- 
- const styles = StyleSheet.create((theme) => ({
-   root: {
-@@ -67,194 +56,78 @@ const styles = StyleSheet.create((theme) => ({
-     maxWidth: 420,
-     gap: theme.spacing[3],
-   },
--  actionButton: {
--    flexDirection: "row",
--    alignItems: "center",
--    justifyContent: "center",
--    gap: theme.spacing[3],
--    paddingVertical: theme.spacing[4],
--    borderRadius: theme.borderRadius.xl,
--    backgroundColor: theme.colors.surface2,
--    borderWidth: 1,
--    borderColor: theme.colors.border,
--  },
--  actionButtonPrimary: {
--    backgroundColor: theme.colors.accent,
--    borderColor: theme.colors.accent,
--  },
--  actionText: {
--    color: theme.colors.foreground,
--    fontSize: theme.fontSize.base,
--    fontWeight: theme.fontWeight.medium,
--  },
--  actionTextPrimary: {
--    color: theme.colors.accentForeground,
--  },
--  setupLink: {
--    flexDirection: "row",
--    alignItems: "center",
--    justifyContent: "center",
--    gap: 6,
--  },
--  setupLinkText: {
--    color: theme.colors.accent,
--    fontSize: theme.fontSize.sm,
--    fontWeight: theme.fontWeight.medium,
--  },
--  versionLabel: {
--    color: theme.colors.foregroundMuted,
--    fontSize: theme.fontSize.xs,
--    textAlign: "center",
--    marginTop: theme.spacing[6],
--  },
--  settingsButton: {
--    alignSelf: "center",
--    marginTop: theme.spacing[6],
--  },
- }));
- 
--function useAnyHostOnline(serverIds: string[]): string | null {
--  const runtime = getHostRuntimeStore();
--  return useSyncExternalStore(
--    (onStoreChange) => runtime.subscribeAll(onStoreChange),
--    () => {
--      let firstOnlineServerId: string | null = null;
--      let firstOnlineAt: string | null = null;
--      for (const serverId of serverIds) {
--        const snapshot = runtime.getSnapshot(serverId);
--        const lastOnlineAt = snapshot?.lastOnlineAt ?? null;
--        if (!isHostRuntimeConnected(snapshot) || !lastOnlineAt) {
--          continue;
--        }
--        if (!firstOnlineAt || lastOnlineAt < firstOnlineAt) {
--          firstOnlineAt = lastOnlineAt;
--          firstOnlineServerId = serverId;
--        }
--      }
--      return firstOnlineServerId;
--    },
--    () => {
--      let firstOnlineServerId: string | null = null;
--      let firstOnlineAt: string | null = null;
--      for (const serverId of serverIds) {
--        const snapshot = runtime.getSnapshot(serverId);
--        const lastOnlineAt = snapshot?.lastOnlineAt ?? null;
--        if (!isHostRuntimeConnected(snapshot) || !lastOnlineAt) {
--          continue;
--        }
--        if (!firstOnlineAt || lastOnlineAt < firstOnlineAt) {
--          firstOnlineAt = lastOnlineAt;
--          firstOnlineServerId = serverId;
--        }
--      }
--      return firstOnlineServerId;
--    },
--  );
--}
--
--export interface WelcomeScreenProps {
--  onHostAdded?: (profile: HostProfile) => void;
--}
--
--export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
-+export function WelcomeScreen() {
-   const { theme } = useUnistyles();
--  const { t } = useTranslation();
-   const insets = useSafeAreaInsets();
-   const router = useRouter();
--  const appVersion = resolveAppVersion();
--  const appVersionText = formatVersionWithPrefix(appVersion);
--  const [isDirectOpen, setIsDirectOpen] = useState(false);
--  const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
--  const hosts = useHosts();
--  const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
--
--  useEffect(() => {
--    if (!anyOnlineServerId) return;
--    router.replace(buildHostRootRoute(anyOnlineServerId));
--  }, [anyOnlineServerId, router]);
--
--  const finishOnboarding = useCallback(
--    (serverId: string) => {
--      router.replace(buildHostRootRoute(serverId));
--    },
--    [router],
--  );
--
--  const handleOpenPaseoSite = useCallback(() => {
--    void openExternalUrl("https://paseo.sh");
--  }, []);
-+  const hasPolarisSession = usePolarisAuthSession();
-+  const authDisabled = isPolarisAuthDisabled();
-+  const syncStartedRef = useRef(false);
- 
--  const handleOpenSettings = useCallback(() => {
--    router.push("/settings");
--  }, [router]);
-+  // Disabled / already-authenticated users never need the login wall.
-+  // Root auth redirect also sends them to /settings; this is a safety net.
-+  const skipLoginWall = authDisabled || hasPolarisSession;
- 
--  const handleOpenDirect = useCallback(() => setIsDirectOpen(true), []);
--  const handleCloseDirect = useCallback(() => setIsDirectOpen(false), []);
--  const handleOpenPasteLink = useCallback(() => setIsPasteLinkOpen(true), []);
--  const handleClosePasteLink = useCallback(() => setIsPasteLinkOpen(false), []);
--  const handleScanQr = useCallback(() => {
--    router.push("/pair-scan?source=onboarding");
--  }, [router]);
--
--  const handleHostSaved = useCallback(
--    ({ profile, serverId }: { profile: HostProfile; serverId: string }) => {
--      onHostAdded?.(profile);
--      finishOnboarding(serverId);
--    },
--    [onHostAdded, finishOnboarding],
--  );
--
--  const actions: WelcomeAction[] = isWeb
--    ? [
--        {
--          key: "direct-connection",
--          label: t("pairing.connectionMethods.direct.title"),
--          testID: "welcome-direct-connection",
--          primary: true,
--          icon: Link2,
--          onPress: handleOpenDirect,
--        },
--        {
--          key: "paste-pairing-link",
--          label: t("pairing.connectionMethods.pasteLink.title"),
--          testID: "welcome-paste-pairing-link",
--          primary: false,
--          icon: ClipboardPaste,
--          onPress: handleOpenPasteLink,
--        },
--      ]
--    : [
--        {
--          key: "scan-qr",
--          label: t("pairing.connectionMethods.scanQr.title"),
--          testID: "welcome-scan-qr",
--          primary: true,
--          icon: QrCode,
--          onPress: handleScanQr,
--        },
--        {
--          key: "direct-connection",
--          label: t("pairing.connectionMethods.direct.title"),
--          testID: "welcome-direct-connection",
--          primary: false,
--          icon: Link2,
--          onPress: handleOpenDirect,
--        },
--        {
--          key: "paste-pairing-link",
--          label: t("pairing.connectionMethods.pasteLink.title"),
--          testID: "welcome-paste-pairing-link",
--          primary: false,
--          icon: ClipboardPaste,
--          onPress: handleOpenPasteLink,
--        },
--      ];
-+  useEffect(() => {
-+    if (!hasPolarisSession || authDisabled) {
-+      syncStartedRef.current = false;
-+      return;
-+    }
-+    if (syncStartedRef.current) {
-+      return;
-+    }
-+    syncStartedRef.current = true;
-+    let disposed = false;
-+    const token = getPolarisAuthToken();
-+    if (!token) {
-+      router.replace("/settings");
-+      return;
-+    }
-+    const store = getHostRuntimeStore();
-+    const fallbackServerId = () => store.getHosts()[0]?.serverId ?? null;
-+    void syncPolarisHostsOnce({
-+      token,
-+      upsertFromOfferUrl: (url, label) => store.upsertConnectionFromOfferUrl(url, label),
-+    })
-+      .then((synced) => {
-+        if (disposed) return;
-+        if (synced.preferredHref) {
-+          router.replace(synced.preferredHref as never);
-+          return;
-+        }
-+        const fallback = fallbackServerId();
-+        if (fallback) {
-+          router.replace(buildHostRootRoute(fallback));
-+          return;
-+        }
-+        router.replace("/settings");
-+      })
-+      .catch((error) => {
-+        console.warn("[welcome] polaris host sync failed", error);
-+        if (disposed) return;
-+        const fallback = fallbackServerId();
-+        if (fallback) {
-+          router.replace(buildHostRootRoute(fallback));
-+          return;
-+        }
-+        router.replace("/settings");
-+      });
-+    return () => {
-+      disposed = true;
-+    };
-+  }, [authDisabled, hasPolarisSession, router]);
- 
-   const scrollContentContainerStyle = useMemo(
-     () => [styles.container, { paddingBottom: theme.spacing[6] + insets.bottom }],
-     [theme.spacing, insets.bottom],
-   );
- 
-+  if (skipLoginWall) {
-+    return <Redirect href="/settings" />;
-+  }
-+
-   return (
-     <View style={styles.root}>
-       <ScrollView
-@@ -266,73 +139,17 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
-         <View style={styles.content}>
-           <PaseoLogo size={96} />
-           <View style={styles.copyBlock}>
--            <Text style={styles.title}>{t("onboarding.title")}</Text>
--            <Text style={styles.subtitle}>{t("onboarding.subtitle")}</Text>
--            {isNative ? (
--              <Pressable style={styles.setupLink} onPress={handleOpenPaseoSite}>
--                <Text style={styles.setupLinkText}>paseo.sh</Text>
--                <ExternalLink size={14} color={theme.colors.accent} />
--              </Pressable>
--            ) : null}
-+            <Text style={styles.title}>欢迎使用 Polaris</Text>
-+            <Text style={styles.subtitle}>登录即可开始</Text>
-           </View>
- 
-           <View style={styles.actions}>
--            {actions.map((action) => (
--              <WelcomeActionButton key={action.key} action={action} />
--            ))}
-+            <Button size="lg" onPress={beginPolarisSignIn} testID="welcome-sign-in">
-+              登录
-+            </Button>
-           </View>
--
--          <Button
--            variant="ghost"
--            size="sm"
--            leftIcon={Settings}
--            onPress={handleOpenSettings}
--            style={styles.settingsButton}
--            testID="welcome-open-settings"
--          >
--            {t("onboarding.actions.settings")}
--          </Button>
-         </View>
--        <Text style={styles.versionLabel}>{appVersionText}</Text>
--
--        <AddHostModal
--          visible={isDirectOpen}
--          onClose={handleCloseDirect}
--          onSaved={handleHostSaved}
--        />
--
--        <PairLinkModal
--          visible={isPasteLinkOpen}
--          onClose={handleClosePasteLink}
--          onSaved={handleHostSaved}
--        />
-       </ScrollView>
-     </View>
-   );
- }
--
--interface WelcomeActionButtonProps {
--  action: WelcomeAction;
--}
--
--function WelcomeActionButton({ action }: WelcomeActionButtonProps) {
--  const { theme } = useUnistyles();
--  const Icon = action.icon;
--  const buttonStyle = useMemo(
--    () => [styles.actionButton, action.primary ? styles.actionButtonPrimary : null],
--    [action.primary],
--  );
--  const textStyle = useMemo(
--    () => [styles.actionText, action.primary ? styles.actionTextPrimary : null],
--    [action.primary],
--  );
--  return (
--    <Pressable style={buttonStyle} onPress={action.onPress} testID={action.testID}>
--      <Icon
--        size={18}
--        color={action.primary ? theme.colors.accentForeground : theme.colors.foreground}
--      />
--      <Text style={textStyle}>{action.label}</Text>
--    </Pressable>
--  );
--}
+
 diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
 new file mode 100644
-index 0000000..d2c59ce
+index 0000000..be717df
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.test.ts
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,123 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
-+  beginPolarisSignIn,
-+  clearPolarisSignIn,
-+  completePolarisSignIn,
 +  getPolarisAuthToken,
 +  getPolarisAuthUserScope,
 +  hasPolarisAuthSession,
@@ -459,18 +78,8 @@ index 0000000..d2c59ce
 +  isPolarisAuthDisabled,
 +  publishPolarisAuthSession,
 +  resolvePolarisAuthRedirect,
-+  signOutPolaris,
 +  subscribePolarisAuthSession,
 +} from "./polaris-authing";
-+
-+const sessionKeys = [
-+  "polaris_authing_session",
-+  "polaris_authing_id_token",
-+  "polaris_authing_pkce_verifier",
-+  "polaris_authing_state",
-+  "polaris_authing_return_path",
-+  "polaris_authing_redirect_uri",
-+];
 +
 +function installSessionStorage(): Storage {
 +  const values = new Map<string, string>();
@@ -495,29 +104,6 @@ index 0000000..d2c59ce
 +  return storage;
 +}
 +
-+function installLocalStorage(): Storage {
-+  const values = new Map<string, string>();
-+  const storage: Storage = {
-+    get length() {
-+      return values.size;
-+    },
-+    clear: () => values.clear(),
-+    getItem: (key) => values.get(key) ?? null,
-+    key: (index) => [...values.keys()][index] ?? null,
-+    removeItem: (key) => {
-+      values.delete(key);
-+    },
-+    setItem: (key, value) => {
-+      values.set(key, String(value));
-+    },
-+  };
-+  Object.defineProperty(globalThis, "localStorage", {
-+    configurable: true,
-+    value: storage,
-+  });
-+  return storage;
-+}
-+
 +function portalSessionToken(subject: string): string {
 +  const payload = Buffer.from(JSON.stringify({ sub: subject }))
 +    .toString("base64")
@@ -529,82 +115,31 @@ index 0000000..d2c59ce
 +
 +afterEach(() => {
 +  delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
-+  delete (globalThis as { localStorage?: Storage }).localStorage;
 +  delete process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE;
 +  delete process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID;
 +  vi.unstubAllGlobals();
 +});
 +
 +describe("Polaris authentication state", () => {
-+  it("clears every local authentication value on sign-out", () => {
-+    const storage = installSessionStorage();
-+    const onSessionChange = vi.fn();
-+    const unsubscribe = subscribePolarisAuthSession(onSessionChange);
-+    for (const key of sessionKeys) storage.setItem(key, "value");
-+
-+    expect(hasPolarisAuthSession()).toBe(true);
-+
-+    clearPolarisSignIn();
-+
-+    for (const key of sessionKeys) expect(storage.getItem(key)).toBeNull();
-+    expect(getPolarisAuthToken()).toBeNull();
-+    expect(hasPolarisAuthSession()).toBe(false);
-+    expect(onSessionChange).toHaveBeenCalledTimes(1);
-+    unsubscribe();
-+  });
-+
-+  it("publishes the authenticated state when completing sign-in", async () => {
-+    const storage = installSessionStorage();
-+    installLocalStorage();
-+    const token = portalSessionToken("authing-user-a");
-+    storage.setItem("polaris_authing_pkce_verifier", "verifier");
-+    storage.setItem("polaris_authing_state", "expected-state");
-+    storage.setItem("polaris_authing_return_path", "/welcome");
-+    storage.setItem("polaris_authing_redirect_uri", "http://example.test/auth/callback");
-+    vi.stubGlobal("location", {
-+      search: "?code=authorization-code&state=expected-state",
-+      protocol: "http:",
-+      hostname: "example.test",
-+      origin: "http://example.test",
-+    });
-+    vi.stubGlobal(
-+      "fetch",
-+      vi.fn().mockResolvedValue(
-+        new Response(
-+          JSON.stringify({
-+            token,
-+            idToken: "authing-id-token",
-+          }),
-+          { status: 200 },
-+        ),
-+      ),
-+    );
++  it("publishes auth session changes", () => {
++    installSessionStorage();
 +    const onSessionChange = vi.fn();
 +    const unsubscribe = subscribePolarisAuthSession(onSessionChange);
 +
-+    await expect(completePolarisSignIn()).resolves.toBe("/settings");
-+
-+    expect(getPolarisAuthToken()).toBe(token);
-+    expect(storage.getItem("polaris_authing_id_token")).toBe("authing-id-token");
-+    expect(hasPolarisAuthSession()).toBe(true);
-+    expect(hasPolarisHostSession()).toBe(true);
-+    expect(getPolarisAuthUserScope()).toBe("authing-user-a");
-+    expect(onSessionChange).not.toHaveBeenCalled();
 +    publishPolarisAuthSession();
++
 +    expect(onSessionChange).toHaveBeenCalledTimes(1);
 +    unsubscribe();
 +  });
 +
-+  it("derives the Host registry scope from the authenticated user subject", () => {
++  it("reads the authenticated user subject from the session token", () => {
 +    const storage = installSessionStorage();
 +    storage.setItem("polaris_authing_session", portalSessionToken("authing-user-b"));
 +
++    expect(getPolarisAuthToken()).toBe(portalSessionToken("authing-user-b"));
 +    expect(getPolarisAuthUserScope()).toBe("authing-user-b");
++    expect(hasPolarisAuthSession()).toBe(true);
 +    expect(hasPolarisHostSession()).toBe(true);
-+
-+    clearPolarisSignIn();
-+    expect(getPolarisAuthUserScope()).toBeNull();
-+    expect(hasPolarisHostSession()).toBe(false);
 +  });
 +
 +  it("treats disabled auth override as an authenticated local session", () => {
@@ -618,32 +153,8 @@ index 0000000..d2c59ce
 +    expect(getPolarisAuthUserScope()).toBe("local-dev-admin");
 +    expect(resolvePolarisAuthRedirect("/settings", true)).toBeNull();
 +    expect(resolvePolarisAuthRedirect("/settings", false)).toBeNull();
-+    // Login surfaces are skipped entirely in disabled mode.
 +    expect(resolvePolarisAuthRedirect("/welcome", false)).toBe("/settings");
 +    expect(resolvePolarisAuthRedirect("/welcome", true)).toBe("/settings");
-+    expect(resolvePolarisAuthRedirect("/auth/callback", false)).toBe("/settings");
-+  });
-+
-+  it("ignores sign-in and sign-out when auth is disabled", () => {
-+    process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE = "disabled";
-+    process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID = "local-dev-admin";
-+    const replace = vi.fn();
-+    vi.stubGlobal("location", {
-+      replace,
-+      assign: vi.fn(),
-+      pathname: "/welcome",
-+      search: "",
-+      protocol: "http:",
-+      hostname: "example.test",
-+      origin: "http://example.test",
-+    });
-+
-+    beginPolarisSignIn();
-+    signOutPolaris();
-+
-+    expect(replace).not.toHaveBeenCalled();
-+    expect(getPolarisAuthToken()).toBe("polaris-disabled-auth-session");
-+    expect(hasPolarisAuthSession()).toBe(true);
 +  });
 +
 +  it("treats oauth2-proxy sessions as plain username scopes", () => {
@@ -657,35 +168,8 @@ index 0000000..d2c59ce
 +    expect(getPolarisAuthUserScope()).toBe("authing-user-a");
 +  });
 +
-+  it("accepts callback state from localStorage fallback", async () => {
-+    installSessionStorage();
-+    const localStorage = installLocalStorage();
-+    localStorage.setItem("polaris_authing_pkce_verifier", "verifier");
-+    localStorage.setItem("polaris_authing_state", "expected-state");
-+    localStorage.setItem("polaris_authing_return_path", "/projects/demo");
-+    localStorage.setItem("polaris_authing_redirect_uri", "http://example.test/auth/callback");
-+    vi.stubGlobal("location", {
-+      search: "?code=authorization-code&state=expected-state",
-+      protocol: "http:",
-+      hostname: "example.test",
-+      origin: "http://example.test",
-+    });
-+    vi.stubGlobal(
-+      "fetch",
-+      vi
-+        .fn()
-+        .mockResolvedValue(
-+          new Response(JSON.stringify({ token: "authenticated-token" }), { status: 200 }),
-+        ),
-+    );
-+
-+    await expect(completePolarisSignIn()).resolves.toBe("/projects/demo");
-+    expect(getPolarisAuthToken()).toBe("authenticated-token");
-+  });
-+
 +  it("redirects unauthenticated users away from every app route", () => {
 +    expect(resolvePolarisAuthRedirect("/welcome", false)).toBeNull();
-+    expect(resolvePolarisAuthRedirect("/auth/callback", false)).toBeNull();
 +    expect(resolvePolarisAuthRedirect("/", false)).toBe("/welcome");
 +    expect(resolvePolarisAuthRedirect("/settings", false)).toBe("/welcome");
 +    expect(resolvePolarisAuthRedirect("/settings/general", false)).toBe("/welcome");
@@ -706,22 +190,18 @@ index 0000000..d2c59ce
 +
 +  it("sends authenticated users away from the welcome login wall", () => {
 +    expect(resolvePolarisAuthRedirect("/welcome", true)).toBe("/settings");
-+    expect(resolvePolarisAuthRedirect("/auth/callback", true)).toBeNull();
 +  });
 +});
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..f6674b6
+index 0000000..2a918db
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,57 @@
 +import { isEmbedDevelopmentEnabled } from "@/embed/protocol";
-+import { isPolarisAuthDisabled } from "@getpaseo/polaris-auth-client";
++import { isPolarisAuthDisabled, polarisApiBaseUrl } from "@getpaseo/polaris-auth-client";
 +
 +export {
-+  beginPolarisSignIn,
-+  clearPolarisSignIn,
-+  completePolarisSignIn,
 +  getPolarisAuthToken,
 +  getPolarisAuthUserScope,
 +  hasPolarisAuthSession,
@@ -729,12 +209,23 @@ index 0000000..f6674b6
 +  isPolarisAuthDisabled,
 +  polarisApiBaseUrl,
 +  publishPolarisAuthSession,
-+  signOutPolaris,
 +  subscribePolarisAuthSession,
 +  usePolarisAuthSession,
 +} from "@getpaseo/polaris-auth-client";
 +
 +export type PolarisAuthRedirect = "/welcome" | "/settings" | null;
++
++export function polarisShellBaseUrl(): string {
++  return polarisApiBaseUrl().replace(/\/api\/?$/, "");
++}
++
++export function polarisShellRouteHref(pathname: string): string {
++  return new URL(pathname, `${polarisShellBaseUrl()}/`).toString();
++}
++
++export function polarisShellWelcomeHref(): string {
++  return polarisShellRouteHref("/welcome");
++}
 +
 +/**
 + * Gate app routes against auth state.
@@ -753,17 +244,13 @@ index 0000000..f6674b6
 +    if (pathname === "/welcome") {
 +      return "/settings";
 +    }
-+    // Disabled mode has no OAuth callback; real Authing still needs /auth/callback.
-+    if (pathname === "/auth/callback" && isPolarisAuthDisabled()) {
-+      return "/settings";
-+    }
 +    return null;
 +  }
 +
 +  if (pathname === "/embed" && isEmbedDevelopmentEnabled()) {
 +    return null;
 +  }
-+  if (pathname === "/welcome" || pathname === "/auth/callback") {
++  if (pathname === "/welcome") {
 +    return null;
 +  }
 +  return "/welcome";
@@ -935,18 +422,13 @@ index 77a8cfd..f46e2bc 100644
  function isHostStartupRouteInput(
 diff --git a/packages/polaris-auth-client/src/index.ts b/packages/polaris-auth-client/src/index.ts
 new file mode 100644
-index 0000000..a4bcb4b
+index 0000000..004a704
 --- /dev/null
 +++ b/packages/polaris-auth-client/src/index.ts
-@@ -0,0 +1,448 @@
+@@ -0,0 +1,146 @@
 +import { useSyncExternalStore } from "react";
 +
 +const sessionKey = "polaris_authing_session";
-+const idTokenKey = "polaris_authing_id_token";
-+const verifierKey = "polaris_authing_pkce_verifier";
-+const stateKey = "polaris_authing_state";
-+const returnPathKey = "polaris_authing_return_path";
-+const redirectUriKey = "polaris_authing_redirect_uri";
 +const authOverrideCookieKey = "polaris_auth_override";
 +const disabledAuthToken = "polaris-disabled-auth-session";
 +
@@ -957,42 +439,14 @@ index 0000000..a4bcb4b
 +  userScope: string;
 +}
 +
-+type PolarisRemoteAuthMode = "authing-browser-session" | "oauth2-proxy" | "disabled";
++type PolarisRemoteAuthMode =
++  | "authing-browser-session"
++  | "oauth2-proxy"
++  | "disabled";
 +
 +function resolvePolarisRemoteAuthMode(): PolarisRemoteAuthMode {
-+  return (process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE?.trim().toLowerCase() ||
-+    "authing-browser-session") as PolarisRemoteAuthMode;
-+}
-+
-+function readTransientAuthValue(key: string): string | null {
-+  const sessionValue = sessionStorage.getItem(key)?.trim();
-+  if (sessionValue) {
-+    return sessionValue;
-+  }
-+  try {
-+    const localValue = localStorage.getItem(key)?.trim();
-+    return localValue || null;
-+  } catch {
-+    return null;
-+  }
-+}
-+
-+function writeTransientAuthValue(key: string, value: string): void {
-+  sessionStorage.setItem(key, value);
-+  try {
-+    localStorage.setItem(key, value);
-+  } catch {
-+    // Ignore storage availability issues in restrictive browsers.
-+  }
-+}
-+
-+function clearTransientAuthValue(key: string): void {
-+  sessionStorage.removeItem(key);
-+  try {
-+    localStorage.removeItem(key);
-+  } catch {
-+    // Ignore storage availability issues in restrictive browsers.
-+  }
++  const rawMode = process.env.EXPO_PUBLIC_POLARIS_AUTH_MODE?.trim().toLowerCase();
++  return (rawMode || "authing-browser-session") as PolarisRemoteAuthMode;
 +}
 +
 +function notifyPolarisSessionChange(): void {
@@ -1015,19 +469,12 @@ index 0000000..a4bcb4b
 +  return decodeURIComponent(entry.slice(key.length + 1).trim()) || null;
 +}
 +
-+function clearCookieValue(key: string): void {
-+  if (typeof globalThis.document === "undefined") {
-+    return;
-+  }
-+  globalThis.document.cookie = `${key}=; Max-Age=0; path=/`;
-+}
-+
 +function resolvePolarisAuthOverride(): PolarisAuthOverride | null {
 +  const envMode = resolvePolarisRemoteAuthMode();
 +  if (envMode === "disabled") {
 +    const envUserScope =
-+      process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID?.trim() ||
-+      "100000000000000001";
++      process.env.EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID?.trim()
++      || "100000000000000001";
 +    return {
 +      mode: "disabled",
 +      userScope: envUserScope,
@@ -1047,107 +494,8 @@ index 0000000..a4bcb4b
 +  };
 +}
 +
-+/**
-+ * Local-dev / no-IdP mode. The app is permanently signed in as the default
-+ * Polaris user: no login wall, no logout, no Authing redirects.
-+ */
 +export function isPolarisAuthDisabled(): boolean {
 +  return resolvePolarisAuthOverride()?.mode === "disabled";
-+}
-+
-+function required(value: string | undefined, name: string): string {
-+  const trimmed = value?.trim();
-+  if (!trimmed) {
-+    throw new Error(`${name} is required`);
-+  }
-+  return trimmed;
-+}
-+
-+function fallbackCallbackUrl(): string {
-+  if (typeof globalThis.location === "undefined") {
-+    throw new Error("A browser is required");
-+  }
-+  return `${globalThis.location.origin}/auth/callback`;
-+}
-+
-+function base64Url(bytes: Uint8Array): string {
-+  let value = "";
-+  for (const byte of bytes) {
-+    value += String.fromCharCode(byte);
-+  }
-+  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-+}
-+
-+function randomBytes(length: number): Uint8Array {
-+  const bytes = new Uint8Array(length);
-+  if (typeof globalThis.crypto?.getRandomValues === "function") {
-+    globalThis.crypto.getRandomValues(bytes);
-+    return bytes;
-+  }
-+  for (let index = 0; index < length; index += 1) {
-+    bytes[index] = Math.floor(Math.random() * 256);
-+  }
-+  return bytes;
-+}
-+
-+async function challenge(
-+  verifier: string,
-+): Promise<{ value: string; method: "S256" | "plain" }> {
-+  if (typeof globalThis.crypto?.subtle?.digest === "function") {
-+    return {
-+      value: base64Url(
-+        new Uint8Array(
-+          await globalThis.crypto.subtle.digest(
-+            "SHA-256",
-+            new TextEncoder().encode(verifier),
-+          ),
-+        ),
-+      ),
-+      method: "S256",
-+    };
-+  }
-+  return { value: verifier, method: "plain" };
-+}
-+
-+interface AuthingConfig {
-+  authMode: PolarisRemoteAuthMode;
-+  appId?: string;
-+  authorizationUrl?: string;
-+  redirectUri: string;
-+  logoutUrl?: string;
-+  logoutRedirectUri?: string;
-+  signInUrl?: string;
-+  signOutUrl?: string;
-+}
-+
-+async function loadAuthingConfig(): Promise<AuthingConfig> {
-+  const response = await fetch(`${polarisApiBaseUrl()}/authing-config`);
-+  const config = (await response.json().catch(() => ({}))) as Partial<AuthingConfig>;
-+  if (!response.ok) {
-+    throw new Error("无法加载 Authing 配置");
-+  }
-+  const authMode = (config.authMode?.trim().toLowerCase() ||
-+    resolvePolarisRemoteAuthMode()) as PolarisRemoteAuthMode;
-+  if (authMode === "oauth2-proxy") {
-+    return {
-+      authMode,
-+      redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
-+      logoutUrl: config.logoutUrl?.trim() || undefined,
-+      logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
-+      signInUrl: config.signInUrl?.trim() || "/oauth2/start",
-+      signOutUrl: config.signOutUrl?.trim() || "/oauth2/sign_out",
-+    };
-+  }
-+  return {
-+    authMode,
-+    appId: required(config.appId, "POLARIS_AUTHING_APP_ID"),
-+    authorizationUrl: required(config.authorizationUrl, "POLARIS_AUTHING_AUTHORIZATION_URL"),
-+    redirectUri: config.redirectUri?.trim() || fallbackCallbackUrl(),
-+    logoutUrl: config.logoutUrl?.trim() || undefined,
-+    logoutRedirectUri: config.logoutRedirectUri?.trim() || undefined,
-+    signInUrl: config.signInUrl?.trim() || undefined,
-+    signOutUrl: config.signOutUrl?.trim() || undefined,
-+  };
 +}
 +
 +export function publishPolarisAuthSession(): void {
@@ -1180,10 +528,6 @@ index 0000000..a4bcb4b
 +  return null;
 +}
 +
-+/**
-+ * Keep Host storage scoped to the authenticated identity, never to a pairing
-+ * URL or a locally remembered host.
-+ */
 +export function getPolarisAuthUserScope(): string | null {
 +  const authOverride = resolvePolarisAuthOverride();
 +  if (authOverride?.mode === "disabled") {
@@ -1216,9 +560,7 @@ index 0000000..a4bcb4b
 +  return Boolean(getPolarisAuthToken() && getPolarisAuthUserScope());
 +}
 +
-+export function subscribePolarisAuthSession(
-+  listener: () => void,
-+): () => void {
++export function subscribePolarisAuthSession(listener: () => void): () => void {
 +  sessionListeners.add(listener);
 +  return () => sessionListeners.delete(listener);
 +}
@@ -1229,161 +571,4 @@ index 0000000..a4bcb4b
 +    hasPolarisAuthSession,
 +    hasPolarisAuthSession,
 +  );
-+}
-+
-+export function beginPolarisSignIn(): void {
-+  void (async () => {
-+    // Disabled mode is always authenticated. Callers should not show a sign-in
-+    // affordance; if they do, stay put instead of bouncing through /settings.
-+    if (isPolarisAuthDisabled()) {
-+      return;
-+    }
-+    writeTransientAuthValue(
-+      returnPathKey,
-+      `${globalThis.location.pathname}${globalThis.location.search}`,
-+    );
-+    const config = await loadAuthingConfig();
-+    if (config.authMode === "oauth2-proxy") {
-+      clearTransientAuthValue(verifierKey);
-+      clearTransientAuthValue(stateKey);
-+      writeTransientAuthValue(redirectUriKey, config.redirectUri);
-+      const signInUrl = new URL(config.signInUrl || "/oauth2/start", globalThis.location.origin);
-+      signInUrl.searchParams.set("rd", config.redirectUri);
-+      globalThis.location.assign(signInUrl.toString());
-+      return;
-+    }
-+    const verifier = base64Url(randomBytes(32));
-+    const state = base64Url(randomBytes(24));
-+    writeTransientAuthValue(verifierKey, verifier);
-+    writeTransientAuthValue(stateKey, state);
-+    writeTransientAuthValue(redirectUriKey, config.redirectUri);
-+    const authorizationUrl = new URL(config.authorizationUrl);
-+    const pkce = await challenge(verifier);
-+    authorizationUrl.search = new URLSearchParams({
-+      client_id: config.appId,
-+      response_type: "code",
-+      scope: "openid profile email username phone",
-+      redirect_uri: config.redirectUri,
-+      state,
-+      code_challenge: pkce.value,
-+      code_challenge_method: pkce.method,
-+    }).toString();
-+    globalThis.location.assign(authorizationUrl.toString());
-+  })();
-+}
-+
-+export async function completePolarisSignIn(): Promise<string> {
-+  const envMode = resolvePolarisRemoteAuthMode();
-+  const config = envMode === "oauth2-proxy" ? await loadAuthingConfig().catch(() => null) : null;
-+  const params = new URLSearchParams(globalThis.location.search);
-+  const code = params.get("code");
-+  const state = params.get("state");
-+  if ((config?.authMode ?? envMode) === "oauth2-proxy" && !code) {
-+    const token =
-+      getPolarisAuthToken() ||
-+      (await fetch(`${polarisApiBaseUrl()}/session`)
-+        .then(async (response) => {
-+          const body = (await response.json().catch(() => ({}))) as {
-+            authingUserId?: string;
-+            authingUsername?: string | null;
-+            error?: string;
-+          };
-+          if (!response.ok) {
-+            throw new Error(body.error || "Authing 登录未完成");
-+          }
-+          return body.authingUserId?.trim() || body.authingUsername?.trim() || null;
-+        })
-+        .catch(() => null));
-+    if (!token) {
-+      throw new Error("Authing 登录未完成");
-+    }
-+    sessionStorage.setItem(sessionKey, token);
-+    clearTransientAuthValue(verifierKey);
-+    clearTransientAuthValue(stateKey);
-+    clearTransientAuthValue(redirectUriKey);
-+    const returnPath = readTransientAuthValue(returnPathKey);
-+    return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
-+  }
-+  const verifier = readTransientAuthValue(verifierKey);
-+  if (!code || !verifier || state !== readTransientAuthValue(stateKey)) {
-+    throw new Error("Authing 登录状态无效，请重新登录");
-+  }
-+  const response = await fetch(`${polarisApiBaseUrl()}/auth/callback`, {
-+    method: "POST",
-+    headers: { "content-type": "application/json" },
-+    body: JSON.stringify({
-+      code,
-+      codeVerifier: verifier,
-+      redirectUri: readTransientAuthValue(redirectUriKey) || fallbackCallbackUrl(),
-+    }),
-+  });
-+  const payload = (await response.json().catch(() => ({}))) as {
-+    token?: string;
-+    idToken?: string;
-+    error?: string;
-+  };
-+  if (!response.ok || !payload.token?.trim()) {
-+    throw new Error(payload.error || "Authing 登录未完成");
-+  }
-+  sessionStorage.setItem(sessionKey, payload.token);
-+  if (payload.idToken?.trim()) {
-+    sessionStorage.setItem(idTokenKey, payload.idToken.trim());
-+  }
-+  clearTransientAuthValue(verifierKey);
-+  clearTransientAuthValue(stateKey);
-+  clearTransientAuthValue(redirectUriKey);
-+  const returnPath = readTransientAuthValue(returnPathKey);
-+  return returnPath && returnPath !== "/welcome" ? returnPath : "/settings";
-+}
-+
-+export function clearPolarisSignIn(options?: {
-+  notify?: boolean;
-+  preserveCookie?: boolean;
-+}): void {
-+  sessionStorage.removeItem(sessionKey);
-+  sessionStorage.removeItem(idTokenKey);
-+  if (!options?.preserveCookie) {
-+    clearCookieValue(sessionKey);
-+  }
-+  clearTransientAuthValue(verifierKey);
-+  clearTransientAuthValue(stateKey);
-+  clearTransientAuthValue(redirectUriKey);
-+  clearTransientAuthValue(returnPathKey);
-+  if (options?.notify !== false) {
-+    notifyPolarisSessionChange();
-+  }
-+}
-+
-+export function signOutPolaris(): void {
-+  void (async () => {
-+    // There is no real session to clear in disabled mode; pretend-logout only
-+    // confuses navigation (token still resolves, welcome/settings loop).
-+    if (isPolarisAuthDisabled()) {
-+      return;
-+    }
-+    const config = await loadAuthingConfig().catch(() => null);
-+    const idToken = sessionStorage.getItem(idTokenKey)?.trim();
-+    if ((config?.authMode ?? resolvePolarisRemoteAuthMode()) === "oauth2-proxy") {
-+      const proxyLogoutUrl = new URL(config?.signOutUrl || "/oauth2/sign_out", globalThis.location.origin);
-+      proxyLogoutUrl.searchParams.set("rd", "/welcome");
-+      clearPolarisSignIn({ notify: false, preserveCookie: true });
-+      globalThis.location.replace(proxyLogoutUrl.toString());
-+      return;
-+    }
-+    if (config?.logoutUrl) {
-+      const logoutUrl = new URL(config.logoutUrl);
-+      if (idToken) {
-+        logoutUrl.searchParams.set("id_token_hint", idToken);
-+      }
-+      logoutUrl.searchParams.set(
-+        "post_logout_redirect_uri",
-+        config.logoutRedirectUri || globalThis.location.origin,
-+      );
-+      clearPolarisSignIn({ notify: false });
-+      globalThis.location.replace(logoutUrl.toString());
-+      return;
-+    }
-+    clearPolarisSignIn();
-+    globalThis.location.replace("/welcome");
-+  })();
 +}
