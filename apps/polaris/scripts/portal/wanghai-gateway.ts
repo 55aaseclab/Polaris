@@ -12,6 +12,7 @@ import {
   type WanghaiAssertionAdmission,
   type WanghaiGatewayRole,
   type WanghaiLaunchClaims,
+  type WanghaiQuotaMeasurement,
 } from "../security/wanghai-assertions.js";
 import { getPolarisControlStore } from "./control-store.js";
 
@@ -217,6 +218,7 @@ export function issueRequestAssertion(input: {
   session: WanghaiLaunchClaims;
   requestId?: string;
   admission?: WanghaiAssertionAdmission;
+  quotaMeasurement?: WanghaiQuotaMeasurement;
 }): string {
   const masterSecret = requireWanghaiGatewayMasterSecret();
   const secret = deriveWanghaiVaultAssertionSecret(
@@ -232,6 +234,7 @@ export function issueRequestAssertion(input: {
     role: input.session.role,
     requestId: input.requestId ?? randomUUID(),
     admission: input.admission,
+    quotaMeasurement: input.quotaMeasurement,
   });
 }
 
