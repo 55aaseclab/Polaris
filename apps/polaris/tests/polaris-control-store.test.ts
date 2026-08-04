@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { PolarisControlStore } from "../scripts/portal/control-store.js";
 
@@ -101,6 +102,71 @@ test("control store claims, retries, and completes durable jobs", () => {
     assert.equal(reclaimed?.attempts, 2);
     assert.equal(store.completeJob(queued.id, "worker-b"), true);
     assert.equal(store.getJob(queued.id)?.status, "succeeded");
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("control store persists durable job results across reopen", () => {
+  const fixture = temporaryStore();
+  try {
+    const first = PolarisControlStore.open(fixture.filePath);
+    const job = first.enqueueJob({
+      kind: "wanghai-backup",
+      dedupeKey: "tenant-a:vault-a:backup-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    assert.equal(first.claimNextJob("backup-worker", 10_000, ["wanghai-backup"])?.id, job.id);
+    assert.equal(
+      first.completeJob(job.id, "backup-worker", { archive_id: "synthetic-archive" }),
+      true,
+    );
+    first.close();
+
+    const reopened = PolarisControlStore.open(fixture.filePath);
+    assert.deepEqual(reopened.getJob(job.id)?.result, { archive_id: "synthetic-archive" });
+    reopened.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("control store adds durable job results to an existing jobs table", () => {
+  const fixture = temporaryStore();
+  try {
+    fs.mkdirSync(path.dirname(fixture.filePath), { recursive: true });
+    const legacy = new DatabaseSync(fixture.filePath);
+    legacy.exec(`
+      CREATE TABLE jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        tenant_id TEXT,
+        vault_id TEXT,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 3,
+        available_at INTEGER NOT NULL,
+        lease_owner TEXT,
+        lease_expires_at INTEGER,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      )
+    `);
+    legacy.close();
+
+    const store = PolarisControlStore.open(fixture.filePath);
+    const job = store.enqueueJob({ kind: "wanghai-backup", dedupeKey: "legacy-backup" });
+    assert.equal(store.claimNextJob("backup-worker", 10_000, ["wanghai-backup"])?.id, job.id);
+    assert.equal(store.completeJob(job.id, "backup-worker", { restored: true }), true);
+    assert.deepEqual(store.getJob(job.id)?.result, { restored: true });
     store.close();
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

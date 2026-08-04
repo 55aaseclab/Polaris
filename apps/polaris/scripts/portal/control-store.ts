@@ -23,6 +23,7 @@ export interface DurableJob {
   cancelRequested: boolean;
   errorCode?: string;
   errorMessage?: string;
+  result?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -185,13 +186,18 @@ function asOptionalString(value: unknown): string | undefined {
 }
 
 function parsePayload(value: unknown): Record<string, unknown> {
+  return parseOptionalPayload(value) ?? {};
+}
+
+function parseOptionalPayload(value: unknown): Record<string, unknown> | undefined {
+  if (value == null) return undefined;
   try {
-    const parsed = JSON.parse(String(value ?? "{}"));
+    const parsed = JSON.parse(String(value));
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
-      : {};
+      : undefined;
   } catch {
-    return {};
+    return undefined;
   }
 }
 
@@ -212,6 +218,7 @@ function rowToJob(row: SqlRow): DurableJob {
     cancelRequested: Number(row.cancel_requested ?? 0) === 1,
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
+    result: parseOptionalPayload(row.result_json),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     completedAt: asOptionalString(row.completed_at),
@@ -321,6 +328,14 @@ function ensureJobCancellationColumn(db: DatabaseSync): void {
   db.exec("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
 }
 
+function ensureJobResultColumn(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(jobs)").all() as SqlRow[];
+  if (columns.some((column) => String(column.name) === "result_json")) {
+    return;
+  }
+  db.exec("ALTER TABLE jobs ADD COLUMN result_json TEXT");
+}
+
 function ensureIdempotencyResponseColumns(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(idempotency_keys)").all() as SqlRow[];
   const names = new Set(columns.map((column) => String(column.name)));
@@ -389,6 +404,7 @@ export class PolarisControlStore {
         cancel_requested INTEGER NOT NULL DEFAULT 0,
         error_code TEXT,
         error_message TEXT,
+        result_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         completed_at TEXT
@@ -488,6 +504,7 @@ export class PolarisControlStore {
       END;
     `);
     ensureJobCancellationColumn(db);
+    ensureJobResultColumn(db);
     ensureIdempotencyResponseColumns(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
@@ -694,16 +711,22 @@ export class PolarisControlStore {
     return result.changes === 1;
   }
 
-  completeJob(jobId: string, workerId: string): boolean {
+  completeJob(
+    jobId: string,
+    workerId: string,
+    resultPayload?: Record<string, unknown>,
+  ): boolean {
+    const resultJson = resultPayload === undefined ? null : boundedJson(resultPayload);
     const now = nowIso();
     const result = this.db.prepare(`
       UPDATE jobs
       SET status = 'succeeded', lease_owner = NULL, lease_expires_at = NULL,
-          updated_at = ?, completed_at = ?, error_code = NULL, error_message = NULL
+          updated_at = ?, completed_at = ?, error_code = NULL, error_message = NULL,
+          result_json = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
         AND cancel_requested = 0
         AND lease_expires_at > ?
-    `).run(now, now, jobId, workerId, Date.now());
+    `).run(now, now, resultJson, jobId, workerId, Date.now());
     return result.changes === 1;
   }
 
