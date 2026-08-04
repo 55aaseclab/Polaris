@@ -28,6 +28,8 @@ source "${ENV_FILE}"
 set +a
 export POLARIS_ENV_FILE="${ENV_FILE}"
 
+bash "${ROOT_DIR}/scripts/release-preflight.sh" "${ENV_FILE}"
+
 active_color="$(polaris_bluegreen_active_color "${ACTIVE_COLOR_FILE}")"
 target_color="$(polaris_bluegreen_inactive_color "${active_color}")"
 project_name="$(polaris_bluegreen_project_name "${target_color}")"
@@ -46,7 +48,7 @@ set +a
 
 pnpm install --frozen-lockfile
 pnpm run build
-polaris_bluegreen_privileged install -m 0644 "${temp_env}" "${server_env_file}"
+polaris_bluegreen_privileged install -o root -g "$(id -gn)" -m 0640 "${temp_env}" "${server_env_file}"
 polaris_bluegreen_privileged systemctl enable "polaris-server@${target_color}.service"
 polaris_bluegreen_privileged systemctl restart "polaris-server@${target_color}.service"
 

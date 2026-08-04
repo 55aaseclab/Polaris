@@ -120,14 +120,16 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_DATA_ROOT}/wanghai/cache' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
 \${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
 \${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
   printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
 \${SUDO} grep -qs \"${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)\" /etc/exports || \
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra
-\${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}' '${REMOTE_WANGHAI_DIR}'
+\${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_DATA_ROOT}' '${REMOTE_WANGHAI_DIR}'
+\${SUDO} chown root:\"\${APP_GROUP}\" '${REMOTE_ENV_DIR}'
+\${SUDO} chmod 0750 '${REMOTE_ENV_DIR}'
 "
 
 rsync -az \
@@ -195,22 +197,29 @@ upsert_env_line() {
       }
     }
   ' \"\${file}\" > \"\${temp_file}\"
-  if [ -n \"\${SUDO}\" ]; then
-    \${SUDO} install -m 0644 \"\${temp_file}\" \"\${file}\"
-  else
-    install -m 0644 \"\${temp_file}\" \"\${file}\"
-  fi
+  install_env_file \"\$temp_file\" \"\$file\"
   rm -f \"\${temp_file}\"
 }
 
+install_env_file() {
+  local source_file=\"\$1\"
+  local target_file=\"\$2\"
+  if [ -n \"\$SUDO\" ]; then
+    \$SUDO install -o root -g \"\$APP_GROUP\" -m 0640 \"\$source_file\" \"\$target_file\"
+  else
+    install -o root -g \"\$APP_GROUP\" -m 0640 \"\$source_file\" \"\$target_file\"
+  fi
+}
+
 if [ ! -f '${REMOTE_ENV_FILE}' ]; then
-  \${SUDO} cp '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+  install_env_file '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
+else
+  \$SUDO chown root:\"\$APP_GROUP\" '${REMOTE_ENV_FILE}'
+  \$SUDO chmod 0640 '${REMOTE_ENV_FILE}'
 fi
 
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
-upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_DATA_ROOT}/wanghai' '${REMOTE_ENV_FILE}'
-upsert_env_line 'POLARIS_WANGHAI_VAULT_IMAGE' 'wanghai-admin-portal:latest' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'
@@ -305,8 +314,17 @@ EOF
   -f '${REMOTE_APP_DIR}/config/docker/vault-prebuilt.Dockerfile' \
   -t 'polaris-workspace-prebuilt:latest' \
   '${REMOTE_APP_DIR}'
-cd '${REMOTE_WANGHAI_DIR}'
-bash ./scripts/build-admin-portal-image.sh 'wanghai-admin-portal:latest'
+set -a
+# shellcheck disable=SC1090
+source '${REMOTE_ENV_FILE}'
+set +a
+if ! [[ "\${POLARIS_WANGHAI_VAULT_IMAGE:-}" =~ @sha256:[a-f0-9]{64}\$ ]]; then
+  echo 'remote provisioning: POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference' >&2
+  exit 2
+fi
+if ! \${SUDO} docker image inspect "\${POLARIS_WANGHAI_VAULT_IMAGE}" >/dev/null 2>&1; then
+  \${SUDO} docker pull "\${POLARIS_WANGHAI_VAULT_IMAGE}"
+fi
 \${SUDO} nginx -t
 \${SUDO} systemctl reload nginx
 
@@ -327,7 +345,7 @@ if [ \"\$missing\" -eq 1 ]; then
   printf '%s\n' \
     'next steps:' \
     '1. Fill real values into ${REMOTE_ENV_FILE}' \
-    '   Required: Clerk publishable and secret keys' \
+    '   Required: Authing settings, gateway secret, and digest-pinned Wanghai image' \
     '2. Production data root: ${REMOTE_DATA_ROOT}' \
     '3. In the Polaris host nginx server block, add: include ${REMOTE_UPSTREAM_FILE};' \
     '4. In the same location / block, use: proxy_pass \$polaris_upstream;' \
@@ -341,7 +359,7 @@ printf '%s\n' \
   'nginx gateway check: ok' \
   'next steps:' \
   '1. Fill real values into ${REMOTE_ENV_FILE}' \
-  '   Required: Clerk publishable and secret keys' \
+  '   Required: Authing settings, gateway secret, and digest-pinned Wanghai image' \
   '2. Production data root: ${REMOTE_DATA_ROOT}' \
   '3. Run nginx -t && nginx -s reload on the remote host if you changed the upstream file' \
   '4. From your local machine, run: bash ./scripts/cd-remote.sh ${REMOTE_HOST}' \
