@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 test("remote deploy restarts Polaris through a host systemd service", () => {
@@ -30,6 +31,8 @@ test("remote provision reuses an existing Docker install instead of forcing dock
 test("remote provision keeps integrated Wanghai on the Polaris vault export", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   assert.match(script, /POLARIS_NETFS_LOCAL_EXPORT_ROOT/);
+  assert.match(script, /POLARIS_RELEASE_PROFILE/);
+  assert.match(script, /POLARIS_MAX_ACTIVE_VAULTS/);
   assert.doesNotMatch(script, /POLARIS_WANGHAI_DATA_ROOT/);
   assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
@@ -68,7 +71,27 @@ test("host Polaris launcher reads bind host and port from the environment", () =
   const script = fs.readFileSync("scripts/run-polaris-server-host.sh", "utf8");
   assert.match(script, /POLARIS_SERVER_PORT/);
   assert.match(script, /POLARIS_SERVER_BIND_HOST/);
+  assert.match(script, /scripts\/release-profile\.mjs/);
   assert.match(script, /apps\/polaris\/dist\/scripts\/polaris\.js/);
+});
+
+test("host Polaris launcher rejects invalid production replica configuration", () => {
+  const result = spawnSync("bash", ["scripts/run-polaris-server-host.sh"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      POLARIS_RELEASE_PROFILE: "0.3.0-single-host",
+      POLARIS_DEPLOYMENT_MODE: "single-host",
+      POLARIS_SERVER_REPLICAS: "2",
+      POLARIS_GATEWAY_REPLICAS: "1",
+      POLARIS_JOB_WORKER_CONCURRENCY: "1",
+      POLARIS_MAX_ACTIVE_VAULTS: "10",
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /POLARIS_SERVER_REPLICAS must equal 1/);
 });
 
 test("bluegreen nginx keeps /paseo assets on the Paseo app", () => {

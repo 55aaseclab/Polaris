@@ -74,6 +74,9 @@ operations, and release documentation lives in the Polaris documentation site.
   Strip browser credentials and upstream `Set-Cookie` values at the gateway.
 - Keep standalone Wanghai support in a separate 0.3.1 batch. It requires an
   explicit external identity adapter and must not weaken integrated assertions.
+- Use `config/release-profiles/0.3.0-single-host.json` as the 0.3 capacity,
+  quota, resource-budget, and SLO source. Production preflight and the host
+  launcher must validate it; do not raise its limits without new evidence.
 
 Read the canonical Polaris Docs Surface Boundary and Release TODO before
 altering this boundary. Record each reviewed commit and its focused checks in
