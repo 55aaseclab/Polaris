@@ -1742,17 +1742,8 @@ async function executeClaimedProvisionJob(
 async function runProvisionWorker(workerId: string): Promise<void> {
   const store = getPolarisControlStore(import.meta.url);
   for (;;) {
-    const job = store.claimNextJob(workerId, provisionJobLeaseMs());
+    const job = store.claimNextJob(workerId, provisionJobLeaseMs(), ["vault-provision"]);
     if (!job) return;
-    if (job.kind !== "vault-provision") {
-      store.failJobPermanently(
-        job.id,
-        workerId,
-        "unsupported-job-kind",
-        `Unsupported durable job kind '${job.kind}'`,
-      );
-      continue;
-    }
     await executeClaimedProvisionJob(job, workerId);
   }
 }
