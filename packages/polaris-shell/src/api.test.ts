@@ -16,6 +16,7 @@ const verticalSession: ShellSession = {
 const verticalHost: ShellHostSummary = {
   name: "sample-host",
   serverId: "srv_sample",
+  wanghaiId: "wg_sample",
   surfaces: ["paseo", "wanghai"],
   status: {
     driver: {
@@ -37,7 +38,7 @@ test("vertical subscribers receive only the vertical action for vertical hosts",
     }),
     [{
       kind: "open-wanghai",
-      href: "/v/srv_sample/wanghai",
+      href: "/v/wg_sample/wanghai",
     }],
   );
 });
@@ -50,15 +51,15 @@ test("coding subscribers cannot open vertical hosts", () => {
   assert.deepEqual(actions, []);
 });
 
-test("a host without a paired server cannot expose surface links", () => {
+test("a host without a Wanghai gateway identity cannot expose the Wanghai link", () => {
   const actions = resolveShellHostActions({
     session: verticalSession,
-    host: { ...verticalHost, serverId: null },
+    host: { ...verticalHost, wanghaiId: null },
   });
   assert.deepEqual(actions, []);
 });
 
-test("a stopped vertical host keeps only the vertical action when a serverId is cached", () => {
+test("a stopped vertical host keeps only the vertical action when a Wanghai identity is cached", () => {
   const actions = resolveShellHostActions({
     session: verticalSession,
     host: {
@@ -73,7 +74,7 @@ test("a stopped vertical host keeps only the vertical action when a serverId is 
   assert.deepEqual(actions, [
     {
       kind: "open-wanghai",
-      href: "/v/srv_sample/wanghai",
+      href: "/v/wg_sample/wanghai",
     },
   ]);
 });
@@ -86,7 +87,7 @@ test("both-line subscribers get exactly one surface action per host", () => {
     }),
     [{
       kind: "open-wanghai",
-      href: "/v/srv_sample/wanghai",
+      href: "/v/wg_sample/wanghai",
     }],
   );
 

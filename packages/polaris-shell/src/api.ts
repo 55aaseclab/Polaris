@@ -21,6 +21,8 @@ export interface ShellHostSummary {
   name: string;
   /** Available after the in-container Paseo daemon has paired. */
   serverId: string | null;
+  /** Stable private Wanghai gateway route identity. */
+  wanghaiId: string | null;
   surfaces: readonly string[];
   status: {
     driver?: {
@@ -66,10 +68,10 @@ export function resolveShellHostActions(input: {
     return actions;
   }
 
-  if (hostLine === "vertical" && allowedLines.includes("vertical") && input.host.serverId) {
+  if (hostLine === "vertical" && allowedLines.includes("vertical") && input.host.wanghaiId) {
     actions.push({
       kind: "open-wanghai",
-      href: planOpenWanghaiPortal(input.host.serverId).shellEmbedPath,
+      href: planOpenWanghaiPortal(input.host.wanghaiId).shellEmbedPath,
     });
   }
 

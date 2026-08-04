@@ -882,10 +882,10 @@ function resolveCurrentWanghaiGatewaySession(
 
 async function resolveAuthorizedWanghaiVault(
   userId: string,
-  serverId: string,
+  wanghaiId: string,
 ): Promise<AuthorizedWanghaiVault> {
   const summary = (await listPortalVaults(userId)).find(
-    (entry) => entry.serverId === serverId,
+    (entry) => entry.wanghaiId === wanghaiId,
   );
   if (!summary || !summary.surfaces.some((surface) => surface.toLowerCase() === "wanghai")) {
     throw new PortalAuthError("Wanghai vault not found", 404);
@@ -1961,7 +1961,7 @@ async function handleWanghaiGatewayHost(
 async function handleWanghaiLaunch(
   req: IncomingMessage,
   res: ServerResponse,
-  serverId: string,
+  wanghaiId: string,
 ): Promise<void> {
   const session = await requirePortalSession(req, res);
   if (!session || !requireMappedPortalSession(res, session)) {
@@ -1971,10 +1971,10 @@ async function handleWanghaiLaunch(
     sendJson(res, 403, { error: "The vertical product line is not enabled for this user" });
     return;
   }
-  const authorizedVault = await resolveAuthorizedWanghaiVault(session.polarisUserId, serverId);
+  const authorizedVault = await resolveAuthorizedWanghaiVault(session.polarisUserId, wanghaiId);
   const launch = createWanghaiGatewayLaunch({
     session,
-    serverId,
+    serverId: wanghaiId,
     vaultId: authorizedVault.vault,
   });
   sendJson(res, 200, { portalUrl: launch.portalUrl });

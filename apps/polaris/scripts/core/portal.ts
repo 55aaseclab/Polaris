@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
@@ -135,6 +136,8 @@ export interface PortalVaultSummary {
   surfaces: string[];
   /** Available once the in-container Paseo daemon finishes pairing. */
   serverId: string | null;
+  /** Stable opaque route identity for the private Wanghai gateway. */
+  wanghaiId: string | null;
   drivers: PortalDriverTarget[];
   status: VaultStatus | null;
 }
@@ -881,9 +884,32 @@ export function loadVaultSummary(userId: string, vault: string): PortalVaultSumm
     name: vault,
     surfaces: runtime.surfaces,
     serverId: runtime.paseoEnabled ? readPersistedPaseoServerId(userId, vault) : null,
+    wanghaiId: runtime.surfaces.includes("wanghai")
+      ? wanghaiGatewayId(userId, vault)
+      : null,
     drivers: PORTAL_DRIVER_TARGETS,
     status,
   };
+}
+
+/**
+ * Wanghai must not depend on a Paseo relay identifier. The route remains
+ * tenant-scoped because every gateway request resolves this value against the
+ * current Polaris user's vault summaries before it is proxied.
+ */
+export function wanghaiGatewayId(userId: string, vault: string): string {
+  const tenantId = userId.trim();
+  const vaultId = vault.trim();
+  if (!tenantId || !vaultId) {
+    throw new Error("Wanghai gateway IDs require a tenant and vault");
+  }
+  const digest = createHash("sha256")
+    .update(tenantId, "utf8")
+    .update("\0", "utf8")
+    .update(vaultId, "utf8")
+    .digest("hex")
+    .slice(0, 32);
+  return `wg_${digest}`;
 }
 
 function loadPortalVaultRuntimeSurface(
