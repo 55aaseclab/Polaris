@@ -1,5 +1,8 @@
 import { createPortalServer } from "../../portal/server.js";
-import { resumeDurableVaultJobs } from "../../runtime/operations.js";
+import {
+  resumeDurableVaultJobs,
+  startDurableJobRecoveryLoop,
+} from "../../runtime/operations.js";
 import { captureTelemetryError, trackTelemetryEvent } from "../../telemetry/client.js";
 
 export async function portalCommand(portArg?: string, hostArg?: string): Promise<void> {
@@ -12,6 +15,7 @@ export async function portalCommand(portArg?: string, hostArg?: string): Promise
     const host = hostArg?.trim() || "127.0.0.1";
     createPortalServer(port, host);
     void resumeDurableVaultJobs();
+    startDurableJobRecoveryLoop();
     await trackTelemetryEvent(import.meta.url, {
       event: "app_launch_completed",
       category: "runtime",

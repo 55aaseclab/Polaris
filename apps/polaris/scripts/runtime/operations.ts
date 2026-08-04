@@ -102,6 +102,9 @@ const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
 let durableJobQueueDrain: Promise<void> | null = null;
 let durableJobWorkerSequence = 0;
+let durableJobRecoveryTimer: NodeJS.Timeout | null = null;
+
+const DURABLE_JOB_RECOVERY_INTERVAL_MS = 5_000;
 
 type VaultOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
@@ -2487,6 +2490,36 @@ export function resumeDurableVaultJobs(): Promise<void> {
     });
   });
   return durableJobQueueDrain;
+}
+
+export function startDurableJobRecoveryLoop(options?: {
+  intervalMs?: number;
+  resume?: () => Promise<void>;
+  schedule?: (callback: () => void, intervalMs: number) => NodeJS.Timeout;
+}): boolean {
+  if (durableJobRecoveryTimer) return false;
+  const requestedIntervalMs = options?.intervalMs ?? DURABLE_JOB_RECOVERY_INTERVAL_MS;
+  const intervalMs = Number.isFinite(requestedIntervalMs)
+    ? Math.max(100, Math.floor(requestedIntervalMs))
+    : DURABLE_JOB_RECOVERY_INTERVAL_MS;
+  const resume = options?.resume ?? resumeDurableVaultJobs;
+  const schedule = options?.schedule
+    ?? ((callback: () => void, delayMs: number) => setInterval(callback, delayMs));
+  durableJobRecoveryTimer = schedule(() => {
+    void resume().catch((error) => {
+      logError("executor", "durable-job-recovery-cycle-failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, intervalMs);
+  durableJobRecoveryTimer.unref();
+  return true;
+}
+
+export function stopDurableJobRecoveryLoop(): void {
+  if (!durableJobRecoveryTimer) return;
+  clearInterval(durableJobRecoveryTimer);
+  durableJobRecoveryTimer = null;
 }
 
 export async function switchPortalVault(
