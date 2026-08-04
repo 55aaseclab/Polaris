@@ -74,6 +74,65 @@ export interface IdempotencyResponseRecord {
   response?: IdempotencyResponse;
 }
 
+export const QUOTA_CATEGORIES = [
+  "active_workspace",
+  "cache",
+  "runtime_state",
+  "identity_state",
+] as const;
+
+export type QuotaCategory = (typeof QUOTA_CATEGORIES)[number];
+export type QuotaReservationStatus = "active" | "reconciled" | "released" | "expired";
+
+export interface QuotaUsageRecord {
+  tenantId: string;
+  vaultId: string;
+  category: QuotaCategory;
+  usageBytes: number;
+  measuredAt: number;
+}
+
+export interface QuotaReservation {
+  id: string;
+  tenantId: string;
+  vaultId: string;
+  category: QuotaCategory;
+  action: string;
+  idempotencyScope: string;
+  idempotencyKey: string;
+  limitBytes: number;
+  baselineUsageBytes: number;
+  reservedBytes: number;
+  status: QuotaReservationStatus;
+  expiresAt: number;
+  actualUsageBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+  reconciledAt?: string;
+}
+
+export interface ReserveQuotaInput {
+  tenantId: string;
+  vaultId: string;
+  category: QuotaCategory;
+  action: string;
+  idempotencyScope: string;
+  idempotencyKey: string;
+  limitBytes: number;
+  measuredUsageBytes: number;
+  reservedBytes: number;
+  leaseMs?: number;
+  nowMs?: number;
+}
+
+export interface QuotaReservationAttempt {
+  allowed: boolean;
+  usageBytes: number;
+  reservedBytes: number;
+  remainingBytes: number;
+  reservation?: QuotaReservation;
+}
+
 type SqlRow = Record<string, unknown>;
 
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -82,9 +141,17 @@ const MAX_ERROR_BYTES = 4 * 1024;
 const DEFAULT_GATEWAY_RATE_WINDOW_SECONDS = 60;
 const MAX_RATE_LIMIT_BUCKET_KEY_BYTES = 128;
 const MAX_IDEMPOTENCY_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_QUOTA_RESERVATION_LEASE_MS = 120_000;
+const MAX_QUOTA_RESERVATION_LEASE_MS = 5 * 60_000;
+const MAX_QUOTA_SCOPE_BYTES = 256;
+const MAX_QUOTA_ACTION_BYTES = 128;
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function nowIsoAt(nowMs: number): string {
+  return new Date(nowMs).toISOString();
 }
 
 function boundedText(value: unknown, maxBytes: number): string | undefined {
@@ -140,6 +207,84 @@ function rowToJob(row: SqlRow): DurableJob {
     updatedAt: String(row.updated_at),
     completedAt: asOptionalString(row.completed_at),
   };
+}
+
+function rowToQuotaReservation(row: SqlRow): QuotaReservation {
+  const status = String(row.status);
+  if (
+    status !== "active"
+    && status !== "reconciled"
+    && status !== "released"
+    && status !== "expired"
+  ) {
+    throw new Error("Quota reservation has an invalid status");
+  }
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    vaultId: String(row.vault_id),
+    category: normalizeQuotaCategory(row.category),
+    action: String(row.action),
+    idempotencyScope: String(row.idempotency_scope),
+    idempotencyKey: String(row.idempotency_key),
+    limitBytes: normalizeQuotaBytes(row.limit_bytes, "Quota reservation limit"),
+    baselineUsageBytes: normalizeQuotaBytes(
+      row.baseline_usage_bytes,
+      "Quota reservation baseline usage",
+    ),
+    reservedBytes: normalizeQuotaBytes(row.reserved_bytes, "Quota reservation bytes"),
+    status,
+    expiresAt: normalizeQuotaTimestamp(row.expires_at, "Quota reservation expiry"),
+    actualUsageBytes: row.actual_usage_bytes == null
+      ? undefined
+      : normalizeQuotaBytes(row.actual_usage_bytes, "Quota reservation actual usage"),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    reconciledAt: asOptionalString(row.reconciled_at),
+  };
+}
+
+function normalizeQuotaCategory(value: unknown): QuotaCategory {
+  if (!QUOTA_CATEGORIES.includes(value as QuotaCategory)) {
+    throw new Error("Quota category is invalid");
+  }
+  return value as QuotaCategory;
+}
+
+function normalizeQuotaScopeValue(value: unknown, name: string, maxBytes: number): string {
+  const normalized = String(value ?? "").trim();
+  if (
+    !normalized
+    || Buffer.byteLength(normalized, "utf8") > maxBytes
+    || /[\u0000-\u001f\u007f]/u.test(normalized)
+  ) {
+    throw new Error(`${name} is invalid`);
+  }
+  return normalized;
+}
+
+function normalizeQuotaBytes(value: unknown, name: string): number {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 0) {
+    throw new Error(`${name} must be a non-negative safe integer`);
+  }
+  return numeric;
+}
+
+function normalizeQuotaTimestamp(value: unknown, name: string): number {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 0) {
+    throw new Error(`${name} must be a non-negative safe integer`);
+  }
+  return numeric;
+}
+
+function normalizeQuotaNow(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 0) {
+    throw new Error("Quota reservation time is invalid");
+  }
+  return numeric;
 }
 
 function controlStoreFile(importMetaUrl: string): string {
@@ -266,6 +411,46 @@ export class PolarisControlStore {
         version INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(tenant_id, vault_id, workspace_id)
       );
+
+      CREATE TABLE IF NOT EXISTS quota_usage (
+        tenant_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN (
+          'active_workspace', 'cache', 'runtime_state', 'identity_state'
+        )),
+        usage_bytes INTEGER NOT NULL CHECK (usage_bytes >= 0),
+        measured_at INTEGER NOT NULL CHECK (measured_at >= 0),
+        PRIMARY KEY(tenant_id, vault_id, category)
+      );
+
+      CREATE TABLE IF NOT EXISTS quota_reservations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN (
+          'active_workspace', 'cache', 'runtime_state', 'identity_state'
+        )),
+        action TEXT NOT NULL,
+        idempotency_scope TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        limit_bytes INTEGER NOT NULL CHECK (limit_bytes >= 0),
+        baseline_usage_bytes INTEGER NOT NULL CHECK (baseline_usage_bytes >= 0),
+        reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes >= 0),
+        status TEXT NOT NULL CHECK (status IN (
+          'active', 'reconciled', 'released', 'expired'
+        )),
+        expires_at INTEGER NOT NULL CHECK (expires_at >= 0),
+        actual_usage_bytes INTEGER CHECK (actual_usage_bytes >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        reconciled_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_quota_reservations_active
+        ON quota_reservations(tenant_id, vault_id, category, status, expires_at);
+
+      CREATE INDEX IF NOT EXISTS idx_quota_reservations_idempotency
+        ON quota_reservations(idempotency_scope, idempotency_key, category);
 
       CREATE TABLE IF NOT EXISTS audit_events (
         id TEXT PRIMARY KEY,
@@ -840,6 +1025,263 @@ export class PolarisControlStore {
     return result.changes === 1;
   }
 
+  /**
+   * Atomically reserves bounded logical storage against the latest observed
+   * tenant/vault usage. Measurements can only raise the pre-write baseline;
+   * a post-write reconciliation is the authoritative path for decreases.
+   */
+  reserveQuota(input: ReserveQuotaInput): QuotaReservationAttempt {
+    const tenantId = normalizeQuotaScopeValue(
+      input.tenantId,
+      "Quota tenant ID",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const vaultId = normalizeQuotaScopeValue(
+      input.vaultId,
+      "Quota vault ID",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const category = normalizeQuotaCategory(input.category);
+    const action = normalizeQuotaScopeValue(
+      input.action,
+      "Quota action",
+      MAX_QUOTA_ACTION_BYTES,
+    );
+    const idempotencyScope = normalizeQuotaScopeValue(
+      input.idempotencyScope,
+      "Quota idempotency scope",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const idempotencyKey = normalizeQuotaScopeValue(
+      input.idempotencyKey,
+      "Quota idempotency key",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const limitBytes = normalizeQuotaBytes(input.limitBytes, "Quota limit");
+    const measuredUsageBytes = normalizeQuotaBytes(
+      input.measuredUsageBytes,
+      "Quota measured usage",
+    );
+    const requestedBytes = normalizeQuotaBytes(input.reservedBytes, "Quota reservation");
+    const nowMs = normalizeQuotaNow(input.nowMs ?? Date.now());
+    const requestedLeaseMs = Number(input.leaseMs ?? DEFAULT_QUOTA_RESERVATION_LEASE_MS);
+    if (!Number.isSafeInteger(requestedLeaseMs) || requestedLeaseMs <= 0) {
+      throw new Error("Quota reservation lease is invalid");
+    }
+    const leaseMs = Math.max(
+      1_000,
+      Math.min(MAX_QUOTA_RESERVATION_LEASE_MS, requestedLeaseMs),
+    );
+    const expiresAt = nowMs + leaseMs;
+    if (!Number.isSafeInteger(expiresAt)) {
+      throw new Error("Quota reservation expiry exceeds the supported range");
+    }
+    const timestamp = nowIsoAt(nowMs);
+    let attempt: QuotaReservationAttempt = {
+      allowed: false,
+      usageBytes: 0,
+      reservedBytes: 0,
+      remainingBytes: 0,
+    };
+
+    this.transaction(() => {
+      this.expireQuotaReservations(nowMs, timestamp);
+      const usageRow = this.db.prepare(`
+        SELECT usage_bytes FROM quota_usage
+        WHERE tenant_id = ? AND vault_id = ? AND category = ?
+      `).get(tenantId, vaultId, category) as SqlRow | undefined;
+      const recordedUsageBytes = usageRow
+        ? normalizeQuotaBytes(usageRow.usage_bytes, "Stored quota usage")
+        : 0;
+      const usageBytes = Math.max(recordedUsageBytes, measuredUsageBytes);
+      if (!usageRow || usageBytes > recordedUsageBytes) {
+        this.db.prepare(`
+          INSERT INTO quota_usage (tenant_id, vault_id, category, usage_bytes, measured_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(tenant_id, vault_id, category) DO UPDATE SET
+            usage_bytes = excluded.usage_bytes,
+            measured_at = excluded.measured_at
+        `).run(tenantId, vaultId, category, usageBytes, nowMs);
+      }
+
+      const activeRow = this.db.prepare(`
+        SELECT COALESCE(SUM(reserved_bytes), 0) AS reserved_bytes
+        FROM quota_reservations
+        WHERE tenant_id = ? AND vault_id = ? AND category = ?
+          AND status = 'active' AND expires_at > ?
+      `).get(tenantId, vaultId, category, nowMs) as SqlRow | undefined;
+      const activeReservedBytes = normalizeQuotaBytes(
+        activeRow?.reserved_bytes ?? 0,
+        "Active quota reservations",
+      );
+      const totalReservedBytes = activeReservedBytes + requestedBytes;
+      if (!Number.isSafeInteger(totalReservedBytes)) {
+        throw new Error("Active quota reservations exceed the supported range");
+      }
+      const usedWithReservation = usageBytes + totalReservedBytes;
+      if (!Number.isSafeInteger(usedWithReservation)) {
+        throw new Error("Quota usage exceeds the supported range");
+      }
+      if (usedWithReservation > limitBytes) {
+        attempt = {
+          allowed: false,
+          usageBytes,
+          reservedBytes: activeReservedBytes,
+          remainingBytes: Math.max(0, limitBytes - usageBytes - activeReservedBytes),
+        };
+        return;
+      }
+
+      const reservation: QuotaReservation = {
+        id: randomUUID(),
+        tenantId,
+        vaultId,
+        category,
+        action,
+        idempotencyScope,
+        idempotencyKey,
+        limitBytes,
+        baselineUsageBytes: usageBytes,
+        reservedBytes: requestedBytes,
+        status: "active",
+        expiresAt,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.db.prepare(`
+        INSERT INTO quota_reservations (
+          id, tenant_id, vault_id, category, action, idempotency_scope,
+          idempotency_key, limit_bytes, baseline_usage_bytes, reserved_bytes,
+          status, expires_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        reservation.id,
+        reservation.tenantId,
+        reservation.vaultId,
+        reservation.category,
+        reservation.action,
+        reservation.idempotencyScope,
+        reservation.idempotencyKey,
+        reservation.limitBytes,
+        reservation.baselineUsageBytes,
+        reservation.reservedBytes,
+        reservation.status,
+        reservation.expiresAt,
+        reservation.createdAt,
+        reservation.updatedAt,
+      );
+      attempt = {
+        allowed: true,
+        usageBytes,
+        reservedBytes: totalReservedBytes,
+        remainingBytes: limitBytes - usedWithReservation,
+        reservation,
+      };
+    });
+    return attempt;
+  }
+
+  reconcileQuotaReservation(input: {
+    reservationId: string;
+    actualUsageBytes: number;
+    nowMs?: number;
+  }): QuotaReservation {
+    const reservationId = normalizeQuotaScopeValue(
+      input.reservationId,
+      "Quota reservation ID",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const actualUsageBytes = normalizeQuotaBytes(input.actualUsageBytes, "Quota actual usage");
+    const nowMs = normalizeQuotaNow(input.nowMs ?? Date.now());
+    const timestamp = nowIsoAt(nowMs);
+    let reconciled: QuotaReservation | null = null;
+
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT * FROM quota_reservations WHERE id = ?
+      `).get(reservationId) as SqlRow | undefined;
+      if (!row) throw new Error("Quota reservation is unknown");
+      const reservation = rowToQuotaReservation(row);
+      if (reservation.status === "released") {
+        throw new Error("Quota reservation was released before reconciliation");
+      }
+      this.db.prepare(`
+        INSERT INTO quota_usage (tenant_id, vault_id, category, usage_bytes, measured_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, vault_id, category) DO UPDATE SET
+          usage_bytes = excluded.usage_bytes,
+          measured_at = excluded.measured_at
+      `).run(
+        reservation.tenantId,
+        reservation.vaultId,
+        reservation.category,
+        actualUsageBytes,
+        nowMs,
+      );
+      this.db.prepare(`
+        UPDATE quota_reservations
+        SET status = 'reconciled', actual_usage_bytes = ?, updated_at = ?, reconciled_at = ?
+        WHERE id = ?
+      `).run(actualUsageBytes, timestamp, timestamp, reservation.id);
+      const updated = this.db.prepare(`
+        SELECT * FROM quota_reservations WHERE id = ?
+      `).get(reservation.id) as SqlRow | undefined;
+      if (!updated) throw new Error("Quota reservation disappeared during reconciliation");
+      reconciled = rowToQuotaReservation(updated);
+    });
+    if (!reconciled) throw new Error("Quota reservation reconciliation did not complete");
+    return reconciled;
+  }
+
+  releaseQuotaReservation(reservationId: string, nowMs = Date.now()): boolean {
+    const id = normalizeQuotaScopeValue(
+      reservationId,
+      "Quota reservation ID",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const timestamp = nowIsoAt(normalizeQuotaNow(nowMs));
+    const result = this.db.prepare(`
+      UPDATE quota_reservations
+      SET status = 'released', updated_at = ?
+      WHERE id = ? AND status = 'active'
+    `).run(timestamp, id);
+    return result.changes === 1;
+  }
+
+  getQuotaUsage(
+    tenantId: string,
+    vaultId: string,
+    category: QuotaCategory,
+  ): QuotaUsageRecord | null {
+    const tenant = normalizeQuotaScopeValue(tenantId, "Quota tenant ID", MAX_QUOTA_SCOPE_BYTES);
+    const vault = normalizeQuotaScopeValue(vaultId, "Quota vault ID", MAX_QUOTA_SCOPE_BYTES);
+    const normalizedCategory = normalizeQuotaCategory(category);
+    const row = this.db.prepare(`
+      SELECT usage_bytes, measured_at FROM quota_usage
+      WHERE tenant_id = ? AND vault_id = ? AND category = ?
+    `).get(tenant, vault, normalizedCategory) as SqlRow | undefined;
+    if (!row) return null;
+    return {
+      tenantId: tenant,
+      vaultId: vault,
+      category: normalizedCategory,
+      usageBytes: normalizeQuotaBytes(row.usage_bytes, "Stored quota usage"),
+      measuredAt: normalizeQuotaTimestamp(row.measured_at, "Stored quota measurement time"),
+    };
+  }
+
+  getQuotaReservation(reservationId: string): QuotaReservation | null {
+    const id = normalizeQuotaScopeValue(
+      reservationId,
+      "Quota reservation ID",
+      MAX_QUOTA_SCOPE_BYTES,
+    );
+    const row = this.db.prepare(`
+      SELECT * FROM quota_reservations WHERE id = ?
+    `).get(id) as SqlRow | undefined;
+    return row ? rowToQuotaReservation(row) : null;
+  }
+
   recordAudit(event: DurableAuditEvent): string {
     const id = event.id?.trim() || randomUUID();
     const occurredAt = nowIso();
@@ -906,6 +1348,14 @@ export class PolarisControlStore {
       occurredAt: String(row.occurred_at),
       eventHash: String(row.event_hash),
     }));
+  }
+
+  private expireQuotaReservations(nowMs: number, timestamp: string): void {
+    this.db.prepare(`
+      UPDATE quota_reservations
+      SET status = 'expired', updated_at = ?
+      WHERE status = 'active' AND expires_at <= ?
+    `).run(timestamp, nowMs);
   }
 
   private transaction(fn: () => void): void {

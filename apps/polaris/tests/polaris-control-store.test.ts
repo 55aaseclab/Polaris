@@ -287,3 +287,101 @@ test("control store enforces idempotency, workspace ownership, and immutable aud
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("control store reserves and reconciles logical quota atomically", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const first = store.reserveQuota({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      category: "active_workspace",
+      action: "product.update",
+      idempotencyScope: "scope-a",
+      idempotencyKey: "mutation-a",
+      limitBytes: 100,
+      measuredUsageBytes: 50,
+      reservedBytes: 30,
+      leaseMs: 10_000,
+      nowMs: 1_000,
+    });
+    assert.equal(first.allowed, true);
+    assert.equal(first.usageBytes, 50);
+    assert.equal(first.reservedBytes, 30);
+    assert.equal(first.remainingBytes, 20);
+    assert.ok(first.reservation);
+
+    const exhausted = store.reserveQuota({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      category: "active_workspace",
+      action: "product.update",
+      idempotencyScope: "scope-a",
+      idempotencyKey: "mutation-b",
+      limitBytes: 100,
+      measuredUsageBytes: 40,
+      reservedBytes: 21,
+      leaseMs: 10_000,
+      nowMs: 1_100,
+    });
+    assert.deepEqual(exhausted, {
+      allowed: false,
+      usageBytes: 50,
+      reservedBytes: 30,
+      remainingBytes: 20,
+    });
+
+    const reconciled = store.reconcileQuotaReservation({
+      reservationId: first.reservation.id,
+      actualUsageBytes: 60,
+      nowMs: 1_200,
+    });
+    assert.equal(reconciled.status, "reconciled");
+    assert.equal(reconciled.actualUsageBytes, 60);
+    assert.equal(store.getQuotaUsage("tenant-a", "vault-a", "active_workspace")?.usageBytes, 60);
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("expired quota reservations stop blocking later admissions", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const first = store.reserveQuota({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      category: "active_workspace",
+      action: "product.asset.upload",
+      idempotencyScope: "scope-a",
+      idempotencyKey: "upload-a",
+      limitBytes: 100,
+      measuredUsageBytes: 40,
+      reservedBytes: 50,
+      leaseMs: 1_000,
+      nowMs: 1_000,
+    });
+    assert.ok(first.reservation);
+
+    const later = store.reserveQuota({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      category: "active_workspace",
+      action: "product.asset.upload",
+      idempotencyScope: "scope-a",
+      idempotencyKey: "upload-b",
+      limitBytes: 100,
+      measuredUsageBytes: 40,
+      reservedBytes: 60,
+      leaseMs: 1_000,
+      nowMs: 2_001,
+    });
+    assert.equal(later.allowed, true);
+    assert.equal(store.getQuotaReservation(first.reservation.id)?.status, "expired");
+    assert.equal(later.remainingBytes, 0);
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
