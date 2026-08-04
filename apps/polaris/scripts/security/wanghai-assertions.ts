@@ -11,6 +11,26 @@ export const WANGHAI_ASSERTION_VERSION = 1;
 
 export type WanghaiGatewayRole = "viewer" | "operator" | "admin";
 
+export interface WanghaiAssertionAdmission {
+  action: string;
+  actionVersion: 1;
+  workspaceId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  expectedVersion?: number;
+  quotaReservationId?: string;
+}
+
+export interface WanghaiAdmissionClaims {
+  action: string;
+  action_version: 1;
+  workspace_id: string;
+  idempotency_key: string;
+  request_hash: string;
+  expected_version?: number;
+  quota_reservation_id?: string;
+}
+
 export interface WanghaiAssertionClaims {
   v: 1;
   iss: typeof WANGHAI_ASSERTION_ISSUER;
@@ -22,6 +42,7 @@ export interface WanghaiAssertionClaims {
   request_id: string;
   iat: number;
   exp: number;
+  admission?: WanghaiAdmissionClaims;
 }
 
 export interface WanghaiLaunchClaims {
@@ -66,6 +87,7 @@ export function issueWanghaiAssertion(input: {
   vaultId: string;
   role: WanghaiGatewayRole;
   requestId?: string;
+  admission?: WanghaiAssertionAdmission;
   nowSeconds?: number;
   ttlSeconds?: number;
 }): string {
@@ -85,6 +107,7 @@ export function issueWanghaiAssertion(input: {
     request_id: input.requestId?.trim() || randomUUID(),
     iat: now,
     exp: now + ttl,
+    ...(input.admission ? { admission: normalizeAdmission(input.admission) } : {}),
   };
   return signPayload(claims, input.secret);
 }
@@ -182,6 +205,9 @@ export function verifyWanghaiAssertion(
   if (claims.iat > nowSeconds + 30) {
     throw new Error("Wanghai assertion is not yet valid");
   }
+  if (claims.admission !== undefined) {
+    normalizeAdmissionClaims(claims.admission);
+  }
   return claims;
 }
 
@@ -237,6 +263,87 @@ function requireNonEmpty(value: string, name: string): string {
   const normalized = value.trim();
   if (!normalized) {
     throw new Error(`${name} is required`);
+  }
+  return normalized;
+}
+
+function normalizeAdmission(input: WanghaiAssertionAdmission): WanghaiAdmissionClaims {
+  const action = requireBoundedToken(input.action, "admission.action", /^[a-z][a-z0-9.-]{0,127}$/u);
+  const workspaceId = requireBoundedToken(
+    input.workspaceId,
+    "admission.workspaceId",
+    /^[a-z][a-z0-9-]{0,62}$/u,
+  );
+  const idempotencyKey = requireBoundedToken(
+    input.idempotencyKey,
+    "admission.idempotencyKey",
+    /^[\x21-\x7e]{1,128}$/u,
+  );
+  const requestHash = requireBoundedToken(
+    input.requestHash,
+    "admission.requestHash",
+    /^[0-9a-f]{64}$/u,
+  );
+  if (input.actionVersion !== 1) {
+    throw new Error("admission.actionVersion must be 1");
+  }
+  const expectedVersion = input.expectedVersion;
+  if (
+    expectedVersion !== undefined
+    && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0)
+  ) {
+    throw new Error("admission.expectedVersion must be a non-negative integer");
+  }
+  const quotaReservationId = input.quotaReservationId === undefined
+    ? undefined
+    : requireBoundedToken(
+        input.quotaReservationId,
+        "admission.quotaReservationId",
+        /^[\x21-\x7e]{1,128}$/u,
+      );
+  return {
+    action,
+    action_version: 1,
+    workspace_id: workspaceId,
+    idempotency_key: idempotencyKey,
+    request_hash: requestHash,
+    ...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
+    ...(quotaReservationId === undefined ? {} : { quota_reservation_id: quotaReservationId }),
+  };
+}
+
+function normalizeAdmissionClaims(value: unknown): WanghaiAdmissionClaims {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Wanghai assertion admission is invalid");
+  }
+  const candidate = value as Record<string, unknown>;
+  const allowedKeys = new Set([
+    "action",
+    "action_version",
+    "workspace_id",
+    "idempotency_key",
+    "request_hash",
+    "expected_version",
+    "quota_reservation_id",
+  ]);
+  if (Object.keys(candidate).some((key) => !allowedKeys.has(key))) {
+    throw new Error("Wanghai assertion admission contains unsupported claims");
+  }
+  return normalizeAdmission({
+    action: String(candidate.action ?? ""),
+    actionVersion: candidate.action_version as 1,
+    workspaceId: String(candidate.workspace_id ?? ""),
+    idempotencyKey: String(candidate.idempotency_key ?? ""),
+    requestHash: String(candidate.request_hash ?? ""),
+    expectedVersion: candidate.expected_version as number | undefined,
+    quotaReservationId: candidate.quota_reservation_id as string | undefined,
+  });
+}
+
+function requireBoundedToken(value: string, name: string, pattern: RegExp): string {
+  const normalized = String(value ?? "").trim();
+  if (!pattern.test(normalized)) {
+    throw new Error(`${name} is invalid`);
   }
   return normalized;
 }

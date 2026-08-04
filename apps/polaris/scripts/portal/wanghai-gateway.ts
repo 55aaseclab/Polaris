@@ -9,6 +9,7 @@ import {
   requireWanghaiGatewayMasterSecret,
   verifyWanghaiLaunchToken,
   wanghaiGatewayHostLabel as assertionGatewayHostLabel,
+  type WanghaiAssertionAdmission,
   type WanghaiGatewayRole,
   type WanghaiLaunchClaims,
 } from "../security/wanghai-assertions.js";
@@ -215,6 +216,7 @@ export function consumeLaunchTicket(input: {
 export function issueRequestAssertion(input: {
   session: WanghaiLaunchClaims;
   requestId?: string;
+  admission?: WanghaiAssertionAdmission;
 }): string {
   const masterSecret = requireWanghaiGatewayMasterSecret();
   const secret = deriveWanghaiVaultAssertionSecret(
@@ -229,6 +231,7 @@ export function issueRequestAssertion(input: {
     vaultId: input.session.vault_id,
     role: input.session.role,
     requestId: input.requestId ?? randomUUID(),
+    admission: input.admission,
   });
 }
 
