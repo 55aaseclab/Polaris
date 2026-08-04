@@ -23,6 +23,7 @@ import {
   queueWanghaiRestore,
   queueWanghaiRestoreRollback,
   requestWanghaiBackupCancellation,
+  requestWanghaiRestoreCancellation,
   resumeDurableVaultJobs,
 } from "../scripts/runtime/operations.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
@@ -66,7 +67,13 @@ async function withEnv<T>(
 }
 
 async function withFakeDocker<T>(
-  input: { tenantId: string; vaultId: string; recovery?: boolean; hold?: boolean },
+  input: {
+    tenantId: string;
+    vaultId: string;
+    recovery?: boolean;
+    hold?: boolean;
+    restoreHold?: boolean;
+  },
   fn: (readCommands: () => string[]) => Promise<T>,
 ): Promise<T> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-docker-"));
@@ -128,11 +135,26 @@ case "\${1:-}" in
     exit 1
     ;;
   logs)
+    name="$(container_name "$@")"
     if [ -f "\${logs_file}" ]; then
       cat "\${logs_file}"
-    else
-      archive_path "$@"
+      exit 0
     fi
+    if [[ "\${name}" = polaris-wanghai-restore-activation-* ]]; then
+      job="\${name#polaris-wanghai-restore-activation-}"
+      printf 'activation_job_id=%s\\nrestore_job_id=%s\\nactivated_workspace=workspaces\\nprevious_workspace=workspaces.pre-restore-%s\\nverified=1\\n' "\${job}" "\${FAKE_RESTORE_JOB_ID:-restore-source-a}" "\${job}"
+      exit 0
+    fi
+    if [[ "\${name}" = polaris-wanghai-restore-rollback-* ]]; then
+      job="\${name#polaris-wanghai-restore-rollback-}"
+      printf 'rollback_job_id=%s\\nactivation_job_id=%s\\nrolled_back_workspace=workspaces\\nfailed_workspace=workspaces.failed-rollback-%s\\nverified=1\\n' "\${job}" "\${FAKE_ACTIVATION_JOB_ID:-activation-source-a}" "\${job}"
+      exit 0
+    fi
+    if [[ "\${name}" = polaris-wanghai-restore-* ]]; then
+      printf 'restored_to=/restore/workspaces\\nverified=1\\n'
+      exit 0
+    fi
+    archive_path "$@"
     exit 0
     ;;
   run)
@@ -158,6 +180,14 @@ case "\${1:-}" in
           ;;
       esac
     done
+    if [[ "\${name}" = polaris-wanghai-restore-* ]] && [ "\${FAKE_RESTORE_HOLD:-0}" = "1" ]; then
+      printf '[{"State":{"Running":true,"ExitCode":0}}]' > "\${state_file}"
+      while [ ! -f "${stopFile}" ]; do
+        sleep 0.05
+      done
+      printf '[{"State":{"Running":false,"ExitCode":137}}]' > "\${state_file}"
+      exit 137
+    fi
     if [[ "\${name}" = polaris-wanghai-restore-activation-* ]]; then
       restore_job=""
       for ((index = 0; index < \${#args[@]}; index += 1)); do
@@ -242,6 +272,7 @@ esac
   process.env.FAKE_BACKUP_VAULT = input.vaultId;
   process.env.FAKE_BACKUP_RECOVERY = input.recovery ? "1" : "0";
   process.env.FAKE_BACKUP_HOLD = input.hold ? "1" : "0";
+  process.env.FAKE_RESTORE_HOLD = input.restoreHold ? "1" : "0";
   try {
     return await fn(() => (
       fs.existsSync(commandLog)
@@ -254,6 +285,9 @@ esac
     delete process.env.FAKE_BACKUP_VAULT;
     delete process.env.FAKE_BACKUP_RECOVERY;
     delete process.env.FAKE_BACKUP_HOLD;
+    delete process.env.FAKE_RESTORE_HOLD;
+    delete process.env.FAKE_RESTORE_JOB_ID;
+    delete process.env.FAKE_ACTIVATION_JOB_ID;
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -799,6 +833,165 @@ test("durable Wanghai backup finalizes an exited named container after restart",
               entry.startsWith("inspect --format {{json .State}} polaris-wanghai-backup-")
             )));
             assert.ok(commands.some((entry) => entry.startsWith("rm -f polaris-wanghai-backup-")));
+          } finally {
+            closePolarisControlStore();
+          }
+        });
+      });
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("durable Wanghai restore cancellation stops the named one-shot container", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-cancel-"));
+  const keyRoot = path.join(root, "keys");
+  const controlPath = path.join(root, "control.sqlite");
+  fs.mkdirSync(keyRoot, { mode: 0o700 });
+  try {
+    await withBackupVault(async ({ tenantId, vaultId }) => {
+      await withFakeDocker({ tenantId, vaultId, restoreHold: true }, async (readCommands) => {
+        await withEnv({
+          POLARIS_CONTROL_STORE_PATH: controlPath,
+          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
+          POLARIS_WANGHAI_RESTORE_TIMEOUT_MS: "60000",
+        }, async () => {
+          closePolarisControlStore();
+          try {
+            const backup = await queueWanghaiBackup({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              idempotencyKey: "restore-cancel-source-a",
+            });
+            await resumeDurableVaultJobs();
+            const restore = await queueWanghaiRestore({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              sourceBackupJobId: backup.id,
+              idempotencyKey: "restore-cancel-a",
+            });
+            await waitFor(() => (
+              readCommands().some((entry) => entry.startsWith("run --name polaris-wanghai-restore-"))
+                ? true
+                : null
+            ));
+            assert.equal(requestWanghaiRestoreCancellation({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              jobId: restore.id,
+            }), true);
+            await resumeDurableVaultJobs();
+            const cancelled = getPolarisControlStore(import.meta.url).getJob(restore.id);
+            assert.equal(cancelled?.status, "failed");
+            assert.equal(cancelled?.cancelRequested, true);
+            assert.equal(cancelled?.errorCode, "durable-job-cancelled");
+            const commands = readCommands();
+            assert.ok(commands.some((entry) => (
+              entry.startsWith("stop --time 10 polaris-wanghai-restore-")
+            )));
+            assert.ok(commands.some((entry) => (
+              entry.startsWith("rm -f polaris-wanghai-restore-")
+            )));
+            assert.ok(commands.some((entry) => entry.startsWith("volume rm ")));
+          } finally {
+            closePolarisControlStore();
+          }
+        });
+      });
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("durable Wanghai restore activation and rollback recover exited containers after restart", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-lifecycle-recovery-"));
+  const keyRoot = path.join(root, "keys");
+  const controlPath = path.join(root, "control.sqlite");
+  fs.mkdirSync(keyRoot, { mode: 0o700 });
+  try {
+    await withBackupVault(async ({ tenantId, vaultId }) => {
+      await withFakeDocker({ tenantId, vaultId, recovery: true }, async (readCommands) => {
+        await withEnv({
+          POLARIS_CONTROL_STORE_PATH: controlPath,
+          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
+          POLARIS_WANGHAI_RESTORE_TIMEOUT_MS: "60000",
+          POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "test-wanghai-gateway-master-secret-0001",
+          POLARIS_PORTAL_ALLOWED_ORIGINS: "https://portal.example.test",
+        }, async () => {
+          closePolarisControlStore();
+          try {
+            const backup = await queueWanghaiBackup({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              idempotencyKey: "lifecycle-recovery-source-a",
+            });
+            await resumeDurableVaultJobs();
+            const restore = await queueWanghaiRestore({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              sourceBackupJobId: backup.id,
+              idempotencyKey: "lifecycle-recovery-stage-a",
+            });
+            await resumeDurableVaultJobs();
+
+            process.env.FAKE_RESTORE_JOB_ID = restore.id;
+            const activation = await queueWanghaiRestoreActivation({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              restoreJobId: restore.id,
+              idempotencyKey: "lifecycle-recovery-activation-a",
+            });
+            await resumeDurableVaultJobs();
+            const activated = getPolarisControlStore(import.meta.url).getJob(activation.id);
+            assert.equal(activated?.status, "succeeded", activated?.errorMessage);
+            assert.equal(activated?.result?.checksumVerified, true);
+            assert.equal(
+              readCommands().some((entry) => (
+                entry.startsWith("run --name polaris-wanghai-restore-activation-")
+              )),
+              false,
+            );
+            assert.ok(readCommands().some((entry) => (
+              entry.startsWith("inspect --format {{json .State}} polaris-wanghai-restore-activation-")
+            )));
+            assert.ok(readCommands().some((entry) => (
+              entry.startsWith("rm -f polaris-wanghai-restore-activation-")
+            )));
+
+            process.env.FAKE_ACTIVATION_JOB_ID = activation.id;
+            const rollback = await queueWanghaiRestoreRollback({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              activationJobId: activation.id,
+              idempotencyKey: "lifecycle-recovery-rollback-a",
+            });
+            await resumeDurableVaultJobs();
+            const rolledBack = getPolarisControlStore(import.meta.url).getJob(rollback.id);
+            assert.equal(rolledBack?.status, "succeeded", rolledBack?.errorMessage);
+            assert.equal(rolledBack?.result?.rollbackVerified, true);
+            assert.equal(
+              readCommands().some((entry) => (
+                entry.startsWith("run --name polaris-wanghai-restore-rollback-")
+              )),
+              false,
+            );
+            assert.ok(readCommands().some((entry) => (
+              entry.startsWith("inspect --format {{json .State}} polaris-wanghai-restore-rollback-")
+            )));
+            assert.ok(readCommands().some((entry) => (
+              entry.startsWith("rm -f polaris-wanghai-restore-rollback-")
+            )));
           } finally {
             closePolarisControlStore();
           }
