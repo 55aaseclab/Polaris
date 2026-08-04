@@ -42,8 +42,8 @@
 ## Polaris 0.3 Boundary
 
 For the 0.3 release, Polaris is the only control plane. Work only with the
-Polaris, Wanghai, release, and documentation repositories named in
-`../ploaris-production/AGENTS.md`.
+Polaris, Wanghai, and documentation repositories. Canonical product,
+operations, and release documentation lives in the Polaris documentation site.
 
 - Own Authing identity, user mapping, tenant/vault ownership, role capability
   checks, gateway sessions, rate limits, logical quotas, lifecycle, durable
@@ -75,6 +75,7 @@ Polaris, Wanghai, release, and documentation repositories named in
 - Keep standalone Wanghai support in a separate 0.3.1 batch. It requires an
   explicit external identity adapter and must not weaken integrated assertions.
 
-Read `../ploaris-production/0.3-SURFACE-BOUNDARY.md` and
-`../ploaris-production/0.3-RELEASE-TODO.md` before altering this boundary.
-Record each reviewed commit and its focused checks in the release plan.
+Read the canonical Polaris Docs Surface Boundary and Release TODO before
+altering this boundary. Record each reviewed commit and its focused checks in
+the maintained release documentation; do not add an internal release-directory
+path to Polaris code or tooling.
