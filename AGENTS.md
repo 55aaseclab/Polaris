@@ -38,3 +38,43 @@
 - Add comments when they improve clarity.
 - Do not report intermediate results or say "if you want" when the next step
   is clear; default to taking action directly.
+
+## Polaris 0.3 Boundary
+
+For the 0.3 release, Polaris is the only control plane. Work only with the
+Polaris, Wanghai, release, and documentation repositories named in
+`../ploaris-production/AGENTS.md`.
+
+- Own Authing identity, user mapping, tenant/vault ownership, role capability
+  checks, gateway sessions, rate limits, logical quotas, lifecycle, durable
+  jobs, audit persistence, ingress, and deployment policy here.
+- Keep Wanghai behind `POST /api/wanghai/:serverId/launch` and the private
+  Polaris gateway. Never return or publish a direct Wanghai port, NodePort, or
+  browser URL.
+- Treat `9090` as a private implementation port. Docker must bind it to
+  loopback; Pod and KubeVirt must use private services.
+- In integrated mode Wanghai uses the mounted vault root `/vault/project`.
+  Do not inject a separate shared Wanghai workspace root or a per-user
+  `.env` override.
+- Do not pass standalone `SMTP_*`, `OUTREACH_*`, `WANGHAI_*`, or
+  `PORTAL_PROFILE_AUTH` settings into an integrated Wanghai runtime. Polaris
+  injects only the reviewed private-root, gateway, and local-safety values.
+- Revalidate current Polaris line/role access before proxying. A gateway cookie
+  is transport state, not an authorization cache.
+- Use only `status.driver.selected` to advertise or proxy Wanghai. Never fall
+  back to a retained Docker, Pod, or KubeVirt configuration.
+- Keep live external actions and integrated backup/restore lifecycle in Polaris.
+  Wanghai must fail closed until Polaris has durable idempotency, outbox, and
+  audit support.
+- Keep manual intelligence-analysis completion in Polaris durable jobs. A
+  Wanghai review export may be surface work, but direct analysis `prepare`,
+  `run`, `finalize`, and `complete-review` must remain unavailable in
+  integrated mode.
+- Reject proxy request targets that can override the configured private origin.
+  Strip browser credentials and upstream `Set-Cookie` values at the gateway.
+- Keep standalone Wanghai support in a separate 0.3.1 batch. It requires an
+  explicit external identity adapter and must not weaken integrated assertions.
+
+Read `../ploaris-production/0.3-SURFACE-BOUNDARY.md` and
+`../ploaris-production/0.3-RELEASE-TODO.md` before altering this boundary.
+Record each reviewed commit and its focused checks in the release plan.
