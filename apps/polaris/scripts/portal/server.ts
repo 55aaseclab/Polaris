@@ -93,8 +93,20 @@ import {
 } from "./wanghai-gateway-policy.js";
 import {
   getPolarisControlStore,
+  type PolarisControlStore,
   type GatewayRateLimitResult,
 } from "./control-store.js";
+import {
+  maxWanghaiMutationBodyBytes,
+  prepareWanghaiMutationAdmission,
+  wanghaiAssertionAdmission,
+  WanghaiMutationAdmissionError,
+  type WanghaiMutationAdmission,
+} from "./wanghai-mutation-admission.js";
+import {
+  matchWanghaiMutationAction,
+  type WanghaiMutationMatch,
+} from "./wanghai-mutation-catalog.js";
 import { readUserAccessSummary } from "./user-map.js";
 import { vaultRuntimeResourceName, vaultRuntimeScopeName } from "../core/vault-name.js";
 import type { VaultSpec } from "../core/vault.js";
@@ -940,16 +952,20 @@ function sendGatewayError(
   message: string,
   extraHeaders: Record<string, string> = {},
 ): void {
-  const payload = `${JSON.stringify({ error: message })}\n`;
+  const payload = gatewayErrorPayload(message);
   res.writeHead(statusCode, {
     "cache-control": "no-store",
-    "content-length": Buffer.byteLength(payload),
+    "content-length": payload.byteLength,
     "content-type": "application/json; charset=utf-8",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     ...extraHeaders,
   });
   res.end(payload);
+}
+
+function gatewayErrorPayload(message: string): Buffer {
+  return Buffer.from(`${JSON.stringify({ error: message })}\n`, "utf8");
 }
 
 function gatewayRateLimitHeaders(rateLimit: GatewayRateLimitResult): Record<string, string> {
@@ -978,12 +994,21 @@ function isUnsafeMethod(method: string | undefined): boolean {
 }
 
 type WanghaiMutationAudit = {
+  admission: WanghaiMutationAdmission;
   category: string;
   method: string;
   requestId: string;
   route: string;
   session: ReturnType<typeof verifyGatewaySession>;
 };
+
+type WanghaiMutationExecution = {
+  admission: WanghaiMutationAdmission;
+  store: PolarisControlStore;
+};
+
+const WANGHAI_WORKSPACE_LEASE_MS = 120_000;
+const MAX_WANGHAI_MUTATION_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 const WANGHAI_AUDIT_ROUTE_SEGMENTS = new Set([
   "api",
@@ -1025,13 +1050,18 @@ function recordWanghaiMutationAudit(
     actorId: audit.session.user_id,
     tenantId: audit.session.tenant_id,
     vaultId: audit.session.vault_id,
-    action: `wanghai.surface.mutation.${phase}`,
+    action: `wanghai.surface.action.${audit.admission.action.id}.${phase}`,
     requestId: audit.requestId,
     outcome: phase === "accepted" || (upstreamStatus ?? 500) < 400
       ? "success"
       : "failure",
     metadata: {
+      action: audit.admission.action.id,
+      actionVersion: audit.admission.action.version,
       category: audit.category,
+      ...(audit.admission.expectedVersion === undefined
+        ? {}
+        : { expectedVersion: audit.admission.expectedVersion }),
       method: audit.method,
       route: audit.route,
       ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
@@ -1040,6 +1070,15 @@ function recordWanghaiMutationAudit(
 }
 
 function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: string): URL {
+  const requestTarget = validateWanghaiRequestTarget(rawUrl);
+  const resolved = new URL(requestTarget, targetOrigin);
+  if (resolved.origin !== targetOrigin) {
+    throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request origin", 400);
+  }
+  return resolved;
+}
+
+function validateWanghaiRequestTarget(rawUrl: string | undefined): string {
   const requestTarget = String(rawUrl ?? "/");
   // Node accepts absolute-form request targets from proxy-style clients. Do
   // not let one override the configured private upstream origin.
@@ -1051,11 +1090,92 @@ function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: str
   ) {
     throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request path", 400);
   }
-  const resolved = new URL(requestTarget, targetOrigin);
-  if (resolved.origin !== targetOrigin) {
-    throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request origin", 400);
+  return requestTarget;
+}
+
+function requestHeaderValue(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name.toLowerCase()];
+  if (Array.isArray(raw)) {
+    throw new WanghaiMutationAdmissionError(`Wanghai request header '${name}' is invalid`, 400);
   }
-  return resolved;
+  return raw;
+}
+
+async function readBoundedWanghaiMutationBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer> {
+  const declaredLength = requestHeaderValue(req, "content-length");
+  if (declaredLength !== undefined) {
+    if (!/^\d+$/u.test(declaredLength.trim())) {
+      throw new WanghaiMutationAdmissionError("Wanghai Content-Length is invalid", 400);
+    }
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length)) {
+      throw new WanghaiMutationAdmissionError("Wanghai Content-Length is invalid", 400);
+    }
+    if (length > maxBytes) {
+      throw new WanghaiMutationAdmissionError(
+        `Wanghai mutation body exceeds the ${maxBytes} byte limit`,
+        413,
+      );
+    }
+  }
+
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.from(chunk as Uint8Array);
+    size += bytes.byteLength;
+    if (size > maxBytes) {
+      req.resume();
+      throw new WanghaiMutationAdmissionError(
+        `Wanghai mutation body exceeds the ${maxBytes} byte limit`,
+        413,
+      );
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+async function readBoundedWanghaiMutationResponse(response: Response): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > MAX_WANGHAI_MUTATION_RESPONSE_BYTES) {
+      try {
+        await response.body.cancel();
+      } catch {
+        // The response stream may already be closed by the upstream.
+      }
+      throw new Error("Wanghai mutation response exceeds the replay limit");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+function replayWanghaiMutationResponse(
+  res: ServerResponse,
+  requestId: string,
+  response: { statusCode: number; contentType: string; body: Buffer },
+  rateLimit?: GatewayRateLimitResult,
+): void {
+  res.writeHead(response.statusCode, {
+    "cache-control": "no-store",
+    "content-length": response.body.byteLength,
+    "content-type": response.contentType,
+    "referrer-policy": "same-origin",
+    "x-content-type-options": "nosniff",
+    "x-polaris-idempotent-replay": "1",
+    [WANGHAI_GATEWAY_REQUEST_ID_HEADER]: requestId,
+    ...(rateLimit ? gatewayRateLimitHeaders(rateLimit) : {}),
+  });
+  res.end(response.body);
 }
 
 function forwardedGatewayRequestHeaders(
@@ -1070,6 +1190,7 @@ function forwardedGatewayRequestHeaders(
     "content-length",
     "cookie",
     "host",
+    "idempotency-key",
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
@@ -1080,6 +1201,7 @@ function forwardedGatewayRequestHeaders(
     "upgrade",
     WANGHAI_GATEWAY_ASSERTION_HEADER,
     WANGHAI_GATEWAY_REQUEST_ID_HEADER,
+    "x-polaris-expected-version",
     "x-forwarded-for",
     "x-forwarded-host",
     "x-forwarded-proto",
@@ -1152,6 +1274,8 @@ async function proxyWanghaiRequest(
   assertion: string,
   requestId: string,
   rateLimit?: GatewayRateLimitResult,
+  requestBody?: Buffer,
+  execution?: WanghaiMutationExecution,
   audit?: WanghaiMutationAudit,
 ): Promise<void> {
   const method = String(req.method ?? "GET").toUpperCase();
@@ -1161,14 +1285,35 @@ async function proxyWanghaiRequest(
     redirect: "manual",
   };
   if (method !== "GET" && method !== "HEAD") {
-    init.body = req as unknown as BodyInit;
-    init.duplex = "half";
+    if (requestBody) {
+      init.body = requestBody as unknown as BodyInit;
+    } else {
+      init.body = req as unknown as BodyInit;
+      init.duplex = "half";
+    }
   }
 
   let response: Response;
   try {
     response = await fetch(requestUrl, init);
   } catch {
+    const payload = gatewayErrorPayload("Wanghai portal is unavailable");
+    if (execution) {
+      try {
+        execution.store.failIdempotencyResponse(
+          execution.admission.idempotencyScope,
+          execution.admission.idempotencyKey,
+          {
+            statusCode: 502,
+            contentType: "application/json; charset=utf-8",
+            body: payload,
+          },
+        );
+      } catch {
+        // The accepted audit record identifies a mutation that needs operator
+        // reconciliation. Do not forward an unrecorded retry.
+      }
+    }
     if (audit) {
       try {
         recordWanghaiMutationAudit(audit, "completed", 502);
@@ -1178,6 +1323,58 @@ async function proxyWanghaiRequest(
       }
     }
     sendGatewayError(res, 502, "Wanghai portal is unavailable");
+    return;
+  }
+  if (execution) {
+    let responseBody: Buffer;
+    try {
+      responseBody = await readBoundedWanghaiMutationResponse(response);
+      execution.store.completeIdempotencyResponse(
+        execution.admission.idempotencyScope,
+        execution.admission.idempotencyKey,
+        {
+          statusCode: response.status,
+          contentType: response.headers.get("content-type") ?? "application/octet-stream",
+          body: responseBody,
+        },
+      );
+    } catch {
+      const payload = gatewayErrorPayload("Wanghai mutation result is unavailable");
+      try {
+        execution.store.failIdempotencyResponse(
+          execution.admission.idempotencyScope,
+          execution.admission.idempotencyKey,
+          {
+            statusCode: 502,
+            contentType: "application/json; charset=utf-8",
+            body: payload,
+          },
+        );
+      } catch {
+        // Preserve the accepted semantic audit record for reconciliation.
+      }
+      if (audit) {
+        try {
+          recordWanghaiMutationAudit(audit, "completed", 502);
+        } catch {
+          // The accepted record remains durable even when completion repair is needed.
+        }
+      }
+      sendGatewayError(res, 502, "Wanghai mutation result is unavailable");
+      return;
+    }
+    if (audit) {
+      try {
+        recordWanghaiMutationAudit(audit, "completed", response.status);
+      } catch {
+        // The exact upstream result is durable under the idempotency key.
+      }
+    }
+    writeGatewayResponseHeaders(res, response, targetOrigin, req, rateLimit);
+    res.setHeader(WANGHAI_GATEWAY_REQUEST_ID_HEADER, requestId);
+    res.setHeader("content-length", responseBody.byteLength);
+    res.writeHead(response.status);
+    res.end(responseBody);
     return;
   }
   if (audit) {
@@ -1258,12 +1455,46 @@ async function handleWanghaiGatewayHost(
     return;
   }
   session = currentSession;
-  if (isUnsafeMethod(req.method) && !requestUsesExpectedOrigin(req, configuredGatewayProtocol())) {
+  const unsafeMethod = isUnsafeMethod(req.method);
+  if (unsafeMethod && !requestUsesExpectedOrigin(req, configuredGatewayProtocol())) {
     sendGatewayError(res, 403, "Wanghai request failed CSRF validation");
     return;
   }
 
   try {
+    validateWanghaiRequestTarget(req.url);
+  } catch (error) {
+    if (error instanceof WanghaiGatewayPolicyError) {
+      sendGatewayError(res, error.statusCode, error.message);
+      return;
+    }
+    sendGatewayError(res, 400, "Invalid Wanghai gateway request path");
+    return;
+  }
+
+  let mutationMatch: WanghaiMutationMatch | null = null;
+  if (unsafeMethod) {
+    try {
+      mutationMatch = matchWanghaiMutationAction({
+        method: req.method,
+        pathname: url.pathname,
+      });
+    } catch {
+      sendGatewayError(res, 400, "Wanghai mutation route is invalid");
+      return;
+    }
+    if (!mutationMatch) {
+      sendGatewayError(res, 403, "Wanghai mutation route is not admitted");
+      return;
+    }
+    if (mutationMatch.action.minimumRole === "admin" && session.role !== "admin") {
+      sendGatewayError(res, 403, "Wanghai mutation action is not authorized");
+      return;
+    }
+  }
+
+  try {
+    const store = getPolarisControlStore(import.meta.url);
     const policy = checkWanghaiGatewayPolicy({
       tenantId: session.tenant_id,
       vaultId: session.vault_id,
@@ -1272,7 +1503,7 @@ async function handleWanghaiGatewayHost(
       method: req.method,
       pathname: url.pathname,
       contentType: String(req.headers["content-type"] ?? ""),
-      store: getPolarisControlStore(import.meta.url),
+      store,
     });
     if (!policy.allowed) {
       if (policy.statusCode === 429 && policy.rateLimit) {
@@ -1292,38 +1523,143 @@ async function handleWanghaiGatewayHost(
     const target = resolveWanghaiGatewayTarget(authorizedVault.spec);
     const requestId = randomUUID();
     const requestUrl = resolveWanghaiUpstreamUrl(req.url, target);
-    const audit = isUnsafeMethod(req.method)
-      ? {
-          category: policy.category,
-          method: String(req.method ?? "GET").toUpperCase(),
-          requestId,
-          route: wanghaiAuditRoute(url.pathname),
-          session,
-        }
-      : undefined;
-    const assertion = issueRequestAssertion({ session, requestId });
-    if (audit) {
-      // This must succeed before a mutable request reaches the surface. The
-      // completion record below provides the upstream result under the same ID.
-      recordWanghaiMutationAudit(audit, "accepted");
+    if (!mutationMatch) {
+      const assertion = issueRequestAssertion({ session, requestId });
+      await proxyWanghaiRequest(
+        req,
+        res,
+        target,
+        requestUrl,
+        assertion,
+        requestId,
+        policy.rateLimit,
+      );
+      return;
     }
-    await proxyWanghaiRequest(
+
+    const requestBody = await readBoundedWanghaiMutationBody(
       req,
-      res,
-      target,
-      requestUrl,
-      assertion,
-      requestId,
-      policy.rateLimit,
-      audit,
+      maxWanghaiMutationBodyBytes(mutationMatch.action),
     );
+    const admission = prepareWanghaiMutationAdmission({
+      match: mutationMatch,
+      body: requestBody,
+      contentType: requestHeaderValue(req, "content-type"),
+      idempotencyKey: requestHeaderValue(req, "idempotency-key"),
+      expectedVersion: requestHeaderValue(req, "x-polaris-expected-version"),
+      query: url.searchParams.entries(),
+      tenantId: session.tenant_id,
+      vaultId: session.vault_id,
+      userId: session.user_id,
+    });
+    const begun = store.beginIdempotencyFingerprint(
+      admission.idempotencyScope,
+      admission.idempotencyKey,
+      admission.requestHash,
+    );
+    if (begun === "existing") {
+      const existing = store.readIdempotencyResponse(
+        admission.idempotencyScope,
+        admission.idempotencyKey,
+      );
+      if (existing?.response) {
+        replayWanghaiMutationResponse(res, requestId, existing.response, policy.rateLimit);
+        return;
+      }
+      sendGatewayError(res, 409, "Wanghai mutation is already in progress", {
+        ...(policy.rateLimit ? gatewayRateLimitHeaders(policy.rateLimit) : {}),
+      });
+      return;
+    }
+
+    if (!store.acquireWorkspaceLock({
+      tenantId: session.tenant_id,
+      vaultId: session.vault_id,
+      workspaceId: admission.workspaceId,
+      owner: requestId,
+      leaseMs: WANGHAI_WORKSPACE_LEASE_MS,
+    })) {
+      const payload = gatewayErrorPayload("Another Wanghai workspace mutation is in progress");
+      store.failIdempotencyResponse(admission.idempotencyScope, admission.idempotencyKey, {
+        statusCode: 409,
+        contentType: "application/json; charset=utf-8",
+        body: payload,
+      });
+      replayWanghaiMutationResponse(res, requestId, {
+        statusCode: 409,
+        contentType: "application/json; charset=utf-8",
+        body: payload,
+      }, policy.rateLimit);
+      return;
+    }
+
+    const audit: WanghaiMutationAudit = {
+      admission,
+      category: policy.category,
+      method: String(req.method ?? "GET").toUpperCase(),
+      requestId,
+      route: wanghaiAuditRoute(url.pathname),
+      session,
+    };
+    const assertion = issueRequestAssertion({
+      session,
+      requestId,
+      admission: wanghaiAssertionAdmission(admission),
+    });
+    try {
+      // This must succeed before a mutable request reaches the surface. The
+      // completion record below is persisted under the same idempotency key.
+      try {
+        recordWanghaiMutationAudit(audit, "accepted");
+      } catch {
+        const payload = gatewayErrorPayload("Wanghai mutation audit is unavailable");
+        store.failIdempotencyResponse(admission.idempotencyScope, admission.idempotencyKey, {
+          statusCode: 503,
+          contentType: "application/json; charset=utf-8",
+          body: payload,
+        });
+        replayWanghaiMutationResponse(res, requestId, {
+          statusCode: 503,
+          contentType: "application/json; charset=utf-8",
+          body: payload,
+        }, policy.rateLimit);
+        return;
+      }
+      await proxyWanghaiRequest(
+        req,
+        res,
+        target,
+        requestUrl,
+        assertion,
+        requestId,
+        policy.rateLimit,
+        requestBody,
+        { admission, store },
+        audit,
+      );
+    } finally {
+      store.releaseWorkspaceLock(
+        session.tenant_id,
+        session.vault_id,
+        admission.workspaceId,
+        requestId,
+      );
+    }
   } catch (error) {
+    if (error instanceof WanghaiMutationAdmissionError) {
+      sendGatewayError(res, error.statusCode, error.message);
+      return;
+    }
     if (error instanceof WanghaiGatewayPolicyError) {
       sendGatewayError(res, error.statusCode, error.message);
       return;
     }
     if (error instanceof PortalAuthError) {
       sendGatewayError(res, error.statusCode, "Wanghai vault is not authorized");
+      return;
+    }
+    if (error instanceof Error && error.message === "Idempotency key was reused with a different request") {
+      sendGatewayError(res, 409, "Wanghai idempotency key was reused with a different request");
       return;
     }
     sendGatewayError(
