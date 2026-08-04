@@ -155,6 +155,83 @@ test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
         && (document.metadata as Record<string, unknown> | undefined)?.name === privateServiceName,
     );
     assert.ok(wanghaiDeployment);
+    const wanghaiPodSpec = (
+      (wanghaiDeployment.spec as Record<string, unknown>).template as Record<string, unknown>
+    ).spec as Record<string, unknown>;
+    const wanghaiContainer = (
+      wanghaiPodSpec.containers as Array<Record<string, unknown>>
+    )[0];
+    assert.ok(wanghaiContainer);
+    assert.equal(wanghaiPodSpec.automountServiceAccountToken, false);
+    assert.deepEqual(wanghaiPodSpec.securityContext, {
+      runAsNonRoot: true,
+      runAsUser: 1000,
+      runAsGroup: 1000,
+      fsGroup: 1000,
+      fsGroupChangePolicy: "OnRootMismatch",
+      seccompProfile: { type: "RuntimeDefault" },
+    });
+    assert.deepEqual(wanghaiContainer.securityContext, {
+      allowPrivilegeEscalation: false,
+      readOnlyRootFilesystem: true,
+      capabilities: { drop: ["ALL"] },
+    });
+    assert.deepEqual(wanghaiContainer.resources, {
+      requests: {
+        cpu: "100m",
+        memory: "128Mi",
+        "ephemeral-storage": "128Mi",
+      },
+      limits: {
+        cpu: "500m",
+        memory: "512Mi",
+        "ephemeral-storage": "512Mi",
+      },
+    });
+    assert.match(String((wanghaiContainer.args as string[])[0]), /ulimit -u 128/u);
+    const gatewaySecretName = vaultRuntimeResourceName(
+      DEMO_USER_PROFILE_ID,
+      project,
+      "wanghai-gateway",
+    );
+    const gatewaySecret = kubevirtDocs.find(
+      (document) => document.kind === "Secret"
+        && (document.metadata as Record<string, unknown> | undefined)?.name === gatewaySecretName,
+    );
+    assert.ok(gatewaySecret);
+    assert.match(
+      String((gatewaySecret.data as Record<string, unknown>)["assertion-secret"]),
+      /^[A-Za-z0-9+/=]+$/u,
+    );
+    assert.deepEqual(
+      (wanghaiContainer.env as Array<Record<string, unknown>>).find(
+        (entry) => entry.name === "WANGHAI_GATEWAY_ASSERTION_SECRET",
+      )?.valueFrom,
+      { secretKeyRef: { name: gatewaySecretName, key: "assertion-secret" } },
+    );
+    const wanghaiEgressPolicy = kubevirtDocs.find(
+      (document) => document.kind === "NetworkPolicy"
+        && (document.metadata as Record<string, unknown> | undefined)?.name
+          === vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "wanghai-egress"),
+    );
+    assert.ok(wanghaiEgressPolicy);
+    assert.deepEqual(
+      (wanghaiEgressPolicy.spec as Record<string, unknown>).egress,
+      [
+        {
+          ports: [
+            { protocol: "UDP", port: 53 },
+            { protocol: "TCP", port: 53 },
+          ],
+        },
+        {
+          ports: [
+            { protocol: "TCP", port: 80 },
+            { protocol: "TCP", port: 443 },
+          ],
+        },
+      ],
+    );
     assert.match(kubevirtRendered, new RegExp(`kind: Deployment[\\s\\S]+name: ${privateServiceName}`));
     assert.match(kubevirtRendered, /WANGHAI_GATEWAY_ASSERTION_SECRET/);
     assert.match(kubevirtRendered, new RegExp(`kind: Service[\\s\\S]+type: ClusterIP[\\s\\S]+app: ${privateServiceName}`));

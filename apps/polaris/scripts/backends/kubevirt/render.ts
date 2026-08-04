@@ -30,6 +30,15 @@ import { writeGeneratedManifest } from "../../output/write-generated.js";
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
 const GENERATED_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "generated", "kubevirt");
 const FALLBACK_KUBEVIRT_DIR = path.join(REPO_ROOT, "config", "kubevirt", "templates");
+const WANGHAI_RESOURCE_LIMITS = {
+  requestCpu: "100m",
+  requestMemory: "128Mi",
+  requestEphemeralStorage: "128Mi",
+  limitCpu: "500m",
+  limitMemory: "512Mi",
+  limitEphemeralStorage: "512Mi",
+} as const;
+const WANGHAI_PID_LIMIT = 128;
 
 function runtimeScope(vault: VaultSpec): string {
   return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
@@ -145,13 +154,33 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
     vault.identity.projectName,
     "wanghai",
   );
+  const gatewaySecretName = vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+    "wanghai-gateway",
+  );
   const dataClaim = requireAttachmentVolumeRef(vault, "vaultData");
   const gateway = wanghaiGatewayEnvironment(vault);
   const wanghaiEnv = vault.runtime.authFiles.find(
     (file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY
       || file.mountPath === WANGHAI_PROFILE_ENV_MOUNT_PATH,
   );
-  const envSecretName = `${serviceName}-env`;
+  const envSecretName = vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+    "wanghai-env",
+  );
+  const gatewaySecret = [
+    "apiVersion: v1",
+    "kind: Secret",
+    "metadata:",
+    `  name: ${gatewaySecretName}`,
+    `  namespace: ${scope}`,
+    "type: Opaque",
+    "data:",
+    `  assertion-secret: ${Buffer.from(gateway.assertionSecret, "utf8").toString("base64")}`,
+    "---",
+  ];
   const envSecret = wanghaiEnv
     ? [
       "apiVersion: v1",
@@ -168,15 +197,24 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
   const envLines = [
     ["WANGHAI_REPO_ROOT", "/opt/wanghai"],
     ["WANGHAI_RUNTIME_MODE", "polaris"],
-    ["WANGHAI_GATEWAY_ASSERTION_SECRET", gateway.assertionSecret],
     ["WANGHAI_GATEWAY_TENANT_ID", gateway.tenantId],
     ["WANGHAI_GATEWAY_VAULT_ID", gateway.vaultId],
     ["WANGHAI_GATEWAY_FRAME_ANCESTORS", gateway.frameAncestors],
     ["WANGHAI_SUPERVISE_PORTAL", "1"],
+    ["HOME", "/tmp/wanghai-home"],
+    ["TMPDIR", "/tmp"],
+    ["NEXT_TELEMETRY_DISABLED", "1"],
   ].flatMap(([name, value]) => [
     `        - name: ${name}`,
     `          value: ${JSON.stringify(value)}`,
   ]);
+  const assertionSecretEnv = [
+    "        - name: WANGHAI_GATEWAY_ASSERTION_SECRET",
+    "          valueFrom:",
+    "            secretKeyRef:",
+    `              name: ${gatewaySecretName}`,
+    "              key: assertion-secret",
+  ];
   const envVolume = wanghaiEnv
     ? [
       "        - name: wanghai-env",
@@ -193,6 +231,7 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
     ]
     : [];
   return [
+    ...gatewaySecret,
     ...envSecret,
     "apiVersion: apps/v1",
     "kind: Deployment",
@@ -211,13 +250,42 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
     "      labels:",
     `        app: ${serviceName}`,
     "    spec:",
+    "      automountServiceAccountToken: false",
+    "      securityContext:",
+    "        runAsNonRoot: true",
+    "        runAsUser: 1000",
+    "        runAsGroup: 1000",
+    "        fsGroup: 1000",
+    "        fsGroupChangePolicy: OnRootMismatch",
+    "        seccompProfile:",
+    "          type: RuntimeDefault",
     "      containers:",
     "      - name: wanghai",
     `        image: ${JSON.stringify(vault.runtime.baseImage)}`,
+    "        command: [\"/bin/sh\", \"-lc\"]",
+    "        args:",
+    "        - >-",
+    `          mkdir -p /tmp/wanghai-home && ulimit -u ${WANGHAI_PID_LIMIT} && exec /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port ${privatePort.containerPort}`,
+    "        securityContext:",
+    "          allowPrivilegeEscalation: false",
+    "          readOnlyRootFilesystem: true",
+    "          capabilities:",
+    "            drop:",
+    "            - ALL",
+    "        resources:",
+    "          requests:",
+    `            cpu: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.requestCpu)}`,
+    `            memory: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.requestMemory)}`,
+    `            ephemeral-storage: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.requestEphemeralStorage)}`,
+    "          limits:",
+    `            cpu: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.limitCpu)}`,
+    `            memory: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.limitMemory)}`,
+    `            ephemeral-storage: ${JSON.stringify(WANGHAI_RESOURCE_LIMITS.limitEphemeralStorage)}`,
     "        ports:",
     `        - name: ${privatePort.name}`,
     `          containerPort: ${privatePort.containerPort}`,
     "        env:",
+    ...assertionSecretEnv,
     ...envLines,
     "        startupProbe:",
     "          httpGet:",
@@ -244,11 +312,21 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
     "        volumeMounts:",
     "        - name: vault-data",
     "          mountPath: /vault/project",
+    "        - name: wanghai-tmp",
+    "          mountPath: /tmp",
+    "        - name: wanghai-next-cache",
+    "          mountPath: /opt/wanghai/apps/admin-portal/.next/cache",
     ...envVolume,
     "      volumes:",
     "      - name: vault-data",
     "        persistentVolumeClaim:",
     `          claimName: ${dataClaim}`,
+    "      - name: wanghai-tmp",
+    "        emptyDir:",
+    "          sizeLimit: 128Mi",
+    "      - name: wanghai-next-cache",
+    "        emptyDir:",
+    "          sizeLimit: 64Mi",
     ...secretVolume,
     "---",
     "apiVersion: v1",
@@ -265,6 +343,29 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
     `    port: ${privatePort.containerPort}`,
     `    targetPort: ${privatePort.containerPort}`,
     "    appProtocol: http",
+    "---",
+    "apiVersion: networking.k8s.io/v1",
+    "kind: NetworkPolicy",
+    "metadata:",
+    `  name: ${vaultRuntimeResourceName(vault.userProfile.id, vault.identity.projectName, "wanghai-egress")}`,
+    `  namespace: ${scope}`,
+    "spec:",
+    "  podSelector:",
+    "    matchLabels:",
+    `      app: ${serviceName}`,
+    "  policyTypes:",
+    "  - Egress",
+    "  egress:",
+    "  - ports:",
+    "    - protocol: UDP",
+    "      port: 53",
+    "    - protocol: TCP",
+    "      port: 53",
+    "  - ports:",
+    "    - protocol: TCP",
+    "      port: 80",
+    "    - protocol: TCP",
+    "      port: 443",
     "---",
   ].join("\n");
 }
