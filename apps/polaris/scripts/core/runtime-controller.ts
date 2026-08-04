@@ -91,6 +91,16 @@ function synthesizeVaultPaseoStatus(
   vault: VaultSpec,
   driver: Pick<NonNullable<VaultStatus["driver"]>, "selected" | "status" | "reason">,
 ): VaultStatus["paseo"] {
+  if (!vault.agent.enabled) {
+    return {
+      daemon: "absent",
+      web: "unavailable",
+      reconnectMode: "unknown",
+      liveTarget: null,
+      reconnectTarget: null,
+      reason: driver.reason,
+    };
+  }
   const liveTarget = readPersistedPaseoPairingUrl(vault);
   const serverId = readPersistedPaseoServerId(vault);
   const reconnectTarget = buildReconnectTarget(serverId, liveTarget, vaultPaseoScope(vault));
@@ -464,12 +474,17 @@ export function computeVaultDrift(vault: VaultSpec, observation: BackendObservat
       }
     }
 
-    const runtimeTargets = [
-      { key: "projectRoot", message: "vault project root assembly missing" },
-      { key: "managerState", message: "vault manager assembly missing" },
-      { key: "evolutionState", message: "vault evolution assembly missing" },
-      { key: "ssh", message: "user SSH assembly missing" },
-    ] as const;
+    const runtimeTargets: Array<{
+      key: "projectRoot" | "managerState" | "evolutionState" | "ssh";
+      message: string;
+    }> = [{ key: "projectRoot", message: "vault project root assembly missing" }];
+    if (vault.agent.enabled) {
+      runtimeTargets.push(
+        { key: "managerState", message: "vault manager assembly missing" },
+        { key: "evolutionState", message: "vault evolution assembly missing" },
+        { key: "ssh", message: "user SSH assembly missing" },
+      );
+    }
     for (const target of runtimeTargets) {
       const observed = observation.vaultAssembly[target.key];
       if (observed && !observed.observed) {
@@ -590,11 +605,11 @@ export function synthesizeVaultStatus(
     vaultAssembly: {
       home: runtimeCheck(observation.vaultAssembly.home),
       projectRoot: runtimeCheck(observation.vaultAssembly.projectRoot),
-      managerState: runtimeCheck(observation.vaultAssembly.managerState),
-      evolutionState: runtimeCheck(observation.vaultAssembly.evolutionState),
+      managerState: runtimeAssemblyCheck(vault.agent.enabled, observation.vaultAssembly.managerState),
+      evolutionState: runtimeAssemblyCheck(vault.agent.enabled, observation.vaultAssembly.evolutionState),
       codex: runtimeAssemblyCheck(expectsCodexAssembly, observation.vaultAssembly.codex),
       claude: runtimeAssemblyCheck(expectsClaudeAssembly, observation.vaultAssembly.claude),
-      ssh: runtimeCheck(observation.vaultAssembly.ssh),
+      ssh: runtimeAssemblyCheck(vault.agent.enabled, observation.vaultAssembly.ssh),
     },
   };
 }

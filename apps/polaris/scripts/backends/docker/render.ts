@@ -372,6 +372,44 @@ export function renderDockerVault(vault: VaultSpec): string {
       `unset ${environmentName}`,
     ];
   });
+  const agentBootstrapLines = vault.agent.enabled
+    ? [
+        `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${vault.attachments.vaultRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
+        ...(vault.runtime.user === "root"
+          ? [`chown -R root:root ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.userIdentityState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}`]
+          : []),
+        `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
+        `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/vault`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/copilot ${home}/.copilot`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/pi ${home}/.pi`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
+        `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
+        `ln -sfn ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${home}/.paseo`,
+        `ln -sfn ${sshRoot} ${home}/.ssh`,
+        `ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/vault`,
+        `ln -sfn ${toolRoot} ${home}/.local/polaris`,
+        ...buildAgentCliWrapperLines(vault),
+        ...(vault.profile.vaultAlias ? [`ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/${vault.profile.vaultAlias}`] : []),
+      ]
+    : [
+        `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets`,
+      ];
+  const agentIdentityBootstrapLines = vault.agent.enabled
+    ? [
+        `mkdir -p ${sshRoot}`,
+        ...(vault.runtime.user === "root" ? [`chown root:root ${sshRoot} || true`] : []),
+        `chmod 700 ${sshRoot} || true`,
+        ...(vault.runtime.user === "root"
+          ? [`find ${sshRoot} -maxdepth 1 -type f -exec chown root:root {} + 2>/dev/null || true`]
+          : []),
+        `find ${sshRoot} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod ${vault.runtime.user === "root" ? "400" : "600"} {} + 2>/dev/null || true`,
+        `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
+        `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
+        ...buildGitHubKnownHostsLines(sshRoot),
+      ]
+    : [];
   const bootstrap = [
     "set -eu",
     `mkdir -p ${home}`,
@@ -383,49 +421,33 @@ export function renderDockerVault(vault: VaultSpec): string {
           ...(vault.runtime.installRustup
             ? ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"]
             : []),
-          ...buildAgentCliInstallLines(vault),
+          ...(vault.agent.enabled ? buildAgentCliInstallLines(vault) : []),
         ]),
-    `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${vault.attachments.vaultRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
-    ...(vault.runtime.user === "root"
-      ? [`chown -R root:root ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.userIdentityState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}`]
-      : []),
-    `if [ -x ${imageToolRoot}/bin/paseo ] && [ ! -L ${imageToolRoot} ]; then rm -rf ${toolRoot}/bin/paseo ${toolRoot}/lib/node_modules/@getpaseo; cp -a ${imageToolRoot}/. ${toolRoot}/; fi`,
-    `rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/vault`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/codex ${home}/.codex`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/claude ${home}/.claude`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/copilot ${home}/.copilot`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/pi ${home}/.pi`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/config ${home}/.config/opencode`,
-    `ln -sfn ${vault.attachments.userIdentityState.mountRoot}/opencode/data ${home}/.local/share/opencode`,
-    `ln -sfn ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${home}/.paseo`,
-    `ln -sfn ${sshRoot} ${home}/.ssh`,
-    `ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/vault`,
-    `ln -sfn ${toolRoot} ${home}/.local/polaris`,
-    ...buildAgentCliWrapperLines(vault),
-    ...(vault.profile.vaultAlias ? [`ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/${vault.profile.vaultAlias}`] : []),
+    ...agentBootstrapLines,
     ...authBootstrapLines,
-    `mkdir -p ${sshRoot}`,
-    ...(vault.runtime.user === "root" ? [`chown root:root ${sshRoot} || true`] : []),
-    `chmod 700 ${sshRoot} || true`,
-    ...(vault.runtime.user === "root"
-      ? [`find ${sshRoot} -maxdepth 1 -type f -exec chown root:root {} + 2>/dev/null || true`]
-      : []),
-    `find ${sshRoot} -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys' ! -name 'known_hosts' ! -name 'known_hosts.old' -exec chmod ${vault.runtime.user === "root" ? "400" : "600"} {} + 2>/dev/null || true`,
-    `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
-    `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
-    ...buildGitHubKnownHostsLines(sshRoot),
-    ...buildEvolutionBootstrapLines(vault),
+    ...agentIdentityBootstrapLines,
+    ...(vault.agent.enabled ? buildEvolutionBootstrapLines(vault) : []),
     ...buildPaseoBootstrapLines(vault),
     ...buildWanghaiPortalRuntimeLines(vault),
   ]
     .map((line) => composeEscape(line))
     .join("\n");
   const portLines = vault.connectivity.servicePorts
-    .filter((port) => !isWanghaiServicePort(port) || Boolean(port.nodePort))
+    .filter((port) => {
+      if (!vault.agent.enabled && !isWanghaiServicePort(port)) {
+        return false;
+      }
+      return !isWanghaiServicePort(port) || Boolean(port.nodePort);
+    })
     .map((port) => isWanghaiServicePort(port)
       ? `      - "127.0.0.1:${port.nodePort}:${port.containerPort}"`
       : `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");
+  const ports = portLines
+    ? `ports:\n${portLines}`
+    : vault.agent.enabled
+      ? 'ports:\n      - "6767:6767"'
+      : "ports: []";
   const environment = {
     ...Object.fromEntries(plainEnvVars.map((envVar) => [envVar.name, envVar.value])),
     POLARIS_EVOLUTION_ROOT: vault.agent.runtime.evolutionRoot,
@@ -451,8 +473,7 @@ services:
       - -lc
       - |
 ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
-    ports:
-${portLines || '      - "6767:6767"'}
+    ${ports}
     environment:
 ${environmentLines}
     extra_hosts:

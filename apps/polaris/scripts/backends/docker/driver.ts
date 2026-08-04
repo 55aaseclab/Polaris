@@ -195,7 +195,7 @@ export class DockerDriver implements BackendDriver {
       || (processRunning && execCheck("curl -fsS http://127.0.0.1:9090/readyz >/dev/null"));
     const running = processRunning && wanghaiReady;
     const githubAuthObserved =
-      exists && running && vault.userProfile.github.account
+      vault.agent.enabled && exists && running && vault.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)
         : false;
 
@@ -214,12 +214,16 @@ export class DockerDriver implements BackendDriver {
       vaultAssembly: exists && running ? {
         home: { observed: execCheck(`test -d ${vault.runtime.home}`), detail: vault.runtime.home },
         projectRoot: { observed: execCheck(`test -L ${vault.runtime.home}/vault || test -L ${vault.runtime.home}/${vault.profile.vaultAlias ?? "vault"}`), detail: `${vault.runtime.home}/vault` },
-        managerState: { observed: execCheck(`test -L ${vault.runtime.home}/.paseo`), detail: vault.agent.runtime.stateRoot },
-        evolutionState: { observed: execCheck(`test -d ${vault.agent.runtime.evolutionRoot}`), detail: vault.agent.runtime.evolutionRoot },
+        ...(vault.agent.enabled
+          ? {
+              managerState: { observed: execCheck(`test -L ${vault.runtime.home}/.paseo`), detail: vault.agent.runtime.stateRoot },
+              evolutionState: { observed: execCheck(`test -d ${vault.agent.runtime.evolutionRoot}`), detail: vault.agent.runtime.evolutionRoot },
+              ssh: { observed: execCheck(`test -L ${vault.runtime.home}/.ssh || test -d ${vault.runtime.home}/.ssh`), detail: `${vault.runtime.home}/.ssh` },
+            }
+          : {}),
         codex: { observed: execCheck(`test -L ${vault.runtime.home}/.codex`), detail: `${vault.runtime.home}/.codex` },
         claude: { observed: execCheck(`test -L ${vault.runtime.home}/.claude`), detail: `${vault.runtime.home}/.claude` },
-        ssh: { observed: execCheck(`test -L ${vault.runtime.home}/.ssh || test -d ${vault.runtime.home}/.ssh`), detail: `${vault.runtime.home}/.ssh` },
-        githubAuth: vault.userProfile.github.account
+        githubAuth: vault.agent.enabled && vault.userProfile.github.account
           ? { observed: githubAuthObserved, detail: vault.userProfile.github.account }
           : undefined,
       } : {},

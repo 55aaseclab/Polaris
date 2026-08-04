@@ -128,6 +128,16 @@ export function validateVault(vault: VaultSpec): void {
     if (!vault.agent.capabilities.supportsTranscriptReplay) {
       throw new Error("Agent-enabled vaults require transcript replay support");
     }
+  } else {
+    if (vault.agent.managerId !== "none") {
+      throw new Error("Agent-disabled vaults must not declare a manager");
+    }
+    if (Object.values(vault.agent.capabilities).some(Boolean)) {
+      throw new Error("Agent-disabled vaults must not declare agent capabilities");
+    }
+    if (vault.agent.harnesses.length > 0) {
+      throw new Error("Agent-disabled vaults must not declare agent harnesses");
+    }
   }
 
   if (vault.userProfile.ssh.mode === "provided-key") {
