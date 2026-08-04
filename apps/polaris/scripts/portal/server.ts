@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { ManagedHarness } from "../config/credential-catalog.js";
@@ -5,8 +6,10 @@ import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import {
   listPortalProfiles,
+  loadPortalVaultByTarget,
   parsePortalDriverTarget,
   readPortalProfile,
+  type PortalDriverTarget,
   type PortalProfileSummary,
 } from "../core/portal.js";
 import {
@@ -18,6 +21,7 @@ import {
   requirePortalSession,
   selfProvisionedPolarisUserId,
   sessionMatchesCurrentIdentity,
+  type AuthenticatedPortalSession,
 } from "./auth.js";
 import { resolvePortalAuthMode } from "@qingniao/polaris-auth-server";
 import {
@@ -70,6 +74,30 @@ import {
   readShellAsset,
   shellFallbackHtml,
 } from "./shell-assets.js";
+import {
+  configuredGatewayProtocol,
+  consumeLaunchTicket,
+  createWanghaiGatewayLaunch,
+  gatewayHostLabelFromRequest,
+  isWanghaiGatewayHost,
+  issueRequestAssertion,
+  requestUsesExpectedOrigin,
+  verifyGatewaySession,
+  wanghaiRoleForPortalSession,
+  WANGHAI_GATEWAY_ASSERTION_HEADER,
+  WANGHAI_GATEWAY_REQUEST_ID_HEADER,
+} from "./wanghai-gateway.js";
+import {
+  checkWanghaiGatewayPolicy,
+  WanghaiGatewayPolicyError,
+} from "./wanghai-gateway-policy.js";
+import {
+  getPolarisControlStore,
+  type GatewayRateLimitResult,
+} from "./control-store.js";
+import { readUserAccessSummary } from "./user-map.js";
+import { vaultRuntimeResourceName, vaultRuntimeScopeName } from "../core/vault-name.js";
+import type { VaultSpec } from "../core/vault.js";
 
 type ParsedBody = Record<string, string>;
 
@@ -105,17 +133,124 @@ function resolveRequestedVaultLine(input: {
   return allowed[0] ?? "coding";
 }
 
-const requestOrigins = new WeakMap<ServerResponse, string>();
+const MAX_PORTAL_BODY_BYTES = 1_048_576;
+
+class PortalRequestError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: 400 | 413,
+  ) {
+    super(message);
+  }
+}
+
+function requestHeader(req: IncomingMessage, name: string): string {
+  const value = req.headers[name.toLowerCase()];
+  return Array.isArray(value) ? String(value[0] ?? "").trim() : String(value ?? "").trim();
+}
+
+function normalizeHttpOrigin(value: string, name: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} must contain absolute HTTP(S) origins`);
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error(`${name} must contain absolute HTTP(S) origins`);
+  }
+  return parsed.origin;
+}
+
+function configuredPortalOrigins(): Set<string> {
+  const values = [
+    process.env.POLARIS_PORTAL_ORIGIN,
+    process.env.POLARIS_PORTAL_ALLOWED_ORIGINS,
+  ]
+    .flatMap((value) => String(value ?? "").split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return new Set(values.map((value) => normalizeHttpOrigin(value, "POLARIS_PORTAL_ALLOWED_ORIGINS")));
+}
+
+function requestPublicOrigin(req: IncomingMessage): string | null {
+  const host = requestHeader(req, "host");
+  if (!host || /[\s/\\]/u.test(host)) {
+    return null;
+  }
+  try {
+    const origin = new URL(`http://${host}`);
+    // Explicit origins are required outside loopback development. Do not
+    // reflect a public Host or X-Forwarded-Proto value into CORS policy.
+    if (!isLoopbackHostname(origin.hostname)) return null;
+    return origin.origin;
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]";
+}
+
+function requestHasAllowedPortalOrigin(
+  req: IncomingMessage,
+  allowedOrigins: ReadonlySet<string>,
+): boolean {
+  const rawOrigin = requestHeader(req, "origin");
+  if (!rawOrigin) {
+    return false;
+  }
+  let origin: string;
+  try {
+    origin = normalizeHttpOrigin(rawOrigin, "Origin");
+  } catch {
+    return false;
+  }
+  return allowedOrigins.has(origin) || origin === requestPublicOrigin(req);
+}
+
+function applyPortalCorsHeaders(
+  req: IncomingMessage,
+  res: ServerResponse,
+  allowedOrigins: ReadonlySet<string>,
+): boolean {
+  if (!requestHasAllowedPortalOrigin(req, allowedOrigins)) {
+    return false;
+  }
+  const origin = normalizeHttpOrigin(requestHeader(req, "origin"), "Origin");
+  res.setHeader("access-control-allow-origin", origin);
+  res.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("access-control-allow-headers", "authorization,content-type");
+  res.setHeader("access-control-allow-credentials", "true");
+  res.setHeader("vary", "Origin");
+  return true;
+}
+
+function requestUsesCookieBackedPortalSession(req: IncomingMessage): boolean {
+  const cookie = requestHeader(req, "cookie");
+  if (!cookie) {
+    return false;
+  }
+  if (resolvePortalAuthMode() === "oauth2-proxy") {
+    return true;
+  }
+  return /(?:^|;\s*)(?:polaris_authing_session|__session)=/u.test(cookie);
+}
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = `${JSON.stringify(body, null, 2)}\n`;
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
-    "access-control-allow-origin": requestOrigins.get(res) ?? "*",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
-    "access-control-allow-credentials": "true",
   });
   res.end(payload);
 }
@@ -158,9 +293,6 @@ function sendEventStreamHeaders(res: ServerResponse): void {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
   });
 }
 
@@ -190,9 +322,19 @@ function parseFormBody(raw: string): ParsedBody {
 }
 
 async function readBody(req: IncomingMessage): Promise<ParsedBody> {
+  const declaredLength = Number(requestHeader(req, "content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_PORTAL_BODY_BYTES) {
+    throw new PortalRequestError("Request body is too large", 413);
+  }
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_PORTAL_BODY_BYTES) {
+      throw new PortalRequestError("Request body is too large", 413);
+    }
+    chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (!raw) {
@@ -200,7 +342,12 @@ async function readBody(req: IncomingMessage): Promise<ParsedBody> {
   }
   const contentType = String(req.headers["content-type"] ?? "");
   if (contentType.includes("application/json")) {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      throw new PortalRequestError("Request body is not valid JSON", 400);
+    }
     const body: ParsedBody = {};
     for (const [key, value] of Object.entries(parsed)) {
       body[key] = Array.isArray(value) ? value.map((item) => String(item)).join(",") : String(value ?? "");
@@ -685,28 +832,476 @@ async function handleUserDelete(
   sendJson(res, 200, await deletePortalUser(userId));
 }
 
+type AuthorizedWanghaiVault = {
+  vault: string;
+  spec: VaultSpec;
+};
+
+function sessionCanUseWanghai(
+  session: Pick<AuthenticatedPortalSession, "line">,
+): boolean {
+  return session.line === "vertical" || session.line === "both";
+}
+
+function resolveCurrentWanghaiGatewaySession(
+  session: ReturnType<typeof verifyGatewaySession>,
+): ReturnType<typeof verifyGatewaySession> | null {
+  const access = readUserAccessSummary(session.user_id);
+  if (
+    !access
+    || access.polarisUserId !== session.user_id
+    || !sessionCanUseWanghai(access)
+  ) {
+    return null;
+  }
+  // Gateway cookies are short-lived transport state, not an authority cache.
+  // Re-derive the role from Polaris so revocation/downgrade takes effect before
+  // the next proxied Wanghai request.
+  return {
+    ...session,
+    role: wanghaiRoleForPortalSession(access),
+  };
+}
+
+async function resolveAuthorizedWanghaiVault(
+  userId: string,
+  serverId: string,
+): Promise<AuthorizedWanghaiVault> {
+  const summary = (await listPortalVaults(userId)).find(
+    (entry) => entry.serverId === serverId,
+  );
+  if (!summary || !summary.surfaces.some((surface) => surface.toLowerCase() === "wanghai")) {
+    throw new PortalAuthError("Wanghai vault not found", 404);
+  }
+
+  const targets: PortalDriverTarget[] = [];
+  if (summary.status?.driver?.selected) {
+    targets.push(summary.status.driver.selected);
+  }
+  targets.push(
+    { backend: "docker" },
+    { backend: "pod", profile: "gvisor" },
+    { backend: "kubevirt-vm" },
+  );
+  const tried = new Set<string>();
+  for (const target of targets) {
+    const key = `${target.backend}:${target.profile ?? ""}`;
+    if (tried.has(key)) continue;
+    tried.add(key);
+    try {
+      const spec = loadPortalVaultByTarget(userId, summary.name, target);
+      if (spec.connectivity.servicePorts.some(isWanghaiServicePort)) {
+        return { vault: summary.name, spec };
+      }
+    } catch {
+      // A vault can retain configs for multiple backends. Only the selected
+      // runtime should resolve to a gateway target.
+    }
+  }
+  throw new Error("Wanghai vault runtime configuration is unavailable");
+}
+
+function isWanghaiServicePort(port: VaultSpec["connectivity"]["servicePorts"][number]): boolean {
+  return port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090";
+}
+
+function resolveWanghaiGatewayTarget(vault: VaultSpec): string {
+  const port = vault.connectivity.servicePorts.find(isWanghaiServicePort);
+  if (!port) {
+    throw new Error("Wanghai portal port is not configured");
+  }
+  if (vault.backend.kind === "docker") {
+    const configuredHost = String(
+      process.env.POLARIS_WANGHAI_DOCKER_GATEWAY_HOST ?? "127.0.0.1",
+    ).trim();
+    if (!configuredHost || !port.nodePort) {
+      throw new Error("Docker Wanghai gateway target is not configured");
+    }
+    const target = new URL(
+      configuredHost.includes("://") ? configuredHost : `http://${configuredHost}`,
+    );
+    if (target.protocol !== "http:" || target.pathname !== "/" || target.search || target.hash) {
+      throw new Error("POLARIS_WANGHAI_DOCKER_GATEWAY_HOST must be an HTTP host");
+    }
+    target.port = port.nodePort;
+    return target.origin;
+  }
+
+  const clusterDomain = String(
+    process.env.POLARIS_WANGHAI_CLUSTER_DOMAIN ?? "cluster.local",
+  ).trim();
+  if (!/^[a-z0-9.-]+$/u.test(clusterDomain)) {
+    throw new Error("POLARIS_WANGHAI_CLUSTER_DOMAIN is invalid");
+  }
+  const namespace = vaultRuntimeScopeName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+  );
+  const service = vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+    "wanghai",
+  );
+  return `http://${service}.${namespace}.svc.${clusterDomain}:${port.containerPort}`;
+}
+
+function sendGatewayError(
+  res: ServerResponse,
+  statusCode: number,
+  message: string,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const payload = `${JSON.stringify({ error: message })}\n`;
+  res.writeHead(statusCode, {
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(payload),
+    "content-type": "application/json; charset=utf-8",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
+function gatewayRateLimitHeaders(rateLimit: GatewayRateLimitResult): Record<string, string> {
+  const retryAfter = Math.max(1, rateLimit.resetAt - Math.floor(Date.now() / 1000));
+  return {
+    "ratelimit-limit": String(rateLimit.limit),
+    "ratelimit-remaining": String(rateLimit.remaining),
+    "ratelimit-reset": String(retryAfter),
+  };
+}
+
+function sendGatewayRateLimitError(
+  res: ServerResponse,
+  rateLimit: GatewayRateLimitResult,
+): void {
+  const retryAfter = Math.max(1, rateLimit.resetAt - Math.floor(Date.now() / 1000));
+  sendGatewayError(res, 429, "Wanghai gateway rate limit exceeded", {
+    ...gatewayRateLimitHeaders(rateLimit),
+    "retry-after": String(retryAfter),
+  });
+}
+
+function isUnsafeMethod(method: string | undefined): boolean {
+  const normalized = String(method ?? "GET").toUpperCase();
+  return normalized !== "GET" && normalized !== "HEAD" && normalized !== "OPTIONS";
+}
+
+function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: string): URL {
+  const requestTarget = String(rawUrl ?? "/");
+  // Node accepts absolute-form request targets from proxy-style clients. Do
+  // not let one override the configured private upstream origin.
+  if (
+    !requestTarget.startsWith("/")
+    || requestTarget.startsWith("//")
+    || requestTarget.includes("\\")
+    || /[\u0000-\u001f\u007f]/u.test(requestTarget)
+  ) {
+    throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request path", 400);
+  }
+  const resolved = new URL(requestTarget, targetOrigin);
+  if (resolved.origin !== targetOrigin) {
+    throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request origin", 400);
+  }
+  return resolved;
+}
+
+function forwardedGatewayRequestHeaders(
+  req: IncomingMessage,
+  assertion: string,
+  requestId: string,
+): Headers {
+  const headers = new Headers();
+  const blocked = new Set([
+    "authorization",
+    "connection",
+    "content-length",
+    "cookie",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "set-cookie",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    WANGHAI_GATEWAY_ASSERTION_HEADER,
+    WANGHAI_GATEWAY_REQUEST_ID_HEADER,
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+  ]);
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (!value || blocked.has(name.toLowerCase())) continue;
+    headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  }
+  headers.set(WANGHAI_GATEWAY_ASSERTION_HEADER, assertion);
+  headers.set(WANGHAI_GATEWAY_REQUEST_ID_HEADER, requestId);
+  headers.set("x-forwarded-for", req.socket.remoteAddress ?? "");
+  headers.set("x-forwarded-host", String(req.headers.host ?? ""));
+  headers.set("x-forwarded-proto", configuredGatewayProtocol().replace(":", ""));
+  return headers;
+}
+
+function writeGatewayResponseHeaders(
+  res: ServerResponse,
+  response: Response,
+  targetOrigin: string,
+  req: IncomingMessage,
+  rateLimit?: GatewayRateLimitResult,
+): void {
+  const blocked = new Set([
+    "connection",
+    "content-encoding",
+    "content-length",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "set-cookie",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+  ]);
+  for (const [name, rawValue] of response.headers.entries()) {
+    if (blocked.has(name.toLowerCase())) continue;
+    let value = rawValue;
+    if (name.toLowerCase() === "location") {
+      try {
+        const location = new URL(rawValue, targetOrigin);
+        if (location.origin === targetOrigin) {
+          value = `${location.pathname}${location.search}${location.hash}`;
+        }
+      } catch {
+        // Preserve an invalid upstream header rather than turning a proxy
+        // response into an internal error.
+      }
+    }
+    res.setHeader(name, value);
+  }
+  // Only Polaris may establish state for the gateway host. Wanghai is an
+  // upstream surface and must not overwrite the gateway session cookie.
+  res.setHeader("referrer-policy", "same-origin");
+  res.setHeader("x-content-type-options", "nosniff");
+  if (rateLimit) {
+    for (const [name, value] of Object.entries(gatewayRateLimitHeaders(rateLimit))) {
+      res.setHeader(name, value);
+    }
+  }
+  void req;
+}
+
+async function proxyWanghaiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  targetOrigin: string,
+  assertion: string,
+  requestId: string,
+  rateLimit?: GatewayRateLimitResult,
+): Promise<void> {
+  const requestUrl = resolveWanghaiUpstreamUrl(req.url, targetOrigin);
+  const method = String(req.method ?? "GET").toUpperCase();
+  const init: RequestInit & { duplex?: "half" } = {
+    method,
+    headers: forwardedGatewayRequestHeaders(req, assertion, requestId),
+    redirect: "manual",
+  };
+  if (method !== "GET" && method !== "HEAD") {
+    init.body = req as unknown as BodyInit;
+    init.duplex = "half";
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, init);
+  } catch {
+    sendGatewayError(res, 502, "Wanghai portal is unavailable");
+    return;
+  }
+  writeGatewayResponseHeaders(res, response, targetOrigin, req, rateLimit);
+  res.setHeader(WANGHAI_GATEWAY_REQUEST_ID_HEADER, requestId);
+  res.writeHead(response.status);
+  if (method === "HEAD" || !response.body) {
+    res.end();
+    return;
+  }
+  try {
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      if (!res.write(chunk)) {
+        await new Promise<void>((resolve, reject) => {
+          res.once("drain", resolve);
+          res.once("error", reject);
+        });
+      }
+    }
+    res.end();
+  } catch {
+    if (!res.writableEnded) {
+      res.destroy();
+    }
+  }
+}
+
+async function handleWanghaiGatewayHost(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+): Promise<void> {
+  const hostLabel = gatewayHostLabelFromRequest(req);
+  const ticket = url.searchParams.get("ticket");
+  if (ticket) {
+    if (req.method !== "GET" || url.searchParams.getAll("ticket").length !== 1) {
+      sendGatewayError(res, 400, "Invalid Wanghai launch request");
+      return;
+    }
+    try {
+      consumeLaunchTicket({
+        req,
+        res,
+        ticket,
+        hostLabel,
+        secure: configuredGatewayProtocol() === "https:",
+      });
+      res.writeHead(302, {
+        "cache-control": "no-store",
+        location: url.pathname || "/",
+        "referrer-policy": "no-referrer",
+      });
+      res.end();
+    } catch {
+      sendGatewayError(res, 401, "Invalid or expired Wanghai launch ticket");
+    }
+    return;
+  }
+
+  let session;
+  try {
+    session = verifyGatewaySession(req, hostLabel);
+  } catch {
+    sendGatewayError(res, 401, "Wanghai gateway session is required");
+    return;
+  }
+  const currentSession = resolveCurrentWanghaiGatewaySession(session);
+  if (!currentSession) {
+    sendGatewayError(res, 403, "Wanghai gateway access is no longer authorized");
+    return;
+  }
+  session = currentSession;
+  if (isUnsafeMethod(req.method) && !requestUsesExpectedOrigin(req, configuredGatewayProtocol())) {
+    sendGatewayError(res, 403, "Wanghai request failed CSRF validation");
+    return;
+  }
+
+  try {
+    const policy = checkWanghaiGatewayPolicy({
+      tenantId: session.tenant_id,
+      vaultId: session.vault_id,
+      userId: session.user_id,
+      role: session.role,
+      method: req.method,
+      pathname: url.pathname,
+      contentType: String(req.headers["content-type"] ?? ""),
+      store: getPolarisControlStore(import.meta.url),
+    });
+    if (!policy.allowed) {
+      if (policy.statusCode === 429 && policy.rateLimit) {
+        sendGatewayRateLimitError(res, policy.rateLimit);
+        return;
+      }
+      sendGatewayError(res, policy.statusCode ?? 403, "Wanghai request is not authorized");
+      return;
+    }
+    const authorizedVault = await resolveAuthorizedWanghaiVault(
+      session.user_id,
+      session.server_id,
+    );
+    if (authorizedVault.vault !== session.vault_id) {
+      throw new Error("Wanghai gateway vault scope changed");
+    }
+    const target = resolveWanghaiGatewayTarget(authorizedVault.spec);
+    const requestId = randomUUID();
+    await proxyWanghaiRequest(
+      req,
+      res,
+      target,
+      issueRequestAssertion({ session, requestId }),
+      requestId,
+      policy.rateLimit,
+    );
+  } catch (error) {
+    if (error instanceof WanghaiGatewayPolicyError) {
+      sendGatewayError(res, error.statusCode, error.message);
+      return;
+    }
+    if (error instanceof PortalAuthError) {
+      sendGatewayError(res, error.statusCode, "Wanghai vault is not authorized");
+      return;
+    }
+    sendGatewayError(
+      res,
+      502,
+      "Wanghai portal is unavailable",
+    );
+  }
+}
+
+async function handleWanghaiLaunch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  serverId: string,
+): Promise<void> {
+  const session = await requirePortalSession(req, res);
+  if (!session || !requireMappedPortalSession(res, session)) {
+    return;
+  }
+  if (!sessionCanUseWanghai(session)) {
+    sendJson(res, 403, { error: "The vertical product line is not enabled for this user" });
+    return;
+  }
+  const authorizedVault = await resolveAuthorizedWanghaiVault(session.polarisUserId, serverId);
+  const launch = createWanghaiGatewayLaunch({
+    session,
+    serverId,
+    vaultId: authorizedVault.vault,
+  });
+  sendJson(res, 200, { portalUrl: launch.portalUrl });
+}
+
 function isApiPath(segments: string[]): boolean {
   return segments[0] === "api";
 }
 
 export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
+  const allowedOrigins = configuredPortalOrigins();
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-      const segments = routeSegments(url);
-      const requestOrigin = req.headers.origin;
-      if (requestOrigin) {
-        requestOrigins.set(res, requestOrigin);
-        res.setHeader("access-control-allow-origin", requestOrigin);
+      if (isWanghaiGatewayHost(req.headers.host)) {
+        await handleWanghaiGatewayHost(req, res, url);
+        return;
       }
+      const segments = routeSegments(url);
       if (req.method === "OPTIONS" && isApiPath(segments)) {
-        res.writeHead(204, {
-          "access-control-allow-origin": requestOrigin ?? "*",
-          "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-          "access-control-allow-headers": "authorization,content-type",
-          "access-control-allow-credentials": "true",
-        });
+        if (!applyPortalCorsHeaders(req, res, allowedOrigins)) {
+          sendJson(res, 403, { error: "Origin is not allowed" });
+          return;
+        }
+        res.writeHead(204);
         res.end();
+        return;
+      }
+
+      const hasAllowedOrigin = isApiPath(segments)
+        && applyPortalCorsHeaders(req, res, allowedOrigins);
+      if (
+        isApiPath(segments)
+        && isUnsafeMethod(req.method)
+        && requestUsesCookieBackedPortalSession(req)
+        && !hasAllowedOrigin
+      ) {
+        sendJson(res, 403, { error: "Portal request failed CSRF validation" });
         return;
       }
 
@@ -726,6 +1321,15 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
 
       if (isApiPath(segments)) {
+        if (
+          segments.length === 4
+          && segments[1] === "wanghai"
+          && segments[3] === "launch"
+          && req.method === "POST"
+        ) {
+          await handleWanghaiLaunch(req, res, decodeURIComponent(segments[2]));
+          return;
+        }
         if (segments.length === 2 && segments[1] === "authing-config" && req.method === "GET") {
           const authMode = resolvePortalAuthMode();
           sendJson(res, 200, {
@@ -1224,7 +1828,11 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       notFound(res);
     } catch (error) {
-      const statusCode = error instanceof PortalAuthError ? error.statusCode : 500;
+      const statusCode = error instanceof PortalAuthError
+        ? error.statusCode
+        : error instanceof PortalRequestError
+          ? error.statusCode
+          : 500;
       const message = error instanceof Error ? error.message : String(error);
       const isApiRequest = (req.url ?? "").startsWith("/api/");
       if (isApiRequest) {

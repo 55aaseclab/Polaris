@@ -106,6 +106,13 @@ function ensureDockerVaultPrerequisites(vault: VaultSpec): void {
   ensureDockerUserIdentityVolume(vault);
 }
 
+function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some((port) => {
+    const name = (port.name ?? "").toLowerCase();
+    return name === "wanghai" || String(port.containerPort) === "9090";
+  });
+}
+
 function runDockerComposeTimed(
   vault: VaultSpec,
   outputPath: string,
@@ -173,7 +180,7 @@ export class DockerDriver implements BackendDriver {
     const inspect = exists
       ? spawnSync("docker", ["inspect", id], { encoding: "utf8" })
       : { status: 1, stdout: "", stderr: "" };
-    const running = exists && /"Running":\s*true/.test(inspect.stdout || "");
+    const processRunning = exists && /"Running":\s*true/.test(inspect.stdout || "");
     const execCheck = (command: string): boolean => {
       if (!exists) return false;
       const result = spawnSync("docker", ["exec", id, "sh", "-lc", command], { encoding: "utf8" });
@@ -184,6 +191,9 @@ export class DockerDriver implements BackendDriver {
       const result = spawnSync("docker", ["exec", id, "sh", "-lc", command], { encoding: "utf8" });
       return result.status === 0 ? String(result.stdout || "") : "";
     };
+    const wanghaiReady = !vaultEnablesWanghaiPortal(vault)
+      || (processRunning && execCheck("curl -fsS http://127.0.0.1:9090/readyz >/dev/null"));
+    const running = processRunning && wanghaiReady;
     const githubAuthObserved =
       exists && running && vault.userProfile.github.account
         ? execCheck(`output=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -T git@github.com 2>&1 || true); printf '%s' "$output" | grep -q 'successfully authenticated'`)

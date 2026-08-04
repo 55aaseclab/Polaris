@@ -15,7 +15,6 @@ import {
   vaultPaseoPackageSpec,
   vaultToolCatalog,
 } from "../../core/harness-catalog.js";
-import { resolveWanghaiHostDataRoots } from "../../config/wanghai-env.js";
 import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
@@ -25,10 +24,10 @@ import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 import { resolveRepoRoot } from "../../utils/repo-root.js";
 import {
-  WANGHAI_BACKUP_RUNTIME_ROOT,
-  WANGHAI_CACHE_RUNTIME_ROOT,
-  WANGHAI_VAULTS_RUNTIME_ROOT,
-} from "../../config/scaffold.js";
+  deriveWanghaiVaultAssertionSecret,
+  requireWanghaiGatewayMasterSecret,
+} from "../../security/wanghai-assertions.js";
+import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
@@ -232,55 +231,41 @@ function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
   });
 }
 
-function buildWanghaiDataRootMountLines(vault: VaultSpec): string[] {
-  if (!vaultEnablesWanghaiPortal(vault)) {
-    return [];
-  }
-  const roots = resolveWanghaiHostDataRoots(import.meta.url);
-  const mounts: Array<{ source: string; target: string }> = [];
-  if (roots.vaultsRoot) {
-    mounts.push({
-      source: roots.vaultsRoot,
-      target: WANGHAI_VAULTS_RUNTIME_ROOT,
-    });
-  }
-  if (roots.backupRoot) {
-    mounts.push({
-      source: roots.backupRoot,
-      target: WANGHAI_BACKUP_RUNTIME_ROOT,
-    });
-  }
-  if (roots.cacheRoot) {
-    mounts.push({
-      source: roots.cacheRoot,
-      target: WANGHAI_CACHE_RUNTIME_ROOT,
-    });
-  }
-  return mounts.flatMap((mount) => [
-    "      - type: bind",
-    `        source: ${JSON.stringify(mount.source)}`,
-    `        target: ${JSON.stringify(mount.target)}`,
-  ]);
+function isWanghaiServicePort(port: VaultSpec["connectivity"]["servicePorts"][number]): boolean {
+  const name = (port.name ?? "").toLowerCase();
+  return name === "wanghai" || String(port.containerPort) === "9090";
 }
 
-/**
- * Wanghai portal runs **inside** the vault container (not on the host).
- * Started after paseo daemon bootstrap; logs under vault runtime state.
- */
-function buildWanghaiPortalBootstrapLines(vault: VaultSpec): string[] {
+function buildWanghaiGatewayBootstrapLines(vault: VaultSpec): string[] {
   if (!vaultEnablesWanghaiPortal(vault)) {
     return [];
   }
-  const logFile = `${vault.attachments.vaultRuntimeState.mountRoot}/wanghai-portal.log`;
-  const pidFile = `${vault.attachments.ephemeralRuntime.mountRoot}/pids/wanghai-portal.pid`;
+  const assertionSecret = deriveWanghaiVaultAssertionSecret(
+    requireWanghaiGatewayMasterSecret(),
+    vault.userProfile.id,
+    vault.identity.projectName,
+  );
+  const frameAncestors = configuredWanghaiFrameAncestors();
   return [
-    `mkdir -p ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.vaultRuntimeState.mountRoot}`,
-    `if [ -x /usr/local/bin/wanghai-entrypoint ] && [ -d /opt/wanghai/apps/admin-portal ]; then`,
-    `  if ! curl -fsS http://127.0.0.1:9090/ >/dev/null 2>&1; then`,
-    `    nohup /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090 > ${logFile} 2>&1 &`,
-    `    echo $! > ${pidFile}`,
-    `  fi`,
-    `fi`,
+    "export WANGHAI_RUNTIME_MODE=polaris",
+    `export WANGHAI_GATEWAY_ASSERTION_SECRET=${q(assertionSecret)}`,
+    `export WANGHAI_GATEWAY_TENANT_ID=${q(vault.userProfile.id)}`,
+    `export WANGHAI_GATEWAY_VAULT_ID=${q(vault.identity.projectName)}`,
+    `export WANGHAI_GATEWAY_FRAME_ANCESTORS=${q(frameAncestors)}`,
+  ];
+}
+
+/** Wanghai runs as the foreground process for a vertical vault. */
+function buildWanghaiPortalRuntimeLines(vault: VaultSpec): string[] {
+  if (!vaultEnablesWanghaiPortal(vault)) {
+    return [
+      "touch /tmp/.ready",
+      "sleep infinity",
+    ];
+  }
+  return [
+    `if [ ! -x /usr/local/bin/wanghai-entrypoint ] || [ ! -d /opt/wanghai/apps/admin-portal ]; then echo "Wanghai portal runtime is missing" >&2; exit 1; fi`,
+    `exec env WANGHAI_SUPERVISE_PORTAL=1 /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090`,
   ];
 }
 
@@ -416,17 +401,21 @@ export function renderDockerVault(vault: VaultSpec): string {
     `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
     `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
     ...buildGitHubKnownHostsLines(sshRoot),
-    ...vault.runtime.plainEnvVars.map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
+    ...vault.runtime.plainEnvVars
+      .filter((envVar) => !vaultEnablesWanghaiPortal(vault) || envVar.name !== "WANGHAI_RUNTIME_MODE")
+      .map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
+    ...buildWanghaiGatewayBootstrapLines(vault),
     ...buildEvolutionBootstrapLines(vault),
     ...buildPaseoBootstrapLines(vault),
-    ...buildWanghaiPortalBootstrapLines(vault),
-    "touch /tmp/.ready",
-    "sleep infinity",
+    ...buildWanghaiPortalRuntimeLines(vault),
   ]
     .map((line) => composeEscape(line))
     .join("\n");
   const portLines = vault.connectivity.servicePorts
-    .map((port) => `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
+    .filter((port) => !isWanghaiServicePort(port) || Boolean(port.nodePort))
+    .map((port) => isWanghaiServicePort(port)
+      ? `      - "127.0.0.1:${port.nodePort}:${port.containerPort}"`
+      : `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");
 
   return `name: ${composeProjectName}
@@ -452,7 +441,6 @@ ${portLines || '      - "6767:6767"'}
       - "host.docker.internal:host-gateway"
     volumes:
 ${vaultDataVolume.mountBlock.join("\n")}
-${buildWanghaiDataRootMountLines(vault).join("\n")}
       - type: volume
         source: ${vaultRuntimeVolume.key}
         target: /vault/state
