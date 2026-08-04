@@ -240,23 +240,19 @@ function isWanghaiServicePort(port: VaultSpec["connectivity"]["servicePorts"][nu
   return name === "wanghai" || String(port.containerPort) === "9090";
 }
 
-function buildWanghaiGatewayBootstrapLines(vault: VaultSpec): string[] {
-  if (!vaultEnablesWanghaiPortal(vault)) {
-    return [];
-  }
-  const assertionSecret = deriveWanghaiVaultAssertionSecret(
-    requireWanghaiGatewayMasterSecret(),
-    vault.userProfile.id,
-    vault.identity.projectName,
-  );
-  const frameAncestors = configuredWanghaiFrameAncestors();
-  return [
-    "export WANGHAI_RUNTIME_MODE=polaris",
-    `export WANGHAI_GATEWAY_ASSERTION_SECRET=${q(assertionSecret)}`,
-    `export WANGHAI_GATEWAY_TENANT_ID=${q(vault.userProfile.id)}`,
-    `export WANGHAI_GATEWAY_VAULT_ID=${q(vault.identity.projectName)}`,
-    `export WANGHAI_GATEWAY_FRAME_ANCESTORS=${q(frameAncestors)}`,
-  ];
+function wanghaiGatewayEnvironment(vault: VaultSpec): Record<string, string> | null {
+  if (!vaultEnablesWanghaiPortal(vault)) return null;
+  return {
+    WANGHAI_RUNTIME_MODE: "polaris",
+    WANGHAI_GATEWAY_ASSERTION_SECRET: deriveWanghaiVaultAssertionSecret(
+      requireWanghaiGatewayMasterSecret(),
+      vault.userProfile.id,
+      vault.identity.projectName,
+    ),
+    WANGHAI_GATEWAY_TENANT_ID: vault.userProfile.id,
+    WANGHAI_GATEWAY_VAULT_ID: vault.identity.projectName,
+    WANGHAI_GATEWAY_FRAME_ANCESTORS: configuredWanghaiFrameAncestors(),
+  };
 }
 
 /** Wanghai runs as the foreground process for a vertical vault. */
@@ -349,6 +345,7 @@ export function renderDockerVault(vault: VaultSpec): string {
   const plainEnvVars = vaultEnablesWanghaiPortal(vault)
     ? filterIntegratedWanghaiPlainEnvVars(vault.runtime.plainEnvVars)
     : vault.runtime.plainEnvVars;
+  const wanghaiGateway = wanghaiGatewayEnvironment(vault);
   const authBootstrapLines = authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
@@ -413,7 +410,6 @@ export function renderDockerVault(vault: VaultSpec): string {
     ...buildGitHubKnownHostsLines(sshRoot),
     ...plainEnvVars
       .map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
-    ...buildWanghaiGatewayBootstrapLines(vault),
     ...buildEvolutionBootstrapLines(vault),
     ...buildPaseoBootstrapLines(vault),
     ...buildWanghaiPortalRuntimeLines(vault),
@@ -426,6 +422,13 @@ export function renderDockerVault(vault: VaultSpec): string {
       ? `      - "127.0.0.1:${port.nodePort}:${port.containerPort}"`
       : `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");
+  const environmentLines = [
+    `      POLARIS_EVOLUTION_ROOT: ${q(vault.agent.runtime.evolutionRoot)}`,
+    `      POLARIS_VAULT_MEMORY_FILE: ${q(vault.evolution?.vaultMemoryFile ?? "")}`,
+    `      POLARIS_USER_MEMORY_FILE: ${q(vault.evolution?.userMemoryFile ?? "")}`,
+    `      POLARIS_MEMORY_SNAPSHOT_FILE: ${q(vault.evolution?.sessionSnapshotFile ?? "")}`,
+    ...Object.entries(wanghaiGateway ?? {}).map(([name, value]) => `      ${name}: ${q(value)}`),
+  ].join("\n");
 
   return `name: ${composeProjectName}
 
@@ -442,10 +445,7 @@ ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     ports:
 ${portLines || '      - "6767:6767"'}
     environment:
-      POLARIS_EVOLUTION_ROOT: ${vault.agent.runtime.evolutionRoot}
-      POLARIS_VAULT_MEMORY_FILE: ${vault.evolution?.vaultMemoryFile ?? ""}
-      POLARIS_USER_MEMORY_FILE: ${vault.evolution?.userMemoryFile ?? ""}
-      POLARIS_MEMORY_SNAPSHOT_FILE: ${vault.evolution?.sessionSnapshotFile ?? ""}
+${environmentLines}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

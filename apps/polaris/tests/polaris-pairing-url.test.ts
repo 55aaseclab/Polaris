@@ -125,15 +125,17 @@ test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
     assert.match(rendered, new RegExp(`127\\.0\\.0\\.1:${wanghaiPort?.nodePort}:9090`));
     assert.doesNotMatch(rendered, new RegExp(`- "${wanghaiPort?.nodePort}:9090"`));
     assert.match(rendered, /tenants\/.+\/vaults\/.+/);
-    assert.match(rendered, /WANGHAI_RUNTIME_MODE=polaris/);
-    assert.match(rendered, /WANGHAI_GATEWAY_ASSERTION_SECRET/);
-    assert.match(rendered, /WANGHAI_GATEWAY_FRAME_ANCESTORS/);
+    assert.doesNotMatch(rendered, /export WANGHAI_GATEWAY_/);
+    assert.match(rendered, /WANGHAI_RUNTIME_MODE: "polaris"/);
+    assert.match(rendered, /WANGHAI_GATEWAY_ASSERTION_SECRET:/);
+    assert.match(rendered, /WANGHAI_GATEWAY_FRAME_ANCESTORS:/);
     assert.match(rendered, /https:\/\/polaris\.example\.test/);
 
     const podRendered = renderPodVault({
       ...vault,
       backend: { ...vault.backend, kind: "pod", profile: "gvisor" },
     });
+    assert.doesNotMatch(podRendered, /export WANGHAI_GATEWAY_/);
     assert.match(podRendered, /type: ClusterIP[\s\S]+name: wanghai-private/);
     assert.doesNotMatch(podRendered, new RegExp(`nodePort: ${wanghaiPort?.nodePort}`));
     assert.match(podRendered, /startupProbe:[\s\S]+path: \/readyz/);
