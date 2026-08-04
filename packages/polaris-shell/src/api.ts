@@ -1,4 +1,4 @@
-import { planOpenWanghaiPortal } from "@qingniao/surface-wanghai";
+import { planOpenWanghaiPortal } from "@polaris/surface-wanghai";
 import { codingEmbedPath } from "./routes.js";
 import {
   resolveAllowedVaultLines,

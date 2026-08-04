@@ -1,5 +1,5 @@
 {
-  "name": "@qingniao/polaris-shell",
+  "name": "@polaris/polaris-shell",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,8 @@
     "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@qingniao/surface-paseo": "workspace:*",
-    "@qingniao/surface-wanghai": "workspace:*"
+    "@polaris/surface-paseo": "workspace:*",
+    "@polaris/surface-wanghai": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",

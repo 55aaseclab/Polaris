@@ -19,10 +19,10 @@ importers:
 
   apps/polaris:
     dependencies:
-      '@qingniao/polaris-auth-server':
+      '@polaris/polaris-auth-server':
         specifier: workspace:*
         version: link:../../packages/polaris-auth-server
-      '@qingniao/polaris-shell':
+      '@polaris/polaris-shell':
         specifier: workspace:*
         version: link:../../packages/polaris-shell
       '@sentry/node':
@@ -74,10 +74,10 @@ importers:
 
   packages/polaris-shell:
     dependencies:
-      '@qingniao/surface-paseo':
+      '@polaris/surface-paseo':
         specifier: workspace:*
         version: link:../surface-coding
-      '@qingniao/surface-wanghai':
+      '@polaris/surface-wanghai':
         specifier: workspace:*
         version: link:../surface-wanghai
     devDependencies:
