@@ -21,7 +21,7 @@ import {
   vaultStateDir,
   vaultStatusPath,
 } from "../output/state-store.js";
-import type { Credential, ServicePort, VaultStatus } from "./vault.js";
+import type { Credential, VaultStatus } from "./vault.js";
 import type { AuthFile } from "./vault.js";
 import { WANGHAI_PROFILE_ENV_FILE_KEY } from "../config/scaffold.js";
 import { polarisUsersRoot, repoRoot } from "../utils/paths.js";
@@ -133,8 +133,6 @@ export interface PortalVaultSummary {
   name: string;
   /** Surface capabilities read from the vault's selected runtime spec. */
   surfaces: string[];
-  /** Published ports needed by outer shell surfaces. */
-  ports: ServicePort[];
   /** Available once the in-container Paseo daemon finishes pairing. */
   serverId: string | null;
   drivers: PortalDriverTarget[];
@@ -882,7 +880,6 @@ export function loadVaultSummary(userId: string, vault: string): PortalVaultSumm
   return {
     name: vault,
     surfaces: runtime.surfaces,
-    ports: runtime.ports,
     serverId: readPersistedPaseoServerId(userId, vault),
     drivers: PORTAL_DRIVER_TARGETS,
     status,
@@ -895,7 +892,6 @@ function loadPortalVaultRuntimeSurface(
   status: VaultStatus | null,
 ): {
   surfaces: string[];
-  ports: ServicePort[];
 } {
   const targets = [
     status?.driver?.selected ?? null,
@@ -913,7 +909,6 @@ function loadPortalVaultRuntimeSurface(
         )
           ? ["paseo", "wanghai"]
           : ["paseo"],
-        ports,
       };
     } catch {
       continue;
@@ -921,7 +916,6 @@ function loadPortalVaultRuntimeSurface(
   }
   return {
     surfaces: [],
-    ports: [],
   };
 }
 
