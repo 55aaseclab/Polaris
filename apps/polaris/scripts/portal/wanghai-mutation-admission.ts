@@ -70,6 +70,12 @@ export function prepareWanghaiMutationAdmission(input: {
     throw new WanghaiMutationAdmissionError("Wanghai mutation workspace ID is invalid", 400);
   }
   const expectedVersion = normalizeExpectedVersion(input.expectedVersion);
+  if (action.requiresExpectedVersion && expectedVersion === undefined) {
+    throw new WanghaiMutationAdmissionError(
+      `Wanghai mutations require the ${WANGHAI_EXPECTED_VERSION_HEADER} header`,
+      428,
+    );
+  }
   const requestHash = fingerprintWanghaiMutation({
     action,
     body: bodyValue,
