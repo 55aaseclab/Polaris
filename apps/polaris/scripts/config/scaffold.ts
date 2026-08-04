@@ -653,6 +653,7 @@ export function scaffoldDockerVault(
   options?: {
     baseImage?: string | null;
     line?: VaultSubscriptionLine;
+    paseoFreeWanghaiTest?: boolean;
   },
 ): string {
   const outputPath = vaultConfigPath(project, "docker", userProfileId);
@@ -668,18 +669,25 @@ export function scaffoldDockerVault(
   }
   const defaultCredentials = resolveDefaultCredentialBindings(userProfileId);
   requireVaultGitAuth(userProfileId, defaultCredentials.bindings);
-  const vaultServicePort = allocateVaultServicePort();
   const verticalWanghai = isWanghaiVerticalBaseImage(baseImage);
+  const paseoFreeWanghaiTest = options?.paseoFreeWanghaiTest === true;
+  if (paseoFreeWanghaiTest && !verticalWanghai) {
+    throw new Error("Paseo-free test vaults require the vertical Wanghai image");
+  }
+  const vaultServicePort = paseoFreeWanghaiTest ? null : allocateVaultServicePort();
   const wanghaiServicePort = verticalWanghai
-    ? allocateVaultServicePort([Number.parseInt(vaultServicePort, 10)])
+    ? allocateVaultServicePort(
+        vaultServicePort ? [Number.parseInt(vaultServicePort, 10)] : [],
+      )
     : null;
-  const servicePorts: Array<Record<string, string>> = [
-    {
+  const servicePorts: Array<Record<string, string>> = [];
+  if (vaultServicePort) {
+    servicePorts.push({
       container_port: "6767",
       node_port: vaultServicePort,
       name: "paseo",
-    },
-  ];
+    });
+  }
   if (wanghaiServicePort) {
     servicePorts.push({
       container_port: WANGHAI_PORTAL_CONTAINER_PORT,
@@ -690,7 +698,14 @@ export function scaffoldDockerVault(
   const doc = {
     project,
     user_profile: userProfileId,
-    surfaces: verticalWanghai ? ["paseo", "wanghai"] : ["paseo"],
+    surfaces: paseoFreeWanghaiTest ? ["wanghai"] : verticalWanghai ? ["paseo", "wanghai"] : ["paseo"],
+    ...(paseoFreeWanghaiTest
+      ? {
+          testing: {
+            paseo_free_wanghai: true,
+          },
+        }
+      : {}),
     backend: {
       kind: "docker",
       spec_files: null,
@@ -715,12 +730,19 @@ export function scaffoldDockerVault(
       ephemeral_storage_request: "128Mi",
       unbounded: false,
     },
-    agent: {
-      kind: "multi",
-      label: "Codex + Claude Code",
-      args: [],
-      persist_state: true,
-    },
+    agent: paseoFreeWanghaiTest
+      ? {
+          kind: "none",
+          label: "Wanghai-only test surface",
+          args: [],
+          persist_state: false,
+        }
+      : {
+          kind: "multi",
+          label: "Codex + Claude Code",
+          args: [],
+          persist_state: true,
+        },
     tooling: {
       bootstrap_profile: "prebuilt",
       install_rustup: true,
@@ -753,7 +775,9 @@ export function scaffoldDockerVault(
         scope: "vault",
         sharing: "exclusive",
         mount_root: "/vault/state",
-        durable_paths: ["/vault/state/paseo", "/vault/state/paseo/evolution"],
+        durable_paths: paseoFreeWanghaiTest
+          ? ["/vault/state/tooling"]
+          : ["/vault/state/paseo", "/vault/state/paseo/evolution"],
         source: {
           kind: "generated-material",
           description: `docker vault runtime state for ${project}`,
@@ -772,7 +796,9 @@ export function scaffoldDockerVault(
       "ephemeral-runtime": {
         mount_root: "/run/vault",
         paths: ["/run/vault/tmp", "/run/vault/pids", "/run/vault/sockets"],
-        stale_artifacts: ["/root/.paseo/paseo.pid", "/run/vault/pids/paseo.pid"],
+        stale_artifacts: paseoFreeWanghaiTest
+          ? ["/run/vault/pids/wanghai.pid"]
+          : ["/root/.paseo/paseo.pid", "/run/vault/pids/paseo.pid"],
       },
     },
     profile: "morpheus",

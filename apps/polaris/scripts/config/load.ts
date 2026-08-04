@@ -28,6 +28,7 @@ import {
 import { readVaultDriverSelection } from "../output/state-store.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
 import {
+  isWanghaiVerticalBaseImage,
   wanghaiProfileEnvAuthFile,
   WANGHAI_PROFILE_ENV_FILE_KEY,
   WANGHAI_PROFILE_ENV_MOUNT_PATH,
@@ -852,13 +853,40 @@ function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] 
 
 function normalizeAgentKind(rawKind: unknown): string {
   const kind = String(rawKind ?? "").trim().toLowerCase();
-  if (!kind || kind === "none" || kind === "disabled") {
+  if (!kind || kind === "disabled") {
     return "default";
+  }
+  if (kind === "none") {
+    return "none";
   }
   return kind;
 }
 
 function buildAgentContract(home: string, agentKind: string): VaultAgentContract {
+  if (agentKind === "none") {
+    return {
+      enabled: false,
+      managerId: "none",
+      contractVersion: "v1",
+      capabilities: {
+        supportsEventStream: false,
+        supportsTranscriptReplay: false,
+        supportsStructuredArtifacts: false,
+        supportsReview: false,
+        supportsRetrieval: false,
+        supportsCuration: false,
+        requiresDaemon: false,
+        supportsPairing: false,
+      },
+      harnesses: [],
+      runtime: {
+        stateRoot: "",
+        evolutionRoot: "",
+        daemonAddress: "",
+        staleRuntimeArtifacts: [],
+      },
+    };
+  }
   const enabled = true;
   const stateRoot = `${home}/.paseo`;
   const evolutionRoot = `${stateRoot}/evolution`;
@@ -921,6 +949,54 @@ function normalizeServicePorts(service: Record<string, unknown>): ServicePort[] 
   return [];
 }
 
+function isWanghaiServicePort(port: ServicePort): boolean {
+  return port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090";
+}
+
+function validatePaseoFreeWanghaiTestConfig(params: {
+  paseoFreeWanghaiTest: boolean;
+  agentKind: string;
+  backendKind: VaultSpec["backend"]["kind"];
+  baseImage: string;
+  serviceEnabled: boolean;
+  servicePorts: ServicePort[];
+  surfaces: string[];
+}): void {
+  const usesDisabledAgent = params.agentKind === "none";
+  if (usesDisabledAgent && !params.paseoFreeWanghaiTest) {
+    throw new Error(
+      "agent.kind 'none' is reserved for testing.paseo_free_wanghai Docker vaults",
+    );
+  }
+  if (!params.paseoFreeWanghaiTest) {
+    return;
+  }
+  if (!usesDisabledAgent) {
+    throw new Error("testing.paseo_free_wanghai requires agent.kind 'none'");
+  }
+  if (params.backendKind !== "docker") {
+    throw new Error("testing.paseo_free_wanghai requires the Docker backend");
+  }
+  if (!isWanghaiVerticalBaseImage(params.baseImage)) {
+    throw new Error("testing.paseo_free_wanghai requires a Wanghai vertical image");
+  }
+  if (!params.serviceEnabled) {
+    throw new Error("testing.paseo_free_wanghai requires an enabled Wanghai service");
+  }
+  if (params.surfaces.length !== 1 || params.surfaces[0] !== "wanghai") {
+    throw new Error("testing.paseo_free_wanghai requires surfaces: [wanghai]");
+  }
+  if (
+    params.servicePorts.length !== 1
+    || !isWanghaiServicePort(params.servicePorts[0])
+    || !params.servicePorts[0].nodePort
+  ) {
+    throw new Error(
+      "testing.paseo_free_wanghai requires exactly one private Wanghai service port",
+    );
+  }
+}
+
 export function resolveVaultConfigPath(
   projectRef: string,
   userProfileId?: string,
@@ -964,6 +1040,7 @@ export function loadVaultFromConfigPath(
   const auth = (data.auth ?? {}) as Record<string, unknown>;
   const env = (data.env ?? {}) as Record<string, unknown>;
   const service = (data.service ?? {}) as Record<string, unknown>;
+  const testing = (data.testing ?? {}) as Record<string, unknown>;
 
   const projectName = String(data.project ?? project);
   const profile = resolveVaultProfile(data.profile, projectName);
@@ -978,6 +1055,9 @@ export function loadVaultFromConfigPath(
     gitUserEmail: toolingGitUserEmail,
   });
   const backendKind = String(backend.kind ?? "pod") as VaultSpec["backend"]["kind"];
+  const baseImage = String(
+    runtime.base_image ?? profile.defaults.runtime?.baseImage ?? "debian:trixie-slim",
+  );
   const podProfileDefaults = backendKind === "pod" && profileHint
     ? loadPodProfileDefaults(profileHint)
     : {};
@@ -1003,6 +1083,19 @@ export function loadVaultFromConfigPath(
     [],
   );
   const agentKind = normalizeAgentKind(agent.kind);
+  const servicePorts = normalizeServicePorts(service);
+  const surfaces = Array.isArray(data.surfaces)
+    ? data.surfaces.map((surface) => String(surface).trim().toLowerCase())
+    : [];
+  validatePaseoFreeWanghaiTestConfig({
+    paseoFreeWanghaiTest: testing.paseo_free_wanghai === true,
+    agentKind,
+    backendKind,
+    baseImage,
+    serviceEnabled: Boolean(service.enabled ?? false),
+    servicePorts,
+    surfaces,
+  });
   const plainEnvVars = normalizePlainEnv((env.plain ?? {}) as Record<string, unknown>);
   const persistState = Boolean(agent.persist_state ?? true);
   const claimName = String(runtime.storage_claim_name ?? `${projectName}-project`);
@@ -1056,13 +1149,13 @@ export function loadVaultFromConfigPath(
       unbounded: Boolean(resources.unbounded ?? false)
     },
     runtime: {
-      baseImage: String(runtime.base_image ?? profile.defaults.runtime?.baseImage ?? "debian:trixie-slim"),
+      baseImage,
       rootdiskImage: runtime.rootdisk_image ? String(runtime.rootdisk_image) : undefined,
       user: mergedRuntimeUser,
       home,
       privileged: Boolean(runtime.privileged ?? false),
       agentLabel: String(agent.label ?? "None"),
-      agentCmd: agentKind,
+      agentCmd: agentContract.enabled ? agentKind : "",
       agentArgs: Array.isArray(agent.args) ? agent.args.map((item) => String(item)) : [],
       bootstrapProfile: String(tooling.bootstrap_profile ?? profile.defaults.runtime?.bootstrapProfile ?? "full"),
       aptPackages: Array.isArray(tooling.apt_packages) ? tooling.apt_packages.map((item) => String(item)) : [],
@@ -1077,7 +1170,7 @@ export function loadVaultFromConfigPath(
     connectivity: {
       exposeService: Boolean(service.enabled ?? false),
       serviceMode: String(service.mode ?? "nodeport") === "ingress" ? "ingress" : "nodeport",
-      servicePorts: normalizeServicePorts(service),
+      servicePorts,
       serviceHost: service.host ? String(service.host) : undefined,
       servicePath: String(service.path ?? profile.defaults.service?.path ?? "/")
     },
@@ -1087,13 +1180,20 @@ export function loadVaultFromConfigPath(
     runtimeContract: {
       minimalInvariants: [
         `runtime home SHALL resolve to ${home}`,
-        `${agentContract.runtime.stateRoot} SHALL assemble from vault-runtime-state`,
-        `${agentContract.runtime.evolutionRoot} SHALL assemble from vault-runtime-state`,
-        `${home}/.codex, ${home}/.claude, ${home}/.copilot, ${home}/.pi, and OpenCode runtime state SHALL assemble from user-identity-state`,
-        `Codex XDG config/data/state SHALL assemble from user-identity-state`,
-        `${home}/.ssh SHALL assemble from user-identity-state with strict key permissions`,
+        ...(agentContract.enabled
+          ? [
+              `${agentContract.runtime.stateRoot} SHALL assemble from vault-runtime-state`,
+              `${agentContract.runtime.evolutionRoot} SHALL assemble from vault-runtime-state`,
+              `${home}/.codex, ${home}/.claude, ${home}/.copilot, ${home}/.pi, and OpenCode runtime state SHALL assemble from user-identity-state`,
+              `Codex XDG config/data/state SHALL assemble from user-identity-state`,
+              `${home}/.ssh SHALL assemble from user-identity-state with strict key permissions`,
+            ]
+          : []),
       ],
-      staleRuntimeArtifacts: [...agentContract.runtime.staleRuntimeArtifacts, ...attachments.ephemeralRuntime.staleArtifacts],
+      staleRuntimeArtifacts: [
+        ...agentContract.runtime.staleRuntimeArtifacts,
+        ...attachments.ephemeralRuntime.staleArtifacts,
+      ],
     },
     health: {
       readinessMode: backendKind === "pod" && String(runtime.class ?? "") === "gvisor" && agentContract.capabilities.requiresDaemon ? "daemon-port" : "ready-file",

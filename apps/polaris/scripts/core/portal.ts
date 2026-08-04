@@ -880,7 +880,7 @@ export function loadVaultSummary(userId: string, vault: string): PortalVaultSumm
   return {
     name: vault,
     surfaces: runtime.surfaces,
-    serverId: readPersistedPaseoServerId(userId, vault),
+    serverId: runtime.paseoEnabled ? readPersistedPaseoServerId(userId, vault) : null,
     drivers: PORTAL_DRIVER_TARGETS,
     status,
   };
@@ -892,26 +892,29 @@ function loadPortalVaultRuntimeSurface(
   status: VaultStatus | null,
 ): {
   surfaces: string[];
+  paseoEnabled: boolean;
 } {
   // A surface belongs to the selected runtime, not any retained backend spec.
   // Falling back here can advertise a stale Wanghai instance after a driver
   // switch and lets the gateway resolve the wrong execution target.
   const target = status?.driver?.selected;
   if (!target) {
-    return { surfaces: [] };
+    return { surfaces: [], paseoEnabled: false };
   }
   try {
     const loaded = loadPortalVaultByTarget(userId, vault, target);
     const ports = loaded.connectivity.servicePorts;
+    const wanghaiEnabled = ports.some((port) =>
+      port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
+    );
     return {
-      surfaces: ports.some((port) =>
-        port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
-      )
-        ? ["paseo", "wanghai"]
-        : ["paseo"],
+      surfaces: wanghaiEnabled
+        ? loaded.agent.enabled ? ["paseo", "wanghai"] : ["wanghai"]
+        : loaded.agent.enabled ? ["paseo"] : [],
+      paseoEnabled: loaded.agent.enabled,
     };
   } catch {
-    return { surfaces: [] };
+    return { surfaces: [], paseoEnabled: false };
   }
 }
 

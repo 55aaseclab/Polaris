@@ -14,6 +14,7 @@ import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerVault, renderDockerVault } from "../scripts/backends/docker/render.js";
 import { renderAndWritePodVault, renderPodVault } from "../scripts/backends/pod/render.js";
 import { renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
+import { createCommand } from "../scripts/cli/commands/create.js";
 import { vaultRuntimeResourceName } from "../scripts/core/vault-name.js";
 import {
   applyPairingUrlScope,
@@ -105,6 +106,82 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
         { containerPort: "9090", name: "wanghai" },
       ],
     );
+  } finally {
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+  }
+});
+
+test("Paseo-free Wanghai test vaults render only a private portal surface", () => {
+  const project = `wanghai-only-${process.pid}-${Date.now()}`;
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousPortalOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
+  const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
+    line: "vertical",
+    paseoFreeWanghaiTest: true,
+  });
+  try {
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as {
+      agent?: { kind?: unknown };
+      service?: { ports?: Array<{ container_port?: unknown; name?: unknown }> };
+      surfaces?: unknown;
+      testing?: { paseo_free_wanghai?: unknown };
+    };
+    assert.equal(doc.testing?.paseo_free_wanghai, true);
+    assert.equal(doc.agent?.kind, "none");
+    assert.deepEqual(doc.surfaces, ["wanghai"]);
+    assert.deepEqual(
+      (doc.service?.ports ?? []).map((entry) => ({
+        containerPort: String(entry.container_port ?? ""),
+        name: String(entry.name ?? ""),
+      })),
+      [{ containerPort: "9090", name: "wanghai" }],
+    );
+
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    assert.equal(vault.agent.enabled, false);
+    assert.equal(vault.agent.managerId, "none");
+    const wanghaiPort = vault.connectivity.servicePorts[0]?.nodePort;
+    assert.ok(wanghaiPort);
+    const rendered = renderDockerVault(vault);
+    assert.match(rendered, new RegExp(`127\\.0\\.0\\.1:${wanghaiPort}:9090`));
+    assert.doesNotMatch(rendered, new RegExp(`- "${wanghaiPort}:9090"`));
+    assert.doesNotMatch(rendered, /6767/);
+    assert.doesNotMatch(rendered, /PASEO_HOME/);
+    assert.doesNotMatch(rendered, /paseo daemon/);
+    assert.doesNotMatch(rendered, /paseo daemon pair/);
+    assert.match(rendered, /WANGHAI_RUNTIME_MODE: "polaris"/);
+
+    const unmarked = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as Record<string, unknown>;
+    delete unmarked.testing;
+    fs.writeFileSync(outputPath, yaml.dump(unmarked, { lineWidth: 120, noRefs: true }), "utf8");
+    assert.throws(
+      () => loadVaultFromRefForTest(`${project}@docker`),
+      /agent\.kind 'none' is reserved for testing\.paseo_free_wanghai Docker vaults/,
+    );
+  } finally {
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousPortalOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousPortalOrigins;
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+  }
+});
+
+test("create --test-wanghai-only scaffolds the relay-safe Wanghai fixture", async () => {
+  const project = `wanghai-only-create-${process.pid}-${Date.now()}`;
+  const outputPath = vaultConfigPath(project, "docker", DEMO_USER_PROFILE_ID);
+  try {
+    await createCommand([project, "--user", DEMO_USER_PROFILE_ID, "--test-wanghai-only"]);
+    const doc = (yaml.load(fs.readFileSync(outputPath, "utf8")) ?? {}) as {
+      agent?: { kind?: unknown };
+      surfaces?: unknown;
+      testing?: { paseo_free_wanghai?: unknown };
+    };
+    assert.equal(doc.testing?.paseo_free_wanghai, true);
+    assert.equal(doc.agent?.kind, "none");
+    assert.deepEqual(doc.surfaces, ["wanghai"]);
   } finally {
     fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
   }

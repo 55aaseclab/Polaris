@@ -2477,6 +2477,52 @@ test("portal vault summaries expose surface capability without runtime ports", a
   }
 });
 
+test("portal vault summaries keep Paseo-free Wanghai test vaults out of relay identity", async () => {
+  const userId = uniqueName("portal-wanghai-only-user");
+  const vault = uniqueName("portal-wanghai-only-vault");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userId);
+  try {
+    await createUserCommand([
+      userId,
+      "--name",
+      "Portal Wanghai Test User",
+      "--email",
+      `${userId}@polaris.local`,
+    ]);
+    scaffoldDockerVault(vault, userId, {
+      line: "vertical",
+      paseoFreeWanghaiTest: true,
+    });
+    const paseoStateRoot = vaultPaseoStateDir(vault, userId);
+    fs.mkdirSync(paseoStateRoot, { recursive: true });
+    fs.writeFileSync(path.join(paseoStateRoot, "server-id"), "stale-paseo-server\n", "utf8");
+    writeVaultStatus({
+      schemaVersion: 1.1,
+      project: vault,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userId);
+
+    const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
+    assert.equal(summary?.serverId, null);
+    assert.deepEqual(summary?.surfaces, ["wanghai"]);
+  } finally {
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
 test("portal API metadata is served from /api without a default user fallback", async () => {
   const server = createPortalServer(0);
   await once(server, "listening");
