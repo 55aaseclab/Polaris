@@ -107,6 +107,36 @@ test("control store claims, retries, and completes durable jobs", () => {
   }
 });
 
+test("control store scopes durable job claims to allowed kinds", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const wanghai = store.enqueueJob({
+      kind: "wanghai-workflow-run",
+      dedupeKey: "tenant-a:vault-a:workflow-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    const provision = store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:vault-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+
+    const provisionClaim = store.claimNextJob("provision-worker", 10_000, ["vault-provision"]);
+    assert.equal(provisionClaim?.id, provision.id);
+    assert.equal(store.getJob(wanghai.id)?.status, "queued");
+
+    const wanghaiClaim = store.claimNextJob("wanghai-worker", 10_000, ["wanghai-workflow-run"]);
+    assert.equal(wanghaiClaim?.id, wanghai.id);
+    assert.equal(store.getJob(wanghai.id)?.status, "running");
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store cancels queued jobs and prevents a cancelled lease from completing", () => {
   const fixture = temporaryStore();
   try {

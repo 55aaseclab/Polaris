@@ -170,6 +170,15 @@ function boundedJson(value: Record<string, unknown> | undefined): string {
   return encoded;
 }
 
+function normalizeClaimJobKinds(kinds: readonly string[] | undefined): string[] | undefined {
+  if (kinds === undefined) return undefined;
+  const normalized = [...new Set(kinds.map((kind) => String(kind ?? "").trim()))];
+  if (normalized.some((kind) => !kind || Buffer.byteLength(kind, "utf8") > 128 || /[\u0000-\u001f\u007f]/u.test(kind))) {
+    throw new Error("Durable job claim kinds are invalid");
+  }
+  return normalized;
+}
+
 function asOptionalString(value: unknown): string | undefined {
   const text = String(value ?? "").trim();
   return text || undefined;
@@ -611,9 +620,19 @@ export class PolarisControlStore {
     return rowToJob(row);
   }
 
-  claimNextJob(workerId: string, leaseMs = 60_000): DurableJob | null {
+  claimNextJob(
+    workerId: string,
+    leaseMs = 60_000,
+    allowedKinds?: readonly string[],
+  ): DurableJob | null {
     const owner = workerId.trim();
     if (!owner) throw new Error("A durable job worker ID is required");
+    const kinds = normalizeClaimJobKinds(allowedKinds);
+    const kindFilter = kinds === undefined
+      ? ""
+      : kinds.length === 0
+        ? " AND 1 = 0"
+        : ` AND kind IN (${kinds.map(() => "?").join(", ")})`;
     const now = Date.now();
     let claimedId: string | null = null;
     this.transaction(() => {
@@ -641,13 +660,15 @@ export class PolarisControlStore {
             updated_at = ?
         WHERE status = 'running' AND lease_expires_at IS NOT NULL
           AND lease_expires_at <= ?
-      `).run(nowIso(), nowIso(), now);
+          ${kindFilter}
+      `).run(nowIso(), nowIso(), now, ...(kinds ?? []));
       const row = this.db.prepare(`
         SELECT id FROM jobs
         WHERE status = 'queued' AND cancel_requested = 0 AND available_at <= ?
+          ${kindFilter}
         ORDER BY created_at ASC
         LIMIT 1
-      `).get(now) as SqlRow | undefined;
+      `).get(now, ...(kinds ?? [])) as SqlRow | undefined;
       if (!row) return;
       claimedId = String(row.id);
       this.db.prepare(`
