@@ -24,6 +24,7 @@ import {
   deriveWanghaiVaultAssertionSecret,
   requireWanghaiGatewayMasterSecret,
 } from "../../security/wanghai-assertions.js";
+import { sanitizeIntegratedWanghaiEnv } from "../../security/wanghai-runtime-env.js";
 import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
@@ -190,7 +191,7 @@ function wanghaiRuntimeDocs(vault: VaultSpec): string {
       `  namespace: ${scope}`,
       "type: Opaque",
       "data:",
-      `  .env: ${Buffer.from(wanghaiEnv.content ?? "", "utf8").toString("base64")}`,
+      `  .env: ${Buffer.from(sanitizeIntegratedWanghaiEnv(wanghaiEnv.content ?? ""), "utf8").toString("base64")}`,
       "---",
     ]
     : [];

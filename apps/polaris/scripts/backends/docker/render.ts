@@ -27,6 +27,10 @@ import {
   deriveWanghaiVaultAssertionSecret,
   requireWanghaiGatewayMasterSecret,
 } from "../../security/wanghai-assertions.js";
+import {
+  filterIntegratedWanghaiPlainEnvVars,
+  sanitizeIntegratedWanghaiAuthFiles,
+} from "../../security/wanghai-runtime-env.js";
 import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 
 function q(value: string): string {
@@ -339,7 +343,13 @@ export function renderDockerVault(vault: VaultSpec): string {
   const identityDirs = userIdentityBootstrapDirs(
     vault.attachments.userIdentityState.mountRoot,
   );
-  const authBootstrapLines = vault.runtime.authFiles.flatMap((file) => {
+  const authFiles = vaultEnablesWanghaiPortal(vault)
+    ? sanitizeIntegratedWanghaiAuthFiles(vault.runtime.authFiles)
+    : vault.runtime.authFiles;
+  const plainEnvVars = vaultEnablesWanghaiPortal(vault)
+    ? filterIntegratedWanghaiPlainEnvVars(vault.runtime.plainEnvVars)
+    : vault.runtime.plainEnvVars;
+  const authBootstrapLines = authFiles.flatMap((file) => {
     const content = file.content ?? "";
     const encoded = Buffer.from(content, "utf8").toString("base64");
     const storageTarget = stateStoragePathForMountPath({
@@ -401,8 +411,7 @@ export function renderDockerVault(vault: VaultSpec): string {
     `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
     `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
     ...buildGitHubKnownHostsLines(sshRoot),
-    ...vault.runtime.plainEnvVars
-      .filter((envVar) => !vaultEnablesWanghaiPortal(vault) || envVar.name !== "WANGHAI_RUNTIME_MODE")
+    ...plainEnvVars
       .map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildWanghaiGatewayBootstrapLines(vault),
     ...buildEvolutionBootstrapLines(vault),
