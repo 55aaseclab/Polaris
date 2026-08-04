@@ -51,7 +51,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pnpm install
-pnpm --filter @qingniao/polaris-auth-server run build
+pnpm --filter @polaris/polaris-auth-server run build
 # Build the shell bundle and the two surface packages before starting the stack.
 pnpm run build:surfaces
 

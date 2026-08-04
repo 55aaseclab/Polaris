@@ -5,7 +5,7 @@ import {
   PortalAuthError,
   resolveDisabledPortalSession,
   type PortalAuthMode,
-} from "@qingniao/polaris-auth-server";
+} from "@polaris/polaris-auth-server";
 import {
   findUserMapEntry,
   readUserAccessSummary,

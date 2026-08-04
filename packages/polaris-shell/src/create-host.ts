@@ -1,4 +1,4 @@
-import { paseoSurfacePath } from "@qingniao/surface-paseo";
+import { paseoSurfacePath } from "@polaris/surface-paseo";
 import { codingEmbedPath, wanghaiEmbedPath } from "./routes.js";
 import type { PolarisVaultLine } from "./product.js";
 

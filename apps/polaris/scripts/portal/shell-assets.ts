@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isShellPath } from "@qingniao/polaris-shell";
+import { isShellPath } from "@polaris/polaris-shell";
 import { repoRoot } from "../utils/paths.js";
 
 const SHELL_ROOT = path.join(repoRoot(import.meta.url), "packages", "polaris-shell", "dist", "web");

@@ -23,7 +23,7 @@ import {
   sessionMatchesCurrentIdentity,
   type AuthenticatedPortalSession,
 } from "./auth.js";
-import { resolvePortalAuthMode } from "@qingniao/polaris-auth-server";
+import { resolvePortalAuthMode } from "@polaris/polaris-auth-server";
 import {
   findUserMapEntry,
   normalizePolarisSubscriptionLine,
