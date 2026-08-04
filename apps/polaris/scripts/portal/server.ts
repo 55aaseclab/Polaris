@@ -977,6 +977,68 @@ function isUnsafeMethod(method: string | undefined): boolean {
   return normalized !== "GET" && normalized !== "HEAD" && normalized !== "OPTIONS";
 }
 
+type WanghaiMutationAudit = {
+  category: string;
+  method: string;
+  requestId: string;
+  route: string;
+  session: ReturnType<typeof verifyGatewaySession>;
+};
+
+const WANGHAI_AUDIT_ROUTE_SEGMENTS = new Set([
+  "api",
+  "assets",
+  "catalogs",
+  "customers",
+  "manual-review",
+  "metrics",
+  "modules",
+  "orders",
+  "outreach",
+  "paseo",
+  "prebuilt-workflows",
+  "products",
+  "seo",
+  "settings",
+  "sites",
+  "submodules",
+  "thumb",
+  "workflows",
+  "workspaces",
+]);
+
+function wanghaiAuditRoute(pathname: string): string {
+  // Do not put tenant workspace, product, order, or site identifiers into the
+  // control-plane audit log. The route shape is sufficient for triage.
+  const segments = pathname.split("/").filter(Boolean).slice(0, 32);
+  return `/${segments.map((segment) => (
+    WANGHAI_AUDIT_ROUTE_SEGMENTS.has(segment) ? segment : ":resource"
+  )).join("/")}`;
+}
+
+function recordWanghaiMutationAudit(
+  audit: WanghaiMutationAudit,
+  phase: "accepted" | "completed",
+  upstreamStatus?: number,
+): void {
+  getPolarisControlStore(import.meta.url).recordAudit({
+    actorId: audit.session.user_id,
+    tenantId: audit.session.tenant_id,
+    vaultId: audit.session.vault_id,
+    action: `wanghai.surface.mutation.${phase}`,
+    requestId: audit.requestId,
+    outcome: phase === "accepted" || (upstreamStatus ?? 500) < 400
+      ? "success"
+      : "failure",
+    metadata: {
+      category: audit.category,
+      method: audit.method,
+      route: audit.route,
+      ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+    },
+  });
+}
+
 function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: string): URL {
   const requestTarget = String(rawUrl ?? "/");
   // Node accepts absolute-form request targets from proxy-style clients. Do
@@ -1086,11 +1148,12 @@ async function proxyWanghaiRequest(
   req: IncomingMessage,
   res: ServerResponse,
   targetOrigin: string,
+  requestUrl: URL,
   assertion: string,
   requestId: string,
   rateLimit?: GatewayRateLimitResult,
+  audit?: WanghaiMutationAudit,
 ): Promise<void> {
-  const requestUrl = resolveWanghaiUpstreamUrl(req.url, targetOrigin);
   const method = String(req.method ?? "GET").toUpperCase();
   const init: RequestInit & { duplex?: "half" } = {
     method,
@@ -1106,8 +1169,25 @@ async function proxyWanghaiRequest(
   try {
     response = await fetch(requestUrl, init);
   } catch {
+    if (audit) {
+      try {
+        recordWanghaiMutationAudit(audit, "completed", 502);
+      } catch {
+        // The accepted audit record was written before forwarding. Preserve the
+        // gateway failure response instead of encouraging an unsafe replay.
+      }
+    }
     sendGatewayError(res, 502, "Wanghai portal is unavailable");
     return;
+  }
+  if (audit) {
+    try {
+      recordWanghaiMutationAudit(audit, "completed", response.status);
+    } catch {
+      // A durable accepted record already exists. Returning the upstream
+      // result avoids replaying a completed mutation while audit repair is
+      // investigated from the missing completion record.
+    }
   }
   writeGatewayResponseHeaders(res, response, targetOrigin, req, rateLimit);
   res.setHeader(WANGHAI_GATEWAY_REQUEST_ID_HEADER, requestId);
@@ -1211,13 +1291,31 @@ async function handleWanghaiGatewayHost(
     }
     const target = resolveWanghaiGatewayTarget(authorizedVault.spec);
     const requestId = randomUUID();
+    const requestUrl = resolveWanghaiUpstreamUrl(req.url, target);
+    const audit = isUnsafeMethod(req.method)
+      ? {
+          category: policy.category,
+          method: String(req.method ?? "GET").toUpperCase(),
+          requestId,
+          route: wanghaiAuditRoute(url.pathname),
+          session,
+        }
+      : undefined;
+    const assertion = issueRequestAssertion({ session, requestId });
+    if (audit) {
+      // This must succeed before a mutable request reaches the surface. The
+      // completion record below provides the upstream result under the same ID.
+      recordWanghaiMutationAudit(audit, "accepted");
+    }
     await proxyWanghaiRequest(
       req,
       res,
       target,
-      issueRequestAssertion({ session, requestId }),
+      requestUrl,
+      assertion,
       requestId,
       policy.rateLimit,
+      audit,
     );
   } catch (error) {
     if (error instanceof WanghaiGatewayPolicyError) {
