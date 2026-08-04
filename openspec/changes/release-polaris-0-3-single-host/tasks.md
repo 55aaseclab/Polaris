@@ -13,9 +13,9 @@
 
 - [x] 2.1 Inventory every integrated Wanghai mutation route and define an
   allowlisted Polaris action catalog with scope and version requirements.
-- [ ] 2.2 Require and validate bounded idempotency keys and normalized request
+- [x] 2.2 Require and validate bounded idempotency keys and normalized request
   fingerprints for every admitted action.
-- [ ] 2.3 Wire control-store idempotency records, workspace leases, and semantic
+- [x] 2.3 Wire control-store idempotency records, workspace leases, and semantic
   audit records into the gateway mutation path.
 - [ ] 2.4 Add signed write-admission claims and Wanghai verification for
   workspace, action, expected version, and quota reservation context.
