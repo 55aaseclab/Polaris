@@ -15,12 +15,16 @@ function withPreflightFixture({
   psFailure = false,
   dnsFailure = false,
   tlsFailure = false,
+  backupKeyMode = 0o700,
   envOverrides = {},
 }, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-release-preflight-"));
   const bin = path.join(root, "bin");
   const envFile = path.join(root, "polaris.env");
+  const backupKeyRoot = path.join(root, "backup-keys");
   fs.mkdirSync(bin);
+  fs.mkdirSync(backupKeyRoot, { mode: backupKeyMode });
+  fs.chmodSync(backupKeyRoot, backupKeyMode);
   const digest = "a".repeat(64);
   const values = {
     POLARIS_RELEASE_PROFILE: "0.3.0-single-host",
@@ -43,6 +47,10 @@ function withPreflightFixture({
     POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "0123456789abcdef0123456789abcdef",
     POLARIS_PORTAL_ALLOWED_ORIGINS: "https://polaris.example.test",
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
+    POLARIS_WANGHAI_BACKUP_KEY_ROOT: backupKeyRoot,
+    POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "2",
+    POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "900000",
+    POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR: "6",
   };
   Object.assign(values, envOverrides);
   fs.writeFileSync(
@@ -152,6 +160,24 @@ test("release preflight rejects mutable Wanghai images", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /digest-pinned image reference/);
+  });
+});
+
+test("release preflight rejects an insecure Wanghai backup key root", () => {
+  withPreflightFixture({ backupKeyMode: 0o755 }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /BACKUP_KEY_ROOT must not be group\/world accessible/);
+  });
+});
+
+test("release preflight validates Wanghai backup retention settings", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "0" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /BACKUP_RETENTION_COUNT must be an integer between 1 and 30/);
   });
 });
 

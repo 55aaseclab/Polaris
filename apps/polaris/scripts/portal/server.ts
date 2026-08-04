@@ -31,11 +31,13 @@ import {
 } from "./user-map.js";
 import {
   activatePortalCredential,
+  cancelPortalWanghaiBackup,
   createPortalCredential,
   createPortalSkill,
   listPortalAdminUsers,
   deletePortalUser,
   getPortalCredentialCatalog,
+  getPortalWanghaiBackupJob,
   deletePortalCredential,
   deletePortalSkill,
   installPortalVaultSkill,
@@ -53,6 +55,7 @@ import {
   refreshPortalVault,
   readUserPortalVaultAssetPreview,
   queueProvisionVault,
+  queuePortalWanghaiBackup,
   rebuildPortalVault,
   restartPortalVaultPaseoDaemon,
   syncPortalVaultSkills,
@@ -67,6 +70,7 @@ import {
   updatePortalUserAccess,
   writePortalCredentialFile,
 } from "./service.js";
+import { WanghaiBackupError } from "../runtime/wanghai-backup.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
@@ -460,6 +464,82 @@ async function handleVaultProvision(
     ...(line ? { line } : {}),
   });
   sendJson(res, 202, progress);
+}
+
+function sendWanghaiBackupError(res: ServerResponse, error: unknown): void {
+  if (!(error instanceof WanghaiBackupError)) {
+    throw error;
+  }
+  const statusCode = error.code === "backup-contract-invalid"
+    ? 400
+    : error.code === "backup-tenant-not-found"
+      ? 404
+      : error.code === "backup-rate-limited"
+        ? 429
+        : error.code === "backup-backend-unsupported"
+          ? 409
+          : 503;
+  sendJson(res, statusCode, { error: error.message });
+}
+
+async function handleWanghaiBackupSubmit(
+  req: IncomingMessage,
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+  },
+): Promise<void> {
+  const idempotencyKey = requestHeader(req, "idempotency-key");
+  if (!idempotencyKey) {
+    sendJson(res, 428, { error: "Wanghai backup requires the idempotency-key header" });
+    return;
+  }
+  try {
+    const job = await queuePortalWanghaiBackup({
+      actorId: input.actorId,
+      userId: input.userId,
+      vault: input.vault,
+      idempotencyKey,
+    });
+    sendJson(res, job.status === "queued" || job.status === "running" ? 202 : 200, { job });
+  } catch (error) {
+    sendWanghaiBackupError(res, error);
+  }
+}
+
+function handleWanghaiBackupRead(
+  res: ServerResponse,
+  input: {
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  const job = getPortalWanghaiBackupJob(input);
+  if (!job) {
+    notFound(res);
+    return;
+  }
+  sendJson(res, 200, { job });
+}
+
+function handleWanghaiBackupCancellation(
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  if (!cancelPortalWanghaiBackup(input)) {
+    notFound(res);
+    return;
+  }
+  const job = getPortalWanghaiBackupJob(input);
+  sendJson(res, 202, { job });
 }
 
 async function handleVaultDelete(
@@ -2025,6 +2105,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId",
             "/api/users/:userId/vaults",
             "/api/users/:userId/vaults/:vaultName",
+            "/api/users/:userId/vaults/:vaultName/backups",
             "/api/users/:userId/credentials",
           ],
         });
@@ -2470,6 +2551,48 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             requestedLine,
             body,
           );
+          return;
+        }
+        if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "backups") {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          if (req.method === "POST") {
+            await handleWanghaiBackupSubmit(req, res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (segments[3] === "vaults" && segments.length === 7 && segments[5] === "backups") {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          const jobId = decodeURIComponent(segments[6]);
+          if (req.method === "GET") {
+            handleWanghaiBackupRead(res, {
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          if (req.method === "DELETE") {
+            handleWanghaiBackupCancellation(res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          notFound(res);
           return;
         }
         if (segments[3] === "vaults" && segments.length === 4 && req.method === "POST") {

@@ -120,7 +120,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/backup-keys' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
 \${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
 \${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
   printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
@@ -128,6 +128,7 @@ fi
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra
 \${SUDO} chown -R \"\${APP_USER}\":\"\${APP_GROUP}\" '${REMOTE_APP_DIR}' '${REMOTE_DATA_ROOT}' '${REMOTE_WANGHAI_DIR}'
+\${SUDO} chmod 0700 '${REMOTE_DATA_ROOT}/backup-keys'
 \${SUDO} chown root:\"\${APP_GROUP}\" '${REMOTE_ENV_DIR}'
 \${SUDO} chmod 0750 '${REMOTE_ENV_DIR}'
 "

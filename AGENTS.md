@@ -66,6 +66,12 @@ operations, and release documentation lives in the Polaris documentation site.
 - Keep live external actions and integrated backup/restore lifecycle in Polaris.
   Wanghai must fail closed until Polaris has durable idempotency, outbox, and
   audit support.
+- The only integrated backup path is the Polaris-owned `wanghai-backup` Docker
+  job. It uses a digest-pinned, network-disabled one-shot image, the selected
+  vault data attachment read-only, a separate per-vault backup volume, and a
+  private key below `POLARIS_WANGHAI_BACKUP_KEY_ROOT`. Keep its named container
+  until the durable result is persisted. Do not add a Wanghai portal backup,
+  restore, or rollback route; restore remains a separate release-gated slice.
 - Keep manual intelligence-analysis completion in Polaris durable jobs. A
   Wanghai review export may be surface work, but direct analysis `prepare`,
   `run`, `finalize`, and `complete-review` must remain unavailable in
