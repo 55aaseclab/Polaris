@@ -63,6 +63,17 @@ export interface EnqueueJobInput {
   availableAt?: number;
 }
 
+export interface IdempotencyResponse {
+  statusCode: number;
+  contentType: string;
+  body: Buffer;
+}
+
+export interface IdempotencyResponseRecord {
+  status: "started" | "completed" | "failed";
+  response?: IdempotencyResponse;
+}
+
 type SqlRow = Record<string, unknown>;
 
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -70,6 +81,7 @@ const MAX_METADATA_BYTES = 16 * 1024;
 const MAX_ERROR_BYTES = 4 * 1024;
 const DEFAULT_GATEWAY_RATE_WINDOW_SECONDS = 60;
 const MAX_RATE_LIMIT_BUCKET_KEY_BYTES = 128;
+const MAX_IDEMPOTENCY_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -155,6 +167,20 @@ function ensureJobCancellationColumn(db: DatabaseSync): void {
   db.exec("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
 }
 
+function ensureIdempotencyResponseColumns(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(idempotency_keys)").all() as SqlRow[];
+  const names = new Set(columns.map((column) => String(column.name)));
+  if (!names.has("result_status")) {
+    db.exec("ALTER TABLE idempotency_keys ADD COLUMN result_status INTEGER");
+  }
+  if (!names.has("result_content_type")) {
+    db.exec("ALTER TABLE idempotency_keys ADD COLUMN result_content_type TEXT");
+  }
+  if (!names.has("result_body")) {
+    db.exec("ALTER TABLE idempotency_keys ADD COLUMN result_body BLOB");
+  }
+}
+
 /**
  * Durable control-plane state for one Polaris installation.
  *
@@ -223,6 +249,9 @@ export class PolarisControlStore {
         request_hash TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('started', 'completed', 'failed')),
         result_json TEXT,
+        result_status INTEGER,
+        result_content_type TEXT,
+        result_body BLOB,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY(scope, idempotency_key)
@@ -265,6 +294,7 @@ export class PolarisControlStore {
       END;
     `);
     ensureJobCancellationColumn(db);
+    ensureIdempotencyResponseColumns(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
   }
@@ -654,10 +684,20 @@ export class PolarisControlStore {
   }
 
   beginIdempotency(scope: string, key: string, request: unknown): "started" | "existing" {
+    const requestHash = createHash("sha256").update(JSON.stringify(request ?? null)).digest("hex");
+    return this.beginIdempotencyFingerprint(scope, key, requestHash);
+  }
+
+  beginIdempotencyFingerprint(
+    scope: string,
+    key: string,
+    requestHash: string,
+  ): "started" | "existing" {
     const normalizedScope = scope.trim();
     const normalizedKey = key.trim();
-    if (!normalizedScope || !normalizedKey) throw new Error("Idempotency scope and key are required");
-    const requestHash = createHash("sha256").update(JSON.stringify(request ?? null)).digest("hex");
+    if (!normalizedScope || !normalizedKey || !/^[0-9a-f]{64}$/u.test(requestHash)) {
+      throw new Error("Idempotency scope, key, and request fingerprint are required");
+    }
     const now = nowIso();
     let started = false;
     this.transaction(() => {
@@ -683,7 +723,9 @@ export class PolarisControlStore {
   completeIdempotency(scope: string, key: string, result: unknown): void {
     const encoded = boundedJson(result && typeof result === "object" ? result as Record<string, unknown> : { value: result });
     const updated = this.db.prepare(`
-      UPDATE idempotency_keys SET status = 'completed', result_json = ?, updated_at = ?
+      UPDATE idempotency_keys
+      SET status = 'completed', result_json = ?, result_status = NULL,
+          result_content_type = NULL, result_body = NULL, updated_at = ?
       WHERE scope = ? AND idempotency_key = ?
     `).run(encoded, nowIso(), scope.trim(), key.trim());
     if (updated.changes !== 1) throw new Error("Unknown idempotency key");
@@ -699,6 +741,45 @@ export class PolarisControlStore {
       status: String(row.status),
       result: row.result_json ? parsePayload(row.result_json) : undefined,
     };
+  }
+
+  completeIdempotencyResponse(
+    scope: string,
+    key: string,
+    response: IdempotencyResponse,
+  ): void {
+    this.writeIdempotencyResponse(scope, key, "completed", response);
+  }
+
+  failIdempotencyResponse(
+    scope: string,
+    key: string,
+    response: IdempotencyResponse,
+  ): void {
+    this.writeIdempotencyResponse(scope, key, "failed", response);
+  }
+
+  readIdempotencyResponse(scope: string, key: string): IdempotencyResponseRecord | null {
+    const row = this.db.prepare(`
+      SELECT status, result_status, result_content_type, result_body
+      FROM idempotency_keys
+      WHERE scope = ? AND idempotency_key = ?
+    `).get(scope.trim(), key.trim()) as SqlRow | undefined;
+    if (!row) return null;
+    const status = String(row.status);
+    if (status !== "started" && status !== "completed" && status !== "failed") {
+      throw new Error("Idempotency record has an invalid status");
+    }
+    const statusCode = Number(row.result_status);
+    const contentType = asOptionalString(row.result_content_type);
+    if (!Number.isInteger(statusCode) || !contentType || row.result_body === null || row.result_body === undefined) {
+      return { status };
+    }
+    const body = Buffer.from(row.result_body as Uint8Array);
+    if (body.byteLength > MAX_IDEMPOTENCY_RESPONSE_BYTES) {
+      throw new Error("Idempotency response exceeds the configured limit");
+    }
+    return { status, response: { statusCode, contentType, body } };
   }
 
   acquireWorkspaceLock(input: {
@@ -722,6 +803,31 @@ export class PolarisControlStore {
     `).run(
       input.tenantId, input.vaultId, input.workspaceId, input.owner,
       leaseExpiresAt, now,
+    );
+    return result.changes === 1;
+  }
+
+  heartbeatWorkspaceLock(input: {
+    tenantId: string;
+    vaultId: string;
+    workspaceId: string;
+    owner: string;
+    leaseMs?: number;
+  }): boolean {
+    const now = Date.now();
+    const leaseExpiresAt = now + Math.max(1_000, input.leaseMs ?? 60_000);
+    const result = this.db.prepare(`
+      UPDATE workspace_locks
+      SET lease_expires_at = ?
+      WHERE tenant_id = ? AND vault_id = ? AND workspace_id = ? AND owner = ?
+        AND lease_expires_at > ?
+    `).run(
+      leaseExpiresAt,
+      input.tenantId,
+      input.vaultId,
+      input.workspaceId,
+      input.owner,
+      now,
     );
     return result.changes === 1;
   }
@@ -815,6 +921,46 @@ export class PolarisControlStore {
       }
       throw error;
     }
+  }
+
+  private writeIdempotencyResponse(
+    scope: string,
+    key: string,
+    status: "completed" | "failed",
+    response: IdempotencyResponse,
+  ): void {
+    const normalizedScope = scope.trim();
+    const normalizedKey = key.trim();
+    const statusCode = Math.floor(response.statusCode);
+    const contentType = response.contentType.trim();
+    const body = Buffer.from(response.body);
+    if (
+      !normalizedScope
+      || !normalizedKey
+      || !Number.isInteger(statusCode)
+      || statusCode < 100
+      || statusCode > 599
+      || !contentType
+      || Buffer.byteLength(contentType, "utf8") > 256
+      || body.byteLength > MAX_IDEMPOTENCY_RESPONSE_BYTES
+    ) {
+      throw new Error("Idempotency response is invalid");
+    }
+    const updated = this.db.prepare(`
+      UPDATE idempotency_keys
+      SET status = ?, result_json = NULL, result_status = ?, result_content_type = ?,
+          result_body = ?, updated_at = ?
+      WHERE scope = ? AND idempotency_key = ? AND status = 'started'
+    `).run(
+      status,
+      statusCode,
+      contentType,
+      body,
+      nowIso(),
+      normalizedScope,
+      normalizedKey,
+    );
+    if (updated.changes !== 1) throw new Error("Unknown or completed idempotency key");
   }
 }
 

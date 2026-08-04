@@ -199,6 +199,45 @@ test("control store lists pending jobs by exact tenant and vault", () => {
   }
 });
 
+test("control store persists replayable idempotency responses", () => {
+  const fixture = temporaryStore();
+  const fingerprint = "a".repeat(64);
+  try {
+    const first = PolarisControlStore.open(fixture.filePath);
+    assert.equal(
+      first.beginIdempotencyFingerprint("mutation-scope", "mutation-a", fingerprint),
+      "started",
+    );
+    first.completeIdempotencyResponse("mutation-scope", "mutation-a", {
+      statusCode: 201,
+      contentType: "application/json; charset=utf-8",
+      body: Buffer.from('{"created":true}\n', "utf8"),
+    });
+    assert.deepEqual(first.readIdempotencyResponse("mutation-scope", "mutation-a"), {
+      status: "completed",
+      response: {
+        statusCode: 201,
+        contentType: "application/json; charset=utf-8",
+        body: Buffer.from('{"created":true}\n', "utf8"),
+      },
+    });
+    first.close();
+
+    const reopened = PolarisControlStore.open(fixture.filePath);
+    assert.equal(
+      reopened.beginIdempotencyFingerprint("mutation-scope", "mutation-a", fingerprint),
+      "existing",
+    );
+    assert.throws(
+      () => reopened.beginIdempotencyFingerprint("mutation-scope", "mutation-a", "b".repeat(64)),
+      /different request/u,
+    );
+    reopened.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store enforces idempotency, workspace ownership, and immutable audit", () => {
   const fixture = temporaryStore();
   try {
@@ -216,6 +255,12 @@ test("control store enforces idempotency, workspace ownership, and immutable aud
       tenantId: "tenant-a", vaultId: "vault-a", workspaceId: "workspace-a", owner: "writer-a",
     }), true);
     assert.equal(store.acquireWorkspaceLock({
+      tenantId: "tenant-a", vaultId: "vault-a", workspaceId: "workspace-a", owner: "writer-b",
+    }), false);
+    assert.equal(store.heartbeatWorkspaceLock({
+      tenantId: "tenant-a", vaultId: "vault-a", workspaceId: "workspace-a", owner: "writer-a",
+    }), true);
+    assert.equal(store.heartbeatWorkspaceLock({
       tenantId: "tenant-a", vaultId: "vault-a", workspaceId: "workspace-a", owner: "writer-b",
     }), false);
     assert.equal(store.releaseWorkspaceLock("tenant-a", "vault-a", "workspace-a", "writer-a"), true);
