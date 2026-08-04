@@ -20,6 +20,7 @@ export interface DurableJob {
   availableAt: number;
   leaseOwner?: string;
   leaseExpiresAt?: number;
+  cancelRequested: boolean;
   errorCode?: string;
   errorMessage?: string;
   createdAt: string;
@@ -120,6 +121,7 @@ function rowToJob(row: SqlRow): DurableJob {
     availableAt: Number(row.available_at),
     leaseOwner: asOptionalString(row.lease_owner),
     leaseExpiresAt: row.lease_expires_at == null ? undefined : Number(row.lease_expires_at),
+    cancelRequested: Number(row.cancel_requested ?? 0) === 1,
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
     createdAt: String(row.created_at),
@@ -143,6 +145,14 @@ function controlStoreFile(importMetaUrl: string): string {
 
 function ensureParent(filePath: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+}
+
+function ensureJobCancellationColumn(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(jobs)").all() as SqlRow[];
+  if (columns.some((column) => String(column.name) === "cancel_requested")) {
+    return;
+  }
+  db.exec("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
 }
 
 /**
@@ -196,6 +206,7 @@ export class PolarisControlStore {
         available_at INTEGER NOT NULL,
         lease_owner TEXT,
         lease_expires_at INTEGER,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
         error_code TEXT,
         error_message TEXT,
         created_at TEXT NOT NULL,
@@ -253,6 +264,7 @@ export class PolarisControlStore {
         SELECT RAISE(ABORT, 'audit events are immutable');
       END;
     `);
+    ensureJobCancellationColumn(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
   }
@@ -351,13 +363,18 @@ export class PolarisControlStore {
     const maxAttempts = Math.max(1, Math.min(10, Math.floor(input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS)));
     const availableAt = Number.isFinite(input.availableAt) ? Math.floor(input.availableAt as number) : Date.now();
     this.transaction(() => {
-      const existing = this.db.prepare("SELECT id, status, attempts, max_attempts FROM jobs WHERE dedupe_key = ?").get(dedupeKey) as SqlRow | undefined;
+      const existing = this.db.prepare("SELECT id, status, attempts, max_attempts, cancel_requested FROM jobs WHERE dedupe_key = ?").get(dedupeKey) as SqlRow | undefined;
       if (existing) {
-        if (existing.status === "failed" && Number(existing.attempts) < Number(existing.max_attempts)) {
+        if (
+          existing.status === "failed"
+          && Number(existing.cancel_requested ?? 0) === 0
+          && Number(existing.attempts) < Number(existing.max_attempts)
+        ) {
           this.db.prepare(`
             UPDATE jobs
             SET status = 'queued', available_at = ?, lease_owner = NULL,
-                lease_expires_at = NULL, error_code = NULL, error_message = NULL,
+                lease_expires_at = NULL, cancel_requested = 0,
+                error_code = NULL, error_message = NULL,
                 updated_at = ?, completed_at = NULL
             WHERE dedupe_key = ?
           `).run(availableAt, now, dedupeKey);
@@ -386,15 +403,33 @@ export class PolarisControlStore {
     let claimedId: string | null = null;
     this.transaction(() => {
       this.db.prepare(`
-        UPDATE jobs
-        SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
+      UPDATE jobs
+        SET status = CASE
+              WHEN cancel_requested = 1 OR attempts >= max_attempts THEN 'failed'
+              ELSE 'queued'
+            END,
+            lease_owner = NULL, lease_expires_at = NULL,
+            error_code = CASE
+              WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+              WHEN attempts >= max_attempts THEN COALESCE(error_code, 'job-lease-expired')
+              ELSE error_code
+            END,
+            error_message = CASE
+              WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+              WHEN attempts >= max_attempts THEN COALESCE(error_message, 'durable job lease expired')
+              ELSE error_message
+            END,
+            completed_at = CASE
+              WHEN cancel_requested = 1 OR attempts >= max_attempts THEN COALESCE(completed_at, ?)
+              ELSE completed_at
+            END,
             updated_at = ?
         WHERE status = 'running' AND lease_expires_at IS NOT NULL
           AND lease_expires_at <= ?
-      `).run(nowIso(), now);
+      `).run(nowIso(), nowIso(), now);
       const row = this.db.prepare(`
         SELECT id FROM jobs
-        WHERE status = 'queued' AND available_at <= ?
+        WHERE status = 'queued' AND cancel_requested = 0 AND available_at <= ?
         ORDER BY created_at ASC
         LIMIT 1
       `).get(now) as SqlRow | undefined;
@@ -417,7 +452,9 @@ export class PolarisControlStore {
       UPDATE jobs
       SET lease_expires_at = ?, updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(Date.now() + Math.max(1_000, leaseMs), nowIso(), jobId, workerId);
+        AND cancel_requested = 0
+        AND lease_expires_at > ?
+    `).run(Date.now() + Math.max(1_000, leaseMs), nowIso(), jobId, workerId, Date.now());
     return result.changes === 1;
   }
 
@@ -428,7 +465,9 @@ export class PolarisControlStore {
       SET status = 'succeeded', lease_owner = NULL, lease_expires_at = NULL,
           updated_at = ?, completed_at = ?, error_code = NULL, error_message = NULL
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(now, now, jobId, workerId);
+        AND cancel_requested = 0
+        AND lease_expires_at > ?
+    `).run(now, now, jobId, workerId, Date.now());
     return result.changes === 1;
   }
 
@@ -437,12 +476,28 @@ export class PolarisControlStore {
     const now = nowIso();
     this.transaction(() => {
       this.db.prepare(`
-        UPDATE jobs
-        SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
+      UPDATE jobs
+      SET status = CASE
+              WHEN cancel_requested = 1 THEN 'failed'
+              WHEN attempts < max_attempts THEN 'queued'
+              ELSE 'failed'
+            END,
             available_at = ?, lease_owner = NULL, lease_expires_at = NULL,
-            error_code = ?, error_message = ?, updated_at = ?,
-            completed_at = CASE WHEN attempts < max_attempts THEN NULL ELSE ? END
+            error_code = CASE
+              WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+              ELSE ?
+            END,
+            error_message = CASE
+              WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+              ELSE ?
+            END,
+            updated_at = ?,
+            completed_at = CASE
+              WHEN cancel_requested = 1 OR attempts >= max_attempts THEN ?
+              ELSE NULL
+            END
         WHERE id = ? AND status = 'running' AND lease_owner = ?
+          AND lease_expires_at > ?
       `).run(
         Date.now() + Math.max(0, retryDelayMs),
         boundedText(errorCode, 256) ?? null,
@@ -451,6 +506,7 @@ export class PolarisControlStore {
         now,
         jobId,
         workerId,
+        Date.now(),
       );
     });
     const row = this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId) as SqlRow | undefined;
@@ -462,12 +518,138 @@ export class PolarisControlStore {
     return row ? rowToJob(row) : null;
   }
 
+  getJobByDedupeKey(dedupeKey: string): DurableJob | null {
+    const key = dedupeKey.trim();
+    if (!key) throw new Error("A durable job dedupe key is required");
+    const row = this.db.prepare("SELECT * FROM jobs WHERE dedupe_key = ?").get(key) as SqlRow | undefined;
+    return row ? rowToJob(row) : null;
+  }
+
+  deleteTerminalProvisionJob(tenantId: string, vaultId: string): boolean {
+    const tenant = tenantId.trim();
+    const vault = vaultId.trim();
+    if (!tenant || !vault) {
+      throw new Error("A durable provision tenant and vault are required");
+    }
+    const result = this.db.prepare(`
+      DELETE FROM jobs
+      WHERE kind = 'vault-provision'
+        AND tenant_id = ?
+        AND vault_id = ?
+        AND status IN ('succeeded', 'failed')
+    `).run(tenant, vault);
+    return result.changes === 1;
+  }
+
+  failJobPermanently(
+    jobId: string,
+    workerId: string,
+    errorCode: string,
+    errorMessage: string,
+  ): DurableJob | null {
+    const boundedError = boundedText(errorMessage, MAX_ERROR_BYTES) ?? "durable job failed";
+    const now = nowIso();
+    this.db.prepare(`
+      UPDATE jobs
+      SET status = 'failed', available_at = ?, lease_owner = NULL,
+          lease_expires_at = NULL,
+          error_code = CASE
+            WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+            ELSE ?
+          END,
+          error_message = CASE
+            WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+            ELSE ?
+          END,
+          updated_at = ?, completed_at = ?
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND lease_expires_at > ?
+    `).run(
+      Date.now(),
+      boundedText(errorCode, 256) ?? null,
+      boundedError,
+      now,
+      now,
+      jobId,
+      workerId,
+      Date.now(),
+    );
+    const row = this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId) as SqlRow | undefined;
+    return row ? rowToJob(row) : null;
+  }
+
+  requestJobCancellation(dedupeKey: string): boolean {
+    const key = dedupeKey.trim();
+    if (!key) throw new Error("A durable job dedupe key is required");
+    const now = nowIso();
+    let changed = false;
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT status FROM jobs WHERE dedupe_key = ?
+      `).get(key) as SqlRow | undefined;
+      if (!row) return;
+      const status = String(row.status);
+      if (status !== "queued" && status !== "running") return;
+      if (status === "queued") {
+        const result = this.db.prepare(`
+          UPDATE jobs
+          SET status = 'failed', cancel_requested = 1, lease_owner = NULL,
+              lease_expires_at = NULL, error_code = 'vault-provision-cancelled',
+              error_message = 'vault provision cancelled', updated_at = ?,
+              completed_at = ?
+          WHERE dedupe_key = ? AND status = 'queued'
+        `).run(now, now, key);
+        changed = result.changes === 1;
+        return;
+      }
+      const result = this.db.prepare(`
+        UPDATE jobs
+        SET cancel_requested = 1, updated_at = ?
+        WHERE dedupe_key = ? AND status = 'running'
+      `).run(now, key);
+      changed = result.changes === 1;
+    });
+    return changed;
+  }
+
+  isJobCancellationRequested(jobId: string): boolean {
+    const row = this.db.prepare(`
+      SELECT cancel_requested FROM jobs WHERE id = ?
+    `).get(jobId) as SqlRow | undefined;
+    return Number(row?.cancel_requested ?? 0) === 1;
+  }
+
   listPendingJobs(): DurableJob[] {
     const rows = this.db.prepare(`
       SELECT * FROM jobs
       WHERE status IN ('queued', 'running')
       ORDER BY created_at ASC
     `).all() as SqlRow[];
+    return rows.map(rowToJob);
+  }
+
+  listPendingJobsForTenant(tenantId: string): DurableJob[] {
+    const normalized = tenantId.trim();
+    if (!normalized) throw new Error("A durable job tenant ID is required");
+    const rows = this.db.prepare(`
+      SELECT * FROM jobs
+      WHERE tenant_id = ? AND status IN ('queued', 'running')
+      ORDER BY created_at ASC
+    `).all(normalized) as SqlRow[];
+    return rows.map(rowToJob);
+  }
+
+  listPendingJobsForVault(tenantId: string, vaultId: string): DurableJob[] {
+    const tenant = tenantId.trim();
+    const vault = vaultId.trim();
+    if (!tenant || !vault) {
+      throw new Error("A durable job tenant and vault ID are required");
+    }
+    const rows = this.db.prepare(`
+      SELECT * FROM jobs
+      WHERE tenant_id = ? AND vault_id = ? AND status IN ('queued', 'running')
+      ORDER BY created_at ASC
+    `).all(tenant, vault) as SqlRow[];
     return rows.map(rowToJob);
   }
 

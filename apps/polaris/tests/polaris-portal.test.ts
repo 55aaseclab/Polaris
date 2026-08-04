@@ -70,7 +70,14 @@ import {
   writeVaultDriverSelection,
   writeVaultStatus,
 } from "../scripts/output/state-store.js";
-import { stopPortalVault as stopPortalVaultDirect } from "../scripts/runtime/operations.js";
+import {
+  resumeDurableVaultJobs,
+  stopPortalVault as stopPortalVaultDirect,
+} from "../scripts/runtime/operations.js";
+import {
+  closePolarisControlStore,
+  getPolarisControlStore,
+} from "../scripts/portal/control-store.js";
 import { vaultRuntimeScopeName } from "../scripts/core/vault-name.js";
 import { readVaultDriverSelection } from "../scripts/output/state-store.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
@@ -1498,6 +1505,7 @@ test("portal service can cancel a queued or running vault provision job", async 
         },
         async () => {
           await queueProvisionVault(userId, vault);
+          await new Promise((resolve) => setTimeout(resolve, 25));
           await cancelPortalVaultProvision(userId, vault);
 
           const finalProgress = await waitFor(() => {
@@ -1508,6 +1516,8 @@ test("portal service can cancel a queued or running vault provision job", async 
           assert.equal(finalProgress.phase, "cancelled");
           assert.equal(finalProgress.errorCode, "vault-provision-cancelled");
           assert.equal(finalProgress.retryable, true);
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          assert.equal(readVaultProvisionProgress(userId, vault)?.status, "cancelled");
         },
       );
     });
@@ -1522,6 +1532,96 @@ test("portal service can cancel a queued or running vault provision job", async 
     fs.rmSync(profileFile, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
   }
+});
+
+test("portal cancellation does not overwrite a completed provision state", async () => {
+  const userId = uniqueName("portal-cancel-complete-user");
+  const vault = uniqueName("portal-cancel-complete");
+  const userRoot = path.join(USER_ROOT, userId);
+
+  try {
+    writeVaultProvisionProgress(userId, vault, {
+      userId,
+      vault,
+      phase: "complete",
+      status: "succeeded",
+      message: "vault provision complete",
+      done: true,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await assert.rejects(
+      () => cancelPortalVaultProvision(userId, vault),
+      /pending provision job/u,
+    );
+    assert.equal(readVaultProvisionProgress(userId, vault)?.status, "succeeded");
+  } finally {
+    clearVaultProvisionProgress(userId, vault);
+    fs.rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("durable provisioning abandons a deleted tenant without recreating its root", async () => {
+  const userId = uniqueName("portal-deleted-provision-user");
+  const vault = uniqueName("portal-deleted-provision-vault");
+  const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-deleted-provision-"));
+  const controlPath = path.join(controlRoot, "control.sqlite");
+
+  await withEnv("POLARIS_CONTROL_STORE_PATH", controlPath, async () => {
+    closePolarisControlStore();
+    try {
+      const store = getPolarisControlStore(import.meta.url);
+      const job = store.enqueueJob({
+        kind: "vault-provision",
+        dedupeKey: `vault-provision:${userId}:${vault}`,
+        tenantId: userId,
+        vaultId: vault,
+      });
+
+      await resumeDurableVaultJobs();
+
+      assert.equal(store.getJob(job.id)?.status, "failed");
+      assert.equal(store.getJob(job.id)?.errorCode, "tenant-not-found");
+      assert.equal(fs.existsSync(path.join(USER_ROOT, userId)), false);
+    } finally {
+      closePolarisControlStore();
+      fs.rmSync(controlRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+test("vault deletion refuses a queued durable job before removing its root", async () => {
+  const userId = uniqueName("portal-delete-pending-user");
+  const vault = uniqueName("portal-delete-pending-vault");
+  const userRoot = path.join(USER_ROOT, userId);
+  const vaultRoot = path.join(userRoot, "vaults", vault);
+  const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-delete-pending-"));
+  const controlPath = path.join(controlRoot, "control.sqlite");
+  fs.mkdirSync(vaultRoot, { recursive: true });
+  fs.writeFileSync(path.join(vaultRoot, "marker"), "synthetic\n", "utf8");
+
+  await withEnv("POLARIS_CONTROL_STORE_PATH", controlPath, async () => {
+    closePolarisControlStore();
+    try {
+      getPolarisControlStore(import.meta.url).enqueueJob({
+        kind: "vault-provision",
+        dedupeKey: `vault-provision:${userId}:${vault}`,
+        tenantId: userId,
+        vaultId: vault,
+      });
+
+      await assert.rejects(
+        () => deleteVaultOwnedByUser(userId, vault),
+        /durable jobs are queued or running/u,
+      );
+      assert.equal(fs.existsSync(path.join(vaultRoot, "marker")), true);
+    } finally {
+      closePolarisControlStore();
+    }
+  });
+
+  fs.rmSync(userRoot, { recursive: true, force: true });
+  fs.rmSync(controlRoot, { recursive: true, force: true });
 });
 
 test("portal service stops the selected vault driver", async () => {

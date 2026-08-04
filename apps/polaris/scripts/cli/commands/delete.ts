@@ -9,6 +9,7 @@ import { getBackendDriver } from "../../backends/index.js";
 import { parseVaultReference } from "../../config/load.js";
 import { projectOwners } from "../../config/project-ownership.js";
 import type { VaultSpec } from "../../core/vault.js";
+import { getPolarisControlStore } from "../../portal/control-store.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRoot } from "../../utils/paths.js";
 import { withVaultMutationLock } from "../../utils/vault-lifecycle-lock.js";
@@ -128,8 +129,16 @@ export async function deleteVaultOwnedByUser(userId: string, vault: string): Pro
   vault: string;
 }> {
   return withVaultMutationLock(import.meta.url, userId, vault, async () => {
+    const pendingJobs = getPolarisControlStore(import.meta.url)
+      .listPendingJobsForVault(userId, vault);
+    if (pendingJobs.length > 0) {
+      throw new Error(
+        `Vault '${vault}' cannot be deleted while durable jobs are queued or running. Cancel or finish those jobs first.`,
+      );
+    }
     const { root } = await prepareVaultRemoval(userId, vault);
     fs.rmSync(root, { recursive: true, force: true });
+    getPolarisControlStore(import.meta.url).deleteTerminalProvisionJob(userId, vault);
     logInfo("cli", "vault-deleted", {
       userId,
       vault,

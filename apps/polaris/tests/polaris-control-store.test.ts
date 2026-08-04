@@ -107,6 +107,98 @@ test("control store claims, retries, and completes durable jobs", () => {
   }
 });
 
+test("control store cancels queued jobs and prevents a cancelled lease from completing", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const queued = store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:cancel-queued",
+      tenantId: "tenant-a",
+      vaultId: "cancel-queued",
+    });
+    assert.equal(store.requestJobCancellation("tenant-a:cancel-queued"), true);
+    assert.equal(store.getJob(queued.id)?.status, "failed");
+    assert.equal(store.getJob(queued.id)?.cancelRequested, true);
+    assert.equal(
+      store.enqueueJob({
+        kind: "vault-provision",
+        dedupeKey: "tenant-a:cancel-queued",
+      }).status,
+      "failed",
+    );
+    assert.equal(store.getJob(queued.id)?.cancelRequested, true);
+    assert.equal(store.claimNextJob("worker-a"), null);
+
+    const running = store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:cancel-running",
+      tenantId: "tenant-a",
+      vaultId: "cancel-running",
+    });
+    assert.equal(store.claimNextJob("worker-a")?.id, running.id);
+    assert.equal(store.requestJobCancellation("tenant-a:cancel-running"), true);
+    assert.equal(store.isJobCancellationRequested(running.id), true);
+    assert.equal(store.heartbeatJob(running.id, "worker-a"), false);
+    assert.equal(store.completeJob(running.id, "worker-a"), false);
+    assert.equal(
+      store.failJob(running.id, "worker-a", "temporary", "should be cancelled")?.status,
+      "failed",
+    );
+    assert.equal(store.getJob(running.id)?.errorCode, "vault-provision-cancelled");
+
+    const terminal = store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:terminal",
+      tenantId: "tenant-a",
+      vaultId: "terminal",
+    });
+    assert.equal(store.claimNextJob("worker-a")?.id, terminal.id);
+    assert.equal(
+      store.failJobPermanently(terminal.id, "worker-a", "tenant-not-found", "tenant removed")?.status,
+      "failed",
+    );
+    assert.equal(store.listPendingJobsForTenant("tenant-a").length, 0);
+    assert.equal(store.deleteTerminalProvisionJob("tenant-a", "terminal"), true);
+    assert.equal(store.getJob(terminal.id), null);
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("control store lists pending jobs by exact tenant and vault", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const matching = store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:vault-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-a:vault-b",
+      tenantId: "tenant-a",
+      vaultId: "vault-b",
+    });
+    store.enqueueJob({
+      kind: "vault-provision",
+      dedupeKey: "tenant-b:vault-a",
+      tenantId: "tenant-b",
+      vaultId: "vault-a",
+    });
+
+    assert.deepEqual(
+      store.listPendingJobsForVault("tenant-a", "vault-a").map((job) => job.id),
+      [matching.id],
+    );
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store enforces idempotency, workspace ownership, and immutable audit", () => {
   const fixture = temporaryStore();
   try {
