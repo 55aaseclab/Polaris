@@ -436,7 +436,6 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
   const actions = resolveShellHostActions({
     session,
     host,
-    publicHost: location.hostname,
   });
   const coding = actions.find((action) => action.kind === "open-coding");
   const wanghai = actions.find((action) => action.kind === "open-wanghai");
@@ -471,16 +470,19 @@ async function renderWanghaiPortal(serverId: string): Promise<void> {
   const action = resolveShellHostActions({
     session,
     host,
-    publicHost: location.hostname,
   }).find((item) => item.kind === "open-wanghai");
   if (!action || action.kind !== "open-wanghai") {
     navigate("/hosts", true);
     return;
   }
+  const launch = await request<{ portalUrl: string }>(
+    SHELL_HOST_API.launchWanghai(serverId),
+    { method: "POST" },
+  );
   setShellScrollRoot(false);
   app.innerHTML = renderWanghaiEmbedPage({
     hostName: host.name,
-    portalUrl: action.portalUrl,
+    portalUrl: launch.portalUrl,
     backHref: "/hosts",
   });
   const backButton = app.querySelector<HTMLAnchorElement>(".portal-shell-back");

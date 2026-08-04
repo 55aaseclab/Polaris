@@ -11,15 +11,12 @@ import { createManagedSshCredential } from "../scripts/config/credentials.js";
 import { assertNoProjectNameCollision, assertProjectNameAvailableForUser } from "../scripts/config/project-ownership.js";
 import { getBackendDriver } from "../scripts/backends/index.js";
 import {
-  WANGHAI_CACHE_RUNTIME_ROOT,
   scaffoldDockerVault,
   scaffoldUserProfileById,
   syncVaultDockerfileTemplate,
-  WANGHAI_BACKUP_RUNTIME_ROOT,
   WANGHAI_PROFILE_ENV_FILE_KEY,
   WANGHAI_PROFILE_ENV_MOUNT_PATH,
   WANGHAI_PROFILE_ENV_SOURCE_PATH,
-  WANGHAI_VAULTS_RUNTIME_ROOT,
   vaultConfigPath,
   vaultImageRef,
 } from "../scripts/config/scaffold.js";
@@ -83,10 +80,6 @@ const SHARED_VAULT_DOCKERFILE = path.join(
 
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sharedVaultImageRefForTest(dockerfilePath: string): string {
@@ -518,17 +511,16 @@ test("vault load mounts the user Wanghai env when the file exists", async () => 
   });
 });
 
-test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROOT", async () => {
+test("docker render reuses the Polaris vault mount for Wanghai data", async () => {
   const project = uniqueProjectName("wanghai-profile-data-root");
   const profileId = uniqueProjectName("wanghai-profile-data-root-user");
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const userRoot = path.join(USER_ROOT, profileId);
-  const previousHostDataRoot = process.env.POLARIS_WANGHAI_DATA_ROOT;
-  const hostDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-wanghai-host-data-"));
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
 
   await withTempVaultSpec(project, "docker", async () => {
     try {
-      process.env.POLARIS_WANGHAI_DATA_ROOT = hostDataRoot;
+      process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
       scaffoldUserProfileById({
         id: profileId,
         name: "Wanghai Data Root User",
@@ -537,7 +529,7 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
       fs.writeFileSync(
         path.join(userRoot, "wanghai", ".env"),
         [
-          "WANGHAI_VAULTS_ROOT=/host/wanghai/vaults",
+          "WANGHAI_WORKSPACES_ROOT=/host/wanghai/workspaces",
           "WANGHAI_BACKUP_ROOT=/host/wanghai/backups",
           "WANGHAI_CACHE_ROOT=/host/wanghai/cache",
           "CUSTOM_WANGHAI_FLAG=1",
@@ -554,43 +546,18 @@ test("docker render bind-mounts Wanghai data roots from POLARIS_WANGHAI_DATA_ROO
 
       const vault = loadVaultFromRefForTest(`${project}@docker`);
       const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
-      const expectedVaultsRoot = path.join(hostDataRoot, "vaults");
-      const expectedBackupRoot = path.join(hostDataRoot, "backups");
-      const expectedCacheRoot = path.join(hostDataRoot, "cache");
-      assert.match(
-        rendered,
-        new RegExp(`source: "${escapeRegExp(expectedVaultsRoot)}"`),
-      );
-      assert.match(
-        rendered,
-        new RegExp(`target: "${WANGHAI_VAULTS_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
-      );
-      assert.match(
-        rendered,
-        new RegExp(`source: "${escapeRegExp(expectedBackupRoot)}"`),
-      );
-      assert.match(
-        rendered,
-        new RegExp(`target: "${WANGHAI_BACKUP_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
-      );
-      assert.match(
-        rendered,
-        new RegExp(`source: "${escapeRegExp(expectedCacheRoot)}"`),
-      );
-      assert.match(
-        rendered,
-        new RegExp(`target: "${WANGHAI_CACHE_RUNTIME_ROOT.replace(/\//g, "\\/")}"`),
-      );
-      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/vaults"/);
+      assert.match(rendered, /target: \/vault\/project/);
+      assert.match(rendered, /export WANGHAI_RUNTIME_MODE=polaris/);
+      assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/workspaces"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/backups"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/cache"/);
+      assert.doesNotMatch(rendered, /target: "\/vault\/project\/(workspaces|backups|cache)"/);
     } finally {
-      if (previousHostDataRoot === undefined) {
-        delete process.env.POLARIS_WANGHAI_DATA_ROOT;
+      if (previousMasterSecret === undefined) {
+        delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
       } else {
-        process.env.POLARIS_WANGHAI_DATA_ROOT = previousHostDataRoot;
+        process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
       }
-      fs.rmSync(hostDataRoot, { recursive: true, force: true });
     }
   }).finally(() => {
     fs.rmSync(profilePath, { force: true });
@@ -3172,6 +3139,8 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 
 test("docker vertical bootstrap starts the Wanghai portal after Paseo", async () => {
   const project = uniqueProjectName("docker-vertical");
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
   const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
     line: "vertical",
   });
@@ -3183,14 +3152,18 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
       vault.connectivity.servicePorts.some((port) => port.containerPort === "9090"),
     );
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
-    assert.match(rendered, /curl -fsS http:\/\/127\.0\.0\.1:9090\/ >/);
+    assert.match(rendered, /exec env WANGHAI_SUPERVISE_PORTAL=1 \/usr\/local\/bin\/wanghai-entrypoint/);
     assert.match(
       rendered,
       /wanghai-entrypoint pnpm --dir \/opt\/wanghai\/apps\/admin-portal run start --hostname 0\.0\.0\.0 --port 9090/,
     );
+    assert.doesNotMatch(rendered, /nohup .*wanghai-entrypoint/);
+    assert.doesNotMatch(rendered, /touch \/tmp\/.ready[\s\S]*sleep infinity/);
   } finally {
     fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
     fs.rmSync(renderedOutputPath, { force: true });
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
   }
 });
 
@@ -4686,6 +4659,45 @@ exit 0
       await driver.restart(vault);
     },
   );
+});
+
+test("kubevirt stop scales a private Wanghai deployment down with its vault", async () => {
+  const project = uniqueProjectName("kubevirt-vertical-stop");
+  const dockerPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
+    line: "vertical",
+  });
+  const kubevirtPath = vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  try {
+    ensureVaultConfig(`${project}@kubevirt-vm`, DEMO_USER_PROFILE_ID);
+    const vault = loadVaultFromRefForTest(`${project}@kubevirt-vm`);
+    const privateDeployment = vaultRuntimeResourceName(
+      DEMO_USER_PROFILE_ID,
+      project,
+      "wanghai",
+    );
+    await withFakeCommands(
+      {
+        kubectl: `
+if [[ "$*" == *"get vmi ${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}"* ]]; then
+  printf 'Stopped'
+  exit 0
+fi
+exit 0
+`,
+      },
+      async ({ readCommandLog }) => {
+        await getBackendDriver("kubevirt-vm").stop(vault);
+        assert.ok(
+          readCommandLog().some((entry) =>
+            entry.includes(`scale deployment ${privateDeployment} --replicas=0`),
+          ),
+        );
+      },
+    );
+  } finally {
+    fs.rmSync(path.dirname(dockerPath), { recursive: true, force: true });
+    fs.rmSync(kubevirtPath, { force: true });
+  }
 });
 
 test("docker backend returns structured observations and executes compose actions", async () => {

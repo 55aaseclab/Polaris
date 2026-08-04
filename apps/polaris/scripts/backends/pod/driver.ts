@@ -5,6 +5,13 @@ import { vaultRuntimeScopeName } from "../../core/vault-name.js";
 import { runCommand } from "../../utils/shell.js";
 import { renderAndWritePodVault } from "./render.js";
 
+function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some((port) => {
+    const name = (port.name ?? "").toLowerCase();
+    return name === "wanghai" || String(port.containerPort) === "9090";
+  });
+}
+
 export class PodDriver implements BackendDriver {
   readonly kind = "pod" as const;
 
@@ -86,7 +93,24 @@ export class PodDriver implements BackendDriver {
       { encoding: "utf8" },
     );
     const podName = (podNameResult.stdout || "").trim();
-    const running = Boolean(podName);
+    const readiness = vaultEnablesWanghaiPortal(vault) && podName
+      ? spawnSync(
+          "kubectl",
+          [
+            "-n",
+            vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName),
+            "get",
+            "pod",
+            podName,
+            "-o",
+            "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}",
+          ],
+          { encoding: "utf8" },
+        )
+      : null;
+    const wanghaiReady = !vaultEnablesWanghaiPortal(vault)
+      || (readiness?.status === 0 && String(readiness.stdout || "").trim() === "True");
+    const running = Boolean(podName) && wanghaiReady;
 
     const execCheck = (command: string): boolean => {
       if (!podName) return false;

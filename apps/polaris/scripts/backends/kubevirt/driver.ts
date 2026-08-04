@@ -40,6 +40,35 @@ function runtimeScope(vault: VaultSpec): string {
   return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
 }
 
+function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some((port) => {
+    const name = (port.name ?? "").toLowerCase();
+    return name === "wanghai" || String(port.containerPort) === "9090";
+  });
+}
+
+function wanghaiDeploymentName(vault: VaultSpec): string {
+  return vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+    "wanghai",
+  );
+}
+
+function scaleWanghaiDeployment(vault: VaultSpec, replicas: 0 | 1): void {
+  if (!vaultEnablesWanghaiPortal(vault)) {
+    return;
+  }
+  runCommand("kubectl", [
+    "-n",
+    runtimeScope(vault),
+    "scale",
+    "deployment",
+    wanghaiDeploymentName(vault),
+    `--replicas=${replicas}`,
+  ]);
+}
+
 function vmName(vault: VaultSpec): string {
   return vaultRuntimeResourceName(vault.userProfile.id, vault.identity.projectName, "vm");
 }
@@ -617,6 +646,7 @@ export class KubevirtDriver implements BackendDriver {
   async stop(vault: VaultSpec): Promise<void> {
     await syncKubevirtGuestState(vault, "sync-out");
     runVmLifecycleAction(vault, "stop");
+    scaleWanghaiDeployment(vault, 0);
   }
 
   async restart(vault: VaultSpec): Promise<void> {
@@ -661,7 +691,25 @@ export class KubevirtDriver implements BackendDriver {
       ? spawnSync("kubectl", ["-n", runtimeScope(vault), "get", "vmi", vmName(vault), "-o", "jsonpath={.status.phase}"], { encoding: "utf8" })
       : { status: 1, stdout: "", stderr: "" };
     const phase = (vmi.stdout || "").trim();
-    const running = phase === "Running";
+    const vmRunning = phase === "Running";
+    const wanghaiReadiness = exists && vmRunning && vaultEnablesWanghaiPortal(vault)
+      ? spawnSync(
+          "kubectl",
+          [
+            "-n",
+            runtimeScope(vault),
+            "get",
+            "deployment",
+            wanghaiDeploymentName(vault),
+            "-o",
+            "jsonpath={.status.readyReplicas}",
+          ],
+          { encoding: "utf8" },
+        )
+      : null;
+    const wanghaiReady = !vaultEnablesWanghaiPortal(vault)
+      || (wanghaiReadiness?.status === 0 && String(wanghaiReadiness.stdout || "").trim() === "1");
+    const running = vmRunning && wanghaiReady;
     const service = vault.connectivity.servicePorts.length
       ? spawnSync("kubectl", ["-n", runtimeScope(vault), "get", "svc", runtimeScope(vault), "-o", "jsonpath={.metadata.name}"], { encoding: "utf8" })
       : { status: 0, stdout: "", stderr: "" };
@@ -697,7 +745,13 @@ export class KubevirtDriver implements BackendDriver {
         kind: vault.backend.kind,
         exists,
         running,
-        detail: exists ? (running ? `vmi phase ${phase}` : `vm exists, vmi phase ${phase || "missing"}`) : "vm object missing",
+        detail: exists
+          ? (running
+            ? `vmi phase ${phase}`
+            : vaultEnablesWanghaiPortal(vault) && vmRunning
+              ? "vm is running but the Wanghai deployment is not ready"
+              : `vm exists, vmi phase ${phase || "missing"}`)
+          : "vm object missing",
       },
       attachments: {
         vaultData: exists

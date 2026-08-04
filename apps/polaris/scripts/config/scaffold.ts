@@ -16,7 +16,6 @@ import {
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_SECRETS_ROOT = polarisUsersRoot(import.meta.url);
 const USER_PROFILES_DIR = path.join(USER_SECRETS_ROOT, "profiles");
-const DEMO_USER_PROFILE_ID = "100000000000000001";
 const VAULT_SERVICE_PORT_START = 32000;
 const VAULT_SERVICE_PORT_END = 32999;
 
@@ -24,15 +23,20 @@ export interface UserVaultDefaults {}
 
 export type VaultSubscriptionLine = "coding" | "vertical";
 
-function vaultDataNetfsSource(project: string): Record<string, any> {
+function vaultDataNetfsSource(project: string, userProfileId: string): Record<string, any> {
   return {
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
-    sub_path: project,
+    sub_path: path.posix.join(
+      "tenants",
+      sanitizeUserProfileId(userProfileId),
+      "vaults",
+      sanitizeImageTagComponent(project, "vault", 64),
+    ),
     mount_options: ["nfsvers=4.1", "hard", "rw"],
-    volume_ref: vaultDataVolumeRef(DEMO_USER_PROFILE_ID, project),
-    volume_size: "120Gi",
+    volume_ref: vaultDataVolumeRef(userProfileId, project),
+    volume_size: "1Gi",
     description: `shared vault data for ${project}`,
   };
 }
@@ -325,9 +329,11 @@ export const DEFAULT_WANGHAI_VAULT_IMAGE = "wanghai-admin-portal:latest";
 export const WANGHAI_PROFILE_ENV_FILE_KEY = "wanghai-root-env";
 export const WANGHAI_PROFILE_ENV_SOURCE_PATH = "wanghai/.env";
 export const WANGHAI_PROFILE_ENV_MOUNT_PATH = "/opt/wanghai/.env";
-export const WANGHAI_VAULTS_RUNTIME_ROOT = "/vault/project/vaults";
+export const WANGHAI_WORKSPACES_RUNTIME_ROOT = "/vault/project/workspaces";
 export const WANGHAI_BACKUP_RUNTIME_ROOT = "/vault/project/backups";
 export const WANGHAI_CACHE_RUNTIME_ROOT = "/vault/project/cache";
+/** @deprecated Use WANGHAI_WORKSPACES_RUNTIME_ROOT. */
+export const WANGHAI_VAULTS_RUNTIME_ROOT = WANGHAI_WORKSPACES_RUNTIME_ROOT;
 
 export function verticalVaultBaseImage(): string {
   return String(process.env.POLARIS_WANGHAI_VAULT_IMAGE ?? "").trim()
@@ -692,13 +698,13 @@ export function scaffoldDockerVault(
       docker_enabled: true,
     },
     resources: {
-      cpu: "8",
-      memory: "16Gi",
-      ephemeral_storage: "120Gi",
-      cpu_request: "2",
-      memory_request: "4Gi",
-      ephemeral_storage_request: "20Gi",
-      unbounded: true,
+      cpu: "1",
+      memory: "512Mi",
+      ephemeral_storage: "512Mi",
+      cpu_request: "250m",
+      memory_request: "128Mi",
+      ephemeral_storage_request: "128Mi",
+      unbounded: false,
     },
     agent: {
       kind: "multi",
@@ -715,9 +721,7 @@ export function scaffoldDockerVault(
       plain: verticalWanghai
         ? {
             WANGHAI_REPO_ROOT: "/opt/wanghai",
-            WANGHAI_VAULTS_ROOT: WANGHAI_VAULTS_RUNTIME_ROOT,
-            WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
-            WANGHAI_CACHE_ROOT: WANGHAI_CACHE_RUNTIME_ROOT,
+            WANGHAI_RUNTIME_MODE: "polaris",
           }
         : {},
     },
@@ -734,7 +738,7 @@ export function scaffoldDockerVault(
         sharing: "exclusive",
         mount_root: "/vault/project",
         durable_paths: ["/vault/project"],
-        source: vaultDataNetfsSource(project),
+        source: vaultDataNetfsSource(project, userProfileId),
       },
       "vault-runtime-state": {
         scope: "vault",

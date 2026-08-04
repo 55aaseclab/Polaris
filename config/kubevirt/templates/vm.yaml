@@ -16,6 +16,7 @@ spec:
   ports:
 __SERVICE_PORTS__
 ---
+__PRIVATE_WANGHAI_SERVICE__
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:

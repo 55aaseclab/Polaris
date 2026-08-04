@@ -16,6 +16,15 @@ import {
   vaultRuntimeResourceName,
   vaultRuntimeScopeName,
 } from "../../core/vault-name.js";
+import {
+  WANGHAI_PROFILE_ENV_FILE_KEY,
+  WANGHAI_PROFILE_ENV_MOUNT_PATH,
+} from "../../config/scaffold.js";
+import {
+  deriveWanghaiVaultAssertionSecret,
+  requireWanghaiGatewayMasterSecret,
+} from "../../security/wanghai-assertions.js";
+import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
 
 const REPO_ROOT = resolveRepoRoot(import.meta.url);
@@ -92,6 +101,172 @@ function attachmentVolumeSize(
     case "userIdentityState":
       return "5Gi";
   }
+}
+
+function isWanghaiServicePort(port: {
+  name?: string;
+  containerPort: string;
+}): boolean {
+  return port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090";
+}
+
+function wanghaiGatewayEnvironment(vault: VaultSpec): {
+  assertionSecret: string;
+  frameAncestors: string;
+  tenantId: string;
+  vaultId: string;
+} {
+  return {
+    assertionSecret: deriveWanghaiVaultAssertionSecret(
+      requireWanghaiGatewayMasterSecret(),
+      vault.userProfile.id,
+      vault.identity.projectName,
+    ),
+    frameAncestors: configuredWanghaiFrameAncestors(),
+    tenantId: vault.userProfile.id,
+    vaultId: vault.identity.projectName,
+  };
+}
+
+function wanghaiRuntimeDocs(vault: VaultSpec): string {
+  const privatePort = vault.connectivity.servicePorts
+    .map((port) => ({
+      name: port.name?.trim() || "wanghai",
+      containerPort: String(port.containerPort),
+    }))
+    .find(isWanghaiServicePort);
+  if (!privatePort) {
+    return "";
+  }
+
+  const scope = runtimeScope(vault);
+  const serviceName = vaultRuntimeResourceName(
+    vault.userProfile.id,
+    vault.identity.projectName,
+    "wanghai",
+  );
+  const dataClaim = requireAttachmentVolumeRef(vault, "vaultData");
+  const gateway = wanghaiGatewayEnvironment(vault);
+  const wanghaiEnv = vault.runtime.authFiles.find(
+    (file) => file.key === WANGHAI_PROFILE_ENV_FILE_KEY
+      || file.mountPath === WANGHAI_PROFILE_ENV_MOUNT_PATH,
+  );
+  const envSecretName = `${serviceName}-env`;
+  const envSecret = wanghaiEnv
+    ? [
+      "apiVersion: v1",
+      "kind: Secret",
+      "metadata:",
+      `  name: ${envSecretName}`,
+      `  namespace: ${scope}`,
+      "type: Opaque",
+      "data:",
+      `  .env: ${Buffer.from(wanghaiEnv.content ?? "", "utf8").toString("base64")}`,
+      "---",
+    ]
+    : [];
+  const envLines = [
+    ["WANGHAI_REPO_ROOT", "/opt/wanghai"],
+    ["WANGHAI_RUNTIME_MODE", "polaris"],
+    ["WANGHAI_GATEWAY_ASSERTION_SECRET", gateway.assertionSecret],
+    ["WANGHAI_GATEWAY_TENANT_ID", gateway.tenantId],
+    ["WANGHAI_GATEWAY_VAULT_ID", gateway.vaultId],
+    ["WANGHAI_GATEWAY_FRAME_ANCESTORS", gateway.frameAncestors],
+    ["WANGHAI_SUPERVISE_PORTAL", "1"],
+  ].flatMap(([name, value]) => [
+    `        - name: ${name}`,
+    `          value: ${JSON.stringify(value)}`,
+  ]);
+  const envVolume = wanghaiEnv
+    ? [
+      "        - name: wanghai-env",
+      "          mountPath: /opt/wanghai/.env",
+      "          subPath: .env",
+      "          readOnly: true",
+    ]
+    : [];
+  const secretVolume = wanghaiEnv
+    ? [
+      "      - name: wanghai-env",
+      "        secret:",
+      `          secretName: ${envSecretName}`,
+    ]
+    : [];
+  return [
+    ...envSecret,
+    "apiVersion: apps/v1",
+    "kind: Deployment",
+    "metadata:",
+    `  name: ${serviceName}`,
+    `  namespace: ${scope}`,
+    "spec:",
+    "  replicas: 1",
+    "  strategy:",
+    "    type: Recreate",
+    "  selector:",
+    "    matchLabels:",
+    `      app: ${serviceName}`,
+    "  template:",
+    "    metadata:",
+    "      labels:",
+    `        app: ${serviceName}`,
+    "    spec:",
+    "      containers:",
+    "      - name: wanghai",
+    `        image: ${JSON.stringify(vault.runtime.baseImage)}`,
+    "        ports:",
+    `        - name: ${privatePort.name}`,
+    `          containerPort: ${privatePort.containerPort}`,
+    "        env:",
+    ...envLines,
+    "        startupProbe:",
+    "          httpGet:",
+    "            path: /readyz",
+    `            port: ${privatePort.containerPort}`,
+    "          initialDelaySeconds: 2",
+    "          timeoutSeconds: 5",
+    "          periodSeconds: 5",
+    "          failureThreshold: 60",
+    "        livenessProbe:",
+    "          httpGet:",
+    "            path: /healthz",
+    `            port: ${privatePort.containerPort}`,
+    "          timeoutSeconds: 5",
+    "          periodSeconds: 10",
+    "          failureThreshold: 3",
+    "        readinessProbe:",
+    "          httpGet:",
+    "            path: /readyz",
+    `            port: ${privatePort.containerPort}`,
+    "          timeoutSeconds: 5",
+    "          periodSeconds: 5",
+    "          failureThreshold: 3",
+    "        volumeMounts:",
+    "        - name: vault-data",
+    "          mountPath: /vault/project",
+    ...envVolume,
+    "      volumes:",
+    "      - name: vault-data",
+    "        persistentVolumeClaim:",
+    `          claimName: ${dataClaim}`,
+    ...secretVolume,
+    "---",
+    "apiVersion: v1",
+    "kind: Service",
+    "metadata:",
+    `  name: ${serviceName}`,
+    `  namespace: ${scope}`,
+    "spec:",
+    "  type: ClusterIP",
+    "  selector:",
+    `    app: ${serviceName}`,
+    "  ports:",
+    `  - name: ${privatePort.name}`,
+    `    port: ${privatePort.containerPort}`,
+    `    targetPort: ${privatePort.containerPort}`,
+    "    appProtocol: http",
+    "---",
+  ].join("\n");
 }
 
 function existingPersistentVolumeClaimName(
@@ -211,10 +386,12 @@ function replacePlaceholders(text: string, vault: VaultSpec): string {
     containerPort: String(port.containerPort),
     nodePort: port.nodePort ? String(port.nodePort) : undefined,
   }));
-  const sshDeclared = declaredPorts.some((port) => port.containerPort === "22" || port.name === "ssh");
+  const publicDeclaredPorts = declaredPorts.filter((port) => !isWanghaiServicePort(port));
+  const sshDeclared = publicDeclaredPorts.some((port) => port.containerPort === "22" || port.name === "ssh");
   const servicePorts = sshDeclared
-    ? declaredPorts
-    : [...declaredPorts, { name: "ssh", containerPort: "22" as const, nodePort: undefined }];
+    ? publicDeclaredPorts
+    : [...publicDeclaredPorts, { name: "ssh", containerPort: "22" as const, nodePort: undefined }];
+  const interfacePorts = servicePorts;
   const renderedServicePorts = servicePorts
     .map((port) => [
       `    - name: ${port.name}`,
@@ -223,12 +400,13 @@ function replacePlaceholders(text: string, vault: VaultSpec): string {
       ...(port.nodePort ? [`      nodePort: ${port.nodePort}`] : []),
     ].join("\n"))
     .join("\n");
-  const renderedInterfacePorts = servicePorts
+  const renderedInterfacePorts = interfacePorts
     .map((port) => [
       `                - port: ${port.containerPort}`,
       "                  protocol: TCP",
     ].join("\n"))
     .join("\n");
+  const wanghaiPrivateService = wanghaiRuntimeDocs(vault);
   return text
     .replaceAll(
       "__PERSISTENT_VOLUME_CLAIMS__",
@@ -236,6 +414,7 @@ function replacePlaceholders(text: string, vault: VaultSpec): string {
     )
     .replaceAll("__SERVICE_PORTS__", renderedServicePorts)
     .replaceAll("__INTERFACE_PORTS__", renderedInterfacePorts)
+    .replaceAll("__PRIVATE_WANGHAI_SERVICE__", wanghaiPrivateService)
     .replaceAll("__PROJECT__", scope)
     .replaceAll(`${scope}-vm-cloudinit`, cloudInitName)
     .replaceAll(`${scope}-vm`, virtualMachineName)

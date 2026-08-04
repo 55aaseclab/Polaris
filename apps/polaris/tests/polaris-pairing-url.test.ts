@@ -8,14 +8,13 @@ import {
   scaffoldDockerVault,
   verticalVaultBaseImage,
   vaultConfigPath,
-  WANGHAI_BACKUP_RUNTIME_ROOT,
-  WANGHAI_CACHE_RUNTIME_ROOT,
-  WANGHAI_VAULTS_RUNTIME_ROOT,
 } from "../scripts/config/scaffold.js";
+import { ensureVaultConfig } from "../scripts/config/provision.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
 import { renderAndWriteDockerVault } from "../scripts/backends/docker/render.js";
-import { renderAndWritePodVault } from "../scripts/backends/pod/render.js";
+import { renderAndWritePodVault, renderPodVault } from "../scripts/backends/pod/render.js";
 import { renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
+import { vaultRuntimeResourceName } from "../scripts/core/vault-name.js";
 import {
   applyPairingUrlScope,
   extractOfferFragment,
@@ -94,9 +93,7 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
     assert.deepEqual(doc.surfaces, ["paseo", "wanghai"]);
     assert.deepEqual(doc.env?.plain, {
       WANGHAI_REPO_ROOT: "/opt/wanghai",
-      WANGHAI_VAULTS_ROOT: WANGHAI_VAULTS_RUNTIME_ROOT,
-      WANGHAI_BACKUP_ROOT: WANGHAI_BACKUP_RUNTIME_ROOT,
-      WANGHAI_CACHE_ROOT: WANGHAI_CACHE_RUNTIME_ROOT,
+      WANGHAI_RUNTIME_MODE: "polaris",
     });
     assert.deepEqual(
       (doc.service?.ports ?? []).map((entry) => ({
@@ -110,6 +107,69 @@ test("vertical docker scaffold selects the Wanghai image, surfaces, and dual por
     );
   } finally {
     fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+  }
+});
+
+test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
+  const project = `vertical-private-${process.pid}-${Date.now()}`;
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousPortalOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
+  const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, { line: "vertical" });
+  try {
+    const vault = loadVaultFromRefForTest(`${project}@docker`);
+    const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
+    const wanghaiPort = vault.connectivity.servicePorts.find((port) => port.name === "wanghai");
+    assert.ok(wanghaiPort?.nodePort);
+    assert.match(rendered, new RegExp(`127\\.0\\.0\\.1:${wanghaiPort?.nodePort}:9090`));
+    assert.doesNotMatch(rendered, new RegExp(`- "${wanghaiPort?.nodePort}:9090"`));
+    assert.match(rendered, /tenants\/.+\/vaults\/.+/);
+    assert.match(rendered, /WANGHAI_RUNTIME_MODE=polaris/);
+    assert.match(rendered, /WANGHAI_GATEWAY_ASSERTION_SECRET/);
+    assert.match(rendered, /WANGHAI_GATEWAY_FRAME_ANCESTORS/);
+    assert.match(rendered, /https:\/\/polaris\.example\.test/);
+
+    const podRendered = renderPodVault({
+      ...vault,
+      backend: { ...vault.backend, kind: "pod", profile: "gvisor" },
+    });
+    assert.match(podRendered, /type: ClusterIP[\s\S]+name: wanghai-private/);
+    assert.doesNotMatch(podRendered, new RegExp(`nodePort: ${wanghaiPort?.nodePort}`));
+    assert.match(podRendered, /startupProbe:[\s\S]+path: \/readyz/);
+    assert.match(podRendered, /livenessProbe:[\s\S]+path: \/healthz/);
+    assert.match(podRendered, /exec env WANGHAI_SUPERVISE_PORTAL=1/);
+    assert.doesNotMatch(podRendered, /touch \/tmp\/.ready && sleep infinity/);
+
+    ensureVaultConfig(`${project}@kubevirt-vm`, DEMO_USER_PROFILE_ID);
+    const kubevirtVault = loadVaultFromRefForTest(`${project}@kubevirt-vm`);
+    const kubevirtRendered = renderKubevirtVault(kubevirtVault);
+    const privateServiceName = vaultRuntimeResourceName(
+      DEMO_USER_PROFILE_ID,
+      project,
+      "wanghai",
+    );
+    const kubevirtDocs = yaml.loadAll(kubevirtRendered) as Array<Record<string, unknown>>;
+    const wanghaiDeployment = kubevirtDocs.find(
+      (document) => document.kind === "Deployment"
+        && (document.metadata as Record<string, unknown> | undefined)?.name === privateServiceName,
+    );
+    assert.ok(wanghaiDeployment);
+    assert.match(kubevirtRendered, new RegExp(`kind: Deployment[\\s\\S]+name: ${privateServiceName}`));
+    assert.match(kubevirtRendered, /WANGHAI_GATEWAY_ASSERTION_SECRET/);
+    assert.match(kubevirtRendered, new RegExp(`kind: Service[\\s\\S]+type: ClusterIP[\\s\\S]+app: ${privateServiceName}`));
+    assert.doesNotMatch(kubevirtRendered, /containerPort: 9090[\\s\\S]+name: .*vm/);
+    assert.doesNotMatch(
+      kubevirtRendered,
+      /claimRef:\n\s+namespace: .+\n\s+name: .+\n\s+name:/u,
+    );
+  } finally {
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+    fs.rmSync(vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID), { force: true });
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousPortalOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousPortalOrigins;
   }
 });
 

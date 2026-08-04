@@ -15,7 +15,12 @@ import {
 } from "../../core/identity-layout.js";
 import { resolveConfiguredPaseoAppBaseUrl } from "../../core/pairing-url.js";
 import { writeGeneratedManifest } from "../../output/write-generated.js";
-import { vaultRuntimeScopeName } from "../../core/vault-name.js";
+import { vaultRuntimeResourceName, vaultRuntimeScopeName } from "../../core/vault-name.js";
+import {
+  deriveWanghaiVaultAssertionSecret,
+  requireWanghaiGatewayMasterSecret,
+} from "../../security/wanghai-assertions.js";
+import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 
 function q(value: string): string {
   return JSON.stringify(value);
@@ -225,7 +230,10 @@ function buildBootstrap(vault: VaultSpec): string[] {
       ...buildEvolutionBootstrapLines(vault),
       ...buildSshMaterialLines(user, vault),
       ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
-      "          touch /tmp/.ready && sleep infinity",
+      ...buildWanghaiPortalRuntimeLines(vault),
+      ...(vaultEnablesWanghaiPortal(vault)
+        ? []
+        : ["          touch /tmp/.ready && sleep infinity"]),
     ];
   }
   return [
@@ -238,11 +246,82 @@ function buildBootstrap(vault: VaultSpec): string[] {
     ...buildEvolutionBootstrapLines(vault),
     ...buildSshMaterialLines(user, vault),
     ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
-    "          touch /tmp/.ready && sleep infinity",
+    ...buildWanghaiPortalRuntimeLines(vault),
+    ...(vaultEnablesWanghaiPortal(vault)
+      ? []
+      : ["          touch /tmp/.ready && sleep infinity"]),
+  ];
+}
+
+function isWanghaiServicePort(
+  port: VaultSpec["connectivity"]["servicePorts"][number],
+): boolean {
+  return port.name?.toLowerCase() === "wanghai" || String(port.containerPort) === "9090";
+}
+
+function vaultEnablesWanghaiPortal(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some(isWanghaiServicePort);
+}
+
+function wanghaiGatewayEnvironment(vault: VaultSpec): {
+  assertionSecret: string;
+  frameAncestors: string;
+  tenantId: string;
+  vaultId: string;
+} {
+  return {
+    assertionSecret: deriveWanghaiVaultAssertionSecret(
+      requireWanghaiGatewayMasterSecret(),
+      vault.userProfile.id,
+      vault.identity.projectName,
+    ),
+    frameAncestors: configuredWanghaiFrameAncestors(),
+    tenantId: vault.userProfile.id,
+    vaultId: vault.identity.projectName,
+  };
+}
+
+function buildWanghaiPortalRuntimeLines(vault: VaultSpec): string[] {
+  if (!vaultEnablesWanghaiPortal(vault)) return [];
+  const gateway = wanghaiGatewayEnvironment(vault);
+  return [
+    `          export WANGHAI_GATEWAY_ASSERTION_SECRET=${q(gateway.assertionSecret)} && \\`,
+    `          export WANGHAI_GATEWAY_TENANT_ID=${q(gateway.tenantId)} && \\`,
+    `          export WANGHAI_GATEWAY_VAULT_ID=${q(gateway.vaultId)} && \\`,
+    `          export WANGHAI_GATEWAY_FRAME_ANCESTORS=${q(gateway.frameAncestors)} && \\`,
+    `          mkdir -p ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.vaultRuntimeState.mountRoot} && \\`,
+    `          if [ ! -x /usr/local/bin/wanghai-entrypoint ] || [ ! -d /opt/wanghai/apps/admin-portal ]; then echo "Wanghai portal runtime is missing" >&2; exit 1; fi && \\`,
+    "          exec env WANGHAI_SUPERVISE_PORTAL=1 /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090",
   ];
 }
 
 function buildReadinessProbe(vault: VaultSpec): string[] {
+  if (vaultEnablesWanghaiPortal(vault)) {
+    return [
+      "        startupProbe:",
+      "          httpGet:",
+      "            path: /readyz",
+      "            port: 9090",
+      "          initialDelaySeconds: 2",
+      "          timeoutSeconds: 5",
+      "          periodSeconds: 5",
+      "          failureThreshold: 60",
+      "        livenessProbe:",
+      "          httpGet:",
+      "            path: /healthz",
+      "            port: 9090",
+      "          timeoutSeconds: 5",
+      "          periodSeconds: 10",
+      "          failureThreshold: 3",
+      "        readinessProbe:",
+      "          httpGet:",
+      "            path: /readyz",
+      "            port: 9090",
+      "          timeoutSeconds: 5",
+      "          periodSeconds: 5",
+      "          failureThreshold: 3",
+    ];
+  }
   if (vault.health.readinessMode === "daemon-port") {
     return [
       "        readinessProbe:",
@@ -267,7 +346,15 @@ function buildReadinessProbe(vault: VaultSpec): string[] {
 
 function buildEnvLines(vault: VaultSpec): string[] {
   const envLines: string[] = [];
+  const gatewayNames = new Set([
+    "WANGHAI_GATEWAY_ASSERTION_SECRET",
+    "WANGHAI_GATEWAY_TENANT_ID",
+    "WANGHAI_GATEWAY_VAULT_ID",
+    "WANGHAI_GATEWAY_FRAME_ANCESTORS",
+    "WANGHAI_RUNTIME_MODE",
+  ]);
   for (const item of vault.runtime.plainEnvVars as PlainEnvVar[]) {
+    if (gatewayNames.has(item.name)) continue;
     envLines.push(`        - name: ${item.name}`);
     envLines.push(`          value: ${q(item.value)}`);
   }
@@ -289,6 +376,19 @@ function buildEnvLines(vault: VaultSpec): string[] {
   envLines.push(`          value: ${q(vault.evolution?.userMemoryFile ?? "")}`);
   envLines.push("        - name: POLARIS_MEMORY_SNAPSHOT_FILE");
   envLines.push(`          value: ${q(vault.evolution?.sessionSnapshotFile ?? "")}`);
+  if (vaultEnablesWanghaiPortal(vault)) {
+    const gateway = wanghaiGatewayEnvironment(vault);
+    envLines.push("        - name: WANGHAI_RUNTIME_MODE");
+    envLines.push(`          value: ${q("polaris")}`);
+    envLines.push("        - name: WANGHAI_GATEWAY_ASSERTION_SECRET");
+    envLines.push(`          value: ${q(gateway.assertionSecret)}`);
+    envLines.push("        - name: WANGHAI_GATEWAY_TENANT_ID");
+    envLines.push(`          value: ${q(gateway.tenantId)}`);
+    envLines.push("        - name: WANGHAI_GATEWAY_VAULT_ID");
+    envLines.push(`          value: ${q(gateway.vaultId)}`);
+    envLines.push("        - name: WANGHAI_GATEWAY_FRAME_ANCESTORS");
+    envLines.push(`          value: ${q(gateway.frameAncestors)}`);
+  }
   return envLines;
 }
 
@@ -445,7 +545,10 @@ export function renderPodVault(vault: VaultSpec): string {
   deploymentLines.push("        emptyDir: {}");
   docs.push(deploymentLines.join("\n"));
 
-  if (vault.connectivity.exposeService && vault.connectivity.servicePorts.length) {
+  const publicServicePorts = vault.connectivity.servicePorts.filter(
+    (port) => !isWanghaiServicePort(port),
+  );
+  if (vault.connectivity.exposeService && publicServicePorts.length) {
     const serviceLines = [
       "apiVersion: v1",
       "kind: Service",
@@ -458,7 +561,7 @@ export function renderPodVault(vault: VaultSpec): string {
       `    app: ${runtimeScope(vault)}`,
       "  ports:",
     ];
-    vault.connectivity.servicePorts.forEach((port, index) => {
+    publicServicePorts.forEach((port, index) => {
       serviceLines.push(`  - name: ${serviceName(port, index)}`);
       serviceLines.push("    protocol: TCP");
       serviceLines.push(`    port: ${port.containerPort}`);
@@ -469,6 +572,32 @@ export function renderPodVault(vault: VaultSpec): string {
       }
     });
     docs.push(serviceLines.join("\n"));
+  }
+
+  if (vault.connectivity.exposeService && vaultEnablesWanghaiPortal(vault)) {
+    const service = vaultRuntimeResourceName(
+      vault.userProfile.id,
+      vault.identity.projectName,
+      "wanghai",
+    );
+    const port = vault.connectivity.servicePorts.find(isWanghaiServicePort)!;
+    docs.push([
+      "apiVersion: v1",
+      "kind: Service",
+      "metadata:",
+      `  name: ${service}`,
+      `  namespace: ${runtimeScope(vault)}`,
+      "spec:",
+      "  type: ClusterIP",
+      "  selector:",
+      `    app: ${runtimeScope(vault)}`,
+      "  ports:",
+      `  - name: wanghai-private`,
+      "    protocol: TCP",
+      `    port: ${port.containerPort}`,
+      `    targetPort: ${port.containerPort}`,
+      "    appProtocol: http",
+    ].join("\n"));
   }
 
   return `${docs.join("\n---\n")}\n`;

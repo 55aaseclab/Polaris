@@ -23,10 +23,10 @@ function vaultDataNetfsSource(project: string, userProfileId: string): Record<st
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
-    sub_path: project,
+    sub_path: `tenants/${userProfileId}/vaults/${project}`,
     mount_options: ["nfsvers=4.1", "hard", "rw"],
     volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-data"),
-    volume_size: "120Gi",
+    volume_size: "1Gi",
     description: `shared vault data for ${project}`,
   };
 }
@@ -147,13 +147,13 @@ function synthesizeAttachments(
     vaultRuntimeState.source = {
       kind: "persistent-volume",
       volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
-      volume_size: "20Gi",
+      volume_size: "128Mi",
       description: `reusable vault runtime state for ${project}`,
     };
     userIdentityState.source = {
       kind: "persistent-volume",
       volume_ref: vaultRuntimeResourceName(userProfileId, project, "user-identity-state"),
-      volume_size: "5Gi",
+      volume_size: "64Mi",
       description: `persistent user identity state for ${project}`,
     };
     return;
@@ -164,7 +164,7 @@ function synthesizeAttachments(
     vaultRuntimeState.source = {
       kind: "persistent-volume",
       volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
-      volume_size: "20Gi",
+      volume_size: "128Mi",
       description: `reusable vault runtime state for ${project}`,
     };
     userIdentityState.source ??= {
@@ -178,7 +178,7 @@ function synthesizeAttachments(
   vaultRuntimeState.source = {
     kind: "persistent-volume",
     volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-runtime-state"),
-    volume_size: "20Gi",
+    volume_size: "128Mi",
     description: `reusable ${backendKind} vault runtime state for ${project}`,
   };
   userIdentityState.source ??= {
@@ -218,15 +218,16 @@ function synthesizeConfigDoc(
     delete doc.runtime.rootdisk_image;
   }
   doc.resources = {
-    cpu: "8",
-    memory: "16Gi",
-    ephemeral_storage: "120Gi",
-    cpu_request: "2",
-    memory_request: "4Gi",
-    ephemeral_storage_request: "20Gi",
-    unbounded: true,
+    cpu: "1",
+    memory: "512Mi",
+    ephemeral_storage: "512Mi",
+    cpu_request: "250m",
+    memory_request: "128Mi",
+    ephemeral_storage_request: "128Mi",
+    unbounded: false,
     ...(doc.resources ?? {}),
   };
+  doc.resources.unbounded = false;
   doc.tooling = {
     bootstrap_profile: "prebuilt",
     install_rustup: false,
