@@ -20,6 +20,10 @@ import {
   deriveWanghaiVaultAssertionSecret,
   requireWanghaiGatewayMasterSecret,
 } from "../../security/wanghai-assertions.js";
+import {
+  filterIntegratedWanghaiPlainEnvVars,
+  sanitizeIntegratedWanghaiAuthFiles,
+} from "../../security/wanghai-runtime-env.js";
 import { configuredWanghaiFrameAncestors } from "../../portal/wanghai-gateway.js";
 
 function q(value: string): string {
@@ -218,6 +222,9 @@ function buildGitConfigLines(vault: VaultSpec): string[] {
 function buildBootstrap(vault: VaultSpec): string[] {
   const home = vault.runtime.home;
   const user = vault.runtime.user;
+  const authFiles = vaultEnablesWanghaiPortal(vault)
+    ? sanitizeIntegratedWanghaiAuthFiles(vault.runtime.authFiles)
+    : vault.runtime.authFiles;
   if (vault.runtime.bootstrapProfile === "prebuilt") {
     return [
       "          set -eux && \\",
@@ -226,7 +233,7 @@ function buildBootstrap(vault: VaultSpec): string[] {
       ...buildToolInstallLines(vault),
       ...(user === "root" ? buildRootProfileFixLine(vault) : []),
       ...buildGitConfigLines(vault),
-      ...buildAuthCopyLines(user, vault.runtime.authFiles, vault),
+      ...buildAuthCopyLines(user, authFiles, vault),
       ...buildEvolutionBootstrapLines(vault),
       ...buildSshMaterialLines(user, vault),
       ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
@@ -242,7 +249,7 @@ function buildBootstrap(vault: VaultSpec): string[] {
     ...buildAttachmentAssemblyLines(vault),
     ...buildToolInstallLines(vault),
     `          apt-get update && apt-get install -y openssh-client ripgrep ${vault.runtime.aptPackages.join(" ")} && \\`,
-    ...buildAuthCopyLines(user, vault.runtime.authFiles, vault),
+    ...buildAuthCopyLines(user, authFiles, vault),
     ...buildEvolutionBootstrapLines(vault),
     ...buildSshMaterialLines(user, vault),
     ...buildPaseoBootstrapLine(Boolean(vault.runtime.agentCmd), home),
@@ -353,7 +360,10 @@ function buildEnvLines(vault: VaultSpec): string[] {
     "WANGHAI_GATEWAY_FRAME_ANCESTORS",
     "WANGHAI_RUNTIME_MODE",
   ]);
-  for (const item of vault.runtime.plainEnvVars as PlainEnvVar[]) {
+  const plainEnvVars = vaultEnablesWanghaiPortal(vault)
+    ? filterIntegratedWanghaiPlainEnvVars(vault.runtime.plainEnvVars)
+    : vault.runtime.plainEnvVars;
+  for (const item of plainEnvVars as PlainEnvVar[]) {
     if (gatewayNames.has(item.name)) continue;
     envLines.push(`        - name: ${item.name}`);
     envLines.push(`          value: ${q(item.value)}`);
