@@ -25,6 +25,19 @@ master_secret="${POLARIS_WANGHAI_GATEWAY_MASTER_SECRET:-}"
 wanghai_image="${POLARIS_WANGHAI_VAULT_IMAGE:-}"
 allowed_origins="${POLARIS_PORTAL_ALLOWED_ORIGINS:-}"
 auth_mode="${POLARIS_AUTH_MODE:-}"
+backup_key_root="${POLARIS_WANGHAI_BACKUP_KEY_ROOT:-}"
+backup_retention_count="${POLARIS_WANGHAI_BACKUP_RETENTION_COUNT:-}"
+backup_timeout_ms="${POLARIS_WANGHAI_BACKUP_TIMEOUT_MS:-}"
+backup_submissions_per_hour="${POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR:-}"
+
+require_integer_range() {
+  local value="$1" name="$2" minimum="$3" maximum="$4"
+  if ! [[ "${value}" =~ ^[0-9]+$ ]] \
+    || [ "${value}" -lt "${minimum}" ] \
+    || [ "${value}" -gt "${maximum}" ]; then
+    fail "${name} must be an integer between ${minimum} and ${maximum}"
+  fi
+}
 
 if [ "${auth_mode}" != "authing-browser-session" ]; then
   fail "POLARIS_AUTH_MODE must be authing-browser-session for a production release"
@@ -107,6 +120,22 @@ for (const value of values) {
 if ! [[ "${wanghai_image}" =~ @sha256:[a-f0-9]{64}$ ]]; then
   fail "POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference"
 fi
+
+if [ -z "${backup_key_root}" ] \
+  || [[ "${backup_key_root}" != /* ]] \
+  || [ ! -d "${backup_key_root}" ] \
+  || [ -L "${backup_key_root}" ]; then
+  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must be an existing absolute non-symlink directory"
+fi
+backup_key_mode="$(stat -c '%a' "${backup_key_root}")" \
+  || fail "unable to inspect POLARIS_WANGHAI_BACKUP_KEY_ROOT permissions"
+if ! [[ "${backup_key_mode}" =~ ^[0-7]{3,4}$ ]] \
+  || (( (8#${backup_key_mode} & 8#077) != 0 )); then
+  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must not be group/world accessible"
+fi
+require_integer_range "${backup_retention_count}" "POLARIS_WANGHAI_BACKUP_RETENTION_COUNT" 1 30
+require_integer_range "${backup_timeout_ms}" "POLARIS_WANGHAI_BACKUP_TIMEOUT_MS" 60000 21600000
+require_integer_range "${backup_submissions_per_hour}" "POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR" 1 24
 
 command -v docker >/dev/null 2>&1 || fail "docker is required for release preflight"
 if ! docker image inspect "${wanghai_image}" >/dev/null 2>&1; then

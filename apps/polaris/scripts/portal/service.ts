@@ -49,6 +49,7 @@ import {
   type PortalVaultSummary,
 } from "../core/portal.js";
 import type { VaultStatus } from "../core/vault.js";
+import type { DurableJob } from "./control-store.js";
 import { createUserCommand } from "../cli/commands/create-user.js";
 import { deleteUserCommand } from "../cli/commands/delete-user.js";
 import {
@@ -61,9 +62,12 @@ import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
+  getWanghaiBackupJob as getWanghaiBackupJobExecutor,
   getPortalVaultPaseoDiagnostic as getPortalVaultPaseoDiagnosticExecutor,
   permanentlyDeletePortalVault as permanentlyDeletePortalVaultExecutor,
   queueProvisionVault as queueProvisionVaultExecutor,
+  queueWanghaiBackup as queueWanghaiBackupExecutor,
+  requestWanghaiBackupCancellation as requestWanghaiBackupCancellationExecutor,
   requestProvisionCancellation as requestProvisionCancellationExecutor,
   refreshPortalVaultStatus as refreshPortalVaultStatusExecutor,
   rebuildPortalVault as rebuildPortalVaultExecutor,
@@ -81,6 +85,53 @@ import {
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
+
+export interface PortalWanghaiBackupJob {
+  id: string;
+  status: DurableJob["status"];
+  attempts: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  result?: {
+    archiveName: string;
+    checksumVerified: boolean;
+    retentionCount: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+function portalWanghaiBackupJob(job: DurableJob): PortalWanghaiBackupJob {
+  const result = job.result;
+  const archiveName = typeof result?.archiveName === "string" ? result.archiveName : "";
+  const checksumVerified = result?.checksumVerified === true;
+  const retentionCount = Number(result?.retentionCount);
+  return {
+    id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.errorCode ? { errorCode: job.errorCode } : {}),
+    ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    ...(archiveName && checksumVerified && Number.isSafeInteger(retentionCount)
+      && retentionCount > 0
+      ? {
+          result: {
+            archiveName,
+            checksumVerified,
+            retentionCount,
+          },
+        }
+      : {}),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.completedAt ? { completedAt: job.completedAt } : {}),
+  };
+}
 
 function rootKey(userId: string, vault: string): string {
   return `${userId}:${vault}`;
@@ -524,6 +575,47 @@ export async function queueProvisionVault(
     defaultDockerOnly: options?.defaultDockerOnly,
     startAfterCreate: options?.startAfterCreate,
     line: options?.line,
+  });
+}
+
+export async function queuePortalWanghaiBackup(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  idempotencyKey: string;
+}): Promise<PortalWanghaiBackupJob> {
+  return portalWanghaiBackupJob(await queueWanghaiBackupExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    idempotencyKey: input.idempotencyKey,
+  }));
+}
+
+export function getPortalWanghaiBackupJob(input: {
+  userId: string;
+  vault: string;
+  jobId: string;
+}): PortalWanghaiBackupJob | null {
+  const job = getWanghaiBackupJobExecutor({
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+  return job ? portalWanghaiBackupJob(job) : null;
+}
+
+export function cancelPortalWanghaiBackup(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  jobId: string;
+}): boolean {
+  return requestWanghaiBackupCancellationExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
   });
 }
 

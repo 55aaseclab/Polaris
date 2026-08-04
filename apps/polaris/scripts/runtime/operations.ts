@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { ensureCanonicalVaultImage, ensureVaultConfig } from "../config/provision.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import { userProfileExists, vaultConfigExists, vaultConfigPath } from "../config/scaffold.js";
@@ -27,6 +27,7 @@ import {
   loadVaultDetail,
   loadPortalVaultByTarget,
   loadVaultSummary,
+  readVaultStatus,
   type PortalDriverTarget,
   type PortalVaultDetail,
   type PortalVaultPaseoDiagnostic,
@@ -79,14 +80,28 @@ import {
   type DurableJob,
 } from "../portal/control-store.js";
 import { durableJobWorkerConcurrency } from "./job-concurrency.js";
+import {
+  WANGHAI_BACKUP_JOB_KIND,
+  WanghaiBackupError,
+  buildWanghaiBackupDockerRunArgs,
+  buildWanghaiBackupVerificationDockerRunArgs,
+  ensureWanghaiBackupKey,
+  parseWanghaiBackupArchiveLog,
+  resolveWanghaiBackupSettings,
+  wanghaiBackupArchiveName,
+  wanghaiBackupContainerName,
+  wanghaiBackupDedupeKey,
+  wanghaiBackupRateLimitBucket,
+  type WanghaiBackupResult,
+} from "./wanghai-backup.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
-let provisionQueueDrain: Promise<void> | null = null;
-let provisionWorkerSequence = 0;
+let durableJobQueueDrain: Promise<void> | null = null;
+let durableJobWorkerSequence = 0;
 
 type VaultOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
@@ -160,7 +175,7 @@ function enqueueProvisionJob(
   });
 }
 
-function provisionJobLeaseMs(): number {
+function durableJobLeaseMs(): number {
   const raw = Number.parseInt(String(process.env.POLARIS_JOB_LEASE_MS ?? ""), 10);
   if (!Number.isFinite(raw)) return 30 * 60 * 1_000;
   return Math.max(60_000, Math.min(6 * 60 * 60 * 1_000, raw));
@@ -1593,6 +1608,542 @@ export function requestProvisionCancellation(userId: string, vault: string): boo
   return requested;
 }
 
+const MAX_BACKUP_PROCESS_OUTPUT_BYTES = 16 * 1024;
+
+interface DockerCommandResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
+interface DockerBackupContainerState {
+  running: boolean;
+  exitCode: number | null;
+}
+
+interface WanghaiBackupContainerSuccess {
+  result: WanghaiBackupResult;
+  containerName: string;
+}
+
+class WanghaiBackupContainerError extends WanghaiBackupError {
+  constructor(
+    code: string,
+    message: string,
+    retryable: boolean,
+    readonly cleanupContainer: boolean,
+  ) {
+    super(code, message, retryable);
+    this.name = "WanghaiBackupContainerError";
+  }
+}
+
+function appendBoundedBackupOutput(current: string, chunk: Buffer): string {
+  const combined = Buffer.concat([Buffer.from(current, "utf8"), chunk]);
+  return combined.subarray(Math.max(0, combined.length - MAX_BACKUP_PROCESS_OUTPUT_BYTES)).toString("utf8");
+}
+
+function startDockerCapture(args: string[]): {
+  completion: Promise<DockerCommandResult>;
+  terminate: () => void;
+} {
+  const child = spawn("docker", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  const completion = new Promise<DockerCommandResult>((resolve) => {
+    let settled = false;
+    const finish = (result: DockerCommandResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout = appendBoundedBackupOutput(stdout, Buffer.from(chunk));
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = appendBoundedBackupOutput(stderr, Buffer.from(chunk));
+    });
+    child.once("error", (error) => {
+      finish({ status: null, stdout, stderr, error });
+    });
+    child.once("close", (status) => {
+      finish({ status, stdout, stderr });
+    });
+  });
+  return {
+    completion,
+    terminate: () => {
+      child.kill("SIGTERM");
+    },
+  };
+}
+
+async function runDockerCapture(args: string[]): Promise<DockerCommandResult> {
+  return startDockerCapture(args).completion;
+}
+
+function dockerResultIsNotFound(result: DockerCommandResult): boolean {
+  return /no such (?:container|object)/iu.test(`${result.stdout}\n${result.stderr}`);
+}
+
+async function inspectWanghaiBackupContainer(
+  containerName: string,
+): Promise<DockerBackupContainerState | null> {
+  const result = await runDockerCapture(["inspect", containerName]);
+  if (result.status !== 0) {
+    if (dockerResultIsNotFound(result)) return null;
+    throw new WanghaiBackupContainerError(
+      "backup-container-inspect-failed",
+      "Unable to inspect the Wanghai backup container",
+      true,
+      false,
+    );
+  }
+  try {
+    const parsed = JSON.parse(result.stdout) as Array<{ State?: Record<string, unknown> }>;
+    const state = parsed[0]?.State;
+    if (!state) throw new Error("missing Docker state");
+    const rawExitCode = state.ExitCode;
+    const exitCode = typeof rawExitCode === "number" && Number.isSafeInteger(rawExitCode)
+      ? rawExitCode
+      : null;
+    return {
+      running: state.Running === true || state.Status === "running",
+      exitCode,
+    };
+  } catch {
+    throw new WanghaiBackupContainerError(
+      "backup-container-inspect-invalid",
+      "Wanghai backup container inspection returned invalid state",
+      true,
+      false,
+    );
+  }
+}
+
+async function stopWanghaiBackupContainer(containerName: string): Promise<void> {
+  const stopped = await runDockerCapture(["stop", "--time", "10", containerName]);
+  if (stopped.status === 0 || dockerResultIsNotFound(stopped)) return;
+  await runDockerCapture(["kill", containerName]);
+}
+
+async function waitForWanghaiBackupDockerCommand(input: {
+  args: string[];
+  containerName: string;
+  timeoutMs: number;
+  isCancelled: () => boolean;
+}): Promise<{ result: DockerCommandResult; cancelled: boolean; timedOut: boolean }> {
+  const command = startDockerCapture(input.args);
+  let cancellationRequested = input.isCancelled();
+  let timedOut = false;
+  let interruption: Promise<void> | null = null;
+  let terminateTimer: NodeJS.Timeout | null = null;
+  const interrupt = (): void => {
+    if (interruption) return;
+    interruption = stopWanghaiBackupContainer(input.containerName).catch(() => {
+      // The final inspect determines whether the container was actually stopped.
+    });
+  };
+  if (cancellationRequested) {
+    interrupt();
+  }
+  const startedAt = Date.now();
+  const timer = setInterval(() => {
+    if (input.isCancelled()) {
+      cancellationRequested = true;
+      interrupt();
+      return;
+    }
+    if (Date.now() - startedAt >= input.timeoutMs) {
+      timedOut = true;
+      interrupt();
+      if (!terminateTimer) {
+        terminateTimer = setTimeout(() => {
+          command.terminate();
+        }, 15_000);
+        terminateTimer.unref();
+      }
+    }
+  }, 1_000);
+  timer.unref();
+  const result = await command.completion;
+  clearInterval(timer);
+  if (terminateTimer) clearTimeout(terminateTimer);
+  if (interruption) {
+    await interruption;
+  }
+  return { result, cancelled: cancellationRequested, timedOut };
+}
+
+function hasWanghaiSurface(vault: VaultSpec): boolean {
+  return vault.connectivity.servicePorts.some((port) => (
+    port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
+  ));
+}
+
+function resolveWanghaiBackupVault(userId: string, vault: string): VaultSpec {
+  const target = readVaultStatus(userId, vault)?.driver?.selected;
+  if (!target) {
+    throw new WanghaiBackupError(
+      "backup-runtime-unavailable",
+      "Wanghai backup requires a selected vault runtime",
+      false,
+    );
+  }
+  let spec: VaultSpec;
+  try {
+    spec = loadPortalVaultByTarget(userId, vault, target);
+  } catch {
+    throw new WanghaiBackupError(
+      "backup-runtime-unavailable",
+      "Wanghai backup could not resolve the selected vault runtime",
+      false,
+    );
+  }
+  if (
+    spec.userProfile.id !== userId
+    || spec.identity.projectName !== vault
+  ) {
+    throw new WanghaiBackupError(
+      "backup-runtime-unavailable",
+      "Wanghai backup selected vault identity does not match the durable job",
+      false,
+    );
+  }
+  if (spec.backend.kind !== "docker") {
+    throw new WanghaiBackupError(
+      "backup-backend-unsupported",
+      "Wanghai backup is currently supported only for the selected Docker runtime",
+      false,
+    );
+  }
+  if (!hasWanghaiSurface(spec) || spec.attachments.vaultData.mountRoot !== "/vault/project") {
+    throw new WanghaiBackupError(
+      "backup-surface-unavailable",
+      "The selected vault does not provide the integrated Wanghai backup surface",
+      false,
+    );
+  }
+  return spec;
+}
+
+function backupActorId(job: DurableJob, tenantId: string): string {
+  const actor = String(job.payload.actorId ?? "").trim();
+  return actor || tenantId;
+}
+
+function classifyWanghaiBackupError(error: unknown): {
+  code: string;
+  message: string;
+  retryable: boolean;
+  cleanupContainer: boolean;
+} {
+  if (error instanceof WanghaiBackupContainerError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      cleanupContainer: error.cleanupContainer,
+    };
+  }
+  if (error instanceof WanghaiBackupError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      cleanupContainer: false,
+    };
+  }
+  return {
+    code: "backup-worker-failed",
+    message: "Wanghai backup worker failed",
+    retryable: true,
+    cleanupContainer: false,
+  };
+}
+
+async function inspectCompletedWanghaiBackup(input: {
+  vault: VaultSpec;
+  containerName: string;
+  tenantId: string;
+  vaultId: string;
+  jobId: string;
+  retentionCount: number;
+  cancelled: boolean;
+  timedOut: boolean;
+}): Promise<WanghaiBackupContainerSuccess> {
+  const state = await inspectWanghaiBackupContainer(input.containerName);
+  if (!state) {
+    throw new WanghaiBackupContainerError(
+      "backup-container-missing",
+      "Wanghai backup container disappeared before completion was recorded",
+      true,
+      false,
+    );
+  }
+  if (state.running) {
+    throw new WanghaiBackupContainerError(
+      "backup-container-running",
+      "Wanghai backup container is still running after the worker disconnected",
+      true,
+      false,
+    );
+  }
+  if (input.cancelled) {
+    throw new WanghaiBackupContainerError(
+      "backup-cancelled",
+      "Wanghai backup was cancelled",
+      false,
+      true,
+    );
+  }
+  if (input.timedOut) {
+    throw new WanghaiBackupContainerError(
+      "backup-timeout",
+      "Wanghai backup exceeded its execution deadline",
+      true,
+      true,
+    );
+  }
+  if (state.exitCode !== 0) {
+    throw new WanghaiBackupContainerError(
+      "backup-container-failed",
+      "Wanghai backup container exited unsuccessfully",
+      true,
+      true,
+    );
+  }
+  const archiveName = wanghaiBackupArchiveName({
+    tenantId: input.tenantId,
+    vaultId: input.vaultId,
+    jobId: input.jobId,
+  });
+  const logs = await runDockerCapture(["logs", "--tail", "64", input.containerName]);
+  if (logs.status !== 0) {
+    throw new WanghaiBackupContainerError(
+      "backup-container-logs-unavailable",
+      "Wanghai backup container logs are unavailable for recovery",
+      true,
+      false,
+    );
+  }
+  const parsed = parseWanghaiBackupArchiveLog(logs.stdout, archiveName);
+  const verification = await runDockerCapture(
+    buildWanghaiBackupVerificationDockerRunArgs({
+      vault: input.vault,
+      archiveName,
+    }),
+  );
+  if (verification.status !== 0) {
+    throw new WanghaiBackupContainerError(
+      "backup-verification-failed",
+      "Wanghai backup archive checksum verification failed",
+      true,
+      true,
+    );
+  }
+  return {
+    containerName: input.containerName,
+    result: {
+      ...parsed,
+      retentionCount: input.retentionCount,
+    },
+  };
+}
+
+async function executeWanghaiBackupContainer(input: {
+  vault: VaultSpec;
+  job: DurableJob;
+  tenantId: string;
+  vaultId: string;
+  isCancelled: () => boolean;
+}): Promise<WanghaiBackupContainerSuccess> {
+  const settings = resolveWanghaiBackupSettings();
+  const containerName = wanghaiBackupContainerName(input.job.id);
+  const existing = await inspectWanghaiBackupContainer(containerName);
+  if (existing?.running) {
+    const waited = await waitForWanghaiBackupDockerCommand({
+      args: ["wait", containerName],
+      containerName,
+      timeoutMs: settings.timeoutMs,
+      isCancelled: input.isCancelled,
+    });
+    return inspectCompletedWanghaiBackup({
+      vault: input.vault,
+      containerName,
+      tenantId: input.tenantId,
+      vaultId: input.vaultId,
+      jobId: input.job.id,
+      retentionCount: settings.retentionCount,
+      cancelled: waited.cancelled,
+      timedOut: waited.timedOut,
+    });
+  }
+  if (existing) {
+    return inspectCompletedWanghaiBackup({
+      vault: input.vault,
+      containerName,
+      tenantId: input.tenantId,
+      vaultId: input.vaultId,
+      jobId: input.job.id,
+      retentionCount: settings.retentionCount,
+      cancelled: input.isCancelled(),
+      timedOut: false,
+    });
+  }
+  const keyFile = ensureWanghaiBackupKey({
+    keyRoot: settings.keyRoot,
+    tenantId: input.tenantId,
+    vaultId: input.vaultId,
+  });
+  const started = await waitForWanghaiBackupDockerCommand({
+    args: buildWanghaiBackupDockerRunArgs({
+      vault: input.vault,
+      jobId: input.job.id,
+      tenantId: input.tenantId,
+      vaultId: input.vaultId,
+      keyFile,
+      settings,
+    }),
+    containerName,
+    timeoutMs: settings.timeoutMs,
+    isCancelled: input.isCancelled,
+  });
+  return inspectCompletedWanghaiBackup({
+    vault: input.vault,
+    containerName,
+    tenantId: input.tenantId,
+    vaultId: input.vaultId,
+    jobId: input.job.id,
+    retentionCount: settings.retentionCount,
+    cancelled: started.cancelled,
+    timedOut: started.timedOut,
+  });
+}
+
+async function removeWanghaiBackupContainer(containerName: string): Promise<void> {
+  const result = await runDockerCapture(["rm", "-f", containerName]);
+  if (result.status !== 0 && !dockerResultIsNotFound(result)) {
+    logWarn("executor", "wanghai-backup-container-remove-failed", {
+      containerName,
+    });
+  }
+}
+
+export async function queueWanghaiBackup(input: {
+  actorId: string;
+  tenantId: string;
+  vaultId: string;
+  idempotencyKey: string;
+}): Promise<DurableJob> {
+  const tenantId = input.tenantId.trim();
+  const vaultId = input.vaultId.trim();
+  if (!tenantId || !vaultId || !userProfileExists(tenantId)) {
+    throw new WanghaiBackupError(
+      "backup-tenant-not-found",
+      "Wanghai backup tenant was not found",
+      false,
+    );
+  }
+  const dedupeKey = wanghaiBackupDedupeKey(tenantId, vaultId, input.idempotencyKey);
+  const store = getPolarisControlStore(import.meta.url);
+  const existing = store.getJobByDedupeKey(dedupeKey);
+  if (existing) {
+    store.recordAudit({
+      actorId: input.actorId.trim() || tenantId,
+      tenantId,
+      vaultId,
+      action: "wanghai.backup.submit",
+      outcome: "success",
+      metadata: { jobId: existing.id, reused: true },
+    });
+    void resumeDurableVaultJobs();
+    return existing;
+  }
+  resolveWanghaiBackupVault(tenantId, vaultId);
+  const settings = resolveWanghaiBackupSettings();
+  const rateLimit = store.consumeGatewayRateLimit({
+    bucketKey: wanghaiBackupRateLimitBucket(tenantId, vaultId),
+    limit: settings.submissionsPerHour,
+    windowSeconds: 60 * 60,
+  });
+  if (!rateLimit.allowed) {
+    store.recordAudit({
+      actorId: input.actorId.trim() || tenantId,
+      tenantId,
+      vaultId,
+      action: "wanghai.backup.submit",
+      outcome: "denied",
+      metadata: { reason: "rate-limited", limit: rateLimit.limit },
+    });
+    throw new WanghaiBackupError(
+      "backup-rate-limited",
+      "Wanghai backup submission rate limit exceeded",
+      false,
+    );
+  }
+  const job = store.enqueueJob({
+    kind: WANGHAI_BACKUP_JOB_KIND,
+    dedupeKey,
+    tenantId,
+    vaultId,
+    payload: {
+      actorId: input.actorId.trim() || tenantId,
+    },
+  });
+  store.recordAudit({
+    actorId: input.actorId.trim() || tenantId,
+    tenantId,
+    vaultId,
+    action: "wanghai.backup.submit",
+    outcome: "success",
+    metadata: { jobId: job.id, reused: false },
+  });
+  void resumeDurableVaultJobs();
+  return job;
+}
+
+export function getWanghaiBackupJob(input: {
+  tenantId: string;
+  vaultId: string;
+  jobId: string;
+}): DurableJob | null {
+  const job = getPolarisControlStore(import.meta.url).getJob(input.jobId);
+  if (
+    !job
+    || job.kind !== WANGHAI_BACKUP_JOB_KIND
+    || job.tenantId !== input.tenantId.trim()
+    || job.vaultId !== input.vaultId.trim()
+  ) {
+    return null;
+  }
+  return job;
+}
+
+export function requestWanghaiBackupCancellation(input: {
+  actorId: string;
+  tenantId: string;
+  vaultId: string;
+  jobId: string;
+}): boolean {
+  const job = getWanghaiBackupJob(input);
+  const requested = job
+    ? getPolarisControlStore(import.meta.url).requestJobCancellation(job.dedupeKey)
+    : false;
+  getPolarisControlStore(import.meta.url).recordAudit({
+    actorId: input.actorId.trim() || input.tenantId.trim(),
+    tenantId: input.tenantId.trim(),
+    vaultId: input.vaultId.trim(),
+    action: "wanghai.backup.cancel",
+    outcome: requested ? "success" : "denied",
+    metadata: { jobId: input.jobId.trim() || "unknown", requested },
+  });
+  return requested;
+}
+
 function provisionOptionsFromJob(job: DurableJob): {
   defaultDockerOnly: boolean;
   startAfterCreate: boolean;
@@ -1633,7 +2184,7 @@ async function executeClaimedProvisionJob(
     await existing;
     return;
   }
-  const leaseMs = provisionJobLeaseMs();
+  const leaseMs = durableJobLeaseMs();
   const heartbeat = setInterval(() => {
     store.heartbeatJob(job.id, workerId, leaseMs);
   }, Math.max(10_000, Math.floor(leaseMs / 4)));
@@ -1734,34 +2285,208 @@ async function executeClaimedProvisionJob(
   await execution;
 }
 
-async function runProvisionWorker(workerId: string): Promise<void> {
+async function executeClaimedWanghaiBackupJob(
+  job: DurableJob,
+  workerId: string,
+): Promise<void> {
+  const tenantId = job.tenantId?.trim();
+  const vaultId = job.vaultId?.trim();
   const store = getPolarisControlStore(import.meta.url);
-  for (;;) {
-    const job = store.claimNextJob(workerId, provisionJobLeaseMs(), ["vault-provision"]);
-    if (!job) return;
-    await executeClaimedProvisionJob(job, workerId);
+  if (!tenantId || !vaultId) {
+    store.failJobPermanently(
+      job.id,
+      workerId,
+      "backup-job-invalid",
+      "Wanghai backup job is missing tenant or vault identity",
+    );
+    store.recordAudit({
+      action: "wanghai.backup",
+      outcome: "failure",
+      metadata: { jobId: job.id, errorCode: "backup-job-invalid" },
+    });
+    return;
+  }
+  const actorId = backupActorId(job, tenantId);
+  if (store.isJobCancellationRequested(job.id)) {
+    const updated = store.failJob(job.id, workerId, "backup-cancelled", "Wanghai backup was cancelled", 0);
+    store.recordAudit({
+      actorId,
+      tenantId,
+      vaultId,
+      action: "wanghai.backup",
+      outcome: "failure",
+      metadata: {
+        jobId: job.id,
+        errorCode: updated?.errorCode ?? "durable-job-cancelled",
+        cancelled: true,
+      },
+    });
+    return;
+  }
+
+  let cleanupContainer = false;
+  let containerName: string | undefined;
+  const leaseMs = durableJobLeaseMs();
+  const heartbeat = setInterval(() => {
+    store.heartbeatJob(job.id, workerId, leaseMs);
+  }, Math.max(10_000, Math.floor(leaseMs / 4)));
+  heartbeat.unref();
+  try {
+    containerName = wanghaiBackupContainerName(job.id);
+    await withVaultLifecycleLock(import.meta.url, tenantId, vaultId, async () => {
+      if (store.isJobCancellationRequested(job.id)) {
+        throw new WanghaiBackupContainerError(
+          "backup-cancelled",
+          "Wanghai backup was cancelled",
+          false,
+          false,
+        );
+      }
+      const vault = resolveWanghaiBackupVault(tenantId, vaultId);
+      const completed = await executeWanghaiBackupContainer({
+        vault,
+        job,
+        tenantId,
+        vaultId,
+        isCancelled: () => store.isJobCancellationRequested(job.id),
+      });
+      if (!store.completeJob(job.id, workerId, completed.result)) {
+        if (store.isJobCancellationRequested(job.id)) {
+          const updated = store.failJob(
+            job.id,
+            workerId,
+            "backup-cancelled",
+            "Wanghai backup was cancelled",
+            0,
+          );
+          cleanupContainer = updated?.status === "failed";
+          store.recordAudit({
+            actorId,
+            tenantId,
+            vaultId,
+            action: "wanghai.backup",
+            outcome: "failure",
+            metadata: {
+              jobId: job.id,
+              errorCode: updated?.errorCode ?? "durable-job-cancelled",
+              cancelled: true,
+            },
+          });
+          return;
+        }
+        throw new WanghaiBackupContainerError(
+          "backup-job-lease-lost",
+          "Lost durable job lease while completing Wanghai backup",
+          true,
+          false,
+        );
+      }
+      cleanupContainer = true;
+      store.recordAudit({
+        actorId,
+        tenantId,
+        vaultId,
+        action: "wanghai.backup",
+        outcome: "success",
+        metadata: {
+          jobId: job.id,
+          attempts: job.attempts,
+          archiveName: completed.result.archiveName,
+          checksumVerified: completed.result.checksumVerified,
+          retentionCount: completed.result.retentionCount,
+        },
+      });
+    });
+  } catch (error) {
+    const cancelled = store.isJobCancellationRequested(job.id);
+    const classified = cancelled
+      ? {
+          code: "backup-cancelled",
+          message: "Wanghai backup was cancelled",
+          retryable: false,
+          cleanupContainer: error instanceof WanghaiBackupContainerError
+            ? error.cleanupContainer
+            : false,
+        }
+      : classifyWanghaiBackupError(error);
+    cleanupContainer = cleanupContainer || classified.cleanupContainer;
+    // A completed container is evidence for this job attempt. Do not remove it
+    // and start another one until the durable job has reached a terminal state.
+    const retryable = classified.retryable && !classified.cleanupContainer;
+    const updated = retryable
+      ? store.failJob(job.id, workerId, classified.code, classified.message)
+      : store.failJobPermanently(job.id, workerId, classified.code, classified.message);
+    store.recordAudit({
+      actorId,
+      tenantId,
+      vaultId,
+      action: "wanghai.backup",
+      outcome: "failure",
+      metadata: {
+        jobId: job.id,
+        attempts: job.attempts,
+        errorCode: updated?.errorCode ?? classified.code,
+        retryScheduled: updated?.status === "queued",
+        cancelled,
+      },
+    });
+    if (!cancelled && retryable && updated?.status === "queued") {
+      const retry = setTimeout(() => {
+        void resumeDurableVaultJobs();
+      }, 1_000);
+      retry.unref();
+    }
+  } finally {
+    clearInterval(heartbeat);
+    if (cleanupContainer && containerName) {
+      await removeWanghaiBackupContainer(containerName);
+    }
   }
 }
 
-/** Resume queued/leased provisioning after a Polaris process restart. */
+const DURABLE_WORKER_JOB_KINDS = ["vault-provision", WANGHAI_BACKUP_JOB_KIND] as const;
+
+async function runDurableJobWorker(workerId: string): Promise<void> {
+  const store = getPolarisControlStore(import.meta.url);
+  for (;;) {
+    const job = store.claimNextJob(workerId, durableJobLeaseMs(), DURABLE_WORKER_JOB_KINDS);
+    if (!job) return;
+    if (job.kind === "vault-provision") {
+      await executeClaimedProvisionJob(job, workerId);
+      continue;
+    }
+    if (job.kind === WANGHAI_BACKUP_JOB_KIND) {
+      await executeClaimedWanghaiBackupJob(job, workerId);
+      continue;
+    }
+    store.failJobPermanently(
+      job.id,
+      workerId,
+      "durable-job-handler-missing",
+      "No durable job handler is registered for this job",
+    );
+  }
+}
+
+/** Resume queued and leased Polaris durable jobs after a process restart. */
 export function resumeDurableVaultJobs(): Promise<void> {
-  if (provisionQueueDrain) return provisionQueueDrain;
+  if (durableJobQueueDrain) return durableJobQueueDrain;
   const workerCount = durableJobWorkerConcurrency();
   const workers = Array.from({ length: workerCount }, () => {
-    provisionWorkerSequence += 1;
-    return runProvisionWorker(`polaris-${process.pid}-provision-${provisionWorkerSequence}`);
+    durableJobWorkerSequence += 1;
+    return runDurableJobWorker(`polaris-${process.pid}-durable-${durableJobWorkerSequence}`);
   });
-  provisionQueueDrain = Promise.all(workers)
+  durableJobQueueDrain = Promise.all(workers)
     .then(() => undefined)
     .finally(() => {
-      provisionQueueDrain = null;
+      durableJobQueueDrain = null;
     });
-  provisionQueueDrain.catch((error) => {
-    logError("executor", "durable-provision-worker-failed", {
+  durableJobQueueDrain.catch((error) => {
+    logError("executor", "durable-job-worker-failed", {
       error: error instanceof Error ? error.message : String(error),
     });
   });
-  return provisionQueueDrain;
+  return durableJobQueueDrain;
 }
 
 export async function switchPortalVault(
