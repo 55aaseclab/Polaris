@@ -893,30 +893,26 @@ function loadPortalVaultRuntimeSurface(
 ): {
   surfaces: string[];
 } {
-  const targets = [
-    status?.driver?.selected ?? null,
-    { backend: "docker" as const },
-    { backend: "pod" as const, profile: "gvisor" },
-    { backend: "kubevirt-vm" as const },
-  ].filter(Boolean) as PortalDriverTarget[];
-  for (const target of targets) {
-    try {
-      const loaded = loadPortalVaultByTarget(userId, vault, target);
-      const ports = loaded.connectivity.servicePorts;
-      return {
-        surfaces: ports.some((port) =>
-          port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
-        )
-          ? ["paseo", "wanghai"]
-          : ["paseo"],
-      };
-    } catch {
-      continue;
-    }
+  // A surface belongs to the selected runtime, not any retained backend spec.
+  // Falling back here can advertise a stale Wanghai instance after a driver
+  // switch and lets the gateway resolve the wrong execution target.
+  const target = status?.driver?.selected;
+  if (!target) {
+    return { surfaces: [] };
   }
-  return {
-    surfaces: [],
-  };
+  try {
+    const loaded = loadPortalVaultByTarget(userId, vault, target);
+    const ports = loaded.connectivity.servicePorts;
+    return {
+      surfaces: ports.some((port) =>
+        port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090"
+      )
+        ? ["paseo", "wanghai"]
+        : ["paseo"],
+    };
+  } catch {
+    return { surfaces: [] };
+  }
 }
 
 export function loadVaultDetailStatic(

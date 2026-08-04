@@ -2450,6 +2450,22 @@ test("portal vault summaries expose surface capability without runtime ports", a
     const paseoStateRoot = vaultPaseoStateDir(vault, userId);
     fs.mkdirSync(paseoStateRoot, { recursive: true });
     fs.writeFileSync(path.join(paseoStateRoot, "server-id"), "srv_summary\n", "utf8");
+    writeVaultStatus({
+      schemaVersion: 1.1,
+      project: vault,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userId);
 
     const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
     assert.equal(summary?.serverId, "srv_summary");

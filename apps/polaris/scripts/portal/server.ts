@@ -874,31 +874,20 @@ async function resolveAuthorizedWanghaiVault(
     throw new PortalAuthError("Wanghai vault not found", 404);
   }
 
-  const targets: PortalDriverTarget[] = [];
-  if (summary.status?.driver?.selected) {
-    targets.push(summary.status.driver.selected);
+  const target = summary.status?.driver?.selected;
+  if (!target) {
+    throw new PortalAuthError("Wanghai vault runtime is unavailable", 503);
   }
-  targets.push(
-    { backend: "docker" },
-    { backend: "pod", profile: "gvisor" },
-    { backend: "kubevirt-vm" },
-  );
-  const tried = new Set<string>();
-  for (const target of targets) {
-    const key = `${target.backend}:${target.profile ?? ""}`;
-    if (tried.has(key)) continue;
-    tried.add(key);
-    try {
-      const spec = loadPortalVaultByTarget(userId, summary.name, target);
-      if (spec.connectivity.servicePorts.some(isWanghaiServicePort)) {
-        return { vault: summary.name, spec };
-      }
-    } catch {
-      // A vault can retain configs for multiple backends. Only the selected
-      // runtime should resolve to a gateway target.
+  try {
+    const spec = loadPortalVaultByTarget(userId, summary.name, target);
+    if (spec.connectivity.servicePorts.some(isWanghaiServicePort)) {
+      return { vault: summary.name, spec };
     }
+  } catch {
+    // The selected runtime is the only permitted gateway target. Do not fall
+    // back to a retained Docker, Pod, or KubeVirt configuration.
   }
-  throw new Error("Wanghai vault runtime configuration is unavailable");
+  throw new PortalAuthError("Wanghai vault runtime is unavailable", 503);
 }
 
 function isWanghaiServicePort(port: VaultSpec["connectivity"]["servicePorts"][number]): boolean {

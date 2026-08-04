@@ -17,8 +17,12 @@ import {
   scaffoldUserProfileById,
   vaultConfigPath,
 } from "../scripts/config/scaffold.js";
+import { ensureVaultConfig } from "../scripts/config/provision.js";
 import { createManagedSshCredential } from "../scripts/config/credentials.js";
-import { vaultPaseoStateDir } from "../scripts/output/state-store.js";
+import {
+  vaultPaseoStateDir,
+  writeVaultStatus,
+} from "../scripts/output/state-store.js";
 import {
   deleteUserMapEntriesForPolarisUserId,
   updateUserAccessEntry,
@@ -148,6 +152,22 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     const paseoState = vaultPaseoStateDir(vault, userA);
     fs.mkdirSync(paseoState, { recursive: true });
     fs.writeFileSync(path.join(paseoState, "server-id"), `${serverId}\n`, "utf8");
+    writeVaultStatus({
+      schemaVersion: 1.1,
+      project: vault,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userA);
 
     portal = createPortalServer(0);
     await once(portal, "listening");
@@ -239,6 +259,41 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(csrfAttempt.statusCode, 403);
+
+    // A retained Docker configuration must not keep Wanghai available after
+    // Polaris selects a different runtime that does not expose the surface.
+    ensureVaultConfig(`${vault}@pod:gvisor`, userA);
+    const podConfigPath = vaultConfigPath(vault, "pod", userA);
+    const podConfig = (yaml.load(fs.readFileSync(podConfigPath, "utf8")) ?? {}) as Record<string, any>;
+    podConfig.service = {
+      ...(podConfig.service ?? {}),
+      ports: (podConfig.service?.ports ?? []).filter(
+        (port: Record<string, unknown>) => port.name !== "wanghai",
+      ),
+    };
+    fs.writeFileSync(podConfigPath, yaml.dump(podConfig, { lineWidth: 120, noRefs: true }), "utf8");
+    writeVaultStatus({
+      schemaVersion: 1.1,
+      project: vault,
+      driver: {
+        selected: { backend: "pod", profile: "gvisor" },
+        status: "running",
+      },
+      paseo: {
+        daemon: "ready",
+        web: "connectable",
+        reconnectMode: "reconnectable",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {},
+    }, userA);
+    const selectedRuntimeLaunch = await fetch(
+      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${serverId}/launch`,
+      { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
+    );
+    assert.equal(selectedRuntimeLaunch.status, 404);
+    assert.equal(upstreamRequests, 1);
 
     process.env.POLARIS_AUTH_DEFAULT_USER_ID = userB;
     const crossTenantLaunch = await fetch(
