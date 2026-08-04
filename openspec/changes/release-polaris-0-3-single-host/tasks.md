@@ -11,7 +11,7 @@
 
 ## 2. Semantic Surface Mutations
 
-- [ ] 2.1 Inventory every integrated Wanghai mutation route and define an
+- [x] 2.1 Inventory every integrated Wanghai mutation route and define an
   allowlisted Polaris action catalog with scope and version requirements.
 - [ ] 2.2 Require and validate bounded idempotency keys and normalized request
   fingerprints for every admitted action.
