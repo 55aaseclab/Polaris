@@ -10,6 +10,7 @@ export const WANGHAI_ASSERTION_AUDIENCE = "wanghai";
 export const WANGHAI_ASSERTION_VERSION = 1;
 
 export type WanghaiGatewayRole = "viewer" | "operator" | "admin";
+export type WanghaiQuotaMeasurement = "active_workspace";
 
 export interface WanghaiAssertionAdmission {
   action: string;
@@ -43,6 +44,7 @@ export interface WanghaiAssertionClaims {
   iat: number;
   exp: number;
   admission?: WanghaiAdmissionClaims;
+  quota_measurement?: WanghaiQuotaMeasurement;
 }
 
 export interface WanghaiLaunchClaims {
@@ -88,6 +90,7 @@ export function issueWanghaiAssertion(input: {
   role: WanghaiGatewayRole;
   requestId?: string;
   admission?: WanghaiAssertionAdmission;
+  quotaMeasurement?: WanghaiQuotaMeasurement;
   nowSeconds?: number;
   ttlSeconds?: number;
 }): string {
@@ -95,6 +98,9 @@ export function issueWanghaiAssertion(input: {
   const ttl = input.ttlSeconds ?? 60;
   if (!Number.isSafeInteger(now) || !Number.isSafeInteger(ttl) || ttl <= 0) {
     throw new Error("Assertion time values must be positive integers");
+  }
+  if (input.admission && input.quotaMeasurement) {
+    throw new Error("Assertion admission and quota measurement cannot be combined");
   }
   const claims: WanghaiAssertionClaims = {
     v: 1,
@@ -108,6 +114,9 @@ export function issueWanghaiAssertion(input: {
     iat: now,
     exp: now + ttl,
     ...(input.admission ? { admission: normalizeAdmission(input.admission) } : {}),
+    ...(input.quotaMeasurement
+      ? { quota_measurement: normalizeQuotaMeasurement(input.quotaMeasurement) }
+      : {}),
   };
   return signPayload(claims, input.secret);
 }
@@ -207,6 +216,12 @@ export function verifyWanghaiAssertion(
   }
   if (claims.admission !== undefined) {
     normalizeAdmissionClaims(claims.admission);
+  }
+  if (claims.quota_measurement !== undefined) {
+    normalizeQuotaMeasurement(claims.quota_measurement);
+  }
+  if (claims.admission !== undefined && claims.quota_measurement !== undefined) {
+    throw new Error("Wanghai assertion combines incompatible purposes");
   }
   return claims;
 }
@@ -310,6 +325,13 @@ function normalizeAdmission(input: WanghaiAssertionAdmission): WanghaiAdmissionC
     ...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
     ...(quotaReservationId === undefined ? {} : { quota_reservation_id: quotaReservationId }),
   };
+}
+
+function normalizeQuotaMeasurement(value: unknown): WanghaiQuotaMeasurement {
+  if (value !== "active_workspace") {
+    throw new Error("quotaMeasurement is invalid");
+  }
+  return value;
 }
 
 function normalizeAdmissionClaims(value: unknown): WanghaiAdmissionClaims {

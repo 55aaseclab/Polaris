@@ -111,3 +111,39 @@ test("Wanghai assertions can carry a bounded signed mutation admission", () => {
     /workspaceId is invalid/u,
   );
 });
+
+test("Wanghai assertions keep quota measurement separate from mutation admission", () => {
+  const secret = deriveWanghaiVaultAssertionSecret(masterSecret, "tenant-a", "vault-a");
+  const token = issueWanghaiAssertion({
+    secret,
+    userId: "synthetic-user-a",
+    tenantId: "tenant-a",
+    vaultId: "vault-a",
+    role: "operator",
+    requestId: "request-quota-a",
+    quotaMeasurement: "active_workspace",
+    nowSeconds: 1_000,
+  });
+  assert.equal(
+    verifyWanghaiAssertion(token, secret, 1_001).quota_measurement,
+    "active_workspace",
+  );
+  assert.throws(
+    () => issueWanghaiAssertion({
+      secret,
+      userId: "synthetic-user-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      role: "operator",
+      quotaMeasurement: "active_workspace",
+      admission: {
+        action: "product.update",
+        actionVersion: 1,
+        workspaceId: "acme",
+        idempotencyKey: "mutation-a",
+        requestHash: "a".repeat(64),
+      },
+    }),
+    /cannot be combined/u,
+  );
+});
