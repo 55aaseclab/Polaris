@@ -165,9 +165,11 @@ function provisionJobLeaseMs(): number {
   return Math.max(60_000, Math.min(6 * 60 * 60 * 1_000, raw));
 }
 
-function provisionJobConcurrency(): number {
-  const raw = Number.parseInt(String(process.env.POLARIS_JOB_CONCURRENCY ?? ""), 10);
-  if (!Number.isFinite(raw)) return 2;
+export function durableJobWorkerConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number.parseInt(String(env.POLARIS_JOB_WORKER_CONCURRENCY ?? ""), 10);
+  if (!Number.isFinite(raw)) return 1;
   return Math.max(1, Math.min(4, raw));
 }
 
@@ -1751,7 +1753,7 @@ async function runProvisionWorker(workerId: string): Promise<void> {
 /** Resume queued/leased provisioning after a Polaris process restart. */
 export function resumeDurableVaultJobs(): Promise<void> {
   if (provisionQueueDrain) return provisionQueueDrain;
-  const workerCount = provisionJobConcurrency();
+  const workerCount = durableJobWorkerConcurrency();
   const workers = Array.from({ length: workerCount }, () => {
     provisionWorkerSequence += 1;
     return runProvisionWorker(`polaris-${process.pid}-provision-${provisionWorkerSequence}`);
