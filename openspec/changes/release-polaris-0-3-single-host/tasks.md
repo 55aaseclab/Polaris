@@ -4,9 +4,9 @@
   slice, add any missing regression coverage, and commit it separately.
 - [x] 1.2 Update canonical 0.3 documentation from a 50-100-user claim to the
   single-host 5-10 active-user release profile and staged 2/5/10 evidence.
-- [ ] 1.3 Add a machine-readable single-host release profile with maximum active
+- [x] 1.3 Add a machine-readable single-host release profile with maximum active
   vaults, worker concurrency, resource budgets, quota defaults, and SLO values.
-- [ ] 1.4 Add configuration validation that fails closed for invalid release
+- [x] 1.4 Add configuration validation that fails closed for invalid release
   profile values and prevents replica mode for the 0.3.0 profile.
 
 ## 2. Semantic Surface Mutations
