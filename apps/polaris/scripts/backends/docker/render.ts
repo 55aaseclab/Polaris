@@ -346,28 +346,34 @@ export function renderDockerVault(vault: VaultSpec): string {
     ? filterIntegratedWanghaiPlainEnvVars(vault.runtime.plainEnvVars)
     : vault.runtime.plainEnvVars;
   const wanghaiGateway = wanghaiGatewayEnvironment(vault);
-  const authBootstrapLines = authFiles.flatMap((file) => {
-    const content = file.content ?? "";
-    const encoded = Buffer.from(content, "utf8").toString("base64");
+  const authBootstrapFiles = authFiles.map((file, index) => ({
+    environmentName: `POLARIS_BOOTSTRAP_AUTH_FILE_${index}_B64`,
+    file,
+    value: Buffer.from(file.content ?? "", "utf8").toString("base64"),
+  }));
+  const authBootstrapLines = authBootstrapFiles.flatMap(({ environmentName, file }) => {
     const storageTarget = stateStoragePathForMountPath({
       mountPath: file.mountPath,
       runtimeHome: home,
       identityRoot: vault.attachments.userIdentityState.mountRoot,
     });
     const target = storageTarget ?? file.mountPath;
+    const parent = path.dirname(target);
+    const decode = `mkdir -p ${q(parent)}; printf '%s' "\${${environmentName}}" | base64 -d > ${q(target)}`;
     const guardedWrite =
       storageTarget?.startsWith(`${sshRoot}/`)
         && vault.userProfile.ssh.mode === "provided-key"
-        ? `python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}`
-        : `if [ ! -f ${target} ]; then python3 -c ${q(`import base64, pathlib; path = pathlib.Path(${JSON.stringify(target)}); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(base64.b64decode(${JSON.stringify(encoded)}));`)}; fi`;
+        ? decode
+        : `if [ ! -f ${q(target)} ]; then ${decode}; fi`;
     return [
       guardedWrite,
       ...(vault.runtime.user === "root" ? [`chown root:root ${target} || true`] : []),
       `chmod 600 ${target} || true`,
+      `unset ${environmentName}`,
     ];
   });
   const bootstrap = [
-    "set -eux",
+    "set -eu",
     `mkdir -p ${home}`,
     `chmod 755 ${home}`,
     ...(vault.runtime.bootstrapProfile === "prebuilt"
@@ -408,8 +414,6 @@ export function renderDockerVault(vault: VaultSpec): string {
     `find ${sshRoot} -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true`,
     `for ssh_meta in ${sshRoot}/authorized_keys ${sshRoot}/known_hosts ${sshRoot}/known_hosts.old; do if [ -e "$ssh_meta" ]; then chmod 600 "$ssh_meta" 2>/dev/null || true; fi; done`,
     ...buildGitHubKnownHostsLines(sshRoot),
-    ...plainEnvVars
-      .map((envVar) => `export ${envVar.name}=${q(envVar.value)}`),
     ...buildEvolutionBootstrapLines(vault),
     ...buildPaseoBootstrapLines(vault),
     ...buildWanghaiPortalRuntimeLines(vault),
@@ -422,13 +426,18 @@ export function renderDockerVault(vault: VaultSpec): string {
       ? `      - "127.0.0.1:${port.nodePort}:${port.containerPort}"`
       : `      - "${port.nodePort || port.containerPort}:${port.containerPort}"`)
     .join("\n");
-  const environmentLines = [
-    `      POLARIS_EVOLUTION_ROOT: ${q(vault.agent.runtime.evolutionRoot)}`,
-    `      POLARIS_VAULT_MEMORY_FILE: ${q(vault.evolution?.vaultMemoryFile ?? "")}`,
-    `      POLARIS_USER_MEMORY_FILE: ${q(vault.evolution?.userMemoryFile ?? "")}`,
-    `      POLARIS_MEMORY_SNAPSHOT_FILE: ${q(vault.evolution?.sessionSnapshotFile ?? "")}`,
-    ...Object.entries(wanghaiGateway ?? {}).map(([name, value]) => `      ${name}: ${q(value)}`),
-  ].join("\n");
+  const environment = {
+    ...Object.fromEntries(plainEnvVars.map((envVar) => [envVar.name, envVar.value])),
+    POLARIS_EVOLUTION_ROOT: vault.agent.runtime.evolutionRoot,
+    POLARIS_VAULT_MEMORY_FILE: vault.evolution?.vaultMemoryFile ?? "",
+    POLARIS_USER_MEMORY_FILE: vault.evolution?.userMemoryFile ?? "",
+    POLARIS_MEMORY_SNAPSHOT_FILE: vault.evolution?.sessionSnapshotFile ?? "",
+    ...(wanghaiGateway ?? {}),
+    ...Object.fromEntries(authBootstrapFiles.map((file) => [file.environmentName, file.value])),
+  };
+  const environmentLines = Object.entries(environment)
+    .map(([name, value]) => `      ${name}: ${q(value)}`)
+    .join("\n");
 
   return `name: ${composeProjectName}
 

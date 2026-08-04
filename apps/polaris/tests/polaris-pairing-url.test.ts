@@ -11,7 +11,7 @@ import {
 } from "../scripts/config/scaffold.js";
 import { ensureVaultConfig } from "../scripts/config/provision.js";
 import { generatedOutputPath } from "../scripts/output/write-generated.js";
-import { renderAndWriteDockerVault } from "../scripts/backends/docker/render.js";
+import { renderAndWriteDockerVault, renderDockerVault } from "../scripts/backends/docker/render.js";
 import { renderAndWritePodVault, renderPodVault } from "../scripts/backends/pod/render.js";
 import { renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
 import { vaultRuntimeResourceName } from "../scripts/core/vault-name.js";
@@ -130,6 +130,32 @@ test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
     assert.match(rendered, /WANGHAI_GATEWAY_ASSERTION_SECRET:/);
     assert.match(rendered, /WANGHAI_GATEWAY_FRAME_ANCESTORS:/);
     assert.match(rendered, /https:\/\/polaris\.example\.test/);
+
+    const commandSecret = "synthetic-command-secret";
+    const renderedWithCredentials = renderDockerVault({
+      ...vault,
+      runtime: {
+        ...vault.runtime,
+        plainEnvVars: [{ name: "SYNTHETIC_TOKEN", value: commandSecret }],
+        authFiles: [
+          ...vault.runtime.authFiles,
+          {
+            key: "synthetic-command-secret",
+            mountPath: "/root/.config/synthetic-auth.json",
+            content: commandSecret,
+          },
+        ],
+      },
+    });
+    const command = renderedWithCredentials.slice(
+      renderedWithCredentials.indexOf("    command:"),
+      renderedWithCredentials.indexOf("    ports:"),
+    );
+    assert.doesNotMatch(command, /set -x/);
+    assert.doesNotMatch(command, new RegExp(commandSecret));
+    assert.doesNotMatch(command, new RegExp(Buffer.from(commandSecret, "utf8").toString("base64")));
+    assert.match(renderedWithCredentials, /SYNTHETIC_TOKEN: "synthetic-command-secret"/);
+    assert.match(renderedWithCredentials, /POLARIS_BOOTSTRAP_AUTH_FILE_\d+_B64:/);
 
     const podRendered = renderPodVault({
       ...vault,
