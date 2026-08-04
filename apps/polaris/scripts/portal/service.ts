@@ -63,11 +63,14 @@ import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
   getWanghaiBackupJob as getWanghaiBackupJobExecutor,
+  getWanghaiRestoreJob as getWanghaiRestoreJobExecutor,
   getPortalVaultPaseoDiagnostic as getPortalVaultPaseoDiagnosticExecutor,
   permanentlyDeletePortalVault as permanentlyDeletePortalVaultExecutor,
   queueProvisionVault as queueProvisionVaultExecutor,
   queueWanghaiBackup as queueWanghaiBackupExecutor,
+  queueWanghaiRestore as queueWanghaiRestoreExecutor,
   requestWanghaiBackupCancellation as requestWanghaiBackupCancellationExecutor,
+  requestWanghaiRestoreCancellation as requestWanghaiRestoreCancellationExecutor,
   requestProvisionCancellation as requestProvisionCancellationExecutor,
   refreshPortalVaultStatus as refreshPortalVaultStatusExecutor,
   rebuildPortalVault as rebuildPortalVaultExecutor,
@@ -104,6 +107,25 @@ export interface PortalWanghaiBackupJob {
   completedAt?: string;
 }
 
+export interface PortalWanghaiRestoreJob {
+  id: string;
+  status: DurableJob["status"];
+  attempts: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  result?: {
+    sourceBackupJobId: string;
+    archiveName: string;
+    checksumVerified: boolean;
+    staged: true;
+  };
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 function portalWanghaiBackupJob(job: DurableJob): PortalWanghaiBackupJob {
   const result = job.result;
   const archiveName = typeof result?.archiveName === "string" ? result.archiveName : "";
@@ -124,6 +146,38 @@ function portalWanghaiBackupJob(job: DurableJob): PortalWanghaiBackupJob {
             archiveName,
             checksumVerified,
             retentionCount,
+          },
+        }
+      : {}),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.completedAt ? { completedAt: job.completedAt } : {}),
+  };
+}
+
+function portalWanghaiRestoreJob(job: DurableJob): PortalWanghaiRestoreJob {
+  const result = job.result;
+  const sourceBackupJobId = typeof result?.sourceBackupJobId === "string"
+    ? result.sourceBackupJobId
+    : "";
+  const archiveName = typeof result?.archiveName === "string" ? result.archiveName : "";
+  const checksumVerified = result?.checksumVerified === true;
+  const staged = typeof result?.stagingVolume === "string" && result.stagingVolume.length > 0;
+  return {
+    id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.errorCode ? { errorCode: job.errorCode } : {}),
+    ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    ...(sourceBackupJobId && archiveName && checksumVerified && staged
+      ? {
+          result: {
+            sourceBackupJobId,
+            archiveName,
+            checksumVerified,
+            staged: true,
           },
         }
       : {}),
@@ -612,6 +666,49 @@ export function cancelPortalWanghaiBackup(input: {
   jobId: string;
 }): boolean {
   return requestWanghaiBackupCancellationExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+}
+
+export async function queuePortalWanghaiRestore(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  sourceBackupJobId: string;
+  idempotencyKey: string;
+}): Promise<PortalWanghaiRestoreJob> {
+  return portalWanghaiRestoreJob(await queueWanghaiRestoreExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    sourceBackupJobId: input.sourceBackupJobId,
+    idempotencyKey: input.idempotencyKey,
+  }));
+}
+
+export function getPortalWanghaiRestoreJob(input: {
+  userId: string;
+  vault: string;
+  jobId: string;
+}): PortalWanghaiRestoreJob | null {
+  const job = getWanghaiRestoreJobExecutor({
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+  return job ? portalWanghaiRestoreJob(job) : null;
+}
+
+export function cancelPortalWanghaiRestore(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  jobId: string;
+}): boolean {
+  return requestWanghaiRestoreCancellationExecutor({
     actorId: input.actorId,
     tenantId: input.userId,
     vaultId: input.vault,

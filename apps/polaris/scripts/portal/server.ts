@@ -32,12 +32,14 @@ import {
 import {
   activatePortalCredential,
   cancelPortalWanghaiBackup,
+  cancelPortalWanghaiRestore,
   createPortalCredential,
   createPortalSkill,
   listPortalAdminUsers,
   deletePortalUser,
   getPortalCredentialCatalog,
   getPortalWanghaiBackupJob,
+  getPortalWanghaiRestoreJob,
   deletePortalCredential,
   deletePortalSkill,
   installPortalVaultSkill,
@@ -56,6 +58,7 @@ import {
   readUserPortalVaultAssetPreview,
   queueProvisionVault,
   queuePortalWanghaiBackup,
+  queuePortalWanghaiRestore,
   rebuildPortalVault,
   restartPortalVaultPaseoDaemon,
   syncPortalVaultSkills,
@@ -71,6 +74,7 @@ import {
   writePortalCredentialFile,
 } from "./service.js";
 import { WanghaiBackupError } from "../runtime/wanghai-backup.js";
+import { WanghaiRestoreError } from "../runtime/wanghai-restore.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
@@ -482,6 +486,24 @@ function sendWanghaiBackupError(res: ServerResponse, error: unknown): void {
   sendJson(res, statusCode, { error: error.message });
 }
 
+function sendWanghaiRestoreError(res: ServerResponse, error: unknown): void {
+  if (!(error instanceof WanghaiRestoreError)) {
+    throw error;
+  }
+  const statusCode = error.code === "restore-contract-invalid"
+    || error.code === "restore-source-invalid"
+    ? 400
+    : error.code === "restore-tenant-not-found"
+      ? 404
+      : error.code === "restore-rate-limited"
+        ? 429
+        : error.code === "restore-backend-unsupported"
+          || error.code === "restore-source-unavailable"
+          ? 409
+          : 503;
+  sendJson(res, statusCode, { error: error.message });
+}
+
 async function handleWanghaiBackupSubmit(
   req: IncomingMessage,
   res: ServerResponse,
@@ -539,6 +561,68 @@ function handleWanghaiBackupCancellation(
     return;
   }
   const job = getPortalWanghaiBackupJob(input);
+  sendJson(res, 202, { job });
+}
+
+async function handleWanghaiRestoreSubmit(
+  req: IncomingMessage,
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    sourceBackupJobId: string;
+  },
+): Promise<void> {
+  const idempotencyKey = requestHeader(req, "idempotency-key");
+  if (!idempotencyKey) {
+    sendJson(res, 428, { error: "Wanghai restore requires the idempotency-key header" });
+    return;
+  }
+  try {
+    const job = await queuePortalWanghaiRestore({
+      actorId: input.actorId,
+      userId: input.userId,
+      vault: input.vault,
+      sourceBackupJobId: input.sourceBackupJobId,
+      idempotencyKey,
+    });
+    sendJson(res, job.status === "queued" || job.status === "running" ? 202 : 200, { job });
+  } catch (error) {
+    sendWanghaiRestoreError(res, error);
+  }
+}
+
+function handleWanghaiRestoreRead(
+  res: ServerResponse,
+  input: {
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  const job = getPortalWanghaiRestoreJob(input);
+  if (!job) {
+    notFound(res);
+    return;
+  }
+  sendJson(res, 200, { job });
+}
+
+function handleWanghaiRestoreCancellation(
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  if (!cancelPortalWanghaiRestore(input)) {
+    notFound(res);
+    return;
+  }
+  const job = getPortalWanghaiRestoreJob(input);
   sendJson(res, 202, { job });
 }
 
@@ -2106,6 +2190,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/vaults",
             "/api/users/:userId/vaults/:vaultName",
             "/api/users/:userId/vaults/:vaultName/backups",
+            "/api/users/:userId/vaults/:vaultName/backups/:backupJobId/restore",
             "/api/users/:userId/credentials",
           ],
         });
@@ -2553,6 +2638,28 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           );
           return;
         }
+        if (
+          segments[3] === "vaults"
+          && segments.length === 8
+          && segments[5] === "backups"
+          && segments[7] === "restore"
+        ) {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          if (req.method === "POST") {
+            await handleWanghaiRestoreSubmit(req, res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              sourceBackupJobId: decodeURIComponent(segments[6]),
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
         if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "backups") {
           if (!sessionCanUseWanghai(session)) {
             sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
@@ -2585,6 +2692,32 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           }
           if (req.method === "DELETE") {
             handleWanghaiBackupCancellation(res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (segments[3] === "vaults" && segments.length === 7 && segments[5] === "restores") {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          const jobId = decodeURIComponent(segments[6]);
+          if (req.method === "GET") {
+            handleWanghaiRestoreRead(res, {
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          if (req.method === "DELETE") {
+            handleWanghaiRestoreCancellation(res, {
               actorId: session.polarisUserId ?? routeUserId,
               userId: routeUserId,
               vault,

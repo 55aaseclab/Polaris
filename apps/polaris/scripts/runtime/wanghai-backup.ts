@@ -127,7 +127,7 @@ function secureDirectory(directory: string, label: string): string {
   return path.resolve(normalized);
 }
 
-function secureKeyFile(keyFile: string): string {
+export function validateWanghaiBackupKeyFile(keyFile: string): string {
   let stats: fs.Stats;
   try {
     stats = fs.lstatSync(keyFile);
@@ -313,7 +313,7 @@ export function ensureWanghaiBackupKey(input: {
       );
     }
   }
-  return secureKeyFile(keyFile);
+  return validateWanghaiBackupKeyFile(keyFile);
 }
 
 export function buildWanghaiBackupDockerRunArgs(
@@ -333,7 +333,7 @@ export function buildWanghaiBackupDockerRunArgs(
   const dataMount = backupDataMount(input.vault);
   const backupVolume = wanghaiBackupVolumeName(input.vault);
   const containerName = wanghaiBackupContainerName(jobId);
-  const keyFile = secureKeyFile(input.keyFile);
+  const keyFile = validateWanghaiBackupKeyFile(input.keyFile);
 
   return [
     "run",

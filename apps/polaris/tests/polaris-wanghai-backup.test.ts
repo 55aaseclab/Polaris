@@ -19,6 +19,7 @@ import {
 } from "../scripts/portal/user-map.js";
 import {
   queueWanghaiBackup,
+  queueWanghaiRestore,
   requestWanghaiBackupCancellation,
   resumeDurableVaultJobs,
 } from "../scripts/runtime/operations.js";
@@ -131,6 +132,12 @@ case "\${1:-}" in
           ;;
       esac
     done
+    if [[ "\${name}" = polaris-wanghai-restore-* ]]; then
+      printf '[{"State":{"Running":false,"ExitCode":0}}]' > "\${state_file}"
+      printf 'restored_to=/restore/workspaces\\nverified=1\\n' > "\${logs_file}"
+      cat "\${logs_file}"
+      exit 0
+    fi
     job="\${name#polaris-wanghai-backup-}"
     if [ "\${FAKE_BACKUP_HOLD:-0}" = "1" ]; then
       printf '[{"State":{"Running":true,"ExitCode":0}}]' > "\${state_file}"
@@ -423,6 +430,77 @@ test("durable Wanghai backup runs once with no network or published port", async
             assert.equal(/(?:^|\s)(?:-p|--publish)(?:\s|$)/u.test(backupRun), false);
             assert.equal(commands.filter((entry) => entry.startsWith("run --name polaris-wanghai-backup-")).length, 1);
             assert.ok(commands.some((entry) => entry.startsWith("rm -f polaris-wanghai-backup-")));
+          } finally {
+            closePolarisControlStore();
+          }
+        });
+      });
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("durable Wanghai restore stages a completed same-scope backup once", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-worker-"));
+  const keyRoot = path.join(root, "keys");
+  const controlPath = path.join(root, "control.sqlite");
+  fs.mkdirSync(keyRoot, { mode: 0o700 });
+  try {
+    await withBackupVault(async ({ tenantId, vaultId }) => {
+      await withFakeDocker({ tenantId, vaultId }, async (readCommands) => {
+        await withEnv({
+          POLARIS_CONTROL_STORE_PATH: controlPath,
+          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
+          POLARIS_WANGHAI_RESTORE_MAX_ARCHIVE_BYTES: "1048576",
+        }, async () => {
+          closePolarisControlStore();
+          try {
+            const backup = await queueWanghaiBackup({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              idempotencyKey: "restore-source-a",
+            });
+            await resumeDurableVaultJobs();
+            const restore = await queueWanghaiRestore({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              sourceBackupJobId: backup.id,
+              idempotencyKey: "restore-request-a",
+            });
+            await resumeDurableVaultJobs();
+            const finished = getPolarisControlStore(import.meta.url).getJob(restore.id);
+            assert.equal(finished?.status, "succeeded");
+            assert.equal(finished?.result?.sourceBackupJobId, backup.id);
+            assert.equal(
+              finished?.result?.archiveName,
+              `backup-${tenantId}-${vaultId}-${backup.id}.tar.gz.enc`,
+            );
+            assert.equal(finished?.result?.checksumVerified, true);
+            assert.equal(typeof finished?.result?.stagingVolume, "string");
+            const replay = await queueWanghaiRestore({
+              actorId: "restore-operator",
+              tenantId,
+              vaultId,
+              sourceBackupJobId: backup.id,
+              idempotencyKey: "restore-request-a",
+            });
+            assert.equal(replay.id, restore.id);
+            const commands = readCommands();
+            const restoreRun = commands.find((entry) => entry.startsWith("run --name polaris-wanghai-restore-"));
+            assert.ok(restoreRun);
+            assert.match(restoreRun, /--network none/u);
+            assert.match(restoreRun, /--read-only/u);
+            assert.match(restoreRun, /target=\/backup,readonly/u);
+            assert.match(restoreRun, /target=\/restore/u);
+            assert.equal(/target=\/vault\/project/u.test(restoreRun), false);
+            assert.equal(/(?:^|\s)(?:-p|--publish)(?:\s|$)/u.test(restoreRun), false);
+            assert.equal(commands.filter((entry) => entry.startsWith("run --name polaris-wanghai-restore-")).length, 1);
+            assert.ok(commands.some((entry) => entry.startsWith("rm -f polaris-wanghai-restore-")));
+            assert.equal(commands.some((entry) => entry.startsWith("volume rm ")), false);
           } finally {
             closePolarisControlStore();
           }

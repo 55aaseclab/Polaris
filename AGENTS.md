@@ -71,7 +71,12 @@ operations, and release documentation lives in the Polaris documentation site.
   vault data attachment read-only, a separate per-vault backup volume, and a
   private key below `POLARIS_WANGHAI_BACKUP_KEY_ROOT`. Keep its named container
   until the durable result is persisted. Do not add a Wanghai portal backup,
-  restore, or rollback route; restore remains a separate release-gated slice.
+  restore, or rollback route. The separate Polaris-owned restore staging slice
+  may accept only a completed same-tenant/vault backup, use a digest-pinned,
+  network-disabled one-shot image with read-only `/backup` and a new private
+  `/restore` volume, and persist only a verified staging result. Do not expose
+  the staging volume or activate, replace, or roll back the live root until the
+  separate activation/rollback gate is implemented.
 - Keep manual intelligence-analysis completion in Polaris durable jobs. A
   Wanghai review export may be surface work, but direct analysis `prepare`,
   `run`, `finalize`, and `complete-review` must remain unavailable in
