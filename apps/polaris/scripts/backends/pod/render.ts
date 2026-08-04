@@ -290,12 +290,7 @@ function wanghaiGatewayEnvironment(vault: VaultSpec): {
 
 function buildWanghaiPortalRuntimeLines(vault: VaultSpec): string[] {
   if (!vaultEnablesWanghaiPortal(vault)) return [];
-  const gateway = wanghaiGatewayEnvironment(vault);
   return [
-    `          export WANGHAI_GATEWAY_ASSERTION_SECRET=${q(gateway.assertionSecret)} && \\`,
-    `          export WANGHAI_GATEWAY_TENANT_ID=${q(gateway.tenantId)} && \\`,
-    `          export WANGHAI_GATEWAY_VAULT_ID=${q(gateway.vaultId)} && \\`,
-    `          export WANGHAI_GATEWAY_FRAME_ANCESTORS=${q(gateway.frameAncestors)} && \\`,
     `          mkdir -p ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.vaultRuntimeState.mountRoot} && \\`,
     `          if [ ! -x /usr/local/bin/wanghai-entrypoint ] || [ ! -d /opt/wanghai/apps/admin-portal ]; then echo "Wanghai portal runtime is missing" >&2; exit 1; fi && \\`,
     "          exec env WANGHAI_SUPERVISE_PORTAL=1 /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port 9090",
