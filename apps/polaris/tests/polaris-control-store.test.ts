@@ -216,6 +216,7 @@ test("control store cancels queued jobs and prevents a cancelled lease from comp
     assert.equal(store.requestJobCancellation("tenant-a:cancel-queued"), true);
     assert.equal(store.getJob(queued.id)?.status, "failed");
     assert.equal(store.getJob(queued.id)?.cancelRequested, true);
+    assert.equal(store.getJob(queued.id)?.errorCode, "durable-job-cancelled");
     assert.equal(
       store.enqueueJob({
         kind: "vault-provision",
@@ -227,7 +228,7 @@ test("control store cancels queued jobs and prevents a cancelled lease from comp
     assert.equal(store.claimNextJob("worker-a"), null);
 
     const running = store.enqueueJob({
-      kind: "vault-provision",
+      kind: "wanghai-backup",
       dedupeKey: "tenant-a:cancel-running",
       tenantId: "tenant-a",
       vaultId: "cancel-running",
@@ -241,7 +242,7 @@ test("control store cancels queued jobs and prevents a cancelled lease from comp
       store.failJob(running.id, "worker-a", "temporary", "should be cancelled")?.status,
       "failed",
     );
-    assert.equal(store.getJob(running.id)?.errorCode, "vault-provision-cancelled");
+    assert.equal(store.getJob(running.id)?.errorCode, "durable-job-cancelled");
 
     const terminal = store.enqueueJob({
       kind: "vault-provision",

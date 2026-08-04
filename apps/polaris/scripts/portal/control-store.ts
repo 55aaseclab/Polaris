@@ -139,6 +139,8 @@ type SqlRow = Record<string, unknown>;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_METADATA_BYTES = 16 * 1024;
 const MAX_ERROR_BYTES = 4 * 1024;
+const CANCELLED_JOB_ERROR_CODE = "durable-job-cancelled";
+const CANCELLED_JOB_ERROR_MESSAGE = "durable job cancelled";
 const DEFAULT_GATEWAY_RATE_WINDOW_SECONDS = 60;
 const MAX_RATE_LIMIT_BUCKET_KEY_BYTES = 128;
 const MAX_IDEMPOTENCY_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -661,12 +663,12 @@ export class PolarisControlStore {
             END,
             lease_owner = NULL, lease_expires_at = NULL,
             error_code = CASE
-              WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+              WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_CODE}'
               WHEN attempts >= max_attempts THEN COALESCE(error_code, 'job-lease-expired')
               ELSE error_code
             END,
             error_message = CASE
-              WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+              WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_MESSAGE}'
               WHEN attempts >= max_attempts THEN COALESCE(error_message, 'durable job lease expired')
               ELSE error_message
             END,
@@ -743,11 +745,11 @@ export class PolarisControlStore {
             END,
             available_at = ?, lease_owner = NULL, lease_expires_at = NULL,
             error_code = CASE
-              WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+              WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_CODE}'
               ELSE ?
             END,
             error_message = CASE
-              WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+              WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_MESSAGE}'
               ELSE ?
             END,
             updated_at = ?,
@@ -813,11 +815,11 @@ export class PolarisControlStore {
       SET status = 'failed', available_at = ?, lease_owner = NULL,
           lease_expires_at = NULL,
           error_code = CASE
-            WHEN cancel_requested = 1 THEN 'vault-provision-cancelled'
+            WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_CODE}'
             ELSE ?
           END,
           error_message = CASE
-            WHEN cancel_requested = 1 THEN 'vault provision cancelled'
+            WHEN cancel_requested = 1 THEN '${CANCELLED_JOB_ERROR_MESSAGE}'
             ELSE ?
           END,
           updated_at = ?, completed_at = ?
@@ -853,11 +855,11 @@ export class PolarisControlStore {
         const result = this.db.prepare(`
           UPDATE jobs
           SET status = 'failed', cancel_requested = 1, lease_owner = NULL,
-              lease_expires_at = NULL, error_code = 'vault-provision-cancelled',
-              error_message = 'vault provision cancelled', updated_at = ?,
+              lease_expires_at = NULL, error_code = ?,
+              error_message = ?, updated_at = ?,
               completed_at = ?
           WHERE dedupe_key = ? AND status = 'queued'
-        `).run(now, now, key);
+        `).run(CANCELLED_JOB_ERROR_CODE, CANCELLED_JOB_ERROR_MESSAGE, now, now, key);
         changed = result.changes === 1;
         return;
       }
