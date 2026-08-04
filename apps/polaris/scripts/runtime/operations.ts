@@ -74,12 +74,18 @@ import {
   withVaultLifecycleLock,
   withVaultMutationLock,
 } from "../utils/vault-lifecycle-lock.js";
+import {
+  getPolarisControlStore,
+  type DurableJob,
+} from "../portal/control-store.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const provisionJobs = new Map<string, Promise<void>>();
 const statusRefreshJobs = new Map<string, Promise<void>>();
 const stopJobs = new Map<string, Promise<void>>();
+let provisionQueueDrain: Promise<void> | null = null;
+let provisionWorkerSequence = 0;
 
 type VaultOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
@@ -116,6 +122,53 @@ async function maybeDelayProvisionStep(
 
 function rootKey(userId: string, vault: string): string {
   return `${userId}:${vault}`;
+}
+
+function provisionJobDedupeKey(userId: string, vault: string): string {
+  return `vault-provision:${rootKey(userId, vault)}`;
+}
+
+type ProvisionJobOptions = {
+  defaultDockerOnly?: boolean;
+  startAfterCreate?: boolean;
+  line?: "coding" | "vertical";
+};
+
+class ProvisionTenantMissingError extends Error {
+  constructor(userId: string) {
+    super(`Provision tenant '${userId}' no longer exists`);
+    this.name = "ProvisionTenantMissingError";
+  }
+}
+
+function enqueueProvisionJob(
+  userId: string,
+  vault: string,
+  options?: ProvisionJobOptions,
+): DurableJob {
+  return getPolarisControlStore(import.meta.url).enqueueJob({
+    kind: "vault-provision",
+    dedupeKey: provisionJobDedupeKey(userId, vault),
+    tenantId: userId,
+    vaultId: vault,
+    payload: {
+      defaultDockerOnly: options?.defaultDockerOnly ?? false,
+      startAfterCreate: options?.startAfterCreate ?? false,
+      ...(options?.line ? { line: options.line } : {}),
+    },
+  });
+}
+
+function provisionJobLeaseMs(): number {
+  const raw = Number.parseInt(String(process.env.POLARIS_JOB_LEASE_MS ?? ""), 10);
+  if (!Number.isFinite(raw)) return 30 * 60 * 1_000;
+  return Math.max(60_000, Math.min(6 * 60 * 60 * 1_000, raw));
+}
+
+function provisionJobConcurrency(): number {
+  const raw = Number.parseInt(String(process.env.POLARIS_JOB_CONCURRENCY ?? ""), 10);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.max(1, Math.min(4, raw));
 }
 
 function driverStatusForOperation(kind: VaultOperationKind): NonNullable<VaultStatus["driver"]>["status"] {
@@ -1260,6 +1313,8 @@ async function provisionVaultInternal(
   options?: {
     defaultDockerOnly?: boolean;
     startAfterCreate?: boolean;
+    line?: "coding" | "vertical";
+    isCancelled?: () => boolean;
   },
 ): Promise<void> {
   return withVaultMutationLock(
@@ -1269,6 +1324,15 @@ async function provisionVaultInternal(
     async () => {
       const defaultDockerOnly = options?.defaultDockerOnly ?? false;
       const startAfterCreate = options?.startAfterCreate ?? false;
+      const ensureNotCancelled = () => {
+        if (options?.isCancelled?.()) {
+          throw new Error("vault provision cancelled");
+        }
+      };
+      if (!userProfileExists(userId)) {
+        throw new ProvisionTenantMissingError(userId);
+      }
+      ensureNotCancelled();
       writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
         vault,
         current,
@@ -1279,15 +1343,19 @@ async function provisionVaultInternal(
         },
       }));
       if (!fs.existsSync(vaultConfigPath(vault, "docker", userId))) {
-        await createVaultForUser(vault, userId);
+        await createVaultForUser(vault, userId, options?.line ? { line: options.line } : undefined);
       }
       await maybeDelayProvisionStep(userId, vault, "specs");
+      ensureNotCancelled();
       ensureVaultTargetSpecs(userId, vault, defaultDockerOnly);
       await maybeDelayProvisionStep(userId, vault, "images");
+      ensureNotCancelled();
       ensureVaultImageTargets(userId, vault, defaultDockerOnly);
       await maybeDelayProvisionStep(userId, vault, "manifests");
+      ensureNotCancelled();
       renderVaultTargets(userId, vault, defaultDockerOnly);
       await maybeDelayProvisionStep(userId, vault, "status");
+      ensureNotCancelled();
       await captureStdout(() => statusCommand(`${vault}@docker`, userId));
       const summary = loadVaultSummary(userId, vault);
       if ((summary.status?.driver?.selected ?? null) === null) {
@@ -1296,6 +1364,7 @@ async function provisionVaultInternal(
 
       if (startAfterCreate) {
         await maybeDelayProvisionStep(userId, vault, "start");
+        ensureNotCancelled();
         writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
           vault,
           current,
@@ -1309,6 +1378,7 @@ async function provisionVaultInternal(
         await startCommand(`${vault}@docker`, userId);
       }
       await maybeDelayProvisionStep(userId, vault, "finalize");
+      ensureNotCancelled();
       const finalRef = vaultRefFromTarget(
         vault,
         summary.status?.driver?.selected ?? { backend: "docker" },
@@ -1442,11 +1512,7 @@ export async function updatePortalVaultSelectedDriver(input: {
 export async function queueProvisionVault(
   userId: string,
   vault: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-    line?: "coding" | "vertical";
-  },
+  options?: ProvisionJobOptions,
 ): Promise<{ queued: true; vault: string }> {
   return withUserMutationLock(import.meta.url, userId, async () => {
     if (!userProfileExists(userId)) {
@@ -1461,22 +1527,41 @@ export async function queueProvisionVault(
       });
       return { queued: true, vault };
     }
+    const store = getPolarisControlStore(import.meta.url);
+    const existingDurable = store.getJobByDedupeKey(provisionJobDedupeKey(userId, vault));
+    if (existingDurable?.status === "queued" || existingDurable?.status === "running") {
+      logInfo("executor", "vault-provision-queue-reused", {
+        userId,
+        vault,
+        jobId: existingDurable.id,
+      });
+      void resumeDurableVaultJobs();
+      return { queued: true, vault };
+    }
+    if (existingDurable?.status === "failed" && existingDurable.cancelRequested) {
+      throw new Error(`Vault '${vault}' provision was cancelled; remove it before retrying.`);
+    }
+    if (
+      existingDurable?.status === "failed"
+      && existingDurable.attempts >= existingDurable.maxAttempts
+    ) {
+      throw new Error(`Vault '${vault}' provision exhausted its retry budget.`);
+    }
     assertProjectNameAvailableForUser(vault, userId);
-    if (vaultConfigExists(vault, userId)) {
+    if (vaultConfigExists(vault, userId) && !existingDurable) {
       throw new Error(`Vault '${vault}' already exists for user ${userId}.`);
     }
-    await createVaultForUser(vault, userId, {
-      ...(options?.line ? { line: options.line } : {}),
-    });
+    const durableJob = enqueueProvisionJob(userId, vault, options);
     clearProvisionState(userId, vault);
     logInfo("executor", "vault-provision-queued", {
       userId,
       vault,
+      jobId: durableJob.id,
       defaultDockerOnly: options?.defaultDockerOnly ?? false,
       startAfterCreate: options?.startAfterCreate ?? false,
       line: options?.line ?? "coding",
     });
-    void startProvisionVault(userId, vault, options);
+    void resumeDurableVaultJobs();
     return { queued: true, vault };
   });
 }
@@ -1484,57 +1569,213 @@ export async function queueProvisionVault(
 export function startProvisionVault(
   userId: string,
   vault: string,
-  options?: {
-    defaultDockerOnly?: boolean;
-    startAfterCreate?: boolean;
-  },
+  options?: ProvisionJobOptions,
 ): Promise<void> {
   const key = rootKey(userId, vault);
   const existing = provisionJobs.get(key);
   if (existing) {
     return existing;
   }
-  const job = (async () => {
+  const job = enqueueProvisionJob(userId, vault, options);
+  const drain = resumeDurableVaultJobs();
+  if (job.status === "failed" && job.cancelRequested) {
+    return Promise.reject(new Error("vault provision was cancelled"));
+  }
+  return provisionJobs.get(key) ?? drain;
+}
+
+export function requestProvisionCancellation(userId: string, vault: string): boolean {
+  const store = getPolarisControlStore(import.meta.url);
+  const requested = store.requestJobCancellation(provisionJobDedupeKey(userId, vault));
+  store.recordAudit({
+    actorId: userId,
+    tenantId: userId,
+    vaultId: vault,
+    action: "vault.provision.cancel",
+    outcome: requested ? "success" : "denied",
+    metadata: { requested },
+  });
+  return requested;
+}
+
+function provisionOptionsFromJob(job: DurableJob): {
+  defaultDockerOnly: boolean;
+  startAfterCreate: boolean;
+  line?: "coding" | "vertical";
+} {
+  return {
+    defaultDockerOnly: job.payload.defaultDockerOnly === true,
+    startAfterCreate: job.payload.startAfterCreate === true,
+    ...(job.payload.line === "coding" || job.payload.line === "vertical"
+      ? { line: job.payload.line }
+      : {}),
+  };
+}
+
+async function executeClaimedProvisionJob(
+  job: DurableJob,
+  workerId: string,
+): Promise<void> {
+  const userId = job.tenantId?.trim();
+  const vault = job.vaultId?.trim();
+  const store = getPolarisControlStore(import.meta.url);
+  if (!userId || !vault) {
+    store.failJobPermanently(job.id, workerId, "invalid-job", "Provision job is missing tenant or vault identity");
+    store.recordAudit({
+      action: "vault.provision",
+      outcome: "failure",
+      metadata: { jobId: job.id, reason: "invalid-job" },
+    });
+    return;
+  }
+  if (store.isJobCancellationRequested(job.id)) {
+    store.failJob(job.id, workerId, "vault-provision-cancelled", "vault provision cancelled", 0);
+    return;
+  }
+  const key = rootKey(userId, vault);
+  const existing = provisionJobs.get(key);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const leaseMs = provisionJobLeaseMs();
+  const heartbeat = setInterval(() => {
+    store.heartbeatJob(job.id, workerId, leaseMs);
+  }, Math.max(10_000, Math.floor(leaseMs / 4)));
+  heartbeat.unref();
+  const execution = (async () => {
+    let tenantMissing = false;
     try {
       clearProvisionState(userId, vault);
-      await provisionVaultInternal(userId, vault, options);
+      await provisionVaultInternal(userId, vault, {
+        ...provisionOptionsFromJob(job),
+        isCancelled: () => store.isJobCancellationRequested(job.id),
+      });
+      if (!store.completeJob(job.id, workerId)) {
+        if (store.isJobCancellationRequested(job.id)) {
+          store.failJob(job.id, workerId, "vault-provision-cancelled", "vault provision cancelled", 0);
+          return;
+        }
+        throw new Error("Lost durable job lease while completing provision");
+      }
+      store.recordAudit({
+        actorId: userId,
+        tenantId: userId,
+        vaultId: vault,
+        action: "vault.provision",
+        outcome: "success",
+        metadata: { jobId: job.id, attempts: job.attempts },
+      });
     } catch (error) {
-      const classified = classifyProvisionError(error);
+      tenantMissing = error instanceof ProvisionTenantMissingError;
+      const cancelled = store.isJobCancellationRequested(job.id);
+      const classified = cancelled
+        ? {
+            message: "vault provision cancelled",
+            errorCode: "vault-provision-cancelled",
+            retryable: false,
+          }
+        : classifyProvisionError(error);
+      const failureCode = tenantMissing ? "tenant-not-found" : classified.errorCode;
       logVaultEvent("warn", "provision-failed", {
         userId,
         vault,
       }, {
-        errorCode: classified.errorCode,
+        errorCode: failureCode,
         reason: classified.message,
       });
-      try {
-        await refreshPortalVaultStatus(userId, vault);
-      } catch (refreshError) {
-        writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
-          vault,
-          current,
-          driverState: {
-            selected: current?.driver?.selected ?? null,
-            status: "failed",
-            reason: classified.message,
-          },
-        }));
-        logVaultEvent("warn", "provision-failed-refresh", {
-          userId,
-          vault,
-        }, {
-          error: refreshError instanceof Error ? refreshError.message : String(refreshError),
-        });
+      if (!cancelled && !tenantMissing) {
+        try {
+          await refreshPortalVaultStatus(userId, vault);
+        } catch (refreshError) {
+          writeDirectVaultStatus(userId, vault, (current) => buildVaultStatusFromCurrent({
+            vault,
+            current,
+            driverState: {
+              selected: current?.driver?.selected ?? null,
+              status: "failed",
+              reason: classified.message,
+            },
+          }));
+          logVaultEvent("warn", "provision-failed-refresh", {
+            userId,
+            vault,
+          }, {
+            error: refreshError instanceof Error ? refreshError.message : String(refreshError),
+          });
+        }
       }
-      throw error;
+      const updated = tenantMissing
+        ? store.failJobPermanently(job.id, workerId, "tenant-not-found", classified.message)
+        : store.failJob(job.id, workerId, classified.errorCode, classified.message);
+      store.recordAudit({
+        actorId: userId,
+        tenantId: userId,
+        vaultId: vault,
+        action: "vault.provision",
+        outcome: "failure",
+        metadata: {
+          jobId: job.id,
+          attempts: job.attempts,
+          errorCode: failureCode,
+          retryScheduled: updated?.status === "queued",
+        },
+      });
+      if (!cancelled && updated?.status === "queued") {
+        const retry = setTimeout(() => {
+          void resumeDurableVaultJobs();
+        }, 1_000);
+        retry.unref();
+      }
     } finally {
-      clearProvisionState(userId, vault);
+      clearInterval(heartbeat);
+      if (!store.isJobCancellationRequested(job.id) && !tenantMissing) {
+        clearProvisionState(userId, vault);
+      }
       provisionJobs.delete(key);
     }
   })();
-  job.catch(() => undefined);
-  provisionJobs.set(key, job);
-  return job;
+  provisionJobs.set(key, execution);
+  await execution;
+}
+
+async function runProvisionWorker(workerId: string): Promise<void> {
+  const store = getPolarisControlStore(import.meta.url);
+  for (;;) {
+    const job = store.claimNextJob(workerId, provisionJobLeaseMs());
+    if (!job) return;
+    if (job.kind !== "vault-provision") {
+      store.failJobPermanently(
+        job.id,
+        workerId,
+        "unsupported-job-kind",
+        `Unsupported durable job kind '${job.kind}'`,
+      );
+      continue;
+    }
+    await executeClaimedProvisionJob(job, workerId);
+  }
+}
+
+/** Resume queued/leased provisioning after a Polaris process restart. */
+export function resumeDurableVaultJobs(): Promise<void> {
+  if (provisionQueueDrain) return provisionQueueDrain;
+  const workerCount = provisionJobConcurrency();
+  const workers = Array.from({ length: workerCount }, () => {
+    provisionWorkerSequence += 1;
+    return runProvisionWorker(`polaris-${process.pid}-provision-${provisionWorkerSequence}`);
+  });
+  provisionQueueDrain = Promise.all(workers)
+    .then(() => undefined)
+    .finally(() => {
+      provisionQueueDrain = null;
+    });
+  provisionQueueDrain.catch((error) => {
+    logError("executor", "durable-provision-worker-failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  return provisionQueueDrain;
 }
 
 export async function switchPortalVault(

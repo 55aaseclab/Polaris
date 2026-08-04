@@ -517,10 +517,12 @@ test("docker render reuses the Polaris vault mount for Wanghai data", async () =
   const profilePath = path.join(USER_ROOT, "profiles", `${profileId}.yaml`);
   const userRoot = path.join(USER_ROOT, profileId);
   const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousPortalOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
 
   await withTempVaultSpec(project, "docker", async () => {
     try {
       process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+      process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
       scaffoldUserProfileById({
         id: profileId,
         name: "Wanghai Data Root User",
@@ -557,6 +559,11 @@ test("docker render reuses the Polaris vault mount for Wanghai data", async () =
         delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
       } else {
         process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+      }
+      if (previousPortalOrigins === undefined) {
+        delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+      } else {
+        process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousPortalOrigins;
       }
     }
   }).finally(() => {
@@ -1758,7 +1765,10 @@ test("ensureVaultConfig synthesizes a pod spec from the docker source of truth",
       podDoc.attachments["vault-data"].source.export_path,
       DEMO_VAULT_EXPORT_ROOT,
     );
-    assert.equal(podDoc.attachments["vault-data"].source.sub_path, project);
+    assert.equal(
+      podDoc.attachments["vault-data"].source.sub_path,
+      `tenants/${DEMO_USER_PROFILE_ID}/vaults/${project}`,
+    );
     assert.equal(
       podDoc.attachments["vault-runtime-state"].source.volume_ref,
       vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vault-runtime-state"),
@@ -3140,7 +3150,9 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
 test("docker vertical bootstrap starts the Wanghai portal after Paseo", async () => {
   const project = uniqueProjectName("docker-vertical");
   const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousPortalOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
   process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
   const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
     line: "vertical",
   });
@@ -3164,6 +3176,8 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
     fs.rmSync(renderedOutputPath, { force: true });
     if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
     else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousPortalOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousPortalOrigins;
   }
 });
 

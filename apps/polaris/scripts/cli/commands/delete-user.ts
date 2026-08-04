@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getPolarisControlStore } from "../../portal/control-store.js";
 import { withDeletedUserMapEntries } from "../../portal/user-map.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRelativePath } from "../../utils/paths.js";
@@ -69,6 +70,13 @@ export async function deleteUserCommand(argv: string[]): Promise<void> {
   const profilePath = profilePathFor(userProfileId);
   const userRoot = userRootFor(userProfileId);
   await withUserMutationLock(import.meta.url, userProfileId, async () => {
+    const pendingJobs = getPolarisControlStore(import.meta.url)
+      .listPendingJobsForTenant(userProfileId);
+    if (pendingJobs.length > 0) {
+      throw new Error(
+        `User '${userProfileId}' cannot be deleted while durable jobs are queued or running. Cancel or finish those jobs first.`,
+      );
+    }
     const activeVaults = listChildDirectories(activeVaultsRootFor(userProfileId));
     if (activeVaults.length > 0) {
       throw new Error(

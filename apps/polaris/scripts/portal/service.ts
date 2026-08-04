@@ -64,6 +64,7 @@ import {
   getPortalVaultPaseoDiagnostic as getPortalVaultPaseoDiagnosticExecutor,
   permanentlyDeletePortalVault as permanentlyDeletePortalVaultExecutor,
   queueProvisionVault as queueProvisionVaultExecutor,
+  requestProvisionCancellation as requestProvisionCancellationExecutor,
   refreshPortalVaultStatus as refreshPortalVaultStatusExecutor,
   rebuildPortalVault as rebuildPortalVaultExecutor,
   restartPortalVaultPaseoDaemon as restartPortalVaultPaseoDaemonExecutor,
@@ -530,6 +531,9 @@ export async function cancelPortalVaultProvision(
   userId: string,
   vault: string,
 ): Promise<{ cancelled: true; vault: string }> {
+  if (!requestProvisionCancellationExecutor(userId, vault)) {
+    throw new Error(`Vault '${vault}' does not have a pending provision job`);
+  }
   writeVaultProvisionProgress(userId, vault, {
     userId,
     vault,
