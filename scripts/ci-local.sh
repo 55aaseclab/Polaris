@@ -29,6 +29,7 @@ bash -n scripts/build-paseo-web-artifact.sh
 bash -n scripts/build-paseo-tool-bundle.sh
 bash -n scripts/clean-paseo-web-artifact.sh
 bash -n scripts/deploy-polaris.sh
+bash -n scripts/release-preflight.sh
 bash -n scripts/rollback-polaris.sh
 bash -n scripts/run-polaris-server-host.sh
 bash -n scripts/lib/polaris-bluegreen.sh
@@ -38,6 +39,7 @@ echo "[6/8] local stack regression tests"
 node --test scripts/tests/local-stack-service.test.mjs
 node --test scripts/tests/sidecar-removal.test.mjs
 node --test scripts/tests/remote-host-deploy.test.mjs
+node --test scripts/tests/release-preflight.test.mjs
 
 echo "[7/8] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null

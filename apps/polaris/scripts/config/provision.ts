@@ -3,7 +3,12 @@ import crypto from "node:crypto";
 import path from "node:path";
 import yaml from "js-yaml";
 import { parseVaultReference } from "./load.js";
-import { syncVaultDockerfileTemplate, vaultConfigPath, vaultImageRef } from "./scaffold.js";
+import {
+  syncVaultDockerfileTemplate,
+  vaultConfigPath,
+  vaultDataRelativePath,
+  vaultImageRef,
+} from "./scaffold.js";
 import { vaultRuntimeResourceName } from "../core/vault-name.js";
 import { logInfo } from "../utils/log.js";
 import {
@@ -23,7 +28,7 @@ function vaultDataNetfsSource(project: string, userProfileId: string): Record<st
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
-    sub_path: `tenants/${userProfileId}/vaults/${project}`,
+    sub_path: vaultDataRelativePath(userProfileId, project),
     mount_options: ["nfsvers=4.1", "hard", "rw"],
     volume_ref: vaultRuntimeResourceName(userProfileId, project, "vault-data"),
     volume_size: "1Gi",

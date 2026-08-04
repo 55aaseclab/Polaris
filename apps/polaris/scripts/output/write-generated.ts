@@ -3,8 +3,6 @@ import path from "node:path";
 import type { VaultSpec } from "../core/vault.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 
-const USER_ROOT = polarisUsersRoot(import.meta.url);
-
 export function generatedOutputPath(vault: VaultSpec): string {
   const backendFile =
     vault.backend.kind === "pod"
@@ -13,7 +11,7 @@ export function generatedOutputPath(vault: VaultSpec): string {
         ? "kubevirt.yaml"
         : "docker.yaml";
   return path.join(
-    USER_ROOT,
+    polarisUsersRoot(import.meta.url),
     vault.userProfile.id,
     "vaults",
     vault.identity.projectName,
@@ -24,7 +22,10 @@ export function generatedOutputPath(vault: VaultSpec): string {
 
 export function writeGeneratedManifest(vault: VaultSpec, yamlText: string): string {
   const outputPath = generatedOutputPath(vault);
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, yamlText, "utf8");
+  const outputDir = path.dirname(outputPath);
+  fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(outputDir, 0o700);
+  fs.writeFileSync(outputPath, yamlText, { encoding: "utf8", mode: 0o600 });
+  fs.chmodSync(outputPath, 0o600);
   return outputPath;
 }

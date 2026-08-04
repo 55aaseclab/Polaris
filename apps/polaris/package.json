@@ -6,6 +6,7 @@
     "build:auth": "pnpm --filter @polaris/polaris-auth-server run build",
     "polaris": "sh -lc 'pnpm run build:auth && if [ \"$1\" = \"--\" ]; then shift; fi; exec ./node_modules/.bin/tsx scripts/polaris.ts \"$@\"' --",
     "server": "pnpm run polaris -- server",
+    "migrate:wanghai-data-root": "tsx scripts/migrate-wanghai-data-root.ts",
     "build": "pnpm run build:auth && tsc -p tsconfig.json",
     "check": "pnpm run build:auth && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run test:smoke",

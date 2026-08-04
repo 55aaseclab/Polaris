@@ -28,12 +28,7 @@ function vaultDataNetfsSource(project: string, userProfileId: string): Record<st
     kind: "netfs",
     server: "netfs.local",
     export_path: polarisNetfsLocalExportRoot(import.meta.url),
-    sub_path: path.posix.join(
-      "tenants",
-      sanitizeUserProfileId(userProfileId),
-      "vaults",
-      sanitizeImageTagComponent(project, "vault", 64),
-    ),
+    sub_path: vaultDataRelativePath(userProfileId, project),
     mount_options: ["nfsvers=4.1", "hard", "rw"],
     volume_ref: vaultDataVolumeRef(userProfileId, project),
     volume_size: "1Gi",
@@ -59,6 +54,20 @@ function sanitizeImageTagComponent(
     ? sanitized
     : sanitized.slice(0, maxLength).replace(/^-+|-+$/g, "");
   return bounded || fallback;
+}
+
+/**
+ * The vault data mount is the sole integrated Wanghai data root. Keep this
+ * path shared by provisioning and migration so Wanghai always sees the vault
+ * that Polaris provisioned at /vault/project.
+ */
+export function vaultDataRelativePath(userProfileId: string, project: string): string {
+  return path.posix.join(
+    "tenants",
+    sanitizeUserProfileId(userProfileId),
+    "vaults",
+    sanitizeImageTagComponent(project, "vault", 64),
+  );
 }
 
 function neutralUserImageTagSegment(userProfileId: string): string {

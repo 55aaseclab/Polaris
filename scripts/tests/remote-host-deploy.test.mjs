@@ -27,21 +27,31 @@ test("remote provision reuses an existing Docker install instead of forcing dock
   assert.doesNotMatch(script, /apt-get install -y docker\.io docker-compose-plugin nginx/);
 });
 
-test("remote provision writes the remote Wanghai data root", () => {
+test("remote provision keeps integrated Wanghai on the Polaris vault export", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
-  assert.match(script, /POLARIS_WANGHAI_DATA_ROOT/);
-  assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
-  assert.match(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai\/cache'/);
+  assert.match(script, /POLARIS_NETFS_LOCAL_EXPORT_ROOT/);
+  assert.doesNotMatch(script, /POLARIS_WANGHAI_DATA_ROOT/);
+  assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
 
-test("remote provision bootstraps the Wanghai source tree and image", () => {
+test("remote deployment keeps environment files root-owned and non-world-readable", () => {
+  const provision = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  const deploy = fs.readFileSync("scripts/deploy-polaris.sh", "utf8");
+  assert.match(provision, /install -o root -g .* -m 0640/);
+  assert.match(provision, /chmod 0750/);
+  assert.match(deploy, /install -o root -g .* -m 0640/);
+});
+
+test("remote provision requires a digest-pinned Wanghai image", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   assert.match(script, /rsync -az --delete --delete-excluded/);
   assert.match(script, /--exclude ".next\*"/);
   assert.match(script, /--exclude "\/workspaces\/\*\*\*"/);
   assert.match(script, /\$\{LOCAL_WANGHAI_DIR\}\//);
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_WANGHAI_DIR\}\//);
-  assert.match(script, /build-admin-portal-image\.sh/);
+  assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference/);
+  assert.match(script, /docker pull/);
+  assert.doesNotMatch(script, /build-admin-portal-image\.sh 'wanghai-admin-portal:latest'/);
   assert.match(script, /polaris-workspace-prebuilt:latest/);
   assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE/);
 });
