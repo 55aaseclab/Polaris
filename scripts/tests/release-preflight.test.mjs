@@ -23,6 +23,12 @@ function withPreflightFixture({
   fs.mkdirSync(bin);
   const digest = "a".repeat(64);
   const values = {
+    POLARIS_RELEASE_PROFILE: "0.3.0-single-host",
+    POLARIS_DEPLOYMENT_MODE: "single-host",
+    POLARIS_SERVER_REPLICAS: "1",
+    POLARIS_GATEWAY_REPLICAS: "1",
+    POLARIS_JOB_WORKER_CONCURRENCY: "1",
+    POLARIS_MAX_ACTIVE_VAULTS: "10",
     POLARIS_AUTH_MODE: "authing-browser-session",
     POLARIS_AUTHING_APP_ID: "synthetic-app-id",
     POLARIS_AUTHING_APP_SECRET: "synthetic-app-secret",
@@ -105,6 +111,16 @@ test("release preflight rejects disabled authentication", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /POLARIS_AUTH_MODE must be authing-browser-session/);
+  });
+});
+
+test("release preflight rejects replica mode", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_SERVER_REPLICAS: "2" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /POLARIS_SERVER_REPLICAS must equal 1/);
   });
 });
 

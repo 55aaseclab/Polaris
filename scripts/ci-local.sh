@@ -39,6 +39,7 @@ echo "[6/8] local stack regression tests"
 node --test scripts/tests/local-stack-service.test.mjs
 node --test scripts/tests/sidecar-removal.test.mjs
 node --test scripts/tests/remote-host-deploy.test.mjs
+node --test scripts/tests/release-profile.test.mjs
 node --test scripts/tests/release-preflight.test.mjs
 
 echo "[7/8] docker compose config"

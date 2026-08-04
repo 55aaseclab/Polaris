@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "0.3.0-single-host",
+  "topology": {
+    "mode": "single-host",
+    "controlPlaneReplicas": 1,
+    "gatewayReplicas": 1
+  },
+  "capacity": {
+    "maxActiveVaults": 10,
+    "jobWorkerConcurrency": 1
+  },
+  "resourceBudget": {
+    "vaultCpuMillicores": 1000,
+    "vaultMemoryMiB": 512,
+    "vaultPidLimit": 128,
+    "vaultEphemeralStorageMiB": 512
+  },
+  "quota": {
+    "activeWorkspaceMiB": 256,
+    "cacheMiB": 64,
+    "runtimeStateMiB": 128,
+    "identityStateMiB": 64,
+    "hotStorageMiB": 512
+  },
+  "slo": {
+    "gatewayLaunchSuccessPercent": 99.5,
+    "readP95Ms": 500,
+    "mutationP95Ms": 1500,
+    "recoverySeconds": 120,
+    "max5xxPercent": 1
+  }
+}

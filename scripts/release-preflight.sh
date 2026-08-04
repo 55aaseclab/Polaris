@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ENV_FILE="${1:-/etc/polaris/polaris.env}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 fail() {
   printf 'release preflight: %s\n' "$*" >&2
@@ -16,6 +17,8 @@ set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"
 set +a
+
+node "${SCRIPT_DIR}/release-profile.mjs" || fail "release profile configuration is invalid"
 
 gateway_origin="${POLARIS_WANGHAI_GATEWAY_ORIGIN:-}"
 master_secret="${POLARIS_WANGHAI_GATEWAY_MASTER_SECRET:-}"
