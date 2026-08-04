@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,10 +11,20 @@ import {
 } from "../scripts/runtime/wanghai-backup.js";
 import {
   WanghaiRestoreError,
+  buildWanghaiRestoreActivationDockerRunArgs,
+  buildWanghaiRestoreActivationVerificationDockerRunArgs,
   buildWanghaiRestoreDockerRunArgs,
+  buildWanghaiRestoreRollbackDockerRunArgs,
+  buildWanghaiRestoreRollbackVerificationDockerRunArgs,
   buildWanghaiRestoreVerificationDockerRunArgs,
+  parseWanghaiRestoreActivationLog,
   parseWanghaiRestoreLog,
+  parseWanghaiRestoreRollbackLog,
   resolveWanghaiRestoreSettings,
+  wanghaiRestoreActivationDedupeKey,
+  wanghaiRestorePreviousWorkspaceName,
+  wanghaiRestoreRollbackDedupeKey,
+  wanghaiRestoreRollbackFailedWorkspaceName,
   wanghaiRestoreDedupeKey,
   wanghaiRestoreStagingVolumeName,
 } from "../scripts/runtime/wanghai-restore.js";
@@ -118,4 +129,165 @@ test("Polaris restore binds deduplication to the source backup and rejects bad i
     (error: unknown) => error instanceof WanghaiRestoreError
       && error.code === "restore-configuration-invalid",
   );
+});
+
+test("Polaris restore activation and rollback use scoped, syntax-checked Docker contracts", () => {
+  const restoreJobId = "restore-source-a";
+  const activationJobId = "activation-a";
+  const rollbackJobId = "rollback-a";
+  const stagingVolume = wanghaiRestoreStagingVolumeName(vault(), restoreJobId);
+  const previousWorkspaceName = wanghaiRestorePreviousWorkspaceName(activationJobId);
+  const failedWorkspaceName = wanghaiRestoreRollbackFailedWorkspaceName(rollbackJobId);
+
+  const activation = buildWanghaiRestoreActivationDockerRunArgs({
+    vault: vault(),
+    jobId: activationJobId,
+    restoreJobId,
+    stagingVolume,
+  });
+  assert.ok(activation.includes("--network"));
+  assert.ok(activation.includes("none"));
+  assert.ok(activation.includes("--read-only"));
+  assert.ok(activation.includes("type=volume,source=vault-data,target=/vault/project"));
+  assert.ok(activation.includes(`type=volume,source=${stagingVolume},target=/restore,readonly`));
+  assert.equal(activation.some((entry) => entry === "-p" || entry === "--publish"), false);
+  const activationCommand = activation.at(-1) ?? "";
+  assert.match(activationCommand, new RegExp(`activation_job_id=\"${activationJobId}\"`, "u"));
+  assert.match(activationCommand, new RegExp(`restore_job_id=\"${restoreJobId}\"`, "u"));
+  assert.match(activationCommand, new RegExp(`previous_workspace_name=\"${previousWorkspaceName}\"`, "u"));
+  assert.equal(activationCommand.includes("$previousWorkspaceName"), false);
+  const activationSyntax = spawnSync("bash", ["-n"], {
+    encoding: "utf8",
+    input: activationCommand,
+  });
+  assert.equal(activationSyntax.status, 0, activationSyntax.stderr);
+  assert.deepEqual(
+    parseWanghaiRestoreActivationLog({
+      output: [
+        `activation_job_id=${activationJobId}`,
+        `restore_job_id=${restoreJobId}`,
+        "activated_workspace=workspaces",
+        `previous_workspace=${previousWorkspaceName}`,
+        "verified=1",
+      ].join("\n"),
+      jobId: activationJobId,
+      restoreJobId,
+    }),
+    { previousWorkspaceName, checksumVerified: true },
+  );
+  assert.throws(
+    () => buildWanghaiRestoreActivationDockerRunArgs({
+      vault: vault(),
+      jobId: activationJobId,
+      restoreJobId,
+      stagingVolume: "another-restore-volume",
+    }),
+    (error: unknown) => error instanceof WanghaiRestoreError
+      && error.code === "restore-contract-invalid",
+  );
+
+  const activationVerification = buildWanghaiRestoreActivationVerificationDockerRunArgs({
+    vault: vault(),
+    jobId: activationJobId,
+    restoreJobId,
+    stagingVolume,
+  });
+  assert.ok(activationVerification.includes("type=volume,source=vault-data,target=/vault/project,readonly"));
+  assert.ok(activationVerification.includes(`type=volume,source=${stagingVolume},target=/restore,readonly`));
+
+  const rollback = buildWanghaiRestoreRollbackDockerRunArgs({
+    vault: vault(),
+    jobId: rollbackJobId,
+    activationJobId,
+    previousWorkspaceName,
+  });
+  assert.ok(rollback.includes("--network"));
+  assert.ok(rollback.includes("none"));
+  assert.ok(rollback.includes("type=volume,source=vault-data,target=/vault/project"));
+  const rollbackCommand = rollback.at(-1) ?? "";
+  assert.match(rollbackCommand, new RegExp(`rollback_job_id=\"${rollbackJobId}\"`, "u"));
+  assert.match(rollbackCommand, new RegExp(`activation_job_id=\"${activationJobId}\"`, "u"));
+  assert.match(rollbackCommand, new RegExp(`failed_workspace_name=\"${failedWorkspaceName}\"`, "u"));
+  assert.equal(rollbackCommand.includes("$failedWorkspaceName"), false);
+  const rollbackSyntax = spawnSync("bash", ["-n"], {
+    encoding: "utf8",
+    input: rollbackCommand,
+  });
+  assert.equal(rollbackSyntax.status, 0, rollbackSyntax.stderr);
+  assert.deepEqual(
+    parseWanghaiRestoreRollbackLog({
+      output: [
+        `rollback_job_id=${rollbackJobId}`,
+        `activation_job_id=${activationJobId}`,
+        "rolled_back_workspace=workspaces",
+        `failed_workspace=${failedWorkspaceName}`,
+        "verified=1",
+      ].join("\n"),
+      jobId: rollbackJobId,
+      activationJobId,
+    }),
+    { failedWorkspaceName, rollbackVerified: true },
+  );
+  assert.throws(
+    () => buildWanghaiRestoreRollbackDockerRunArgs({
+      vault: vault(),
+      jobId: rollbackJobId,
+      activationJobId,
+      previousWorkspaceName: "workspaces.pre-restore-other",
+    }),
+    (error: unknown) => error instanceof WanghaiRestoreError
+      && error.code === "restore-contract-invalid",
+  );
+
+  const rollbackVerification = buildWanghaiRestoreRollbackVerificationDockerRunArgs({
+    vault: vault(),
+    jobId: rollbackJobId,
+    failedWorkspaceName,
+  });
+  assert.ok(rollbackVerification.includes("type=volume,source=vault-data,target=/vault/project,readonly"));
+  assert.equal(
+    wanghaiRestoreActivationDedupeKey("tenant-a", "vault-a", restoreJobId, "request-a"),
+    wanghaiRestoreActivationDedupeKey("tenant-a", "vault-a", restoreJobId, "request-a"),
+  );
+  assert.notEqual(
+    wanghaiRestoreRollbackDedupeKey("tenant-a", "vault-a", activationJobId, "request-a"),
+    wanghaiRestoreRollbackDedupeKey("tenant-a", "vault-a", activationJobId, "request-b"),
+  );
+});
+
+test("Polaris restore activation recovers the original root after a partial candidate", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-activation-recovery-"));
+  const dataRoot = path.join(root, "data");
+  const restoreRoot = path.join(root, "restore");
+  const activationJobId = "activation-recovery-a";
+  const restoreJobId = "restore-source-a";
+  const previousWorkspaceName = wanghaiRestorePreviousWorkspaceName(activationJobId);
+  const candidateWorkspaceName = `workspaces.restore-pending-${activationJobId}`;
+  const command = (buildWanghaiRestoreActivationDockerRunArgs({
+    vault: vault(),
+    jobId: activationJobId,
+    restoreJobId,
+    stagingVolume: wanghaiRestoreStagingVolumeName(vault(), restoreJobId),
+  }).at(-1) ?? "")
+    .replaceAll("/vault/project", dataRoot)
+    .replaceAll("/restore", restoreRoot);
+  try {
+    fs.mkdirSync(path.join(dataRoot, previousWorkspaceName), { recursive: true });
+    fs.mkdirSync(path.join(dataRoot, candidateWorkspaceName), { recursive: true });
+    fs.mkdirSync(path.join(restoreRoot, "workspaces"), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, previousWorkspaceName, "state.txt"), "original", "utf8");
+    fs.writeFileSync(path.join(dataRoot, candidateWorkspaceName, "state.txt"), "partial", "utf8");
+    fs.writeFileSync(path.join(restoreRoot, "workspaces", "state.txt"), "restored", "utf8");
+
+    const result = spawnSync("bash", ["-lc", command], { encoding: "utf8" });
+    assert.notEqual(result.status, 0, result.stderr);
+    assert.equal(
+      fs.readFileSync(path.join(dataRoot, "workspaces", "state.txt"), "utf8"),
+      "original",
+    );
+    assert.equal(fs.existsSync(path.join(dataRoot, previousWorkspaceName)), false);
+    assert.equal(fs.existsSync(path.join(dataRoot, candidateWorkspaceName)), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

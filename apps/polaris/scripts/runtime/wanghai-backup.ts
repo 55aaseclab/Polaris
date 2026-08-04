@@ -191,7 +191,9 @@ function dataVolumeName(vault: VaultSpec): string {
   return `${baseName}-${suffix}`;
 }
 
-function backupDataMount(vault: VaultSpec): { type: "bind" | "volume"; source: string } {
+export function wanghaiVaultDataMount(
+  vault: VaultSpec,
+): { type: "bind" | "volume"; source: string } {
   const source = vault.attachments.vaultData.source;
   if (isNetfsSource(source) && source.server?.trim() === "netfs.local") {
     return {
@@ -330,7 +332,7 @@ export function buildWanghaiBackupDockerRunArgs(
       false,
     );
   }
-  const dataMount = backupDataMount(input.vault);
+  const dataMount = wanghaiVaultDataMount(input.vault);
   const backupVolume = wanghaiBackupVolumeName(input.vault);
   const containerName = wanghaiBackupContainerName(jobId);
   const keyFile = validateWanghaiBackupKeyFile(input.keyFile);

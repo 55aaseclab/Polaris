@@ -63,14 +63,20 @@ import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
   getWanghaiBackupJob as getWanghaiBackupJobExecutor,
+  getWanghaiRestoreActivationJob as getWanghaiRestoreActivationJobExecutor,
   getWanghaiRestoreJob as getWanghaiRestoreJobExecutor,
+  getWanghaiRestoreRollbackJob as getWanghaiRestoreRollbackJobExecutor,
   getPortalVaultPaseoDiagnostic as getPortalVaultPaseoDiagnosticExecutor,
   permanentlyDeletePortalVault as permanentlyDeletePortalVaultExecutor,
   queueProvisionVault as queueProvisionVaultExecutor,
   queueWanghaiBackup as queueWanghaiBackupExecutor,
+  queueWanghaiRestoreActivation as queueWanghaiRestoreActivationExecutor,
   queueWanghaiRestore as queueWanghaiRestoreExecutor,
+  queueWanghaiRestoreRollback as queueWanghaiRestoreRollbackExecutor,
   requestWanghaiBackupCancellation as requestWanghaiBackupCancellationExecutor,
+  requestWanghaiRestoreActivationCancellation as requestWanghaiRestoreActivationCancellationExecutor,
   requestWanghaiRestoreCancellation as requestWanghaiRestoreCancellationExecutor,
+  requestWanghaiRestoreRollbackCancellation as requestWanghaiRestoreRollbackCancellationExecutor,
   requestProvisionCancellation as requestProvisionCancellationExecutor,
   refreshPortalVaultStatus as refreshPortalVaultStatusExecutor,
   rebuildPortalVault as rebuildPortalVaultExecutor,
@@ -120,6 +126,42 @@ export interface PortalWanghaiRestoreJob {
     archiveName: string;
     checksumVerified: boolean;
     staged: true;
+  };
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface PortalWanghaiRestoreActivationJob {
+  id: string;
+  status: DurableJob["status"];
+  attempts: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  result?: {
+    restoreJobId: string;
+    checksumVerified: true;
+    activated: true;
+  };
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface PortalWanghaiRestoreRollbackJob {
+  id: string;
+  status: DurableJob["status"];
+  attempts: number;
+  maxAttempts: number;
+  cancelRequested: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  result?: {
+    activationJobId: string;
+    rollbackVerified: true;
+    rolledBack: true;
   };
   createdAt: string;
   updatedAt: string;
@@ -178,6 +220,62 @@ function portalWanghaiRestoreJob(job: DurableJob): PortalWanghaiRestoreJob {
             archiveName,
             checksumVerified,
             staged: true,
+          },
+        }
+      : {}),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.completedAt ? { completedAt: job.completedAt } : {}),
+  };
+}
+
+function portalWanghaiRestoreActivationJob(job: DurableJob): PortalWanghaiRestoreActivationJob {
+  const result = job.result;
+  const restoreJobId = typeof result?.restoreJobId === "string" ? result.restoreJobId : "";
+  const checksumVerified = result?.checksumVerified === true;
+  return {
+    id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.errorCode ? { errorCode: job.errorCode } : {}),
+    ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    ...(restoreJobId && checksumVerified
+      ? {
+          result: {
+            restoreJobId,
+            checksumVerified: true,
+            activated: true,
+          },
+        }
+      : {}),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.completedAt ? { completedAt: job.completedAt } : {}),
+  };
+}
+
+function portalWanghaiRestoreRollbackJob(job: DurableJob): PortalWanghaiRestoreRollbackJob {
+  const result = job.result;
+  const activationJobId = typeof result?.activationJobId === "string"
+    ? result.activationJobId
+    : "";
+  const rollbackVerified = result?.rollbackVerified === true;
+  return {
+    id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.errorCode ? { errorCode: job.errorCode } : {}),
+    ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    ...(activationJobId && rollbackVerified
+      ? {
+          result: {
+            activationJobId,
+            rollbackVerified: true,
+            rolledBack: true,
           },
         }
       : {}),
@@ -709,6 +807,92 @@ export function cancelPortalWanghaiRestore(input: {
   jobId: string;
 }): boolean {
   return requestWanghaiRestoreCancellationExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+}
+
+export async function queuePortalWanghaiRestoreActivation(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  restoreJobId: string;
+  idempotencyKey: string;
+}): Promise<PortalWanghaiRestoreActivationJob> {
+  return portalWanghaiRestoreActivationJob(await queueWanghaiRestoreActivationExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    restoreJobId: input.restoreJobId,
+    idempotencyKey: input.idempotencyKey,
+  }));
+}
+
+export function getPortalWanghaiRestoreActivationJob(input: {
+  userId: string;
+  vault: string;
+  jobId: string;
+}): PortalWanghaiRestoreActivationJob | null {
+  const job = getWanghaiRestoreActivationJobExecutor({
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+  return job ? portalWanghaiRestoreActivationJob(job) : null;
+}
+
+export function cancelPortalWanghaiRestoreActivation(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  jobId: string;
+}): boolean {
+  return requestWanghaiRestoreActivationCancellationExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+}
+
+export async function queuePortalWanghaiRestoreRollback(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  activationJobId: string;
+  idempotencyKey: string;
+}): Promise<PortalWanghaiRestoreRollbackJob> {
+  return portalWanghaiRestoreRollbackJob(await queueWanghaiRestoreRollbackExecutor({
+    actorId: input.actorId,
+    tenantId: input.userId,
+    vaultId: input.vault,
+    activationJobId: input.activationJobId,
+    idempotencyKey: input.idempotencyKey,
+  }));
+}
+
+export function getPortalWanghaiRestoreRollbackJob(input: {
+  userId: string;
+  vault: string;
+  jobId: string;
+}): PortalWanghaiRestoreRollbackJob | null {
+  const job = getWanghaiRestoreRollbackJobExecutor({
+    tenantId: input.userId,
+    vaultId: input.vault,
+    jobId: input.jobId,
+  });
+  return job ? portalWanghaiRestoreRollbackJob(job) : null;
+}
+
+export function cancelPortalWanghaiRestoreRollback(input: {
+  actorId: string;
+  userId: string;
+  vault: string;
+  jobId: string;
+}): boolean {
+  return requestWanghaiRestoreRollbackCancellationExecutor({
     actorId: input.actorId,
     tenantId: input.userId,
     vaultId: input.vault,

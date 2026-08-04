@@ -133,6 +133,92 @@ test("control store persists durable job results across reopen", () => {
   }
 });
 
+test("control store makes only the current Wanghai restore activation rollback eligible", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const first = store.enqueueJob({
+      kind: "wanghai-restore-activation",
+      dedupeKey: "tenant-a:vault-a:activation-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    const second = store.enqueueJob({
+      kind: "wanghai-restore-activation",
+      dedupeKey: "tenant-a:vault-a:activation-b",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    assert.equal(
+      store.claimNextJob("activation-worker-a", 10_000, ["wanghai-restore-activation"])
+        ?.id,
+      first.id,
+    );
+    assert.equal(store.completeWanghaiRestoreActivation({
+      jobId: first.id,
+      workerId: "activation-worker-a",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      result: { restoreJobId: "restore-a" },
+    }), true);
+    assert.equal(store.isWanghaiRestoreActivationCurrent({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      activationJobId: first.id,
+    }), true);
+
+    assert.equal(
+      store.claimNextJob("activation-worker-b", 10_000, ["wanghai-restore-activation"])
+        ?.id,
+      second.id,
+    );
+    assert.equal(store.completeWanghaiRestoreActivation({
+      jobId: second.id,
+      workerId: "activation-worker-b",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      result: { restoreJobId: "restore-b" },
+    }), true);
+    assert.equal(store.isWanghaiRestoreActivationCurrent({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      activationJobId: first.id,
+    }), false);
+    assert.equal(store.isWanghaiRestoreActivationCurrent({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      activationJobId: second.id,
+    }), true);
+
+    const rollback = store.enqueueJob({
+      kind: "wanghai-restore-rollback",
+      dedupeKey: "tenant-a:vault-a:rollback-b",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    assert.equal(
+      store.claimNextJob("rollback-worker", 10_000, ["wanghai-restore-rollback"])?.id,
+      rollback.id,
+    );
+    assert.equal(store.completeWanghaiRestoreRollback({
+      jobId: rollback.id,
+      workerId: "rollback-worker",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      activationJobId: second.id,
+      result: { rollbackVerified: true },
+    }), true);
+    assert.equal(store.isWanghaiRestoreActivationCurrent({
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+      activationJobId: second.id,
+    }), false);
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store adds durable job results to an existing jobs table", () => {
   const fixture = temporaryStore();
   try {
