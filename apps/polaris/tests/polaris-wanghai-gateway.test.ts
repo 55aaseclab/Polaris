@@ -62,6 +62,7 @@ async function requestPortalHost(input: {
   path: string;
   method?: string;
   headers: Record<string, string>;
+  body?: string | Buffer;
 }): Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
     const request = httpRequest({
@@ -82,6 +83,7 @@ async function requestPortalHost(input: {
       });
     });
     request.on("error", reject);
+    if (input.body !== undefined) request.write(input.body);
     request.end();
   });
 }
@@ -103,16 +105,22 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
   ];
   let assertionHeader = "";
   let requestIdHeader = "";
+  let upstreamBody = "";
   let upstreamRequests = 0;
   const upstream = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
     upstreamRequests += 1;
     assertionHeader = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
     requestIdHeader = String(req.headers["x-polaris-request-id"] ?? "");
-    res.writeHead(200, {
-      "content-type": "application/json",
-      "set-cookie": "surface-session=must-not-reach-the-gateway-host",
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    req.on("end", () => {
+      upstreamBody = Buffer.concat(chunks).toString("utf8");
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "set-cookie": "surface-session=must-not-reach-the-gateway-host",
+      });
+      res.end(JSON.stringify({ upstream: true }));
     });
-    res.end(JSON.stringify({ upstream: true }));
   });
   let portal: ReturnType<typeof createPortalServer> | null = null;
   try {
@@ -231,6 +239,21 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(assertion.tenant_id, userA);
     assert.equal(requestIdHeader, assertion.request_id);
 
+    const missingIdempotency = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/workspaces",
+      method: "POST",
+      headers: {
+        host: launchUrl.host,
+        cookie: cookie!,
+        origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ workspace_id: "synthetic-workspace", workspace_type: "research" }),
+    });
+    assert.equal(missingIdempotency.statusCode, 428);
+    assert.equal(upstreamRequests, 1);
+
     const mutation = await requestPortalHost({
       port: portalAddress.port,
       path: "/api/workspaces",
@@ -239,19 +262,78 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
         host: launchUrl.host,
         cookie: cookie!,
         origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+        "idempotency-key": "workspace-create-001",
       },
+      body: JSON.stringify({ workspace_id: "synthetic-workspace", workspace_type: "research" }),
     });
     assert.equal(mutation.statusCode, 200);
+    assert.equal(upstreamBody, JSON.stringify({ workspace_id: "synthetic-workspace", workspace_type: "research" }));
     const mutationRequestId = String(mutation.headers["x-polaris-request-id"] ?? "");
+    const mutationAssertion = verifyWanghaiAssertion(assertionHeader, assertionSecret);
+    assert.ok(mutationAssertion.admission);
+    assert.equal(mutationAssertion.admission.action, "workspace.create");
+    assert.equal(mutationAssertion.admission.workspace_id, "synthetic-workspace");
+    assert.equal(mutationAssertion.admission.idempotency_key, "workspace-create-001");
+    assert.match(mutationAssertion.admission.request_hash, /^[0-9a-f]{64}$/u);
     const mutationAudit = getPolarisControlStore(import.meta.url).listAuditEvents()
       .filter((event) => event.requestId === mutationRequestId);
     assert.deepEqual(
       mutationAudit.map((event) => [event.action, event.outcome]).sort(),
       [
-        ["wanghai.surface.mutation.accepted", "success"],
-        ["wanghai.surface.mutation.completed", "success"],
+        ["wanghai.surface.action.workspace.create.accepted", "success"],
+        ["wanghai.surface.action.workspace.create.completed", "success"],
       ],
     );
+
+    const replayedMutation = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/workspaces",
+      method: "POST",
+      headers: {
+        host: launchUrl.host,
+        cookie: cookie!,
+        origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+        "idempotency-key": "workspace-create-001",
+      },
+      body: JSON.stringify({ workspace_type: "research", workspace_id: "synthetic-workspace" }),
+    });
+    assert.equal(replayedMutation.statusCode, 200);
+    assert.equal(replayedMutation.headers["x-polaris-idempotent-replay"], "1");
+    assert.equal(upstreamRequests, 2);
+
+    const conflictingMutation = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/workspaces",
+      method: "POST",
+      headers: {
+        host: launchUrl.host,
+        cookie: cookie!,
+        origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+        "idempotency-key": "workspace-create-001",
+      },
+      body: JSON.stringify({ workspace_id: "other-workspace", workspace_type: "research" }),
+    });
+    assert.equal(conflictingMutation.statusCode, 409);
+    assert.equal(upstreamRequests, 2);
+
+    const unknownMutation = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/workspaces/synthetic-workspace/not-admitted",
+      method: "POST",
+      headers: {
+        host: launchUrl.host,
+        cookie: cookie!,
+        origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+        "idempotency-key": "unknown-route-001",
+      },
+      body: "{}",
+    });
+    assert.equal(unknownMutation.statusCode, 403);
+    assert.equal(upstreamRequests, 2);
 
     const absoluteFormAttempt = await requestPortalHost({
       port: portalAddress.port,

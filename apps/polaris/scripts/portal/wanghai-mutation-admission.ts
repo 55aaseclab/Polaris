@@ -86,7 +86,6 @@ export function prepareWanghaiMutationAdmission(input: {
       vaultId: input.vaultId,
       userId: input.userId,
       actionId: action.id,
-      workspaceId,
     }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
   };
@@ -220,7 +219,6 @@ function wanghaiMutationIdempotencyScope(input: {
   vaultId: string;
   userId: string;
   actionId: string;
-  workspaceId: string;
 }): string {
   const values = [
     "polaris-wanghai-mutation-v1",
@@ -228,7 +226,6 @@ function wanghaiMutationIdempotencyScope(input: {
     input.vaultId,
     input.userId,
     input.actionId,
-    input.workspaceId,
   ];
   if (values.some((value) => !String(value).trim())) {
     throw new WanghaiMutationAdmissionError("Wanghai mutation scope is invalid", 400);
