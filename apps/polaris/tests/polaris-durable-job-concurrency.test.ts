@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { durableJobWorkerConcurrency } from "../scripts/runtime/operations.js";
+import { durableJobWorkerConcurrency } from "../scripts/runtime/job-concurrency.js";
 
 test("durable workers use the release-profile concurrency setting", () => {
   assert.equal(durableJobWorkerConcurrency({}), 1);

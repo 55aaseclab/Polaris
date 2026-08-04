@@ -78,6 +78,7 @@ import {
   getPolarisControlStore,
   type DurableJob,
 } from "../portal/control-store.js";
+import { durableJobWorkerConcurrency } from "./job-concurrency.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -163,14 +164,6 @@ function provisionJobLeaseMs(): number {
   const raw = Number.parseInt(String(process.env.POLARIS_JOB_LEASE_MS ?? ""), 10);
   if (!Number.isFinite(raw)) return 30 * 60 * 1_000;
   return Math.max(60_000, Math.min(6 * 60 * 60 * 1_000, raw));
-}
-
-export function durableJobWorkerConcurrency(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const raw = Number.parseInt(String(env.POLARIS_JOB_WORKER_CONCURRENCY ?? ""), 10);
-  if (!Number.isFinite(raw)) return 1;
-  return Math.max(1, Math.min(4, raw));
 }
 
 function driverStatusForOperation(kind: VaultOperationKind): NonNullable<VaultStatus["driver"]>["status"] {
