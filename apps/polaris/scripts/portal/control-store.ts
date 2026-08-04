@@ -415,6 +415,15 @@ export class PolarisControlStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_claim
         ON jobs(status, available_at, lease_expires_at, created_at);
 
+      CREATE TABLE IF NOT EXISTS wanghai_restore_activation_state (
+        tenant_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        activation_job_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, vault_id),
+        FOREIGN KEY (activation_job_id) REFERENCES jobs(id)
+      );
+
       CREATE TABLE IF NOT EXISTS idempotency_keys (
         scope TEXT NOT NULL,
         idempotency_key TEXT NOT NULL,
@@ -730,6 +739,126 @@ export class PolarisControlStore {
         AND lease_expires_at > ?
     `).run(now, now, resultJson, jobId, workerId, Date.now());
     return result.changes === 1;
+  }
+
+  completeWanghaiRestoreActivation(input: {
+    jobId: string;
+    workerId: string;
+    tenantId: string;
+    vaultId: string;
+    result: Record<string, unknown>;
+  }): boolean {
+    const tenantId = input.tenantId.trim();
+    const vaultId = input.vaultId.trim();
+    if (!tenantId || !vaultId) {
+      throw new Error("Wanghai restore activation tenant and vault IDs are required");
+    }
+    const resultJson = boundedJson(input.result);
+    const now = nowIso();
+    let completed = false;
+    this.transaction(() => {
+      const result = this.db.prepare(`
+        UPDATE jobs
+        SET status = 'succeeded', lease_owner = NULL, lease_expires_at = NULL,
+            updated_at = ?, completed_at = ?, error_code = NULL, error_message = NULL,
+            result_json = ?
+        WHERE id = ? AND kind = 'wanghai-restore-activation'
+          AND tenant_id = ? AND vault_id = ?
+          AND status = 'running' AND lease_owner = ?
+          AND cancel_requested = 0 AND lease_expires_at > ?
+      `).run(
+        now,
+        now,
+        resultJson,
+        input.jobId,
+        tenantId,
+        vaultId,
+        input.workerId,
+        Date.now(),
+      );
+      if (result.changes !== 1) return;
+      this.db.prepare(`
+        INSERT INTO wanghai_restore_activation_state
+          (tenant_id, vault_id, activation_job_id, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(tenant_id, vault_id) DO UPDATE SET
+          activation_job_id = excluded.activation_job_id,
+          updated_at = excluded.updated_at
+      `).run(tenantId, vaultId, input.jobId, now);
+      completed = true;
+    });
+    return completed;
+  }
+
+  isWanghaiRestoreActivationCurrent(input: {
+    tenantId: string;
+    vaultId: string;
+    activationJobId: string;
+  }): boolean {
+    const tenantId = input.tenantId.trim();
+    const vaultId = input.vaultId.trim();
+    const activationJobId = input.activationJobId.trim();
+    if (!tenantId || !vaultId || !activationJobId) return false;
+    const row = this.db.prepare(`
+      SELECT activation_job_id FROM wanghai_restore_activation_state
+      WHERE tenant_id = ? AND vault_id = ?
+    `).get(tenantId, vaultId) as SqlRow | undefined;
+    return String(row?.activation_job_id ?? "") === activationJobId;
+  }
+
+  completeWanghaiRestoreRollback(input: {
+    jobId: string;
+    workerId: string;
+    tenantId: string;
+    vaultId: string;
+    activationJobId: string;
+    result: Record<string, unknown>;
+  }): boolean {
+    const tenantId = input.tenantId.trim();
+    const vaultId = input.vaultId.trim();
+    const activationJobId = input.activationJobId.trim();
+    if (!tenantId || !vaultId || !activationJobId) {
+      throw new Error("Wanghai restore rollback identity is required");
+    }
+    const resultJson = boundedJson(input.result);
+    const now = nowIso();
+    let completed = false;
+    this.transaction(() => {
+      const current = this.db.prepare(`
+        SELECT activation_job_id FROM wanghai_restore_activation_state
+        WHERE tenant_id = ? AND vault_id = ?
+      `).get(tenantId, vaultId) as SqlRow | undefined;
+      if (String(current?.activation_job_id ?? "") !== activationJobId) return;
+      const result = this.db.prepare(`
+        UPDATE jobs
+        SET status = 'succeeded', lease_owner = NULL, lease_expires_at = NULL,
+            updated_at = ?, completed_at = ?, error_code = NULL, error_message = NULL,
+            result_json = ?
+        WHERE id = ? AND kind = 'wanghai-restore-rollback'
+          AND tenant_id = ? AND vault_id = ?
+          AND status = 'running' AND lease_owner = ?
+          AND cancel_requested = 0 AND lease_expires_at > ?
+      `).run(
+        now,
+        now,
+        resultJson,
+        input.jobId,
+        tenantId,
+        vaultId,
+        input.workerId,
+        Date.now(),
+      );
+      if (result.changes !== 1) return;
+      const cleared = this.db.prepare(`
+        DELETE FROM wanghai_restore_activation_state
+        WHERE tenant_id = ? AND vault_id = ? AND activation_job_id = ?
+      `).run(tenantId, vaultId, activationJobId);
+      if (cleared.changes !== 1) {
+        throw new Error("Wanghai restore activation state changed during rollback completion");
+      }
+      completed = true;
+    });
+    return completed;
   }
 
   failJob(jobId: string, workerId: string, errorCode: string, errorMessage: string, retryDelayMs = 1_000): DurableJob | null {

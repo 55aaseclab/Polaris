@@ -32,14 +32,18 @@ import {
 import {
   activatePortalCredential,
   cancelPortalWanghaiBackup,
+  cancelPortalWanghaiRestoreActivation,
   cancelPortalWanghaiRestore,
+  cancelPortalWanghaiRestoreRollback,
   createPortalCredential,
   createPortalSkill,
   listPortalAdminUsers,
   deletePortalUser,
   getPortalCredentialCatalog,
   getPortalWanghaiBackupJob,
+  getPortalWanghaiRestoreActivationJob,
   getPortalWanghaiRestoreJob,
+  getPortalWanghaiRestoreRollbackJob,
   deletePortalCredential,
   deletePortalSkill,
   installPortalVaultSkill,
@@ -58,7 +62,9 @@ import {
   readUserPortalVaultAssetPreview,
   queueProvisionVault,
   queuePortalWanghaiBackup,
+  queuePortalWanghaiRestoreActivation,
   queuePortalWanghaiRestore,
+  queuePortalWanghaiRestoreRollback,
   rebuildPortalVault,
   restartPortalVaultPaseoDaemon,
   syncPortalVaultSkills,
@@ -492,13 +498,19 @@ function sendWanghaiRestoreError(res: ServerResponse, error: unknown): void {
   }
   const statusCode = error.code === "restore-contract-invalid"
     || error.code === "restore-source-invalid"
+    || error.code === "restore-activation-source-invalid"
+    || error.code === "restore-rollback-source-invalid"
     ? 400
     : error.code === "restore-tenant-not-found"
       ? 404
       : error.code === "restore-rate-limited"
+        || error.code === "restore-activation-rate-limited"
+        || error.code === "restore-rollback-rate-limited"
         ? 429
         : error.code === "restore-backend-unsupported"
           || error.code === "restore-source-unavailable"
+          || error.code === "restore-activation-source-unavailable"
+          || error.code === "restore-rollback-source-unavailable"
           ? 409
           : 503;
   sendJson(res, statusCode, { error: error.message });
@@ -623,6 +635,140 @@ function handleWanghaiRestoreCancellation(
     return;
   }
   const job = getPortalWanghaiRestoreJob(input);
+  sendJson(res, 202, { job });
+}
+
+async function handleWanghaiRestoreActivationSubmit(
+  req: IncomingMessage,
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    restoreJobId: string;
+  },
+): Promise<void> {
+  const idempotencyKey = requestHeader(req, "idempotency-key");
+  if (!idempotencyKey) {
+    sendJson(res, 428, { error: "Wanghai restore activation requires the idempotency-key header" });
+    return;
+  }
+  try {
+    const job = await queuePortalWanghaiRestoreActivation({
+      actorId: input.actorId,
+      userId: input.userId,
+      vault: input.vault,
+      restoreJobId: input.restoreJobId,
+      idempotencyKey,
+    });
+    sendJson(res, job.status === "queued" || job.status === "running" ? 202 : 200, { job });
+  } catch (error) {
+    sendWanghaiRestoreError(res, error);
+  }
+}
+
+function handleWanghaiRestoreActivationRead(
+  res: ServerResponse,
+  input: {
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  const job = getPortalWanghaiRestoreActivationJob(input);
+  if (!job) {
+    notFound(res);
+    return;
+  }
+  sendJson(res, 200, { job });
+}
+
+function handleWanghaiRestoreActivationCancellation(
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  if (!cancelPortalWanghaiRestoreActivation(input)) {
+    const job = getPortalWanghaiRestoreActivationJob(input);
+    if (job) {
+      sendJson(res, 409, { error: "Wanghai restore activation can only be cancelled before it starts" });
+      return;
+    }
+    notFound(res);
+    return;
+  }
+  const job = getPortalWanghaiRestoreActivationJob(input);
+  sendJson(res, 202, { job });
+}
+
+async function handleWanghaiRestoreRollbackSubmit(
+  req: IncomingMessage,
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    activationJobId: string;
+  },
+): Promise<void> {
+  const idempotencyKey = requestHeader(req, "idempotency-key");
+  if (!idempotencyKey) {
+    sendJson(res, 428, { error: "Wanghai restore rollback requires the idempotency-key header" });
+    return;
+  }
+  try {
+    const job = await queuePortalWanghaiRestoreRollback({
+      actorId: input.actorId,
+      userId: input.userId,
+      vault: input.vault,
+      activationJobId: input.activationJobId,
+      idempotencyKey,
+    });
+    sendJson(res, job.status === "queued" || job.status === "running" ? 202 : 200, { job });
+  } catch (error) {
+    sendWanghaiRestoreError(res, error);
+  }
+}
+
+function handleWanghaiRestoreRollbackRead(
+  res: ServerResponse,
+  input: {
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  const job = getPortalWanghaiRestoreRollbackJob(input);
+  if (!job) {
+    notFound(res);
+    return;
+  }
+  sendJson(res, 200, { job });
+}
+
+function handleWanghaiRestoreRollbackCancellation(
+  res: ServerResponse,
+  input: {
+    actorId: string;
+    userId: string;
+    vault: string;
+    jobId: string;
+  },
+): void {
+  if (!cancelPortalWanghaiRestoreRollback(input)) {
+    const job = getPortalWanghaiRestoreRollbackJob(input);
+    if (job) {
+      sendJson(res, 409, { error: "Wanghai restore rollback can only be cancelled before it starts" });
+      return;
+    }
+    notFound(res);
+    return;
+  }
+  const job = getPortalWanghaiRestoreRollbackJob(input);
   sendJson(res, 202, { job });
 }
 
@@ -2191,6 +2337,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/vaults/:vaultName",
             "/api/users/:userId/vaults/:vaultName/backups",
             "/api/users/:userId/vaults/:vaultName/backups/:backupJobId/restore",
+            "/api/users/:userId/vaults/:vaultName/restores/:restoreJobId/activate",
+            "/api/users/:userId/vaults/:vaultName/restore-activations/:activationJobId/rollback",
             "/api/users/:userId/credentials",
           ],
         });
@@ -2660,6 +2808,50 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           notFound(res);
           return;
         }
+        if (
+          segments[3] === "vaults"
+          && segments.length === 8
+          && segments[5] === "restores"
+          && segments[7] === "activate"
+        ) {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          if (req.method === "POST") {
+            await handleWanghaiRestoreActivationSubmit(req, res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              restoreJobId: decodeURIComponent(segments[6]),
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (
+          segments[3] === "vaults"
+          && segments.length === 8
+          && segments[5] === "restore-activations"
+          && segments[7] === "rollback"
+        ) {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          if (req.method === "POST") {
+            await handleWanghaiRestoreRollbackSubmit(req, res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              activationJobId: decodeURIComponent(segments[6]),
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
         if (segments[3] === "vaults" && segments.length === 6 && segments[5] === "backups") {
           if (!sessionCanUseWanghai(session)) {
             sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
@@ -2718,6 +2910,66 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           }
           if (req.method === "DELETE") {
             handleWanghaiRestoreCancellation(res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (
+          segments[3] === "vaults"
+          && segments.length === 7
+          && segments[5] === "restore-activations"
+        ) {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          const jobId = decodeURIComponent(segments[6]);
+          if (req.method === "GET") {
+            handleWanghaiRestoreActivationRead(res, {
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          if (req.method === "DELETE") {
+            handleWanghaiRestoreActivationCancellation(res, {
+              actorId: session.polarisUserId ?? routeUserId,
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (
+          segments[3] === "vaults"
+          && segments.length === 7
+          && segments[5] === "restore-rollbacks"
+        ) {
+          if (!sessionCanUseWanghai(session)) {
+            sendJson(res, 403, { error: "Wanghai access is not enabled for this account" });
+            return;
+          }
+          const jobId = decodeURIComponent(segments[6]);
+          if (req.method === "GET") {
+            handleWanghaiRestoreRollbackRead(res, {
+              userId: routeUserId,
+              vault,
+              jobId,
+            });
+            return;
+          }
+          if (req.method === "DELETE") {
+            handleWanghaiRestoreRollbackCancellation(res, {
               actorId: session.polarisUserId ?? routeUserId,
               userId: routeUserId,
               vault,
