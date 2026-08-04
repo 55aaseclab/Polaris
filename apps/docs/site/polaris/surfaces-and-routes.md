@@ -13,7 +13,7 @@ Monorepo packages:
 | --- | --- |
 | `@qingniao/polaris-shell` | Outer door: auth, user management, host directory |
 | `@qingniao/surface-paseo` | Coding surface: `/h/...` left/right IDE routes only |
-| `@qingniao/surface-wanghai` | Vertical surface: open in-container portal URL |
+| `@qingniao/surface-wanghai` | Vertical surface: request the Polaris gateway route |
 
 ## Route ownership
 
@@ -51,15 +51,15 @@ Not shell: login, global user admin, global host catalog.
 
 ### Wanghai surface (`@qingniao/surface-wanghai`)
 
-Vertical industry UI entry from shell. **Server is in-container.**
+Vertical industry UI entry from shell. **Server is private in-container.**
 
 | Path / action | Purpose |
 | --- | --- |
-| Shell action `open-wanghai-portal` | Resolve portal base URL from host status ports |
-| Optional outer route `/v/:serverId/wanghai` | Thin embed/redirect page to in-container `:9090` |
+| Shell action `open-wanghai-portal` | Open the Polaris-authorized surface route |
+| Outer route `/v/:serverId/wanghai` | Thin embed page that first requests a gateway launch |
 
-No second global wanghai deployment. URL comes from that workspace's mapped
-port (docker publish / nodePort).
+No second global Wanghai deployment. The browser receives neither a container
+port nor a NodePort. Polaris resolves the private target after authorization.
 
 ## Product assembly (per user, one stack)
 

@@ -2333,7 +2333,7 @@ test("portal vault summaries stay isolated for same vault name under different u
   }
 });
 
-test("portal vault summaries expose serverId, surfaces, and published ports", async () => {
+test("portal vault summaries expose surface capability without runtime ports", async () => {
   const userId = uniqueName("portal-summary-user");
   const vault = uniqueName("portal-summary-vault");
   const profilePath = path.join(USER_ROOT, "profiles", `${userId}.yaml`);
@@ -2354,16 +2354,7 @@ test("portal vault summaries expose serverId, surfaces, and published ports", as
     const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
     assert.equal(summary?.serverId, "srv_summary");
     assert.deepEqual(summary?.surfaces, ["paseo", "wanghai"]);
-    assert.deepEqual(
-      summary?.ports.map((port) => ({
-        name: port.name ?? "",
-        containerPort: port.containerPort,
-      })),
-      [
-        { name: "paseo", containerPort: "6767" },
-        { name: "wanghai", containerPort: "9090" },
-      ],
-    );
+    assert.equal("ports" in (summary ?? {}), false);
   } finally {
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });

@@ -1,8 +1,4 @@
-import {
-  planOpenWanghaiPortal,
-  resolveWanghaiPortalUrl,
-  type VaultServicePort,
-} from "@qingniao/surface-wanghai";
+import { planOpenWanghaiPortal } from "@qingniao/surface-wanghai";
 import { codingEmbedPath } from "./routes.js";
 import {
   resolveAllowedVaultLines,
@@ -26,7 +22,6 @@ export interface ShellHostSummary {
   /** Available after the in-container Paseo daemon has paired. */
   serverId: string | null;
   surfaces: readonly string[];
-  ports: readonly VaultServicePort[];
   status: {
     driver?: {
       status?: string;
@@ -47,7 +42,6 @@ export type ShellHostSurfaceAction =
   | {
       kind: "open-wanghai";
       href: string;
-      portalUrl: string;
     };
 
 /**
@@ -58,7 +52,6 @@ export type ShellHostSurfaceAction =
 export function resolveShellHostActions(input: {
   session: Pick<ShellSession, "line" | "plan">;
   host: ShellHostSummary;
-  publicHost: string;
 }): ShellHostSurfaceAction[] {
   const actions: ShellHostSurfaceAction[] = [];
   const allowedLines = resolveAllowedVaultLines(input.session.line);
@@ -73,18 +66,10 @@ export function resolveShellHostActions(input: {
     return actions;
   }
 
-  const portalUrl = resolveHostWanghaiPortalUrl({
-    host: input.host,
-    publicHost: input.publicHost,
-  });
-  if (hostLine === "vertical" && allowedLines.includes("vertical") && portalUrl && input.host.serverId) {
+  if (hostLine === "vertical" && allowedLines.includes("vertical") && input.host.serverId) {
     actions.push({
       kind: "open-wanghai",
-      href: planOpenWanghaiPortal({
-        serverId: input.host.serverId,
-        portalUrl,
-      }).shellEmbedPath,
-      portalUrl,
+      href: planOpenWanghaiPortal(input.host.serverId).shellEmbedPath,
     });
   }
 
@@ -96,17 +81,4 @@ function resolveHostVaultLine(host: ShellHostSummary): "coding" | "vertical" {
     return "vertical";
   }
   return "coding";
-}
-
-function resolveHostWanghaiPortalUrl(input: {
-  host: ShellHostSummary;
-  publicHost: string;
-}): string | null {
-  if (resolveHostVaultLine(input.host) !== "vertical") {
-    return null;
-  }
-  return resolveWanghaiPortalUrl({
-    publicHost: input.publicHost,
-    ports: input.host.ports,
-  });
 }
