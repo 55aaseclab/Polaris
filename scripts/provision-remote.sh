@@ -226,6 +226,7 @@ upsert_env_line 'POLARIS_SERVER_REPLICAS' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_GATEWAY_REPLICAS' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_JOB_WORKER_CONCURRENCY' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_MAX_ACTIVE_VAULTS' '10' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES' '268435456' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'

@@ -99,6 +99,7 @@ export function prepareWanghaiMutationAdmission(input: {
 
 export function wanghaiAssertionAdmission(
   admission: WanghaiMutationAdmission,
+  quotaReservationId?: string,
 ): WanghaiAssertionAdmission {
   return {
     action: admission.action.id,
@@ -109,6 +110,7 @@ export function wanghaiAssertionAdmission(
     ...(admission.expectedVersion === undefined
       ? {}
       : { expectedVersion: admission.expectedVersion }),
+    ...(quotaReservationId === undefined ? {} : { quotaReservationId }),
   };
 }
 

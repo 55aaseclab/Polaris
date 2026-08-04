@@ -15,6 +15,7 @@ function releaseEnvironment(profile) {
     POLARIS_GATEWAY_REPLICAS: String(profile.topology.gatewayReplicas),
     POLARIS_JOB_WORKER_CONCURRENCY: String(profile.capacity.jobWorkerConcurrency),
     POLARIS_MAX_ACTIVE_VAULTS: String(profile.capacity.maxActiveVaults),
+    POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES: String(profile.quota.activeWorkspaceMiB * 1024 * 1024),
   };
 }
 
@@ -55,6 +56,13 @@ test("the single-host profile rejects replicas and mismatched capacity overrides
   assert.throws(
     () => validateReleaseProfileEnvironment(profile, environment),
     /POLARIS_MAX_ACTIVE_VAULTS must equal 10/i,
+  );
+
+  environment.POLARIS_MAX_ACTIVE_VAULTS = "10";
+  environment.POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES = "1";
+  assert.throws(
+    () => validateReleaseProfileEnvironment(profile, environment),
+    /POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES must equal 268435456/i,
   );
 });
 
