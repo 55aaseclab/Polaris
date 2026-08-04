@@ -104,6 +104,11 @@ import {
   type WanghaiMutationAdmission,
 } from "./wanghai-mutation-admission.js";
 import {
+  activeWorkspaceQuotaBytes,
+  estimateWanghaiWorkspaceGrowth,
+  WanghaiWorkspaceQuotaError,
+} from "./wanghai-workspace-quota.js";
+import {
   matchWanghaiMutationAction,
   type WanghaiMutationMatch,
 } from "./wanghai-mutation-catalog.js";
@@ -1005,10 +1010,28 @@ type WanghaiMutationAudit = {
 type WanghaiMutationExecution = {
   admission: WanghaiMutationAdmission;
   store: PolarisControlStore;
+  quota: {
+    audit: WanghaiQuotaAudit;
+    reservationId: string;
+    session: ReturnType<typeof verifyGatewaySession>;
+    targetOrigin: string;
+  };
+};
+
+type WanghaiQuotaAudit = {
+  admission: WanghaiMutationAdmission;
+  estimatedBytes: number;
+  limitBytes: number;
+  measuredUsageBytes: number;
+  requestId: string;
+  session: ReturnType<typeof verifyGatewaySession>;
 };
 
 const WANGHAI_WORKSPACE_LEASE_MS = 120_000;
 const MAX_WANGHAI_MUTATION_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_WANGHAI_WORKSPACE_USAGE_RESPONSE_BYTES = 16 * 1024;
+const WANGHAI_WORKSPACE_USAGE_TIMEOUT_MS = 5_000;
+const WANGHAI_WORKSPACE_USAGE_PATH = "/api/internal/workspace-usage";
 
 const WANGHAI_AUDIT_ROUTE_SEGMENTS = new Set([
   "api",
@@ -1067,6 +1090,39 @@ function recordWanghaiMutationAudit(
       ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
     },
   });
+}
+
+function recordWanghaiQuotaAudit(
+  audit: WanghaiQuotaAudit,
+  phase: "reservation.accepted" | "reservation.denied" | "reconciliation.completed" | "reconciliation.failed",
+  input: { actualUsageBytes?: number } = {},
+): void {
+  getPolarisControlStore(import.meta.url).recordAudit({
+    actorId: audit.session.user_id,
+    tenantId: audit.session.tenant_id,
+    vaultId: audit.session.vault_id,
+    action: `wanghai.surface.quota.${phase}`,
+    requestId: audit.requestId,
+    outcome: phase === "reservation.denied"
+      ? "denied"
+      : phase === "reconciliation.failed"
+        ? "failure"
+        : "success",
+    metadata: {
+      action: audit.admission.action.id,
+      category: "active_workspace",
+      estimatedBytes: audit.estimatedBytes,
+      limitBytes: audit.limitBytes,
+      measuredUsageBytes: audit.measuredUsageBytes,
+      ...(input.actualUsageBytes === undefined
+        ? {}
+        : { actualUsageBytes: input.actualUsageBytes }),
+    },
+  });
+}
+
+function isPrivateWanghaiPath(pathname: string): boolean {
+  return pathname === "/api/internal" || pathname.startsWith("/api/internal/");
 }
 
 function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: string): URL {
@@ -1157,6 +1213,129 @@ async function readBoundedWanghaiMutationResponse(response: Response): Promise<B
     chunks.push(bytes);
   }
   return Buffer.concat(chunks, size);
+}
+
+async function measureWanghaiWorkspaceUsage(input: {
+  session: ReturnType<typeof verifyGatewaySession>;
+  targetOrigin: string;
+}): Promise<number> {
+  const requestId = randomUUID();
+  const assertion = issueRequestAssertion({
+    session: input.session,
+    requestId,
+    quotaMeasurement: "active_workspace",
+  });
+  let response: Response;
+  try {
+    response = await fetch(new URL(WANGHAI_WORKSPACE_USAGE_PATH, input.targetOrigin), {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        [WANGHAI_GATEWAY_ASSERTION_HEADER]: assertion,
+        [WANGHAI_GATEWAY_REQUEST_ID_HEADER]: requestId,
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(WANGHAI_WORKSPACE_USAGE_TIMEOUT_MS),
+    });
+  } catch {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  if (response.status !== 200) {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  let body: Buffer;
+  try {
+    body = await readBoundedWanghaiWorkspaceUsageResponse(response);
+  } catch {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  return parseWanghaiWorkspaceUsage(body);
+}
+
+async function reconcileWanghaiMutationQuota(execution: WanghaiMutationExecution): Promise<void> {
+  try {
+    const actualUsageBytes = await measureWanghaiWorkspaceUsage({
+      session: execution.quota.session,
+      targetOrigin: execution.quota.targetOrigin,
+    });
+    execution.store.reconcileQuotaReservation({
+      reservationId: execution.quota.reservationId,
+      actualUsageBytes,
+    });
+    recordWanghaiQuotaAudit(execution.quota.audit, "reconciliation.completed", {
+      actualUsageBytes,
+    });
+  } catch {
+    try {
+      recordWanghaiQuotaAudit(execution.quota.audit, "reconciliation.failed");
+    } catch {
+      // The accepted mutation audit remains durable when reconciliation audit
+      // repair requires operator attention.
+    }
+  }
+}
+
+async function readBoundedWanghaiWorkspaceUsageResponse(response: Response): Promise<Buffer> {
+  const declaredLength = response.headers.get("content-length")?.trim();
+  if (declaredLength && (!/^\d+$/u.test(declaredLength)
+    || Number(declaredLength) > MAX_WANGHAI_WORKSPACE_USAGE_RESPONSE_BYTES)) {
+    throw new Error("Wanghai workspace usage response is too large");
+  }
+  if (!response.body) throw new Error("Wanghai workspace usage response is empty");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > MAX_WANGHAI_WORKSPACE_USAGE_RESPONSE_BYTES) {
+      try {
+        await response.body.cancel();
+      } catch {
+        // The response stream may already be closed by the upstream.
+      }
+      throw new Error("Wanghai workspace usage response is too large");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+function parseWanghaiWorkspaceUsage(body: Buffer): number {
+  let value: unknown;
+  try {
+    value = JSON.parse(body.toString("utf8"));
+  } catch {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  const payload = value as Record<string, unknown>;
+  const expectedKeys = new Set([
+    "schema_version",
+    "category",
+    "usage_bytes",
+    "file_count",
+    "entry_count",
+  ]);
+  if (Object.keys(payload).length !== expectedKeys.size
+    || Object.keys(payload).some((key) => !expectedKeys.has(key))) {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  const usageBytes = payload.usage_bytes;
+  if (
+    payload.schema_version !== 1
+    || payload.category !== "active_workspace"
+    || !Number.isSafeInteger(usageBytes)
+    || (usageBytes as number) < 0
+    || !Number.isSafeInteger(payload.file_count)
+    || (payload.file_count as number) < 0
+    || !Number.isSafeInteger(payload.entry_count)
+    || (payload.entry_count as number) < 0
+  ) {
+    throw new WanghaiWorkspaceQuotaError("Wanghai workspace usage is unavailable", 503);
+  }
+  return usageBytes as number;
 }
 
 function replayWanghaiMutationResponse(
@@ -1299,6 +1478,7 @@ async function proxyWanghaiRequest(
   } catch {
     const payload = gatewayErrorPayload("Wanghai portal is unavailable");
     if (execution) {
+      await reconcileWanghaiMutationQuota(execution);
       try {
         execution.store.failIdempotencyResponse(
           execution.admission.idempotencyScope,
@@ -1327,8 +1507,11 @@ async function proxyWanghaiRequest(
   }
   if (execution) {
     let responseBody: Buffer;
+    let quotaReconciled = false;
     try {
       responseBody = await readBoundedWanghaiMutationResponse(response);
+      await reconcileWanghaiMutationQuota(execution);
+      quotaReconciled = true;
       execution.store.completeIdempotencyResponse(
         execution.admission.idempotencyScope,
         execution.admission.idempotencyKey,
@@ -1340,6 +1523,9 @@ async function proxyWanghaiRequest(
       );
     } catch {
       const payload = gatewayErrorPayload("Wanghai mutation result is unavailable");
+      if (!quotaReconciled) {
+        await reconcileWanghaiMutationQuota(execution);
+      }
       try {
         execution.store.failIdempotencyResponse(
           execution.admission.idempotencyScope,
@@ -1471,6 +1657,10 @@ async function handleWanghaiGatewayHost(
     sendGatewayError(res, 400, "Invalid Wanghai gateway request path");
     return;
   }
+  if (isPrivateWanghaiPath(url.pathname)) {
+    sendGatewayError(res, 404, "Wanghai route is unavailable");
+    return;
+  }
 
   let mutationMatch: WanghaiMutationMatch | null = null;
   if (unsafeMethod) {
@@ -1593,25 +1783,114 @@ async function handleWanghaiGatewayHost(
       return;
     }
 
-    const audit: WanghaiMutationAudit = {
-      admission,
-      category: policy.category,
-      method: String(req.method ?? "GET").toUpperCase(),
-      requestId,
-      route: wanghaiAuditRoute(url.pathname),
-      session,
-    };
-    const assertion = issueRequestAssertion({
-      session,
-      requestId,
-      admission: wanghaiAssertionAdmission(admission),
-    });
     try {
+      let quotaAudit: WanghaiQuotaAudit;
+      let quotaReservationId: string;
+      try {
+        const limitBytes = activeWorkspaceQuotaBytes();
+        const measuredUsageBytes = await measureWanghaiWorkspaceUsage({
+          session,
+          targetOrigin: target,
+        });
+        const estimatedBytes = estimateWanghaiWorkspaceGrowth({
+          admission,
+          measuredUsageBytes,
+          requestBodyBytes: requestBody.byteLength,
+        });
+        quotaAudit = {
+          admission,
+          estimatedBytes,
+          limitBytes,
+          measuredUsageBytes,
+          requestId,
+          session,
+        };
+        const reservation = store.reserveQuota({
+          tenantId: session.tenant_id,
+          vaultId: session.vault_id,
+          category: "active_workspace",
+          action: admission.action.id,
+          idempotencyScope: admission.idempotencyScope,
+          idempotencyKey: admission.idempotencyKey,
+          limitBytes,
+          measuredUsageBytes,
+          reservedBytes: estimatedBytes,
+          leaseMs: WANGHAI_WORKSPACE_LEASE_MS,
+        });
+        if (!reservation.allowed || !reservation.reservation) {
+          try {
+            recordWanghaiQuotaAudit(quotaAudit, "reservation.denied");
+          } catch {
+            throw new WanghaiWorkspaceQuotaError("Wanghai quota audit is unavailable", 503);
+          }
+          const payload = gatewayErrorPayload("Wanghai workspace quota is exhausted");
+          store.failIdempotencyResponse(admission.idempotencyScope, admission.idempotencyKey, {
+            statusCode: 507,
+            contentType: "application/json; charset=utf-8",
+            body: payload,
+          });
+          replayWanghaiMutationResponse(res, requestId, {
+            statusCode: 507,
+            contentType: "application/json; charset=utf-8",
+            body: payload,
+          }, policy.rateLimit);
+          return;
+        }
+        quotaReservationId = reservation.reservation.id;
+        try {
+          recordWanghaiQuotaAudit(quotaAudit, "reservation.accepted");
+        } catch {
+          store.releaseQuotaReservation(quotaReservationId);
+          throw new WanghaiWorkspaceQuotaError("Wanghai quota audit is unavailable", 503);
+        }
+      } catch {
+        try {
+          store.recordAudit({
+            actorId: session.user_id,
+            tenantId: session.tenant_id,
+            vaultId: session.vault_id,
+            action: "wanghai.surface.quota.admission.failed",
+            requestId,
+            outcome: "failure",
+            metadata: { action: admission.action.id, category: "active_workspace" },
+          });
+        } catch {
+          // Preserve the idempotency result even when the audit store needs repair.
+        }
+        const payload = gatewayErrorPayload("Wanghai workspace quota is unavailable");
+        store.failIdempotencyResponse(admission.idempotencyScope, admission.idempotencyKey, {
+          statusCode: 503,
+          contentType: "application/json; charset=utf-8",
+          body: payload,
+        });
+        replayWanghaiMutationResponse(res, requestId, {
+          statusCode: 503,
+          contentType: "application/json; charset=utf-8",
+          body: payload,
+        }, policy.rateLimit);
+        return;
+      }
+
+      const audit: WanghaiMutationAudit = {
+        admission,
+        category: policy.category,
+        method: String(req.method ?? "GET").toUpperCase(),
+        requestId,
+        route: wanghaiAuditRoute(url.pathname),
+        session,
+      };
       // This must succeed before a mutable request reaches the surface. The
       // completion record below is persisted under the same idempotency key.
+      let assertion: string;
       try {
+        assertion = issueRequestAssertion({
+          session,
+          requestId,
+          admission: wanghaiAssertionAdmission(admission, quotaReservationId),
+        });
         recordWanghaiMutationAudit(audit, "accepted");
       } catch {
+        store.releaseQuotaReservation(quotaReservationId);
         const payload = gatewayErrorPayload("Wanghai mutation audit is unavailable");
         store.failIdempotencyResponse(admission.idempotencyScope, admission.idempotencyKey, {
           statusCode: 503,
@@ -1634,7 +1913,16 @@ async function handleWanghaiGatewayHost(
         requestId,
         policy.rateLimit,
         requestBody,
-        { admission, store },
+        {
+          admission,
+          store,
+          quota: {
+            audit: quotaAudit,
+            reservationId: quotaReservationId,
+            session,
+            targetOrigin: target,
+          },
+        },
         audit,
       );
     } finally {

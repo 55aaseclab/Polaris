@@ -105,9 +105,27 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
   ];
   let assertionHeader = "";
   let requestIdHeader = "";
+  let quotaMeasurementAssertion = "";
+  let quotaMeasurementRequestId = "";
   let upstreamBody = "";
   let upstreamRequests = 0;
+  let quotaMeasurementRequests = 0;
+  let workspaceUsageBytes = 1_024;
   const upstream = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+    if (req.url === "/api/internal/workspace-usage") {
+      quotaMeasurementRequests += 1;
+      quotaMeasurementAssertion = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
+      quotaMeasurementRequestId = String(req.headers["x-polaris-request-id"] ?? "");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        schema_version: 1,
+        category: "active_workspace",
+        usage_bytes: workspaceUsageBytes,
+        file_count: 1,
+        entry_count: 1,
+      }));
+      return;
+    }
     upstreamRequests += 1;
     assertionHeader = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
     requestIdHeader = String(req.headers["x-polaris-request-id"] ?? "");
@@ -115,6 +133,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     req.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
     req.on("end", () => {
       upstreamBody = Buffer.concat(chunks).toString("utf8");
+      if (req.method === "POST") workspaceUsageBytes = 2_048;
       res.writeHead(200, {
         "content-type": "application/json",
         "set-cookie": "surface-session=must-not-reach-the-gateway-host",
@@ -276,8 +295,21 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(mutationAssertion.admission.workspace_id, "synthetic-workspace");
     assert.equal(mutationAssertion.admission.idempotency_key, "workspace-create-001");
     assert.match(mutationAssertion.admission.request_hash, /^[0-9a-f]{64}$/u);
+    assert.match(mutationAssertion.admission.quota_reservation_id ?? "", /^[\x21-\x7e]{1,128}$/u);
+    const measurementAssertion = verifyWanghaiAssertion(quotaMeasurementAssertion, assertionSecret);
+    assert.equal(measurementAssertion.quota_measurement, "active_workspace");
+    assert.equal(measurementAssertion.admission, undefined);
+    assert.equal(quotaMeasurementRequestId, measurementAssertion.request_id);
+    assert.equal(quotaMeasurementRequests, 2);
+    assert.equal(
+      getPolarisControlStore(import.meta.url)
+        .getQuotaReservation(mutationAssertion.admission.quota_reservation_id!)
+        ?.actualUsageBytes,
+      2_048,
+    );
     const mutationAudit = getPolarisControlStore(import.meta.url).listAuditEvents()
-      .filter((event) => event.requestId === mutationRequestId);
+      .filter((event) => event.requestId === mutationRequestId)
+      .filter((event) => event.action.startsWith("wanghai.surface.action."));
     assert.deepEqual(
       mutationAudit.map((event) => [event.action, event.outcome]).sort(),
       [
@@ -302,6 +334,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(replayedMutation.statusCode, 200);
     assert.equal(replayedMutation.headers["x-polaris-idempotent-replay"], "1");
     assert.equal(upstreamRequests, 2);
+    assert.equal(quotaMeasurementRequests, 2);
 
     const conflictingMutation = await requestPortalHost({
       port: portalAddress.port,
@@ -318,6 +351,38 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     });
     assert.equal(conflictingMutation.statusCode, 409);
     assert.equal(upstreamRequests, 2);
+
+    const internalBrowserAttempt = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/internal/workspace-usage",
+      headers: { host: launchUrl.host, cookie: cookie! },
+    });
+    assert.equal(internalBrowserAttempt.statusCode, 404);
+    assert.equal(quotaMeasurementRequests, 2);
+
+    workspaceUsageBytes = 256 * 1024 * 1024 - 2 * 1024 * 1024;
+    const quotaExhausted = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/api/workspaces",
+      method: "POST",
+      headers: {
+        host: launchUrl.host,
+        cookie: cookie!,
+        origin: `http://${launchUrl.host}`,
+        "content-type": "application/json",
+        "idempotency-key": "workspace-quota-exhausted-001",
+      },
+      body: JSON.stringify({ workspace_id: "quota-exhausted", workspace_type: "research" }),
+    });
+    assert.equal(quotaExhausted.statusCode, 507);
+    assert.equal(upstreamRequests, 2);
+    assert.equal(quotaMeasurementRequests, 3);
+    assert.ok(
+      getPolarisControlStore(import.meta.url).listAuditEvents().some((event) => (
+        event.action === "wanghai.surface.quota.reservation.denied"
+        && event.outcome === "denied"
+      )),
+    );
 
     const unknownMutation = await requestPortalHost({
       port: portalAddress.port,

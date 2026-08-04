@@ -241,6 +241,11 @@ export function validateReleaseProfileEnvironment(profile, environment = process
     "POLARIS_MAX_ACTIVE_VAULTS",
     profile.capacity.maxActiveVaults,
   );
+  requireEnvironmentInteger(
+    environment,
+    "POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES",
+    profile.quota.activeWorkspaceMiB * 1024 * 1024,
+  );
   return profile;
 }
 

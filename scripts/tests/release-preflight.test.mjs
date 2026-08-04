@@ -29,6 +29,7 @@ function withPreflightFixture({
     POLARIS_GATEWAY_REPLICAS: "1",
     POLARIS_JOB_WORKER_CONCURRENCY: "1",
     POLARIS_MAX_ACTIVE_VAULTS: "10",
+    POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES: "268435456",
     POLARIS_AUTH_MODE: "authing-browser-session",
     POLARIS_AUTHING_APP_ID: "synthetic-app-id",
     POLARIS_AUTHING_APP_SECRET: "synthetic-app-secret",
