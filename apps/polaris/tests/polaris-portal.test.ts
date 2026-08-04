@@ -61,6 +61,7 @@ import {
   readVaultProvisionProgress,
   readVaultStatus,
   updatePortalProfile,
+  wanghaiGatewayId,
   writeVaultProvisionProgress,
   clearVaultProvisionProgress,
 } from "../scripts/core/portal.js";
@@ -2469,6 +2470,7 @@ test("portal vault summaries expose surface capability without runtime ports", a
 
     const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
     assert.equal(summary?.serverId, "srv_summary");
+    assert.equal(summary?.wanghaiId, wanghaiGatewayId(userId, vault));
     assert.deepEqual(summary?.surfaces, ["paseo", "wanghai"]);
     assert.equal("ports" in (summary ?? {}), false);
   } finally {
@@ -2516,6 +2518,7 @@ test("portal vault summaries keep Paseo-free Wanghai test vaults out of relay id
 
     const summary = (await listPortalVaults(userId)).find((entry) => entry.name === vault);
     assert.equal(summary?.serverId, null);
+    assert.equal(summary?.wanghaiId, wanghaiGatewayId(userId, vault));
     assert.deepEqual(summary?.surfaces, ["wanghai"]);
   } finally {
     fs.rmSync(profilePath, { force: true });

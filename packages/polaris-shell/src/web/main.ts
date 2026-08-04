@@ -433,6 +433,11 @@ function createHostCard(session: Pick<ShellSession, "line">): string {
 
 function hostCard(host: ShellHostSummary, session: ShellSession): string {
   const driverStatus = host.status?.driver?.status || "未就绪";
+  const surfaceStatus = host.serverId
+    ? `Paseo ${escapeHtml(host.serverId)}`
+    : host.wanghaiId
+      ? "Wanghai 网关已就绪"
+      : "等待库服务就绪";
   const actions = resolveShellHostActions({
     session,
     host,
@@ -444,7 +449,7 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
     <div class="card-head">
       <div>
         <h2>${escapeHtml(host.name)}</h2>
-        <p class="muted">${host.serverId ? `Paseo ${escapeHtml(host.serverId)}` : "等待库服务就绪"}</p>
+        <p class="muted">${surfaceStatus}</p>
       </div>
       <span class="status ${driverStatus === "running" ? "running" : ""}">${escapeHtml(driverStatus)}</span>
     </div>
@@ -459,10 +464,10 @@ function hostCard(host: ShellHostSummary, session: ShellSession): string {
   </article>`;
 }
 
-async function renderWanghaiPortal(serverId: string): Promise<void> {
+async function renderWanghaiPortal(wanghaiId: string): Promise<void> {
   const session = requireSession();
   const payload = await request<{ hosts: ShellHostSummary[] }>(SHELL_HOST_API.listHosts);
-  const host = payload.hosts.find((item) => item.serverId === serverId);
+  const host = payload.hosts.find((item) => item.wanghaiId === wanghaiId);
   if (!host) {
     navigate("/hosts", true);
     return;
@@ -476,7 +481,7 @@ async function renderWanghaiPortal(serverId: string): Promise<void> {
     return;
   }
   const launch = await request<{ portalUrl: string }>(
-    SHELL_HOST_API.launchWanghai(serverId),
+    SHELL_HOST_API.launchWanghai(wanghaiId),
     { method: "POST" },
   );
   setShellScrollRoot(false);
@@ -780,11 +785,12 @@ function bindCreateHostForm(session: Pick<ShellSession, "line">): void {
           navigate("/hosts", true);
           return;
         }
-        const host = await waitForShellHost(validation.hostName);
-        if (!host.serverId) {
+        const host = await waitForShellHost(validation.hostName, selectedLine);
+        const surfaceId = selectedLine === "vertical" ? host.wanghaiId : host.serverId;
+        if (!surfaceId) {
           throw new Error("主机仍在准备中，请稍后刷新主机列表");
         }
-        navigate(buildCreatedHostSurfaceHref(host.serverId, selectedLine));
+        navigate(buildCreatedHostSurfaceHref(surfaceId, selectedLine));
       } catch (error) {
         alert(error instanceof Error ? error.message : String(error));
       } finally {
@@ -797,12 +803,15 @@ function bindCreateHostForm(session: Pick<ShellSession, "line">): void {
   });
 }
 
-async function waitForShellHost(name: string): Promise<ShellHostSummary> {
+async function waitForShellHost(
+  name: string,
+  line: "coding" | "vertical",
+): Promise<ShellHostSummary> {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     const payload = await request<{ hosts: ShellHostSummary[] }>(SHELL_HOST_API.listHosts);
     const host = payload.hosts.find((item) => item.name === name);
-    if (host?.serverId) {
+    if ((line === "vertical" ? host?.wanghaiId : host?.serverId)) {
       return host;
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));

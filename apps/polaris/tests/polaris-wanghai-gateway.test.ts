@@ -12,6 +12,7 @@ import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { createPortalServer } from "../scripts/portal/server.js";
+import { listPortalVaults } from "../scripts/portal/service.js";
 import {
   scaffoldDockerVault,
   scaffoldUserProfileById,
@@ -20,9 +21,9 @@ import {
 import { ensureVaultConfig } from "../scripts/config/provision.js";
 import { createManagedSshCredential } from "../scripts/config/credentials.js";
 import {
-  vaultPaseoStateDir,
   writeVaultStatus,
 } from "../scripts/output/state-store.js";
+import { wanghaiGatewayId } from "../scripts/core/portal.js";
 import {
   deleteUserMapEntriesForPolarisUserId,
   updateUserAccessEntry,
@@ -92,7 +93,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
   const userA = uniqueName("gateway-user-a");
   const userB = uniqueName("gateway-user-b");
   const vault = uniqueName("gateway-vault");
-  const serverId = "srv_gateway_synthetic";
+  const wanghaiId = wanghaiGatewayId(userA, vault);
   const controlStoreRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-gateway-store-"));
   const restores = [
     setEnv("POLARIS_AUTH_MODE", "disabled"),
@@ -160,7 +161,10 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       label: "Gateway SSH",
       activate: true,
     });
-    scaffoldDockerVault(vault, userA, { line: "vertical" });
+    scaffoldDockerVault(vault, userA, {
+      line: "vertical",
+      paseoFreeWanghaiTest: true,
+    });
     await upsertUserMapEntry(userA, {
       polarisUserId: userA,
       role: "user",
@@ -179,9 +183,6 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     if (!wanghaiPort) throw new Error("Test Wanghai port was not scaffolded");
     wanghaiPort.node_port = String(upstreamAddress.port);
     fs.writeFileSync(configPath, yaml.dump(config, { lineWidth: 120, noRefs: true }), "utf8");
-    const paseoState = vaultPaseoStateDir(vault, userA);
-    fs.mkdirSync(paseoState, { recursive: true });
-    fs.writeFileSync(path.join(paseoState, "server-id"), `${serverId}\n`, "utf8");
     writeVaultStatus({
       schemaVersion: 1.1,
       project: vault,
@@ -199,6 +200,10 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       details: {},
     }, userA);
 
+    const summary = (await listPortalVaults(userA)).find((entry) => entry.name === vault);
+    assert.equal(summary?.serverId, null);
+    assert.equal(summary?.wanghaiId, wanghaiId);
+
     portal = createPortalServer(0);
     await once(portal, "listening");
     const portalAddress = portal.address();
@@ -213,7 +218,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     );
 
     const launchResponse = await fetch(
-      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${serverId}/launch`,
+      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${wanghaiId}/launch`,
       { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
     );
     assert.equal(launchResponse.status, 200);
@@ -238,7 +243,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(replayedTicket.statusCode, 401);
 
     const nextLaunchResponse = await fetch(
-      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${serverId}/launch`,
+      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${wanghaiId}/launch`,
       { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
     );
     assert.equal(nextLaunchResponse.status, 200);
@@ -461,7 +466,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       details: {},
     }, userA);
     const selectedRuntimeLaunch = await fetch(
-      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${serverId}/launch`,
+      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${wanghaiId}/launch`,
       { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
     );
     assert.equal(selectedRuntimeLaunch.status, 404);
@@ -469,7 +474,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     process.env.POLARIS_AUTH_DEFAULT_USER_ID = userB;
     const crossTenantLaunch = await fetch(
-      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${serverId}/launch`,
+      `http://127.0.0.1:${portalAddress.port}/api/wanghai/${wanghaiId}/launch`,
       { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
     );
     assert.equal(crossTenantLaunch.status, 404);
