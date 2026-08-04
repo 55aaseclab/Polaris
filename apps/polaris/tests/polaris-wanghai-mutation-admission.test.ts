@@ -20,6 +20,7 @@ function admissionInput(overrides: Record<string, unknown> = {}) {
     body: Buffer.from('{"name":"Sample","inventory":2}', "utf8"),
     contentType: "application/json; charset=utf-8",
     idempotencyKey: "mutation-001",
+    expectedVersion: "0",
     query: [],
     tenantId: "tenant-a",
     vaultId: "vault-a",
@@ -53,6 +54,7 @@ test("Wanghai mutation admission fingerprints normalized JSON and query pairs", 
     workspaceId: "acme",
     idempotencyKey: "mutation-001",
     requestHash: first.requestHash,
+    expectedVersion: 0,
   });
 });
 
@@ -83,6 +85,11 @@ test("Wanghai mutation admission rejects missing keys, wrong body types, and mal
       && error.statusCode === 415,
   );
   assert.throws(
+    () => prepareWanghaiMutationAdmission(admissionInput({ expectedVersion: undefined })),
+    (error: unknown) => error instanceof WanghaiMutationAdmissionError
+      && error.statusCode === 428,
+  );
+  assert.throws(
     () => prepareWanghaiMutationAdmission(admissionInput({ expectedVersion: "next" })),
     /expected version/u,
   );
@@ -101,6 +108,7 @@ test("Wanghai mutation admission fingerprints multipart payloads without parsing
     body: Buffer.from("synthetic-multipart-body", "utf8"),
     contentType: "multipart/form-data; boundary=synthetic",
     idempotencyKey: "upload-001",
+    expectedVersion: "0",
     tenantId: "tenant-a",
     vaultId: "vault-a",
     userId: "user-a",
@@ -110,6 +118,7 @@ test("Wanghai mutation admission fingerprints multipart payloads without parsing
     body: Buffer.from("changed-multipart-body", "utf8"),
     contentType: "multipart/form-data; boundary=synthetic",
     idempotencyKey: "upload-001",
+    expectedVersion: "0",
     tenantId: "tenant-a",
     vaultId: "vault-a",
     userId: "user-a",
