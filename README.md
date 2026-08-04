@@ -8,7 +8,12 @@ Self-hosted workspace control plane.
 agents across `docker`, `pod`, and `kubevirt-vm` backends.
 
 This README is the source-owned onboarding guide. Cross-repository architecture,
-operator runbooks, and release evidence live in the documentation site.
+operator runbooks, and release evidence live in the
+[Jianxiaoyi documentation site](https://www.jianxiaoyitech.com/docs/).
+Start with the [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/)
+for architecture and the
+[Polaris 0.3 release records](https://www.jianxiaoyitech.com/docs/operations/polaris-release/)
+for release status.
 
 ## Local Development
 
