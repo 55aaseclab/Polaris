@@ -471,6 +471,48 @@ test("control store enforces idempotency, workspace ownership, and immutable aud
   }
 });
 
+test("control store verifies durable audit chain integrity", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    store.recordAudit({
+      actorId: " user-a ",
+      tenantId: " tenant-a ",
+      vaultId: " vault-a ",
+      action: " workspace.write ",
+      requestId: " request-a ",
+      outcome: "success",
+      metadata: { workspaceId: "workspace-a" },
+    });
+    const secondId = store.recordAudit({
+      actorId: "user-b",
+      tenantId: "tenant-b",
+      vaultId: "vault-b",
+      action: "workspace.delete",
+      outcome: "denied",
+    });
+    assert.deepEqual(store.verifyAuditChain(), { valid: true, checked: 2 });
+
+    const rawStore = store as unknown as {
+      db: {
+        exec(query: string): void;
+        prepare(query: string): { run(...args: unknown[]): unknown };
+      };
+    };
+    rawStore.db.exec("DROP TRIGGER audit_events_immutable_update");
+    rawStore.db.prepare("UPDATE audit_events SET event_hash = ? WHERE id = ?").run("f".repeat(64), secondId);
+    assert.deepEqual(store.verifyAuditChain(), {
+      valid: false,
+      checked: 2,
+      failedEventId: secondId,
+      reason: "event-hash-mismatch",
+    });
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store reserves and reconciles logical quota atomically", () => {
   const fixture = temporaryStore();
   try {

@@ -10,6 +10,7 @@ import {
   vaultStatusPath,
   writeVaultStatus,
 } from "../../output/state-store.js";
+import { getPolarisControlStore } from "../../portal/control-store.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisStateRoot } from "../../utils/paths.js";
 
@@ -46,9 +47,15 @@ type VaultReconcileResult = {
   error?: string;
 };
 
+type AuditOptions = {
+  limit: number;
+  json: boolean;
+  verify: boolean;
+};
+
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]",
+    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]\n       pnpm --dir apps/polaris run polaris -- ops audit [--limit <1-1000>] [--verify] [--json]",
   );
 }
 
@@ -87,6 +94,32 @@ function parseReconcileOptions(argv: string[]): ReconcileOptions {
         usage();
       }
       options.vault = vault;
+      index += 1;
+      continue;
+    }
+    usage();
+  }
+  return options;
+}
+
+function parseAuditOptions(argv: string[]): AuditOptions {
+  const options: AuditOptions = { limit: 100, json: false, verify: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (value === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (value === "--verify") {
+      options.verify = true;
+      continue;
+    }
+    if (value === "--limit") {
+      const limit = Number(argv[index + 1]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
+        throw new Error("ops audit --limit must be an integer between 1 and 1000");
+      }
+      options.limit = limit;
       index += 1;
       continue;
     }
@@ -254,12 +287,61 @@ async function reconcileVaultsCommand(argv: string[]): Promise<void> {
   );
 }
 
+function auditCommand(argv: string[]): void {
+  const options = parseAuditOptions(argv);
+  const store = getPolarisControlStore(import.meta.url);
+  const events = store.listAuditEvents(options.limit);
+  const integrity = options.verify ? store.verifyAuditChain() : undefined;
+  const result = { events, ...(integrity ? { integrity } : {}) };
+
+  logInfo("cli", "ops-audit", {
+    limit: options.limit,
+    verify: options.verify,
+    eventCount: events.length,
+    chainValid: integrity?.valid,
+  });
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    for (const event of events) {
+      const fields = [
+        event.occurredAt,
+        event.outcome,
+        `action=${event.action}`,
+        `tenant=${event.tenantId ?? "-"}`,
+        `vault=${event.vaultId ?? "-"}`,
+        `actor=${event.actorId ?? "-"}`,
+        `request=${event.requestId ?? "-"}`,
+        `event=${event.id}`,
+        `hash=${event.eventHash}`,
+      ];
+      process.stdout.write(`${fields.join(" ")}\n`);
+    }
+    if (integrity) {
+      process.stdout.write(
+        `integrity valid=${integrity.valid ? "yes" : "no"} checked=${integrity.checked}${integrity.failedEventId ? ` failed-event=${integrity.failedEventId}` : ""}${integrity.reason ? ` reason=${integrity.reason}` : ""}\n`,
+      );
+    }
+  }
+
+  if (integrity && !integrity.valid) {
+    throw new Error(
+      `Audit chain verification failed${integrity.failedEventId ? ` for event ${integrity.failedEventId}` : ""}${integrity.reason ? ` (${integrity.reason})` : ""}`,
+    );
+  }
+}
+
 export async function opsCommand(action: string | undefined, argv: string[]): Promise<void> {
   if (!action) {
     usage();
   }
   if (action === "reconcile-vaults") {
     await reconcileVaultsCommand(argv);
+    return;
+  }
+  if (action === "audit") {
+    auditCommand(argv);
     return;
   }
   usage();
