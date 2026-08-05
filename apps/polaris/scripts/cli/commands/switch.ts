@@ -24,6 +24,23 @@ const SUPPORTED_BACKENDS: Array<VaultSpec["backend"]["kind"]> = [
   "kubevirt-vm",
 ];
 
+function isWanghaiServicePort(
+  port: VaultSpec["connectivity"]["servicePorts"][number],
+): boolean {
+  return port.name?.toLowerCase() === "wanghai" || port.containerPort === "9090";
+}
+
+function switchableBackendsForVault(
+  vault: VaultSpec,
+): readonly VaultSpec["backend"]["kind"][] {
+  const isDockerOnlyWanghai =
+    vault.backend.kind === "docker"
+    && !vault.agent.enabled
+    && vault.connectivity.servicePorts.length > 0
+    && vault.connectivity.servicePorts.every(isWanghaiServicePort);
+  return isDockerOnlyWanghai ? ["docker"] : SUPPORTED_BACKENDS;
+}
+
 function loadVaultForBackend(
   project: string,
   backend: VaultSpec["backend"]["kind"],
@@ -694,10 +711,11 @@ async function importSwitchState(
 async function stopCompetingBackends(
   project: string,
   targetBackend: VaultSpec["backend"]["kind"],
+  switchableBackends: readonly VaultSpec["backend"]["kind"][],
   userProfileId?: string,
 ): Promise<VaultSpec["backend"]["kind"][]> {
   const stopped: VaultSpec["backend"]["kind"][] = [];
-  for (const backend of SUPPORTED_BACKENDS) {
+  for (const backend of switchableBackends) {
     if (backend === targetBackend) {
       continue;
     }
@@ -728,6 +746,7 @@ async function stopCompetingBackends(
 async function runningBackendsForProject(
   project: string,
   targetBackend: VaultSpec["backend"]["kind"],
+  switchableBackends: readonly VaultSpec["backend"]["kind"][],
   userProfileId?: string,
 ): Promise<Array<{
   backend: VaultSpec["backend"]["kind"];
@@ -737,7 +756,7 @@ async function runningBackendsForProject(
     backend: VaultSpec["backend"]["kind"];
     vault: VaultSpec;
   }> = [];
-  for (const backend of SUPPORTED_BACKENDS) {
+  for (const backend of switchableBackends) {
     if (backend === targetBackend) {
       continue;
     }
@@ -780,15 +799,17 @@ export async function performVaultSwitch(
     ensureVaultConfig(targetRef, userProfileId);
     const previewVault = loadVaultForProjectRef(targetRef, userProfileId);
     await getBackendDriver(previewVault.backend.kind).render(previewVault);
+    const switchableBackends = switchableBackendsForVault(previewVault);
 
     const previousSelection = loadVaultSummary(userProfileId ?? "", project).status?.driver?.selected ?? null;
     const previousBackend = previousSelection?.backend;
-    const previousSelectionVault = previousBackend
+    const previousSelectionVault = previousBackend && switchableBackends.includes(previousBackend)
       ? loadVaultForBackend(project, previousBackend, userProfileId)
       : null;
     const runningBackends = await runningBackendsForProject(
       project,
       backendHint,
+      switchableBackends,
       userProfileId,
     );
     const selectedRunningVault = previousBackend
@@ -811,7 +832,7 @@ export async function performVaultSwitch(
       effectivePreviousBackend !== backendHint &&
       effectivePreviousBackend === "kubevirt-vm";
     const stoppedBackends = shouldStopBeforeExport
-      ? await stopCompetingBackends(project, backendHint, userProfileId)
+      ? await stopCompetingBackends(project, backendHint, switchableBackends, userProfileId)
       : [];
     const exportedSwitchState =
       previousVault &&
@@ -821,7 +842,7 @@ export async function performVaultSwitch(
         : null;
     const finalizedStoppedBackends = shouldStopBeforeExport
       ? stoppedBackends
-      : await stopCompetingBackends(project, backendHint, userProfileId);
+      : await stopCompetingBackends(project, backendHint, switchableBackends, userProfileId);
     const { vault, driver } = await loadExecutableVaultForCommand(
       "start",
       targetRef,
