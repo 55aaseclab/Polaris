@@ -194,7 +194,7 @@ export async function waitForVaultReady(
   vault: VaultSpec,
   timeoutMs = 120000,
   intervalMs = 1500,
-): Promise<void> {
+): Promise<VaultStatus> {
   const driver = getBackendDriver(vault.backend.kind);
   const startedAt = Date.now();
   let lastStatus: VaultStatus | null = null;
@@ -261,7 +261,7 @@ export async function waitForVaultReady(
         project: vault.identity.projectName,
         backend: vault.backend.kind,
       });
-      return;
+      return status;
     }
 
     await sleep(intervalMs);

@@ -115,7 +115,7 @@ function readVaultStatusFile(filePath: string): VaultStatus | null {
   }
 }
 
-function readStoredVaultStatus(project: string, userProfileId?: string): VaultStatus | null {
+export function readStoredVaultStatus(project: string, userProfileId?: string): VaultStatus | null {
   const candidates = [
     vaultStatusPath(project, userProfileId),
     legacyVaultStatusPath(project),
