@@ -30,6 +30,10 @@ backup_retention_count="${POLARIS_WANGHAI_BACKUP_RETENTION_COUNT:-}"
 backup_timeout_ms="${POLARIS_WANGHAI_BACKUP_TIMEOUT_MS:-}"
 backup_submissions_per_hour="${POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR:-}"
 
+if [ -n "${POLARIS_WANGHAI_DATA_ROOT:-}" ]; then
+  fail "POLARIS_WANGHAI_DATA_ROOT must be unset; integrated Wanghai derives /vault/project"
+fi
+
 require_integer_range() {
   local value="$1" name="$2" minimum="$3" maximum="$4"
   if ! [[ "${value}" =~ ^[0-9]+$ ]] \

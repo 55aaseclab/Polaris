@@ -164,6 +164,16 @@ test("release preflight rejects malformed gateway origins", () => {
   });
 });
 
+test("release preflight rejects a legacy integrated Wanghai data root", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_WANGHAI_DATA_ROOT: "/srv/legacy-wanghai" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /POLARIS_WANGHAI_DATA_ROOT must be unset/);
+  });
+});
+
 test("release preflight rejects mutable Wanghai images", () => {
   withPreflightFixture({
     envOverrides: { POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai:latest" },
