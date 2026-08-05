@@ -136,6 +136,8 @@ let durableJobWorkerSequence = 0;
 let durableJobRecoveryTimer: NodeJS.Timeout | null = null;
 
 const DURABLE_JOB_RECOVERY_INTERVAL_MS = 5_000;
+const DEFAULT_DURABLE_JOB_LEASE_MS = 60_000;
+const MAX_DURABLE_JOB_LEASE_MS = 6 * 60 * 60 * 1_000;
 
 type VaultOperationKind = "create" | "start" | "stop" | "rebuild" | "delete";
 
@@ -211,8 +213,8 @@ function enqueueProvisionJob(
 
 function durableJobLeaseMs(): number {
   const raw = Number.parseInt(String(process.env.POLARIS_JOB_LEASE_MS ?? ""), 10);
-  if (!Number.isFinite(raw)) return 30 * 60 * 1_000;
-  return Math.max(60_000, Math.min(6 * 60 * 60 * 1_000, raw));
+  if (!Number.isFinite(raw)) return DEFAULT_DURABLE_JOB_LEASE_MS;
+  return Math.max(DEFAULT_DURABLE_JOB_LEASE_MS, Math.min(MAX_DURABLE_JOB_LEASE_MS, raw));
 }
 
 function driverStatusForOperation(kind: VaultOperationKind): NonNullable<VaultStatus["driver"]>["status"] {

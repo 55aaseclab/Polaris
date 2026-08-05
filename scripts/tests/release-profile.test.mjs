@@ -14,6 +14,7 @@ function releaseEnvironment(profile) {
     POLARIS_SERVER_REPLICAS: String(profile.topology.controlPlaneReplicas),
     POLARIS_GATEWAY_REPLICAS: String(profile.topology.gatewayReplicas),
     POLARIS_JOB_WORKER_CONCURRENCY: String(profile.capacity.jobWorkerConcurrency),
+    POLARIS_JOB_LEASE_MS: String(profile.capacity.jobLeaseMs),
     POLARIS_MAX_ACTIVE_VAULTS: String(profile.capacity.maxActiveVaults),
     POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES: String(profile.quota.activeWorkspaceMiB * 1024 * 1024),
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + "a".repeat(64),
@@ -27,6 +28,7 @@ test("the 0.3.0 single-host profile declares bounded capacity and quota defaults
   assert.equal(profile.topology.gatewayReplicas, 1);
   assert.equal(profile.capacity.maxActiveVaults, 10);
   assert.equal(profile.capacity.jobWorkerConcurrency, 1);
+  assert.equal(profile.capacity.jobLeaseMs, 60_000);
   assert.equal(profile.quota.hotStorageMiB, 512);
   assert.equal(profile.slo.readP95Ms, 500);
 });
@@ -38,6 +40,16 @@ test("release profile validation rejects inconsistent storage accounting", () =>
   assert.throws(
     () => validateReleaseProfile(invalid),
     /hotStorageMiB must equal the sum/i,
+  );
+});
+
+test("release profile rejects a job lease that cannot meet its recovery SLO", () => {
+  const profile = loadReleaseProfile("0.3.0-single-host");
+  const invalid = JSON.parse(JSON.stringify(profile));
+  invalid.capacity.jobLeaseMs = 120_000;
+  assert.throws(
+    () => validateReleaseProfile(invalid),
+    /capacity\.jobLeaseMs must be less than slo\.recoverySeconds \* 1000/i,
   );
 });
 
@@ -53,6 +65,13 @@ test("the single-host profile rejects replicas and mismatched capacity overrides
   );
 
   environment.POLARIS_SERVER_REPLICAS = "1";
+  environment.POLARIS_JOB_LEASE_MS = "120000";
+  assert.throws(
+    () => validateReleaseProfileEnvironment(profile, environment),
+    /POLARIS_JOB_LEASE_MS must equal 60000/i,
+  );
+
+  environment.POLARIS_JOB_LEASE_MS = "60000";
   environment.POLARIS_MAX_ACTIVE_VAULTS = "11";
   assert.throws(
     () => validateReleaseProfileEnvironment(profile, environment),
