@@ -9,12 +9,15 @@ POLARIS_PASEO_SOURCE_REF="${POLARIS_PASEO_SOURCE_REF:-v0.1.101}"
 paseo_local_ensure_source() {
   local source_dir="apps/paseo/source"
 
-  if [ -f "${source_dir}/package.json" ]; then
+  if [ -f "${source_dir}/package.json" ] \
+    && [ -d "${source_dir}/.git" ] \
+    && git -C "${source_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    && git -C "${source_dir}" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1; then
     return
   fi
 
   if [ -d "${source_dir}" ] && [ -n "$(find "${source_dir}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-    printf 'Paseo source is incomplete: %s\n' "${source_dir}" >&2
+    printf 'Paseo source is incomplete or lacks usable Git metadata: %s\n' "${source_dir}" >&2
     return 1
   fi
 
