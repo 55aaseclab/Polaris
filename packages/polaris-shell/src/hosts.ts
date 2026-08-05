@@ -45,6 +45,6 @@ export const SHELL_HOST_API = {
   listHosts: "/polaris-hosts",
   createHost: "/polaris-hosts",
   hostAction: (name: string) => `/polaris-hosts/${encodeURIComponent(name)}`,
-  launchWanghai: (serverId: string) => `/wanghai/${encodeURIComponent(serverId)}/launch`,
+  launchWanghai: (serverId: string) => `/g/${encodeURIComponent(serverId)}/launch`,
   currentUser: "/polaris-user",
 } as const;

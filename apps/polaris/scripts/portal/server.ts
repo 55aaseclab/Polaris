@@ -93,13 +93,15 @@ import {
   configuredGatewayProtocol,
   consumeLaunchTicket,
   createWanghaiGatewayLaunch,
-  isWanghaiGatewayPath,
+  gatewayPathKind,
+  gatewayRequestPath,
+  isPolarisGatewayLaunchRoute,
   issueRequestAssertion,
+  POLARIS_GATEWAY_PATH,
   requestUsesExpectedOrigin,
   verifyGatewaySession,
   wanghaiRoleForPortalSession,
-  wanghaiGatewayRequestPath,
-  WANGHAI_GATEWAY_PATH,
+  WANGHAI_PORTAL_BASE_PATH,
   WANGHAI_GATEWAY_ASSERTION_HEADER,
   WANGHAI_GATEWAY_REQUEST_ID_HEADER,
 } from "./wanghai-gateway.js";
@@ -1458,7 +1460,13 @@ function isPrivateWanghaiPath(pathname: string): boolean {
 
 function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: string): URL {
   const requestTarget = validateWanghaiRequestTarget(rawUrl);
-  const resolved = new URL(requestTarget, targetOrigin);
+  const publicUrl = new URL(requestTarget, "http://polaris-gateway.invalid");
+  const surfacePath = gatewayRequestPath(publicUrl.pathname);
+  const upstreamPath = surfacePath === "/"
+    ? `${WANGHAI_PORTAL_BASE_PATH}/`
+    : `${WANGHAI_PORTAL_BASE_PATH}${surfacePath}`;
+  const resolved = new URL(upstreamPath, targetOrigin);
+  resolved.search = publicUrl.search;
   if (resolved.origin !== targetOrigin) {
     throw new WanghaiGatewayPolicyError("Invalid Wanghai gateway request origin", 400);
   }
@@ -1755,7 +1763,7 @@ function writeGatewayResponseHeaders(
       try {
         const location = new URL(rawValue, targetOrigin);
         if (location.origin === targetOrigin) {
-          value = `${location.pathname}${location.search}${location.hash}`;
+          value = `${rewriteWanghaiLocation(location.pathname)}${location.search}${location.hash}`;
         }
       } catch {
         // Preserve an invalid upstream header rather than turning a proxy
@@ -1927,15 +1935,27 @@ async function proxyWanghaiRequest(
   }
 }
 
+function rewriteWanghaiLocation(pathname: string): string {
+  if (
+    pathname !== WANGHAI_PORTAL_BASE_PATH
+    && !pathname.startsWith(`${WANGHAI_PORTAL_BASE_PATH}/`)
+  ) {
+    return pathname;
+  }
+  const suffix = pathname.slice(WANGHAI_PORTAL_BASE_PATH.length);
+  return `${POLARIS_GATEWAY_PATH}${suffix || "/"}`;
+}
+
 async function handleWanghaiGatewayPath(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
 ): Promise<void> {
   let surfacePath: string;
+  const pathKind = gatewayPathKind(url.pathname);
   try {
     validateWanghaiRequestTarget(req.url);
-    surfacePath = wanghaiGatewayRequestPath(url.pathname);
+    surfacePath = gatewayRequestPath(url.pathname);
   } catch (error) {
     if (error instanceof WanghaiGatewayPolicyError) {
       sendGatewayError(res, error.statusCode, error.message);
@@ -1947,7 +1967,11 @@ async function handleWanghaiGatewayPath(
 
   const ticket = url.searchParams.get("ticket");
   if (ticket) {
-    if (req.method !== "GET" || url.searchParams.getAll("ticket").length !== 1) {
+    if (
+      pathKind !== "canonical"
+      || req.method !== "GET"
+      || url.searchParams.getAll("ticket").length !== 1
+    ) {
       sendGatewayError(res, 400, "Invalid Wanghai launch request");
       return;
     }
@@ -1960,8 +1984,8 @@ async function handleWanghaiGatewayPath(
       });
       res.writeHead(302, {
         "cache-control": "no-store",
-        location: url.pathname === WANGHAI_GATEWAY_PATH
-          ? `${WANGHAI_GATEWAY_PATH}/`
+        location: url.pathname === POLARIS_GATEWAY_PATH
+          ? `${POLARIS_GATEWAY_PATH}/`
           : url.pathname,
         "referrer-policy": "no-referrer",
       });
@@ -2333,7 +2357,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           return;
         }
       }
-      if (isWanghaiGatewayPath(url.pathname)) {
+      if (gatewayPathKind(url.pathname)) {
         await handleWanghaiGatewayPath(req, res, url);
         return;
       }
@@ -2380,12 +2404,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
 
       if (isApiPath(segments)) {
-        if (
-          segments.length === 4
-          && segments[1] === "wanghai"
-          && segments[3] === "launch"
-          && req.method === "POST"
-        ) {
+        if (isPolarisGatewayLaunchRoute(segments) && req.method === "POST") {
           await handleWanghaiLaunch(req, res, decodeURIComponent(segments[2]));
           return;
         }

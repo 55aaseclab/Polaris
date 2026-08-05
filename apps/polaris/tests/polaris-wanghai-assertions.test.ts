@@ -51,7 +51,7 @@ test("Wanghai launch URLs stay on the Polaris origin and gateway path", () => {
     });
     const url = new URL(launch.portalUrl);
     assert.equal(url.hostname, "polaris.example.test");
-    assert.equal(url.pathname, "/wanghai/");
+    assert.equal(url.pathname, "/g/");
     assert.ok(url.searchParams.get("ticket"));
     assert.doesNotMatch(launch.portalUrl, /:9090|nodeport|subdomain/i);
   } finally {

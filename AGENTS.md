@@ -48,8 +48,8 @@ operations, and release documentation lives in the Polaris documentation site.
 - Own Authing identity, user mapping, tenant/vault ownership, role capability
   checks, gateway sessions, rate limits, logical quotas, lifecycle, durable
   jobs, audit persistence, ingress, and deployment policy here.
-- Keep Wanghai behind `POST /api/wanghai/:serverId/launch` and the private
-  Polaris gateway. Never return or publish a direct Wanghai port, NodePort, or
+- Keep Wanghai behind Polaris `POST /api/g/:serverId/launch` and the private
+  `/g/` gateway. Never return or publish a direct Wanghai port, NodePort, or
   browser URL.
 - Treat `9090` as a private implementation port. Docker must bind it to
   loopback; Pod and KubeVirt must use private services.

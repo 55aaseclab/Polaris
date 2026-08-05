@@ -69,11 +69,11 @@ test("capacity gateway load runs the complete isolated user flow", async () => {
         });
         return;
       }
-      if (url.pathname === `/api/wanghai/server-${userSuffix}/launch`) {
+      if (url.pathname === `/api/g/server-${userSuffix}/launch`) {
         assert.equal(req.method, "POST");
         assert.equal(req.headers.origin, "http://portal.example.test");
         json(res, 200, {
-          portalUrl: `http://portal.example.test/wanghai/?ticket=synthetic-${userSuffix}`,
+          portalUrl: `http://portal.example.test/g/?ticket=synthetic-${userSuffix}`,
         });
         return;
       }
@@ -82,26 +82,26 @@ test("capacity gateway load runs the complete isolated user flow", async () => {
     if (host === "portal.example.test") {
       if (url.searchParams.has("ticket")) {
         res.writeHead(302, {
-          location: "/wanghai/",
-          "set-cookie": "polaris_wanghai_session=synthetic; Path=/wanghai; HttpOnly",
+          location: "/g/",
+          "set-cookie": "polaris_wanghai_session=synthetic; Path=/g; HttpOnly",
         });
         res.end();
         return;
       }
-      if (url.pathname === "/wanghai/" || url.pathname === "/wanghai") {
+      if (url.pathname === "/g/" || url.pathname === "/g") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end("<html></html>");
         return;
       }
-      if (url.pathname === "/wanghai/api/prebuilt-workflows") {
+      if (url.pathname === "/g/api/prebuilt-workflows") {
         json(res, 200, { workflows: [] });
         return;
       }
-      if (url.pathname === "/wanghai/api/workspaces" && req.method === "GET") {
+      if (url.pathname === "/g/api/workspaces" && req.method === "GET") {
         json(res, 200, { workspaces: [] });
         return;
       }
-      if (url.pathname === "/wanghai/api/workspaces" && req.method === "POST") {
+      if (url.pathname === "/g/api/workspaces" && req.method === "POST") {
         assert.equal(req.headers.origin, "http://portal.example.test");
         assert.match(String(req.headers["idempotency-key"]), /^test-run-s2-u[12]-r1-workspace$/);
         json(res, 201, { workspace_version: 1 });

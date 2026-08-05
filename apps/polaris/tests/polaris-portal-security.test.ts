@@ -107,7 +107,7 @@ test("portal restricts CORS and rejects cookie-backed cross-origin mutations", a
     assert.equal(rejectedPreflight.status, 403);
     assert.equal(rejectedPreflight.headers.get("access-control-allow-origin"), null);
 
-    const rejectedMutation = await fetch(`${origin}/api/wanghai/missing/launch`, {
+    const rejectedMutation = await fetch(`${origin}/api/g/missing/launch`, {
       method: "POST",
       headers: {
         ...authHeaders,
@@ -117,7 +117,7 @@ test("portal restricts CORS and rejects cookie-backed cross-origin mutations", a
     assert.equal(rejectedMutation.status, 403);
     assert.match(await rejectedMutation.text(), /CSRF/i);
 
-    const sameOriginMutation = await fetch(`${origin}/api/wanghai/missing/launch`, {
+    const sameOriginMutation = await fetch(`${origin}/api/g/missing/launch`, {
       method: "POST",
       headers: {
         ...authHeaders,
@@ -173,7 +173,7 @@ test("portal detects Authing cookies after another cookie during CSRF checks", a
       throw new Error("Portal did not expose a TCP address");
     }
     const origin = `http://127.0.0.1:${address.port}`;
-    const response = await fetch(`${origin}/api/wanghai/missing/launch`, {
+    const response = await fetch(`${origin}/api/g/missing/launch`, {
       method: "POST",
       headers: {
         cookie: `unrelated=1; polaris_authing_session=synthetic-session`,
