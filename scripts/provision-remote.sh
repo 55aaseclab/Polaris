@@ -139,7 +139,7 @@ rsync -az \
 rsync -az \
   -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
-rsync -azc --delete --delete-excluded \
+rsync -azc --delete --one-file-system \
   --exclude ".git" \
   --exclude ".cache" \
   --exclude ".cert" \
@@ -153,6 +153,10 @@ rsync -azc --delete --delete-excluded \
   --exclude ".pnpm-store" \
   --exclude ".turbo" \
   --exclude "/workspaces/***" \
+  --exclude "data" \
+  --exclude "data/***" \
+  --exclude "docker-root" \
+  --exclude "docker-root/***" \
   -e "${RSYNC_RSH}" \
   "${LOCAL_WANGHAI_DIR}/" "${REMOTE_HOST}:${REMOTE_WANGHAI_DIR}/"
 

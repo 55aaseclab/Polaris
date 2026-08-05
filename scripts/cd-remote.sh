@@ -30,7 +30,7 @@ bash ./scripts/build-paseo-tool-bundle.sh
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 
-rsync -azc --delete --delete-excluded \
+rsync -azc --delete --one-file-system \
   --include "apps/paseo/tool-bundle/" \
   --include "apps/paseo/tool-bundle/bin/***" \
   --include "apps/paseo/tool-bundle/lib/" \
@@ -50,6 +50,10 @@ rsync -azc --delete --delete-excluded \
   --exclude "config/exports" \
   --exclude "config/generated" \
   --exclude "config/state" \
+  --exclude "data" \
+  --exclude "data/***" \
+  --exclude "docker-root" \
+  --exclude "docker-root/***" \
   --exclude "deploy/release-manifest.json" \
   -e "${RSYNC_RSH}" \
   ./ "${REMOTE_HOST}:${REMOTE_APP_DIR}/"
