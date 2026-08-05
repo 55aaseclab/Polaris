@@ -24,6 +24,40 @@ function setEnv(name: string, value: string): () => void {
   };
 }
 
+test("portal exposes unauthenticated Polaris liveness and readiness probes", async () => {
+  const portal = createPortalServer(0);
+  await once(portal, "listening");
+  const address = portal.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    const health = await fetch(`${origin}/healthz`, {
+      headers: { cookie: "synthetic-session=ignored" },
+    });
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), {
+      service: "polaris-portal",
+      status: "ok",
+    });
+
+    const readiness = await fetch(`${origin}/readyz`);
+    assert.equal(readiness.status, 200);
+    assert.deepEqual(await readiness.json(), {
+      service: "polaris-portal",
+      status: "ready",
+    });
+
+    const head = await fetch(`${origin}/healthz`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), "");
+  } finally {
+    portal.close();
+    await once(portal, "close");
+  }
+});
+
 test("portal restricts CORS and rejects cookie-backed cross-origin mutations", async () => {
   const userId = uniqueName("portal-csrf-user");
   const userRoot = polarisUsersRoot(import.meta.url);

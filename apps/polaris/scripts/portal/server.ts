@@ -288,6 +288,25 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.end(payload);
 }
 
+function sendProcessProbe(
+  res: ServerResponse,
+  method: string,
+  status: "ok" | "ready",
+): void {
+  const payload = `${JSON.stringify({ service: "polaris-portal", status })}\n`;
+  res.writeHead(200, {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(payload),
+    "x-content-type-options": "nosniff",
+  });
+  if (method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.end(payload);
+}
+
 function sendText(
   res: ServerResponse,
   statusCode: number,
@@ -2304,6 +2323,16 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      if (req.method === "GET" || req.method === "HEAD") {
+        if (url.pathname === "/healthz") {
+          sendProcessProbe(res, req.method, "ok");
+          return;
+        }
+        if (url.pathname === "/readyz") {
+          sendProcessProbe(res, req.method, "ready");
+          return;
+        }
+      }
       if (isWanghaiGatewayPath(url.pathname)) {
         await handleWanghaiGatewayPath(req, res, url);
         return;
