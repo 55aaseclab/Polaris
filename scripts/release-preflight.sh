@@ -18,9 +18,13 @@ set -a
 source "${ENV_FILE}"
 set +a
 
-node "${SCRIPT_DIR}/release-profile.mjs" || fail "release profile configuration is invalid"
+if ! release_profile_output="$(node "${SCRIPT_DIR}/release-profile.mjs" 2>&1)"; then
+  printf '%s\n' "${release_profile_output}" >&2
+  fail "release profile configuration is invalid"
+fi
 
 gateway_origin="${POLARIS_WANGHAI_GATEWAY_ORIGIN:-}"
+docker_gateway_host="${POLARIS_WANGHAI_DOCKER_GATEWAY_HOST:-}"
 master_secret="${POLARIS_WANGHAI_GATEWAY_MASTER_SECRET:-}"
 wanghai_image="${POLARIS_WANGHAI_VAULT_IMAGE:-}"
 workspace_base_image="${POLARIS_WORKSPACE_BASE_IMAGE:-}"
@@ -35,6 +39,10 @@ backup_submissions_per_hour="${POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR:-}"
 
 if [ -n "${POLARIS_WANGHAI_DATA_ROOT:-}" ]; then
   fail "POLARIS_WANGHAI_DATA_ROOT must be unset; integrated Wanghai derives /vault/project"
+fi
+
+if [ "${docker_gateway_host}" != "127.0.0.1" ]; then
+  fail "POLARIS_WANGHAI_DOCKER_GATEWAY_HOST must be 127.0.0.1 for the single-host Docker release"
 fi
 
 require_integer_range() {

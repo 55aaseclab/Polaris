@@ -52,6 +52,7 @@ function withPreflightFixture({
     POLARIS_AUTHING_REDIRECT_URI: "https://polaris.example.test/auth/callback",
     POLARIS_WANGHAI_GATEWAY_ORIGIN: "https://polaris.example.test",
     POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "0123456789abcdef0123456789abcdef",
+    POLARIS_WANGHAI_DOCKER_GATEWAY_HOST: "127.0.0.1",
     POLARIS_PORTAL_ALLOWED_ORIGINS: "https://polaris.example.test",
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
     POLARIS_WORKSPACE_BASE_IMAGE: "registry.example.test/polaris-base@sha256:" + "b".repeat(64),
@@ -173,6 +174,16 @@ test("release preflight rejects disabled authentication", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /POLARIS_AUTH_MODE must be authing-browser-session/);
+  });
+});
+
+test("release preflight rejects a non-loopback Docker gateway host", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_WANGHAI_DOCKER_GATEWAY_HOST: "host.docker.internal" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /POLARIS_WANGHAI_DOCKER_GATEWAY_HOST must be 127\.0\.0\.1/);
   });
 });
 
