@@ -139,7 +139,7 @@ rsync -az \
 rsync -az \
   -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
-rsync -az --delete --delete-excluded \
+rsync -azc --delete --delete-excluded \
   --exclude ".git" \
   --exclude ".cache" \
   --exclude ".cert" \

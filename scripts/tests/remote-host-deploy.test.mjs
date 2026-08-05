@@ -49,7 +49,7 @@ test("remote deployment keeps environment files root-owned and non-world-readabl
 
 test("remote provision requires a digest-pinned Wanghai image", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
-  assert.match(script, /rsync -az --delete --delete-excluded/);
+  assert.match(script, /rsync -azc --delete --delete-excluded/);
   assert.match(script, /--exclude ".next\*"/);
   assert.match(script, /--exclude "\/workspaces\/\*\*\*"/);
   assert.match(script, /\$\{LOCAL_WANGHAI_DIR\}\//);
