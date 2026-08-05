@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  INITIAL_PREVIOUS_MANIFEST_SHA256,
   loadReleaseManifest,
   validateReleaseManifest,
   validateReleaseManifestEnvironment,
@@ -40,6 +41,25 @@ test("release manifest rejects mutable images and missing rollback reference", (
   assert.throws(
     () => validateReleaseManifest({ ...validManifest(), previousManifestSha256: "" }),
     /previousManifestSha256 must be a non-empty string/u,
+  );
+});
+
+test("release manifest permits the genesis digest only for the initial candidate", () => {
+  assert.doesNotThrow(() => validateReleaseManifest({
+    ...validManifest(),
+    migration: "initial",
+    previousManifestSha256: INITIAL_PREVIOUS_MANIFEST_SHA256,
+  }));
+  assert.throws(
+    () => validateReleaseManifest({
+      ...validManifest(),
+      previousManifestSha256: INITIAL_PREVIOUS_MANIFEST_SHA256,
+    }),
+    /only initial migration may use the genesis previousManifestSha256/u,
+  );
+  assert.throws(
+    () => validateReleaseManifest({ ...validManifest(), migration: "initial" }),
+    /initial migration must use the genesis previousManifestSha256/u,
   );
 });
 

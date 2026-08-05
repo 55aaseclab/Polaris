@@ -8,6 +8,7 @@ const DIGEST_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{7,64}$/u;
 const RELEASE_ID = "0.3.0";
 const PROFILE_ID = "0.3.0-single-host";
+export const INITIAL_PREVIOUS_MANIFEST_SHA256 = "0".repeat(64);
 
 function fail(message) {
   throw new Error("Release manifest: " + message);
@@ -73,6 +74,19 @@ export function validateReleaseManifest(raw) {
   const generatedAt = requiredString(value.generatedAt, "generatedAt");
   if (!Number.isFinite(Date.parse(generatedAt))) fail("generatedAt must be an ISO timestamp");
 
+  const migration = requiredString(value.migration, "migration");
+  const previousManifestSha256 = requiredPattern(
+    value.previousManifestSha256,
+    DIGEST_PATTERN,
+    "previousManifestSha256",
+  );
+  if (migration === "initial" && previousManifestSha256 !== INITIAL_PREVIOUS_MANIFEST_SHA256) {
+    fail("initial migration must use the genesis previousManifestSha256");
+  }
+  if (migration !== "initial" && previousManifestSha256 === INITIAL_PREVIOUS_MANIFEST_SHA256) {
+    fail("only initial migration may use the genesis previousManifestSha256");
+  }
+
   return {
     schemaVersion: 1,
     release: RELEASE_ID,
@@ -81,13 +95,9 @@ export function validateReleaseManifest(raw) {
     workspaceBaseImage: requiredPattern(value.workspaceBaseImage, IMAGE_REF_PATTERN, "workspaceBaseImage"),
     wanghaiImage: requiredPattern(value.wanghaiImage, IMAGE_REF_PATTERN, "wanghaiImage"),
     environmentSha256: requiredPattern(value.environmentSha256, DIGEST_PATTERN, "environmentSha256"),
-    migration: requiredString(value.migration, "migration"),
+    migration,
     evidence: requiredStringList(value.evidence, "evidence"),
-    previousManifestSha256: requiredPattern(
-      value.previousManifestSha256,
-      DIGEST_PATTERN,
-      "previousManifestSha256",
-    ),
+    previousManifestSha256,
     generatedAt,
   };
 }
