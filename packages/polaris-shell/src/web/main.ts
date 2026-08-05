@@ -511,12 +511,7 @@ async function renderCodingSurface(serverId: string): Promise<void> {
   app.innerHTML = renderPaseoEmbedPage({
     hostName: host.name,
     paseoUrl,
-    backHref: "/hosts",
   });
-  const backButton = app.querySelector<HTMLAnchorElement>(".portal-shell-back");
-  if (backButton) {
-    surfaceBackButtonCleanup = bindDraggableSurfaceBackButton(backButton);
-  }
 }
 
 function bindDraggableSurfaceBackButton(button: HTMLAnchorElement): () => void {
