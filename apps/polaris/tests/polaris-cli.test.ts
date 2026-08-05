@@ -38,6 +38,7 @@ import { renderAndWriteKubevirtVault, renderKubevirtVault } from "../scripts/bac
 import { kubevirtProbePassword } from "../scripts/backends/kubevirt/probe-access.js";
 import { runCli } from "../scripts/cli/main.js";
 import { startCommand } from "../scripts/cli/commands/start.js";
+import { performVaultSwitch } from "../scripts/cli/commands/switch.js";
 import { waitForVaultReady } from "../scripts/cli/commands/shared.js";
 import { buildReconcilePlan, computeVaultDrift, synthesizeVaultStatus } from "../scripts/core/runtime-controller.js";
 import {
@@ -3849,6 +3850,58 @@ exit 0
       fs.rmSync(exportRoot, { recursive: true, force: true });
     }
   });
+});
+
+test("switch keeps Paseo-free Wanghai vaults on Docker without synthesizing other backends", async () => {
+  const project = uniqueProjectName("switch-wanghai-only");
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousPortalOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
+  ensureDemoVaultFixtures();
+  const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {
+    baseImage: "wanghai-admin-portal:test",
+    paseoFreeWanghaiTest: true,
+  });
+  const podPath = vaultConfigPath(project, "pod", DEMO_USER_PROFILE_ID);
+  const kubevirtPath = vaultConfigPath(project, "kubevirt-vm", DEMO_USER_PROFILE_ID);
+  try {
+    await withFakeCommands(
+      {
+        docker: `
+if [[ "$*" == *"compose"* && "$*" == *"ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf 'wanghai-only-id'
+  exit 0
+fi
+if [[ "$*" == *"inspect wanghai-only-id"* ]]; then
+  printf '[{"State":{"Running":true}}]'
+  exit 0
+fi
+if [[ "$1" == "exec" ]]; then
+  exit 0
+fi
+exit 0
+`,
+        kubectl: "echo unexpected kubectl invocation >&2; exit 99",
+      },
+      async () => {
+        const result = await performVaultSwitch(
+          `${project}@docker`,
+          DEMO_USER_PROFILE_ID,
+        );
+        assert.equal(result.selectedBackend, "docker");
+        assert.deepEqual(result.stoppedBackends, []);
+      },
+    );
+    assert.equal(fs.existsSync(podPath), false);
+    assert.equal(fs.existsSync(kubevirtPath), false);
+  } finally {
+    fs.rmSync(path.dirname(outputPath), { recursive: true, force: true });
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousPortalOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousPortalOrigins;
+  }
 });
 
 test("switch migrates only small durable attachments when vault-data is netfs", async () => {
