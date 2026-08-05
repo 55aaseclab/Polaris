@@ -146,6 +146,31 @@ test("release preflight accepts a private, digest-pinned and signed gateway cand
   });
 });
 
+test("release preflight permits the unsigned HTTP test-host mode", () => {
+  withPreflightFixture({
+    dnsFailure: true,
+    tlsFailure: true,
+    cosignFailure: true,
+    provenanceFailure: true,
+    sbomFailure: true,
+    envOverrides: {
+      POLARIS_RELEASE_GATE_MODE: "local-test",
+      POLARIS_AUTHING_LOGOUT_REDIRECT_URI: "http://m00e04c1b76c0.dyn.epfl.ch/welcome",
+      POLARIS_AUTHING_REDIRECT_URI: "http://m00e04c1b76c0.dyn.epfl.ch/auth/callback",
+      POLARIS_WANGHAI_GATEWAY_ORIGIN: "http://m00e04c1b76c0.dyn.epfl.ch",
+      POLARIS_PORTAL_ALLOWED_ORIGINS: "http://m00e04c1b76c0.dyn.epfl.ch",
+      POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "",
+      POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "",
+    },
+  }, ({ bin, envFile, cosignArgsPath }) => {
+    const result = runPreflight(bin, envFile);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /supply-chain verification deferred to 0\.3\.1/);
+    assert.match(result.stdout, /DNS and TLS verification deferred to 0\.3\.1/);
+    assert.equal(fs.existsSync(cosignArgsPath), false);
+  });
+});
+
 test("release preflight rejects a public Wanghai Docker port", () => {
   withPreflightFixture({ publicPort: true }, ({ bin, envFile }) => {
     const result = spawnSync("bash", ["scripts/release-preflight.sh", envFile], {
