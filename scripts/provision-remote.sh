@@ -212,6 +212,16 @@ install_env_file() {
   fi
 }
 
+remove_env_line() {
+  local key=\"\$1\"
+  local file=\"\$2\"
+  local temp_file
+  temp_file=\"\$(mktemp)\"
+  awk -v key=\"\${key}\" 'index(\$0, key \"=\") != 1 { print }' \"\${file}\" > \"\${temp_file}\"
+  install_env_file \"\$temp_file\" \"\$file\"
+  rm -f \"\${temp_file}\"
+}
+
 if [ ! -f '${REMOTE_ENV_FILE}' ]; then
   install_env_file '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
 else
@@ -228,6 +238,7 @@ upsert_env_line 'POLARIS_GATEWAY_REPLICAS' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_JOB_WORKER_CONCURRENCY' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_MAX_ACTIVE_VAULTS' '10' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES' '268435456' '${REMOTE_ENV_FILE}'
+remove_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'

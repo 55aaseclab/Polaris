@@ -34,7 +34,8 @@ test("remote provision keeps integrated Wanghai on the Polaris vault export", ()
   assert.match(script, /POLARIS_RELEASE_PROFILE/);
   assert.match(script, /POLARIS_MAX_ACTIVE_VAULTS/);
   assert.match(script, /POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES/);
-  assert.doesNotMatch(script, /POLARIS_WANGHAI_DATA_ROOT/);
+  assert.match(script, /remove_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
+  assert.doesNotMatch(script, /upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
   assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
 
