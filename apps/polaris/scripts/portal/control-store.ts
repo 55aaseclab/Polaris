@@ -40,6 +40,13 @@ export interface DurableAuditEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface AuditChainVerification {
+  valid: boolean;
+  checked: number;
+  failedEventId?: string;
+  reason?: "previous-hash-mismatch" | "event-hash-mismatch";
+}
+
 export interface GatewayRateLimitInput {
   bucketKey: string;
   limit: number;
@@ -185,6 +192,32 @@ function normalizeClaimJobKinds(kinds: readonly string[] | undefined): string[] 
 function asOptionalString(value: unknown): string | undefined {
   const text = String(value ?? "").trim();
   return text || undefined;
+}
+
+function auditEventHash(input: {
+  id: string;
+  actorId?: string;
+  tenantId?: string;
+  vaultId?: string;
+  action: string;
+  requestId?: string;
+  outcome: string;
+  metadataJson: string;
+  previousHash: string;
+  occurredAt: string;
+}): string {
+  return createHash("sha256").update(JSON.stringify({
+    id: input.id,
+    actorId: input.actorId ?? null,
+    tenantId: input.tenantId ?? null,
+    vaultId: input.vaultId ?? null,
+    action: input.action,
+    requestId: input.requestId ?? null,
+    outcome: input.outcome,
+    metadataJson: input.metadataJson,
+    previousHash: input.previousHash,
+    occurredAt: input.occurredAt,
+  })).digest("hex");
 }
 
 function parsePayload(value: unknown): Record<string, unknown> {
@@ -1461,32 +1494,37 @@ export class PolarisControlStore {
     const id = event.id?.trim() || randomUUID();
     const occurredAt = nowIso();
     const metadataJson = boundedJson(event.metadata);
+    const actorId = event.actorId?.trim() || undefined;
+    const tenantId = event.tenantId?.trim() || undefined;
+    const vaultId = event.vaultId?.trim() || undefined;
+    const action = event.action.trim();
+    const requestId = event.requestId?.trim() || undefined;
     let eventHash = "";
     this.transaction(() => {
       const previous = this.db.prepare(
         "SELECT event_hash FROM audit_events ORDER BY occurred_at DESC, rowid DESC LIMIT 1",
       ).get() as SqlRow | undefined;
       const previousHash = asOptionalString(previous?.event_hash) ?? "";
-      eventHash = createHash("sha256").update(JSON.stringify({
+      eventHash = auditEventHash({
         id,
-        actorId: event.actorId ?? null,
-        tenantId: event.tenantId ?? null,
-        vaultId: event.vaultId ?? null,
-        action: event.action,
-        requestId: event.requestId ?? null,
+        actorId,
+        tenantId,
+        vaultId,
+        action,
+        requestId,
         outcome: event.outcome,
         metadataJson,
         previousHash,
         occurredAt,
-      })).digest("hex");
+      });
       this.db.prepare(`
         INSERT INTO audit_events (
           id, actor_id, tenant_id, vault_id, action, request_id, outcome,
           metadata_json, previous_hash, event_hash, occurred_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, event.actorId?.trim() || null, event.tenantId?.trim() || null,
-        event.vaultId?.trim() || null, event.action.trim(), event.requestId?.trim() || null,
+        id, actorId ?? null, tenantId ?? null,
+        vaultId ?? null, action, requestId ?? null,
         event.outcome, metadataJson, previousHash || null, eventHash, occurredAt,
       );
     });
@@ -1523,6 +1561,54 @@ export class PolarisControlStore {
       occurredAt: String(row.occurred_at),
       eventHash: String(row.event_hash),
     }));
+  }
+
+  verifyAuditChain(): AuditChainVerification {
+    const rows = this.db.prepare(`
+      SELECT id, actor_id, tenant_id, vault_id, action, request_id, outcome,
+             metadata_json, previous_hash, event_hash, occurred_at
+      FROM audit_events
+      ORDER BY occurred_at ASC, rowid ASC
+    `).all() as SqlRow[];
+    let previousHash = "";
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const id = String(row.id);
+      const storedPreviousHash = asOptionalString(row.previous_hash) ?? "";
+      if (storedPreviousHash !== previousHash) {
+        return {
+          valid: false,
+          checked: index + 1,
+          failedEventId: id,
+          reason: "previous-hash-mismatch",
+        };
+      }
+      const eventHash = String(row.event_hash);
+      const expectedHash = auditEventHash({
+        id,
+        actorId: asOptionalString(row.actor_id),
+        tenantId: asOptionalString(row.tenant_id),
+        vaultId: asOptionalString(row.vault_id),
+        action: String(row.action),
+        requestId: asOptionalString(row.request_id),
+        outcome: String(row.outcome),
+        metadataJson: String(row.metadata_json),
+        previousHash,
+        occurredAt: String(row.occurred_at),
+      });
+      if (eventHash !== expectedHash) {
+        return {
+          valid: false,
+          checked: index + 1,
+          failedEventId: id,
+          reason: "event-hash-mismatch",
+        };
+      }
+      previousHash = eventHash;
+    }
+
+    return { valid: true, checked: rows.length };
   }
 
   private expireQuotaReservations(nowMs: number, timestamp: string): void {
