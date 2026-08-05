@@ -90,7 +90,7 @@ operations, and release documentation lives in the Polaris documentation site.
   quota, resource-budget, and SLO source. Production preflight and the host
   launcher must validate it; do not raise its limits without new evidence.
 
-Read the canonical Polaris Docs Surface Boundary and Release TODO before
+Read the canonical Polaris Docs Design and Release TODO before
 altering this boundary. Record each reviewed commit and its focused checks in
 the maintained release documentation; do not add an internal release-directory
 path to Polaris code or tooling.
