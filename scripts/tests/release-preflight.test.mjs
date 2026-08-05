@@ -16,6 +16,7 @@ function withPreflightFixture({
   dnsFailure = false,
   tlsFailure = false,
   backupKeyMode = 0o700,
+  storageMount = "xfs rw,relatime,pquota",
   envOverrides = {},
 }, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-release-preflight-"));
@@ -58,9 +59,19 @@ function withPreflightFixture({
     Object.entries(values).map(([key, value]) => key + "=" + value).join("\n") + "\n",
   );
   writeExecutable(path.join(bin, "docker"), `#!/usr/bin/env bash
+if [ "$1" = "info" ] && [ "$2" = "--format" ]; then
+  case "$3" in
+    *DockerRootDir*) printf '%s\\n' '/var/lib/docker' ;;
+    *) printf '%s\\n' 'overlay2' ;;
+  esac
+  exit 0
+fi
 if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then exit 0; fi
 if [ "$1" = "ps" ]; then ${psFailure ? "exit 1" : publicPort ? "printf '%s\\n' 'legacy 0.0.0.0:32002->9090/tcp'; exit 0" : "exit 0"}; fi
 exit 1
+`);
+  writeExecutable(path.join(bin, "findmnt"), `#!/usr/bin/env bash
+printf '%s\\n' '${storageMount}'
 `);
   writeExecutable(path.join(bin, "getent"), "#!/usr/bin/env bash\nexit " + (dnsFailure ? 1 : 0) + "\n");
   writeExecutable(path.join(bin, "curl"), "#!/usr/bin/env bash\nexit " + (tlsFailure ? 1 : 0) + "\n");
@@ -194,5 +205,13 @@ test("release preflight rejects wildcard TLS failures", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /wildcard TLS endpoint is not reachable/);
+  });
+});
+
+test("release preflight rejects an unsupported Docker writable-layer backend", () => {
+  withPreflightFixture({ storageMount: "ext4 rw,relatime" }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Docker storage must be overlay2 on xfs with pquota or prjquota/);
   });
 });
