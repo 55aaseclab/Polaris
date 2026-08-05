@@ -18,6 +18,21 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+release_gate_mode="${POLARIS_RELEASE_GATE_MODE:-production}"
+case "${release_gate_mode}" in
+  local-test|production) ;;
+  *) fail "POLARIS_RELEASE_GATE_MODE must be local-test or production" ;;
+esac
+if [ "${release_gate_mode}" = "production" ]; then
+  release_url_requirement="valid HTTPS URL"
+  gateway_origin_requirement="bare HTTPS origin"
+  allowed_origins_requirement="explicit HTTPS origins"
+else
+  release_url_requirement="valid release URL"
+  gateway_origin_requirement="bare release origin"
+  allowed_origins_requirement="explicit release origins"
+fi
+
 if ! release_profile_output="$(node "${SCRIPT_DIR}/release-profile.mjs" 2>&1)"; then
   printf '%s\n' "${release_profile_output}" >&2
   fail "release profile configuration is invalid"
@@ -89,10 +104,12 @@ for auth_url_key in \
     } catch {
       process.exit(1);
     }
-    if (value.protocol !== "https:" || value.username || value.password || !value.hostname
+    const allowHttp = process.argv[2] === "1";
+    if (((value.protocol !== "https:") && (!allowHttp || value.protocol !== "http:"))
+      || value.username || value.password || !value.hostname
       || value.search || value.hash) process.exit(1);
-  ' "${auth_url}"; then
-    fail "${auth_url_key} must be a valid HTTPS URL"
+  ' "${auth_url}" "$([ "${release_gate_mode}" = "local-test" ] && printf 1 || printf 0)"; then
+    fail "${auth_url_key} must be a ${release_url_requirement}"
   fi
 done
 
@@ -112,25 +129,29 @@ try {
 } catch {
   process.exit(1);
 }
-if (origin.protocol !== "https:" || origin.username || origin.password
+const allowHttp = process.argv[2] === "1";
+if (((origin.protocol !== "https:") && (!allowHttp || origin.protocol !== "http:"))
+  || origin.username || origin.password
   || origin.pathname !== "/" || origin.search || origin.hash || !origin.hostname) {
   process.exit(1);
 }
 process.stdout.write(origin.hostname.toLowerCase());
-' "${gateway_origin}")" || fail "POLARIS_WANGHAI_GATEWAY_ORIGIN must be a bare HTTPS origin"
+' "${gateway_origin}" "$([ "${release_gate_mode}" = "local-test" ] && printf 1 || printf 0)")" || fail "POLARIS_WANGHAI_GATEWAY_ORIGIN must be a ${gateway_origin_requirement}"
 
 if [ -z "${allowed_origins}" ]; then
   fail "POLARIS_PORTAL_ALLOWED_ORIGINS is required"
 fi
 node -e '
 const values = (process.argv[1] || "").split(",").map((value) => value.trim()).filter(Boolean);
+const allowHttp = process.argv[2] === "1";
 if (values.length === 0 || values.some((value) => value === "*")) process.exit(1);
 for (const value of values) {
   const origin = new URL(value);
-  if (origin.protocol !== "https:" || origin.username || origin.password
+  if (((origin.protocol !== "https:") && (!allowHttp || origin.protocol !== "http:"))
+    || origin.username || origin.password
     || origin.pathname !== "/" || origin.search || origin.hash) process.exit(1);
 }
-' "${allowed_origins}" || fail "POLARIS_PORTAL_ALLOWED_ORIGINS must contain explicit HTTPS origins"
+' "${allowed_origins}" "$([ "${release_gate_mode}" = "local-test" ] && printf 1 || printf 0)" || fail "POLARIS_PORTAL_ALLOWED_ORIGINS must contain ${allowed_origins_requirement}"
 
 if ! node -e '
 const gateway = new URL(process.argv[1]);
@@ -151,6 +172,7 @@ fi
 node "${SCRIPT_DIR}/release-manifest.mjs" "${ENV_FILE}" \
   || fail "release candidate manifest validation failed"
 
+if [ "${release_gate_mode}" = "production" ]; then
 for cosign_key in \
   POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY \
   POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER; do
@@ -173,6 +195,8 @@ for cosign_key in \
   fi
 done
 
+fi
+
 if [ -z "${backup_key_root}" ] \
   || [[ "${backup_key_root}" != /* ]] \
   || [ ! -d "${backup_key_root}" ] \
@@ -194,6 +218,7 @@ if ! docker image inspect "${wanghai_image}" >/dev/null 2>&1; then
   fail "digest-pinned Wanghai image is not present on the host"
 fi
 
+if [ "${release_gate_mode}" = "production" ]; then
 command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify the Wanghai image signature"
 if ! cosign verify \
   --certificate-identity "${wanghai_cosign_identity}" \
@@ -215,6 +240,9 @@ verify_wanghai_attestation() {
 
 verify_wanghai_attestation "slsaprovenance" "Wanghai image provenance attestation"
 verify_wanghai_attestation "spdxjson" "Wanghai image SBOM attestation"
+else
+  printf 'release preflight: external supply-chain verification deferred to 0.3.1\n'
+fi
 
 command -v findmnt >/dev/null 2>&1 || fail "findmnt is required to validate Docker storage quotas"
 docker_storage_driver="$(docker info --format '{{.Driver}}')" \
@@ -237,12 +265,16 @@ if printf '%s\n' "${docker_ports}" \
   fail "a public Docker mapping to Wanghai port 9090 is still active"
 fi
 
-if ! getent ahosts "${gateway_host}" >/dev/null 2>&1; then
-  fail "Polaris public DNS does not resolve"
-fi
-if ! curl --proto '=https' --tlsv1.2 --silent --show-error --output /dev/null \
-  --connect-timeout 10 --max-time 20 "https://${gateway_host}/healthz"; then
-  fail "Polaris public TLS endpoint is not reachable or does not validate"
+if [ "${release_gate_mode}" = "production" ]; then
+  if ! getent ahosts "${gateway_host}" >/dev/null 2>&1; then
+    fail "Polaris public DNS does not resolve"
+  fi
+  if ! curl --proto '=https' --tlsv1.2 --silent --show-error --output /dev/null \
+    --connect-timeout 10 --max-time 20 "https://${gateway_host}/healthz"; then
+    fail "Polaris public TLS endpoint is not reachable or does not validate"
+  fi
+else
+  printf 'release preflight: external DNS and TLS verification deferred to 0.3.1\n'
 fi
 
-printf 'release preflight: ok\n'
+printf 'release preflight: ok (%s)\n' "${release_gate_mode}"
