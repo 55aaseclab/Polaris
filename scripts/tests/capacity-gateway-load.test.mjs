@@ -73,36 +73,36 @@ test("capacity gateway load runs the complete isolated user flow", async () => {
         assert.equal(req.method, "POST");
         assert.equal(req.headers.origin, "http://portal.example.test");
         json(res, 200, {
-          portalUrl: `http://v-aaaaaaaaaaaaaaaaaaaaaaaa.portal.example.test/?ticket=synthetic-${userSuffix}`,
+          portalUrl: `http://portal.example.test/wanghai/?ticket=synthetic-${userSuffix}`,
         });
         return;
       }
     }
 
-    if (host === "v-aaaaaaaaaaaaaaaaaaaaaaaa.portal.example.test") {
+    if (host === "portal.example.test") {
       if (url.searchParams.has("ticket")) {
         res.writeHead(302, {
-          location: "/",
-          "set-cookie": "polaris_wanghai_v-aaaaaaaaaaaaaaaaaaaaaaaa=synthetic; Path=/; HttpOnly",
+          location: "/wanghai/",
+          "set-cookie": "polaris_wanghai_session=synthetic; Path=/wanghai; HttpOnly",
         });
         res.end();
         return;
       }
-      if (url.pathname === "/") {
+      if (url.pathname === "/wanghai/" || url.pathname === "/wanghai") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end("<html></html>");
         return;
       }
-      if (url.pathname === "/api/prebuilt-workflows") {
+      if (url.pathname === "/wanghai/api/prebuilt-workflows") {
         json(res, 200, { workflows: [] });
         return;
       }
-      if (url.pathname === "/api/workspaces" && req.method === "GET") {
+      if (url.pathname === "/wanghai/api/workspaces" && req.method === "GET") {
         json(res, 200, { workspaces: [] });
         return;
       }
-      if (url.pathname === "/api/workspaces" && req.method === "POST") {
-        assert.equal(req.headers.origin, "http://v-aaaaaaaaaaaaaaaaaaaaaaaa.portal.example.test");
+      if (url.pathname === "/wanghai/api/workspaces" && req.method === "POST") {
+        assert.equal(req.headers.origin, "http://portal.example.test");
         assert.match(String(req.headers["idempotency-key"]), /^test-run-s2-u[12]-r1-workspace$/);
         json(res, 201, { workspace_version: 1 });
         return;

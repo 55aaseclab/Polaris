@@ -8,7 +8,6 @@ import {
   issueWanghaiSession,
   requireWanghaiGatewayMasterSecret,
   verifyWanghaiLaunchToken,
-  wanghaiGatewayHostLabel as assertionGatewayHostLabel,
   type WanghaiAssertionAdmission,
   type WanghaiGatewayRole,
   type WanghaiLaunchClaims,
@@ -17,6 +16,8 @@ import {
 import { getPolarisControlStore } from "./control-store.js";
 
 export const WANGHAI_GATEWAY_LAUNCH_PATH = "/api/wanghai";
+export const WANGHAI_GATEWAY_PATH = "/wanghai";
+export const WANGHAI_GATEWAY_SESSION_COOKIE = "polaris_wanghai_session";
 export const WANGHAI_GATEWAY_ASSERTION_HEADER = "x-polaris-wanghai-assertion";
 export const WANGHAI_GATEWAY_REQUEST_ID_HEADER = "x-polaris-request-id";
 
@@ -67,68 +68,41 @@ export function createWanghaiGatewayLaunch(input: {
     vaultId,
     role,
     ticket,
-    portalUrl: wanghaiGatewayPortalUrl(serverId, ticket),
+    portalUrl: wanghaiGatewayPortalUrl(ticket),
   };
 }
 
-export function wanghaiGatewayPortalUrl(serverId: string, ticket: string): string {
+export function wanghaiGatewayPortalUrl(ticket: string): string {
   const base = configuredGatewayOrigin();
-  base.hostname = `${wanghaiGatewayHostLabel(serverId)}.${base.hostname}`;
-  base.pathname = "/";
+  base.pathname = `${WANGHAI_GATEWAY_PATH}/`;
   base.search = "";
   base.hash = "";
   base.searchParams.set("ticket", ticket);
   return base.toString();
 }
 
-export function wanghaiGatewayHostLabel(serverId: string): string {
-  // Keep the hostname opaque and DNS-safe; the signed ticket carries the ID.
-  return assertionGatewayHostLabel(serverId);
+export function isWanghaiGatewayPath(pathname: string | undefined): boolean {
+  const path = String(pathname ?? "");
+  return path === WANGHAI_GATEWAY_PATH || path.startsWith(`${WANGHAI_GATEWAY_PATH}/`);
 }
 
-export function isWanghaiGatewayHost(hostHeader: string | undefined): boolean {
-  try {
-    const host = hostnameOnly(hostHeader);
-    if (!host) return false;
-    const base = hostnameOnly(configuredGatewayOrigin().hostname);
-    if (!base || host === base) return false;
-    const suffix = `.${base}`;
-    if (!host.endsWith(suffix)) return false;
-    const label = host.slice(0, -suffix.length);
-    return /^v-[a-f0-9]{24}$/u.test(label);
-  } catch {
-    // The normal Polaris host remains available until the gateway is configured.
-    return false;
+export function wanghaiGatewayRequestPath(pathname: string): string {
+  if (!isWanghaiGatewayPath(pathname)) {
+    throw new Error("Invalid Wanghai gateway path");
   }
+  const suffix = pathname.slice(WANGHAI_GATEWAY_PATH.length);
+  return suffix === "" || suffix === "/" ? "/" : suffix;
 }
 
-export function gatewayHostLabelFromRequest(req: IncomingMessage): string {
-  const host = hostnameOnly(req.headers.host);
-  const base = hostnameOnly(configuredGatewayOrigin().hostname);
-  const suffix = `.${base}`;
-  if (!host || !host.endsWith(suffix)) {
-    throw new Error("Invalid Wanghai gateway host");
-  }
-  const label = host.slice(0, -suffix.length);
-  if (!/^v-[a-f0-9]{24}$/u.test(label)) {
-    throw new Error("Invalid Wanghai gateway host label");
-  }
-  return label;
-}
-
-export function gatewayCookieName(hostLabel: string): string {
-  if (!/^v-[a-f0-9]{24}$/u.test(hostLabel)) {
-    throw new Error("Invalid Wanghai gateway host label");
-  }
-  return `polaris_wanghai_${hostLabel}`;
+export function gatewayCookieName(): string {
+  return WANGHAI_GATEWAY_SESSION_COOKIE;
 }
 
 export function readGatewayCookie(
   req: IncomingMessage,
-  hostLabel: string,
 ): string | null {
   const cookieHeader = String(req.headers.cookie ?? "");
-  const name = gatewayCookieName(hostLabel);
+  const name = gatewayCookieName();
   for (const part of cookieHeader.split(";")) {
     const separator = part.indexOf("=");
     if (separator < 0) continue;
@@ -140,27 +114,25 @@ export function readGatewayCookie(
 
 export function setGatewaySessionCookie(
   res: ServerResponse,
-  hostLabel: string,
   token: string,
   secure: boolean,
 ): void {
-  const name = gatewayCookieName(hostLabel);
+  const name = gatewayCookieName();
   res.setHeader(
     "set-cookie",
-    `${name}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900${secure ? "; Secure" : ""}`,
+    `${name}=${encodeURIComponent(token)}; Path=${WANGHAI_GATEWAY_PATH}; HttpOnly; SameSite=Lax; Max-Age=900${secure ? "; Secure" : ""}`,
   );
 }
 
 export function verifyGatewaySession(
   req: IncomingMessage,
-  hostLabel: string,
 ): WanghaiLaunchClaims {
-  const token = readGatewayCookie(req, hostLabel);
+  const token = readGatewayCookie(req);
   if (!token) {
     throw new Error("Wanghai gateway session is required");
   }
   const claims = verifyWanghaiLaunchToken(token, requireWanghaiGatewayMasterSecret());
-  if (claims.kind !== "session" || wanghaiGatewayHostLabel(claims.server_id) !== hostLabel) {
+  if (claims.kind !== "session") {
     throw new Error("Wanghai gateway session scope is invalid");
   }
   return claims;
@@ -170,14 +142,13 @@ export function consumeLaunchTicket(input: {
   req: IncomingMessage;
   res: ServerResponse;
   ticket: string;
-  hostLabel: string;
   secure: boolean;
 }): WanghaiLaunchClaims {
   const claims = verifyWanghaiLaunchToken(
     input.ticket,
     requireWanghaiGatewayMasterSecret(),
   );
-  if (claims.kind !== "launch" || wanghaiGatewayHostLabel(claims.server_id) !== input.hostLabel) {
+  if (claims.kind !== "launch") {
     throw new Error("Wanghai launch ticket scope is invalid");
   }
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -202,7 +173,7 @@ export function consumeLaunchTicket(input: {
     masterSecret: requireWanghaiGatewayMasterSecret(),
     launch: claims,
   });
-  setGatewaySessionCookie(input.res, input.hostLabel, session, input.secure);
+  setGatewaySessionCookie(input.res, session, input.secure);
   store.recordAudit({
     actorId: claims.user_id,
     tenantId: claims.tenant_id,

@@ -124,6 +124,14 @@ for (const value of values) {
 }
 ' "${allowed_origins}" || fail "POLARIS_PORTAL_ALLOWED_ORIGINS must contain explicit HTTPS origins"
 
+if ! node -e '
+const gateway = new URL(process.argv[1]);
+const values = (process.argv[2] || "").split(",").map((value) => value.trim()).filter(Boolean);
+if (values.length !== 1 || values[0] !== gateway.origin) process.exit(1);
+' "${gateway_origin}" "${allowed_origins}"; then
+  fail "POLARIS_WANGHAI_GATEWAY_ORIGIN must be the only Polaris portal origin"
+fi
+
 if ! [[ "${wanghai_image}" =~ @sha256:[a-f0-9]{64}$ ]]; then
   fail "POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference"
 fi
@@ -221,13 +229,12 @@ if printf '%s\n' "${docker_ports}" \
   fail "a public Docker mapping to Wanghai port 9090 is still active"
 fi
 
-probe_host="v-000000000000000000000000.${gateway_host}"
-if ! getent ahosts "${probe_host}" >/dev/null 2>&1; then
-  fail "gateway wildcard DNS does not resolve for the release probe host"
+if ! getent ahosts "${gateway_host}" >/dev/null 2>&1; then
+  fail "Polaris public DNS does not resolve"
 fi
 if ! curl --proto '=https' --tlsv1.2 --silent --show-error --output /dev/null \
-  --connect-timeout 10 --max-time 20 "https://${probe_host}/"; then
-  fail "gateway wildcard TLS endpoint is not reachable or does not validate"
+  --connect-timeout 10 --max-time 20 "https://${gateway_host}/healthz"; then
+  fail "Polaris public TLS endpoint is not reachable or does not validate"
 fi
 
 printf 'release preflight: ok\n'

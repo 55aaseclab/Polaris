@@ -50,7 +50,7 @@ function withPreflightFixture({
     POLARIS_AUTHING_LOGOUT_URL: "https://auth.example.test/oidc/session/end",
     POLARIS_AUTHING_LOGOUT_REDIRECT_URI: "https://polaris.example.test/welcome",
     POLARIS_AUTHING_REDIRECT_URI: "https://polaris.example.test/auth/callback",
-    POLARIS_WANGHAI_GATEWAY_ORIGIN: "https://gateway.example.test",
+    POLARIS_WANGHAI_GATEWAY_ORIGIN: "https://polaris.example.test",
     POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "0123456789abcdef0123456789abcdef",
     POLARIS_PORTAL_ALLOWED_ORIGINS: "https://polaris.example.test",
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
@@ -206,6 +206,16 @@ test("release preflight rejects malformed gateway origins", () => {
   });
 });
 
+test("release preflight rejects a second public Wanghai origin", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_WANGHAI_GATEWAY_ORIGIN: "https://gateway.example.test" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must be the only Polaris portal origin/);
+  });
+});
+
 test("release preflight rejects a legacy integrated Wanghai data root", () => {
   withPreflightFixture({
     envOverrides: { POLARIS_WANGHAI_DATA_ROOT: "/srv/legacy-wanghai" },
@@ -278,19 +288,19 @@ test("release preflight validates Wanghai backup retention settings", () => {
   });
 });
 
-test("release preflight rejects wildcard DNS failures", () => {
+test("release preflight rejects public Polaris DNS failures", () => {
   withPreflightFixture({ dnsFailure: true }, ({ bin, envFile }) => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /wildcard DNS does not resolve/);
+    assert.match(result.stderr, /Polaris public DNS does not resolve/);
   });
 });
 
-test("release preflight rejects wildcard TLS failures", () => {
+test("release preflight rejects public Polaris TLS failures", () => {
   withPreflightFixture({ tlsFailure: true }, ({ bin, envFile }) => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /wildcard TLS endpoint is not reachable/);
+    assert.match(result.stderr, /Polaris public TLS endpoint is not reachable/);
   });
 });
 

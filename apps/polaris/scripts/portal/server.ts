@@ -93,12 +93,13 @@ import {
   configuredGatewayProtocol,
   consumeLaunchTicket,
   createWanghaiGatewayLaunch,
-  gatewayHostLabelFromRequest,
-  isWanghaiGatewayHost,
+  isWanghaiGatewayPath,
   issueRequestAssertion,
   requestUsesExpectedOrigin,
   verifyGatewaySession,
   wanghaiRoleForPortalSession,
+  wanghaiGatewayRequestPath,
+  WANGHAI_GATEWAY_PATH,
   WANGHAI_GATEWAY_ASSERTION_HEADER,
   WANGHAI_GATEWAY_REQUEST_ID_HEADER,
 } from "./wanghai-gateway.js";
@@ -1342,7 +1343,7 @@ const WANGHAI_WORKSPACE_LEASE_MS = 120_000;
 const MAX_WANGHAI_MUTATION_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_WANGHAI_WORKSPACE_USAGE_RESPONSE_BYTES = 16 * 1024;
 const WANGHAI_WORKSPACE_USAGE_TIMEOUT_MS = 5_000;
-const WANGHAI_WORKSPACE_USAGE_PATH = "/api/internal/workspace-usage";
+const WANGHAI_WORKSPACE_USAGE_PATH = "/wanghai/api/internal/workspace-usage";
 
 const WANGHAI_AUDIT_ROUTE_SEGMENTS = new Set([
   "api",
@@ -1744,7 +1745,7 @@ function writeGatewayResponseHeaders(
     }
     res.setHeader(name, value);
   }
-  // Only Polaris may establish state for the gateway host. Wanghai is an
+  // Only Polaris may establish state for the gateway path. Wanghai is an
   // upstream surface and must not overwrite the gateway session cookie.
   res.setHeader("referrer-policy", "same-origin");
   res.setHeader("x-content-type-options", "nosniff");
@@ -1907,12 +1908,24 @@ async function proxyWanghaiRequest(
   }
 }
 
-async function handleWanghaiGatewayHost(
+async function handleWanghaiGatewayPath(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
 ): Promise<void> {
-  const hostLabel = gatewayHostLabelFromRequest(req);
+  let surfacePath: string;
+  try {
+    validateWanghaiRequestTarget(req.url);
+    surfacePath = wanghaiGatewayRequestPath(url.pathname);
+  } catch (error) {
+    if (error instanceof WanghaiGatewayPolicyError) {
+      sendGatewayError(res, error.statusCode, error.message);
+      return;
+    }
+    sendGatewayError(res, 400, "Invalid Wanghai gateway request path");
+    return;
+  }
+
   const ticket = url.searchParams.get("ticket");
   if (ticket) {
     if (req.method !== "GET" || url.searchParams.getAll("ticket").length !== 1) {
@@ -1924,12 +1937,13 @@ async function handleWanghaiGatewayHost(
         req,
         res,
         ticket,
-        hostLabel,
         secure: configuredGatewayProtocol() === "https:",
       });
       res.writeHead(302, {
         "cache-control": "no-store",
-        location: url.pathname || "/",
+        location: url.pathname === WANGHAI_GATEWAY_PATH
+          ? `${WANGHAI_GATEWAY_PATH}/`
+          : url.pathname,
         "referrer-policy": "no-referrer",
       });
       res.end();
@@ -1941,7 +1955,7 @@ async function handleWanghaiGatewayHost(
 
   let session;
   try {
-    session = verifyGatewaySession(req, hostLabel);
+    session = verifyGatewaySession(req);
   } catch {
     sendGatewayError(res, 401, "Wanghai gateway session is required");
     return;
@@ -1958,17 +1972,7 @@ async function handleWanghaiGatewayHost(
     return;
   }
 
-  try {
-    validateWanghaiRequestTarget(req.url);
-  } catch (error) {
-    if (error instanceof WanghaiGatewayPolicyError) {
-      sendGatewayError(res, error.statusCode, error.message);
-      return;
-    }
-    sendGatewayError(res, 400, "Invalid Wanghai gateway request path");
-    return;
-  }
-  if (isPrivateWanghaiPath(url.pathname)) {
+  if (isPrivateWanghaiPath(surfacePath)) {
     sendGatewayError(res, 404, "Wanghai route is unavailable");
     return;
   }
@@ -1978,7 +1982,7 @@ async function handleWanghaiGatewayHost(
     try {
       mutationMatch = matchWanghaiMutationAction({
         method: req.method,
-        pathname: url.pathname,
+        pathname: surfacePath,
       });
     } catch {
       sendGatewayError(res, 400, "Wanghai mutation route is invalid");
@@ -2002,7 +2006,7 @@ async function handleWanghaiGatewayHost(
       userId: session.user_id,
       role: session.role,
       method: req.method,
-      pathname: url.pathname,
+      pathname: surfacePath,
       contentType: String(req.headers["content-type"] ?? ""),
       store,
     });
@@ -2187,7 +2191,7 @@ async function handleWanghaiGatewayHost(
         category: policy.category,
         method: String(req.method ?? "GET").toUpperCase(),
         requestId,
-        route: wanghaiAuditRoute(url.pathname),
+        route: wanghaiAuditRoute(surfacePath),
         session,
       };
       // This must succeed before a mutable request reaches the surface. The
@@ -2300,8 +2304,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-      if (isWanghaiGatewayHost(req.headers.host)) {
-        await handleWanghaiGatewayHost(req, res, url);
+      if (isWanghaiGatewayPath(url.pathname)) {
+        await handleWanghaiGatewayPath(req, res, url);
         return;
       }
       const segments = routeSegments(url);
