@@ -178,6 +178,20 @@ if ! cosign verify \
   fail "Wanghai image signature verification failed"
 fi
 
+verify_wanghai_attestation() {
+  local predicate_type="$1" label="$2"
+  if ! cosign verify-attestation \
+    --type "${predicate_type}" \
+    --certificate-identity "${wanghai_cosign_identity}" \
+    --certificate-oidc-issuer "${wanghai_cosign_oidc_issuer}" \
+    "${wanghai_image}" >/dev/null; then
+    fail "${label} verification failed"
+  fi
+}
+
+verify_wanghai_attestation "slsaprovenance" "Wanghai image provenance attestation"
+verify_wanghai_attestation "spdxjson" "Wanghai image SBOM attestation"
+
 command -v findmnt >/dev/null 2>&1 || fail "findmnt is required to validate Docker storage quotas"
 docker_storage_driver="$(docker info --format '{{.Driver}}')" \
   || fail "unable to inspect Docker storage driver"
