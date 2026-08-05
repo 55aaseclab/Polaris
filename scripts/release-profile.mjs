@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROFILE_DIRECTORY = path.join(ROOT_DIR, "config", "release-profiles");
 const PROFILE_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
+const MIN_JOB_LEASE_MS = 60_000;
+const MAX_JOB_LEASE_MS = 6 * 60 * 60 * 1_000;
 
 function fail(message) {
   throw new Error("Release profile: " + message);
@@ -65,13 +67,14 @@ function validateTopology(raw) {
 
 function validateCapacity(raw) {
   const value = assertRecord(raw, "capacity");
-  assertKnownKeys(value, ["maxActiveVaults", "jobWorkerConcurrency"], "capacity");
+  assertKnownKeys(value, ["maxActiveVaults", "jobWorkerConcurrency", "jobLeaseMs"], "capacity");
   return {
     maxActiveVaults: requirePositiveInteger(value.maxActiveVaults, "capacity.maxActiveVaults"),
     jobWorkerConcurrency: requirePositiveInteger(
       value.jobWorkerConcurrency,
       "capacity.jobWorkerConcurrency",
     ),
+    jobLeaseMs: requirePositiveInteger(value.jobLeaseMs, "capacity.jobLeaseMs"),
   };
 }
 
@@ -166,7 +169,7 @@ export function validateReleaseProfile(raw) {
   if (!PROFILE_ID_PATTERN.test(id)) {
     fail("id contains unsupported characters");
   }
-  return {
+  const profile = {
     schemaVersion: 1,
     id,
     topology: validateTopology(value.topology),
@@ -175,6 +178,16 @@ export function validateReleaseProfile(raw) {
     quota: validateQuota(value.quota),
     slo: validateSlo(value.slo),
   };
+  if (
+    profile.capacity.jobLeaseMs < MIN_JOB_LEASE_MS
+    || profile.capacity.jobLeaseMs > MAX_JOB_LEASE_MS
+  ) {
+    fail("capacity.jobLeaseMs must be between 60000 and 21600000");
+  }
+  if (profile.capacity.jobLeaseMs >= profile.slo.recoverySeconds * 1000) {
+    fail("capacity.jobLeaseMs must be less than slo.recoverySeconds * 1000");
+  }
+  return profile;
 }
 
 export function loadReleaseProfile(profileId) {
@@ -243,6 +256,11 @@ export function validateReleaseProfileEnvironment(profile, environment = process
     environment,
     "POLARIS_JOB_WORKER_CONCURRENCY",
     profile.capacity.jobWorkerConcurrency,
+  );
+  requireEnvironmentInteger(
+    environment,
+    "POLARIS_JOB_LEASE_MS",
+    profile.capacity.jobLeaseMs,
   );
   requireEnvironmentInteger(
     environment,

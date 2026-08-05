@@ -108,6 +108,35 @@ test("control store claims, retries, and completes durable jobs", () => {
   }
 });
 
+test("control store reclaims an expired lease after the worker process reopens", () => {
+  const fixture = temporaryStore();
+  try {
+    const first = PolarisControlStore.open(fixture.filePath);
+    const job = first.enqueueJob({
+      kind: "wanghai-backup",
+      dedupeKey: "restart-recovery-job",
+      tenantId: "tenant-a",
+      vaultId: "vault-a",
+    });
+    assert.equal(first.claimNextJob("worker-before-restart", 10_000)?.id, job.id);
+    assert.equal(first.getJob(job.id)?.status, "running");
+    first.close();
+
+    const clock = new DatabaseSync(fixture.filePath);
+    clock.prepare("UPDATE jobs SET lease_expires_at = ? WHERE id = ?").run(Date.now() - 1, job.id);
+    clock.close();
+
+    const reopened = PolarisControlStore.open(fixture.filePath);
+    const reclaimed = reopened.claimNextJob("worker-after-restart", 10_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.leaseOwner, "worker-after-restart");
+    reopened.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store persists durable job results across reopen", () => {
   const fixture = temporaryStore();
   try {

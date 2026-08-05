@@ -44,6 +44,7 @@ test("remote provision keeps integrated Wanghai on the Polaris vault export", ()
   assert.match(script, /POLARIS_RELEASE_PROFILE/);
   assert.match(script, /POLARIS_MAX_ACTIVE_VAULTS/);
   assert.match(script, /POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES/);
+  assert.match(script, /POLARIS_JOB_LEASE_MS/);
   assert.match(script, /remove_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
   assert.doesNotMatch(script, /upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
   assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
@@ -104,6 +105,7 @@ test("host Polaris launcher rejects invalid production replica configuration", (
       POLARIS_SERVER_REPLICAS: "2",
       POLARIS_GATEWAY_REPLICAS: "1",
       POLARIS_JOB_WORKER_CONCURRENCY: "1",
+      POLARIS_JOB_LEASE_MS: "60000",
       POLARIS_MAX_ACTIVE_VAULTS: "10",
     },
   });
