@@ -29,7 +29,7 @@ bash ./scripts/build-paseo-tool-bundle.sh
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 
-rsync -az --delete --delete-excluded \
+rsync -azc --delete --delete-excluded \
   --include "apps/paseo/tool-bundle/" \
   --include "apps/paseo/tool-bundle/bin/***" \
   --include "apps/paseo/tool-bundle/lib/" \
