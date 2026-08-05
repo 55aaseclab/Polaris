@@ -208,7 +208,7 @@ export class DockerDriver implements BackendDriver {
       return result.status === 0 ? String(result.stdout || "") : "";
     };
     const wanghaiReady = !vaultEnablesWanghaiPortal(vault)
-      || (processRunning && execCheck("curl -fsS http://127.0.0.1:9090/readyz >/dev/null"));
+      || (processRunning && execCheck("curl -fsS http://127.0.0.1:9090/wanghai/readyz >/dev/null"));
     const running = processRunning && wanghaiReady;
     const githubAuthObserved =
       vault.agent.enabled && exists && running && vault.userProfile.github.account

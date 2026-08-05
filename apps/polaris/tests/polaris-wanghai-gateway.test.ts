@@ -113,7 +113,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
   let quotaMeasurementRequests = 0;
   let workspaceUsageBytes = 1_024;
   const upstream = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === "/api/internal/workspace-usage") {
+    if (req.url === "/wanghai/api/internal/workspace-usage") {
       quotaMeasurementRequests += 1;
       quotaMeasurementAssertion = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
       quotaMeasurementRequestId = String(req.headers["x-polaris-request-id"] ?? "");
@@ -128,6 +128,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       return;
     }
     upstreamRequests += 1;
+    assert.match(String(req.url ?? ""), /^\/wanghai\//u);
     assertionHeader = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
     requestIdHeader = String(req.headers["x-polaris-request-id"] ?? "");
     const chunks: Buffer[] = [];
@@ -213,7 +214,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     restores.push(
       setEnv(
         "POLARIS_WANGHAI_GATEWAY_ORIGIN",
-        `http://gateway.localhost:${portalAddress.port}`,
+        `http://127.0.0.1:${portalAddress.port}`,
       ),
     );
 
@@ -224,7 +225,8 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(launchResponse.status, 200);
     const launch = await launchResponse.json() as { portalUrl: string };
     const launchUrl = new URL(launch.portalUrl);
-    assert.match(launchUrl.hostname, /^v-[a-f0-9]{24}\.gateway\.localhost$/u);
+    assert.equal(launchUrl.hostname, "127.0.0.1");
+    assert.equal(launchUrl.pathname, "/wanghai/");
 
     const ticketResponse = await requestPortalHost({
       port: portalAddress.port,
@@ -234,6 +236,11 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(ticketResponse.statusCode, 302);
     const cookie = (ticketResponse.headers["set-cookie"] as string[] | undefined)?.[0]?.split(";", 1)[0];
     assert.ok(cookie);
+    assert.match(
+      String((ticketResponse.headers["set-cookie"] as string[] | undefined)?.[0] ?? ""),
+      /Path=\/wanghai(?:;|$)/u,
+    );
+    assert.equal(ticketResponse.headers.location, "/wanghai/");
 
     const replayedTicket = await requestPortalHost({
       port: portalAddress.port,
@@ -252,7 +259,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const proxied = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(proxied.statusCode, 200);
@@ -265,7 +272,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const missingIdempotency = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -280,7 +287,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const mutation = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -325,7 +332,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const replayedMutation = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -343,7 +350,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const conflictingMutation = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -359,7 +366,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const internalBrowserAttempt = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/internal/workspace-usage",
+      path: "/wanghai/api/internal/workspace-usage",
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(internalBrowserAttempt.statusCode, 404);
@@ -368,7 +375,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     workspaceUsageBytes = 256 * 1024 * 1024 - 2 * 1024 * 1024;
     const quotaExhausted = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -391,7 +398,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const unknownMutation = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces/synthetic-workspace/not-admitted",
+      path: "/wanghai/api/workspaces/synthetic-workspace/not-admitted",
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -407,7 +414,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const absoluteFormAttempt = await requestPortalHost({
       port: portalAddress.port,
-      path: `http://127.0.0.1:${upstreamAddress.port}/exfiltrate`,
+      path: `http://127.0.0.1:${upstreamAddress.port}/wanghai/exfiltrate`,
       method: "POST",
       headers: {
         host: launchUrl.host,
@@ -421,7 +428,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const rateLimited = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(rateLimited.statusCode, 429);
@@ -431,7 +438,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
 
     const csrfAttempt = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       method: "POST",
       headers: { host: launchUrl.host, cookie: cookie! },
     });
@@ -482,7 +489,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     await updateUserAccessEntry(userA, { line: "coding" });
     const revokedSession = await requestPortalHost({
       port: portalAddress.port,
-      path: "/api/workspaces",
+      path: "/wanghai/api/workspaces",
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(revokedSession.statusCode, 403);

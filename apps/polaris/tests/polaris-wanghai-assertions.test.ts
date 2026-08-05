@@ -4,7 +4,6 @@ import {
   deriveWanghaiVaultAssertionSecret,
   issueWanghaiAssertion,
   verifyWanghaiAssertion,
-  wanghaiGatewayHostLabel,
 } from "../scripts/security/wanghai-assertions.js";
 import { createWanghaiGatewayLaunch } from "../scripts/portal/wanghai-gateway.js";
 
@@ -39,11 +38,11 @@ test("Wanghai assertions are scoped to one tenant and vault", () => {
   assert.throws(() => verifyWanghaiAssertion(token, tenantBSecret, 1_001), /signature/i);
 });
 
-test("Wanghai launch URLs use an opaque per-vault gateway host", () => {
+test("Wanghai launch URLs stay on the Polaris origin and gateway path", () => {
   const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
   const previousOrigin = process.env.POLARIS_WANGHAI_GATEWAY_ORIGIN;
   process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = masterSecret;
-  process.env.POLARIS_WANGHAI_GATEWAY_ORIGIN = "https://wanghai.example.test";
+  process.env.POLARIS_WANGHAI_GATEWAY_ORIGIN = "https://polaris.example.test";
   try {
     const launch = createWanghaiGatewayLaunch({
       session: { polarisUserId: "synthetic-user-a", role: "user" },
@@ -51,10 +50,10 @@ test("Wanghai launch URLs use an opaque per-vault gateway host", () => {
       vaultId: "vault-a",
     });
     const url = new URL(launch.portalUrl);
-    assert.equal(url.hostname, `${wanghaiGatewayHostLabel("srv_synthetic")}.wanghai.example.test`);
-    assert.equal(url.pathname, "/");
+    assert.equal(url.hostname, "polaris.example.test");
+    assert.equal(url.pathname, "/wanghai/");
     assert.ok(url.searchParams.get("ticket"));
-    assert.doesNotMatch(launch.portalUrl, /:9090|nodeport/i);
+    assert.doesNotMatch(launch.portalUrl, /:9090|nodeport|subdomain/i);
   } finally {
     if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
     else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;

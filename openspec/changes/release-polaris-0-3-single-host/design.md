@@ -43,12 +43,13 @@ Use one Polaris server process, one bounded in-process job worker pool, one
 SQLite WAL control store on durable local storage, and no gateway replicas.
 Cap active vaults at ten and set release job concurrency to one until measured
 evidence supports two. The deployment preflight rejects public Wanghai port
-mappings, missing HTTPS wildcard ingress, mutable image references, and
+mappings, a missing single-origin HTTPS endpoint, mutable image references, and
 uninspectable Docker state.
 
-Use the existing per-vault private gateway host scheme. A path-based gateway
-would avoid wildcard DNS but would introduce a new cookie and proxy security
-surface at the wrong point in the release.
+Use the Polaris origin with a fixed `/wanghai/` path. Polaris strips the path
+before applying Wanghai policy and preserves it when forwarding to the Next.js
+surface, so no per-vault hostnames, wildcard DNS, or extra public origin are
+needed.
 
 ### Integrated vault data and migration
 
@@ -169,7 +170,7 @@ dependency triage, and promotion artifacts separately from unit-test results.
 2. Add the semantic write and job contracts behind fail-closed feature gates.
 3. Migrate synthetic data with the manifest-driven tool, verify it, and run an
    encrypted backup before any live data cutover.
-4. Provision the single-host release profile, private wildcard ingress, hard
+4. Provision the single-host release profile, private `/wanghai/` ingress, hard
    per-vault storage ceilings, metrics, and signed candidate images.
 5. Run perimeter, two-tenant, restart, backup/restore, and 2/5/10-user evidence
    in order. Promote only if every required table is complete.

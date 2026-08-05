@@ -70,15 +70,15 @@
 
 ## 6. Immutable Promotion And Deployment
 
-- [ ] 6.1 Complete and commit the digest-pinned image, private-port, wildcard
-  DNS/TLS, and environment preflight integration.
+- [ ] 6.1 Complete and commit the digest-pinned image, private-port, single
+  Polaris-origin DNS/TLS, and environment preflight integration.
 - [ ] 6.2 Build the Polaris workspace base and Wanghai image from exact digests
   and generate SBOM, provenance, and signature verification artifacts.
 - [ ] 6.3 Implement a release candidate manifest, one-deployment lock, smoke
   gate, verified previous-manifest rollback, and release metadata recording.
 - [ ] 6.4 Add CI checks for formatting, type checking, unit/integration tests,
   dependency triage, image scanning, and promotion policy.
-- [ ] 6.5 Configure external Authing, wildcard DNS/TLS, private Docker routing,
+- [ ] 6.5 Configure external Authing, the single Polaris DNS/TLS endpoint, private Docker routing,
   registry access, signing, and backup storage on the release host.
 - [ ] 6.6 Deploy the candidate to the designated remote host without disabling
   production authentication and record redacted configuration evidence.

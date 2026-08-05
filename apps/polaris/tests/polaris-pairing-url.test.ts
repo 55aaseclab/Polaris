@@ -241,8 +241,8 @@ test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
     assert.doesNotMatch(podRendered, /export WANGHAI_GATEWAY_/);
     assert.match(podRendered, /type: ClusterIP[\s\S]+name: wanghai-private/);
     assert.doesNotMatch(podRendered, new RegExp(`nodePort: ${wanghaiPort?.nodePort}`));
-    assert.match(podRendered, /startupProbe:[\s\S]+path: \/readyz/);
-    assert.match(podRendered, /livenessProbe:[\s\S]+path: \/healthz/);
+    assert.match(podRendered, /startupProbe:[\s\S]+path: \/wanghai\/readyz/);
+    assert.match(podRendered, /livenessProbe:[\s\S]+path: \/wanghai\/healthz/);
     assert.match(podRendered, /exec env WANGHAI_SUPERVISE_PORTAL=1/);
     assert.doesNotMatch(podRendered, /touch \/tmp\/.ready && sleep infinity/);
 

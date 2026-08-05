@@ -18,6 +18,7 @@ const WORKSPACE_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}$/u;
 const RUN_ID_PATTERN = /^[a-z][a-z0-9-]{0,36}$/u;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const WANGHAI_BASE_PATH = "/wanghai";
 
 const OPERATION_CATEGORIES = {
   "portal.login": "read",
@@ -105,6 +106,15 @@ function normalizeLoopbackTransport(value) {
     fail("transport_origin must use a loopback host");
   }
   return origin;
+}
+
+function wanghaiUrl(pathname, origin) {
+  const url = new URL(pathname, origin);
+  if (url.pathname === WANGHAI_BASE_PATH || url.pathname.startsWith(`${WANGHAI_BASE_PATH}/`)) {
+    return url;
+  }
+  url.pathname = `${WANGHAI_BASE_PATH}${url.pathname === "/" ? "/" : url.pathname}`;
+  return url;
 }
 
 function normalizeFixtureUser(raw, label) {
@@ -455,6 +465,10 @@ async function runUserRound(state, input) {
     launch.record.error = "gateway.launch returned an invalid portal URL";
     throw error;
   }
+  if (gatewayUrl.origin !== portal || !gatewayUrl.pathname.startsWith(`${WANGHAI_BASE_PATH}/`)) {
+    launch.record.error = "gateway.launch returned a non-Polaris Wanghai URL";
+    throw new CapacityLoadError(launch.record.error);
+  }
 
   const exchange = await timedRequest(state, {
     expectedStatuses: [302],
@@ -469,19 +483,19 @@ async function runUserRound(state, input) {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "portal.navigation",
-    publicUrl: new URL("/", gatewayOrigin),
+    publicUrl: wanghaiUrl("/", gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "portal.workflow-catalog",
-    publicUrl: new URL("/api/prebuilt-workflows?workspace_type=ecommerce", gatewayOrigin),
+    publicUrl: wanghaiUrl("/api/prebuilt-workflows?workspace_type=ecommerce", gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.list",
-    publicUrl: new URL("/api/workspaces", gatewayOrigin),
+    publicUrl: wanghaiUrl("/api/workspaces", gatewayOrigin),
   });
 
   const workspaceId = workspaceIdFor(input.runId, input.stage, input.userIndex, input.round);
@@ -501,7 +515,7 @@ async function runUserRound(state, input) {
     },
     method: "POST",
     operation: "workspace.create",
-    publicUrl: new URL("/api/workspaces", gatewayOrigin),
+    publicUrl: wanghaiUrl("/api/workspaces", gatewayOrigin),
   });
   let workspaceVersion = mutationVersion(
     await jsonObject(createWorkspace.response, createWorkspace.record, "workspace.create"),
@@ -513,19 +527,19 @@ async function runUserRound(state, input) {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.version",
-    publicUrl: new URL(`/api/workspaces/${encodeURIComponent(workspaceId)}/version`, gatewayOrigin),
+    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/version`, gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.assets-list",
-    publicUrl: new URL(`/api/workspaces/${encodeURIComponent(workspaceId)}/assets`, gatewayOrigin),
+    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/assets`, gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workflow.status",
-    publicUrl: new URL(`/api/workspaces/${encodeURIComponent(workspaceId)}/workflows`, gatewayOrigin),
+    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/workflows`, gatewayOrigin),
   });
 
   const productCreate = await timedRequest(state, {
@@ -546,7 +560,7 @@ async function runUserRound(state, input) {
     },
     method: "POST",
     operation: "product.create",
-    publicUrl: new URL(`/api/workspaces/${encodeURIComponent(workspaceId)}/products`, gatewayOrigin),
+    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/products`, gatewayOrigin),
   });
   const product = await jsonObject(productCreate.response, productCreate.record, "product.create");
   workspaceVersion = mutationVersion(product, productCreate.record, "product.create");
@@ -573,7 +587,7 @@ async function runUserRound(state, input) {
     ),
     method: "POST",
     operation: "product.asset-upload",
-    publicUrl: new URL(
+    publicUrl: wanghaiUrl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/products/${encodeURIComponent(sku)}`,
       gatewayOrigin,
     ),

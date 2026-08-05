@@ -1,5 +1,4 @@
 import {
-  createHash,
   createHmac,
   randomUUID,
   timingSafeEqual,
@@ -224,11 +223,6 @@ export function verifyWanghaiAssertion(
     throw new Error("Wanghai assertion combines incompatible purposes");
   }
   return claims;
-}
-
-export function wanghaiGatewayHostLabel(serverId: string): string {
-  const value = requireNonEmpty(serverId, "serverId");
-  return `v-${createHash("sha256").update(value, "utf8").digest("hex").slice(0, 24)}`;
 }
 
 function signPayload(payload: object, secret: string): string {
