@@ -1463,7 +1463,10 @@ function resolveWanghaiUpstreamUrl(rawUrl: string | undefined, targetOrigin: str
   const publicUrl = new URL(requestTarget, "http://polaris-gateway.invalid");
   const surfacePath = gatewayRequestPath(publicUrl.pathname);
   const upstreamPath = surfacePath === "/"
-    ? `${WANGHAI_PORTAL_BASE_PATH}/`
+    // The current Wanghai Next build canonicalizes its base path without a
+    // trailing slash. Preserve that form so a public `/g/` request does not
+    // loop through an upstream 308 redirect.
+    ? WANGHAI_PORTAL_BASE_PATH
     : `${WANGHAI_PORTAL_BASE_PATH}${surfacePath}`;
   const resolved = new URL(upstreamPath, targetOrigin);
   resolved.search = publicUrl.search;
@@ -1712,6 +1715,7 @@ function forwardedGatewayRequestHeaders(
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
+    "refresh",
     "set-cookie",
     "te",
     "trailer",
@@ -1750,6 +1754,7 @@ function writeGatewayResponseHeaders(
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
+    "refresh",
     "set-cookie",
     "te",
     "trailer",
