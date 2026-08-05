@@ -2015,6 +2015,16 @@ exit 0
               serverId: "srv_start_test",
             },
           );
+          const status = JSON.parse(
+            fs.readFileSync(vaultStatusPath(project, DEMO_USER_PROFILE_ID), "utf8"),
+          ) as {
+            driver?: {
+              selected?: { backend?: string };
+              status?: string;
+            };
+          };
+          assert.equal(status.driver?.selected?.backend, "docker");
+          assert.equal(status.driver?.status, "running");
         },
       );
     } finally {

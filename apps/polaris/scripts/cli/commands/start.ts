@@ -1,9 +1,12 @@
 import {
   loadPreparedVaultForCommand,
-  persistVaultPaseoState,
+  runVaultCommandWithEvolution,
   waitForVaultReady,
 } from "./shared.js";
-import { runVaultCommandWithEvolution } from "./shared.js";
+import {
+  readStoredVaultStatus,
+  writeVaultStatus,
+} from "../../output/state-store.js";
 
 export async function startCommand(project: string, userProfileId?: string): Promise<void> {
   const { vault, driver } = await loadPreparedVaultForCommand("start", project, userProfileId);
@@ -12,8 +15,15 @@ export async function startCommand(project: string, userProfileId?: string): Pro
     command: "start",
     execute: async () => {
       await driver.start(vault);
-      await waitForVaultReady(vault);
-      await persistVaultPaseoState(vault);
+      const readyStatus = await waitForVaultReady(vault);
+      const currentStatus = readStoredVaultStatus(
+        vault.identity.projectName,
+        vault.userProfile.id,
+      );
+      writeVaultStatus({
+        ...(currentStatus ?? {}),
+        ...readyStatus,
+      }, vault.userProfile.id);
     },
   });
 }
