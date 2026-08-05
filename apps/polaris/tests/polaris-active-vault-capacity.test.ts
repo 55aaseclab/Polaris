@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,7 @@ import {
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
+const APP_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -64,6 +66,29 @@ test("active-vault capacity requires a release value and defaults to the reviewe
     () => maxActiveVaults({ POLARIS_MAX_ACTIVE_VAULTS: "0" }),
     /positive integer/i,
   );
+});
+
+test("the CLI entrypoint returns failure status for a rejected command", () => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-cli-entrypoint-"));
+  try {
+    const result = spawnSync(
+      path.join(APP_ROOT, "node_modules", ".bin", "tsx"),
+      ["scripts/polaris.ts", "start", "missing-vault@docker", "--user", "missing-user"],
+      {
+        cwd: APP_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          POLARIS_DATA_ROOT: dataRoot,
+          POLARIS_TELEMETRY_ENABLED: "false",
+        },
+      },
+    );
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stderr, /Config not found for project 'missing-vault'/i);
+  } finally {
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
 });
 
 test("Docker start rejects a new vault at capacity but permits an existing running vault", async () => {
