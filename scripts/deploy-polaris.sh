@@ -21,6 +21,7 @@ else
 fi
 
 polaris_bluegreen_require_env_file "${ENV_FILE}"
+polaris_bluegreen_acquire_lock
 
 set -a
 # shellcheck disable=SC1090

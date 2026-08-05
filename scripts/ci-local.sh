@@ -42,6 +42,7 @@ node --test scripts/tests/sidecar-removal.test.mjs
 node --test scripts/tests/remote-host-deploy.test.mjs
 node --test scripts/tests/release-profile.test.mjs
 node --test scripts/tests/release-preflight.test.mjs
+node --test scripts/tests/release-manifest.test.mjs
 node --test scripts/tests/capacity-gateway-load.test.mjs
 node --test scripts/tests/docker-storage-root.test.mjs
 node --test scripts/tests/paseo-local.test.mjs

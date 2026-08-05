@@ -49,6 +49,23 @@ polaris_bluegreen_privileged() {
   "$@"
 }
 
+polaris_bluegreen_acquire_lock() {
+  local lock_file="${1:-${POLARIS_RELEASE_LOCK_FILE:-/run/lock/polaris-release.lock}}"
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "flock is required for Polaris release serialization" >&2
+    exit 1
+  fi
+  if ! : >> "${lock_file}" 2>/dev/null; then
+    echo "cannot write Polaris release lock: ${lock_file}" >&2
+    exit 1
+  fi
+  exec 9>>"${lock_file}"
+  if ! flock -n 9; then
+    echo "another Polaris release operation holds ${lock_file}" >&2
+    exit 1
+  fi
+}
+
 polaris_bluegreen_nginx_port() {
   local color="$1"
   if [ "${color}" = "blue" ]; then

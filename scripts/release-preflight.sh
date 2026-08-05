@@ -23,6 +23,7 @@ node "${SCRIPT_DIR}/release-profile.mjs" || fail "release profile configuration 
 gateway_origin="${POLARIS_WANGHAI_GATEWAY_ORIGIN:-}"
 master_secret="${POLARIS_WANGHAI_GATEWAY_MASTER_SECRET:-}"
 wanghai_image="${POLARIS_WANGHAI_VAULT_IMAGE:-}"
+workspace_base_image="${POLARIS_WORKSPACE_BASE_IMAGE:-}"
 wanghai_cosign_identity="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY:-}"
 wanghai_cosign_oidc_issuer="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER:-}"
 allowed_origins="${POLARIS_PORTAL_ALLOWED_ORIGINS:-}"
@@ -126,6 +127,13 @@ for (const value of values) {
 if ! [[ "${wanghai_image}" =~ @sha256:[a-f0-9]{64}$ ]]; then
   fail "POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference"
 fi
+
+if ! [[ "${workspace_base_image}" =~ @sha256:[a-f0-9]{64}$ ]]; then
+  fail "POLARIS_WORKSPACE_BASE_IMAGE must be a digest-pinned image reference"
+fi
+
+node "${SCRIPT_DIR}/release-manifest.mjs" "${ENV_FILE}" \
+  || fail "release candidate manifest validation failed"
 
 for cosign_key in \
   POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY \

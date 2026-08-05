@@ -20,6 +20,7 @@ else
 fi
 
 polaris_bluegreen_require_env_file "${ENV_FILE}"
+polaris_bluegreen_acquire_lock
 
 active_color="$(polaris_bluegreen_active_color "${ACTIVE_COLOR_FILE}")"
 
