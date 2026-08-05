@@ -142,6 +142,20 @@ if ! docker image inspect "${wanghai_image}" >/dev/null 2>&1; then
   fail "digest-pinned Wanghai image is not present on the host"
 fi
 
+command -v findmnt >/dev/null 2>&1 || fail "findmnt is required to validate Docker storage quotas"
+docker_storage_driver="$(docker info --format '{{.Driver}}')" \
+  || fail "unable to inspect Docker storage driver"
+docker_root_dir="$(docker info --format '{{.DockerRootDir}}')" \
+  || fail "unable to inspect Docker root directory"
+docker_storage_mount="$(findmnt -T "${docker_root_dir}" -no FSTYPE,OPTIONS 2>/dev/null)" \
+  || fail "unable to inspect the Docker root filesystem"
+read -r docker_storage_fs docker_storage_options <<< "${docker_storage_mount}"
+if [ "${docker_storage_driver}" != "overlay2" ] \
+  || [ "${docker_storage_fs}" != "xfs" ] \
+  || ! printf '%s' "${docker_storage_options}" | grep -Eq '(^|,)(pquota|prjquota)(,|$)'; then
+  fail "Docker storage must be overlay2 on xfs with pquota or prjquota for hard writable-layer limits"
+fi
+
 docker_ports="$(docker ps --format '{{.Names}}\t{{.Ports}}')" \
   || fail "unable to inspect Docker port mappings"
 if printf '%s\n' "${docker_ports}" \
