@@ -244,8 +244,16 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       String(sessionCookies?.[0] ?? ""),
       /Path=\/g(?:;|$)/u,
     );
-    assert.ok(sessionCookies?.some((value) => /Path=\/wanghai(?:;|$)/u.test(value)));
+    assert.equal(sessionCookies?.some((value) => /Path=\/wanghai(?:;|$)/u.test(value)), false);
     assert.equal(ticketResponse.headers.location, "/g/");
+
+    const removedCompatibilityPath = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/wanghai/",
+      headers: { host: launchUrl.host, cookie: cookie! },
+    });
+    assert.equal(removedCompatibilityPath.statusCode, 404);
+    assert.equal(upstreamRequests, 0);
 
     const replayedTicket = await requestPortalHost({
       port: portalAddress.port,

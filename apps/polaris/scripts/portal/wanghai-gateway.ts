@@ -20,7 +20,7 @@ export const POLARIS_GATEWAY_LAUNCH_PATH = "/api/g";
 export const POLARIS_GATEWAY_PATH = "/g";
 
 /** Private Wanghai application mount used by the upstream image. */
-export const WANGHAI_PORTAL_BASE_PATH = "/wanghai";
+export const WANGHAI_UPSTREAM_BASE_PATH = "/wanghai";
 
 export const WANGHAI_GATEWAY_SESSION_COOKIE = "polaris_wanghai_session";
 export const WANGHAI_GATEWAY_ASSERTION_HEADER = "x-polaris-wanghai-assertion";
@@ -91,34 +91,11 @@ export function isPolarisGatewayPath(pathname: string | undefined): boolean {
   return path === POLARIS_GATEWAY_PATH || path.startsWith(`${POLARIS_GATEWAY_PATH}/`);
 }
 
-/**
- * The image currently ships a build-time `/wanghai` Next base path. Keep that
- * mount protected as a compatibility path for the image's generated asset
- * and navigation URLs; all new launch URLs use the Polaris `/g` path.
- */
-export function isWanghaiCompatibilityPath(pathname: string | undefined): boolean {
-  const path = String(pathname ?? "");
-  return path === WANGHAI_PORTAL_BASE_PATH
-    || path.startsWith(`${WANGHAI_PORTAL_BASE_PATH}/`);
-}
-
-export function gatewayPathKind(
-  pathname: string | undefined,
-): "canonical" | "compatibility" | null {
-  if (isPolarisGatewayPath(pathname)) return "canonical";
-  if (isWanghaiCompatibilityPath(pathname)) return "compatibility";
-  return null;
-}
-
 export function gatewayRequestPath(pathname: string): string {
-  const kind = gatewayPathKind(pathname);
-  if (!kind) {
+  if (!isPolarisGatewayPath(pathname)) {
     throw new Error("Invalid Polaris gateway path");
   }
-  const prefix = kind === "canonical"
-    ? POLARIS_GATEWAY_PATH
-    : WANGHAI_PORTAL_BASE_PATH;
-  const suffix = pathname.slice(prefix.length);
+  const suffix = pathname.slice(POLARIS_GATEWAY_PATH.length);
   return suffix === "" || suffix === "/" ? "/" : suffix;
 }
 
@@ -156,9 +133,7 @@ export function setGatewaySessionCookie(
   const attributes = `HttpOnly; SameSite=Lax; Max-Age=900${secure ? "; Secure" : ""}`;
   res.setHeader(
     "set-cookie",
-    [POLARIS_GATEWAY_PATH, WANGHAI_PORTAL_BASE_PATH].map(
-      (path) => `${name}=${encodeURIComponent(token)}; Path=${path}; ${attributes}`,
-    ),
+    `${name}=${encodeURIComponent(token)}; Path=${POLARIS_GATEWAY_PATH}; ${attributes}`,
   );
 }
 
