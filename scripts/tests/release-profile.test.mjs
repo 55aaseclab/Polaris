@@ -16,6 +16,7 @@ function releaseEnvironment(profile) {
     POLARIS_JOB_WORKER_CONCURRENCY: String(profile.capacity.jobWorkerConcurrency),
     POLARIS_MAX_ACTIVE_VAULTS: String(profile.capacity.maxActiveVaults),
     POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES: String(profile.quota.activeWorkspaceMiB * 1024 * 1024),
+    POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + "a".repeat(64),
   };
 }
 
@@ -73,5 +74,22 @@ test("a configured release profile requires every single-host control value", ()
   assert.throws(
     () => loadConfiguredReleaseProfile(environment),
     /POLARIS_GATEWAY_REPLICAS is required/i,
+  );
+});
+
+test("the single-host profile rejects a missing or mutable Wanghai image", () => {
+  const profile = loadReleaseProfile("0.3.0-single-host");
+  const environment = releaseEnvironment(profile);
+
+  environment.POLARIS_WANGHAI_VAULT_IMAGE = "registry.example.test/wanghai:latest";
+  assert.throws(
+    () => validateReleaseProfileEnvironment(profile, environment),
+    /POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference/i,
+  );
+
+  delete environment.POLARIS_WANGHAI_VAULT_IMAGE;
+  assert.throws(
+    () => validateReleaseProfileEnvironment(profile, environment),
+    /POLARIS_WANGHAI_VAULT_IMAGE is required/i,
   );
 });

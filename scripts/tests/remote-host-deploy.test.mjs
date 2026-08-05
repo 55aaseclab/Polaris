@@ -56,7 +56,8 @@ test("remote provision requires a digest-pinned Wanghai image", () => {
   assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference/);
   assert.match(script, /docker pull/);
   assert.doesNotMatch(script, /build-admin-portal-image\.sh 'wanghai-admin-portal:latest'/);
-  assert.match(script, /polaris-workspace-prebuilt:latest/);
+  assert.doesNotMatch(script, /polaris-workspace-prebuilt:latest/);
+  assert.doesNotMatch(script, /config\/docker\/vault-prebuilt\.Dockerfile/);
   assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE/);
 });
 

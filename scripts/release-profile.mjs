@@ -211,6 +211,14 @@ function requireEnvironmentInteger(environment, key, expected) {
   }
 }
 
+function requireDigestPinnedImage(environment, key) {
+  const value = requiredEnvironmentValue(environment, key);
+  if (!/^[^\s@]+@sha256:[a-f0-9]{64}$/u.test(value)) {
+    fail(key + " must be a digest-pinned image reference for the configured release profile");
+  }
+  return value;
+}
+
 export function validateReleaseProfileEnvironment(profile, environment = process.env) {
   if (profile.id !== "0.3.0-single-host" || profile.topology.mode !== "single-host") {
     fail("only the 0.3.0 single-host release profile is supported");
@@ -246,6 +254,7 @@ export function validateReleaseProfileEnvironment(profile, environment = process
     "POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES",
     profile.quota.activeWorkspaceMiB * 1024 * 1024,
   );
+  requireDigestPinnedImage(environment, "POLARIS_WANGHAI_VAULT_IMAGE");
   return profile;
 }
 
