@@ -15,6 +15,7 @@ function withPreflightFixture({
   psFailure = false,
   dnsFailure = false,
   tlsFailure = false,
+  cosignFailure = false,
   backupKeyMode = 0o700,
   storageMount = "xfs rw,relatime,pquota",
   envOverrides = {},
@@ -23,6 +24,7 @@ function withPreflightFixture({
   const bin = path.join(root, "bin");
   const envFile = path.join(root, "polaris.env");
   const backupKeyRoot = path.join(root, "backup-keys");
+  const cosignArgsPath = path.join(root, "cosign-args.txt");
   fs.mkdirSync(bin);
   fs.mkdirSync(backupKeyRoot, { mode: backupKeyMode });
   fs.chmodSync(backupKeyRoot, backupKeyMode);
@@ -48,6 +50,8 @@ function withPreflightFixture({
     POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "0123456789abcdef0123456789abcdef",
     POLARIS_PORTAL_ALLOWED_ORIGINS: "https://polaris.example.test",
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
+    POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/jianxiaoyitech/wanghai/.github/workflows/build-admin-portal-image.yml@refs/tags/v0.3.0",
+    POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     POLARIS_WANGHAI_BACKUP_KEY_ROOT: backupKeyRoot,
     POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "2",
     POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "900000",
@@ -75,8 +79,12 @@ printf '%s\\n' '${storageMount}'
 `);
   writeExecutable(path.join(bin, "getent"), "#!/usr/bin/env bash\nexit " + (dnsFailure ? 1 : 0) + "\n");
   writeExecutable(path.join(bin, "curl"), "#!/usr/bin/env bash\nexit " + (tlsFailure ? 1 : 0) + "\n");
+  writeExecutable(path.join(bin, "cosign"), `#!/usr/bin/env bash
+printf '%s\\n' "$@" > "${cosignArgsPath}"
+exit ${cosignFailure ? 1 : 0}
+`);
   try {
-    run({ bin, envFile });
+    run({ bin, envFile, cosignArgsPath });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -90,8 +98,8 @@ function runPreflight(bin, envFile) {
   });
 }
 
-test("release preflight accepts a private, digest-pinned gateway candidate", () => {
-  withPreflightFixture({}, ({ bin, envFile }) => {
+test("release preflight accepts a private, digest-pinned and signed gateway candidate", () => {
+  withPreflightFixture({}, ({ bin, envFile, cosignArgsPath }) => {
     const result = spawnSync("bash", ["scripts/release-preflight.sh", envFile], {
       cwd: process.cwd(),
       encoding: "utf8",
@@ -99,6 +107,10 @@ test("release preflight accepts a private, digest-pinned gateway candidate", () 
     });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /release preflight: ok/);
+    const args = fs.readFileSync(cosignArgsPath, "utf8");
+    assert.match(args, /--certificate-identity/);
+    assert.match(args, /--certificate-oidc-issuer/);
+    assert.match(args, /registry\.example\.test\/wanghai@sha256:/);
   });
 });
 
@@ -181,6 +193,24 @@ test("release preflight rejects mutable Wanghai images", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /digest-pinned image reference/);
+  });
+});
+
+test("release preflight requires an exact Wanghai Cosign identity", () => {
+  withPreflightFixture({
+    envOverrides: { POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "" },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /COSIGN_CERTIFICATE_IDENTITY must be a real production value/);
+  });
+});
+
+test("release preflight rejects an unverifiable Wanghai signature", () => {
+  withPreflightFixture({ cosignFailure: true }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Wanghai image signature verification failed/);
   });
 });
 

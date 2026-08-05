@@ -23,6 +23,8 @@ node "${SCRIPT_DIR}/release-profile.mjs" || fail "release profile configuration 
 gateway_origin="${POLARIS_WANGHAI_GATEWAY_ORIGIN:-}"
 master_secret="${POLARIS_WANGHAI_GATEWAY_MASTER_SECRET:-}"
 wanghai_image="${POLARIS_WANGHAI_VAULT_IMAGE:-}"
+wanghai_cosign_identity="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY:-}"
+wanghai_cosign_oidc_issuer="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER:-}"
 allowed_origins="${POLARIS_PORTAL_ALLOWED_ORIGINS:-}"
 auth_mode="${POLARIS_AUTH_MODE:-}"
 backup_key_root="${POLARIS_WANGHAI_BACKUP_KEY_ROOT:-}"
@@ -125,6 +127,28 @@ if ! [[ "${wanghai_image}" =~ @sha256:[a-f0-9]{64}$ ]]; then
   fail "POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference"
 fi
 
+for cosign_key in \
+  POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY \
+  POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER; do
+  cosign_value="${!cosign_key:-}"
+  if [ -z "${cosign_value}" ] || [[ "${cosign_value}" == *"replace-with"* ]]; then
+    fail "${cosign_key} must be a real production value"
+  fi
+  if ! node -e '
+    const raw = process.argv[1] || "";
+    let value;
+    try {
+      value = new URL(raw);
+    } catch {
+      process.exit(1);
+    }
+    if (value.protocol !== "https:" || value.username || value.password || !value.hostname
+      || value.search || value.hash) process.exit(1);
+  ' "${cosign_value}"; then
+    fail "${cosign_key} must be a valid HTTPS URL"
+  fi
+done
+
 if [ -z "${backup_key_root}" ] \
   || [[ "${backup_key_root}" != /* ]] \
   || [ ! -d "${backup_key_root}" ] \
@@ -144,6 +168,14 @@ require_integer_range "${backup_submissions_per_hour}" "POLARIS_WANGHAI_BACKUP_S
 command -v docker >/dev/null 2>&1 || fail "docker is required for release preflight"
 if ! docker image inspect "${wanghai_image}" >/dev/null 2>&1; then
   fail "digest-pinned Wanghai image is not present on the host"
+fi
+
+command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify the Wanghai image signature"
+if ! cosign verify \
+  --certificate-identity "${wanghai_cosign_identity}" \
+  --certificate-oidc-issuer "${wanghai_cosign_oidc_issuer}" \
+  "${wanghai_image}" >/dev/null; then
+  fail "Wanghai image signature verification failed"
 fi
 
 command -v findmnt >/dev/null 2>&1 || fail "findmnt is required to validate Docker storage quotas"
