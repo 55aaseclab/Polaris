@@ -18,7 +18,7 @@ const WORKSPACE_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}$/u;
 const RUN_ID_PATTERN = /^[a-z][a-z0-9-]{0,36}$/u;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-const WANGHAI_BASE_PATH = "/wanghai";
+const POLARIS_GATEWAY_PATH = "/g";
 
 const OPERATION_CATEGORIES = {
   "portal.login": "read",
@@ -108,12 +108,12 @@ function normalizeLoopbackTransport(value) {
   return origin;
 }
 
-function wanghaiUrl(pathname, origin) {
+function polarisGatewayUrl(pathname, origin) {
   const url = new URL(pathname, origin);
-  if (url.pathname === WANGHAI_BASE_PATH || url.pathname.startsWith(`${WANGHAI_BASE_PATH}/`)) {
+  if (url.pathname === POLARIS_GATEWAY_PATH || url.pathname.startsWith(`${POLARIS_GATEWAY_PATH}/`)) {
     return url;
   }
-  url.pathname = `${WANGHAI_BASE_PATH}${url.pathname === "/" ? "/" : url.pathname}`;
+  url.pathname = `${POLARIS_GATEWAY_PATH}${url.pathname === "/" ? "/" : url.pathname}`;
   return url;
 }
 
@@ -455,7 +455,7 @@ async function runUserRound(state, input) {
     },
     method: "POST",
     operation: "gateway.launch",
-    publicUrl: new URL(`/api/wanghai/${encodeURIComponent(wanghaiId)}/launch`, portal),
+    publicUrl: new URL(`/api/g/${encodeURIComponent(wanghaiId)}/launch`, portal),
   });
   const launchBody = await jsonObject(launch.response, launch.record, "gateway.launch");
   let gatewayUrl;
@@ -465,8 +465,8 @@ async function runUserRound(state, input) {
     launch.record.error = "gateway.launch returned an invalid portal URL";
     throw error;
   }
-  if (gatewayUrl.origin !== portal || !gatewayUrl.pathname.startsWith(`${WANGHAI_BASE_PATH}/`)) {
-    launch.record.error = "gateway.launch returned a non-Polaris Wanghai URL";
+  if (gatewayUrl.origin !== portal || !gatewayUrl.pathname.startsWith(`${POLARIS_GATEWAY_PATH}/`)) {
+    launch.record.error = "gateway.launch returned a non-Polaris gateway URL";
     throw new CapacityLoadError(launch.record.error);
   }
 
@@ -483,19 +483,19 @@ async function runUserRound(state, input) {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "portal.navigation",
-    publicUrl: wanghaiUrl("/", gatewayOrigin),
+    publicUrl: polarisGatewayUrl("/", gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "portal.workflow-catalog",
-    publicUrl: wanghaiUrl("/api/prebuilt-workflows?workspace_type=ecommerce", gatewayOrigin),
+    publicUrl: polarisGatewayUrl("/api/prebuilt-workflows?workspace_type=ecommerce", gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.list",
-    publicUrl: wanghaiUrl("/api/workspaces", gatewayOrigin),
+    publicUrl: polarisGatewayUrl("/api/workspaces", gatewayOrigin),
   });
 
   const workspaceId = workspaceIdFor(input.runId, input.stage, input.userIndex, input.round);
@@ -515,7 +515,7 @@ async function runUserRound(state, input) {
     },
     method: "POST",
     operation: "workspace.create",
-    publicUrl: wanghaiUrl("/api/workspaces", gatewayOrigin),
+    publicUrl: polarisGatewayUrl("/api/workspaces", gatewayOrigin),
   });
   let workspaceVersion = mutationVersion(
     await jsonObject(createWorkspace.response, createWorkspace.record, "workspace.create"),
@@ -527,19 +527,19 @@ async function runUserRound(state, input) {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.version",
-    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/version`, gatewayOrigin),
+    publicUrl: polarisGatewayUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/version`, gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workspace.assets-list",
-    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/assets`, gatewayOrigin),
+    publicUrl: polarisGatewayUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/assets`, gatewayOrigin),
   });
   await timedRequest(state, {
     expectedStatuses: [200],
     headers: gatewayHeaders(gatewayCookie),
     operation: "workflow.status",
-    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/workflows`, gatewayOrigin),
+    publicUrl: polarisGatewayUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/workflows`, gatewayOrigin),
   });
 
   const productCreate = await timedRequest(state, {
@@ -560,7 +560,7 @@ async function runUserRound(state, input) {
     },
     method: "POST",
     operation: "product.create",
-    publicUrl: wanghaiUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/products`, gatewayOrigin),
+    publicUrl: polarisGatewayUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/products`, gatewayOrigin),
   });
   const product = await jsonObject(productCreate.response, productCreate.record, "product.create");
   workspaceVersion = mutationVersion(product, productCreate.record, "product.create");
@@ -587,7 +587,7 @@ async function runUserRound(state, input) {
     ),
     method: "POST",
     operation: "product.asset-upload",
-    publicUrl: wanghaiUrl(
+    publicUrl: polarisGatewayUrl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/products/${encodeURIComponent(sku)}`,
       gatewayOrigin,
     ),

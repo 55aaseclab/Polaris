@@ -15,8 +15,13 @@ import {
 } from "../security/wanghai-assertions.js";
 import { getPolarisControlStore } from "./control-store.js";
 
-export const WANGHAI_GATEWAY_LAUNCH_PATH = "/api/wanghai";
-export const WANGHAI_GATEWAY_PATH = "/wanghai";
+/** Public Polaris-owned gateway routes. */
+export const POLARIS_GATEWAY_LAUNCH_PATH = "/api/g";
+export const POLARIS_GATEWAY_PATH = "/g";
+
+/** Private Wanghai application mount used by the upstream image. */
+export const WANGHAI_PORTAL_BASE_PATH = "/wanghai";
+
 export const WANGHAI_GATEWAY_SESSION_COOKIE = "polaris_wanghai_session";
 export const WANGHAI_GATEWAY_ASSERTION_HEADER = "x-polaris-wanghai-assertion";
 export const WANGHAI_GATEWAY_REQUEST_ID_HEADER = "x-polaris-request-id";
@@ -74,24 +79,54 @@ export function createWanghaiGatewayLaunch(input: {
 
 export function wanghaiGatewayPortalUrl(ticket: string): string {
   const base = configuredGatewayOrigin();
-  base.pathname = `${WANGHAI_GATEWAY_PATH}/`;
+  base.pathname = `${POLARIS_GATEWAY_PATH}/`;
   base.search = "";
   base.hash = "";
   base.searchParams.set("ticket", ticket);
   return base.toString();
 }
 
-export function isWanghaiGatewayPath(pathname: string | undefined): boolean {
+export function isPolarisGatewayPath(pathname: string | undefined): boolean {
   const path = String(pathname ?? "");
-  return path === WANGHAI_GATEWAY_PATH || path.startsWith(`${WANGHAI_GATEWAY_PATH}/`);
+  return path === POLARIS_GATEWAY_PATH || path.startsWith(`${POLARIS_GATEWAY_PATH}/`);
 }
 
-export function wanghaiGatewayRequestPath(pathname: string): string {
-  if (!isWanghaiGatewayPath(pathname)) {
-    throw new Error("Invalid Wanghai gateway path");
+/**
+ * The image currently ships a build-time `/wanghai` Next base path. Keep that
+ * mount protected as a compatibility path for the image's generated asset
+ * and navigation URLs; all new launch URLs use the Polaris `/g` path.
+ */
+export function isWanghaiCompatibilityPath(pathname: string | undefined): boolean {
+  const path = String(pathname ?? "");
+  return path === WANGHAI_PORTAL_BASE_PATH
+    || path.startsWith(`${WANGHAI_PORTAL_BASE_PATH}/`);
+}
+
+export function gatewayPathKind(
+  pathname: string | undefined,
+): "canonical" | "compatibility" | null {
+  if (isPolarisGatewayPath(pathname)) return "canonical";
+  if (isWanghaiCompatibilityPath(pathname)) return "compatibility";
+  return null;
+}
+
+export function gatewayRequestPath(pathname: string): string {
+  const kind = gatewayPathKind(pathname);
+  if (!kind) {
+    throw new Error("Invalid Polaris gateway path");
   }
-  const suffix = pathname.slice(WANGHAI_GATEWAY_PATH.length);
+  const prefix = kind === "canonical"
+    ? POLARIS_GATEWAY_PATH
+    : WANGHAI_PORTAL_BASE_PATH;
+  const suffix = pathname.slice(prefix.length);
   return suffix === "" || suffix === "/" ? "/" : suffix;
+}
+
+export function isPolarisGatewayLaunchRoute(segments: readonly string[]): boolean {
+  const prefix = POLARIS_GATEWAY_LAUNCH_PATH.split("/").filter(Boolean);
+  return segments.length === prefix.length + 2
+    && prefix.every((segment, index) => segments[index] === segment)
+    && segments.at(-1) === "launch";
 }
 
 export function gatewayCookieName(): string {
@@ -118,9 +153,12 @@ export function setGatewaySessionCookie(
   secure: boolean,
 ): void {
   const name = gatewayCookieName();
+  const attributes = `HttpOnly; SameSite=Lax; Max-Age=900${secure ? "; Secure" : ""}`;
   res.setHeader(
     "set-cookie",
-    `${name}=${encodeURIComponent(token)}; Path=${WANGHAI_GATEWAY_PATH}; HttpOnly; SameSite=Lax; Max-Age=900${secure ? "; Secure" : ""}`,
+    [POLARIS_GATEWAY_PATH, WANGHAI_PORTAL_BASE_PATH].map(
+      (path) => `${name}=${encodeURIComponent(token)}; Path=${path}; ${attributes}`,
+    ),
   );
 }
 
