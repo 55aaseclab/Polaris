@@ -2,6 +2,8 @@
 
 FROM node:22 AS bundle
 
+ARG PASEO_SOURCE_REF=v0.1.101
+
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update \
@@ -13,7 +15,7 @@ WORKDIR /opt/paseo
 COPY apps/paseo/source ./
 COPY apps/paseo/patches /tmp/paseo-patches
 
-RUN git reset --hard -q \
+RUN git reset --hard -q "${PASEO_SOURCE_REF}" \
   && git clean -fdq \
   && git apply --3way /tmp/paseo-patches/paseo-web-authing-core.patch /tmp/paseo-patches/paseo-web-polaris-branding.patch /tmp/paseo-patches/paseo-web-settings-auth-visibility.patch /tmp/paseo-patches/paseo-web-host-account-isolation.patch /tmp/paseo-patches/paseo-web-embed-mode.patch /tmp/paseo-patches/paseo-web-authing-package.patch /tmp/paseo-patches/paseo-web-auth-disabled-clean.patch /tmp/paseo-patches/paseo-web-surface-only.patch \
   && rm -rf .git

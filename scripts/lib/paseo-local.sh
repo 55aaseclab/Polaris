@@ -141,6 +141,7 @@ paseo_local_build_dist() {
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.artifact \
       --target artifact-export \
+      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
       --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
       --output "type=local,dest=${tmp_dir}" \
       .
@@ -149,6 +150,7 @@ paseo_local_build_dist() {
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.artifact \
       --target artifact-export \
+      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
       --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
       --output "type=local,dest=${tmp_dir}" \
       .
@@ -193,6 +195,7 @@ paseo_local_build_tool_bundle() {
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.tool-bundle \
       --target bundle-export \
+      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
       --output "type=local,dest=${tmp_dir}" \
       .
   else
@@ -200,6 +203,7 @@ paseo_local_build_tool_bundle() {
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.tool-bundle \
       --target bundle-export \
+      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
       --output "type=local,dest=${tmp_dir}" \
       .
   fi
