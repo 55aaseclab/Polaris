@@ -16,6 +16,8 @@ function withPreflightFixture({
   dnsFailure = false,
   tlsFailure = false,
   cosignFailure = false,
+  provenanceFailure = false,
+  sbomFailure = false,
   backupKeyMode = 0o700,
   storageMount = "xfs rw,relatime,pquota",
   envOverrides = {},
@@ -80,8 +82,16 @@ printf '%s\\n' '${storageMount}'
   writeExecutable(path.join(bin, "getent"), "#!/usr/bin/env bash\nexit " + (dnsFailure ? 1 : 0) + "\n");
   writeExecutable(path.join(bin, "curl"), "#!/usr/bin/env bash\nexit " + (tlsFailure ? 1 : 0) + "\n");
   writeExecutable(path.join(bin, "cosign"), `#!/usr/bin/env bash
-printf '%s\\n' "$@" > "${cosignArgsPath}"
-exit ${cosignFailure ? 1 : 0}
+printf '%s\\n' '-- invocation --' >> "${cosignArgsPath}"
+printf '%s\\n' "$@" >> "${cosignArgsPath}"
+if [ "$1" = "verify" ]; then exit ${cosignFailure ? 1 : 0}; fi
+if [ "$1" = "verify-attestation" ] && [ "$3" = "slsaprovenance" ]; then
+  exit ${provenanceFailure ? 1 : 0}
+fi
+if [ "$1" = "verify-attestation" ] && [ "$3" = "spdxjson" ]; then
+  exit ${sbomFailure ? 1 : 0}
+fi
+exit 1
 `);
   try {
     run({ bin, envFile, cosignArgsPath });
@@ -110,7 +120,10 @@ test("release preflight accepts a private, digest-pinned and signed gateway cand
     const args = fs.readFileSync(cosignArgsPath, "utf8");
     assert.match(args, /--certificate-identity/);
     assert.match(args, /--certificate-oidc-issuer/);
+    assert.match(args, /verify-attestation\n--type\nslsaprovenance/);
+    assert.match(args, /verify-attestation\n--type\nspdxjson/);
     assert.match(args, /registry\.example\.test\/wanghai@sha256:/);
+    assert.equal((args.match(/registry\.example\.test\/wanghai@sha256:/g) ?? []).length, 3);
   });
 });
 
@@ -211,6 +224,22 @@ test("release preflight rejects an unverifiable Wanghai signature", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Wanghai image signature verification failed/);
+  });
+});
+
+test("release preflight rejects an unverifiable Wanghai provenance attestation", () => {
+  withPreflightFixture({ provenanceFailure: true }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Wanghai image provenance attestation verification failed/);
+  });
+});
+
+test("release preflight rejects an unverifiable Wanghai SBOM attestation", () => {
+  withPreflightFixture({ sbomFailure: true }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Wanghai image SBOM attestation verification failed/);
   });
 });
 
