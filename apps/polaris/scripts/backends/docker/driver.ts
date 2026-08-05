@@ -11,6 +11,7 @@ import {
   vaultDataDockerVolumeName,
 } from "../../core/netfs.js";
 import { vaultRuntimeScopeName } from "../../core/vault-name.js";
+import { withDockerActiveVaultCapacity } from "../../runtime/active-vault-capacity.js";
 import { renderAndWriteDockerVault } from "./render.js";
 import { logInfo } from "../../utils/log.js";
 import { runCommand } from "../../utils/shell.js";
@@ -136,9 +137,14 @@ export class DockerDriver implements BackendDriver {
   }
 
   async start(vault: VaultSpec): Promise<void> {
-    ensureDockerVaultPrerequisites(vault);
-    const outputPath = renderAndWriteDockerVault(vault);
-    runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
+    await withDockerActiveVaultCapacity(import.meta.url, {
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
+    }, async () => {
+      ensureDockerVaultPrerequisites(vault);
+      const outputPath = renderAndWriteDockerVault(vault);
+      runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
+    });
   }
 
   async stop(vault: VaultSpec): Promise<void> {
@@ -152,9 +158,14 @@ export class DockerDriver implements BackendDriver {
   }
 
   async rebuild(vault: VaultSpec): Promise<void> {
-    ensureDockerVaultPrerequisites(vault);
-    const outputPath = renderAndWriteDockerVault(vault);
-    runDockerComposeTimed(vault, outputPath, ["up", "-d", "--force-recreate"]);
+    await withDockerActiveVaultCapacity(import.meta.url, {
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
+    }, async () => {
+      ensureDockerVaultPrerequisites(vault);
+      const outputPath = renderAndWriteDockerVault(vault);
+      runDockerComposeTimed(vault, outputPath, ["up", "-d", "--force-recreate"]);
+    });
   }
 
   async render(vault: VaultSpec): Promise<void> {
@@ -162,9 +173,14 @@ export class DockerDriver implements BackendDriver {
   }
 
   async apply(vault: VaultSpec): Promise<void> {
-    ensureDockerVaultPrerequisites(vault);
-    const outputPath = renderAndWriteDockerVault(vault);
-    runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
+    await withDockerActiveVaultCapacity(import.meta.url, {
+      userId: vault.userProfile.id,
+      vault: vault.identity.projectName,
+    }, async () => {
+      ensureDockerVaultPrerequisites(vault);
+      const outputPath = renderAndWriteDockerVault(vault);
+      runDockerComposeTimed(vault, outputPath, ["up", "-d"]);
+    });
   }
 
   async logs(vault: VaultSpec): Promise<void> {
@@ -244,8 +260,7 @@ export class DockerDriver implements BackendDriver {
         continue;
       }
       if (action.kind === "apply") {
-        ensureDockerVaultPrerequisites(vault);
-        runCommand("docker", ["compose", "-f", outputPath, "up", "-d"]);
+        await this.apply(vault);
         continue;
       }
       if (action.kind === "restart-runtime") {

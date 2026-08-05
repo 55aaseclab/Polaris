@@ -81,6 +81,7 @@ import {
 } from "./service.js";
 import { WanghaiBackupError } from "../runtime/wanghai-backup.js";
 import { WanghaiRestoreError } from "../runtime/wanghai-restore.js";
+import { ActiveVaultCapacityError } from "../runtime/active-vault-capacity.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
@@ -3051,6 +3052,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         ? error.statusCode
         : error instanceof PortalRequestError
           ? error.statusCode
+          : error instanceof ActiveVaultCapacityError
+            ? error.statusCode
           : 500;
       const message = error instanceof Error ? error.message : String(error);
       const isApiRequest = (req.url ?? "").startsWith("/api/");
