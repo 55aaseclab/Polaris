@@ -318,10 +318,6 @@ EOF
 \${SUDO} systemctl daemon-reload
 \${SUDO} systemctl enable polaris-container-runtime-cleanup.timer
 \${SUDO} systemctl restart polaris-container-runtime-cleanup.timer
-\${SUDO} docker build \
-  -f '${REMOTE_APP_DIR}/config/docker/vault-prebuilt.Dockerfile' \
-  -t 'polaris-workspace-prebuilt:latest' \
-  '${REMOTE_APP_DIR}'
 set -a
 # shellcheck disable=SC1090
 source '${REMOTE_ENV_FILE}'
