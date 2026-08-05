@@ -15,10 +15,13 @@ test("remote deploy restarts Polaris through a host systemd service", () => {
 
 test("remote deployment checksum-syncs Polaris source", () => {
   const script = fs.readFileSync("scripts/cd-remote.sh", "utf8");
-  assert.match(script, /rsync -azc --delete --delete-excluded/);
+  assert.match(script, /rsync -azc --delete --one-file-system/);
+  assert.doesNotMatch(script, /--delete-excluded/);
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_APP_DIR\}\//);
   assert.match(script, /release-manifest\.json/);
   assert.match(script, /--exclude "deploy\/release-manifest\.json"/);
+  assert.match(script, /--exclude "docker-root\/\*\*\*"/);
+  assert.match(script, /--exclude "data\/\*\*\*"/);
   assert.match(script, /RELEASE_MANIFEST_SOURCE/);
 });
 
@@ -62,9 +65,11 @@ test("remote deployment keeps environment files root-owned and non-world-readabl
 
 test("remote provision requires a digest-pinned Wanghai image", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
-  assert.match(script, /rsync -azc --delete --delete-excluded/);
+  assert.match(script, /rsync -azc --delete --one-file-system/);
+  assert.doesNotMatch(script, /--delete-excluded/);
   assert.match(script, /--exclude ".next\*"/);
   assert.match(script, /--exclude "\/workspaces\/\*\*\*"/);
+  assert.match(script, /--exclude "docker-root\/\*\*\*"/);
   assert.match(script, /\$\{LOCAL_WANGHAI_DIR\}\//);
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_WANGHAI_DIR\}\//);
   assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference/);
