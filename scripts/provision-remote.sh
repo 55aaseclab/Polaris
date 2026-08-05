@@ -337,6 +337,14 @@ if ! [[ "\${POLARIS_WANGHAI_VAULT_IMAGE:-}" =~ @sha256:[a-f0-9]{64}\$ ]]; then
   echo 'remote provisioning: POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference' >&2
   exit 2
 fi
+if ! [[ "\${POLARIS_WORKSPACE_BASE_IMAGE:-}" =~ @sha256:[a-f0-9]{64}\$ ]]; then
+  echo 'remote provisioning: POLARIS_WORKSPACE_BASE_IMAGE must be a digest-pinned image reference' >&2
+  exit 2
+fi
+if [ -z "\${POLARIS_RELEASE_MANIFEST:-}" ]; then
+  echo 'remote provisioning: POLARIS_RELEASE_MANIFEST is required' >&2
+  exit 2
+fi
 if ! \${SUDO} docker image inspect "\${POLARIS_WANGHAI_VAULT_IMAGE}" >/dev/null 2>&1; then
   \${SUDO} docker pull "\${POLARIS_WANGHAI_VAULT_IMAGE}"
 fi

@@ -7,6 +7,7 @@ test("remote deploy restarts Polaris through a host systemd service", () => {
   const script = fs.readFileSync("scripts/deploy-polaris.sh", "utf8");
   assert.match(script, /systemctl enable "polaris-server@\$\{target_color\}\.service"/);
   assert.match(script, /systemctl restart "polaris-server@\$\{target_color\}\.service"/);
+  assert.match(script, /polaris_bluegreen_acquire_lock/);
   assert.match(script, /pnpm run build/);
   assert.doesNotMatch(script, /POLARIS_SERVER_UID/);
   assert.doesNotMatch(script, /POLARIS_SERVER_GID/);
@@ -48,9 +49,11 @@ test("remote provision keeps integrated Wanghai on the Polaris vault export", ()
 test("remote deployment keeps environment files root-owned and non-world-readable", () => {
   const provision = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   const deploy = fs.readFileSync("scripts/deploy-polaris.sh", "utf8");
+  const rollback = fs.readFileSync("scripts/rollback-polaris.sh", "utf8");
   assert.match(provision, /install -o root -g .* -m 0640/);
   assert.match(provision, /chmod 0750/);
   assert.match(deploy, /install -o root -g .* -m 0640/);
+  assert.match(rollback, /polaris_bluegreen_acquire_lock/);
 });
 
 test("remote provision requires a digest-pinned Wanghai image", () => {
@@ -61,6 +64,8 @@ test("remote provision requires a digest-pinned Wanghai image", () => {
   assert.match(script, /\$\{LOCAL_WANGHAI_DIR\}\//);
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_WANGHAI_DIR\}\//);
   assert.match(script, /POLARIS_WANGHAI_VAULT_IMAGE must be a digest-pinned image reference/);
+  assert.match(script, /POLARIS_WORKSPACE_BASE_IMAGE must be a digest-pinned image reference/);
+  assert.match(fs.readFileSync("scripts/release-preflight.sh", "utf8"), /release-manifest\.mjs/);
   assert.match(script, /docker pull/);
   assert.doesNotMatch(script, /build-admin-portal-image\.sh 'wanghai-admin-portal:latest'/);
   assert.doesNotMatch(script, /polaris-workspace-prebuilt:latest/);

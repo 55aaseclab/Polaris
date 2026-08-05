@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -25,6 +26,7 @@ function withPreflightFixture({
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-release-preflight-"));
   const bin = path.join(root, "bin");
   const envFile = path.join(root, "polaris.env");
+  const manifestPath = path.join(root, "release-manifest.json");
   const backupKeyRoot = path.join(root, "backup-keys");
   const cosignArgsPath = path.join(root, "cosign-args.txt");
   fs.mkdirSync(bin);
@@ -52,6 +54,8 @@ function withPreflightFixture({
     POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "0123456789abcdef0123456789abcdef",
     POLARIS_PORTAL_ALLOWED_ORIGINS: "https://polaris.example.test",
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
+    POLARIS_WORKSPACE_BASE_IMAGE: "registry.example.test/polaris-base@sha256:" + "b".repeat(64),
+    POLARIS_RELEASE_MANIFEST: manifestPath,
     POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/jianxiaoyitech/wanghai/.github/workflows/build-admin-portal-image.yml@refs/tags/v0.3.0",
     POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     POLARIS_WANGHAI_BACKUP_KEY_ROOT: backupKeyRoot,
@@ -60,10 +64,23 @@ function withPreflightFixture({
     POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR: "6",
   };
   Object.assign(values, envOverrides);
-  fs.writeFileSync(
-    envFile,
-    Object.entries(values).map(([key, value]) => key + "=" + value).join("\n") + "\n",
-  );
+  const environmentText = Object.entries(values)
+    .map(([key, value]) => key + "=" + value)
+    .join("\n") + "\n";
+  fs.writeFileSync(envFile, environmentText);
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    schemaVersion: 1,
+    release: "0.3.0",
+    profile: "0.3.0-single-host",
+    polarisSourceCommit: "a19f9ed",
+    workspaceBaseImage: values.POLARIS_WORKSPACE_BASE_IMAGE,
+    wanghaiImage: values.POLARIS_WANGHAI_VAULT_IMAGE,
+    environmentSha256: crypto.createHash("sha256").update(environmentText).digest("hex"),
+    migration: "none",
+    evidence: ["synthetic-gateway"],
+    previousManifestSha256: "c".repeat(64),
+    generatedAt: "2026-08-05T12:00:00Z",
+  }) + "\n");
   writeExecutable(path.join(bin, "docker"), `#!/usr/bin/env bash
 if [ "$1" = "info" ] && [ "$2" = "--format" ]; then
   case "$3" in
