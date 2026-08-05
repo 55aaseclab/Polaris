@@ -12,6 +12,12 @@ test("remote deploy restarts Polaris through a host systemd service", () => {
   assert.doesNotMatch(script, /POLARIS_SERVER_GID/);
 });
 
+test("remote deployment checksum-syncs Polaris source", () => {
+  const script = fs.readFileSync("scripts/cd-remote.sh", "utf8");
+  assert.match(script, /rsync -azc --delete --delete-excluded/);
+  assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_APP_DIR\}\//);
+});
+
 test("remote provision installs a host Polaris systemd unit", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   assert.match(script, /polaris-server@\.service/);
