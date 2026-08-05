@@ -37,6 +37,113 @@ function q(value: string): string {
   return JSON.stringify(value);
 }
 
+const DOCKER_VAULT_PID_LIMIT = 128;
+const DOCKER_RUNTIME_TMPFS_MAX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_DOCKER_VAULT_RESOURCES = {
+  cpu: "1",
+  memory: "512Mi",
+  ephemeralStorage: "512Mi",
+} as const;
+const BYTE_UNITS = [
+  { suffix: "e", bytes: 1024 ** 6 },
+  { suffix: "p", bytes: 1024 ** 5 },
+  { suffix: "t", bytes: 1024 ** 4 },
+  { suffix: "g", bytes: 1024 ** 3 },
+  { suffix: "m", bytes: 1024 ** 2 },
+  { suffix: "k", bytes: 1024 },
+] as const;
+
+function quantityNumber(value: string, label: string): { amount: number; suffix: string } {
+  const raw = value.trim();
+  const match = raw.match(/^(\d+(?:\.\d*)?|\.\d+)([A-Za-z]*)$/u);
+  if (!match) {
+    throw new Error(`Docker resource ${label} has an invalid quantity '${value}'`);
+  }
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`Docker resource ${label} must be positive`);
+  }
+  return { amount, suffix: match[2] };
+}
+
+function dockerCpuQuantity(value: string, label: string): string {
+  const { amount, suffix } = quantityNumber(value, label);
+  const multiplier = suffix === "" ? 1 : suffix === "m" ? 1e-3 : suffix === "u" ? 1e-6 : suffix === "n" ? 1e-9 : null;
+  if (multiplier === null) {
+    throw new Error(`Docker resource ${label} has an unsupported CPU suffix '${suffix}'`);
+  }
+  const cores = amount * multiplier;
+  if (!Number.isFinite(cores) || cores <= 0) {
+    throw new Error(`Docker resource ${label} must be positive`);
+  }
+  const normalized = cores.toFixed(9).replace(/0+$/u, "").replace(/\.$/u, "");
+  return normalized || "0.000000001";
+}
+
+function quantityBytes(value: string, label: string): number {
+  const { amount, suffix } = quantityNumber(value, label);
+  const multipliers: Record<string, number> = {
+    "": 1,
+    b: 1,
+    k: 1_000,
+    M: 1_000_000,
+    G: 1_000_000_000,
+    T: 1_000_000_000_000,
+    P: 1_000_000_000_000_000,
+    E: 1_000_000_000_000_000_000,
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    Pi: 1024 ** 5,
+    Ei: 1024 ** 6,
+  };
+  const multiplier = multipliers[suffix];
+  if (multiplier === undefined) {
+    throw new Error(`Docker resource ${label} has an unsupported size suffix '${suffix}'`);
+  }
+  const bytes = amount * multiplier;
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+    throw new Error(`Docker resource ${label} must resolve to a positive whole byte count`);
+  }
+  return bytes;
+}
+
+function dockerByteQuantity(bytes: number): string {
+  for (const unit of BYTE_UNITS) {
+    if (bytes % unit.bytes === 0) {
+      return `${bytes / unit.bytes}${unit.suffix}`;
+    }
+  }
+  return `${bytes}b`;
+}
+
+function dockerVaultResourceLimits(vault: VaultSpec): {
+  cpu: string;
+  memory: string;
+  ephemeralStorage: string;
+  runtimeTmpfs: string;
+  pidLimit: number;
+} {
+  const resources = vault.resources.unbounded
+    ? DEFAULT_DOCKER_VAULT_RESOURCES
+    : vault.resources;
+  const memoryBytes = quantityBytes(resources.memory, "memory");
+  const ephemeralStorageBytes = quantityBytes(
+    resources.ephemeralStorage,
+    "ephemeral storage",
+  );
+  return {
+    cpu: dockerCpuQuantity(resources.cpu, "CPU"),
+    memory: dockerByteQuantity(memoryBytes),
+    ephemeralStorage: dockerByteQuantity(ephemeralStorageBytes),
+    runtimeTmpfs: dockerByteQuantity(
+      Math.min(ephemeralStorageBytes, DOCKER_RUNTIME_TMPFS_MAX_BYTES),
+    ),
+    pidLimit: DOCKER_VAULT_PID_LIMIT,
+  };
+}
+
 function composeEscape(value: string): string {
   return value.replace(/\$/g, "$$$$");
 }
@@ -321,6 +428,7 @@ export function renderDockerVault(vault: VaultSpec): string {
   const serviceName = runtimeScope;
   const composeProjectName = sanitizeVolumeToken(runtimeScope).replace(/^[.-]+/, "") || "polaris-vault";
   const containerName = `${runtimeScope}-docker`;
+  const resourceLimits = dockerVaultResourceLimits(vault);
   const vaultDataVolume = renderDockerVaultDataVolume(vault);
   const vaultRuntimeVolume = resolveDockerVolume({
     fallbackName: `${runtimeScope}-vault-runtime-state`,
@@ -474,6 +582,12 @@ services:
       - |
 ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     ${ports}
+    cpus: ${q(resourceLimits.cpu)}
+    mem_limit: ${q(resourceLimits.memory)}
+    memswap_limit: ${q(resourceLimits.memory)}
+    pids_limit: ${resourceLimits.pidLimit}
+    storage_opt:
+      size: ${q(resourceLimits.ephemeralStorage)}
     environment:
 ${environmentLines}
     extra_hosts:
@@ -487,7 +601,7 @@ ${vaultDataVolume.mountBlock.join("\n")}
         source: ${identityVolume.key}
         target: /identity
     tmpfs:
-      - /run/vault
+      - /run/vault:rw,nosuid,nodev,noexec,size=${resourceLimits.runtimeTmpfs}
 
 volumes:
 ${vaultDataVolume.volumeBlock.join("\n")}

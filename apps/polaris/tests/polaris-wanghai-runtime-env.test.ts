@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import yaml from "js-yaml";
 import { renderDockerVault } from "../scripts/backends/docker/render.js";
 import { renderKubevirtVault } from "../scripts/backends/kubevirt/render.js";
 import { renderPodVault } from "../scripts/backends/pod/render.js";
@@ -80,6 +81,88 @@ test("all integrated renderers remove standalone Wanghai environment values", ()
         assert.match(rendered, /SAFE_PLAIN_SETTING/);
       }
     }
+  } finally {
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousOrigins;
+  }
+});
+
+test("Docker vaults render hard CPU, memory, PID, writable-layer, and tmpfs limits", () => {
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
+  try {
+    const vault = verticalVault("SAFE_SURFACE_SETTING=keep\n");
+    const rendered = renderDockerVault({
+      ...vault,
+      resources: {
+        ...vault.resources,
+        cpu: "250m",
+        memory: "1Gi",
+        ephemeralStorage: "32Mi",
+      },
+    });
+    const document = yaml.load(rendered) as {
+      services?: Record<string, {
+        cpus?: string;
+        mem_limit?: string;
+        memswap_limit?: string;
+        pids_limit?: number;
+        storage_opt?: { size?: string };
+        tmpfs?: string[];
+      }>;
+    };
+    const service = Object.values(document.services ?? {})[0];
+    assert.ok(service);
+    assert.equal(service.cpus, "0.25");
+    assert.equal(service.mem_limit, "1g");
+    assert.equal(service.memswap_limit, "1g");
+    assert.equal(service.pids_limit, 128);
+    assert.deepEqual(service.storage_opt, { size: "32m" });
+    assert.deepEqual(service.tmpfs, ["/run/vault:rw,nosuid,nodev,noexec,size=32m"]);
+  } finally {
+    if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+    else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
+    if (previousOrigins === undefined) delete process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+    else process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = previousOrigins;
+  }
+});
+
+test("Docker vault rendering bounds legacy unbounded resources and rejects invalid values", () => {
+  const vault = verticalVault("SAFE_SURFACE_SETTING=keep\n");
+  const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
+  const previousOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
+  process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
+  process.env.POLARIS_PORTAL_ALLOWED_ORIGINS = "https://polaris.example.test";
+  try {
+    const unboundedRendered = renderDockerVault({
+      ...vault,
+      resources: { ...vault.resources, unbounded: true },
+    });
+    const unboundedDocument = yaml.load(unboundedRendered) as {
+      services?: Record<string, {
+        cpus?: string;
+        mem_limit?: string;
+        storage_opt?: { size?: string };
+        tmpfs?: string[];
+      }>;
+    };
+    const unboundedService = Object.values(unboundedDocument.services ?? {})[0];
+    assert.ok(unboundedService);
+    assert.equal(unboundedService.cpus, "1");
+    assert.equal(unboundedService.mem_limit, "512m");
+    assert.deepEqual(unboundedService.storage_opt, { size: "512m" });
+    assert.deepEqual(unboundedService.tmpfs, ["/run/vault:rw,nosuid,nodev,noexec,size=64m"]);
+    assert.throws(
+      () => renderDockerVault({
+        ...vault,
+        resources: { ...vault.resources, cpu: "1Gi" },
+      }),
+      /unsupported CPU suffix/u,
+    );
   } finally {
     if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
     else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
