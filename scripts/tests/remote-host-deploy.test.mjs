@@ -17,6 +17,9 @@ test("remote deployment checksum-syncs Polaris source", () => {
   const script = fs.readFileSync("scripts/cd-remote.sh", "utf8");
   assert.match(script, /rsync -azc --delete --delete-excluded/);
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_APP_DIR\}\//);
+  assert.match(script, /release-manifest\.json/);
+  assert.match(script, /--exclude "deploy\/release-manifest\.json"/);
+  assert.match(script, /RELEASE_MANIFEST_SOURCE/);
 });
 
 test("remote provision installs a host Polaris systemd unit", () => {

@@ -14,6 +14,7 @@ REMOTE_UPSTREAM_FILE="/etc/nginx/snippets/polaris-gateway-upstream.conf"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RELEASE_MANIFEST_SOURCE="${RELEASE_MANIFEST_SOURCE:-${ROOT_DIR}/deploy/release-manifest.json}"
 
 cd "${ROOT_DIR}"
 
@@ -49,7 +50,15 @@ rsync -azc --delete --delete-excluded \
   --exclude "config/exports" \
   --exclude "config/generated" \
   --exclude "config/state" \
+  --exclude "deploy/release-manifest.json" \
   -e "${RSYNC_RSH}" \
   ./ "${REMOTE_HOST}:${REMOTE_APP_DIR}/"
+
+if [ -f "${RELEASE_MANIFEST_SOURCE}" ]; then
+  rsync -az \
+    -e "${RSYNC_RSH}" \
+    "${RELEASE_MANIFEST_SOURCE}" \
+    "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/release-manifest.json"
+fi
 
 ssh "${REMOTE_HOST}" "cd '${REMOTE_APP_DIR}' && bash ./scripts/deploy-polaris.sh '${REMOTE_ENV_FILE}' '${REMOTE_ACTIVE_COLOR_FILE}' '${REMOTE_UPSTREAM_FILE}'"

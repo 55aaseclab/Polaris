@@ -238,6 +238,7 @@ upsert_env_line 'POLARIS_GATEWAY_REPLICAS' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_JOB_WORKER_CONCURRENCY' '1' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_MAX_ACTIVE_VAULTS' '10' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES' '268435456' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_RELEASE_MANIFEST' 'deploy/release-manifest.json' '${REMOTE_ENV_FILE}'
 remove_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
@@ -343,6 +344,10 @@ if ! [[ "\${POLARIS_WORKSPACE_BASE_IMAGE:-}" =~ @sha256:[a-f0-9]{64}\$ ]]; then
 fi
 if [ -z "\${POLARIS_RELEASE_MANIFEST:-}" ]; then
   echo 'remote provisioning: POLARIS_RELEASE_MANIFEST is required' >&2
+  exit 2
+fi
+if [ "\${POLARIS_RELEASE_MANIFEST}" != 'deploy/release-manifest.json' ]; then
+  echo 'remote provisioning: POLARIS_RELEASE_MANIFEST must be deploy/release-manifest.json' >&2
   exit 2
 fi
 if ! \${SUDO} docker image inspect "\${POLARIS_WANGHAI_VAULT_IMAGE}" >/dev/null 2>&1; then
