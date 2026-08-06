@@ -20,6 +20,7 @@ test("remote deployment checksum-syncs Polaris source", () => {
   assert.match(script, /\$\{REMOTE_HOST\}:\$\{REMOTE_APP_DIR\}\//);
   assert.match(script, /release-manifest\.json/);
   assert.match(script, /--exclude "deploy\/release-manifest\.json"/);
+  assert.match(script, /--exclude "config\/users"/);
   assert.match(script, /--exclude "docker-root\/\*\*\*"/);
   assert.match(script, /--exclude "data\/\*\*\*"/);
   assert.match(script, /--exclude "apps\/paseo\/\.surface-\*\/"/);

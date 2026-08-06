@@ -51,6 +51,7 @@ rsync -azc --delete --one-file-system \
   --exclude "config/exports" \
   --exclude "config/generated" \
   --exclude "config/state" \
+  --exclude "config/users" \
   --exclude "data" \
   --exclude "data/***" \
   --exclude "docker-root" \
