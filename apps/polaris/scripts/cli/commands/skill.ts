@@ -41,7 +41,7 @@ export async function skillInstallCommand(
   const skillId = argv[0]?.trim();
   if (!skillId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- skill-install <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- vault skill-install <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
     );
   }
   const userProfileId = parseFlag(argv, "--user");
@@ -62,7 +62,7 @@ export async function skillUninstallCommand(
   const skillId = argv[0]?.trim();
   if (!skillId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- skill-uninstall <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- vault skill-uninstall <vaultRef> <skillId> [--user <userProfileId>] [--harness <codex|claude>]",
     );
   }
   const userProfileId = parseFlag(argv, "--user");

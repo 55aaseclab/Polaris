@@ -30,7 +30,7 @@ function parseCreateArgs(argv: string[]): {
   const testWanghaiOnly = argv.includes("--test-wanghai-only");
   const userProfileId = userFlagIndex >= 0 ? argv[userFlagIndex + 1]?.trim() : "";
   if (!projectRef || !userProfileId) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- create <project> --user <userProfileId> [--base-image <image>] [--test-wanghai-only]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- vault create <project> --user <userProfileId> [--base-image <image>] [--test-wanghai-only]");
   }
   if (baseImageFlagIndex >= 0 && !argv[baseImageFlagIndex + 1]?.trim()) {
     throw new Error("--base-image requires an image reference");
@@ -126,8 +126,8 @@ export async function createVaultForUser(
           },
           nextSteps: [
             `Stage credentials under ${repoRelativePath(import.meta.url, path.join(USER_ROOT, userProfileId))}/`,
-            `pnpm --dir apps/polaris run polaris -- render ${project}@${scaffoldBackend}`,
-            `pnpm --dir apps/polaris run polaris -- start ${project}@${scaffoldBackend}`,
+            `pnpm --dir apps/polaris run polaris -- vault render ${project}@${scaffoldBackend}`,
+            `pnpm --dir apps/polaris run polaris -- vault start ${project}@${scaffoldBackend}`,
           ],
         },
         null,
