@@ -8,7 +8,7 @@ import {
 } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { performance } from "node:perf_hooks";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 import yaml from "js-yaml";
 import {
@@ -52,6 +52,18 @@ export interface GatewayPerformanceOperationSummary {
   p99Ms: number;
 }
 
+export interface GatewayPerformanceProcessSummary {
+  systemCpuMs: number;
+  userCpuMs: number;
+  peakRssBytes: number;
+  eventLoopDelay: {
+    maxMs: number;
+    p50Ms: number;
+    p95Ms: number;
+    p99Ms: number;
+  };
+}
+
 export interface GatewayPerformanceBenchmarkResult {
   kind: "polaris-gateway-performance-benchmark";
   recordedAt: string;
@@ -66,6 +78,8 @@ export interface GatewayPerformanceBenchmarkResult {
     release: string;
   };
   operations: Record<Operation, GatewayPerformanceOperationSummary>;
+  errors: Record<Operation, number>;
+  process: GatewayPerformanceProcessSummary;
 }
 
 class GatewayBenchmarkError extends Error {
@@ -120,6 +134,10 @@ function percentile(samples: number[], percentileValue: number): number {
 
 function rounded(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function nanosecondsToMilliseconds(value: number): number {
+  return rounded(value / 1_000_000);
 }
 
 function summarize(samples: number[]): GatewayPerformanceOperationSummary {
@@ -254,6 +272,12 @@ export async function runGatewayPerformanceBenchmark(
     "gateway.exchange": [],
     "gateway.read": [],
   };
+  const errors: Record<Operation, number> = {
+    "portal.hosts.list": 0,
+    "gateway.launch": 0,
+    "gateway.exchange": 0,
+    "gateway.read": 0,
+  };
   const restores = [
     setEnv("POLARIS_AUTH_MODE", "disabled"),
     setEnv("POLARIS_AUTH_DEFAULT_USER_ID", userId),
@@ -324,27 +348,43 @@ export async function runGatewayPerformanceBenchmark(
       if (read.status !== 200) throw new GatewayBenchmarkError("Gateway-read warmup failed");
     }
 
-    for (let index = 0; index < samples; index += 1) {
-      const hosts = await timedFetch(
-        observations,
-        "portal.hosts.list",
-        `${origin}/api/polaris-hosts`,
-      );
-      if (hosts.status !== 200) throw new GatewayBenchmarkError("Host-list benchmark failed");
-      const cookie = await issueGatewaySession({
-        origin,
-        samples: observations,
-        wanghaiId: targetWanghaiId,
-        record: true,
-      });
-      const read = await timedFetch(
-        observations,
-        "gateway.read",
-        `${origin}/g/api/prebuilt-workflows?workspace_type=ecommerce`,
-        { headers: { cookie } },
-      );
-      if (read.status !== 200) throw new GatewayBenchmarkError("Gateway-read benchmark failed");
+    const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
+    const cpuStartedAt = process.cpuUsage();
+    let peakRssBytes = process.memoryUsage.rss();
+    eventLoopDelay.enable();
+    try {
+      for (let index = 0; index < samples; index += 1) {
+        const hosts = await timedFetch(
+          observations,
+          "portal.hosts.list",
+          `${origin}/api/polaris-hosts`,
+        );
+        if (hosts.status !== 200) {
+          errors["portal.hosts.list"] += 1;
+          throw new GatewayBenchmarkError("Host-list benchmark failed");
+        }
+        const cookie = await issueGatewaySession({
+          origin,
+          samples: observations,
+          wanghaiId: targetWanghaiId,
+          record: true,
+        });
+        const read = await timedFetch(
+          observations,
+          "gateway.read",
+          `${origin}/g/api/prebuilt-workflows?workspace_type=ecommerce`,
+          { headers: { cookie } },
+        );
+        if (read.status !== 200) {
+          errors["gateway.read"] += 1;
+          throw new GatewayBenchmarkError("Gateway-read benchmark failed");
+        }
+        peakRssBytes = Math.max(peakRssBytes, process.memoryUsage.rss());
+      }
+    } finally {
+      eventLoopDelay.disable();
     }
+    const cpu = process.cpuUsage(cpuStartedAt);
 
     return {
       kind: "polaris-gateway-performance-benchmark",
@@ -360,6 +400,18 @@ export async function runGatewayPerformanceBenchmark(
         "gateway.launch": summarize(observations["gateway.launch"]),
         "gateway.exchange": summarize(observations["gateway.exchange"]),
         "gateway.read": summarize(observations["gateway.read"]),
+      },
+      errors,
+      process: {
+        userCpuMs: rounded(cpu.user / 1_000),
+        systemCpuMs: rounded(cpu.system / 1_000),
+        peakRssBytes,
+        eventLoopDelay: {
+          p50Ms: nanosecondsToMilliseconds(eventLoopDelay.percentile(50)),
+          p95Ms: nanosecondsToMilliseconds(eventLoopDelay.percentile(95)),
+          p99Ms: nanosecondsToMilliseconds(eventLoopDelay.percentile(99)),
+          maxMs: nanosecondsToMilliseconds(eventLoopDelay.max),
+        },
       },
     };
   } finally {
