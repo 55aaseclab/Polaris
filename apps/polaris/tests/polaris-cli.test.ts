@@ -273,6 +273,13 @@ function cleanupStatusFile(project: string): void {
   fs.rmSync(path.join(REPO_ROOT, "config", "state", `${project}.status.json`), { force: true });
 }
 
+function cleanupPaseoState(project: string): void {
+  fs.rmSync(vaultPaseoStateDir(project, DEMO_USER_PROFILE_ID), {
+    recursive: true,
+    force: true,
+  });
+}
+
 function cleanupDriverSelectionState(project: string): void {
   cleanupStatusFile(project);
   fs.rmSync(vaultSelectionPath(project, DEMO_USER_PROFILE_ID), { force: true });
@@ -368,7 +375,13 @@ test("backend registry resolves pod driver", () => {
 
 test("runCli rejects empty argv and missing project", async () => {
   await assert.rejects(() => runCli([]), /Usage:/);
-  await assert.rejects(() => runCli(["status"]), /Usage:/);
+  await assert.rejects(() => runCli(["vault", "status"]), /Usage:/);
+});
+
+test("runCli rejects removed top-level aliases and implicit status", async () => {
+  await assert.rejects(() => runCli(["status", "demo"]), /Usage:/);
+  await assert.rejects(() => runCli(["create-user", "demo-user"]), /Usage:/);
+  await assert.rejects(() => runCli(["demo"]), /Usage:/);
 });
 
 test("scaffoldUserProfileById adds the optional Wanghai env profile entry", () => {
@@ -806,8 +819,8 @@ test("runCli create allows the same vault name under a different user", async ()
       `${secondUserId}@polaris.local`,
     ]);
 
-    await runCli(["create", vault, "--user", firstUserId]);
-    await runCli(["create", vault, "--user", secondUserId]);
+    await runCli(["vault", "create", vault, "--user", firstUserId]);
+    await runCli(["vault", "create", vault, "--user", secondUserId]);
     assert.equal(
       fs.existsSync(path.join(secondUserRoot, "vaults", vault, "docker.agent.yaml")),
       true,
@@ -887,7 +900,7 @@ test("runCli create ignores a retired user default docker base image when scaffo
     };
     fs.writeFileSync(profilePath, yaml.dump(profile, { lineWidth: 120, noRefs: true }), "utf8");
 
-    await runCli(["create", vault, "--user", userProfileId]);
+    await runCli(["vault", "create", vault, "--user", userProfileId]);
 
     const doc = (yaml.load(fs.readFileSync(configPath, "utf8")) ?? {}) as Record<string, any>;
     assert.equal(doc.runtime?.base_image, vaultImageRef(userProfileId, vault));
@@ -933,7 +946,7 @@ test("runCli create --base-image still overrides a retired vault default image",
 
     const stdout = await captureStdout(async () => {
       await runCli([
-        "create",
+        "vault", "create",
         vault,
         "--user",
         userProfileId,
@@ -1080,7 +1093,7 @@ test("runCli user delete rejects users that still have vault data", async () => 
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli(["create", vault, "--user", userProfileId]);
+    await runCli(["vault", "create", vault, "--user", userProfileId]);
 
     await assert.rejects(
       async () => {
@@ -1121,9 +1134,9 @@ test("runCli delete removes a vault without creating an archive", async () => {
       "--email",
       `${userProfileId}@polaris.local`,
     ]);
-    await runCli(["create", vault, "--user", userProfileId]);
+    await runCli(["vault", "create", vault, "--user", userProfileId]);
 
-    await runCli(["delete", vault]);
+    await runCli(["vault", "delete", vault]);
 
     assert.equal(fs.existsSync(vaultRoot), false);
     const archiveEntries = fs.existsSync(archivedRoot)
@@ -1567,7 +1580,7 @@ exit 0
             `${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}-docker`;
           const stdout = await captureStdout(async () => {
             await runCli([
-              "live-switch",
+              "vault", "live-switch",
               `${project}@docker`,
               "claude-live",
               "--harness",
@@ -1865,7 +1878,7 @@ test("ensureCanonicalVaultImage skips managed image provisioning for external ba
     ]);
 
     await runCli([
-      "create",
+      "vault", "create",
       project,
       "--user",
       userProfileId,
@@ -2421,7 +2434,7 @@ exit 0
         },
         async () => {
           const output = await captureStdout(async () => {
-            await runCli(["status", `${project}@docker`]);
+            await runCli(["vault", "status", `${project}@docker`]);
           });
           const parsed = parseJsonOutput<{ evolution?: { latestArtifacts?: Array<{ title: string; whyRetrieved?: string[]; curatorAction?: string; whyExists?: string }> } }>(output);
           assert.ok(parsed.evolution?.latestArtifacts);
@@ -2485,7 +2498,7 @@ test("status reports managed-key ssh metadata for github account profiles", asyn
       fs.writeFileSync(outputPath, yaml.dump(doc, { lineWidth: 120, noRefs: true }), "utf8");
 
       const output = await captureStdout(async () => {
-        await runCli(["status", `${project}@docker`]);
+        await runCli(["vault", "status", `${project}@docker`]);
       });
       const parsed = parseJsonOutput<{
         credentials?: {
@@ -3310,10 +3323,12 @@ exit 0
 test("status includes the daemon pairing URL when the runtime exposes one", async () => {
   cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
+  cleanupPaseoState("demo");
 
-  await withFakeCommands(
-    {
-      kubectl: `
+  try {
+    await withFakeCommands(
+      {
+        kubectl: `
 if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
@@ -3347,17 +3362,20 @@ if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"*
 fi
 exit 0
 `,
-    },
-    async () => {
-      const output = await captureStdout(async () => {
-        await runCli(["status", "demo@pod"]);
-      });
-      const parsed = parseJsonOutput<{
-        paseo?: { liveTarget?: string | null };
-      }>(output);
-      assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
-    },
-  );
+      },
+      async () => {
+        const output = await captureStdout(async () => {
+          await runCli(["vault", "status", "demo@pod"]);
+        });
+        const parsed = parseJsonOutput<{
+          paseo?: { liveTarget?: string | null };
+        }>(output);
+        assert.equal(parsed.paseo?.liveTarget, "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0");
+      },
+    );
+  } finally {
+    cleanupPaseoState("demo");
+  }
 });
 
 test("kubevirt status succeeds when runtime state exposes daemon pairing metadata", async () => {
@@ -3405,21 +3423,21 @@ exit 1
       },
       async () => {
         const output = await captureStdout(async () => {
-          await runCli(["status", `${project}@kubevirt-vm`]);
+          await runCli(["vault", "status", `${project}@kubevirt-vm`]);
         });
-      const parsed = parseJsonOutput<{
-        driver?: {
-          selected?: { backend?: string };
-          runtimeRef?: string;
-          status?: string;
-        };
-        paseo?: { daemon?: string; web?: string };
-      }>(output);
-      assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
-      assert.equal(parsed.driver?.runtimeRef, `vm/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
-      assert.equal(parsed.driver?.status, "running");
-        assert.equal(parsed.paseo?.daemon, "pending");
-        assert.equal(parsed.paseo?.web, "pairing-required");
+        const parsed = parseJsonOutput<{
+          driver?: {
+            selected?: { backend?: string };
+            runtimeRef?: string;
+            status?: string;
+          };
+          paseo?: { daemon?: string; web?: string };
+        }>(output);
+        assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
+        assert.equal(parsed.driver?.runtimeRef, `vm/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
+        assert.equal(parsed.driver?.status, "running");
+        assert.equal(parsed.paseo?.daemon, "ready");
+        assert.equal(parsed.paseo?.web, "connectable");
       },
     );
   });
@@ -3435,9 +3453,10 @@ test("kubevirt render reuses persisted daemon pairing metadata", async () => {
   });
 });
 
-test("CLI status defaults to the status command and persists ready pod status", async () => {
+test("CLI vault status persists ready pod status", async () => {
   cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
+  cleanupPaseoState("demo");
   const expectedStatusFile = vaultStatusPath("demo", DEMO_USER_PROFILE_ID);
 
   await withFakeCommands(
@@ -3479,7 +3498,7 @@ exit 0
     },
     async () => {
       await captureStdout(async () => {
-        await runCli(["demo"]);
+        await runCli(["vault", "status", "demo"]);
       });
 
       assert.equal(fs.existsSync(expectedStatusFile), true);
@@ -3506,14 +3525,15 @@ exit 0
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
       assert.equal(parsed.driver?.baseImage, vaultImageRef(DEMO_USER_PROFILE_ID, "demo"));
       assert.equal(parsed.driver?.status, "running");
-      assert.equal(parsed.paseo.daemon, "pending");
-      assert.equal(parsed.paseo.web, "pairing-required");
+      assert.equal(parsed.paseo.daemon, "ready");
+      assert.equal(parsed.paseo.web, "connectable");
       assert.ok(parsed.evolution);
     },
   );
 
   cleanupStatusFile("demo");
   cleanupDriverSelectionState("demo");
+  cleanupPaseoState("demo");
 });
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
@@ -3757,7 +3777,7 @@ exit 0
 `,
     },
     async ({ readCommandLog }) => {
-      await runCli(["logs", "demo"]);
+      await runCli(["vault", "logs", "demo"]);
       const commands = readCommandLog();
       assert.ok(commands.some((entry) => entry.includes(`get pod -l app=${runtimeScope}`)));
       assert.ok(commands.some((entry) => entry.includes("logs pod-1 --tail=200")));
@@ -3782,7 +3802,7 @@ exit 0
 `,
     },
     async ({ readCommandLog }) => {
-      await runCli(["logs", "demo"]);
+      await runCli(["vault", "logs", "demo"]);
       const commands = readCommandLog();
       assert.ok(
         commands.some((entry) => entry.includes(`logs deployment/${runtimeScope} --tail=200`)),
@@ -3833,14 +3853,14 @@ exit 0
 `,
         },
         async ({ readCommandLog }) => {
-          await runCli(["render", project]);
-          await runCli(["apply", project]);
-          await runCli(["start", project]);
-          await runCli(["restart", project]);
-          await runCli(["stop", project]);
-          await runCli(["rebuild", project]);
+          await runCli(["vault", "render", project]);
+          await runCli(["vault", "apply", project]);
+          await runCli(["vault", "start", project]);
+          await runCli(["vault", "restart", project]);
+          await runCli(["vault", "stop", project]);
+          await runCli(["vault", "rebuild", project]);
           const reconcileOutput = await captureStdout(async () => {
-            await runCli(["reconcile", project]);
+            await runCli(["vault", "reconcile", project]);
           });
 
           const commands = readCommandLog();
@@ -4004,7 +4024,7 @@ exit 0
         },
         async ({ readCommandLog }) => {
           await captureStdout(async () => {
-            await runCli(["switch", `${project}@pod`]);
+            await runCli(["vault", "switch", `${project}@pod`]);
           });
 
           const commands = readCommandLog();
@@ -4123,7 +4143,7 @@ exit 0
         },
         async ({ readCommandLog }) => {
           await captureStdout(async () => {
-            await runCli(["switch", `${project}@pod`]);
+            await runCli(["vault", "switch", `${project}@pod`]);
           });
 
           const commands = readCommandLog();
@@ -4252,7 +4272,7 @@ exit 1
         },
         async ({ readCommandLog }) => {
           await captureStdout(async () => {
-            await runCli(["switch", `${project}@kubevirt-vm`]);
+            await runCli(["vault", "switch", `${project}@kubevirt-vm`]);
           });
 
           const commands = readCommandLog();
@@ -4353,7 +4373,7 @@ exit 0
         async () => {
           await assert.rejects(
             captureStdout(async () => {
-              await runCli(["switch", `${project}@pod`]);
+              await runCli(["vault", "switch", `${project}@pod`]);
             }),
           );
         },
@@ -4454,7 +4474,7 @@ exit 0
         },
         async ({ readCommandLog }) => {
           await captureStdout(async () => {
-            await runCli(["switch", `${project}@docker`]);
+            await runCli(["vault", "switch", `${project}@docker`]);
           });
 
           const commands = readCommandLog();
@@ -4575,7 +4595,7 @@ exit 0
       },
       async ({ readCommandLog }) => {
         const stdout = await captureStdout(async () => {
-          await runCli(["status", project]);
+          await runCli(["vault", "status", project]);
         });
 
         const parsed = parseJsonOutput<{
@@ -4614,7 +4634,7 @@ exit 0
           ["vault-data", "vault-runtime-state"],
         );
 
-        await runCli(["logs", project]);
+        await runCli(["vault", "logs", project]);
         const commands = readCommandLog();
         assert.ok(commands.some((entry) => entry.includes(`compose`) && entry.includes(`ps -q ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
         assert.ok(commands.some((entry) => entry.includes(`logs --tail 200 ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}`)));
@@ -4674,7 +4694,7 @@ exit 1
       },
       async ({ readCommandLog }) => {
         const stdout = await captureStdout(async () => {
-          await runCli(["status", project]);
+          await runCli(["vault", "status", project]);
         });
         const parsed = parseJsonOutput<{
           driver?: {
@@ -4694,7 +4714,7 @@ exit 1
         assert.equal(parsed.driver?.status, "running");
         assert.ok(["pending", "ready"].includes(parsed.paseo.daemon));
 
-        await runCli(["logs", project]);
+        await runCli(["vault", "logs", project]);
         const commands = readCommandLog();
         assert.ok(commands.some((entry) => entry.includes(`get pod -l vm.kubevirt.io/name=${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`)));
         assert.ok(commands.some((entry) => entry.includes("logs virt-launcher-0 --tail=200")));

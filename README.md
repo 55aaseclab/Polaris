@@ -112,10 +112,10 @@ pnpm --dir apps/polaris run polaris -- user skill list <user>
 pnpm --dir apps/polaris run polaris -- user skill add <user> --source <repo-or-source> --skill <skillName> [--harness codex|claude]
 pnpm --dir apps/polaris run polaris -- user skill remove <user> <skillId>
 
-pnpm --dir apps/polaris run polaris -- skill-list <workspace> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- skill-install <workspace> <skillId> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- skill-uninstall <workspace> <skillId> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- skill-sync <workspace> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- vault skill-list <workspace> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- vault skill-install <workspace> <skillId> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- vault skill-uninstall <workspace> <skillId> --user <user> --harness codex
+pnpm --dir apps/polaris run polaris -- vault skill-sync <workspace> --user <user> --harness codex
 ```
 
 Current runtime behavior:

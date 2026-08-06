@@ -194,7 +194,7 @@ test("create scaffolds a docker-first saved spec when the project is new", async
       async () => {
         await runCli(["user", "create", userProfileId, "--name", "E2E Create", "--email", profileEmail]);
         const output = await captureStdout(async () => {
-          await runCli(["create", project, "--user", userProfileId]);
+          await runCli(["vault", "create", project, "--user", userProfileId]);
         });
         const parsed = parseJsonOutput<{
           created: string;
@@ -260,7 +260,7 @@ test("create scaffolds a requested pod spec from the docker source of truth", as
       async () => {
         await runCli(["user", "create", userProfileId, "--name", "E2E Create Pod", "--email", profileEmail]);
         const output = await captureStdout(async () => {
-          await runCli(["create", `${project}@pod:gvisor`, "--user", userProfileId]);
+          await runCli(["vault", "create", `${project}@pod:gvisor`, "--user", userProfileId]);
         });
         const parsed = parseJsonOutput<{
           backend: string;
@@ -352,7 +352,7 @@ test("create adapts vault credential bindings to the user's available registry c
         );
 
         const output = await captureStdout(async () => {
-          await runCli(["create", project, "--user", userProfileId]);
+          await runCli(["vault", "create", project, "--user", userProfileId]);
         });
         const parsed = parseJsonOutput<{
           credentials: {
@@ -399,7 +399,7 @@ test("create fails when the user has no git-auth credential", async () => {
         fs.mkdirSync(credentialRoot, { recursive: true });
 
         await assert.rejects(
-          () => runCli(["create", project, "--user", userProfileId]),
+          () => runCli(["vault", "create", project, "--user", userProfileId]),
           /Vault create requires a git-auth credential/,
         );
         assert.equal(fs.existsSync(configPath), false);
@@ -413,7 +413,7 @@ test("create fails when the user has no git-auth credential", async () => {
   }
 });
 
-test("default CLI dispatch uses status instead of apply", async () => {
+test("explicit CLI vault status does not apply", async () => {
   await withFakePath(
     {
       kubectl: `#!/usr/bin/env bash
@@ -437,7 +437,7 @@ exit 0
     },
     async () => {
       const output = await captureStdout(async () => {
-        await runCli(["demo"]);
+        await runCli(["vault", "status", "demo"]);
       });
       assert.doesNotMatch(output, /"lifecycleAction":/);
       assert.match(output, /"statusFile":/);
@@ -465,7 +465,7 @@ exit 0
     },
     async () => {
       const output = await captureStdout(async () => {
-        await runCli(["status", "demo@docker"]);
+        await runCli(["vault", "status", "demo@docker"]);
       });
       assert.match(output, /"backend": "docker"/);
       assert.match(output, /"project": "demo"/);
@@ -558,26 +558,26 @@ exit 0
       },
       async () => {
         const switched = await captureStdout(async () => {
-          await runCli(["switch", "demo@docker"]);
+          await runCli(["vault", "switch", "demo@docker"]);
         });
         assert.match(switched, /"selectedBackend": "docker"/);
         assert.match(switched, /"stoppedBackends": \[\s*"pod"\s*\]/);
         assert.equal(fs.existsSync(driverSelectionPath), false);
 
         const dockerOutput = await captureStdout(async () => {
-          await runCli(["status", project]);
+          await runCli(["vault", "status", project]);
         });
         assert.match(dockerOutput, /"kind": "docker"/);
 
         const switchedAgain = await captureStdout(async () => {
-          await runCli(["switch", "demo@pod"]);
+          await runCli(["vault", "switch", "demo@pod"]);
         });
         assert.match(switchedAgain, /"selectedBackend": "pod"/);
         assert.match(switchedAgain, /"selectedProfile": "gvisor"/);
         assert.match(switchedAgain, /"stoppedBackends": \[\s*"docker"\s*\]/);
 
         const podOutput = await captureStdout(async () => {
-          await runCli(["status", project]);
+          await runCli(["vault", "status", project]);
         });
         assert.match(podOutput, /"kind": "pod"/);
       },
@@ -624,7 +624,7 @@ exit 0
       },
       async () => {
         const switched = await captureStdout(async () => {
-          await runCli(["switch", "demo@pod:kata"]);
+          await runCli(["vault", "switch", "demo@pod:kata"]);
         });
         assert.match(switched, /"selectedBackend": "pod"/);
         assert.match(switched, /"selectedProfile": "kata"/);
@@ -904,10 +904,10 @@ exit 0
         }> = [];
 
         const dockerToGvisor = await captureOutput(async () => {
-          await runCli(["switch", "demo@pod"]);
+          await runCli(["vault", "switch", "demo@pod"]);
         });
         const gvisorStatus = parseJsonOutput<{ driver: { status: string } }>(
-          (await captureOutput(async () => runCli(["status", "demo@pod"]))).stdout,
+          (await captureOutput(async () => runCli(["vault", "status", "demo@pod"]))).stdout,
         );
         assert.equal(gvisorStatus.driver.status, "running");
         const gvisorDurations = parseSwitchDurations(dockerToGvisor.stderr);
@@ -920,10 +920,10 @@ exit 0
         });
 
         const gvisorToKata = await captureOutput(async () => {
-          await runCli(["switch", "demo@pod:kata-container"]);
+          await runCli(["vault", "switch", "demo@pod:kata-container"]);
         });
         const kataStatus = parseJsonOutput<{ driver: { status: string } }>(
-          (await captureOutput(async () => runCli(["status", "demo@pod:kata-container"]))).stdout,
+          (await captureOutput(async () => runCli(["vault", "status", "demo@pod:kata-container"]))).stdout,
         );
         assert.equal(kataStatus.driver.status, "running");
         const kataDurations = parseSwitchDurations(gvisorToKata.stderr);
@@ -936,10 +936,10 @@ exit 0
         });
 
         const kataToVm = await captureOutput(async () => {
-          await runCli(["switch", "demo@kubevirt-vm"]);
+          await runCli(["vault", "switch", "demo@kubevirt-vm"]);
         });
         const vmStatus = parseJsonOutput<{ driver: { status: string } }>(
-          (await captureOutput(async () => runCli(["status", "demo@kubevirt-vm"]))).stdout,
+          (await captureOutput(async () => runCli(["vault", "status", "demo@kubevirt-vm"]))).stdout,
         );
         assert.equal(vmStatus.driver.status, "running");
         const vmDurations = parseSwitchDurations(kataToVm.stderr);
@@ -952,10 +952,10 @@ exit 0
         });
 
         const vmToDocker = await captureOutput(async () => {
-          await runCli(["switch", "demo@docker"]);
+          await runCli(["vault", "switch", "demo@docker"]);
         });
         const dockerStatus = parseJsonOutput<{ driver: { status: string } }>(
-          (await captureOutput(async () => runCli(["status", "demo@docker"]))).stdout,
+          (await captureOutput(async () => runCli(["vault", "status", "demo@docker"]))).stdout,
         );
         assert.equal(dockerStatus.driver.status, "running");
         const dockerDurations = parseSwitchDurations(vmToDocker.stderr);
@@ -1024,9 +1024,9 @@ exit 0
 `,
       },
       async () => {
-        await runCli(["logs", podProject]);
-        await runCli(["logs", dockerProject]);
-        await runCli(["logs", vmProject]);
+        await runCli(["vault", "logs", podProject]);
+        await runCli(["vault", "logs", dockerProject]);
+        await runCli(["vault", "logs", vmProject]);
       },
     );
 

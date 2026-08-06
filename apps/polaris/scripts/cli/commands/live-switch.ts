@@ -21,7 +21,7 @@ function parseLiveSwitchArgs(argv: string[]): {
   const harnessValue = parseFlag(argv, "--harness")?.trim().toLowerCase();
   if (!vaultRef || !credentialId) {
     throw new Error(
-      "Usage: pnpm --dir apps/polaris run polaris -- live-switch <vaultRef> <credentialId> [--harness <ssh|codex|claude|copilot|opencode|pi>]",
+      "Usage: pnpm --dir apps/polaris run polaris -- vault live-switch <vaultRef> <credentialId> [--harness <ssh|codex|claude|copilot|opencode|pi>]",
     );
   }
   if (harnessValue && !isManagedHarness(harnessValue)) {

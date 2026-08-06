@@ -789,7 +789,7 @@ export async function performVaultSwitch(
 ): Promise<SwitchResult> {
   const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   if (!backendHint || !SUPPORTED_BACKENDS.includes(backendHint)) {
-    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- switch <project>@<docker|pod|kubevirt-vm>[:driver]");
+    throw new Error("Usage: pnpm --dir apps/polaris run polaris -- vault switch <project>@<docker|pod|kubevirt-vm>[:driver]");
   }
   const runSwitch = async (): Promise<SwitchResult> => {
     ensureProvisionedVault(projectRef, userProfileId);
