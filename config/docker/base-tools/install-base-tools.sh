@@ -32,8 +32,11 @@ apt-get install -y --no-install-recommends nodejs
 python3 -m pip install --no-cache-dir --break-system-packages \
   "${PYTHON_PACKAGES[@]}"
 
+RUSTUP_PROFILE="${RUSTUP_PROFILE:-minimal}"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-  | sh -s -- -y
+  | sh -s -- -y --profile "${RUSTUP_PROFILE}"
+export PATH="/root/.cargo/bin:${PATH}"
+rustup component add rustfmt clippy
 
 mkdir -p "$TOOL_PREFIX" /root/.npm
 if [ -x "$PASEO_TOOL_BUNDLE_DIR/bin/paseo" ]; then
@@ -43,6 +46,7 @@ npm install -g --prefix "$TOOL_PREFIX" "${NON_PASEO_NODE_PACKAGES[@]}"
 if [ ! -x "$TOOL_PREFIX/bin/paseo" ]; then
   npm install -g --prefix "$TOOL_PREFIX" @getpaseo/cli@latest
 fi
+npm cache clean --force >/dev/null 2>&1
 
 if command -v fdfind >/dev/null 2>&1; then
   ln -sf "$(command -v fdfind)" /usr/local/bin/fd

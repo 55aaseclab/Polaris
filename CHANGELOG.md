@@ -14,6 +14,11 @@ Started the signed workspace-base image promotion path for the 0.3.2 release.
   signature verification.
 - Added a regression test for the workflow contract and its clean-checkout
   Docker context.
+- Reduced the base image's default Rust profile to minimal while retaining
+  `rustfmt` and `clippy`, and removed the npm download cache after installation.
+- Added a pinned Rekor-free Sigstore signing configuration for the large SPDX
+  attestation; image signatures and SLSA provenance remain transparency-log
+  backed.
 
 ## [0.3.1] - 2026-08-06
 

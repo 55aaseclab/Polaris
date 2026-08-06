@@ -153,6 +153,27 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      - name: Normalize SPDX SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -c . sbom.spdx.json > sbom.compact.json
+          mv sbom.compact.json sbom.spdx.json
+          printf 'SPDX SBOM bytes: %s\n' "$(wc -c < sbom.spdx.json)"
+
+      - name: Prepare large-SBOM signing config
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_url="https://raw.githubusercontent.com/sigstore/root-signing/ec6ed78e27f58420e71138a0d2919f11136fcfaa/targets/signing_config.v0.2.json"
+          curl -fsSL "${config_url}" -o signing-config.source.json
+          printf '%s  %s\n' \
+            '9711a6d5375706957a4859af31c5866a4474f81f0544f9f4b76c9c4f4c8a539c' \
+            signing-config.source.json \
+            | sha256sum --check --status
+          jq 'del(.rekorTlogUrls) | .rekorTlogConfig.selector = "ANY"' \
+            signing-config.source.json > sbom-signing-config.json
+
       - name: Generate SLSA provenance predicate
         env:
           SOURCE_COMMIT: ${{ github.sha }}
@@ -208,11 +229,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if cosign attest --yes --type slsaprovenance --predicate provenance.json "${IMAGE_REF}"; then
               exit 0
             fi
-            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+            if [ "${attempt}" -lt 5 ]; then sleep "$((attempt * 30))"; fi
           done
           exit 1
 
@@ -222,11 +243,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
-            if cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE_REF}"; then
+          for attempt in 1 2 3 4 5; do
+            if cosign attest \
+              --yes \
+              --new-bundle-format \
+              --signing-config sbom-signing-config.json \
+              --type spdxjson \
+              --predicate sbom.spdx.json \
+              "${IMAGE_REF}"; then
               exit 0
             fi
-            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+            if [ "${attempt}" -lt 5 ]; then sleep "$((attempt * 30))"; fi
           done
           exit 1
 
@@ -236,11 +263,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if cosign sign --yes "${IMAGE_REF}"; then
               exit 0
             fi
-            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+            if [ "${attempt}" -lt 5 ]; then sleep "$((attempt * 30))"; fi
           done
           exit 1
 
@@ -261,6 +288,8 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${IMAGE_REF}" >/dev/null
           cosign verify-attestation \
+            --new-bundle-format \
+            --insecure-ignore-tlog \
             --type spdxjson \
             --certificate-identity-regexp "${CERTIFICATE_IDENTITY_REGEXP}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
