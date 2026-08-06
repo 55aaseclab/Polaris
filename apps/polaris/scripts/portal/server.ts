@@ -5,10 +5,12 @@ import type { ManagedHarness } from "../config/credential-catalog.js";
 import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import {
+  findOwnedVaultByWanghaiGatewayId,
   listPortalProfiles,
   loadPortalVaultByTarget,
   parsePortalDriverTarget,
   readPortalProfile,
+  readVaultStatus,
   type PortalDriverTarget,
   type PortalProfileSummary,
 } from "../core/portal.js";
@@ -1217,27 +1219,24 @@ async function resolveAuthorizedWanghaiVault(
   userId: string,
   wanghaiId: string,
 ): Promise<AuthorizedWanghaiVault> {
-  const summary = (await listPortalVaults(userId)).find(
-    (entry) => entry.wanghaiId === wanghaiId,
-  );
-  if (!summary || !summary.surfaces.some((surface) => surface.toLowerCase() === "wanghai")) {
+  const vault = findOwnedVaultByWanghaiGatewayId(userId, wanghaiId);
+  if (!vault) {
     throw new PortalAuthError("Wanghai vault not found", 404);
   }
-
-  const target = summary.status?.driver?.selected;
+  const target = readVaultStatus(userId, vault)?.driver?.selected;
   if (!target) {
-    throw new PortalAuthError("Wanghai vault runtime is unavailable", 503);
+    throw new PortalAuthError("Wanghai vault not found", 404);
   }
   try {
-    const spec = loadPortalVaultByTarget(userId, summary.name, target);
+    const spec = loadPortalVaultByTarget(userId, vault, target);
     if (spec.connectivity.servicePorts.some(isWanghaiServicePort)) {
-      return { vault: summary.name, spec };
+      return { vault, spec };
     }
   } catch {
     // The selected runtime is the only permitted gateway target. Do not fall
     // back to a retained Docker, Pod, or KubeVirt configuration.
   }
-  throw new PortalAuthError("Wanghai vault runtime is unavailable", 503);
+  throw new PortalAuthError("Wanghai vault not found", 404);
 }
 
 function isWanghaiServicePort(port: VaultSpec["connectivity"]["servicePorts"][number]): boolean {

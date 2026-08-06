@@ -518,6 +518,32 @@ export function listOwnedVaults(userId: string): string[] {
     .sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * Resolve the opaque gateway ID without loading every vault's status and YAML.
+ * The caller still must validate the selected runtime and Wanghai surface.
+ */
+export function findOwnedVaultByWanghaiGatewayId(
+  userId: string,
+  requestedWanghaiId: string,
+): string | null {
+  const tenantId = userId.trim();
+  const gatewayId = requestedWanghaiId.trim();
+  const root = userVaultsRoot(tenantId);
+  if (!tenantId || !gatewayId || !fs.existsSync(root)) {
+    return null;
+  }
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || wanghaiGatewayId(tenantId, entry.name) !== gatewayId) {
+      continue;
+    }
+    const ownsVaultConfig = PORTAL_DRIVER_TARGETS.some((target) => (
+      fs.existsSync(path.join(root, entry.name, vaultBackendFile(target)))
+    ));
+    return ownsVaultConfig ? entry.name : null;
+  }
+  return null;
+}
+
 export function listVaultDriverTargets(userId: string, vault: string): Array<PortalDriverTarget & { available: boolean }> {
   const root = vaultRoot(userId, vault);
   return PORTAL_DRIVER_TARGETS.map((target) => ({
