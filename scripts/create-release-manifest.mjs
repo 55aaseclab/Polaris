@@ -55,7 +55,7 @@ export function createReleaseManifest({
   const { text, values } = readEnvironment(environmentPath);
   const manifest = validateReleaseManifest({
     schemaVersion: 1,
-    release: "0.3.0",
+    release: required(values, "POLARIS_RELEASE_ID"),
     profile: required(values, "POLARIS_RELEASE_PROFILE"),
     polarisSourceCommit: sourceCommit,
     workspaceBaseImage: required(values, "POLARIS_WORKSPACE_BASE_IMAGE"),

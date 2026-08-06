@@ -14,6 +14,7 @@ test("create release manifest binds the exact environment and candidate inputs",
   const base = `registry.example.test/base@sha256:${"a".repeat(64)}`;
   const image = `registry.example.test/wanghai@sha256:${"b".repeat(64)}`;
   const text = [
+    "POLARIS_RELEASE_ID=0.3.1",
     "POLARIS_RELEASE_PROFILE=0.3.0-single-host",
     `POLARIS_WORKSPACE_BASE_IMAGE=${base}`,
     `POLARIS_WANGHAI_VAULT_IMAGE=${image}`,
@@ -31,6 +32,7 @@ test("create release manifest binds the exact environment and candidate inputs",
       generatedAt: "2026-08-05T12:00:00Z",
     });
     const loaded = loadReleaseManifest(outputPath).manifest;
+    assert.equal(loaded.release, "0.3.1");
     assert.equal(loaded.wanghaiImage, image);
     assert.equal(
       loaded.environmentSha256,

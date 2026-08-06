@@ -34,6 +34,7 @@ function withPreflightFixture({
   fs.chmodSync(backupKeyRoot, backupKeyMode);
   const digest = "a".repeat(64);
   const values = {
+    POLARIS_RELEASE_ID: "0.3.1",
     POLARIS_RELEASE_PROFILE: "0.3.0-single-host",
     POLARIS_DEPLOYMENT_MODE: "single-host",
     POLARIS_SERVER_REPLICAS: "1",
@@ -58,7 +59,7 @@ function withPreflightFixture({
     POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai@sha256:" + digest,
     POLARIS_WORKSPACE_BASE_IMAGE: "registry.example.test/polaris-base@sha256:" + "b".repeat(64),
     POLARIS_RELEASE_MANIFEST: manifestPath,
-    POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/jianxiaoyitech/wanghai/.github/workflows/build-admin-portal-image.yml@refs/tags/v0.3.0",
+    POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/jianxiaoyitech/wanghai/.github/workflows/build-admin-portal-image.yml@refs/tags/v0.3.1",
     POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     POLARIS_WANGHAI_BACKUP_KEY_ROOT: backupKeyRoot,
     POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "2",
@@ -72,7 +73,7 @@ function withPreflightFixture({
   fs.writeFileSync(envFile, environmentText);
   fs.writeFileSync(manifestPath, JSON.stringify({
     schemaVersion: 1,
-    release: "0.3.0",
+    release: "0.3.1",
     profile: "0.3.0-single-host",
     polarisSourceCommit: "a19f9ed",
     workspaceBaseImage: values.POLARIS_WORKSPACE_BASE_IMAGE,

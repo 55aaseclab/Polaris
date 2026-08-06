@@ -16,7 +16,7 @@ const digest = "a".repeat(64);
 function validManifest(environmentSha256 = digest) {
   return {
     schemaVersion: 1,
-    release: "0.3.0",
+    release: "0.3.1",
     profile: "0.3.0-single-host",
     polarisSourceCommit: "a19f9ed",
     workspaceBaseImage: `registry.example.test/polaris-base@sha256:${digest}`,
@@ -30,7 +30,7 @@ function validManifest(environmentSha256 = digest) {
 }
 
 test("release manifest accepts the complete immutable candidate", () => {
-  assert.equal(validateReleaseManifest(validManifest()).release, "0.3.0");
+  assert.equal(validateReleaseManifest(validManifest()).release, "0.3.1");
 });
 
 test("release manifest rejects mutable images and missing rollback reference", () => {
@@ -67,6 +67,7 @@ test("release manifest binds image and profile values to the environment hash", 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-release-manifest-"));
   const envPath = path.join(root, "polaris.env");
   const env = [
+    "POLARIS_RELEASE_ID=0.3.1",
     "POLARIS_RELEASE_PROFILE=0.3.0-single-host",
     `POLARIS_WORKSPACE_BASE_IMAGE=registry.example.test/polaris-base@sha256:${digest}`,
     `POLARIS_WANGHAI_VAULT_IMAGE=registry.example.test/wanghai@sha256:${"b".repeat(64)}`,
@@ -76,6 +77,7 @@ test("release manifest binds image and profile values to the environment hash", 
   const manifest = validManifest(environmentSha256);
   try {
     assert.doesNotThrow(() => validateReleaseManifestEnvironment(manifest, {
+      POLARIS_RELEASE_ID: manifest.release,
       POLARIS_RELEASE_PROFILE: manifest.profile,
       POLARIS_WORKSPACE_BASE_IMAGE: manifest.workspaceBaseImage,
       POLARIS_WANGHAI_VAULT_IMAGE: manifest.wanghaiImage,
@@ -83,11 +85,38 @@ test("release manifest binds image and profile values to the environment hash", 
     fs.appendFileSync(envPath, "POLARIS_SERVER_REPLICAS=2\n");
     assert.throws(
       () => validateReleaseManifestEnvironment(manifest, {
+        POLARIS_RELEASE_ID: manifest.release,
         POLARIS_RELEASE_PROFILE: manifest.profile,
         POLARIS_WORKSPACE_BASE_IMAGE: manifest.workspaceBaseImage,
         POLARIS_WANGHAI_VAULT_IMAGE: manifest.wanghaiImage,
       }, envPath),
       /environment hash does not match/u,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("release manifest rejects an environment with a different release ID", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-release-manifest-release-id-"));
+  const envPath = path.join(root, "polaris.env");
+  const env = [
+    "POLARIS_RELEASE_ID=0.3.2",
+    "POLARIS_RELEASE_PROFILE=0.3.0-single-host",
+    `POLARIS_WORKSPACE_BASE_IMAGE=registry.example.test/polaris-base@sha256:${digest}`,
+    `POLARIS_WANGHAI_VAULT_IMAGE=registry.example.test/wanghai@sha256:${"b".repeat(64)}`,
+  ].join("\n") + "\n";
+  fs.writeFileSync(envPath, env);
+  const manifest = validManifest(crypto.createHash("sha256").update(env).digest("hex"));
+  try {
+    assert.throws(
+      () => validateReleaseManifestEnvironment(manifest, {
+        POLARIS_RELEASE_ID: "0.3.2",
+        POLARIS_RELEASE_PROFILE: manifest.profile,
+        POLARIS_WORKSPACE_BASE_IMAGE: manifest.workspaceBaseImage,
+        POLARIS_WANGHAI_VAULT_IMAGE: manifest.wanghaiImage,
+      }, envPath),
+      /manifest release does not match POLARIS_RELEASE_ID/u,
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
