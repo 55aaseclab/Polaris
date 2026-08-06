@@ -37,6 +37,7 @@ test("Polaris workspace base workflow publishes the source-owned Dockerfile", ()
   assert.match(workflow, /cosign sign --yes/u);
   assert.match(workflow, /cosign verify-attestation/u);
   assert.match(workflow, /certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/u);
+  assert.match(workflow, /cosign-release: v3\.1\.3/u);
   assert.doesNotMatch(workflow, /type=raw,value=latest/u);
   assert.doesNotMatch(workflow, /PUBLISH_ATTESTATIONS/u);
   assert.doesNotMatch(workflow, /--tlog-upload=false/u);
