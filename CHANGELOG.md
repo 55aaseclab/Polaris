@@ -17,6 +17,15 @@ supported user profile, storage allocation, or production-readiness claim.
 - Protected remote source sync from local user configuration and local Paseo
   surface artifacts.
 
+### Post-release Performance Maintenance
+
+- Avoided duplicate backend status synthesis for durable provisions that do not
+  request `startAfterCreate`, while retaining the post-start reconciliation.
+- Added isolated control-store, durable-worker, and bounded-mutation benchmark
+  paths with scoped V8 CPU-profile capture.
+- Recorded the local before/after worker evidence in the documentation site;
+  this follow-up was not promoted to the designated test host.
+
 ### Release Evidence
 
 - Recorded reproducible paired gateway and Portal host-list measurements on the
