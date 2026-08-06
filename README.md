@@ -14,6 +14,7 @@ Start with the [Polaris product docs](https://www.jianxiaoyitech.com/docs/polari
 for architecture and the
 [Polaris 0.3.1 performance release records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.1/)
 for release status.
+Release history is maintained in [CHANGELOG.md](CHANGELOG.md).
 
 ## Local Development
 
