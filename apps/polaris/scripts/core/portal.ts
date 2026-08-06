@@ -899,12 +899,11 @@ export function readPortalVaultAssetPreview(
   };
 }
 
-export function loadVaultSummary(userId: string, vault: string): PortalVaultSummary {
-  const status = augmentVaultStatusAssets(
-    userId,
-    vault,
-    readVaultStatus(userId, vault),
-  );
+function portalVaultSummary(
+  userId: string,
+  vault: string,
+  status: VaultStatus | null,
+): PortalVaultSummary {
   const runtime = loadPortalVaultRuntimeSurface(userId, vault, status);
   return {
     name: vault,
@@ -916,6 +915,22 @@ export function loadVaultSummary(userId: string, vault: string): PortalVaultSumm
     drivers: PORTAL_DRIVER_TARGETS,
     status,
   };
+}
+
+/**
+ * Host-list responses need current runtime state, but static asset discovery
+ * belongs to the selected vault detail. Avoid rebuilding it for every vault.
+ */
+export function loadVaultListSummary(userId: string, vault: string): PortalVaultSummary {
+  return portalVaultSummary(userId, vault, readVaultStatus(userId, vault));
+}
+
+export function loadVaultSummary(userId: string, vault: string): PortalVaultSummary {
+  return portalVaultSummary(
+    userId,
+    vault,
+    augmentVaultStatusAssets(userId, vault, readVaultStatus(userId, vault)),
+  );
 }
 
 /**

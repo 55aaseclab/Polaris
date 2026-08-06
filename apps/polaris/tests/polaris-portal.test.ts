@@ -2472,6 +2472,7 @@ test("portal vault summaries expose surface capability without runtime ports", a
     assert.equal(summary?.serverId, "srv_summary");
     assert.equal(summary?.wanghaiId, wanghaiGatewayId(userId, vault));
     assert.deepEqual(summary?.surfaces, ["paseo", "wanghai"]);
+    assert.equal("assets" in (summary?.status ?? {}), false);
     assert.equal("ports" in (summary ?? {}), false);
   } finally {
     fs.rmSync(profilePath, { force: true });
