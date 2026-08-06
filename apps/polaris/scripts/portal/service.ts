@@ -31,6 +31,7 @@ import {
   readPortalVaultAssetPreview,
   loadVaultDetailStatic,
   loadVaultDetail,
+  loadVaultListSummary,
   loadVaultSummary,
   updatePortalProfile,
   updatePortalVaultAgentBinding,
@@ -311,7 +312,7 @@ async function refreshPortalVaultStatus(
 
 export async function listPortalVaults(userId: string): Promise<PortalVaultSummary[]> {
   const vaults = listOwnedVaults(userId);
-  return vaults.map((vault) => loadVaultSummary(userId, vault));
+  return vaults.map((vault) => loadVaultListSummary(userId, vault));
 }
 
 export async function listPortalVaultStaticState(
