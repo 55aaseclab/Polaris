@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const IMAGE_REF_PATTERN = /^[^\s@]+@sha256:[a-f0-9]{64}$/u;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{7,64}$/u;
-const RELEASE_ID = "0.3.0";
+const RELEASE_ID_PATTERN = /^\d+\.\d+\.\d+$/u;
 const PROFILE_ID = "0.3.0-single-host";
 export const INITIAL_PREVIOUS_MANIFEST_SHA256 = "0".repeat(64);
 
@@ -65,9 +65,7 @@ export function validateReleaseManifest(raw) {
     "manifest",
   );
   if (value.schemaVersion !== 1) fail("schemaVersion must be 1");
-  if (requiredString(value.release, "release") !== RELEASE_ID) {
-    fail(`release must be ${RELEASE_ID}`);
-  }
+  const release = requiredPattern(value.release, RELEASE_ID_PATTERN, "release");
   if (requiredString(value.profile, "profile") !== PROFILE_ID) {
     fail(`profile must be ${PROFILE_ID}`);
   }
@@ -89,7 +87,7 @@ export function validateReleaseManifest(raw) {
 
   return {
     schemaVersion: 1,
-    release: RELEASE_ID,
+    release,
     profile: PROFILE_ID,
     polarisSourceCommit: requiredPattern(value.polarisSourceCommit, COMMIT_PATTERN, "polarisSourceCommit"),
     workspaceBaseImage: requiredPattern(value.workspaceBaseImage, IMAGE_REF_PATTERN, "workspaceBaseImage"),
@@ -125,6 +123,14 @@ function sha256File(filePath) {
 }
 
 export function validateReleaseManifestEnvironment(manifest, environment, envFilePath) {
+  const configuredReleaseId = requiredPattern(
+    environment.POLARIS_RELEASE_ID,
+    RELEASE_ID_PATTERN,
+    "POLARIS_RELEASE_ID",
+  );
+  if (configuredReleaseId !== manifest.release) {
+    fail("manifest release does not match POLARIS_RELEASE_ID");
+  }
   if (String(environment.POLARIS_RELEASE_PROFILE ?? "").trim() !== manifest.profile) {
     fail("manifest profile does not match POLARIS_RELEASE_PROFILE");
   }

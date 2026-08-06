@@ -89,6 +89,9 @@ operations, and release documentation lives in the Polaris documentation site.
 - Use `config/release-profiles/0.3.0-single-host.json` as the 0.3 capacity,
   quota, resource-budget, and SLO source. Production preflight and the host
   launcher must validate it; do not raise its limits without new evidence.
+- Bind each candidate manifest to `POLARIS_RELEASE_ID`; it identifies the
+  software release and is intentionally separate from the fixed capacity
+  profile ID.
 
 Read the canonical Polaris Docs Design and Release TODO before
 altering this boundary. Record each reviewed commit and its focused checks in
