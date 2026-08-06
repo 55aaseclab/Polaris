@@ -17,6 +17,7 @@ import {
   WANGHAI_PROFILE_ENV_FILE_KEY,
   WANGHAI_PROFILE_ENV_MOUNT_PATH,
   WANGHAI_PROFILE_ENV_SOURCE_PATH,
+  vaultDataRelativePath,
   vaultConfigPath,
   vaultImageRef,
 } from "../scripts/config/scaffold.js";
@@ -45,6 +46,7 @@ import {
   vaultRuntimeResourceName,
   vaultRuntimeScopeName,
 } from "../scripts/core/vault-name.js";
+import { netfsResolvedPath } from "../scripts/core/netfs.js";
 import { polarisNetfsLocalExportRoot, polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -348,7 +350,10 @@ test("loadVault normalizes demo pod config through the TypeScript control plane"
   assert.equal(vault.attachments.vaultData.source.kind, "netfs");
   assert.equal(vault.attachments.vaultData.source.server, "netfs.local");
   assert.equal(vault.attachments.vaultData.source.exportPath, DEMO_VAULT_EXPORT_ROOT);
-  assert.equal(vault.attachments.vaultData.source.subPath, "demo");
+  assert.equal(
+    vault.attachments.vaultData.source.subPath,
+    vaultDataRelativePath(DEMO_USER_PROFILE_ID, "demo"),
+  );
   assert.ok(!vault.userProfile.github.account || vault.userProfile.github.account.length > 0);
   assert.equal(vault.credentialBindings.length, 1);
   assert.equal(vault.credentialBindings[0]?.purpose, "git-auth");
@@ -503,7 +508,8 @@ test("vault load mounts the user Wanghai env when the file exists", async () => 
     assert.match(wanghaiEnv?.content || "", /CUSTOM_WANGHAI_FLAG=1/);
 
     const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
-    assert.match(rendered, /if \[ ! -f \/opt\/wanghai\/\.env \]; then python3 -c /);
+    assert.match(rendered, /POLARIS_BOOTSTRAP_AUTH_FILE_0_B64/);
+    assert.match(rendered, /base64 -d > "\/opt\/wanghai\/\.env"/);
     assert.match(rendered, /chown root:root \/opt\/wanghai\/\.env \|\| true/);
     assert.match(rendered, /chmod 600 \/opt\/wanghai\/\.env \|\| true/);
   }).finally(() => {
@@ -550,7 +556,7 @@ test("docker render reuses the Polaris vault mount for Wanghai data", async () =
       const vault = loadVaultFromRefForTest(`${project}@docker`);
       const rendered = fs.readFileSync(renderAndWriteDockerVault(vault), "utf8");
       assert.match(rendered, /target: \/vault\/project/);
-      assert.match(rendered, /export WANGHAI_RUNTIME_MODE=polaris/);
+      assert.match(rendered, /WANGHAI_RUNTIME_MODE: "polaris"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/workspaces"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/backups"/);
       assert.doesNotMatch(rendered, /source: "\/host\/wanghai\/cache"/);
@@ -3082,7 +3088,8 @@ test("pod render mounts demo vault data through netfs", () => {
   const vault = loadVaultFromRefForTest("demo@pod");
   const outputPath = renderAndWritePodVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
-  const expectedVaultExport = DEMO_VAULT_EXPORT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedVaultExport = netfsResolvedPath(vault.attachments.vaultData.source)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.doesNotThrow(() => yaml.loadAll(rendered));
 
   assert.match(rendered, /- name: vault-data\n        nfs:/);
@@ -3094,6 +3101,8 @@ test("kubevirt render bridges netfs vault data through a PV and PVC", () => {
   const vault = loadVaultFromRefForTest("demo@kubevirt-vm");
   const outputPath = renderAndWriteKubevirtVault(vault);
   const rendered = fs.readFileSync(outputPath, "utf8");
+  const expectedVaultExport = netfsResolvedPath(vault.attachments.vaultData.source)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   assert.match(rendered, /kind: PersistentVolume/);
   assert.match(
@@ -3108,9 +3117,7 @@ test("kubevirt render bridges netfs vault data through a PV and PVC", () => {
   assert.match(rendered, /server: netfs\.local/);
   assert.match(
     rendered,
-    new RegExp(
-      `path: ${DEMO_VAULT_EXPORT_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-    ),
+    new RegExp(`path: ${expectedVaultExport}`),
   );
   assert.match(rendered, new RegExp(`password: ${kubevirtProbePassword(vault)}`));
   assert.match(rendered, /mount -t virtiofs vault-runtime-state \/mnt\/polaris-shared\/vault-runtime-state/);
@@ -3734,10 +3741,11 @@ test("status exposes live credential selections per harness", async () => {
 
 test("CLI logs for pod backend prefers the active pod and falls back to deployment when needed", async () => {
   cleanupDriverSelectionState("demo");
+  const runtimeScope = vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo");
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${runtimeScope}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3751,19 +3759,22 @@ exit 0
     async ({ readCommandLog }) => {
       await runCli(["logs", "demo"]);
       const commands = readCommandLog();
-      assert.ok(commands.some((entry) => entry.includes("get pod -l app=demo")));
+      assert.ok(commands.some((entry) => entry.includes(`get pod -l app=${runtimeScope}`)));
       assert.ok(commands.some((entry) => entry.includes("logs pod-1 --tail=200")));
-      assert.equal(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")), false);
+      assert.equal(
+        commands.some((entry) => entry.includes(`logs deployment/${runtimeScope} --tail=200`)),
+        false,
+      );
     },
   );
 
   await withFakeCommands(
     {
       kubectl: `
-if [[ "$*" == *"get pod -l app=demo"* ]]; then
+if [[ "$*" == *"get pod -l app=${runtimeScope}"* ]]; then
   exit 0
 fi
-if [[ "$*" == *"logs deployment/demo --tail=200"* ]]; then
+if [[ "$*" == *"logs deployment/${runtimeScope} --tail=200"* ]]; then
   printf 'deployment logs'
   exit 0
 fi
@@ -3773,7 +3784,9 @@ exit 0
     async ({ readCommandLog }) => {
       await runCli(["logs", "demo"]);
       const commands = readCommandLog();
-      assert.ok(commands.some((entry) => entry.includes("logs deployment/demo --tail=200")));
+      assert.ok(
+        commands.some((entry) => entry.includes(`logs deployment/${runtimeScope} --tail=200`)),
+      );
     },
   );
   cleanupDriverSelectionState("demo");
