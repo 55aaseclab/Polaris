@@ -47,6 +47,7 @@ node --test scripts/tests/create-release-manifest.test.mjs
 node --test scripts/tests/capacity-gateway-load.test.mjs
 node --test scripts/tests/docker-storage-root.test.mjs
 node --test scripts/tests/paseo-local.test.mjs
+node --test scripts/tests/workspace-base-image-workflow.test.mjs
 
 echo "[7/8] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null

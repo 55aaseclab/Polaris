@@ -1,0 +1,267 @@
+name: Build Polaris Workspace Base Image
+
+on:
+  pull_request:
+    paths:
+      - ".dockerignore"
+      - ".github/workflows/build-workspace-base-image.yml"
+      - "apps/paseo/tool-bundle/bin/paseo"
+      - "config/docker/**"
+      - "scripts/tests/workspace-base-image-workflow.test.mjs"
+  push:
+    branches:
+      - master
+    tags:
+      - "0.3.*"
+    paths:
+      - ".dockerignore"
+      - ".github/workflows/build-workspace-base-image.yml"
+      - "apps/paseo/tool-bundle/bin/paseo"
+      - "config/docker/**"
+      - "scripts/tests/workspace-base-image-workflow.test.mjs"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional release label such as 0.3.2
+        required: false
+        type: string
+
+concurrency:
+  group: polaris-workspace-base-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/polaris-workspace-base
+
+jobs:
+  validate:
+    name: Validate workspace base inputs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate source-owned image inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f config/docker/vault-prebuilt.Dockerfile
+          test -f config/docker/base-tools/install-base-tools.sh
+          test -L apps/paseo/tool-bundle/bin/paseo
+          bash -n config/docker/base-tools/install-base-tools.sh
+
+      - name: Run workflow contract test
+        run: node --test scripts/tests/workspace-base-image-workflow.test.mjs
+
+      - name: Check Dockerfile and build context
+        run: >-
+          docker buildx build
+          --call=check
+          --file config/docker/vault-prebuilt.Dockerfile
+          .
+
+  publish:
+    name: Publish and sign workspace base
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=tag
+            type=raw,value=${{ inputs.release_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+          labels: |
+            org.opencontainers.image.title=Polaris workspace base
+            org.opencontainers.image.description=Source-owned isolated-environment tool baseline for Polaris
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./config/docker/vault-prebuilt.Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record immutable image reference
+        id: image
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${IMAGE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Build did not return a valid image digest" >&2
+            exit 2
+          fi
+          image_ref="${IMAGE_NAME}@${IMAGE_DIGEST}"
+          {
+            echo "ref=${image_ref}"
+            echo "digest=${IMAGE_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "### Polaris workspace base image"
+            echo
+            echo 'Use this digest-pinned reference in Wanghai:'
+            echo
+            echo "\`${image_ref}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@4a30bbadbe35d73a1729ee95a9196544192d905e
+        with:
+          image: ${{ steps.image.outputs.ref }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          syft-version: v1.50.0
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate SLSA provenance predicate
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          INVOCATION_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_digest="${IMAGE_REF##*@}"
+          jq -n \
+            --arg repository_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --arg source_commit "${SOURCE_COMMIT}" \
+            --arg workflow_ref "${WORKFLOW_REF}" \
+            --arg workflow_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/build-workspace-base-image.yml@${SOURCE_COMMIT}" \
+            --arg invocation_id "${INVOCATION_ID}" \
+            --arg image_ref "${IMAGE_REF}" \
+            --arg image_digest "${image_digest}" \
+            '{
+              "builder": {"id": $workflow_url},
+              "buildType": "https://github.com/actions/runner",
+              "invocation": {
+                "configSource": {
+                  "uri": ("git+" + $repository_url),
+                  "digest": {"sha1": $source_commit},
+                  "entryPoint": ".github/workflows/build-workspace-base-image.yml"
+                },
+                "parameters": {
+                  "image": $image_ref,
+                  "workflowRef": $workflow_ref
+                },
+                "environment": {"invocationId": $invocation_id}
+              },
+              "metadata": {"buildInvocationId": $invocation_id},
+              "materials": [
+                {
+                  "uri": ("git+" + $repository_url),
+                  "digest": {"sha1": $source_commit}
+                },
+                {
+                  "uri": $image_ref,
+                  "digest": {"sha256": ($image_digest | sub("^sha256:"; ""))}
+                }
+              ]
+            }' > provenance.json
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Keylessly attest provenance
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cosign attest --yes --type slsaprovenance --predicate provenance.json "${IMAGE_REF}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+          done
+          exit 1
+
+      - name: Keylessly attest SBOM
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE_REF}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+          done
+          exit 1
+
+      - name: Keylessly sign image digest
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cosign sign --yes "${IMAGE_REF}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then sleep "$((attempt * 10))"; fi
+          done
+          exit 1
+
+      - name: Verify signed image and attestations
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          CERTIFICATE_IDENTITY_REGEXP: ^${{ github.server_url }}/${{ github.repository }}/.github/workflows/build-workspace-base-image.yml@
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp "${CERTIFICATE_IDENTITY_REGEXP}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_REF}" >/dev/null
+          cosign verify-attestation \
+            --type slsaprovenance \
+            --certificate-identity-regexp "${CERTIFICATE_IDENTITY_REGEXP}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_REF}" >/dev/null
+          cosign verify-attestation \
+            --type spdxjson \
+            --certificate-identity-regexp "${CERTIFICATE_IDENTITY_REGEXP}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_REF}" >/dev/null

@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [0.3.2] - Unreleased
+
+Started the signed workspace-base image promotion path for the 0.3.2 release.
+
+### Added
+
+- Added a GitHub Actions workflow that publishes the Polaris workspace base to
+  GHCR with a digest output, SPDX SBOM, SLSA provenance, and keyless Cosign
+  signature verification.
+- Added a regression test for the workflow contract and its clean-checkout
+  Docker context.
+
 ## [0.3.1] - 2026-08-06
 
 Released the controlled test-host performance update without changing the
