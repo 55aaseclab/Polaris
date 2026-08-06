@@ -22,6 +22,7 @@ test("gateway performance benchmark measures the fixed local user path", async (
     "gateway.launch": 0,
     "gateway.exchange": 0,
     "gateway.read": 0,
+    "gateway.mutation": 0,
   });
   assert.ok(result.process.userCpuMs >= 0);
   assert.ok(result.process.systemCpuMs >= 0);

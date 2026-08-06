@@ -41,6 +41,7 @@ function workerArguments(options: GatewayPerformanceBenchmarkOptions, outputPath
   if (samples !== undefined) args.push("--samples", String(samples));
   if (vaults !== undefined) args.push("--vaults", String(vaults));
   if (warmupSamples !== undefined) args.push("--warmup-samples", String(warmupSamples));
+  if (options.profileDir) args.push("--profile-dir", path.resolve(options.profileDir));
   args.push("--output", outputPath);
   return args;
 }
@@ -137,6 +138,7 @@ function parseOptions(argv: string[]): CliOptions {
     if (flag === "--samples") options.samples = parseArgument(value, "--samples");
     else if (flag === "--vaults") options.vaults = parseArgument(value, "--vaults");
     else if (flag === "--warmup-samples") options.warmupSamples = parseArgument(value, "--warmup-samples");
+    else if (flag === "--profile-dir") options.profileDir = value;
     else if (flag === "--output") options.output = value;
     else throw new GatewayBenchmarkError(`Unsupported argument: ${flag}`);
   }

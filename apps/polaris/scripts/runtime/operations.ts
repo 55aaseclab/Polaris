@@ -1425,11 +1425,15 @@ async function provisionVaultInternal(
       }
       await maybeDelayProvisionStep(userId, vault, "finalize");
       ensureNotCancelled();
-      const finalRef = vaultRefFromTarget(
-        vault,
-        summary.status?.driver?.selected ?? { backend: "docker" },
-      );
-      await captureStdout(() => statusCommand(finalRef, userId));
+      // Without a start transition, no runtime state changes after the first
+      // status synthesis, so avoid paying for a duplicate backend inspection.
+      if (startAfterCreate) {
+        const finalRef = vaultRefFromTarget(
+          vault,
+          summary.status?.driver?.selected ?? { backend: "docker" },
+        );
+        await captureStdout(() => statusCommand(finalRef, userId));
+      }
     },
   );
 }
