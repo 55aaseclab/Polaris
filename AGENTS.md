@@ -84,7 +84,7 @@ operations, and release documentation lives in the Polaris documentation site.
   integrated mode.
 - Reject proxy request targets that can override the configured private origin.
   Strip browser credentials and upstream `Set-Cookie` values at the gateway.
-- Keep standalone Wanghai support in a separate 0.3.1 batch. It requires an
+- Keep standalone Wanghai support in a separate 0.3.2 batch. It requires an
   explicit external identity adapter and must not weaken integrated assertions.
 - Use `config/release-profiles/0.3.0-single-host.json` as the 0.3 capacity,
   quota, resource-budget, and SLO source. Production preflight and the host
