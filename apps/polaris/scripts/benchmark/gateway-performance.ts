@@ -11,6 +11,7 @@ import path from "node:path";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 import yaml from "js-yaml";
+import { captureCpuProfile, type CpuProfileArtifact } from "./cpu-profile.js";
 import {
   scaffoldDockerVault,
   scaffoldUserProfileById,
@@ -36,12 +37,18 @@ const DEFAULT_WARMUP_SAMPLES = 10;
 const DEFAULT_VAULTS = 10;
 const WORKER_ENV = "POLARIS_GATEWAY_PERFORMANCE_BENCHMARK_WORKER";
 
-type Operation = "portal.hosts.list" | "gateway.launch" | "gateway.exchange" | "gateway.read";
+type Operation =
+  | "portal.hosts.list"
+  | "gateway.launch"
+  | "gateway.exchange"
+  | "gateway.read"
+  | "gateway.mutation";
 
 export interface GatewayPerformanceBenchmarkOptions {
   samples?: number;
   vaults?: number;
   warmupSamples?: number;
+  profileDir?: string;
 }
 
 export interface GatewayPerformanceOperationSummary {
@@ -79,6 +86,9 @@ export interface GatewayPerformanceBenchmarkResult {
   };
   operations: Record<Operation, GatewayPerformanceOperationSummary>;
   errors: Record<Operation, number>;
+  profiles?: {
+    boundedMutation: CpuProfileArtifact;
+  };
   process: GatewayPerformanceProcessSummary;
 }
 
@@ -188,18 +198,66 @@ function writeRunningVaultStatus(userId: string, vault: string): void {
 
 function benchmarkUpstream(): Server {
   return createHttpServer((req: IncomingMessage, res: ServerResponse) => {
+    if (req.url === "/wanghai/api/internal/workspace-usage") {
+      const body = JSON.stringify({
+        schema_version: 1,
+        category: "active_workspace",
+        usage_bytes: 1_024,
+        file_count: 1,
+        entry_count: 1,
+      });
+      res.writeHead(200, {
+        "content-length": Buffer.byteLength(body),
+        "content-type": "application/json; charset=utf-8",
+      });
+      res.end(body);
+      return;
+    }
     if (!String(req.url ?? "").startsWith("/wanghai")) {
       res.writeHead(404);
       res.end();
       return;
     }
-    const body = JSON.stringify({ workflows: [] });
+    const body = req.method === "POST"
+      ? JSON.stringify({ workspace_id: "benchmark-workspace", created: true })
+      : JSON.stringify({ workflows: [] });
+    req.resume();
     res.writeHead(200, {
       "content-length": Buffer.byteLength(body),
       "content-type": "application/json; charset=utf-8",
     });
     res.end(body);
   });
+}
+
+async function issueGatewayMutation(input: {
+  origin: string;
+  cookie: string;
+  samples: Record<Operation, number[]>;
+  index: number;
+  record: boolean;
+}): Promise<void> {
+  const startedAt = performance.now();
+  const response = await fetch(`${input.origin}/g/api/workspaces`, {
+    headers: {
+      cookie: input.cookie,
+      "content-type": "application/json",
+      "idempotency-key": `benchmark-mutation-${input.record ? "measured" : "warmup"}-${input.index}`,
+      origin: input.origin,
+    },
+    method: "POST",
+    body: JSON.stringify({
+      workspace_id: `benchmark-workspace-${input.record ? "measured" : "warmup"}-${input.index}`,
+      workspace_type: "research",
+    }),
+  });
+  await response.arrayBuffer();
+  if (input.record) {
+    input.samples["gateway.mutation"].push(performance.now() - startedAt);
+  }
+  if (response.status !== 200) {
+    throw new GatewayBenchmarkError("Gateway mutation benchmark failed");
+  }
 }
 
 async function timedFetch(
@@ -271,12 +329,14 @@ export async function runGatewayPerformanceBenchmark(
     "gateway.launch": [],
     "gateway.exchange": [],
     "gateway.read": [],
+    "gateway.mutation": [],
   };
   const errors: Record<Operation, number> = {
     "portal.hosts.list": 0,
     "gateway.launch": 0,
     "gateway.exchange": 0,
     "gateway.read": 0,
+    "gateway.mutation": 0,
   };
   const restores = [
     setEnv("POLARIS_AUTH_MODE", "disabled"),
@@ -285,6 +345,7 @@ export async function runGatewayPerformanceBenchmark(
     setEnv("POLARIS_AUTH_DEFAULT_PLAN", "pro"),
     setEnv("POLARIS_WANGHAI_GATEWAY_MASTER_SECRET", MASTER_SECRET),
     setEnv("POLARIS_WANGHAI_RATE_LIMIT_READS_PER_MINUTE", String(Math.max(10_000, samples * 4))),
+    setEnv("POLARIS_WANGHAI_RATE_LIMIT_MUTATIONS_PER_MINUTE", String(Math.max(10_000, samples * 2))),
     setEnv("POLARIS_CONTROL_STORE_PATH", path.join(controlStoreRoot, "control.sqlite")),
   ];
   let upstream: Server | null = null;
@@ -346,11 +407,19 @@ export async function runGatewayPerformanceBenchmark(
       });
       await read.arrayBuffer();
       if (read.status !== 200) throw new GatewayBenchmarkError("Gateway-read warmup failed");
+      await issueGatewayMutation({
+        origin,
+        cookie,
+        samples: observations,
+        index,
+        record: false,
+      });
     }
 
     const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
     const cpuStartedAt = process.cpuUsage();
     let peakRssBytes = process.memoryUsage.rss();
+    const profiles: { boundedMutation?: CpuProfileArtifact } = {};
     eventLoopDelay.enable();
     try {
       for (let index = 0; index < samples; index += 1) {
@@ -381,6 +450,35 @@ export async function runGatewayPerformanceBenchmark(
         }
         peakRssBytes = Math.max(peakRssBytes, process.memoryUsage.rss());
       }
+      const mutationCookie = await issueGatewaySession({
+        origin,
+        samples: observations,
+        wanghaiId: targetWanghaiId,
+        record: false,
+      });
+      const mutationProfile = await captureCpuProfile({
+        filePath: options.profileDir
+          ? path.join(options.profileDir, "bounded-mutation.cpuprofile")
+          : undefined,
+        run: async () => {
+          for (let index = 0; index < samples; index += 1) {
+            try {
+              await issueGatewayMutation({
+                origin,
+                cookie: mutationCookie,
+                samples: observations,
+                index,
+                record: true,
+              });
+            } catch (error) {
+              errors["gateway.mutation"] += 1;
+              throw error;
+            }
+            peakRssBytes = Math.max(peakRssBytes, process.memoryUsage.rss());
+          }
+        },
+      });
+      profiles.boundedMutation = mutationProfile.profile;
     } finally {
       eventLoopDelay.disable();
     }
@@ -400,8 +498,10 @@ export async function runGatewayPerformanceBenchmark(
         "gateway.launch": summarize(observations["gateway.launch"]),
         "gateway.exchange": summarize(observations["gateway.exchange"]),
         "gateway.read": summarize(observations["gateway.read"]),
+        "gateway.mutation": summarize(observations["gateway.mutation"]),
       },
       errors,
+      ...(profiles.boundedMutation ? { profiles: { boundedMutation: profiles.boundedMutation } } : {}),
       process: {
         userCpuMs: rounded(cpu.user / 1_000),
         systemCpuMs: rounded(cpu.system / 1_000),
@@ -449,6 +549,7 @@ function parseOptions(argv: string[]): GatewayPerformanceBenchmarkOptions & { ou
     if (flag === "--samples") options.samples = parseArgument(value, "--samples");
     else if (flag === "--vaults") options.vaults = parseArgument(value, "--vaults");
     else if (flag === "--warmup-samples") options.warmupSamples = parseArgument(value, "--warmup-samples");
+    else if (flag === "--profile-dir") options.profileDir = value;
     else if (flag === "--output") options.output = value;
     else throw new GatewayBenchmarkError(`Unsupported argument: ${flag}`);
   }
