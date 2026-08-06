@@ -222,6 +222,32 @@ ${scriptBody}
   }
 }
 
+async function withEnv<T>(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(vars)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) {
+      delete process.env[key];
+      continue;
+    }
+    process.env[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) {
+        delete process.env[key];
+        continue;
+      }
+      process.env[key] = value;
+    }
+  }
+}
+
 async function captureStdout(fn: () => Promise<void> | void): Promise<string> {
   const previous = getStdoutCaptureQueue();
   let release!: () => void;
@@ -329,10 +355,11 @@ async function withTempVaultSpec(
   try {
     await fn();
   } finally {
-    fs.rmSync(outputPath, { force: true });
-    fs.rmSync(generatedPath, { force: true });
+    cleanupPaseoState(project);
     cleanupStatusFile(project);
     cleanupLiveCredentialsFile(project);
+    fs.rmSync(outputPath, { force: true });
+    fs.rmSync(generatedPath, { force: true });
   }
 }
 
@@ -3422,9 +3449,12 @@ exit 1
 `,
       },
       async () => {
-        const output = await captureStdout(async () => {
-          await runCli(["vault", "status", `${project}@kubevirt-vm`]);
-        });
+        const output = await withEnv(
+          { POLARIS_PASEO_APP_BASE_URL: undefined },
+          () => captureStdout(async () => {
+            await runCli(["vault", "status", `${project}@kubevirt-vm`]);
+          }),
+        );
         const parsed = parseJsonOutput<{
           driver?: {
             selected?: { backend?: string };
@@ -3436,8 +3466,8 @@ exit 1
         assert.equal(parsed.driver?.selected?.backend, "kubevirt-vm");
         assert.equal(parsed.driver?.runtimeRef, `vm/${vaultRuntimeResourceName(DEMO_USER_PROFILE_ID, project, "vm")}`);
         assert.equal(parsed.driver?.status, "running");
-        assert.equal(parsed.paseo?.daemon, "ready");
-        assert.equal(parsed.paseo?.web, "connectable");
+        assert.equal(parsed.paseo?.daemon, "pending");
+        assert.equal(parsed.paseo?.web, "pairing-required");
       },
     );
   });
@@ -3453,15 +3483,16 @@ test("kubevirt render reuses persisted daemon pairing metadata", async () => {
   });
 });
 
-test("CLI vault status persists ready pod status", async () => {
+test("CLI vault status persists pairing metadata without a configured app endpoint", async () => {
   cleanupDriverSelectionState("demo");
   cleanupStatusFile("demo");
   cleanupPaseoState("demo");
   const expectedStatusFile = vaultStatusPath("demo", DEMO_USER_PROFILE_ID);
 
-  await withFakeCommands(
-    {
-      kubectl: `
+  try {
+    await withFakeCommands(
+      {
+        kubectl: `
 if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
   printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
   exit 0
@@ -3495,13 +3526,18 @@ if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"*
 fi
 exit 0
 `,
-    },
-    async () => {
-      await captureStdout(async () => {
-        await runCli(["vault", "status", "demo"]);
-      });
+      },
+      async () => {
+      await withEnv(
+        { POLARIS_PASEO_APP_BASE_URL: undefined },
+        () => captureStdout(async () => {
+          await runCli(["vault", "status", "demo"]);
+        }),
+      );
 
       assert.equal(fs.existsSync(expectedStatusFile), true);
+      assert.equal(fs.existsSync(path.join(vaultPaseoStateDir("demo", DEMO_USER_PROFILE_ID), "server-id")), true);
+      assert.equal(fs.existsSync(path.join(vaultPaseoStateDir("demo", DEMO_USER_PROFILE_ID), "pairing.json")), true);
       const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
         project: string;
         driver?: {
@@ -3525,15 +3561,16 @@ exit 0
       assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
       assert.equal(parsed.driver?.baseImage, vaultImageRef(DEMO_USER_PROFILE_ID, "demo"));
       assert.equal(parsed.driver?.status, "running");
-      assert.equal(parsed.paseo.daemon, "ready");
-      assert.equal(parsed.paseo.web, "connectable");
+      assert.equal(parsed.paseo.daemon, "pending");
+      assert.equal(parsed.paseo.web, "pairing-required");
       assert.ok(parsed.evolution);
-    },
-  );
-
-  cleanupStatusFile("demo");
-  cleanupDriverSelectionState("demo");
-  cleanupPaseoState("demo");
+      },
+    );
+  } finally {
+    cleanupStatusFile("demo");
+    cleanupDriverSelectionState("demo");
+    cleanupPaseoState("demo");
+  }
 });
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
