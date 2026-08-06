@@ -241,7 +241,7 @@ verify_wanghai_attestation() {
 verify_wanghai_attestation "slsaprovenance" "Wanghai image provenance attestation"
 verify_wanghai_attestation "spdxjson" "Wanghai image SBOM attestation"
 else
-  printf 'release preflight: external supply-chain verification deferred to 0.3.1\n'
+  printf 'release preflight: external supply-chain verification deferred to 0.3.2\n'
 fi
 
 command -v findmnt >/dev/null 2>&1 || fail "findmnt is required to validate Docker storage quotas"
@@ -274,7 +274,7 @@ if [ "${release_gate_mode}" = "production" ]; then
     fail "Polaris public TLS endpoint is not reachable or does not validate"
   fi
 else
-  printf 'release preflight: external DNS and TLS verification deferred to 0.3.1\n'
+  printf 'release preflight: external DNS and TLS verification deferred to 0.3.2\n'
 fi
 
 printf 'release preflight: ok (%s)\n' "${release_gate_mode}"
