@@ -35,6 +35,7 @@ rsync -azc --delete --one-file-system \
   --include "apps/paseo/tool-bundle/bin/***" \
   --include "apps/paseo/tool-bundle/lib/" \
   --include "apps/paseo/tool-bundle/lib/node_modules/***" \
+  --exclude "apps/paseo/.surface-*/" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "dist" \
