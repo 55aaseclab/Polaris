@@ -27,6 +27,24 @@ test("remote deployment checksum-syncs Polaris source", () => {
   assert.match(script, /RELEASE_MANIFEST_SOURCE/);
 });
 
+test("remote deployment does not duplicate Paseo artifact builds after ci-local", () => {
+  const script = fs.readFileSync("scripts/cd-remote.sh", "utf8");
+  assert.equal((script.match(/build-paseo-(?:tool-bundle|web-artifact)/gu) ?? []).length, 0);
+  assert.match(script, /bash \.\/scripts\/ci-local\.sh/);
+});
+
+test("Paseo Dockerfiles keep dependency installation reusable across source patches", () => {
+  for (const file of ["apps/paseo/Dockerfile.tool-bundle", "apps/paseo/Dockerfile.artifact"]) {
+    const dockerfile = fs.readFileSync(file, "utf8");
+    const packagePatch = dockerfile.indexOf("paseo-web-authing-package.patch");
+    const dependencyInstall = dockerfile.indexOf("npm ci");
+    const sourcePatches = dockerfile.indexOf("COPY apps/paseo/patches /tmp/paseo-patches");
+    assert.ok(packagePatch >= 0, `${file} must apply the dependency patch`);
+    assert.ok(dependencyInstall > packagePatch, `${file} must install dependencies after the dependency patch`);
+    assert.ok(sourcePatches > dependencyInstall, `${file} must apply source patches after dependency installation`);
+  }
+});
+
 test("remote provision installs a host Polaris systemd unit", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   assert.match(script, /polaris-server@\.service/);
@@ -54,6 +72,13 @@ test("remote provision keeps integrated Wanghai on the Polaris vault export", ()
   assert.match(script, /remove_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
   assert.doesNotMatch(script, /upsert_env_line 'POLARIS_WANGHAI_DATA_ROOT'/);
   assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
+});
+
+test("remote provision falls back to the legacy exports/vaults data root", () => {
+  const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  assert.ok(script.includes("LEGACY_VAULTS_ROOT='${REMOTE_DATA_ROOT}/exports/vaults'"));
+  assert.match(script, /if \[ -d .*LEGACY_VAULTS_ROOT.*\] && \[ ! -e .*VAULTS_ROOT.*\]; then/);
+  assert.ok(script.includes("mount --bind"));
 });
 
 test("remote deployment keeps environment files root-owned and non-world-readable", () => {

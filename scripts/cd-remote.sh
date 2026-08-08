@@ -19,14 +19,6 @@ RELEASE_MANIFEST_SOURCE="${RELEASE_MANIFEST_SOURCE:-${ROOT_DIR}/deploy/release-m
 cd "${ROOT_DIR}"
 
 bash ./scripts/ci-local.sh
-bash ./scripts/build-paseo-tool-bundle.sh
-(
-  set -a
-  # shellcheck disable=SC1091
-  . ./.env.prod
-  set +a
-  bash ./scripts/build-paseo-web-artifact.sh
-)
 
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 

@@ -120,10 +120,22 @@ if ! command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_DATA_ROOT}/backup-keys' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
-\${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind '${REMOTE_DATA_ROOT}/vaults' '${REMOTE_NETFS_EXPORT_ROOT}'
-\${SUDO} grep -qs \"${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
-  printf '%s\n' '${REMOTE_DATA_ROOT}/vaults ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0' | \${SUDO} tee -a /etc/fstab >/dev/null
+\${SUDO} mkdir -p '${REMOTE_APP_DIR}' '${REMOTE_ENV_DIR}' '${REMOTE_DATA_ROOT}/users' '${REMOTE_DATA_ROOT}/state' '${REMOTE_DATA_ROOT}/exports' '${REMOTE_DATA_ROOT}/backup-keys' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_WANGHAI_DIR}' /etc/nginx/snippets
+# Older test hosts may still keep vault data under exports/vaults. Repair that
+# legacy layout by binding it into the canonical vaults/ path before export setup.
+VAULTS_ROOT='${REMOTE_DATA_ROOT}/vaults'
+LEGACY_VAULTS_ROOT='${REMOTE_DATA_ROOT}/exports/vaults'
+if [ -d \"\${LEGACY_VAULTS_ROOT}\" ] && [ ! -e \"\${VAULTS_ROOT}\" ]; then
+  \${SUDO} mkdir -p \"\${VAULTS_ROOT}\"
+  \${SUDO} mount --bind \"\${LEGACY_VAULTS_ROOT}\" \"\${VAULTS_ROOT}\"
+  \${SUDO} grep -qs \"\${LEGACY_VAULTS_ROOT} \${VAULTS_ROOT} none bind 0 0\" /etc/fstab || \
+    printf '%s\n' \"\${LEGACY_VAULTS_ROOT} \${VAULTS_ROOT} none bind 0 0\" | \${SUDO} tee -a /etc/fstab >/dev/null
+else
+  \${SUDO} mkdir -p \"\${VAULTS_ROOT}\"
+fi
+\${SUDO} mountpoint -q '${REMOTE_NETFS_EXPORT_ROOT}' || \${SUDO} mount --bind \"\${VAULTS_ROOT}\" '${REMOTE_NETFS_EXPORT_ROOT}'
+\${SUDO} grep -qs \"\${VAULTS_ROOT} ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" /etc/fstab || \
+  printf '%s\n' \"\${VAULTS_ROOT} ${REMOTE_NETFS_EXPORT_ROOT} none bind 0 0\" | \${SUDO} tee -a /etc/fstab >/dev/null
 \${SUDO} grep -qs \"${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)\" /etc/exports || \
   printf '%s\n' '${REMOTE_NETFS_EXPORT_ROOT} 127.0.0.1/32(rw,fsid=0,no_subtree_check,no_root_squash,sync)' | \${SUDO} tee -a /etc/exports >/dev/null
 \${SUDO} exportfs -ra
@@ -136,6 +148,11 @@ fi
 rsync -az \
   -e "${RSYNC_RSH}" \
   ./.env.prod.example "${REMOTE_HOST}:${REMOTE_APP_DIR}/.env.prod.example"
+if [ -f ./.env.prod ]; then
+  rsync -az \
+    -e "${RSYNC_RSH}" \
+    ./.env.prod "${REMOTE_HOST}:${REMOTE_APP_DIR}/.env.prod"
+fi
 rsync -az \
   -e "${RSYNC_RSH}" \
   ./deploy/ "${REMOTE_HOST}:${REMOTE_APP_DIR}/deploy/"
@@ -226,7 +243,9 @@ remove_env_line() {
   rm -f \"\${temp_file}\"
 }
 
-if [ ! -f '${REMOTE_ENV_FILE}' ]; then
+if [ -f '${REMOTE_APP_DIR}/.env.prod' ]; then
+  install_env_file '${REMOTE_APP_DIR}/.env.prod' '${REMOTE_ENV_FILE}'
+elif [ ! -f '${REMOTE_ENV_FILE}' ]; then
   install_env_file '${REMOTE_APP_DIR}/.env.prod.example' '${REMOTE_ENV_FILE}'
 else
   \$SUDO chown root:\"\$APP_GROUP\" '${REMOTE_ENV_FILE}'
@@ -246,6 +265,14 @@ upsert_env_line 'POLARIS_MAX_ACTIVE_VAULTS' '10' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES' '268435456' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_RELEASE_MANIFEST' 'deploy/release-manifest.json' '${REMOTE_ENV_FILE}'
 remove_env_line 'POLARIS_WANGHAI_DATA_ROOT' '${REMOTE_ENV_FILE}'
+remove_env_line 'CLERK_SECRET_KEY' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_PUBLISHABLE_KEY' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_DOMAIN' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_PROXY_URL' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_SATELLITE_DOMAIN' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_SIGN_IN_URL' '${REMOTE_ENV_FILE}'
+remove_env_line 'VITE_CLERK_SIGN_UP_URL' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_AUTH_MODE' 'authing-browser-session' '${REMOTE_ENV_FILE}'
 
 if [ -d '${REMOTE_APP_DIR}/config/state' ] && [ -z \"\$(find '${REMOTE_DATA_ROOT}/state' -mindepth 1 -maxdepth 1 2>/dev/null)\" ]; then
   rsync -a '${REMOTE_APP_DIR}/config/state/' '${REMOTE_DATA_ROOT}/state/'

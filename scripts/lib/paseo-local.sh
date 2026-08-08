@@ -5,6 +5,8 @@ set -euo pipefail
 POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-}"
 POLARIS_PASEO_BUILDER_NAME="${POLARIS_PASEO_BUILDER_NAME:-polaris-builder}"
 POLARIS_PASEO_SOURCE_REF="${POLARIS_PASEO_SOURCE_REF:-v0.1.101}"
+BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
+export BUILDKIT_PROGRESS
 
 paseo_local_ensure_source() {
   local source_dir="apps/paseo/source"
@@ -67,11 +69,13 @@ paseo_local_buildx_with_local_cache() {
 
   if [ -d "${cache_dir}" ]; then
     docker buildx build \
+      --progress plain \
       --cache-from "type=local,src=${cache_dir}" \
       --cache-to "type=local,dest=${cache_tmp},mode=max" \
       "$@"
   else
     docker buildx build \
+      --progress plain \
       --cache-to "type=local,dest=${cache_tmp},mode=max" \
       "$@"
   fi
@@ -137,6 +141,7 @@ paseo_local_build_dist() {
   paseo_local_ensure_builder
   if [ -d "${cache_dir}" ]; then
     docker buildx build \
+      --progress plain \
       --cache-from "type=local,src=${cache_dir}" \
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.artifact \
@@ -147,6 +152,7 @@ paseo_local_build_dist() {
       .
   else
     docker buildx build \
+      --progress plain \
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.artifact \
       --target artifact-export \
@@ -191,6 +197,7 @@ paseo_local_build_tool_bundle() {
   # but skip cache writes here so deploys stay reliable.
   if [ -d "${cache_dir}" ]; then
     docker buildx build \
+      --progress plain \
       --cache-from "type=local,src=${cache_dir}" \
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.tool-bundle \
@@ -200,6 +207,7 @@ paseo_local_build_tool_bundle() {
       .
   else
     docker buildx build \
+      --progress plain \
       --builder "${POLARIS_PASEO_BUILDER_NAME}" \
       --file apps/paseo/Dockerfile.tool-bundle \
       --target bundle-export \
