@@ -73,10 +73,10 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..f4a393c2678427e764ec69c668a613fe
 +    };
 +
 +    void (async () => {
-+      // A host route owns one daemon. Clear the previous in-memory route
-+      // before importing the host selected by the current URL.
++      // A host route owns one daemon. Drop unrelated in-memory hosts while
++      // preserving the selected host and its active daemon client.
 +      if (activeServerId) {
-+        await store.resetPolarisHostsForCurrentUser();
++        await store.scopePolarisHostsToServer(activeServerId);
 +      }
 +      if (!isCurrentRoute()) {
 +        return;

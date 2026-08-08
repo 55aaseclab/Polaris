@@ -758,7 +758,7 @@ diff --git a/packages/app/src/runtime/host-runtime.test.ts b/packages/app/src/ru
 index 6f9468966292c5a4fadc8cc0409ac83f35778620..5ce708462782e0f0901988679bd002d68513205d 100644
 --- a/packages/app/src/runtime/host-runtime.test.ts
 +++ b/packages/app/src/runtime/host-runtime.test.ts
-@@ -1171,6 +1171,27 @@ describe("HostRuntimeController", () => {
+@@ -1171,6 +1171,40 @@ describe("HostRuntimeController", () => {
  });
  
  describe("HostRuntimeStore", () => {
@@ -781,6 +781,19 @@ index 6f9468966292c5a4fadc8cc0409ac83f35778620..5ce708462782e0f0901988679bd002d6
 +
 +    expect(store.getHosts()).toEqual([]);
 +    expect(store.getSnapshot(host.serverId)).toBeNull();
++  });
++
++  it("scopes to the selected host without removing its runtime controller", async () => {
++    const selected = makeHost({ serverId: "srv_selected", connections: [] });
++    const unrelated = makeHost({ serverId: "srv_unrelated", connections: [] });
++    const store = new HostRuntimeStore();
++
++    store.syncHosts([selected, unrelated]);
++    await store.scopePolarisHostsToServer(selected.serverId);
++
++    expect(store.getHosts()).toEqual([selected]);
++    expect(store.getSnapshot(selected.serverId)).not.toBeNull();
++    expect(store.getSnapshot(unrelated.serverId)).toBeNull();
 +  });
 +
    it("bootstraps agent directory subscription when host transitions online", async () => {
@@ -983,13 +996,27 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
          shouldPersistHosts = true;
        }
      } catch (error) {
-@@ -1674,6 +1813,12 @@ export class HostRuntimeStore {
+@@ -1674,6 +1813,26 @@ export class HostRuntimeStore {
      await this.persistHosts();
    }
  
 +  /** Remove every Host and active daemon client before syncing another account. */
 +  async resetPolarisHostsForCurrentUser(): Promise<void> {
 +    this.setHostsAndSync([]);
++    await this.persistHosts();
++  }
++
++  /** Keep the selected host and its controller while dropping unrelated hosts. */
++  async scopePolarisHostsToServer(serverId: string): Promise<void> {
++    const selectedServerId = serverId.trim();
++    if (!selectedServerId) {
++      return;
++    }
++    const scopedHosts = this.hosts.filter((host) => host.serverId === selectedServerId);
++    if (scopedHosts.length === this.hosts.length) {
++      return;
++    }
++    this.setHostsAndSync(scopedHosts);
 +    await this.persistHosts();
 +  }
 +
