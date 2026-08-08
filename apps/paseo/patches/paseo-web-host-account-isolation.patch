@@ -258,10 +258,10 @@ index 0000000000000000000000000000000000000000..6c765f5bc85031df64df7d7b52bbb220
 +});
 diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..79e1f5e31ca3fffb701d8e94d6e81e62c2cbd85a
+index 0000000000000000000000000000000000000000..a9c2149dd36bf7fd3db841442f0c3e21f4fb21a8
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.ts
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,203 @@
 +import { polarisApiBaseUrl } from "@/lib/polaris-authing";
 +import { buildHostRootRoute } from "@/utils/host-routes";
 +
@@ -288,6 +288,14 @@ index 0000000000000000000000000000000000000000..79e1f5e31ca3fffb701d8e94d6e81e62
 +type UpsertFromOfferUrl = (offerUrl: string, label?: string) => Promise<{ serverId: string }>;
 +
 +let inflight: { key: string; promise: Promise<SyncPolarisHostsResult> } | null = null;
++
++export function buildPolarisHostSyncKey(options: {
++  token: string;
++  serverId?: string | null;
++  scope?: string | null;
++}): string {
++  return `${options.token}:${options.serverId?.trim() || "*"}:${options.scope?.trim() || "*"}`;
++}
 +
 +function decodeBase64UrlJson(value: string): unknown {
 +  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -422,9 +430,10 @@ index 0000000000000000000000000000000000000000..79e1f5e31ca3fffb701d8e94d6e81e62
 +export function syncPolarisHostsOnce(options: {
 +  token: string;
 +  serverId?: string | null;
++  scope?: string | null;
 +  upsertFromOfferUrl: UpsertFromOfferUrl;
 +}): Promise<SyncPolarisHostsResult> {
-+  const key = `${options.token}:${options.serverId?.trim() || "*"}`;
++  const key = buildPolarisHostSyncKey(options);
 +  if (inflight?.key === key) return inflight.promise;
 +  const promise = syncPolarisHostsFromApi(options).finally(() => {
 +    if (inflight?.promise === promise) {
@@ -755,10 +764,10 @@ index 0000000000000000000000000000000000000000..8866aaee7a665153219c6c9b298e1ea8
 +  });
 +});
 diff --git a/packages/app/src/runtime/host-runtime.test.ts b/packages/app/src/runtime/host-runtime.test.ts
-index 6f9468966292c5a4fadc8cc0409ac83f35778620..5ce708462782e0f0901988679bd002d68513205d 100644
+index 6f9468966292c5a4fadc8cc0409ac83f35778620..8a3f7db1b39aaf95d4a8d479d60a2195e12be349 100644
 --- a/packages/app/src/runtime/host-runtime.test.ts
 +++ b/packages/app/src/runtime/host-runtime.test.ts
-@@ -1171,6 +1171,40 @@ describe("HostRuntimeController", () => {
+@@ -1171,6 +1171,70 @@ describe("HostRuntimeController", () => {
  });
  
  describe("HostRuntimeStore", () => {
@@ -784,26 +793,56 @@ index 6f9468966292c5a4fadc8cc0409ac83f35778620..5ce708462782e0f0901988679bd002d6
 +  });
 +
 +  it("scopes to the selected host without removing its runtime controller", async () => {
-+    const selected = makeHost({ serverId: "srv_selected", connections: [] });
-+    const unrelated = makeHost({ serverId: "srv_unrelated", connections: [] });
++    const previousWindow = (globalThis as { window?: unknown }).window;
++    vi.stubGlobal("window", undefined);
 +    const store = new HostRuntimeStore();
 +
-+    store.syncHosts([selected, unrelated]);
-+    await store.scopePolarisHostsToServer(selected.serverId);
++    try {
++      await store.upsertRelayConnection({
++        serverId: "srv_selected",
++        relayEndpoint: "relay.example:443",
++        daemonPublicKeyB64: "pk_selected",
++      });
++      await store.upsertRelayConnection({
++        serverId: "srv_unrelated",
++        relayEndpoint: "relay.example:443",
++        daemonPublicKeyB64: "pk_unrelated",
++      });
++      await store.scopePolarisHostsToServer("srv_selected");
 +
-+    expect(store.getHosts()).toEqual([selected]);
-+    expect(store.getSnapshot(selected.serverId)).not.toBeNull();
-+    expect(store.getSnapshot(unrelated.serverId)).toBeNull();
++      expect(store.getHosts().map((host) => host.serverId)).toEqual(["srv_selected"]);
++      expect(store.getSnapshot("srv_selected")).not.toBeNull();
++      expect(store.getSnapshot("srv_unrelated")).toBeNull();
++    } finally {
++      vi.unstubAllGlobals();
++      if (previousWindow !== undefined) {
++        (globalThis as { window?: unknown }).window = previousWindow;
++      }
++    }
++  });
++
++  it("tracks scoped Polaris sync state by route key", () => {
++    const store = new HostRuntimeStore();
++
++    expect(store.getPolarisHostSyncStatus("srv_selected", "key-a")).toBe("idle");
++    store.beginPolarisHostSync("srv_selected", "key-a");
++    expect(store.getPolarisHostSyncStatus("srv_selected", "key-a")).toBe("syncing");
++    expect(store.getPolarisHostSyncStatus("srv_selected", "key-b")).toBe("idle");
++
++    store.completePolarisHostSync("srv_selected", "key-b");
++    expect(store.getPolarisHostSyncStatus("srv_selected", "key-a")).toBe("syncing");
++    store.completePolarisHostSync("srv_selected", "key-a");
++    expect(store.getPolarisHostSyncStatus("srv_selected", "key-a")).toBe("settled");
 +  });
 +
    it("bootstraps agent directory subscription when host transitions online", async () => {
      const host = makeHost({
        connections: [
 diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
-index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38ca270f0a 100644
+index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8d150f17f 100644
 --- a/packages/app/src/runtime/host-runtime.ts
 +++ b/packages/app/src/runtime/host-runtime.ts
-@@ -44,6 +44,12 @@ import {
+@@ -44,9 +44,16 @@ import {
  } from "@/workspace/legacy-daemon-workspaces";
  import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
  import { queryClient } from "@/query/query-client";
@@ -816,7 +855,11 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
  
  export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
  export type HostRegistryStatus = "loading" | "ready";
-@@ -138,6 +144,19 @@ export interface HostRuntimeControllerDeps {
++export type PolarisHostSyncStatus = "idle" | "syncing" | "settled";
+ 
+ export type ActiveConnection =
+   | { type: "directTcp"; endpoint: string; display: string }
+@@ -138,6 +145,19 @@ export interface HostRuntimeControllerDeps {
    getClientId: () => Promise<string>;
  }
  
@@ -836,7 +879,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
  export interface HostRuntimeStartOptions {
    autoProbe?: boolean;
    initialConnection?: {
-@@ -1270,10 +1289,111 @@ export class HostRuntimeController {
+@@ -1270,10 +1290,111 @@ export class HostRuntimeController {
  }
  
  const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
@@ -948,7 +991,18 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
  function readConfiguredLocalDaemonOverride(): string | null {
    const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
    return value && value.length > 0 ? value : null;
-@@ -1369,14 +1489,28 @@ export class HostRuntimeStore {
+@@ -1314,6 +1435,10 @@ export class HostRuntimeStore {
+   private agentDirectoryBootstrapInFlight = new Map<string, Promise<void>>();
+   private configuredOverrideBootstrapInFlight: Promise<void> | null = null;
+   private bootStarted = false;
++  private polarisHostSyncStatusByServerId = new Map<
++    string,
++    { key: string; status: Exclude<PolarisHostSyncStatus, "idle"> }
++  >();
+ 
+   constructor(input?: { deps?: HostRuntimeControllerDeps }) {
+     this.deps = input?.deps ?? createDefaultDeps();
+@@ -1369,14 +1494,28 @@ export class HostRuntimeStore {
      if (override) {
        this.bootstrapConfiguredOverride(override);
      } else {
@@ -978,7 +1032,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
        if (!stored) {
          return;
        }
-@@ -1388,9 +1522,14 @@ export class HostRuntimeStore {
+@@ -1388,9 +1527,14 @@ export class HostRuntimeStore {
          .map((entry) => normalizeStoredHostProfile(entry))
          .filter((entry): entry is HostProfile => entry !== null);
        const profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
@@ -996,7 +1050,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
          shouldPersistHosts = true;
        }
      } catch (error) {
-@@ -1674,6 +1813,26 @@ export class HostRuntimeStore {
+@@ -1674,6 +1818,73 @@ export class HostRuntimeStore {
      await this.persistHosts();
    }
  
@@ -1020,10 +1074,57 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
 +    await this.persistHosts();
 +  }
 +
++  getPolarisHostSyncStatus(serverId: string, key: string): PolarisHostSyncStatus {
++    const selectedServerId = serverId.trim();
++    const syncKey = key.trim();
++    if (!selectedServerId || !syncKey) {
++      return "settled";
++    }
++    const state = this.polarisHostSyncStatusByServerId.get(selectedServerId);
++    if (!state || state.key !== syncKey) {
++      return "idle";
++    }
++    return state.status;
++  }
++
++  beginPolarisHostSync(serverId: string, key: string): void {
++    const selectedServerId = serverId.trim();
++    const syncKey = key.trim();
++    if (!selectedServerId || !syncKey) {
++      return;
++    }
++    const current = this.polarisHostSyncStatusByServerId.get(selectedServerId);
++    if (current?.key === syncKey && current.status === "syncing") {
++      return;
++    }
++    this.polarisHostSyncStatusByServerId.set(selectedServerId, {
++      key: syncKey,
++      status: "syncing",
++    });
++    this.emitHostList();
++  }
++
++  completePolarisHostSync(serverId: string, key: string): void {
++    const selectedServerId = serverId.trim();
++    const syncKey = key.trim();
++    const current = this.polarisHostSyncStatusByServerId.get(selectedServerId);
++    if (!selectedServerId || !syncKey || current?.key !== syncKey) {
++      return;
++    }
++    if (current.status === "settled") {
++      return;
++    }
++    this.polarisHostSyncStatusByServerId.set(selectedServerId, {
++      key: syncKey,
++      status: "settled",
++    });
++    this.emitHostList();
++  }
++
    async removeConnection(serverId: string, connectionId: string): Promise<void> {
      const now = new Date().toISOString();
      const next = this.hosts
-@@ -1705,6 +1850,10 @@ export class HostRuntimeStore {
+@@ -1705,6 +1916,10 @@ export class HostRuntimeStore {
      connection: HostConnection;
      existingClient?: DaemonClient;
    }): Promise<HostProfile> {
@@ -1034,7 +1135,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
      const now = new Date().toISOString();
      const next = upsertHostConnectionInProfiles({
        profiles: this.hosts,
-@@ -1739,14 +1888,16 @@ export class HostRuntimeStore {
+@@ -1739,14 +1954,16 @@ export class HostRuntimeStore {
        >;
      },
    ): void {
@@ -1054,7 +1155,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
      } catch (error) {
        console.error("[HostRuntime] Failed to persist host registry", error);
      }
-@@ -2139,9 +2290,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
+@@ -2139,9 +2356,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
  export function useHosts(): HostProfile[] {
    const store = getHostRuntimeStore();
    return useSyncExternalStore(
@@ -1074,3 +1175,22 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38
    );
  }
  
+@@ -2154,6 +2378,18 @@ export function useHostRegistryStatus(): HostRegistryStatus {
+   );
+ }
+ 
++export function usePolarisHostSyncStatus(
++  serverId: string | null,
++  key: string | null,
++): PolarisHostSyncStatus {
++  const store = getHostRuntimeStore();
++  return useSyncExternalStore(
++    (onStoreChange) => store.subscribeHostList(onStoreChange),
++    () => (serverId && key ? store.getPolarisHostSyncStatus(serverId, key) : "settled"),
++    () => (serverId && key ? store.getPolarisHostSyncStatus(serverId, key) : "settled"),
++  );
++}
++
+ export interface HostMutations {
+   upsertDirectConnection: (input: {
+     serverId: string;

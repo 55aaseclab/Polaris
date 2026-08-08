@@ -1,31 +1,63 @@
 diff --git a/packages/app/src/app/h/[serverId]/_layout.tsx b/packages/app/src/app/h/[serverId]/_layout.tsx
-index 0fb551f..59513e0 100644
+index 0fb551f300cc3c2dc387c645e86e51d5772d6ee0..b35e857dfc4ed2a0cd0c75206992b19a304e0c17 100644
 --- a/packages/app/src/app/h/[serverId]/_layout.tsx
 +++ b/packages/app/src/app/h/[serverId]/_layout.tsx
-@@ -1,5 +1,6 @@
- import { Redirect, Stack, useLocalSearchParams } from "expo-router";
+@@ -1,8 +1,15 @@
+-import { Redirect, Stack, useLocalSearchParams } from "expo-router";
++import { Redirect, Stack, useGlobalSearchParams, useLocalSearchParams } from "expo-router";
  import { useHostRuntimeBootstrapState } from "@/app/_layout";
-+import { usePolarisAuthSession } from "@/lib/polaris-authing";
++import { buildPolarisHostSyncKey } from "@/lib/polaris-host-sync";
++import {
++  getPolarisAuthToken,
++  hasPolarisHostSession,
++  usePolarisAuthSession,
++} from "@/lib/polaris-authing";
  import { HostRouteProvider } from "@/navigation/host-route-context";
  import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
- import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
-@@ -20,12 +21,14 @@ function KnownHostRoute() {
+-import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
++import { useHostRegistryStatus, useHosts, usePolarisHostSyncStatus } from "@/runtime/host-runtime";
++import { StartupSplashScreen } from "@/screens/startup-splash-screen";
+ 
+ const HOST_STACK_SCREEN_OPTIONS = {
+   headerShown: false,
+@@ -20,18 +27,35 @@ function KnownHostRoute() {
    const hosts = useHosts();
    const hostRegistryStatus = useHostRegistryStatus();
    const bootstrapState = useHostRuntimeBootstrapState();
 +  const hasPolarisSession = usePolarisAuthSession();
    const routeServerId = typeof params.serverId === "string" ? params.serverId : null;
++  const globalParams = useGlobalSearchParams<{ scope?: string | string[] }>();
++  const routeScope =
++    typeof globalParams.scope === "string"
++      ? globalParams.scope.trim()
++      : (globalParams.scope?.[0]?.trim() ?? "");
++  const token = getPolarisAuthToken();
++  const syncKey = token
++    ? buildPolarisHostSyncKey({ token, serverId: routeServerId, scope: routeScope })
++    : null;
++  const polarisHostSyncStatus = usePolarisHostSyncStatus(routeServerId, syncKey);
    const startupRoute = resolveStartupRoute({
      route: { kind: "host", serverId: routeServerId },
      startupBlocker: bootstrapState.startupBlocker,
      hostRegistryStatus,
      hosts,
 +    hasPolarisSession,
++    polarisHostSyncStatus: hasPolarisHostSession() ? polarisHostSyncStatus : "settled",
    });
  
    if (startupRoute.kind === "redirect") {
+     return <Redirect href={startupRoute.href} />;
+   }
+ 
++  if (startupRoute.kind === "splash") {
++    return <StartupSplashScreen bootstrapState={bootstrapState} />;
++  }
++
+   const stack = (
+     <Stack screenOptions={HOST_STACK_SCREEN_OPTIONS}>
+       <Stack.Screen name="index" />
 diff --git a/packages/app/src/app/index.tsx b/packages/app/src/app/index.tsx
-index e0649f6..eeeeb71 100644
+index e0649f65a1c9e8c030319678e89aa8c237f7f405..eeeeb7112945684bba54394da0d48b4124da11e5 100644
 --- a/packages/app/src/app/index.tsx
 +++ b/packages/app/src/app/index.tsx
 @@ -13,11 +13,14 @@ import {
@@ -62,10 +94,9 @@ index e0649f6..eeeeb71 100644
    });
  
    if (startupRoute.kind === "redirect") {
-
 diff --git a/packages/app/src/lib/polaris-authing.test.ts b/packages/app/src/lib/polaris-authing.test.ts
 new file mode 100644
-index 0000000..be717df
+index 0000000000000000000000000000000000000000..be717df59ab29a118033fe892ed6721260dfbd51
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.test.ts
 @@ -0,0 +1,123 @@
@@ -194,7 +225,7 @@ index 0000000..be717df
 +});
 diff --git a/packages/app/src/lib/polaris-authing.ts b/packages/app/src/lib/polaris-authing.ts
 new file mode 100644
-index 0000000..2a918db
+index 0000000000000000000000000000000000000000..2a918db10e8337f2f5fcf59de6f4015d692f458a
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-authing.ts
 @@ -0,0 +1,57 @@
@@ -256,7 +287,7 @@ index 0000000..2a918db
 +  return "/welcome";
 +}
 diff --git a/packages/app/src/navigation/host-runtime-bootstrap.test.ts b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
-index 5d16ed0..b0cc22c 100644
+index 5d16ed09a6454a2cb0480c8f66e2f5b8461a6271..f8c48aed86f676f112a3cfe8067a85cad7ba8fd4 100644
 --- a/packages/app/src/navigation/host-runtime-bootstrap.test.ts
 +++ b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
 @@ -3,6 +3,8 @@ import {
@@ -285,7 +316,31 @@ index 5d16ed0..b0cc22c 100644
    it("keeps host routes mounted while the host registry is loading", () => {
      expect(
        resolveStartupRoute({
-@@ -357,6 +369,59 @@ describe("resolveStartupRoute", () => {
+@@ -339,6 +351,23 @@ describe("resolveStartupRoute", () => {
+     ).toEqual({ kind: "render" });
+   });
+ 
++  it("keeps an authenticated scoped host on the bootstrap surface while syncing", () => {
++    expect(
++      resolveStartupRoute({
++        ...baseHostInput,
++        hasPolarisSession: true,
++        polarisHostSyncStatus: "idle",
++      }),
++    ).toEqual({ kind: "splash" });
++    expect(
++      resolveStartupRoute({
++        ...baseHostInput,
++        hasPolarisSession: true,
++        polarisHostSyncStatus: "syncing",
++      }),
++    ).toEqual({ kind: "splash" });
++  });
++
+   it("sends removed host routes to a saved host instead of welcome", () => {
+     expect(
+       resolveStartupRoute({
+@@ -357,6 +386,59 @@ describe("resolveStartupRoute", () => {
        }),
      ).toEqual({ kind: "redirect", href: "/welcome" });
    });
@@ -346,7 +401,7 @@ index 5d16ed0..b0cc22c 100644
  
  describe("resolveHostIndexRoute", () => {
 diff --git a/packages/app/src/navigation/host-runtime-bootstrap.ts b/packages/app/src/navigation/host-runtime-bootstrap.ts
-index 77a8cfd..f46e2bc 100644
+index 77a8cfda6c5e41fb219a8fdd0cf3d7b53225e11c..733e265667347749cf03db45d0a2d70f5bc9483b 100644
 --- a/packages/app/src/navigation/host-runtime-bootstrap.ts
 +++ b/packages/app/src/navigation/host-runtime-bootstrap.ts
 @@ -61,6 +61,37 @@ export function startDaemonIfGateAllows(input: {
@@ -387,7 +442,15 @@ index 77a8cfd..f46e2bc 100644
  
  export type StartupBlocker =
    | { kind: "none" }
-@@ -130,6 +161,8 @@ interface ResolveStartupRouteBaseInput {
+@@ -113,6 +144,7 @@ export function shouldRunStartupGiveUpTimer(input: {
+ }
+ 
+ export type StartupRegistryStatus = "loading" | "ready";
++export type PolarisHostSyncStatus = "idle" | "syncing" | "settled";
+ 
+ export interface IndexStartupRouteTarget {
+   kind: "index";
+@@ -130,6 +162,8 @@ interface ResolveStartupRouteBaseInput {
    startupBlocker: StartupBlocker;
    hostRegistryStatus: StartupRegistryStatus;
    hosts: readonly { serverId: string }[];
@@ -396,7 +459,15 @@ index 77a8cfd..f46e2bc 100644
  }
  
  export interface ResolveIndexStartupRouteInput extends ResolveStartupRouteBaseInput {
-@@ -231,7 +264,10 @@ function resolveReadyIndexStartupRoute(input: ResolveIndexStartupRouteInput): St
+@@ -143,6 +177,7 @@ export interface ResolveIndexStartupRouteInput extends ResolveStartupRouteBaseIn
+ 
+ export interface ResolveHostStartupRouteInput extends ResolveStartupRouteBaseInput {
+   route: HostStartupRouteTarget;
++  polarisHostSyncStatus?: PolarisHostSyncStatus;
+ }
+ 
+ export type ResolveStartupRouteInput = ResolveIndexStartupRouteInput | ResolveHostStartupRouteInput;
+@@ -231,7 +266,10 @@ function resolveReadyIndexStartupRoute(input: ResolveIndexStartupRouteInput): St
    }
  
    if (input.hasGivenUpWaitingForHost) {
@@ -408,7 +479,20 @@ index 77a8cfd..f46e2bc 100644
    }
  
    return { kind: "splash" };
-@@ -247,7 +283,10 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
+@@ -242,12 +280,23 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
+     return { kind: "render" };
+   }
+ 
++  if (
++    input.hasPolarisSession &&
++    input.route.serverId &&
++    (input.polarisHostSyncStatus ?? "settled") !== "settled"
++  ) {
++    return { kind: "splash" };
++  }
++
+   const fallbackServerId = input.hosts[0]?.serverId ?? null;
+   if (fallbackServerId) {
      return { kind: "redirect", href: buildHostOpenProjectRoute(fallbackServerId) };
    }
  
@@ -422,7 +506,7 @@ index 77a8cfd..f46e2bc 100644
  function isHostStartupRouteInput(
 diff --git a/packages/polaris-auth-client/src/index.ts b/packages/polaris-auth-client/src/index.ts
 new file mode 100644
-index 0000000..004a704
+index 0000000000000000000000000000000000000000..004a704380fb191ab275717a852dd8b8d5d25ea5
 --- /dev/null
 +++ b/packages/polaris-auth-client/src/index.ts
 @@ -0,0 +1,146 @@

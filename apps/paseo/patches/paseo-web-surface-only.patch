@@ -1,5 +1,5 @@
 diff --git a/packages/app/src/components/left-sidebar.tsx b/packages/app/src/components/left-sidebar.tsx
-index 55675e0..cec5a25 100644
+index 55675e0969c53176653484638e5fdba88bd01040..0ebee12477a1981c0662382701ea38f14fa0d653 100644
 --- a/packages/app/src/components/left-sidebar.tsx
 +++ b/packages/app/src/components/left-sidebar.tsx
 @@ -66,8 +66,8 @@ import {
@@ -12,7 +12,39 @@ index 55675e0..cec5a25 100644
  } from "@/utils/host-routes";
  import type { ShortcutKey } from "@/utils/format-shortcut";
  import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
-@@ -250,12 +250,12 @@ export const LeftSidebar = memo(function LeftSidebar({
+@@ -92,6 +92,7 @@ interface SidebarSharedProps {
+   hostTriggerRef: RefObject<View | null>;
+   isHostPickerOpen: boolean;
+   setIsHostPickerOpen: Dispatch<SetStateAction<boolean>>;
++  hostPickerDisabled: boolean;
+   projects: SidebarProjectEntry[];
+   isInitialLoad: boolean;
+   isRevalidating: boolean;
+@@ -175,13 +176,18 @@ export const LeftSidebar = memo(function LeftSidebar({
+   else if (activeHostStatus === "connecting")
+     activeHostStatusColor = theme.colors.palette.amber[500];
+   else activeHostStatusColor = theme.colors.palette.red[500];
++  // A coding surface is bound to one vault, so only keep the active host visible here.
+   const hostOptions = useMemo(
+     () =>
+-      daemons.map((daemon) => ({
+-        id: daemon.serverId,
+-        label: daemon.label?.trim() || daemon.serverId,
+-      })),
+-    [daemons],
++      activeDaemon
++        ? [
++            {
++              id: activeDaemon.serverId,
++              label: activeDaemon.label?.trim() || activeDaemon.serverId,
++            },
++          ]
++        : [],
++    [activeDaemon],
+   );
+   const renderHostOption = useCallback(
+     ({
+@@ -250,12 +256,12 @@ export const LeftSidebar = memo(function LeftSidebar({
  
    const handleSettingsMobile = useCallback(() => {
      showMobileAgent();
@@ -29,8 +61,143 @@ index 55675e0..cec5a25 100644
  
    const handleHomeMobile = useCallback(() => {
      if (!activeServerId) return;
+@@ -302,6 +308,7 @@ export const LeftSidebar = memo(function LeftSidebar({
+     }),
+     [t],
+   );
++  const hostPickerDisabled = hostOptions.length <= 1;
+ 
+   const sharedProps = {
+     theme,
+@@ -312,6 +319,7 @@ export const LeftSidebar = memo(function LeftSidebar({
+     hostTriggerRef,
+     isHostPickerOpen,
+     setIsHostPickerOpen,
++    hostPickerDisabled,
+     projects,
+     isInitialLoad,
+     isRevalidating,
+@@ -361,7 +369,7 @@ export const LeftSidebar = memo(function LeftSidebar({
+ interface HostPickerTriggerProps {
+   triggerRef: React.Ref<View>;
+   setIsHostPickerOpen: Dispatch<SetStateAction<boolean>>;
+-  hostOptionsEmpty: boolean;
++  hostPickerDisabled: boolean;
+   hostStatusDotStyle: StyleProp<ViewStyle>;
+   activeHostLabel: string;
+ }
+@@ -369,7 +377,7 @@ interface HostPickerTriggerProps {
+ function HostPickerTrigger({
+   triggerRef,
+   setIsHostPickerOpen,
+-  hostOptionsEmpty,
++  hostPickerDisabled,
+   hostStatusDotStyle,
+   activeHostLabel,
+ }: HostPickerTriggerProps) {
+@@ -386,7 +394,7 @@ function HostPickerTrigger({
+       ref={triggerRef}
+       style={pressableStyle}
+       onPress={handlePress}
+-      disabled={hostOptionsEmpty}
++      disabled={hostPickerDisabled}
+     >
+       <View style={hostStatusDotStyle} />
+       <Text style={styles.hostTriggerText} numberOfLines={1}>
+@@ -496,6 +504,7 @@ function SidebarFooter({
+   hostTriggerRef,
+   isHostPickerOpen,
+   setIsHostPickerOpen,
++  hostPickerDisabled,
+   handleHostSelect,
+   renderHostOption,
+   handleOpenProject,
+@@ -511,6 +520,7 @@ function SidebarFooter({
+   hostTriggerRef: RefObject<View | null>;
+   isHostPickerOpen: boolean;
+   setIsHostPickerOpen: Dispatch<SetStateAction<boolean>>;
++  hostPickerDisabled: boolean;
+   handleHostSelect: (nextServerId: string) => void;
+   renderHostOption: SidebarSharedProps["renderHostOption"];
+   handleOpenProject: () => void;
+@@ -531,7 +541,7 @@ function SidebarFooter({
+         <HostPickerTrigger
+           triggerRef={hostTriggerRef}
+           setIsHostPickerOpen={setIsHostPickerOpen}
+-          hostOptionsEmpty={hostOptions.length === 0}
++          hostPickerDisabled={hostPickerDisabled}
+           hostStatusDotStyle={hostStatusDotStyle}
+           activeHostLabel={activeHostLabel}
+         />
+@@ -566,19 +576,21 @@ function SidebarFooter({
+           theme={theme}
+         />
+       </View>
+-      <Combobox
+-        options={hostOptions}
+-        value={activeServerId ?? ""}
+-        onSelect={handleHostSelect}
+-        renderOption={renderHostOption}
+-        searchable={false}
+-        title={labels.switchHost}
+-        searchPlaceholder={labels.searchHosts}
+-        desktopMinWidth={280}
+-        open={isHostPickerOpen}
+-        onOpenChange={setIsHostPickerOpen}
+-        anchorRef={hostTriggerRef}
+-      />
++      {hostOptions.length > 1 ? (
++        <Combobox
++          options={hostOptions}
++          value={activeServerId ?? ""}
++          onSelect={handleHostSelect}
++          renderOption={renderHostOption}
++          searchable={false}
++          title={labels.switchHost}
++          searchPlaceholder={labels.searchHosts}
++          desktopMinWidth={280}
++          open={isHostPickerOpen}
++          onOpenChange={setIsHostPickerOpen}
++          anchorRef={hostTriggerRef}
++        />
++      ) : null}
+     </View>
+   );
+ }
+@@ -592,6 +604,7 @@ function MobileSidebar({
+   hostTriggerRef,
+   isHostPickerOpen,
+   setIsHostPickerOpen,
++  hostPickerDisabled,
+   projects,
+   isInitialLoad,
+   isRevalidating,
+@@ -874,6 +887,7 @@ function MobileSidebar({
+               hostTriggerRef={hostTriggerRef}
+               isHostPickerOpen={isHostPickerOpen}
+               setIsHostPickerOpen={setIsHostPickerOpen}
++              hostPickerDisabled={hostPickerDisabled}
+               handleHostSelect={handleHostSelect}
+               renderHostOption={renderHostOption}
+               handleOpenProject={handleOpenProject}
+@@ -897,6 +911,7 @@ function DesktopSidebar({
+   hostTriggerRef,
+   isHostPickerOpen,
+   setIsHostPickerOpen,
++  hostPickerDisabled,
+   projects,
+   isInitialLoad,
+   isRevalidating,
+@@ -1036,6 +1051,7 @@ function DesktopSidebar({
+           hostTriggerRef={hostTriggerRef}
+           isHostPickerOpen={isHostPickerOpen}
+           setIsHostPickerOpen={setIsHostPickerOpen}
++          hostPickerDisabled={hostPickerDisabled}
+           handleHostSelect={handleHostSelect}
+           renderHostOption={renderHostOption}
+           handleOpenProject={handleOpenProject}
 diff --git a/packages/app/src/screens/open-project-screen.tsx b/packages/app/src/screens/open-project-screen.tsx
-index d1f240b..2f5e20b 100644
+index d1f240b6f8b34fc4f19d8fdf467019c7ecffa375..2f5e20b5ecb53f729832f450b2be7e4f2bdae421 100644
 --- a/packages/app/src/screens/open-project-screen.tsx
 +++ b/packages/app/src/screens/open-project-screen.tsx
 @@ -1,8 +1,8 @@
@@ -168,7 +335,7 @@ index d1f240b..2f5e20b 100644
      width: "100%",
 diff --git a/packages/app/src/screens/open-project-shell-transfer.test.ts b/packages/app/src/screens/open-project-shell-transfer.test.ts
 new file mode 100644
-index 0000000..fd64566
+index 0000000000000000000000000000000000000000..fd64566afb081eb13b14fbfd67b176fecaf16c45
 --- /dev/null
 +++ b/packages/app/src/screens/open-project-shell-transfer.test.ts
 @@ -0,0 +1,28 @@
@@ -202,7 +369,7 @@ index 0000000..fd64566
 +});
 diff --git a/packages/app/src/screens/open-project-shell-transfer.ts b/packages/app/src/screens/open-project-shell-transfer.ts
 new file mode 100644
-index 0000000..2abf24d
+index 0000000000000000000000000000000000000000..2abf24de24ae882fa03ff3f366c51b217bd2b0d6
 --- /dev/null
 +++ b/packages/app/src/screens/open-project-shell-transfer.ts
 @@ -0,0 +1,30 @@
@@ -237,7 +404,7 @@ index 0000000..2abf24d
 +  };
 +}
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
-index a290156..5a5a4fb 100644
+index a29015647220cf7f717692327abfe4c8515d8c61..7cf7f79e2a7f75882162e6aa7aeb41940902e749 100644
 --- a/packages/app/src/screens/settings-screen.tsx
 +++ b/packages/app/src/screens/settings-screen.tsx
 @@ -39,7 +39,6 @@ import {
@@ -271,7 +438,7 @@ index a290156..5a5a4fb 100644
  } from "@/utils/host-routes";
 +import { resolveSettingsExitHref } from "@/navigation/host-runtime-bootstrap";
  import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
-+import { usePolarisAuthSession } from "@/lib/polaris-authing";
++import { polarisShellWelcomeHref, usePolarisAuthSession } from "@/lib/polaris-authing";
  
  // ---------------------------------------------------------------------------
  // View model
@@ -607,7 +774,7 @@ index a290156..5a5a4fb 100644
 +
    const handleBackToRoot = useCallback(() => {
 +    if (!hasPolarisSession) {
-+      router.replace("/welcome");
++      window.location.replace(polarisShellWelcomeHref());
 +      return;
 +    }
      if (router.canGoBack()) {
@@ -623,7 +790,7 @@ index a290156..5a5a4fb 100644
    const handleBackToWorkspace = useCallback(() => {
 -    if (navigateToLastWorkspace()) {
 +    if (!hasPolarisSession) {
-+      router.replace("/welcome");
++      window.location.replace(polarisShellWelcomeHref());
        return;
      }
 -    if (anyOnlineServerId) {
@@ -720,7 +887,7 @@ index a290156..5a5a4fb 100644
    );
  }
 diff --git a/packages/app/src/utils/host-routes.test.ts b/packages/app/src/utils/host-routes.test.ts
-index c053bae..3a151ac 100644
+index c053bae1ac0881de06606449af6e51078d7609c8..3a151ac2f5eede5e49ca31e3aa58c251aab2c208 100644
 --- a/packages/app/src/utils/host-routes.test.ts
 +++ b/packages/app/src/utils/host-routes.test.ts
 @@ -7,6 +7,8 @@ import {
@@ -759,7 +926,7 @@ index c053bae..3a151ac 100644
    it("keeps current host settings sections", () => {
      expect(normalizeHostSectionSlug("connections")).toBe("connections");
 diff --git a/packages/app/src/utils/host-routes.ts b/packages/app/src/utils/host-routes.ts
-index ad1a36b..329f8c7 100644
+index ad1a36bbacfaceaa51d49e1901dd855ff9e11dd3..329f8c77d4264be91ce2c2a30340c03983a6fc6b 100644
 --- a/packages/app/src/utils/host-routes.ts
 +++ b/packages/app/src/utils/host-routes.ts
 @@ -464,6 +464,11 @@ export function buildSettingsHostSectionRoute(serverId: string, section: HostSec
