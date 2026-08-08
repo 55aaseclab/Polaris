@@ -5,6 +5,7 @@ set -euo pipefail
 POLARIS_PASEO_WEB_BASE_URL="${POLARIS_PASEO_WEB_BASE_URL:-}"
 POLARIS_PASEO_BUILDER_NAME="${POLARIS_PASEO_BUILDER_NAME:-polaris-builder}"
 POLARIS_PASEO_SOURCE_REF="${POLARIS_PASEO_SOURCE_REF:-v0.1.101}"
+POLARIS_PASEO_BUILD_TIMEOUT_SECONDS="${POLARIS_PASEO_BUILD_TIMEOUT_SECONDS:-600}"
 BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 export BUILDKIT_PROGRESS
 
@@ -55,6 +56,38 @@ paseo_local_ensure_builder() {
     --name "${POLARIS_PASEO_BUILDER_NAME}" \
     --driver docker-container \
     --bootstrap >/dev/null
+}
+
+paseo_local_recreate_builder() {
+  docker buildx rm --force "${POLARIS_PASEO_BUILDER_NAME}" >/dev/null 2>&1 || true
+  docker buildx create \
+    --name "${POLARIS_PASEO_BUILDER_NAME}" \
+    --driver docker-container \
+    --bootstrap >/dev/null
+}
+
+paseo_local_buildx_export() {
+  local cache_dir="$1"
+  shift
+  local -a build_args=(
+    --progress plain
+    --builder "${POLARIS_PASEO_BUILDER_NAME}"
+    "$@"
+  )
+
+  if [ -d "${cache_dir}" ]; then
+    build_args=(--cache-from "type=local,src=${cache_dir}" "${build_args[@]}")
+  fi
+
+  if timeout --foreground --kill-after=30s "${POLARIS_PASEO_BUILD_TIMEOUT_SECONDS}s" \
+    docker buildx build "${build_args[@]}"; then
+    return 0
+  fi
+
+  printf 'Paseo BuildKit export failed or timed out; recreating builder and retrying once.\n' >&2
+  paseo_local_recreate_builder
+  timeout --foreground --kill-after=30s "${POLARIS_PASEO_BUILD_TIMEOUT_SECONDS}s" \
+    docker buildx build "${build_args[@]}"
 }
 
 paseo_local_buildx_with_local_cache() {
@@ -139,28 +172,13 @@ paseo_local_build_dist() {
   # cache state. Reuse any existing cache for reads, but skip cache writes so
   # deploy and local artifact builds complete reliably.
   paseo_local_ensure_builder
-  if [ -d "${cache_dir}" ]; then
-    docker buildx build \
-      --progress plain \
-      --cache-from "type=local,src=${cache_dir}" \
-      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-      --file apps/paseo/Dockerfile.artifact \
-      --target artifact-export \
-      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
-      --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
-      --output "type=local,dest=${tmp_dir}" \
-      .
-  else
-    docker buildx build \
-      --progress plain \
-      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-      --file apps/paseo/Dockerfile.artifact \
-      --target artifact-export \
-      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
-      --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
-      --output "type=local,dest=${tmp_dir}" \
-      .
-  fi
+  paseo_local_buildx_export "${cache_dir}" \
+    --file apps/paseo/Dockerfile.artifact \
+    --target artifact-export \
+    --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
+    --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
+    --output "type=local,dest=${tmp_dir}" \
+    .
 
   rm -rf "${dist_dir}"
   mkdir -p "${dist_dir}"
@@ -190,31 +208,16 @@ paseo_local_build_tool_bundle() {
 
   tmp_dir="$(mktemp -d "${runtime_root}/bundle.XXXXXX")"
   trap 'rm -rf "${tmp_dir}"' RETURN
-  paseo_local_ensure_builder
-
   # The local cache exporter can hang indefinitely for the tool bundle build
   # while exporting the client directory. Reuse the existing cache for reads,
   # but skip cache writes here so deploys stay reliable.
-  if [ -d "${cache_dir}" ]; then
-    docker buildx build \
-      --progress plain \
-      --cache-from "type=local,src=${cache_dir}" \
-      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-      --file apps/paseo/Dockerfile.tool-bundle \
-      --target bundle-export \
-      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
-      --output "type=local,dest=${tmp_dir}" \
-      .
-  else
-    docker buildx build \
-      --progress plain \
-      --builder "${POLARIS_PASEO_BUILDER_NAME}" \
-      --file apps/paseo/Dockerfile.tool-bundle \
-      --target bundle-export \
-      --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
-      --output "type=local,dest=${tmp_dir}" \
-      .
-  fi
+  paseo_local_ensure_builder
+  paseo_local_buildx_export "${cache_dir}" \
+    --file apps/paseo/Dockerfile.tool-bundle \
+    --target bundle-export \
+    --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
+    --output "type=local,dest=${tmp_dir}" \
+    .
 
   rm -rf "${bundle_dir}"
   mkdir -p "${bundle_dir}"

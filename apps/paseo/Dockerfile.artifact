@@ -17,7 +17,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /opt/paseo
 
 COPY apps/paseo/source ./
-COPY apps/paseo/rewrite-export-base-url.mjs /tmp/rewrite-paseo-base-url.mjs
 COPY apps/paseo/patches/paseo-web-authing-package.patch /tmp/paseo-authing-package.patch
 
 RUN git reset --hard -q "${PASEO_SOURCE_REF}" \
@@ -33,6 +32,8 @@ COPY apps/paseo/patches /tmp/paseo-patches
 
 RUN git apply --3way /tmp/paseo-patches/paseo-web-authing-core.patch /tmp/paseo-patches/paseo-web-polaris-branding.patch /tmp/paseo-patches/paseo-web-settings-auth-visibility.patch /tmp/paseo-patches/paseo-web-host-account-isolation.patch /tmp/paseo-patches/paseo-web-embed-mode.patch /tmp/paseo-patches/paseo-web-auth-disabled-clean.patch /tmp/paseo-patches/paseo-web-surface-only.patch \
   && rm -rf .git
+
+COPY apps/paseo/rewrite-export-base-url.mjs /tmp/rewrite-paseo-base-url.mjs
 
 ENV PASEO_WEB_BASE_URL=${PASEO_WEB_BASE_URL}
 

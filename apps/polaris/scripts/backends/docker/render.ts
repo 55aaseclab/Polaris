@@ -587,8 +587,6 @@ ${bootstrap.split("\n").map((line) => `        ${line}`).join("\n")}
     mem_limit: ${q(resourceLimits.memory)}
     memswap_limit: ${q(resourceLimits.memory)}
     pids_limit: ${resourceLimits.pidLimit}
-    storage_opt:
-      size: ${q(resourceLimits.ephemeralStorage)}
     environment:
 ${environmentLines}
     extra_hosts:
