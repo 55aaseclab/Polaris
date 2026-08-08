@@ -467,10 +467,10 @@ index 0000000000000000000000000000000000000000..a9c2149dd36bf7fd3db841442f0c3e21
 +}
 diff --git a/packages/app/src/runtime/host-runtime-auth.test.ts b/packages/app/src/runtime/host-runtime-auth.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8866aaee7a665153219c6c9b298e1ea8baaf383d
+index 0000000000000000000000000000000000000000..40f6c71ee56b73fc44c1dcc54008eff78a173065
 --- /dev/null
 +++ b/packages/app/src/runtime/host-runtime-auth.test.ts
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,304 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import type { HostProfile } from "@/types/host-connection";
 +
@@ -560,6 +560,18 @@ index 0000000000000000000000000000000000000000..8866aaee7a665153219c6c9b298e1ea8
 +  it("keeps the same host list reference for authenticated users", () => {
 +    const hosts = [makeHost()];
 +    expect(filterHostsForPolarisSession(hosts, true)).toBe(hosts);
++  });
++
++  it("filters an authenticated registry to the serverId in the web URL", () => {
++    const currentHost = { ...makeHost(), serverId: "srv_current" };
++    const otherHost = { ...makeHost(), serverId: "srv_other" };
++    expect(
++      filterHostsForPolarisSession(
++        [currentHost, otherHost],
++        true,
++        "srv_current",
++      ),
++    ).toEqual([currentHost]);
 +  });
 +
 +  it("never loads a previous user's scoped or legacy Host registry", async () => {
@@ -839,7 +851,7 @@ index 6f9468966292c5a4fadc8cc0409ac83f35778620..8a3f7db1b39aaf95d4a8d479d60a2195
      const host = makeHost({
        connections: [
 diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
-index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8d150f17f 100644
+index 672642fdbd769fe29b2fb60ac249c43600eb03ef..4bba306023acd48133e70ccfdd18e6c18c014794 100644
 --- a/packages/app/src/runtime/host-runtime.ts
 +++ b/packages/app/src/runtime/host-runtime.ts
 @@ -44,9 +44,16 @@ import {
@@ -859,7 +871,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
  
  export type ActiveConnection =
    | { type: "directTcp"; endpoint: string; display: string }
-@@ -138,6 +145,19 @@ export interface HostRuntimeControllerDeps {
+@@ -138,6 +145,34 @@ export interface HostRuntimeControllerDeps {
    getClientId: () => Promise<string>;
  }
  
@@ -870,16 +882,31 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
 +export function filterHostsForPolarisSession(
 +  hosts: HostProfile[],
 +  hasPolarisSession: boolean,
++  activeServerId?: string | null,
 +): HostProfile[] {
-+  // Preserve the store reference when authenticated so subscribers only
-+  // re-render when the host list itself changes.
-+  return hasPolarisSession ? hosts : EMPTY_POLARIS_HOSTS;
++  if (!hasPolarisSession) {
++    return EMPTY_POLARIS_HOSTS;
++  }
++  const scopedServerId = activeServerId?.trim() ?? "";
++  if (!scopedServerId) {
++    // Preserve the store reference when authenticated so subscribers only
++    // re-render when the host list itself changes.
++    return hosts;
++  }
++  return hosts.filter((host) => host.serverId === scopedServerId);
++}
++
++interface VisibleHostsSnapshot {
++  source: HostProfile[];
++  hasPolarisSession: boolean;
++  activeServerId: string | null;
++  value: HostProfile[];
 +}
 +
  export interface HostRuntimeStartOptions {
    autoProbe?: boolean;
    initialConnection?: {
-@@ -1270,10 +1290,111 @@ export class HostRuntimeController {
+@@ -1270,10 +1305,123 @@ export class HostRuntimeController {
  }
  
  const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
@@ -906,7 +933,19 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
 +    return null;
 +  }
 +  try {
-+    return parseServerIdFromPathname(new URL(window.location.href).pathname);
++    const pathname = new URL(window.location.href).pathname;
++    const directServerId = parseServerIdFromPathname(pathname);
++    if (directServerId) {
++      return directServerId;
++    }
++    const paseoBaseServerId = parseServerIdFromPathname(
++      pathname.replace(/^\/paseo(?=\/)/, ""),
++    );
++    if (paseoBaseServerId) {
++      return paseoBaseServerId;
++    }
++    const shellMatch = pathname.match(/^\/v\/([^/]+)\/coding(?:\/|$)/);
++    return shellMatch?.[1] ? decodeURIComponent(shellMatch[1]) : null;
 +  } catch {
 +    return parseServerIdFromPathname((window.location as { pathname?: string }).pathname ?? "/");
 +  }
@@ -991,10 +1030,11 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
  function readConfiguredLocalDaemonOverride(): string | null {
    const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
    return value && value.length > 0 ? value : null;
-@@ -1314,6 +1435,10 @@ export class HostRuntimeStore {
+@@ -1314,6 +1462,11 @@ export class HostRuntimeStore {
    private agentDirectoryBootstrapInFlight = new Map<string, Promise<void>>();
    private configuredOverrideBootstrapInFlight: Promise<void> | null = null;
    private bootStarted = false;
++  private visibleHostsSnapshot: VisibleHostsSnapshot | null = null;
 +  private polarisHostSyncStatusByServerId = new Map<
 +    string,
 +    { key: string; status: Exclude<PolarisHostSyncStatus, "idle"> }
@@ -1002,7 +1042,36 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
  
    constructor(input?: { deps?: HostRuntimeControllerDeps }) {
      this.deps = input?.deps ?? createDefaultDeps();
-@@ -1369,14 +1494,28 @@ export class HostRuntimeStore {
+@@ -1325,6 +1478,28 @@ export class HostRuntimeStore {
+     return this.hosts;
+   }
+ 
++  getVisibleHosts(): HostProfile[] {
++    const hasPolarisSession = hasPolarisHostSession();
++    const activeServerId = readWebRegistryServerIdFromLocation();
++    const cached = this.visibleHostsSnapshot;
++    if (
++      cached &&
++      cached.source === this.hosts &&
++      cached.hasPolarisSession === hasPolarisSession &&
++      cached.activeServerId === activeServerId
++    ) {
++      return cached.value;
++    }
++    const value = filterHostsForPolarisSession(this.hosts, hasPolarisSession, activeServerId);
++    this.visibleHostsSnapshot = {
++      source: this.hosts,
++      hasPolarisSession,
++      activeServerId,
++      value,
++    };
++    return value;
++  }
++
+   getHostRegistryStatus(): HostRegistryStatus {
+     return this.hostRegistryStatus;
+   }
+@@ -1369,14 +1544,28 @@ export class HostRuntimeStore {
      if (override) {
        this.bootstrapConfiguredOverride(override);
      } else {
@@ -1032,7 +1101,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
        if (!stored) {
          return;
        }
-@@ -1388,9 +1527,14 @@ export class HostRuntimeStore {
+@@ -1388,9 +1577,15 @@ export class HostRuntimeStore {
          .map((entry) => normalizeStoredHostProfile(entry))
          .filter((entry): entry is HostProfile => entry !== null);
        const profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
@@ -1041,6 +1110,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
 -      if (profiles.length !== normalizedProfiles.length) {
 +      const prunedProfiles = pruneHostsToActiveBrowserVault(profiles);
 +      this.hosts = prunedProfiles;
++      this.visibleHostsSnapshot = null;
 +      this.syncHosts(prunedProfiles);
 +      if (
 +        prunedProfiles.length !== profiles.length ||
@@ -1050,7 +1120,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
          shouldPersistHosts = true;
        }
      } catch (error) {
-@@ -1674,6 +1818,73 @@ export class HostRuntimeStore {
+@@ -1674,6 +1869,73 @@ export class HostRuntimeStore {
      await this.persistHosts();
    }
  
@@ -1124,7 +1194,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
    async removeConnection(serverId: string, connectionId: string): Promise<void> {
      const now = new Date().toISOString();
      const next = this.hosts
-@@ -1705,6 +1916,10 @@ export class HostRuntimeStore {
+@@ -1705,6 +1967,10 @@ export class HostRuntimeStore {
      connection: HostConnection;
      existingClient?: DaemonClient;
    }): Promise<HostProfile> {
@@ -1135,7 +1205,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
      const now = new Date().toISOString();
      const next = upsertHostConnectionInProfiles({
        profiles: this.hosts,
-@@ -1739,14 +1954,16 @@ export class HostRuntimeStore {
+@@ -1739,14 +2005,17 @@ export class HostRuntimeStore {
        >;
      },
    ): void {
@@ -1143,6 +1213,7 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
 -    this.syncHosts(hosts, options);
 +    const scopedHosts = pruneHostsToActiveBrowserVault(hosts);
 +    this.hosts = scopedHosts;
++    this.visibleHostsSnapshot = null;
 +    this.syncHosts(scopedHosts, options);
      this.emitHostList();
    }
@@ -1155,7 +1226,35 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
      } catch (error) {
        console.error("[HostRuntime] Failed to persist host registry", error);
      }
-@@ -2139,9 +2356,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
+@@ -1768,7 +2037,8 @@ export class HostRuntimeStore {
+       >;
+     },
+   ): void {
+-    const nextIds = new Set(hosts.map((host) => host.serverId));
++    const scopedHosts = pruneHostsToActiveBrowserVault(hosts);
++    const nextIds = new Set(scopedHosts.map((host) => host.serverId));
+     for (const [serverId, controller] of this.controllers) {
+       if (nextIds.has(serverId)) {
+         continue;
+@@ -1780,7 +2050,7 @@ export class HostRuntimeStore {
+       this.emit(serverId);
+     }
+ 
+-    for (const host of hosts) {
++    for (const host of scopedHosts) {
+       const initialConnection = options?.initialConnectionByServerId?.get(host.serverId);
+       const existing = this.controllers.get(host.serverId);
+       if (existing) {
+@@ -1917,7 +2187,7 @@ export class HostRuntimeStore {
+   getEarliestOnlineHostServerId(): string | null {
+     let earliestServerId: string | null = null;
+     let earliestOnlineAt: string | null = null;
+-    for (const host of this.hosts) {
++    for (const host of this.getVisibleHosts()) {
+       const snapshot = this.getSnapshot(host.serverId);
+       if (!isHostRuntimeConnected(snapshot) || !snapshot?.lastOnlineAt) continue;
+       if (!earliestOnlineAt || snapshot.lastOnlineAt < earliestOnlineAt) {
+@@ -2139,9 +2409,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
  export function useHosts(): HostProfile[] {
    const store = getHostRuntimeStore();
    return useSyncExternalStore(
@@ -1170,12 +1269,12 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
 +        unsubscribeAuth();
 +      };
 +    },
-+    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
-+    () => filterHostsForPolarisSession(store.getHosts(), hasPolarisHostSession()),
++    () => store.getVisibleHosts(),
++    () => store.getVisibleHosts(),
    );
  }
  
-@@ -2154,6 +2378,18 @@ export function useHostRegistryStatus(): HostRegistryStatus {
+@@ -2154,6 +2431,18 @@ export function useHostRegistryStatus(): HostRegistryStatus {
    );
  }
  
@@ -1194,3 +1293,41 @@ index 672642fdbd769fe29b2fb60ac249c43600eb03ef..459026cff5e2cb50502391cc8b1884d8
  export interface HostMutations {
    upsertDirectConnection: (input: {
      serverId: string;
+diff --git a/packages/app/src/utils/active-host.test.ts b/packages/app/src/utils/active-host.test.ts
+index b791f6e74be39f82130ba3650818156f76618b7e..642987cbc60e77ffc3a70e686e92f86fb5bbf6be 100644
+--- a/packages/app/src/utils/active-host.test.ts
++++ b/packages/app/src/utils/active-host.test.ts
+@@ -24,13 +24,13 @@ describe("resolveActiveHost", () => {
+     ).toBe("srv-2");
+   });
+ 
+-  it("falls back to the first host when the route host is missing", () => {
++  it("does not fall back to another host when the scoped route host is missing", () => {
+     expect(
+       resolveActiveHost({
+         hosts: [host("srv-1"), host("srv-2")],
+         pathname: "/h/missing/workspace/ws-main",
+-      })?.serverId,
+-    ).toBe("srv-1");
++      }),
++    ).toBeNull();
+   });
+ 
+   it("returns null when no hosts exist", () => {
+diff --git a/packages/app/src/utils/active-host.ts b/packages/app/src/utils/active-host.ts
+index 9662d904805dec862eb4f3dfee02b5d3a3572220..5a0c309e992f4caaa52a413c3e0b9047fec429e8 100644
+--- a/packages/app/src/utils/active-host.ts
++++ b/packages/app/src/utils/active-host.ts
+@@ -11,9 +11,9 @@ export function resolveActiveHost({
+   const serverIdFromPath = parseServerIdFromPathname(pathname);
+   if (serverIdFromPath) {
+     const routeMatch = hosts.find((host) => host.serverId === serverIdFromPath);
+-    if (routeMatch) {
+-      return routeMatch;
+-    }
++    // A host surface is owned by the server ID in its URL. Never fall back to
++    // another registry entry while that scoped host is still bootstrapping.
++    return routeMatch ?? null;
+   }
+ 
+   return hosts[0] ?? null;

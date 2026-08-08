@@ -287,7 +287,7 @@ index 0000000000000000000000000000000000000000..2a918db10e8337f2f5fcf59de6f4015d
 +  return "/welcome";
 +}
 diff --git a/packages/app/src/navigation/host-runtime-bootstrap.test.ts b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
-index 5d16ed09a6454a2cb0480c8f66e2f5b8461a6271..f8c48aed86f676f112a3cfe8067a85cad7ba8fd4 100644
+index 5d16ed09a6454a2cb0480c8f66e2f5b8461a6271..143cbb84a7f27656bf8f5a204526b5005e513d41 100644
 --- a/packages/app/src/navigation/host-runtime-bootstrap.test.ts
 +++ b/packages/app/src/navigation/host-runtime-bootstrap.test.ts
 @@ -3,6 +3,8 @@ import {
@@ -340,7 +340,26 @@ index 5d16ed09a6454a2cb0480c8f66e2f5b8461a6271..f8c48aed86f676f112a3cfe8067a85ca
    it("sends removed host routes to a saved host instead of welcome", () => {
      expect(
        resolveStartupRoute({
-@@ -357,6 +386,59 @@ describe("resolveStartupRoute", () => {
+@@ -349,6 +378,18 @@ describe("resolveStartupRoute", () => {
+     ).toEqual({ kind: "redirect", href: "/h/server-next/open-project" });
+   });
+ 
++  it("does not redirect an authenticated scoped route to another host", () => {
++    expect(
++      resolveStartupRoute({
++        ...baseHostInput,
++        route: { kind: "host", serverId: "server-removed" },
++        hosts: [{ serverId: "server-next" }],
++        hasPolarisSession: true,
++        polarisHostSyncStatus: "settled",
++      }),
++    ).toEqual({ kind: "redirect", href: "/settings" });
++  });
++
+   it("shows welcome from a host route only after the registry proves no hosts exist", () => {
+     expect(
+       resolveStartupRoute({
+@@ -357,6 +398,59 @@ describe("resolveStartupRoute", () => {
        }),
      ).toEqual({ kind: "redirect", href: "/welcome" });
    });
@@ -401,7 +420,7 @@ index 5d16ed09a6454a2cb0480c8f66e2f5b8461a6271..f8c48aed86f676f112a3cfe8067a85ca
  
  describe("resolveHostIndexRoute", () => {
 diff --git a/packages/app/src/navigation/host-runtime-bootstrap.ts b/packages/app/src/navigation/host-runtime-bootstrap.ts
-index 77a8cfda6c5e41fb219a8fdd0cf3d7b53225e11c..733e265667347749cf03db45d0a2d70f5bc9483b 100644
+index 77a8cfda6c5e41fb219a8fdd0cf3d7b53225e11c..2b2e2a5f6f22a681b26ff069c3b885e3e551a24b 100644
 --- a/packages/app/src/navigation/host-runtime-bootstrap.ts
 +++ b/packages/app/src/navigation/host-runtime-bootstrap.ts
 @@ -61,6 +61,37 @@ export function startDaemonIfGateAllows(input: {
@@ -479,7 +498,7 @@ index 77a8cfda6c5e41fb219a8fdd0cf3d7b53225e11c..733e265667347749cf03db45d0a2d70f
    }
  
    return { kind: "splash" };
-@@ -242,12 +280,23 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
+@@ -242,12 +280,29 @@ function resolveReadyHostStartupRoute(input: ResolveHostStartupRouteInput): Star
      return { kind: "render" };
    }
  
@@ -489,6 +508,12 @@ index 77a8cfda6c5e41fb219a8fdd0cf3d7b53225e11c..733e265667347749cf03db45d0a2d70f
 +    (input.polarisHostSyncStatus ?? "settled") !== "settled"
 +  ) {
 +    return { kind: "splash" };
++  }
++
++  // A scoped Polaris route must never jump to the first unrelated registry
++  // entry. The URL serverId is the only valid host identity for this surface.
++  if (input.hasPolarisSession && input.route.serverId) {
++    return { kind: "redirect", href: SETTINGS_ROUTE };
 +  }
 +
    const fallbackServerId = input.hosts[0]?.serverId ?? null;
