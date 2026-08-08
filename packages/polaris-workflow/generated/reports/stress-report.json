@@ -1,0 +1,11 @@
+{
+  "at": "2026-08-08T08:22:36.375Z",
+  "total": 1000,
+  "pass": 1000,
+  "fail": 0,
+  "passRate": 1,
+  "totalMs": 349,
+  "avgMs": 0.35,
+  "topErrors": [],
+  "failures": []
+}

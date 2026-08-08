@@ -1,0 +1,154 @@
+// ============================================================
+// 目标态素描（Vision）— 设计高度示意，非全部已被 parser 实现
+// 认知：意义 / 计算 / FFI 三世界；Tool = port，不是 step 字段
+// 详见 docs/DESIGN.md
+// ============================================================
+
+domain VisionKernel version "0.3"
+title "内核素描"
+description "业务包无关的语言表面：entity · port · flow · uses/out · call"
+
+// ── ① 意义世界 ─────────────────────────────────────────────
+
+enum OrderStatus { Draft, Created, Shipped, Paid }
+
+entity Order {
+  id       : ID
+  customer : String
+  sku      : String
+  qty      : Number
+  amount   : Money
+  status   : OrderStatus
+}
+
+// ── ③ 外界世界：FFI 端口（只声明契约，不写可执行路径）────────
+// Host binding 在语言外：mock | exec | http | in-process
+
+port ReserveStock {
+  in  { sku: String, qty: Number }
+  out { reservationId: String }
+  effect ffi
+}
+
+port DispatchCarrier {
+  in  { orderId: ID, warehouse: String, trackingNo: String }
+  out { shipmentId: String }
+  effect ffi
+}
+
+port CapturePayment {
+  in  { orderId: ID, amount: Money, method: String }
+  out { paymentId: String }
+  effect ffi
+}
+
+// ── ② 计算 + ① 事务：flow ───────────────────────────────────
+
+flow CreateOrder title "创建订单" on Order {
+  create
+  needs { ReserveStock }   // 能力：未绑定则拒绝加载（目标态）
+
+  input {
+    customer : String required label "客户"
+    sku      : String required label "SKU"
+    qty      : Number required min 1 label "数量"
+    amount   : Money  required label "金额"
+  }
+
+  require { true }
+
+  steps {
+    // 纯计算：无 call
+    validate "校验" {
+      uses { sku, qty, amount }
+      output { ok : Boolean }
+    }
+
+    // 效应：只 call 端口名 —— Tool 在此结束为 FFI
+    reserve "预留库存" {
+      uses { sku, qty }
+      call ReserveStock
+      output { reservationId : String }
+    }
+
+    write "写入订单" {
+      uses { customer, sku, qty, amount, reservationId }
+      output { orderId : ID }
+    }
+  }
+
+  output {
+    orderId        : ID     from orderId
+    reservationId  : String from reservationId
+    status         : OrderStatus from record.status
+  }
+
+  transition status -> Created
+  emit OrderCreated
+
+  ui {
+    layout form
+    primary "提交"
+  }
+}
+
+flow ShipOrder title "发货" on Order {
+  needs { DispatchCarrier }
+
+  input {
+    recordId   : String required label "订单"
+    warehouse  : String required
+    trackingNo : String required
+  }
+
+  require { status == Created }
+
+  steps {
+    dispatch "叫承运商" {
+      uses { recordId, warehouse, trackingNo }
+      call DispatchCarrier
+      output { shipmentId : String }
+    }
+  }
+
+  output {
+    shipmentId : String from shipmentId
+    status     : OrderStatus from record.status
+  }
+
+  transition status -> Shipped
+  emit OrderShipped
+}
+
+flow RemitPayment title "汇款" on Order {
+  needs { CapturePayment }
+
+  input {
+    recordId   : String required
+    method     : String required
+    paidAmount : Money  required
+  }
+
+  require { status in [Created, Shipped] }
+
+  steps {
+    capture "登记收款" {
+      uses { recordId, paidAmount, method }
+      call CapturePayment
+      output { paymentId : String }
+    }
+  }
+
+  output {
+    paymentId : String from paymentId
+    status    : OrderStatus from record.status
+  }
+
+  transition status -> Paid
+  emit PaymentReceived
+}
+
+// ── 编排糖（可选，展开为 flow 间 output→input 接线）──────────
+// pipeline SalesFulfillment {
+//   CreateOrder -> ShipOrder -> RemitPayment
+// }

@@ -1,0 +1,30 @@
+{
+  "name": "polaris-workflow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "examples", "docs"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --incremental false",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "gen:packs": "tsx scripts/generate-domain-packs.mts",
+    "stress:packs": "tsx scripts/stress-domain-packs.mts",
+    "gen:adv": "tsx scripts/generate-adversarial-packs.mts",
+    "stress:adv": "tsx scripts/stress-adversarial.mts",
+    "stress:all": "tsx scripts/generate-domain-packs.mts 1000 && tsx scripts/stress-domain-packs.mts && tsx scripts/generate-adversarial-packs.mts && tsx scripts/stress-adversarial.mts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "tsx": "^4.23.10",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,343 @@
+// ============================================================
+// 通用业务 DSL · 业务包示例：ERP 操作流程全景
+// 语言内核：domain / module / entity / enum / flow
+// 本文件只是「恰好」用 ERP 流程演示，不是 ERP 专用语言
+// 对照：需求计划→采购→生产准备→生产执行→质量→库存→分析
+// ============================================================
+
+domain ErpOps version "0.1"
+title "ERP操作流程全景"
+description "数字化驱动·流程化管控·数据化运营 — 通用 DSL 描述的业务包"
+
+// ---------- 01 需求与计划 ----------
+module DemandPlan code "01" title "需求与计划" {
+  description "销售接单、需求预测、生产计划"
+  outputs { "计划订单", "物料需求计划", "产能计划" }
+
+  enum OrderStatus {
+    Draft, Accepted, Planned, Closed
+  }
+
+  entity SalesOrder {
+    id       : ID
+    customer : String
+    sku      : String
+    qty      : Number
+    amount   : Money
+    status   : OrderStatus
+  }
+
+  // 客户订单 → 需求分析 的可执行切片
+  flow AcceptOrder title "销售接单" on SalesOrder {
+    create
+    description "客户订单录入，生成销售订单"
+    input {
+      customer : String required label "客户" placeholder "华东整机厂"
+      sku      : String required label "物料/SKU" placeholder "FG-2001"
+      qty      : Number required min 1 label "数量"
+      amount   : Money  required min 0 label "金额"
+    }
+    require { true }
+    steps {
+      capture_demand   "登记客户需求"
+      check_credit     "信用与交期初审"
+      write_sales_order "写入销售订单"
+    }
+    transition status -> Accepted
+    emit SalesOrderAccepted
+    ui {
+      layout form
+      primary "确认接单"
+      icon "plus-circle"
+    }
+  }
+
+  flow MakeProductionPlan title "编制生产计划" on SalesOrder {
+    description "需求分析 → 生产计划"
+    input {
+      recordId : String required label "销售订单"
+      plant    : String required label "工厂" placeholder "SH-Plant"
+      week     : String required label "计划周" placeholder "2026-W32"
+    }
+    require { status == Accepted }
+    steps {
+      analyze_demand "需求分析"
+      balance_capacity "产能平衡"
+      issue_plan "下发生产计划"
+    }
+    transition status -> Planned
+    emit ProductionPlanIssued
+    ui {
+      layout form
+      primary "下发计划"
+      icon "workflow"
+    }
+  }
+}
+
+// ---------- 02 物料与采购 ----------
+module Procurement code "02" title "物料与采购" {
+  description "采购申请、供应商、到货入库"
+  outputs { "采购订单", "到货单", "入库单" }
+
+  enum PurchaseStatus {
+    Draft, Ordered, Received, Stocked
+  }
+
+  entity PurchaseOrder {
+    id         : ID
+    material   : String
+    qty        : Number
+    supplier   : String
+    status     : PurchaseStatus
+  }
+
+  flow CreatePurchaseOrder title "采购申请→采购订单" on PurchaseOrder {
+    create
+    description "采购申请转采购订单"
+    input {
+      material : String required label "物料" placeholder "RM-铝材-6061"
+      qty      : Number required min 1 label "数量"
+      supplier : String required label "供应商" placeholder "苏南金属"
+    }
+    require { true }
+    steps {
+      raise_pr "采购申请"
+      select_supplier "选定供应商"
+      place_po "生成采购订单"
+    }
+    transition status -> Ordered
+    emit PurchaseOrderPlaced
+    ui {
+      layout form
+      primary "下达采购"
+      icon "plus-circle"
+    }
+  }
+
+  flow ReceiveGoods title "到货验收→入库" on PurchaseOrder {
+    input {
+      recordId : String required label "采购订单"
+      receivedQty : Number required min 1 label "实收数量"
+      warehouse : String required label "仓库" placeholder "RM-WH-01"
+    }
+    require { status == Ordered }
+    steps {
+      inspect_incoming "到货验收"
+      put_away "办理入库"
+    }
+    transition status -> Stocked
+    emit GoodsReceived
+    ui {
+      layout form
+      primary "确认入库"
+      icon "workflow"
+    }
+  }
+}
+
+// ---------- 03 生产准备 ----------
+module ProdPrep code "03" title "生产准备" {
+  description "BOM、工艺路线、生产排程、工单下达"
+  outputs { "生产工单", "工艺文件", "排产计划" }
+
+  enum WorkOrderStatus {
+    Draft, Released, InProgress, Done
+  }
+
+  entity WorkOrder {
+    id     : ID
+    sku    : String
+    qty    : Number
+    route  : String
+    status : WorkOrderStatus
+  }
+
+  flow ReleaseWorkOrder title "工单下达" on WorkOrder {
+    create
+    description "BOM/工艺就绪后下达生产工单"
+    input {
+      sku   : String required label "成品" placeholder "FG-2001"
+      qty   : Number required min 1 label "数量"
+      route : String required label "工艺路线" placeholder "RT-CNC-01"
+    }
+    require { true }
+    steps {
+      explode_bom "展开BOM"
+      load_routing "加载工艺路线"
+      schedule_slot "生产排程"
+      release_wo "工单下达"
+    }
+    transition status -> Released
+    emit WorkOrderReleased
+    ui {
+      layout form
+      primary "下达工单"
+      icon "plus-circle"
+    }
+  }
+}
+
+// ---------- 04 生产执行 ----------
+module ProdExec code "04" title "生产执行" {
+  description "领料→加工→质检→完工入库；异常返工"
+  outputs { "生产报工", "检验记录", "完工入库单" }
+
+  flow StartProduction title "领料开工" on WorkOrder {
+    input {
+      recordId : String required label "生产工单"
+      line     : String required label "产线" placeholder "LINE-A"
+    }
+    require { status == Released }
+    steps {
+      issue_material "领料"
+      start_run "开工加工"
+    }
+    transition status -> InProgress
+    emit ProductionStarted
+    ui {
+      layout form
+      primary "开工"
+      icon "workflow"
+    }
+  }
+
+  flow CompleteProduction title "质检合格→完工入库" on WorkOrder {
+    input {
+      recordId : String required label "生产工单"
+      goodQty  : Number required min 0 label "合格数"
+    }
+    require { status == InProgress }
+    steps {
+      quality_check "质量检验"
+      finish_goods "完工入库"
+    }
+    transition status -> Done
+    emit ProductionCompleted
+    ui {
+      layout form
+      primary "完工入库"
+      icon "workflow"
+    }
+  }
+}
+
+// ---------- 05 质量管理 ----------
+module Quality code "05" title "质量管理" {
+  description "来料/过程/成品检验与不良处理、质量追溯"
+  outputs { "检验报告", "不良记录", "质量追溯档案" }
+
+  enum QcStatus {
+    Open, Passed, Failed, Closed
+  }
+
+  entity Inspection {
+    id       : ID
+    refType  : String
+    refId    : String
+    result   : String
+    status   : QcStatus
+  }
+
+  flow RunInspection title "执行检验" on Inspection {
+    create
+    input {
+      refType : String required label "对象类型" placeholder "PurchaseOrder / WorkOrder"
+      refId   : String required label "对象单号"
+      result  : String required label "结论" placeholder "Pass / Fail"
+    }
+    require { true }
+    steps {
+      load_standard "加载检验标准"
+      execute_check "执行检验"
+      record_ncr "记录不良(如有)"
+    }
+    transition status -> Passed
+    emit InspectionDone
+    ui {
+      layout form
+      primary "提交检验"
+      icon "plus-circle"
+    }
+  }
+}
+
+// ---------- 06 库存管理 ----------
+module Inventory code "06" title "库存管理" {
+  description "库存监控、调拨、盘点、预警"
+  outputs { "库存报表", "调拨单", "预警信息" }
+
+  enum TransferStatus {
+    Draft, Done
+  }
+
+  entity StockTransfer {
+    id     : ID
+    sku    : String
+    qty    : Number
+    fromWh : String
+    toWh   : String
+    status : TransferStatus
+  }
+
+  flow TransferStock title "库存调拨" on StockTransfer {
+    create
+    input {
+      sku    : String required label "物料"
+      qty    : Number required min 1 label "数量"
+      fromWh : String required label "调出仓"
+      toWh   : String required label "调入仓"
+    }
+    require { true }
+    steps {
+      check_onhand "校验可用库存"
+      post_transfer "过账调拨"
+      refresh_alert "刷新库存预警"
+    }
+    transition status -> Done
+    emit StockTransferred
+    ui {
+      layout form
+      primary "确认调拨"
+      icon "plus-circle"
+    }
+  }
+}
+
+// ---------- 07 数据分析（描述性模块：流程以指标采集示意） ----------
+module Analytics code "07" title "数据分析与决策" {
+  description "生产/成本/绩效分析；OEE 等指标"
+  outputs { "达成率", "良品率", "设备OEE" }
+
+  enum MetricStatus {
+    Draft, Published
+  }
+
+  entity KpiSnapshot {
+    id     : ID
+    name   : String
+    value  : Number
+    status : MetricStatus
+  }
+
+  flow PublishKpi title "发布经营指标" on KpiSnapshot {
+    create
+    input {
+      name  : String required label "指标" placeholder "生产达成率"
+      value : Number required label "数值" placeholder "96.3"
+    }
+    require { true }
+    steps {
+      collect_facts "采集业务事实"
+      compute_kpi "计算指标"
+      publish "发布到决策看板"
+    }
+    transition status -> Published
+    emit KpiPublished
+    ui {
+      layout form
+      primary "发布指标"
+      icon "plus-circle"
+    }
+  }
+}

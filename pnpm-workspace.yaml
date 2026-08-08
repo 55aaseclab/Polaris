@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+minimumReleaseAge: 0
 overrides:
   '@clerk/shared': 4.25.6
 allowBuilds:
