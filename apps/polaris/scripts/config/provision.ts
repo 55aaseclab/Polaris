@@ -61,7 +61,7 @@ function sanitizeImageTagSegment(raw: string): string {
 }
 
 function sharedVaultImageRef(dockerfileDigest: string): string {
-  return `ttl.sh/polaris-vault-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:24h`;
+  return `polaris-vault-prebuilt-${sanitizeImageTagSegment(dockerfileDigest).slice(0, 32)}:latest`;
 }
 
 function configMatches(project: string, userProfileId?: string): VaultConfigMatch[] {

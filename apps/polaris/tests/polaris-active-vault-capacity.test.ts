@@ -73,7 +73,7 @@ test("the CLI entrypoint returns failure status for a rejected command", () => {
   try {
     const result = spawnSync(
       path.join(APP_ROOT, "node_modules", ".bin", "tsx"),
-      ["scripts/polaris.ts", "start", "missing-vault@docker", "--user", "missing-user"],
+      ["scripts/polaris.ts", "vault", "start", "missing-vault@docker", "--user", "missing-user"],
       {
         cwd: APP_ROOT,
         encoding: "utf8",

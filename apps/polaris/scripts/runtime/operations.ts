@@ -806,7 +806,7 @@ function collectVaultPaseoDiagnostic(
   const loaded = loadPortalVaultByTarget(userId, vault, target);
   const daemonStatusRaw = runVaultShell(
     loaded,
-    "PASEO_HOME=/root/.paseo paseo daemon status --json --home /root/.paseo",
+    "timeout 2s env PASEO_HOME=/root/.paseo paseo daemon status --json --home /root/.paseo",
   ).stdout.trim();
   const daemonStatus = parsePaseoDaemonStatus(daemonStatusRaw);
   return {

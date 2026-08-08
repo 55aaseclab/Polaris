@@ -81,7 +81,7 @@ function neutralUserImageTagSegment(userProfileId: string): string {
 export function vaultImageRef(userProfileId: string, project: string): string {
   const userSegment = neutralUserImageTagSegment(userProfileId);
   const projectSegment = sanitizeImageTagComponent(project, "vault", 32);
-  return `ttl.sh/${userSegment}-${projectSegment}:24h`;
+  return `polaris-vault-${userSegment}-${projectSegment}:latest`;
 }
 
 export function vaultConfigPath(

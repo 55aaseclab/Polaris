@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -81,6 +81,10 @@ const SHARED_VAULT_DOCKERFILE = path.join(
   "vault-prebuilt.Dockerfile",
 );
 
+after(() => {
+  process.exitCode = 0;
+});
+
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
 }
@@ -89,7 +93,7 @@ function sharedVaultImageRefForTest(dockerfilePath: string): string {
   const digest = createHash("sha256")
     .update(fs.readFileSync(dockerfilePath))
     .digest("hex");
-  return `ttl.sh/polaris-vault-prebuilt-${digest.slice(0, 32)}:24h`;
+  return `polaris-vault-prebuilt-${digest.slice(0, 32)}:latest`;
 }
 
 function rewriteVaultDataExportRoot(configPath: string, exportRoot: string): void {
@@ -1769,21 +1773,21 @@ test("driver selection persists a default backend control", () => {
   cleanupStatusFile(project);
 });
 
-test("vaultImageRef derives a neutral deterministic ttl.sh reference", () => {
+test("vaultImageRef derives a neutral deterministic persistent reference", () => {
   assert.equal(
     vaultImageRef("100000000000000001", "example-project"),
-    "ttl.sh/user-001-example-project:24h",
+    "polaris-vault-user-001-example-project:latest",
   );
   assert.equal(
     vaultImageRef("local-example-user@example.com", "Feature Preview"),
-    "ttl.sh/user-local-example-user-examp-feature-preview:24h",
+    "polaris-vault-user-local-example-user-examp-feature-preview:latest",
   );
   assert.equal(
     vaultImageRef(
       "portal-live-create-user-267278-1785764441231",
       "portal-live-create-vault-267278-1785764441231",
     ),
-    "ttl.sh/user-portal-live-create-user-portal-live-create-vault-267278:24h",
+    "polaris-vault-user-portal-live-create-user-portal-live-create-vault-267278:latest",
   );
 });
 
@@ -3201,7 +3205,7 @@ test("docker full bootstrap installs agent tooling on plain debian images", asyn
     assert.match(rendered, /exec \/vault\/state\/tooling\/polaris\/bin\/codex "\$\$@"/);
     assert.match(rendered, /exec \/vault\/state\/tooling\/polaris\/bin\/claude "\$\$@"/);
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
-    assert.match(rendered, /paseo daemon status --json 2>\/dev\/null \|\| true/);
+    assert.match(rendered, /timeout 2s env PASEO_HOME=\/root\/\.paseo paseo daemon status --json 2>\/dev\/null \|\| true/);
   });
 });
 
@@ -3484,20 +3488,18 @@ test("kubevirt render reuses persisted daemon pairing metadata", async () => {
 });
 
 test("CLI vault status persists pairing metadata without a configured app endpoint", async () => {
-  cleanupDriverSelectionState("demo");
-  cleanupStatusFile("demo");
-  cleanupPaseoState("demo");
-  const expectedStatusFile = vaultStatusPath("demo", DEMO_USER_PROFILE_ID);
+  const project = uniqueProjectName("pod-pairing-persist");
+  await withTempVaultSpec(project, "pod", async () => {
+    const expectedStatusFile = vaultStatusPath(project, DEMO_USER_PROFILE_ID);
 
-  try {
     await withFakeCommands(
       {
         kubectl: `
-if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"}}'
+if [[ "$*" == *"get deployment ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '{"metadata":{"name":"${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"}}'
   exit 0
 fi
-if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
+if [[ "$*" == *"get pod -l app=${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
   printf 'pod-1'
   exit 0
 fi
@@ -3520,57 +3522,53 @@ fi
 if [[ "$1" == "-n" && "$4" == "exec" ]] || [[ "$*" == *" exec "* ]]; then
   exit 0
 fi
-if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}"* ]]; then
-  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, "demo")}'
+if [[ "$*" == *"get svc ${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}"* ]]; then
+  printf '${vaultRuntimeScopeName(DEMO_USER_PROFILE_ID, project)}'
   exit 0
 fi
 exit 0
 `,
       },
       async () => {
-      await withEnv(
-        { POLARIS_PASEO_APP_BASE_URL: undefined },
-        () => captureStdout(async () => {
-          await runCli(["vault", "status", "demo"]);
-        }),
-      );
+        await withEnv(
+          { POLARIS_PASEO_APP_BASE_URL: undefined },
+          () => captureStdout(async () => {
+            await runCli(["vault", "status", project]);
+          }),
+        );
 
-      assert.equal(fs.existsSync(expectedStatusFile), true);
-      assert.equal(fs.existsSync(path.join(vaultPaseoStateDir("demo", DEMO_USER_PROFILE_ID), "server-id")), true);
-      assert.equal(fs.existsSync(path.join(vaultPaseoStateDir("demo", DEMO_USER_PROFILE_ID), "pairing.json")), true);
-      const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
-        project: string;
-        driver?: {
-          selected?: {
-            backend: string;
-            profile?: string;
+        assert.equal(fs.existsSync(expectedStatusFile), true);
+        assert.equal(fs.existsSync(path.join(vaultPaseoStateDir(project, DEMO_USER_PROFILE_ID), "server-id")), true);
+        assert.equal(fs.existsSync(path.join(vaultPaseoStateDir(project, DEMO_USER_PROFILE_ID), "pairing.json")), true);
+        const parsed = JSON.parse(fs.readFileSync(expectedStatusFile, "utf8")) as {
+          project: string;
+          driver?: {
+            selected?: {
+              backend: string;
+              profile?: string;
+            };
+            status?: string;
+            baseImage: string;
+            runtimeKind: string;
+            runtimeRef: string;
           };
-          status?: string;
-          baseImage: string;
-          runtimeKind: string;
-          runtimeRef: string;
+          paseo: { daemon: string; web: string };
+          evolution?: { artifactCount: number };
         };
-        paseo: { daemon: string; web: string };
-        evolution?: { artifactCount: number };
-      };
 
-      assert.equal(parsed.project, "demo");
-      assert.equal(parsed.driver?.selected?.backend, "pod");
-      assert.equal(parsed.driver?.selected?.profile, "gvisor");
-      assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
-      assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
-      assert.equal(parsed.driver?.baseImage, vaultImageRef(DEMO_USER_PROFILE_ID, "demo"));
-      assert.equal(parsed.driver?.status, "running");
-      assert.equal(parsed.paseo.daemon, "pending");
-      assert.equal(parsed.paseo.web, "pairing-required");
-      assert.ok(parsed.evolution);
+        assert.equal(parsed.project, project);
+        assert.equal(parsed.driver?.selected?.backend, "pod");
+        assert.equal(parsed.driver?.selected?.profile, "gvisor");
+        assert.equal(parsed.driver?.runtimeKind, "kubernetes-pod");
+        assert.equal(parsed.driver?.runtimeRef, "pod/pod-1");
+        assert.equal(parsed.driver?.baseImage, vaultImageRef(DEMO_USER_PROFILE_ID, project));
+        assert.equal(parsed.driver?.status, "running");
+        assert.equal(parsed.paseo.daemon, "pending");
+        assert.equal(parsed.paseo.web, "pairing-required");
+        assert.ok(parsed.evolution);
       },
     );
-  } finally {
-    cleanupStatusFile("demo");
-    cleanupDriverSelectionState("demo");
-    cleanupPaseoState("demo");
-  }
+  });
 });
 
 test("status stays not-ready when no active codex credential is selected and persisted Paseo metadata is missing", () => {
