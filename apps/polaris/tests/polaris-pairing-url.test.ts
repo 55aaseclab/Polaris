@@ -72,6 +72,16 @@ test("normalizePairingUrl rewrites the offer onto the configured Paseo app base 
   );
 });
 
+test("normalizePairingUrl ignores the retired legacy Paseo app base URL env", () => {
+  const raw = "https://app.paseo.sh/#offer=eyJ2IjoyLCJzZXJ2ZXJJZCI6InNydl9kZW1vIn0";
+  assert.equal(
+    normalizePairingUrl(raw, {
+      PASEO_APP_BASE_URL: "http://portal.example.test:8082/",
+    }),
+    raw,
+  );
+});
+
 test("vertical docker scaffold selects the Wanghai image, surfaces, and dual ports", () => {
   const project = `vertical-scaffold-${process.pid}-${Date.now()}`;
   const outputPath = scaffoldDockerVault(project, DEMO_USER_PROFILE_ID, {

@@ -101,7 +101,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     setEnv("POLARIS_AUTH_DEFAULT_ROLE", "user"),
     setEnv("POLARIS_AUTH_DEFAULT_PLAN", "pro"),
     setEnv("POLARIS_WANGHAI_GATEWAY_MASTER_SECRET", masterSecret),
-    setEnv("POLARIS_WANGHAI_RATE_LIMIT_READS_PER_MINUTE", "2"),
+    setEnv("POLARIS_WANGHAI_RATE_LIMIT_READS_PER_MINUTE", "4"),
     setEnv("POLARIS_CONTROL_STORE_PATH", path.join(controlStoreRoot, "control.sqlite")),
   ];
   let assertionHeader = "";
@@ -126,6 +126,35 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
         file_count: 1,
         entry_count: 1,
       }));
+      return;
+    }
+    if (req.url === "/wanghai/html") {
+      upstreamRequests += 1;
+      latestUpstreamUrl = String(req.url ?? "");
+      assertionHeader = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
+      requestIdHeader = String(req.headers["x-polaris-request-id"] ?? "");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`
+        <html>
+          <head>
+            <link rel="stylesheet" href="/wanghai/_next/static/css/298843b9ecaa9a4f.css">
+          </head>
+          <body>ok</body>
+        </html>
+      `);
+      return;
+    }
+    if (req.url === "/wanghai/app.js") {
+      upstreamRequests += 1;
+      latestUpstreamUrl = String(req.url ?? "");
+      assertionHeader = String(req.headers["x-polaris-wanghai-assertion"] ?? "");
+      requestIdHeader = String(req.headers["x-polaris-request-id"] ?? "");
+      res.writeHead(200, { "content-type": "application/javascript; charset=utf-8" });
+      res.end(`
+        const nextBasePath = "/wanghai";
+        window.__POLARIS_FETCH__ = "/wanghai/api/workspaces";
+        fetch("/wanghai/api/workspaces");
+      `);
       return;
     }
     upstreamRequests += 1;
@@ -294,6 +323,28 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     assert.equal(latestUpstreamUrl, "/wanghai");
     assert.equal(upstreamRequests, 2);
 
+    const htmlPortal = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/g/html",
+      headers: { host: launchUrl.host, cookie: cookie! },
+    });
+    assert.equal(htmlPortal.statusCode, 200);
+    assert.match(htmlPortal.body, /\/g\/_next\/static\/css\/298843b9ecaa9a4f\.css/u);
+    assert.doesNotMatch(htmlPortal.body, /\/wanghai\/_next\/static\/css\/298843b9ecaa9a4f\.css/u);
+    assert.equal(upstreamRequests, 3);
+
+    const jsPortal = await requestPortalHost({
+      port: portalAddress.port,
+      path: "/g/app.js",
+      headers: { host: launchUrl.host, cookie: cookie! },
+    });
+    assert.equal(jsPortal.statusCode, 200);
+    assert.match(jsPortal.body, /const nextBasePath = "\/g";/u);
+    assert.match(jsPortal.body, /\/g\/api\/workspaces/u);
+    assert.doesNotMatch(jsPortal.body, /"\/wanghai(?:\/|"|$)/u);
+    assert.doesNotMatch(jsPortal.body, /\/wanghai\/api\/workspaces/u);
+    assert.equal(upstreamRequests, 4);
+
     const missingIdempotency = await requestPortalHost({
       port: portalAddress.port,
       path: "/g/api/workspaces",
@@ -307,7 +358,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       body: JSON.stringify({ workspace_id: "synthetic-workspace", workspace_type: "research" }),
     });
     assert.equal(missingIdempotency.statusCode, 428);
-    assert.equal(upstreamRequests, 2);
+    assert.equal(upstreamRequests, 4);
 
     const mutation = await requestPortalHost({
       port: portalAddress.port,
@@ -369,7 +420,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     });
     assert.equal(replayedMutation.statusCode, 200);
     assert.equal(replayedMutation.headers["x-polaris-idempotent-replay"], "1");
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
     assert.equal(quotaMeasurementRequests, 2);
 
     const conflictingMutation = await requestPortalHost({
@@ -386,7 +437,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       body: JSON.stringify({ workspace_id: "other-workspace", workspace_type: "research" }),
     });
     assert.equal(conflictingMutation.statusCode, 409);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
 
     const internalBrowserAttempt = await requestPortalHost({
       port: portalAddress.port,
@@ -411,7 +462,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       body: JSON.stringify({ workspace_id: "quota-exhausted", workspace_type: "research" }),
     });
     assert.equal(quotaExhausted.statusCode, 507);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
     assert.equal(quotaMeasurementRequests, 3);
     assert.ok(
       getPolarisControlStore(import.meta.url).listAuditEvents().some((event) => (
@@ -434,7 +485,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       body: "{}",
     });
     assert.equal(unknownMutation.statusCode, 403);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
 
     const absoluteFormAttempt = await requestPortalHost({
       port: portalAddress.port,
@@ -448,7 +499,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
     });
     assert.equal(absoluteFormAttempt.statusCode, 400);
     assert.match(absoluteFormAttempt.body, /Invalid Wanghai gateway request path/u);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
 
     const rateLimited = await requestPortalHost({
       port: portalAddress.port,
@@ -456,9 +507,9 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(rateLimited.statusCode, 429);
-    assert.equal(rateLimited.headers["ratelimit-limit"], "2");
+    assert.equal(rateLimited.headers["ratelimit-limit"], "4");
     assert.equal(rateLimited.headers["ratelimit-remaining"], "0");
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
 
     const csrfAttempt = await requestPortalHost({
       port: portalAddress.port,
@@ -501,7 +552,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       { method: "POST", headers: { origin: `http://127.0.0.1:${portalAddress.port}` } },
     );
     assert.equal(selectedRuntimeLaunch.status, 404);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
 
     process.env.POLARIS_AUTH_DEFAULT_USER_ID = userB;
     const crossTenantLaunch = await fetch(
@@ -517,7 +568,7 @@ test("Polaris gateway issues a scoped session, proxies assertions, and blocks by
       headers: { host: launchUrl.host, cookie: cookie! },
     });
     assert.equal(revokedSession.statusCode, 403);
-    assert.equal(upstreamRequests, 3);
+    assert.equal(upstreamRequests, 5);
   } finally {
     if (portal) await closeServer(portal);
     await closeServer(upstream);

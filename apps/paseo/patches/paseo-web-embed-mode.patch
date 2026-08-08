@@ -1,5 +1,5 @@
 diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
-index 94061e2..62974fa 100644
+index 94061e25a597a9d97b443f541ea5a4bf87a14675..f4a393c2678427e764ec69c668a613fe448202e1 100644
 --- a/packages/app/src/app/_layout.tsx
 +++ b/packages/app/src/app/_layout.tsx
 @@ -4,7 +4,7 @@ import { PortalProvider } from "@gorhom/portal";
@@ -33,33 +33,77 @@ index 94061e2..62974fa 100644
        <HostSessionManager />
        <FaviconStatusSync />
        {children}
-@@ -696,6 +704,33 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
+@@ -696,6 +704,77 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
    );
  }
  
 +function PolarisHostRegistrySync() {
 +  const hasPolarisSession = usePolarisAuthSession();
 +  const { upsertConnectionFromOfferUrl } = useHostMutations();
-+  const syncedTokenRef = useRef<string | null>(null);
++  const pathname = usePathname();
++  const globalParams = useGlobalSearchParams<{ scope?: string | string[] }>();
++  const activeServerId = parseServerIdFromPathname(pathname);
++  const routeScope =
++    typeof globalParams.scope === "string"
++      ? globalParams.scope.trim()
++      : (globalParams.scope?.[0]?.trim() ?? "");
++  const syncedScopeRef = useRef<string | null>(null);
 +  const token = getPolarisAuthToken();
++  const syncKey = token ? `${token}:${activeServerId ?? "*"}:${routeScope || "*"}` : null;
 +
 +  useEffect(() => {
-+    if (!hasPolarisSession || !hasPolarisHostSession() || !token) return;
-+    if (syncedTokenRef.current === token) return;
-+    syncedTokenRef.current = token;
++    if (!hasPolarisSession || !hasPolarisHostSession() || !token || !syncKey) {
++      syncedScopeRef.current = null;
++      return;
++    }
++    if (syncedScopeRef.current === syncKey) return;
++    syncedScopeRef.current = syncKey;
 +
-+    void syncPolarisHostsOnce({
-+      token,
-+      upsertFromOfferUrl: (url, label) => {
-+        if (getPolarisAuthToken() !== token) {
-+          throw new Error("Polaris 登录已切换");
-+        }
-+        return upsertConnectionFromOfferUrl(url, label);
-+      },
-+    }).catch((error) => {
++    const store = getHostRuntimeStore();
++    const isCurrentRoute = () => {
++      if (typeof window === "undefined") {
++        return parseServerIdFromPathname(pathname) === activeServerId;
++      }
++      const currentUrl = new URL(window.location.href);
++      const currentScope = currentUrl.searchParams.get("scope")?.trim() ?? "";
++      return (
++        parseServerIdFromPathname(currentUrl.pathname) === activeServerId &&
++        currentScope === routeScope
++      );
++    };
++
++    void (async () => {
++      // A host route owns one daemon. Clear the previous in-memory route
++      // before importing the host selected by the current URL.
++      if (activeServerId) {
++        await store.resetPolarisHostsForCurrentUser();
++      }
++      if (!isCurrentRoute()) {
++        return;
++      }
++      await syncPolarisHostsOnce({
++        token,
++        serverId: activeServerId,
++        upsertFromOfferUrl: (url, label) => {
++          if (getPolarisAuthToken() !== token || !isCurrentRoute()) {
++            throw new Error("Paseo host scope changed");
++          }
++          return upsertConnectionFromOfferUrl(url, label);
++        },
++      });
++    })().catch((error) => {
 +      console.warn("[PolarisHostRegistrySync] Failed to sync Polaris hosts", error);
 +    });
-+  }, [hasPolarisSession, token, upsertConnectionFromOfferUrl]);
++  }, [
++    activeServerId,
++    globalParams.scope,
++    hasPolarisSession,
++    pathname,
++    routeScope,
++    syncKey,
++    token,
++    upsertConnectionFromOfferUrl,
++  ]);
 +
 +  return null;
 +}
@@ -67,7 +111,7 @@ index 94061e2..62974fa 100644
  function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
    const { theme } = useUnistyles();
    const surface0 = theme.colors.surface0;
-@@ -720,12 +755,21 @@ function OfferLinkListener({
+@@ -720,12 +799,21 @@ function OfferLinkListener({
    upsertDaemonFromOfferUrl: (offerUrlOrFragment: string) => Promise<unknown>;
  }) {
    const router = useRouter();
@@ -89,7 +133,7 @@ index 94061e2..62974fa 100644
        void upsertDaemonFromOfferUrl(url)
          .then((profile) => {
            if (cancelled) return;
-@@ -735,11 +779,16 @@ function OfferLinkListener({
+@@ -735,11 +823,16 @@ function OfferLinkListener({
            return;
          })
          .catch((error) => {
@@ -106,7 +150,7 @@ index 94061e2..62974fa 100644
      void Linking.getInitialURL()
        .then(handleUrl)
        .catch(() => undefined);
-@@ -747,10 +796,19 @@ function OfferLinkListener({
+@@ -747,10 +840,19 @@ function OfferLinkListener({
      const subscription = Linking.addEventListener("url", (event) => {
        handleUrl(event.url);
      });
@@ -126,7 +170,7 @@ index 94061e2..62974fa 100644
      };
    }, [router, upsertDaemonFromOfferUrl]);
  
-@@ -879,7 +937,10 @@ function FaviconStatusSync() {
+@@ -879,7 +981,10 @@ function FaviconStatusSync() {
  
  function RootStack() {
    const storeReady = useStoreReady();
@@ -137,7 +181,7 @@ index 94061e2..62974fa 100644
    const stackScreenOptions = useMemo(
      () => ({
        headerShown: false,
-@@ -890,20 +951,27 @@ function RootStack() {
+@@ -890,20 +995,27 @@ function RootStack() {
      }),
      [theme.colors.surface0],
    );
@@ -170,7 +214,7 @@ index 94061e2..62974fa 100644
  }
 diff --git a/packages/app/src/app/embed.tsx b/packages/app/src/app/embed.tsx
 new file mode 100644
-index 0000000..4da0b7b
+index 0000000000000000000000000000000000000000..4da0b7bec1a8400960b06c84dae036c9cf79e909
 --- /dev/null
 +++ b/packages/app/src/app/embed.tsx
 @@ -0,0 +1,376 @@
@@ -551,7 +595,7 @@ index 0000000..4da0b7b
 +  },
 +});
 diff --git a/packages/app/src/attachments/types.ts b/packages/app/src/attachments/types.ts
-index 24cbf02..7bf3e3f 100644
+index 24cbf02f1d8935eb3a2629c96bf2bdb2cad974d6..7bf3e3f038f09f87200f16d7f8634f854898f531 100644
 --- a/packages/app/src/attachments/types.ts
 +++ b/packages/app/src/attachments/types.ts
 @@ -63,6 +63,20 @@ export type PullRequestContextAttachment =
@@ -584,7 +628,7 @@ index 24cbf02..7bf3e3f 100644
        kind: "review";
        attachment: Extract<AgentAttachment, { type: "review" }>;
 diff --git a/packages/app/src/attachments/workspace-attachment-utils.test.ts b/packages/app/src/attachments/workspace-attachment-utils.test.ts
-index 5fd12cd..4a0bd86 100644
+index 5fd12cd3448f7e7e706d5a079266a14a10c266a8..4a0bd86b44003cbb42a6824391f24471a1665006 100644
 --- a/packages/app/src/attachments/workspace-attachment-utils.test.ts
 +++ b/packages/app/src/attachments/workspace-attachment-utils.test.ts
 @@ -1,5 +1,9 @@
@@ -631,7 +675,7 @@ index 5fd12cd..4a0bd86 100644
 +  });
  });
 diff --git a/packages/app/src/attachments/workspace-attachment-utils.ts b/packages/app/src/attachments/workspace-attachment-utils.ts
-index 8284be0..7f8049b 100644
+index 8284be001b17b3fc0bb876490d71a5b94ee059d4..7f8049bad25f0757f2fbf99e9596e5db5f62c937 100644
 --- a/packages/app/src/attachments/workspace-attachment-utils.ts
 +++ b/packages/app/src/attachments/workspace-attachment-utils.ts
 @@ -1,5 +1,6 @@
@@ -684,7 +728,7 @@ index 8284be0..7f8049b 100644
    return attachment.kind === "review" ? attachment.attachment : null;
  }
 diff --git a/packages/app/src/attachments/workspace-attachments-store.test.ts b/packages/app/src/attachments/workspace-attachments-store.test.ts
-index 888a21d..f96fe82 100644
+index 888a21d49cd6d311cdd553e32919e1e5893aec49..f96fe82ea4ee8ea4f7241559b1400b37dde47e39 100644
 --- a/packages/app/src/attachments/workspace-attachments-store.test.ts
 +++ b/packages/app/src/attachments/workspace-attachments-store.test.ts
 @@ -1,5 +1,5 @@
@@ -741,7 +785,7 @@ index 888a21d..f96fe82 100644
 +  });
  });
 diff --git a/packages/app/src/attachments/workspace-attachments-store.ts b/packages/app/src/attachments/workspace-attachments-store.ts
-index 12ccc13..b94f554 100644
+index 12ccc130c7ba04f3903bbdfe3dd0e87114803d90..b94f554401d8ce008b48274e7bcdca7b0fa8abb9 100644
 --- a/packages/app/src/attachments/workspace-attachments-store.ts
 +++ b/packages/app/src/attachments/workspace-attachments-store.ts
 @@ -1,6 +1,6 @@
@@ -807,7 +851,7 @@ index 12ccc13..b94f554 100644
      set((state) => {
        if (!state.attachmentsByScope[scopeKey]) {
 diff --git a/packages/app/src/composer/attachments/workspace.tsx b/packages/app/src/composer/attachments/workspace.tsx
-index e414247..c6c3fed 100644
+index e41424793e939bcc7868bba1b8144ea1085d2d3a..c6c3fed05eaa1f30c521baf2321f8ba95559c427 100644
 --- a/packages/app/src/composer/attachments/workspace.tsx
 +++ b/packages/app/src/composer/attachments/workspace.tsx
 @@ -10,6 +10,7 @@ import type {
@@ -910,7 +954,7 @@ index e414247..c6c3fed 100644
            return true;
 diff --git a/packages/app/src/embed/bridge.native.ts b/packages/app/src/embed/bridge.native.ts
 new file mode 100644
-index 0000000..fa298c1
+index 0000000000000000000000000000000000000000..fa298c15a11c6d967002d41221b4a113296ee6b9
 --- /dev/null
 +++ b/packages/app/src/embed/bridge.native.ts
 @@ -0,0 +1,12 @@
@@ -928,7 +972,7 @@ index 0000000..fa298c1
 +}
 diff --git a/packages/app/src/embed/bridge.shared.ts b/packages/app/src/embed/bridge.shared.ts
 new file mode 100644
-index 0000000..5608cd5
+index 0000000000000000000000000000000000000000..5608cd54f67a9c6356314cb36909cd7c33711116
 --- /dev/null
 +++ b/packages/app/src/embed/bridge.shared.ts
 @@ -0,0 +1,25 @@
@@ -959,7 +1003,7 @@ index 0000000..5608cd5
 +}
 diff --git a/packages/app/src/embed/bridge.ts b/packages/app/src/embed/bridge.ts
 new file mode 100644
-index 0000000..052a3d9
+index 0000000000000000000000000000000000000000..052a3d93571ecbd10d40ac9ad630af911bd26726
 --- /dev/null
 +++ b/packages/app/src/embed/bridge.ts
 @@ -0,0 +1,12 @@
@@ -977,7 +1021,7 @@ index 0000000..052a3d9
 +}
 diff --git a/packages/app/src/embed/bridge.web.test.tsx b/packages/app/src/embed/bridge.web.test.tsx
 new file mode 100644
-index 0000000..6fa3334
+index 0000000000000000000000000000000000000000..6fa33345649b0dd45ed826503f3cf6728ac161d9
 --- /dev/null
 +++ b/packages/app/src/embed/bridge.web.test.tsx
 @@ -0,0 +1,87 @@
@@ -1070,7 +1114,7 @@ index 0000000..6fa3334
 +});
 diff --git a/packages/app/src/embed/bridge.web.ts b/packages/app/src/embed/bridge.web.ts
 new file mode 100644
-index 0000000..f20b98d
+index 0000000000000000000000000000000000000000..f20b98d594a9b6cc6ac9a94685f6bbda88c3f9e5
 --- /dev/null
 +++ b/packages/app/src/embed/bridge.web.ts
 @@ -0,0 +1,102 @@
@@ -1178,7 +1222,7 @@ index 0000000..f20b98d
 +}
 diff --git a/packages/app/src/embed/embedded-agent-panel.tsx b/packages/app/src/embed/embedded-agent-panel.tsx
 new file mode 100644
-index 0000000..f943d7d
+index 0000000000000000000000000000000000000000..f943d7dafe917247804e2b28c4fb8ada811192db
 --- /dev/null
 +++ b/packages/app/src/embed/embedded-agent-panel.tsx
 @@ -0,0 +1,35 @@
@@ -1219,7 +1263,7 @@ index 0000000..f943d7d
 +}
 diff --git a/packages/app/src/embed/embedded-pane-context.test.ts b/packages/app/src/embed/embedded-pane-context.test.ts
 new file mode 100644
-index 0000000..b499470
+index 0000000000000000000000000000000000000000..b49947079b9fdee995a7d81b248889e989aa9fd7
 --- /dev/null
 +++ b/packages/app/src/embed/embedded-pane-context.test.ts
 @@ -0,0 +1,37 @@
@@ -1262,7 +1306,7 @@ index 0000000..b499470
 +});
 diff --git a/packages/app/src/embed/embedded-pane-context.ts b/packages/app/src/embed/embedded-pane-context.ts
 new file mode 100644
-index 0000000..8de47d8
+index 0000000000000000000000000000000000000000..8de47d85fcd839d6f3b89a08274446e05059634b
 --- /dev/null
 +++ b/packages/app/src/embed/embedded-pane-context.ts
 @@ -0,0 +1,25 @@
@@ -1293,7 +1337,7 @@ index 0000000..8de47d8
 +}
 diff --git a/packages/app/src/embed/protocol.test.ts b/packages/app/src/embed/protocol.test.ts
 new file mode 100644
-index 0000000..b72866b
+index 0000000000000000000000000000000000000000..b72866bb7c7e0444bc2891b834fd9d5cdc9dc407
 --- /dev/null
 +++ b/packages/app/src/embed/protocol.test.ts
 @@ -0,0 +1,147 @@
@@ -1446,7 +1490,7 @@ index 0000000..b72866b
 +});
 diff --git a/packages/app/src/embed/protocol.ts b/packages/app/src/embed/protocol.ts
 new file mode 100644
-index 0000000..b1acff0
+index 0000000000000000000000000000000000000000..b1acff031873756daf7ccfe3fd936740176cef62
 --- /dev/null
 +++ b/packages/app/src/embed/protocol.ts
 @@ -0,0 +1,243 @@
@@ -1695,7 +1739,7 @@ index 0000000..b1acff0
 +}
 diff --git a/packages/app/src/embed/workspace.test.ts b/packages/app/src/embed/workspace.test.ts
 new file mode 100644
-index 0000000..998cf36
+index 0000000000000000000000000000000000000000..998cf36e7278c58ddfa4c954abe22e73bc24d48c
 --- /dev/null
 +++ b/packages/app/src/embed/workspace.test.ts
 @@ -0,0 +1,74 @@
@@ -1775,7 +1819,7 @@ index 0000000..998cf36
 +});
 diff --git a/packages/app/src/embed/workspace.ts b/packages/app/src/embed/workspace.ts
 new file mode 100644
-index 0000000..2d17065
+index 0000000000000000000000000000000000000000..2d1706573b9c352552d64b3e48e0daa02ff149bb
 --- /dev/null
 +++ b/packages/app/src/embed/workspace.ts
 @@ -0,0 +1,82 @@
@@ -1862,7 +1906,7 @@ index 0000000..2d17065
 +  return { agentId: agent.id, workspaceId: workspace.id };
 +}
 diff --git a/packages/app/src/panels/agent-panel.tsx b/packages/app/src/panels/agent-panel.tsx
-index 5271010..15181ac 100644
+index 52710109a65be1b63cf4458490e43be94b2d0926..15181ac22b720c02c0aad0f27069113085d75061 100644
 --- a/packages/app/src/panels/agent-panel.tsx
 +++ b/packages/app/src/panels/agent-panel.tsx
 @@ -461,7 +461,7 @@ type AgentLookupState =

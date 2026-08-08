@@ -1,5 +1,6 @@
 import {
   resolveShellHostActions,
+  resolveWanghaiPortalAction,
   type ShellHostSummary,
   type ShellSession,
 } from "../api.js";
@@ -472,11 +473,11 @@ async function renderWanghaiPortal(wanghaiId: string): Promise<void> {
     navigate("/hosts", true);
     return;
   }
-  const action = resolveShellHostActions({
+  const action = resolveWanghaiPortalAction({
     session,
     host,
-  }).find((item) => item.kind === "open-wanghai");
-  if (!action || action.kind !== "open-wanghai") {
+  });
+  if (!action) {
     navigate("/hosts", true);
     return;
   }
@@ -511,7 +512,12 @@ async function renderCodingSurface(serverId: string): Promise<void> {
   app.innerHTML = renderPaseoEmbedPage({
     hostName: host.name,
     paseoUrl,
+    backHref: "/hosts",
   });
+  const backButton = app.querySelector<HTMLAnchorElement>(".portal-shell-back");
+  if (backButton) {
+    surfaceBackButtonCleanup = bindDraggableSurfaceBackButton(backButton);
+  }
 }
 
 function bindDraggableSurfaceBackButton(button: HTMLAnchorElement): () => void {

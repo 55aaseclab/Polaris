@@ -21,8 +21,7 @@ function normalizeScope(input: string | null | undefined): string | null {
 export function resolveConfiguredPaseoAppBaseUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  const configured =
-    env.POLARIS_PASEO_APP_BASE_URL?.trim() || env.PASEO_APP_BASE_URL?.trim() || "";
+  const configured = env.POLARIS_PASEO_APP_BASE_URL?.trim() || "";
   return configured ? normalizeBaseUrl(configured) : null;
 }
 

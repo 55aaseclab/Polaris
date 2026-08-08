@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveShellHostActions, type ShellHostSummary, type ShellSession } from "./api.js";
+import {
+  resolveShellHostActions,
+  resolveWanghaiPortalAction,
+  type ShellHostSummary,
+  type ShellSession,
+} from "./api.js";
 
 const verticalSession: ShellSession = {
   authMode: "disabled",
@@ -59,7 +64,7 @@ test("a host without a Wanghai gateway identity cannot expose the Wanghai link",
   assert.deepEqual(actions, []);
 });
 
-test("a stopped vertical host keeps only the vertical action when a Wanghai identity is cached", () => {
+test("a stopped vertical host exposes no surface action", () => {
   const actions = resolveShellHostActions({
     session: verticalSession,
     host: {
@@ -71,12 +76,27 @@ test("a stopped vertical host keeps only the vertical action when a Wanghai iden
       },
     },
   });
-  assert.deepEqual(actions, [
+  assert.deepEqual(actions, []);
+});
+
+test("a stopped vertical host still resolves the direct portal launch target", () => {
+  assert.deepEqual(
+    resolveWanghaiPortalAction({
+      session: verticalSession,
+      host: {
+        ...verticalHost,
+        status: {
+          driver: {
+            status: "stopped",
+          },
+        },
+      },
+    }),
     {
       kind: "open-wanghai",
       href: "/v/wg_sample/wanghai",
     },
-  ]);
+  );
 });
 
 test("both-line subscribers get exactly one surface action per host", () => {

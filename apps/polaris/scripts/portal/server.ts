@@ -1788,6 +1788,28 @@ function writeGatewayResponseHeaders(
   void req;
 }
 
+function shouldRewriteWanghaiGatewayText(contentType: string): boolean {
+  const normalizedContentType = contentType.toLowerCase();
+  return normalizedContentType.includes("text/")
+    || normalizedContentType.includes("javascript")
+    || normalizedContentType.includes("css");
+}
+
+function rewriteWanghaiGatewayText(body: Buffer, contentType: string): Buffer {
+  if (!shouldRewriteWanghaiGatewayText(contentType)) {
+    return body;
+  }
+  const text = body.toString("utf8");
+  const basePathPattern = new RegExp(
+    `${WANGHAI_UPSTREAM_BASE_PATH}(?=(?:/|[?#]|[\\s"'\\x60),;\\]}]|$))`,
+    "gu",
+  );
+  if (!basePathPattern.test(text)) {
+    return body;
+  }
+  return Buffer.from(text.replaceAll(basePathPattern, POLARIS_GATEWAY_PATH), "utf8");
+}
+
 async function proxyWanghaiRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1917,11 +1939,23 @@ async function proxyWanghaiRequest(
   }
   writeGatewayResponseHeaders(res, response, targetOrigin, req, rateLimit);
   res.setHeader(WANGHAI_GATEWAY_REQUEST_ID_HEADER, requestId);
-  res.writeHead(response.status);
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
   if (method === "HEAD" || !response.body) {
+    res.writeHead(response.status);
     res.end();
     return;
   }
+  if (shouldRewriteWanghaiGatewayText(contentType)) {
+    const responseBody = rewriteWanghaiGatewayText(
+      Buffer.from(await response.arrayBuffer()),
+      contentType,
+    );
+    res.setHeader("content-length", responseBody.byteLength);
+    res.writeHead(response.status);
+    res.end(responseBody);
+    return;
+  }
+  res.writeHead(response.status);
   try {
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
       if (!res.write(chunk)) {

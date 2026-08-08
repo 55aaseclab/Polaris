@@ -1,9 +1,9 @@
 diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
 new file mode 100644
-index 0000000..5906192
+index 0000000000000000000000000000000000000000..6c765f5bc85031df64df7d7b52bbb2201f05ee56
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.test.ts
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,252 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
 +  extractServerIdFromPairingUrl,
@@ -185,13 +185,83 @@ index 0000000..5906192
 +    expect(result.preferredHref).toBe("/h/srv_AiBanc_-FHWd");
 +    expect(result.serverIds).toEqual(["srv_AiBanc_-FHWd", "srv_stopped"]);
 +  });
++
++  it("syncs only the host selected by a scoped Paseo route", async () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "first",
++        status: { paseo: { reconnectTarget: offerUrl("srv_first") } },
++      },
++      {
++        name: "selected",
++        status: { paseo: { reconnectTarget: offerUrl("srv_selected") } },
++      },
++    ];
++    vi.stubGlobal(
++      "fetch",
++      vi.fn().mockResolvedValue(new Response(JSON.stringify({ hosts }), { status: 200 })),
++    );
++    vi.stubGlobal("location", {
++      origin: "https://polaris.example",
++      protocol: "https:",
++      hostname: "polaris.example",
++    });
++    const upsert = vi.fn().mockImplementation(async (url: string) => ({
++      serverId: extractServerIdFromPairingUrl(url) ?? "unknown",
++    }));
++
++    const result = await syncPolarisHostsFromApi({
++      token: "token",
++      serverId: "srv_selected",
++      upsertFromOfferUrl: upsert,
++    });
++
++    expect(upsert).toHaveBeenCalledTimes(1);
++    expect(upsert.mock.calls[0]?.[1]).toBe("selected");
++    expect(result.serverIds).toEqual(["srv_selected"]);
++    expect(result.preferredServerId).toBe("srv_selected");
++  });
++
++  it("does not share an in-flight sync between scoped hosts", async () => {
++    let resolveFirstFetch!: (response: Response) => void;
++    const firstFetch = new Promise<Response>((resolve) => {
++      resolveFirstFetch = resolve;
++    });
++    const fetchMock = vi
++      .fn()
++      .mockImplementationOnce(() => firstFetch)
++      .mockResolvedValueOnce(new Response(JSON.stringify({ hosts: [] }), { status: 200 }));
++    vi.stubGlobal("fetch", fetchMock);
++    vi.stubGlobal("location", {
++      origin: "https://polaris.example",
++      protocol: "https:",
++      hostname: "polaris.example",
++    });
++    const upsert = vi.fn(async () => ({ serverId: "srv_first" }));
++
++    const first = syncPolarisHostsOnce({
++      token: "token",
++      serverId: "srv_first",
++      upsertFromOfferUrl: upsert,
++    });
++    const second = syncPolarisHostsOnce({
++      token: "token",
++      serverId: "srv_second",
++      upsertFromOfferUrl: upsert,
++    });
++
++    await expect(second).resolves.toMatchObject({ serverIds: [] });
++    resolveFirstFetch(new Response(JSON.stringify({ hosts: [] }), { status: 200 }));
++    await expect(first).resolves.toMatchObject({ serverIds: [] });
++    expect(fetchMock).toHaveBeenCalledTimes(2);
++  });
 +});
 diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
 new file mode 100644
-index 0000000..6f16709
+index 0000000000000000000000000000000000000000..79e1f5e31ca3fffb701d8e94d6e81e62c2cbd85a
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.ts
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,194 @@
 +import { polarisApiBaseUrl } from "@/lib/polaris-authing";
 +import { buildHostRootRoute } from "@/utils/host-routes";
 +
@@ -217,7 +287,7 @@ index 0000000..6f16709
 +
 +type UpsertFromOfferUrl = (offerUrl: string, label?: string) => Promise<{ serverId: string }>;
 +
-+let inflight: { token: string; promise: Promise<SyncPolarisHostsResult> } | null = null;
++let inflight: { key: string; promise: Promise<SyncPolarisHostsResult> } | null = null;
 +
 +function decodeBase64UrlJson(value: string): unknown {
 +  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -313,11 +383,19 @@ index 0000000..6f16709
 +
 +export async function syncPolarisHostsFromApi(options: {
 +  token: string;
++  serverId?: string | null;
 +  upsertFromOfferUrl: UpsertFromOfferUrl;
 +}): Promise<SyncPolarisHostsResult> {
 +  const hosts = rankPolarisHosts(await fetchPolarisHosts(options.token));
++  const requestedServerId = options.serverId?.trim() || "";
++  const scopedHosts = requestedServerId
++    ? (() => {
++        const host = findPolarisHostForServerId(hosts, requestedServerId);
++        return host ? [host] : [];
++      })()
++    : hosts;
 +  const serverIds: string[] = [];
-+  for (const host of hosts) {
++  for (const host of scopedHosts) {
 +    const pairingUrl = pickPolarisPairingUrl(host);
 +    if (!pairingUrl || !pairingUrl.includes("#offer=")) {
 +      continue;
@@ -343,15 +421,17 @@ index 0000000..6f16709
 +/** Deduplicate concurrent login/welcome syncs. */
 +export function syncPolarisHostsOnce(options: {
 +  token: string;
++  serverId?: string | null;
 +  upsertFromOfferUrl: UpsertFromOfferUrl;
 +}): Promise<SyncPolarisHostsResult> {
-+  if (inflight?.token === options.token) return inflight.promise;
++  const key = `${options.token}:${options.serverId?.trim() || "*"}`;
++  if (inflight?.key === key) return inflight.promise;
 +  const promise = syncPolarisHostsFromApi(options).finally(() => {
 +    if (inflight?.promise === promise) {
 +      inflight = null;
 +    }
 +  });
-+  inflight = { token: options.token, promise };
++  inflight = { key, promise };
 +  return promise;
 +}
 +
@@ -378,10 +458,10 @@ index 0000000..6f16709
 +}
 diff --git a/packages/app/src/runtime/host-runtime-auth.test.ts b/packages/app/src/runtime/host-runtime-auth.test.ts
 new file mode 100644
-index 0000000..ba4196c
+index 0000000000000000000000000000000000000000..8866aaee7a665153219c6c9b298e1ea8baaf383d
 --- /dev/null
 +++ b/packages/app/src/runtime/host-runtime-auth.test.ts
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,292 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import type { HostProfile } from "@/types/host-connection";
 +
@@ -476,7 +556,7 @@ index 0000000..ba4196c
 +  it("never loads a previous user's scoped or legacy Host registry", async () => {
 +    installAuthenticatedBrowser(
 +      "new-user",
-+      "https://polaris.example/paseo/h/srv_previous?scope=previous-user%3Aworkspace-a",
++      "https://polaris.example/h/srv_previous?scope=previous-user%3Aworkspace-a",
 +    );
 +    const previousHost = makeHost();
 +    asyncStorage.values.set(
@@ -493,15 +573,189 @@ index 0000000..ba4196c
 +    });
 +
 +    expect(store.getHosts()).toEqual([]);
-+    expect(asyncStorage.getItem).toHaveBeenCalledWith("@paseo:daemon-registry:user:new-user");
++    expect(asyncStorage.getItem).toHaveBeenCalledWith(
++      "@paseo:daemon-registry:user:new-user:scope:previous-user%3Aworkspace-a:host:srv_previous",
++    );
 +    expect(asyncStorage.getItem).not.toHaveBeenCalledWith(
 +      "@paseo:daemon-registry:scope:previous-user%3Aworkspace-a",
 +    );
 +    expect(asyncStorage.getItem).not.toHaveBeenCalledWith("@paseo:daemon-registry");
 +  });
++
++  it("uses the web scope together with the authenticated user scope", async () => {
++    installAuthenticatedBrowser(
++      "new-user",
++      "https://polaris.example/h/srv_current?scope=new-user%3Aworkspace-a",
++    );
++    const scopedHost = {
++      ...makeHost(),
++      serverId: "srv_current",
++      connections: [
++        {
++          id: "direct:lan:6767",
++          type: "directTcp",
++          endpoint: "lan:6767",
++          useTls: false,
++        },
++      ],
++      preferredConnectionId: "direct:lan:6767",
++    };
++    asyncStorage.values.set(
++      "@paseo:daemon-registry:user:new-user:scope:new-user%3Aworkspace-a:host:srv_current",
++      JSON.stringify([scopedHost]),
++    );
++    asyncStorage.values.set(
++      "@paseo:daemon-registry:user:new-user",
++      JSON.stringify([
++        {
++          ...makeHost(),
++          connections: [
++            {
++              id: "direct:lan:6767",
++              type: "directTcp",
++              endpoint: "lan:6767",
++              useTls: false,
++            },
++          ],
++          preferredConnectionId: "direct:lan:6767",
++          serverId: "srv_other",
++        },
++      ]),
++    );
++
++    const store = new HostRuntimeStore();
++    store.boot();
++
++    await vi.waitFor(() => {
++      expect(store.getHostRegistryStatus()).toBe("ready");
++    });
++
++    expect(store.getHosts()).toEqual([scopedHost]);
++    expect(asyncStorage.getItem).toHaveBeenCalledWith(
++      "@paseo:daemon-registry:user:new-user:scope:new-user%3Aworkspace-a:host:srv_current",
++    );
++    expect(asyncStorage.getItem).not.toHaveBeenCalledWith("@paseo:daemon-registry:user:new-user");
++  });
++
++  it("prunes stale hosts from the same browser registry and keeps only the active vault", async () => {
++    installAuthenticatedBrowser(
++      "new-user",
++      "https://polaris.example/h/srv_current?scope=new-user%3Aworkspace-a",
++    );
++    const activeHost = {
++      ...makeHost(),
++      serverId: "srv_current",
++      label: "Current vault",
++      connections: [
++        {
++          id: "direct:lan:6767",
++          type: "directTcp",
++          endpoint: "lan:6767",
++          useTls: false,
++        },
++      ],
++      preferredConnectionId: "direct:lan:6767",
++    };
++    const staleHost = {
++      ...makeHost(),
++      serverId: "srv_previous",
++      label: "Previous vault",
++      connections: [
++        {
++          id: "direct:lan:6768",
++          type: "directTcp",
++          endpoint: "lan:6768",
++          useTls: false,
++        },
++      ],
++      preferredConnectionId: "direct:lan:6768",
++    };
++    asyncStorage.values.set(
++      "@paseo:daemon-registry:user:new-user:scope:new-user%3Aworkspace-a:host:srv_current",
++      JSON.stringify([staleHost, activeHost]),
++    );
++
++    const store = new HostRuntimeStore();
++    store.boot();
++
++    await vi.waitFor(() => {
++      expect(store.getHostRegistryStatus()).toBe("ready");
++    });
++
++    expect(store.getHosts()).toEqual([activeHost]);
++    await vi.waitFor(() => {
++      expect(asyncStorage.setItem).toHaveBeenCalledWith(
++        "@paseo:daemon-registry:user:new-user:scope:new-user%3Aworkspace-a:host:srv_current",
++        JSON.stringify([activeHost]),
++      );
++    });
++  });
++
++  it("keeps the full browser registry on the global hosts page", async () => {
++    installAuthenticatedBrowser("new-user", "https://polaris.example/hosts");
++    const firstHost = {
++      ...makeHost(),
++      serverId: "srv_first",
++      label: "First vault",
++      connections: [
++        {
++          id: "direct:lan:6767",
++          type: "directTcp",
++          endpoint: "lan:6767",
++          useTls: false,
++        },
++      ],
++      preferredConnectionId: "direct:lan:6767",
++    };
++    const secondHost = {
++      ...makeHost(),
++      serverId: "srv_second",
++      label: "Second vault",
++      connections: [
++        {
++          id: "direct:lan:6768",
++          type: "directTcp",
++          endpoint: "lan:6768",
++          useTls: false,
++        },
++      ],
++      preferredConnectionId: "direct:lan:6768",
++    };
++    asyncStorage.values.set(
++      "@paseo:daemon-registry:user:new-user",
++      JSON.stringify([firstHost, secondHost]),
++    );
++
++    const store = new HostRuntimeStore();
++    store.boot();
++
++    await vi.waitFor(() => {
++      expect(store.getHostRegistryStatus()).toBe("ready");
++    });
++
++    expect(store.getHosts()).toEqual([firstHost, secondHost]);
++    expect(asyncStorage.setItem).not.toHaveBeenCalledWith(
++      "@paseo:daemon-registry:user:new-user",
++      JSON.stringify([firstHost]),
++    );
++  });
++
++  it("rejects importing another server into a scoped host route", async () => {
++    installAuthenticatedBrowser("new-user", "https://polaris.example/h/srv_current");
++    const store = new HostRuntimeStore();
++
++    await expect(
++      store.upsertRelayConnection({
++        serverId: "srv_other",
++        relayEndpoint: "relay.example:443",
++        daemonPublicKeyB64: "abc",
++      }),
++    ).rejects.toThrow("outside the active Paseo route");
++    expect(store.getHosts()).toEqual([]);
++  });
 +});
 diff --git a/packages/app/src/runtime/host-runtime.test.ts b/packages/app/src/runtime/host-runtime.test.ts
-index 6f94689..5ce7084 100644
+index 6f9468966292c5a4fadc8cc0409ac83f35778620..5ce708462782e0f0901988679bd002d68513205d 100644
 --- a/packages/app/src/runtime/host-runtime.test.ts
 +++ b/packages/app/src/runtime/host-runtime.test.ts
 @@ -1171,6 +1171,27 @@ describe("HostRuntimeController", () => {
@@ -533,10 +787,10 @@ index 6f94689..5ce7084 100644
      const host = makeHost({
        connections: [
 diff --git a/packages/app/src/runtime/host-runtime.ts b/packages/app/src/runtime/host-runtime.ts
-index 672642f..2c6681f 100644
+index 672642fdbd769fe29b2fb60ac249c43600eb03ef..972c7f2c2cc6a2581fdf229c343d1e38ca270f0a 100644
 --- a/packages/app/src/runtime/host-runtime.ts
 +++ b/packages/app/src/runtime/host-runtime.ts
-@@ -44,6 +44,11 @@ import {
+@@ -44,6 +44,12 @@ import {
  } from "@/workspace/legacy-daemon-workspaces";
  import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
  import { queryClient } from "@/query/query-client";
@@ -545,10 +799,11 @@ index 672642f..2c6681f 100644
 +  hasPolarisHostSession,
 +  subscribePolarisAuthSession,
 +} from "@/lib/polaris-authing";
++import { parseServerIdFromPathname } from "@/utils/host-routes";
  
  export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
  export type HostRegistryStatus = "loading" | "ready";
-@@ -138,6 +143,19 @@ export interface HostRuntimeControllerDeps {
+@@ -138,6 +144,19 @@ export interface HostRuntimeControllerDeps {
    getClientId: () => Promise<string>;
  }
  
@@ -568,7 +823,7 @@ index 672642f..2c6681f 100644
  export interface HostRuntimeStartOptions {
    autoProbe?: boolean;
    initialConnection?: {
-@@ -1270,10 +1288,82 @@ export class HostRuntimeController {
+@@ -1270,10 +1289,111 @@ export class HostRuntimeController {
  }
  
  const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
@@ -587,6 +842,17 @@ index 672642f..2c6681f 100644
 +    return scope && scope.length > 0 ? scope : null;
 +  } catch {
 +    return null;
++  }
++}
++
++function readWebRegistryServerIdFromLocation(): string | null {
++  if (typeof window === "undefined") {
++    return null;
++  }
++  try {
++    return parseServerIdFromPathname(new URL(window.location.href).pathname);
++  } catch {
++    return parseServerIdFromPathname((window.location as { pathname?: string }).pathname ?? "/");
 +  }
 +}
 +
@@ -622,25 +888,30 @@ index 672642f..2c6681f 100644
 +    return REGISTRY_STORAGE_KEY;
 +  }
 +  const userScope = getPolarisAuthUserScope();
-+  if (userScope) {
-+    return `${REGISTRY_STORAGE_KEY}:user:${encodeURIComponent(userScope)}`;
-+  }
-+  const scope = readWebRegistryScopeFromLocation();
++  const serverId = readWebRegistryServerIdFromLocation();
++  const locationScope = readWebRegistryScopeFromLocation();
++  const scope = locationScope ?? (serverId ? readPersistedWebRegistryScope() : null);
 +  if (scope) {
 +    persistActiveWebRegistryScope(scope);
-+    return `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(scope)}`;
++    const scopedKey = userScope
++      ? `${REGISTRY_STORAGE_KEY}:user:${encodeURIComponent(userScope)}:scope:${encodeURIComponent(scope)}`
++      : `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(scope)}`;
++    return serverId ? `${scopedKey}:host:${encodeURIComponent(serverId)}` : scopedKey;
 +  }
-+  const persistedScope = readPersistedWebRegistryScope();
-+  return persistedScope
-+    ? `${REGISTRY_STORAGE_KEY}:scope:${encodeURIComponent(persistedScope)}`
-+    : REGISTRY_STORAGE_KEY;
++  if (userScope) {
++    const userKey = `${REGISTRY_STORAGE_KEY}:user:${encodeURIComponent(userScope)}`;
++    return serverId ? `${userKey}:host:${encodeURIComponent(serverId)}` : userKey;
++  }
++  return REGISTRY_STORAGE_KEY;
 +}
 +
 +function resolveRegistryStorageKeys(): string[] {
 +  const primary = resolveRegistryStorageKey();
++  const serverId = readWebRegistryServerIdFromLocation();
++  const hasScopedRoute = Boolean(serverId || readWebRegistryScopeFromLocation());
 +  // A signed portal session identifies one user. Never hydrate that user from
 +  // a legacy global or pairing-link scope that may belong to another account.
-+  if (getPolarisAuthUserScope()) {
++  if (getPolarisAuthUserScope() || hasScopedRoute) {
 +    return [primary];
 +  }
 +  return primary === REGISTRY_STORAGE_KEY
@@ -648,10 +919,23 @@ index 672642f..2c6681f 100644
 +    : [primary, REGISTRY_STORAGE_KEY];
 +}
 +
++function pruneHostsToActiveBrowserVault(hosts: HostProfile[]): HostProfile[] {
++  if (typeof window === "undefined") {
++    return hosts;
++  }
++
++  const activeServerId = readWebRegistryServerIdFromLocation();
++  if (!activeServerId) {
++    return hosts;
++  }
++
++  return hosts.filter((host) => host.serverId === activeServerId);
++}
++
  function readConfiguredLocalDaemonOverride(): string | null {
    const value = process.env.EXPO_PUBLIC_LOCAL_DAEMON?.trim();
    return value && value.length > 0 ? value : null;
-@@ -1369,14 +1459,28 @@ export class HostRuntimeStore {
+@@ -1369,14 +1489,28 @@ export class HostRuntimeStore {
      if (override) {
        this.bootstrapConfiguredOverride(override);
      } else {
@@ -681,16 +965,25 @@ index 672642f..2c6681f 100644
        if (!stored) {
          return;
        }
-@@ -1390,7 +1494,7 @@ export class HostRuntimeStore {
+@@ -1388,9 +1522,14 @@ export class HostRuntimeStore {
+         .map((entry) => normalizeStoredHostProfile(entry))
+         .filter((entry): entry is HostProfile => entry !== null);
        const profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
-       this.hosts = profiles;
-       this.syncHosts(profiles);
+-      this.hosts = profiles;
+-      this.syncHosts(profiles);
 -      if (profiles.length !== normalizedProfiles.length) {
-+      if (profiles.length !== normalizedProfiles.length || resolvedStorageKey !== storageKeys[0]) {
++      const prunedProfiles = pruneHostsToActiveBrowserVault(profiles);
++      this.hosts = prunedProfiles;
++      this.syncHosts(prunedProfiles);
++      if (
++        prunedProfiles.length !== profiles.length ||
++        profiles.length !== normalizedProfiles.length ||
++        resolvedStorageKey !== storageKeys[0]
++      ) {
          shouldPersistHosts = true;
        }
      } catch (error) {
-@@ -1674,6 +1778,12 @@ export class HostRuntimeStore {
+@@ -1674,6 +1813,12 @@ export class HostRuntimeStore {
      await this.persistHosts();
    }
  
@@ -703,7 +996,27 @@ index 672642f..2c6681f 100644
    async removeConnection(serverId: string, connectionId: string): Promise<void> {
      const now = new Date().toISOString();
      const next = this.hosts
-@@ -1745,8 +1855,9 @@ export class HostRuntimeStore {
+@@ -1705,6 +1850,10 @@ export class HostRuntimeStore {
+     connection: HostConnection;
+     existingClient?: DaemonClient;
+   }): Promise<HostProfile> {
++    const activeServerId = readWebRegistryServerIdFromLocation();
++    if (activeServerId && input.serverId !== activeServerId) {
++      throw new Error("Cannot import a host outside the active Paseo route");
++    }
+     const now = new Date().toISOString();
+     const next = upsertHostConnectionInProfiles({
+       profiles: this.hosts,
+@@ -1739,14 +1888,16 @@ export class HostRuntimeStore {
+       >;
+     },
+   ): void {
+-    this.hosts = hosts;
+-    this.syncHosts(hosts, options);
++    const scopedHosts = pruneHostsToActiveBrowserVault(hosts);
++    this.hosts = scopedHosts;
++    this.syncHosts(scopedHosts, options);
+     this.emitHostList();
    }
  
    private async persistHosts(): Promise<void> {
@@ -714,7 +1027,7 @@ index 672642f..2c6681f 100644
      } catch (error) {
        console.error("[HostRuntime] Failed to persist host registry", error);
      }
-@@ -2139,9 +2250,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
+@@ -2139,9 +2290,16 @@ export function useHostRuntimeIsDirectoryLoading(serverId: string): boolean {
  export function useHosts(): HostProfile[] {
    const store = getHostRuntimeStore();
    return useSyncExternalStore(

@@ -56,26 +56,52 @@ export function resolveShellHostActions(input: {
   host: ShellHostSummary;
 }): ShellHostSurfaceAction[] {
   const actions: ShellHostSurfaceAction[] = [];
-  const allowedLines = resolveAllowedVaultLines(input.session.line);
-  const hostLine = resolveHostVaultLine(input.host);
   const isRunning = input.host.status?.driver?.status === "running";
 
-  if (hostLine === "coding" && allowedLines.includes("coding") && input.host.serverId && isRunning) {
-    actions.push({
-      kind: "open-coding",
-      href: codingEmbedPath(input.host.serverId),
-    });
+  const codingAction = resolveCodingHostAction(input);
+  if (codingAction && isRunning) {
+    actions.push(codingAction);
     return actions;
   }
 
-  if (hostLine === "vertical" && allowedLines.includes("vertical") && input.host.wanghaiId) {
-    actions.push({
-      kind: "open-wanghai",
-      href: planOpenWanghaiPortal(input.host.wanghaiId).shellEmbedPath,
-    });
+  const wanghaiAction = resolveWanghaiPortalAction(input);
+  if (wanghaiAction && isRunning) {
+    actions.push(wanghaiAction);
   }
 
   return actions;
+}
+
+export function resolveCodingHostAction(input: {
+  session: Pick<ShellSession, "line" | "plan">;
+  host: ShellHostSummary;
+}): ShellHostSurfaceAction | null {
+  const allowedLines = resolveAllowedVaultLines(input.session.line);
+  const hostLine = resolveHostVaultLine(input.host);
+  const serverId = input.host.serverId?.trim();
+  if (hostLine !== "coding" || !allowedLines.includes("coding") || !serverId) {
+    return null;
+  }
+  return {
+    kind: "open-coding",
+    href: codingEmbedPath(serverId),
+  };
+}
+
+export function resolveWanghaiPortalAction(input: {
+  session: Pick<ShellSession, "line" | "plan">;
+  host: ShellHostSummary;
+}): ShellHostSurfaceAction | null {
+  const allowedLines = resolveAllowedVaultLines(input.session.line);
+  const hostLine = resolveHostVaultLine(input.host);
+  const wanghaiId = input.host.wanghaiId?.trim();
+  if (hostLine !== "vertical" || !allowedLines.includes("vertical") || !wanghaiId) {
+    return null;
+  }
+  return {
+    kind: "open-wanghai",
+    href: planOpenWanghaiPortal(wanghaiId).shellEmbedPath,
+  };
 }
 
 function resolveHostVaultLine(host: ShellHostSummary): "coding" | "vertical" {
