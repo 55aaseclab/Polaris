@@ -89,7 +89,7 @@ test("all integrated renderers remove standalone Wanghai environment values", ()
   }
 });
 
-test("Docker vaults render hard CPU, memory, PID, writable-layer, and tmpfs limits", () => {
+test("Docker vaults render hard CPU, memory, PID, and tmpfs limits", () => {
   const previousMasterSecret = process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
   const previousOrigins = process.env.POLARIS_PORTAL_ALLOWED_ORIGINS;
   process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = "0123456789abcdef0123456789abcdef";
@@ -111,7 +111,6 @@ test("Docker vaults render hard CPU, memory, PID, writable-layer, and tmpfs limi
         mem_limit?: string;
         memswap_limit?: string;
         pids_limit?: number;
-        storage_opt?: { size?: string };
         tmpfs?: string[];
       }>;
     };
@@ -121,7 +120,6 @@ test("Docker vaults render hard CPU, memory, PID, writable-layer, and tmpfs limi
     assert.equal(service.mem_limit, "1g");
     assert.equal(service.memswap_limit, "1g");
     assert.equal(service.pids_limit, 128);
-    assert.deepEqual(service.storage_opt, { size: "32m" });
     assert.deepEqual(service.tmpfs, ["/run/vault:rw,nosuid,nodev,noexec,size=32m"]);
   } finally {
     if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
@@ -146,7 +144,6 @@ test("Docker vault rendering bounds legacy unbounded resources and rejects inval
       services?: Record<string, {
         cpus?: string;
         mem_limit?: string;
-        storage_opt?: { size?: string };
         tmpfs?: string[];
       }>;
     };
@@ -154,7 +151,6 @@ test("Docker vault rendering bounds legacy unbounded resources and rejects inval
     assert.ok(unboundedService);
     assert.equal(unboundedService.cpus, "1");
     assert.equal(unboundedService.mem_limit, "512m");
-    assert.deepEqual(unboundedService.storage_opt, { size: "512m" });
     assert.deepEqual(unboundedService.tmpfs, ["/run/vault:rw,nosuid,nodev,noexec,size=64m"]);
     assert.throws(
       () => renderDockerVault({

@@ -29,12 +29,48 @@ function rowToRecord<T>(columns: string[], values: unknown[]): T {
 
 type SqlScalar = string | number | null;
 
+const LEGACY_SCOPE_TABLES = [
+  {
+    name: "execution_events",
+    legacyIndex: "idx_execution_events_workspace_session",
+  },
+  {
+    name: "memory_entries",
+    legacyIndex: "idx_memory_entries_workspace_target",
+  },
+  {
+    name: "pending_memory_changes",
+    legacyIndex: "idx_pending_memory_changes_workspace_status",
+  },
+] as const;
+
 function parseJsonObject(value: unknown): Record<string, unknown> {
   try {
     const parsed = JSON.parse(String(value ?? "{}"));
     return typeof parsed === "object" && parsed ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
+  }
+}
+
+function tableColumns(db: Database, tableName: string): Set<string> {
+  const stmt = db.prepare(`PRAGMA table_info(${tableName})`);
+  const columns = new Set<string>();
+  while (stmt.step()) {
+    const row = rowToRecord<Record<string, unknown>>(stmt.getColumnNames(), stmt.get());
+    columns.add(String(row.name));
+  }
+  stmt.free();
+  return columns;
+}
+
+function migrateLegacyWorkspaceScope(db: Database): void {
+  for (const table of LEGACY_SCOPE_TABLES) {
+    const columns = tableColumns(db, table.name);
+    if (columns.has("workspace_id") && !columns.has("vault_id")) {
+      db.run(`ALTER TABLE ${table.name} RENAME COLUMN workspace_id TO vault_id`);
+    }
+    db.run(`DROP INDEX IF EXISTS ${table.legacyIndex}`);
   }
 }
 
@@ -56,6 +92,7 @@ export class EvolutionStore {
   }
 
   private migrate(): void {
+    migrateLegacyWorkspaceScope(this.db);
     this.db.run(`
       CREATE TABLE IF NOT EXISTS execution_events (
         id TEXT PRIMARY KEY,

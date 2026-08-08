@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import initSqlJs from "sql.js";
 
 import { renderDockerVault } from "../scripts/backends/docker/render.js";
 import { renderPodVault } from "../scripts/backends/pod/render.js";
@@ -17,6 +19,99 @@ import {
   prepareEvolutionMemorySnapshot,
 } from "../scripts/evolution/runtime.js";
 import { EvolutionStore } from "../scripts/evolution/store.js";
+
+test("EvolutionStore migrates legacy workspace scope columns to vault scope", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-evolution-migration-"));
+  const dbPath = path.join(tempDir, "store.db");
+  const sqlite = await initSqlJs();
+  const legacyDb = new sqlite.Database();
+  legacyDb.run(`
+    CREATE TABLE execution_events (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      manager_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      turn_id TEXT,
+      kind TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
+    CREATE TABLE memory_entries (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      user_profile_id TEXT,
+      target TEXT NOT NULL,
+      section_name TEXT NOT NULL,
+      entry_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      status TEXT NOT NULL,
+      source_session_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL
+    );
+    CREATE TABLE pending_memory_changes (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      user_profile_id TEXT,
+      target TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      section_name TEXT NOT NULL,
+      entry_key TEXT NOT NULL,
+      candidate_json TEXT,
+      reason TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      source_session_id TEXT,
+      source_run_ids_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      metadata_json TEXT NOT NULL
+    );
+    CREATE INDEX idx_execution_events_workspace_session
+      ON execution_events(workspace_id, session_id, timestamp);
+    CREATE INDEX idx_memory_entries_workspace_target
+      ON memory_entries(workspace_id, target, status, updated_at);
+    CREATE INDEX idx_pending_memory_changes_workspace_status
+      ON pending_memory_changes(workspace_id, status, updated_at);
+    INSERT INTO execution_events
+      (id, workspace_id, manager_id, session_id, kind, timestamp, payload_json)
+      VALUES ('legacy-event', 'legacy-vault', 'manager', 'session', 'task-completed',
+              '2026-01-01T00:00:00.000Z', '{}');
+  `);
+  fs.writeFileSync(dbPath, Buffer.from(legacyDb.export()));
+  legacyDb.close();
+
+  try {
+    const store = await EvolutionStore.open(dbPath);
+    try {
+      assert.equal(store.listEventsForVault("legacy-vault").length, 1);
+    } finally {
+      store.close();
+    }
+
+    const migratedDb = new sqlite.Database(fs.readFileSync(dbPath));
+    try {
+      for (const table of ["execution_events", "memory_entries", "pending_memory_changes"]) {
+        const statement = migratedDb.prepare(`PRAGMA table_info(${table})`);
+        const names: string[] = [];
+        while (statement.step()) {
+          const row = statement.get() as unknown[];
+          names.push(String(row[1]));
+        }
+        statement.free();
+        assert.ok(names.includes("vault_id"));
+        assert.equal(names.includes("workspace_id"), false);
+      }
+    } finally {
+      migratedDb.close();
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 function loadVaultFromRefForTest(projectRef: string) {
   const resolved = resolveVaultConfigPath(projectRef);
