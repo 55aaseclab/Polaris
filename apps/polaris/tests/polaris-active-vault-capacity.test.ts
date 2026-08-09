@@ -58,6 +58,7 @@ function restoreEnvironment(name: string, value: string | undefined): void {
 test("active-vault capacity requires a release value and defaults to the reviewed local limit", () => {
   assert.equal(maxActiveVaults({}), 10);
   assert.equal(maxActiveVaults({ POLARIS_MAX_ACTIVE_VAULTS: "3" }), 3);
+  assert.equal(maxActiveVaults({ POLARIS_MAX_ACTIVE_VAULTS: "20" }), 20);
   assert.throws(
     () => maxActiveVaults({ POLARIS_RELEASE_PROFILE: "0.3.0-single-host" }),
     /POLARIS_MAX_ACTIVE_VAULTS is required/i,
@@ -66,6 +67,85 @@ test("active-vault capacity requires a release value and defaults to the reviewe
     () => maxActiveVaults({ POLARIS_MAX_ACTIVE_VAULTS: "0" }),
     /positive integer/i,
   );
+});
+
+test("Docker start admits the 20th vault and rejects the 21st under the 0.3.3 ceiling", async () => {
+  const users: string[] = [];
+  const vaults: string[] = [];
+  const activeContainersPath = path.join(os.tmpdir(), `${uniqueName("active-20")}.txt`);
+  const previousLimit = process.env.POLARIS_MAX_ACTIVE_VAULTS;
+  const previousContainersPath = process.env.POLARIS_TEST_ACTIVE_VAULTS_FILE;
+  try {
+    const lines: string[] = [];
+    for (let index = 1; index <= 21; index += 1) {
+      const userId = uniqueName(`cap20-user-${index}`);
+      const vault = uniqueName(`cap20-vault-${index}`);
+      users.push(userId);
+      vaults.push(vault);
+      await createUserCommand([userId, "--name", `Cap20 ${index}`, "--email", `${userId}@polaris.local`]);
+      await createCommand([vault, "--user", userId]);
+      if (index <= 19) {
+        lines.push(`${vaultRuntimeScopeName(userId, vault)}-docker`);
+      }
+    }
+    fs.writeFileSync(activeContainersPath, `${lines.join("\n")}\n`, "utf8");
+    process.env.POLARIS_MAX_ACTIVE_VAULTS = "20";
+    process.env.POLARIS_TEST_ACTIVE_VAULTS_FILE = activeContainersPath;
+
+    await withFakePath(
+      {
+        docker: `
+if [[ "$1" == "ps" && "$2" == "--format" ]]; then
+  cat "$POLARIS_TEST_ACTIVE_VAULTS_FILE"
+  exit 0
+fi
+exit 0
+`,
+      },
+      async () => {
+        const twentiethUser = users[19];
+        const twentiethVault = vaults[19];
+        const twentyFirstUser = users[20];
+        const twentyFirstVault = vaults[20];
+        assert.ok(twentiethUser && twentiethVault && twentyFirstUser && twentyFirstVault);
+
+        let admitted = false;
+        await withDockerActiveVaultCapacity(import.meta.url, {
+          userId: twentiethUser,
+          vault: twentiethVault,
+        }, async () => {
+          admitted = true;
+          fs.appendFileSync(
+            activeContainersPath,
+            `${vaultRuntimeScopeName(twentiethUser, twentiethVault)}-docker\n`,
+            "utf8",
+          );
+        });
+        assert.equal(admitted, true);
+
+        await assert.rejects(
+          () => withDockerActiveVaultCapacity(import.meta.url, {
+            userId: twentyFirstUser,
+            vault: twentyFirstVault,
+          }, async () => undefined),
+          (error: unknown) => {
+            assert.ok(error instanceof ActiveVaultCapacityError);
+            assert.equal(error.limit, 20);
+            assert.equal(error.activeVaults, 20);
+            return true;
+          },
+        );
+      },
+    );
+  } finally {
+    restoreEnvironment("POLARIS_MAX_ACTIVE_VAULTS", previousLimit);
+    restoreEnvironment("POLARIS_TEST_ACTIVE_VAULTS_FILE", previousContainersPath);
+    fs.rmSync(activeContainersPath, { force: true });
+    for (const userId of users) {
+      fs.rmSync(path.join(USER_ROOT, "profiles", `${userId}.yaml`), { force: true });
+      fs.rmSync(path.join(USER_ROOT, userId), { recursive: true, force: true });
+    }
+  }
 });
 
 test("the CLI entrypoint returns failure status for a rejected command", () => {

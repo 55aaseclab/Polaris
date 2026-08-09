@@ -12,6 +12,12 @@ This remains an unreleased candidate until the designated HTTP test host has
 deployed evidence, a measured 20-user stage result, and Authing is restored for
 any production-bound path.
 
+### Added
+
+- Added `benchmark:concurrent-users` to measure concurrent multi-user portal
+  and gateway load with distinct oauth2-proxy identities.
+- Added a unit test that admits the 20th active vault and rejects the 21st.
+
 ### Changed
 
 - Raised `config/release-profiles/0.3.0-single-host.json` `maxActiveVaults`
@@ -21,6 +27,7 @@ any production-bound path.
   smoke-check capacity bring-up without Authing. Production still requires
   Authing browser sessions.
 - Extended the default capacity-gateway stages to include a 20-user step.
+- Recorded local concurrent 10/20-user evidence before test-host deploy.
 
 ## [0.3.2] - Unreleased
 

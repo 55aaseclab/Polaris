@@ -9,6 +9,7 @@
     "migrate:wanghai-data-root": "tsx scripts/migrate-wanghai-data-root.ts",
     "benchmark:gateway": "tsx scripts/benchmark/gateway-performance-runner.ts",
     "benchmark:control-plane": "tsx scripts/benchmark/control-plane-performance-runner.ts",
+    "benchmark:concurrent-users": "tsx scripts/benchmark/concurrent-user-capacity-runner.ts",
     "build": "pnpm run build:auth && tsc -p tsconfig.json",
     "check": "pnpm run build:auth && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run test:smoke",
