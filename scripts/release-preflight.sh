@@ -69,49 +69,60 @@ require_integer_range() {
   fi
 }
 
-if [ "${auth_mode}" != "authing-browser-session" ]; then
-  fail "POLARIS_AUTH_MODE must be authing-browser-session for a production release"
+# Production always requires Authing browser sessions. local-test may use
+# disabled auth only for synthetic host smoke and capacity bring-up; restore
+# Authing before any production gate.
+if [ "${release_gate_mode}" = "production" ]; then
+  if [ "${auth_mode}" != "authing-browser-session" ]; then
+    fail "POLARIS_AUTH_MODE must be authing-browser-session for a production release"
+  fi
+elif [ "${auth_mode}" != "authing-browser-session" ] && [ "${auth_mode}" != "disabled" ]; then
+  fail "POLARIS_AUTH_MODE must be authing-browser-session or disabled in local-test mode"
 fi
 
-for auth_key in \
-  POLARIS_AUTHING_APP_ID \
-  POLARIS_AUTHING_APP_SECRET \
-  POLARIS_AUTHING_ISSUER \
-  POLARIS_AUTHING_AUTHORIZATION_URL \
-  POLARIS_AUTHING_TOKEN_URL \
-  POLARIS_AUTHING_LOGOUT_URL \
-  POLARIS_AUTHING_LOGOUT_REDIRECT_URI \
-  POLARIS_AUTHING_REDIRECT_URI; do
-  auth_value="${!auth_key:-}"
-  if [ -z "${auth_value}" ] || [[ "${auth_value}" == *"replace-with"* || "${auth_value}" == your-* ]]; then
-    fail "${auth_key} must be a real production value"
-  fi
-done
+if [ "${auth_mode}" = "disabled" ]; then
+  printf 'release preflight: Authing disabled for local-test only; not a production candidate\n'
+else
+  for auth_key in \
+    POLARIS_AUTHING_APP_ID \
+    POLARIS_AUTHING_APP_SECRET \
+    POLARIS_AUTHING_ISSUER \
+    POLARIS_AUTHING_AUTHORIZATION_URL \
+    POLARIS_AUTHING_TOKEN_URL \
+    POLARIS_AUTHING_LOGOUT_URL \
+    POLARIS_AUTHING_LOGOUT_REDIRECT_URI \
+    POLARIS_AUTHING_REDIRECT_URI; do
+    auth_value="${!auth_key:-}"
+    if [ -z "${auth_value}" ] || [[ "${auth_value}" == *"replace-with"* || "${auth_value}" == your-* ]]; then
+      fail "${auth_key} must be a real production value"
+    fi
+  done
 
-for auth_url_key in \
-  POLARIS_AUTHING_ISSUER \
-  POLARIS_AUTHING_AUTHORIZATION_URL \
-  POLARIS_AUTHING_TOKEN_URL \
-  POLARIS_AUTHING_LOGOUT_URL \
-  POLARIS_AUTHING_LOGOUT_REDIRECT_URI \
-  POLARIS_AUTHING_REDIRECT_URI; do
-  auth_url="${!auth_url_key}"
-  if ! node -e '
-    const raw = process.argv[1] || "";
-    let value;
-    try {
-      value = new URL(raw);
-    } catch {
-      process.exit(1);
-    }
-    const allowHttp = process.argv[2] === "1";
-    if (((value.protocol !== "https:") && (!allowHttp || value.protocol !== "http:"))
-      || value.username || value.password || !value.hostname
-      || value.search || value.hash) process.exit(1);
-  ' "${auth_url}" "$([ "${release_gate_mode}" = "local-test" ] && printf 1 || printf 0)"; then
-    fail "${auth_url_key} must be a ${release_url_requirement}"
-  fi
-done
+  for auth_url_key in \
+    POLARIS_AUTHING_ISSUER \
+    POLARIS_AUTHING_AUTHORIZATION_URL \
+    POLARIS_AUTHING_TOKEN_URL \
+    POLARIS_AUTHING_LOGOUT_URL \
+    POLARIS_AUTHING_LOGOUT_REDIRECT_URI \
+    POLARIS_AUTHING_REDIRECT_URI; do
+    auth_url="${!auth_url_key}"
+    if ! node -e '
+      const raw = process.argv[1] || "";
+      let value;
+      try {
+        value = new URL(raw);
+      } catch {
+        process.exit(1);
+      }
+      const allowHttp = process.argv[2] === "1";
+      if (((value.protocol !== "https:") && (!allowHttp || value.protocol !== "http:"))
+        || value.username || value.password || !value.hostname
+        || value.search || value.hash) process.exit(1);
+    ' "${auth_url}" "$([ "${release_gate_mode}" = "local-test" ] && printf 1 || printf 0)"; then
+      fail "${auth_url_key} must be a ${release_url_requirement}"
+    fi
+  done
+fi
 
 if [ "${#master_secret}" -lt 32 ] || [[ "${master_secret}" == *"replace-with"* ]]; then
   fail "POLARIS_WANGHAI_GATEWAY_MASTER_SECRET must be a non-placeholder value of at least 32 characters"

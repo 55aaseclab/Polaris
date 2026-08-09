@@ -64,8 +64,8 @@ test("remote provision reuses an existing Docker install instead of forcing dock
 test("remote provision keeps integrated Wanghai on the Polaris vault export", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
   const exampleEnv = fs.readFileSync(".env.prod.example", "utf8");
-  assert.match(exampleEnv, /^POLARIS_RELEASE_ID=0\.3\.2$/m);
-  assert.match(script, /upsert_env_line 'POLARIS_RELEASE_ID' '0\.3\.2'/);
+  assert.match(exampleEnv, /^POLARIS_RELEASE_ID=0\.3\.3$/m);
+  assert.match(script, /upsert_env_line 'POLARIS_RELEASE_ID' '0\.3\.3'/);
   assert.match(script, /POLARIS_NETFS_LOCAL_EXPORT_ROOT/);
   assert.match(script, /POLARIS_RELEASE_ID/);
   assert.match(script, /POLARIS_RELEASE_PROFILE/);
@@ -142,7 +142,7 @@ test("host Polaris launcher rejects invalid production replica configuration", (
       POLARIS_GATEWAY_REPLICAS: "1",
       POLARIS_JOB_WORKER_CONCURRENCY: "1",
       POLARIS_JOB_LEASE_MS: "60000",
-      POLARIS_MAX_ACTIVE_VAULTS: "10",
+      POLARIS_MAX_ACTIVE_VAULTS: "20",
     },
   });
   assert.notEqual(result.status, 0);

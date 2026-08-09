@@ -26,7 +26,7 @@ test("the 0.3.0 single-host profile declares bounded capacity and quota defaults
   assert.equal(profile.topology.mode, "single-host");
   assert.equal(profile.topology.controlPlaneReplicas, 1);
   assert.equal(profile.topology.gatewayReplicas, 1);
-  assert.equal(profile.capacity.maxActiveVaults, 10);
+  assert.equal(profile.capacity.maxActiveVaults, 20);
   assert.equal(profile.capacity.jobWorkerConcurrency, 1);
   assert.equal(profile.capacity.jobLeaseMs, 60_000);
   assert.equal(profile.quota.hotStorageMiB, 512);
@@ -75,10 +75,10 @@ test("the single-host profile rejects replicas and mismatched capacity overrides
   environment.POLARIS_MAX_ACTIVE_VAULTS = "11";
   assert.throws(
     () => validateReleaseProfileEnvironment(profile, environment),
-    /POLARIS_MAX_ACTIVE_VAULTS must equal 10/i,
+    /POLARIS_MAX_ACTIVE_VAULTS must equal 20/i,
   );
 
-  environment.POLARIS_MAX_ACTIVE_VAULTS = "10";
+  environment.POLARIS_MAX_ACTIVE_VAULTS = "20";
   environment.POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES = "1";
   assert.throws(
     () => validateReleaseProfileEnvironment(profile, environment),

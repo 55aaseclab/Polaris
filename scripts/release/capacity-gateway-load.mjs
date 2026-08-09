@@ -12,7 +12,7 @@ const DEFAULT_PROFILE_PATH = path.join(
   "release-profiles",
   "0.3.0-single-host.json",
 );
-const DEFAULT_STAGES = [2, 5, 10];
+const DEFAULT_STAGES = [2, 5, 10, 20];
 const DEFAULT_ROUNDS = 5;
 const WORKSPACE_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}$/u;
 const RUN_ID_PATTERN = /^[a-z][a-z0-9-]{0,36}$/u;

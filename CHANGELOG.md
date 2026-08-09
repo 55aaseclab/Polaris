@@ -3,6 +3,25 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [0.3.3] - Unreleased
+
+Started the controlled user-growth candidate that raises the single-host active
+vault ceiling from 10 to 20.
+
+This remains an unreleased candidate until the designated HTTP test host has
+deployed evidence, a measured 20-user stage result, and Authing is restored for
+any production-bound path.
+
+### Changed
+
+- Raised `config/release-profiles/0.3.0-single-host.json` `maxActiveVaults`
+  from 10 to 20 and aligned provision defaults and release-identity bumps.
+- Allowed `POLARIS_AUTH_MODE=disabled` only when
+  `POLARIS_RELEASE_GATE_MODE=local-test`, so the designated test host can
+  smoke-check capacity bring-up without Authing. Production still requires
+  Authing browser sessions.
+- Extended the default capacity-gateway stages to include a 20-user step.
+
 ## [0.3.2] - Unreleased
 
 Started the signed workspace-base image promotion path for the 0.3.2 release.

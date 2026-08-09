@@ -27,8 +27,9 @@ export class ActiveVaultCapacityError extends Error {
 }
 
 /**
- * Development uses the reviewed 0.3 limit. A configured release profile must
- * always provide the value that release-profile.mjs verifies.
+ * Development without a release profile uses the conservative local default.
+ * A configured release profile must always provide the value that
+ * release-profile.mjs verifies (20 for the current 0.3.3 single-host profile).
  */
 export function maxActiveVaults(env: NodeJS.ProcessEnv = process.env): number {
   const raw = String(env[POLARIS_MAX_ACTIVE_VAULTS_ENV] ?? "").trim();

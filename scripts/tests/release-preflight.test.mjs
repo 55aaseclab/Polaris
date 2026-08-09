@@ -41,7 +41,7 @@ function withPreflightFixture({
     POLARIS_GATEWAY_REPLICAS: "1",
     POLARIS_JOB_WORKER_CONCURRENCY: "1",
     POLARIS_JOB_LEASE_MS: "60000",
-    POLARIS_MAX_ACTIVE_VAULTS: "10",
+    POLARIS_MAX_ACTIVE_VAULTS: "20",
     POLARIS_ACTIVE_WORKSPACE_QUOTA_BYTES: "268435456",
     POLARIS_AUTH_MODE: "authing-browser-session",
     POLARIS_AUTHING_APP_ID: "synthetic-app-id",
@@ -196,11 +196,46 @@ test("release preflight fails closed when Docker port inspection fails", () => {
   });
 });
 
-test("release preflight rejects disabled authentication", () => {
-  withPreflightFixture({ envOverrides: { POLARIS_AUTH_MODE: "disabled" } }, ({ bin, envFile }) => {
+test("release preflight rejects disabled authentication in production mode", () => {
+  withPreflightFixture({
+    envOverrides: {
+      POLARIS_RELEASE_GATE_MODE: "production",
+      POLARIS_AUTH_MODE: "disabled",
+    },
+  }, ({ bin, envFile }) => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /POLARIS_AUTH_MODE must be authing-browser-session/);
+    assert.match(result.stderr, /POLARIS_AUTH_MODE must be authing-browser-session for a production release/);
+  });
+});
+
+test("release preflight permits disabled authentication in local-test mode", () => {
+  withPreflightFixture({
+    dnsFailure: true,
+    tlsFailure: true,
+    cosignFailure: true,
+    provenanceFailure: true,
+    sbomFailure: true,
+    envOverrides: {
+      POLARIS_RELEASE_GATE_MODE: "local-test",
+      POLARIS_AUTH_MODE: "disabled",
+      POLARIS_AUTHING_APP_ID: "",
+      POLARIS_AUTHING_APP_SECRET: "",
+      POLARIS_AUTHING_ISSUER: "",
+      POLARIS_AUTHING_AUTHORIZATION_URL: "",
+      POLARIS_AUTHING_TOKEN_URL: "",
+      POLARIS_AUTHING_LOGOUT_URL: "",
+      POLARIS_AUTHING_LOGOUT_REDIRECT_URI: "",
+      POLARIS_AUTHING_REDIRECT_URI: "",
+      POLARIS_WANGHAI_GATEWAY_ORIGIN: "http://m00e04c1b76c0.dyn.epfl.ch",
+      POLARIS_PORTAL_ALLOWED_ORIGINS: "http://m00e04c1b76c0.dyn.epfl.ch",
+      POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "",
+      POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "",
+    },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Authing disabled for local-test only/);
   });
 });
 

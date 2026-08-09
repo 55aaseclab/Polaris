@@ -7,7 +7,7 @@
     "gatewayReplicas": 1
   },
   "capacity": {
-    "maxActiveVaults": 10,
+    "maxActiveVaults": 20,
     "jobWorkerConcurrency": 1,
     "jobLeaseMs": 60000
   },
