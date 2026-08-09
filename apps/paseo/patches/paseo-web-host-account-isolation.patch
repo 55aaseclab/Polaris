@@ -1,9 +1,9 @@
 diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..686a59cc189135beea69dff3351622b44065bdb0
+index 0000000000000000000000000000000000000000..a35dc4a8ce23121b0f908719d7afd2a6e016bbd8
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.test.ts
-@@ -0,0 +1,293 @@
+@@ -0,0 +1,382 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
 +  buildPolarisHostSyncKey,
@@ -295,6 +295,95 @@ index 0000000000000000000000000000000000000000..686a59cc189135beea69dff3351622b4
 +    resolveFirstFetch(new Response(JSON.stringify({ hosts: [] }), { status: 200 }));
 +    await expect(first).resolves.toMatchObject({ serverIds: [] });
 +    expect(fetchMock).toHaveBeenCalledTimes(2);
++  });
++
++  it("keeps both coding vaults pinned when Expo rewrites scope during startup", async () => {
++    const vaults = [
++      {
++        name: "test",
++        serverId: "srv_test",
++        oldScope: "user:test-vault",
++        newScope: "user:test-vault-normalized",
++      },
++      {
++        name: "test-coding",
++        serverId: "srv_test-coding",
++        oldScope: "user:test-coding-vault",
++        newScope: "user:test-coding-vault-normalized",
++      },
++    ] as const;
++    const hosts: PolarisHostSummary[] = vaults.map((vault) => ({
++      name: vault.name,
++      serverId: vault.serverId,
++      status: {
++        driver: { status: "running" },
++        paseo: {
++          reconnectTarget: offerUrl(
++            vault.serverId,
++            `/paseo/h/${vault.serverId}?scope=${encodeURIComponent(vault.oldScope)}`,
++          ),
++        },
++      },
++    }));
++    const fetchMock = vi.fn();
++    vi.stubGlobal("fetch", fetchMock);
++    vi.stubGlobal("location", {
++      origin: "https://polaris.example",
++      protocol: "https:",
++      hostname: "polaris.example",
++    });
++
++    for (const selected of vaults) {
++      let currentPathname = `/paseo/h/${selected.serverId}?scope=${encodeURIComponent(selected.oldScope)}`;
++      let resolveFetch!: (response: Response) => void;
++      fetchMock.mockImplementationOnce(
++        () =>
++          new Promise<Response>((resolve) => {
++            resolveFetch = resolve;
++          }),
++      );
++      const upsert = vi.fn(async (url: string, label?: string) => {
++        expect(label).toBe(selected.name);
++        expect(extractServerIdFromPairingUrl(url)).toBe(selected.serverId);
++
++        // Expo may normalize the scope while the host route remains the same.
++        currentPathname = `/paseo/h/${selected.serverId}?scope=${encodeURIComponent(selected.newScope)}`;
++        expect(isPolarisHostRouteCurrent(currentPathname, selected.serverId)).toBe(true);
++        return { serverId: selected.serverId };
++      });
++
++      const first = syncPolarisHostsOnce({
++        token: "shared-user-token",
++        serverId: selected.serverId,
++        scope: selected.oldScope,
++        upsertFromOfferUrl: upsert,
++      });
++      const afterExpoNormalization = syncPolarisHostsOnce({
++        token: "shared-user-token",
++        serverId: selected.serverId,
++        scope: selected.newScope,
++        upsertFromOfferUrl: upsert,
++      });
++
++      // A scope rewrite must not create a second sync or invalidate the route.
++      expect(afterExpoNormalization).toBe(first);
++      resolveFetch(new Response(JSON.stringify({ hosts }), { status: 200 }));
++      const result = await first;
++
++      expect(upsert).toHaveBeenCalledTimes(1);
++      expect(result.serverIds).toEqual([selected.serverId]);
++      expect(result.preferredHref).toBe(`/h/${selected.serverId}`);
++      expect(isPolarisHostRouteCurrent(currentPathname, selected.serverId)).toBe(true);
++      expect(
++        isPolarisHostRouteCurrent(
++          currentPathname,
++          vaults.find((vault) => vault.serverId !== selected.serverId)?.serverId,
++        ),
++      ).toBe(false);
++    }
++
++    // Two vaults mean two independent scoped fetches, never one shared first host.
++    expect(fetchMock).toHaveBeenCalledTimes(vaults.length);
 +  });
 +});
 diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
