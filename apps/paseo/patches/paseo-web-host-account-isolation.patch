@@ -1,9 +1,9 @@
 diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6c765f5bc85031df64df7d7b52bbb2201f05ee56
+index 0000000000000000000000000000000000000000..8549eabfd162b654bb6351c890b62ca8c9e3d646
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.test.ts
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,269 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
 +  extractServerIdFromPairingUrl,
@@ -76,6 +76,23 @@ index 0000000000000000000000000000000000000000..6c765f5bc85031df64df7d7b52bbb220
 +
 +    expect(findPolarisHostForServerId(hosts, "srv_offline")?.name).toBe("workspace-name");
 +    expect(findPolarisHostForServerId(hosts, "srv_other")).toBeNull();
++  });
++
++  it("prefers the API serverId when a pairing target is stale or absent", () => {
++    const hosts: PolarisHostSummary[] = [
++      {
++        name: "test-coding",
++        serverId: "srv_IxC-TWbKqQBg",
++        status: { paseo: { reconnectTarget: "https://polaris.example/paseo" } },
++      },
++      {
++        name: "test",
++        serverId: "srv_AiBanc_-FHWd",
++        status: { paseo: { reconnectTarget: "https://polaris.example/paseo/h/srv_AiBanc_-FHWd" } },
++      },
++    ];
++
++    expect(findPolarisHostForServerId(hosts, "srv_IxC-TWbKqQBg")?.name).toBe("test-coding");
 +  });
 +
 +  it("ranks running hosts before stopped ones", () => {
@@ -258,15 +275,17 @@ index 0000000000000000000000000000000000000000..6c765f5bc85031df64df7d7b52bbb220
 +});
 diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a9c2149dd36bf7fd3db841442f0c3e21f4fb21a8
+index 0000000000000000000000000000000000000000..9c7af6d9970cfdf7a6a01710401083733f7f1197
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.ts
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,212 @@
 +import { polarisApiBaseUrl } from "@/lib/polaris-authing";
 +import { buildHostRootRoute } from "@/utils/host-routes";
 +
 +export interface PolarisHostSummary {
 +  name: string;
++  /** Immutable Paseo identity returned by the authenticated Polaris API. */
++  serverId?: string | null;
 +  status?: {
 +    driver?: {
 +      status?: string | null;
@@ -356,6 +375,13 @@ index 0000000000000000000000000000000000000000..a9c2149dd36bf7fd3db841442f0c3e21
 +  const expectedServerId = serverId.trim();
 +  if (!expectedServerId) {
 +    return null;
++  }
++  // The API already resolves the vault's persisted Paseo identity. Use it as
++  // the primary key; pairing targets are compatibility data and may be stale
++  // or absent while a vault is being refreshed.
++  const apiMatch = hosts.find((host) => host.serverId?.trim() === expectedServerId);
++  if (apiMatch) {
++    return apiMatch;
 +  }
 +  return (
 +    hosts.find(
