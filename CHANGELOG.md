@@ -3,20 +3,20 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
-## [0.3.3] - Unreleased
+## [0.3.3] - 2026-08-09
 
-Started the controlled user-growth candidate that raises the single-host active
-vault ceiling from 10 to 20.
-
-This remains an unreleased candidate until the designated HTTP test host has
-deployed evidence, a measured 20-user stage result, and Authing is restored for
-any production-bound path.
+Released the single-host active-vault ceiling raise from 10 to 20, with a
+measured resource baseline and test-host evidence. Open 0.3.2 perimeter items
+(authenticated tenant matrix, full SPDX clean-host policy, human go/no-go) are
+not reopened by this capacity release.
 
 ### Added
 
 - Added `benchmark:concurrent-users` to measure concurrent multi-user portal
   and gateway load with distinct oauth2-proxy identities.
 - Added a unit test that admits the 20th active vault and rejects the 21st.
+- Published the twenty-user host resource baseline (memory, CPU, storage,
+  network) from linear hot-vault measurements.
 
 ### Changed
 
@@ -27,7 +27,6 @@ any production-bound path.
   smoke-check capacity bring-up without Authing. Production still requires
   Authing browser sessions.
 - Extended the default capacity-gateway stages to include a 20-user step.
-- Recorded local concurrent 10/20-user evidence before test-host deploy.
 
 ## [0.3.2] - Unreleased
 
