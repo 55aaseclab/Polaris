@@ -12,7 +12,7 @@ operator runbooks, and release evidence live in the
 [Jianxiaoyi documentation site](https://www.jianxiaoyitech.com/docs/).
 Start with the [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/)
 for architecture and the
-[Polaris 0.3.1 performance release records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.1/)
+[Polaris 0.3.2 production perimeter records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.2/)
 for release status.
 Release history is maintained in [CHANGELOG.md](CHANGELOG.md).
 

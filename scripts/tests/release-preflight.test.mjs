@@ -166,8 +166,8 @@ test("release preflight permits the unsigned HTTP test-host mode", () => {
   }, ({ bin, envFile, cosignArgsPath }) => {
     const result = runPreflight(bin, envFile);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /supply-chain verification deferred to 0\.3\.2/);
-    assert.match(result.stdout, /DNS and TLS verification deferred to 0\.3\.2/);
+    assert.match(result.stdout, /supply-chain verification skipped in local-test mode/);
+    assert.match(result.stdout, /DNS and TLS verification skipped in local-test mode/);
     assert.equal(fs.existsSync(cosignArgsPath), false);
   });
 });

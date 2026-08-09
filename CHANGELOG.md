@@ -7,6 +7,9 @@ ordered newest first.
 
 Started the signed workspace-base image promotion path for the 0.3.2 release.
 
+This remains an unreleased candidate while clean-host attestation verification,
+the authenticated external tenant matrix, and production approval are open.
+
 ### Added
 
 - Added a GitHub Actions workflow that publishes the Polaris workspace base to
@@ -19,6 +22,13 @@ Started the signed workspace-base image promotion path for the 0.3.2 release.
 - Added a pinned Rekor-free Sigstore signing configuration for the large SPDX
   attestation; image signatures and SLSA provenance remain transparency-log
   backed.
+
+### Changed
+
+- Bumped the release candidate identity to `0.3.2`.
+- Recorded formal-origin probes for `polaris.jianxiaoyitech.com`.
+- Added a regression guard for scoped two-vault Paseo coding routes and mutable
+  Expo `scope` query parameters.
 
 ## [0.3.1] - 2026-08-06
 

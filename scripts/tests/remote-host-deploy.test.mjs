@@ -63,6 +63,9 @@ test("remote provision reuses an existing Docker install instead of forcing dock
 
 test("remote provision keeps integrated Wanghai on the Polaris vault export", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
+  const exampleEnv = fs.readFileSync(".env.prod.example", "utf8");
+  assert.match(exampleEnv, /^POLARIS_RELEASE_ID=0\.3\.2$/m);
+  assert.match(script, /upsert_env_line 'POLARIS_RELEASE_ID' '0\.3\.2'/);
   assert.match(script, /POLARIS_NETFS_LOCAL_EXPORT_ROOT/);
   assert.match(script, /POLARIS_RELEASE_ID/);
   assert.match(script, /POLARIS_RELEASE_PROFILE/);

@@ -254,7 +254,7 @@ fi
 
 upsert_env_line 'POLARIS_DATA_ROOT' '${REMOTE_DATA_ROOT}' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_NETFS_LOCAL_EXPORT_ROOT' '${REMOTE_NETFS_EXPORT_ROOT}' '${REMOTE_ENV_FILE}'
-upsert_env_line 'POLARIS_RELEASE_ID' '0.3.1' '${REMOTE_ENV_FILE}'
+upsert_env_line 'POLARIS_RELEASE_ID' '0.3.2' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_RELEASE_PROFILE' '0.3.0-single-host' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_DEPLOYMENT_MODE' 'single-host' '${REMOTE_ENV_FILE}'
 upsert_env_line 'POLARIS_SERVER_REPLICAS' '1' '${REMOTE_ENV_FILE}'
