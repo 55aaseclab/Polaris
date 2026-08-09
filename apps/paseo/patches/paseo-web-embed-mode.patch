@@ -1,5 +1,5 @@
 diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
-index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249cafad349e4f 100644
+index 94061e25a597a9d97b443f541ea5a4bf87a14675..8ca5ac50f4e922128482c54bbfc5043a6dbac12f 100644
 --- a/packages/app/src/app/_layout.tsx
 +++ b/packages/app/src/app/_layout.tsx
 @@ -4,7 +4,7 @@ import { PortalProvider } from "@gorhom/portal";
@@ -11,7 +11,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
  import {
    createContext,
    type ReactNode,
-@@ -99,6 +99,13 @@ import {
+@@ -99,6 +99,17 @@ import {
  } from "@/utils/host-routes";
  import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
  import { navigateToAgent } from "@/utils/navigate-to-agent";
@@ -21,11 +21,15 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
 +  resolvePolarisAuthRedirect,
 +  usePolarisAuthSession,
 +} from "@/lib/polaris-authing";
-+import { buildPolarisHostSyncKey, syncPolarisHostsOnce } from "@/lib/polaris-host-sync";
++import {
++  buildPolarisHostSyncKey,
++  isPolarisHostRouteCurrent,
++  syncPolarisHostsOnce,
++} from "@/lib/polaris-host-sync";
  import {
    ensureOsNotificationPermission,
    WEB_NOTIFICATION_CLICK_EVENT,
-@@ -689,6 +696,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
+@@ -689,6 +700,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
      <VoiceProvider>
        <DesktopWindowControlsSync enabled={!settingsLoading} />
        <OfferLinkListener upsertDaemonFromOfferUrl={upsertConnectionFromOfferUrl} />
@@ -33,7 +37,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
        <HostSessionManager />
        <FaviconStatusSync />
        {children}
-@@ -696,6 +704,97 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
+@@ -696,6 +708,83 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
    );
  }
  
@@ -41,16 +45,11 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
 +  const hasPolarisSession = usePolarisAuthSession();
 +  const { upsertConnectionFromOfferUrl } = useHostMutations();
 +  const pathname = usePathname();
-+  const globalParams = useGlobalSearchParams<{ scope?: string | string[] }>();
 +  const activeServerId = parseServerIdFromPathname(pathname);
-+  const routeScope =
-+    typeof globalParams.scope === "string"
-+      ? globalParams.scope.trim()
-+      : (globalParams.scope?.[0]?.trim() ?? "");
 +  const syncedScopeRef = useRef<string | null>(null);
 +  const token = getPolarisAuthToken();
 +  const syncKey = token
-+    ? buildPolarisHostSyncKey({ token, serverId: activeServerId, scope: routeScope })
++    ? buildPolarisHostSyncKey({ token, serverId: activeServerId })
 +    : null;
 +
 +  useEffect(() => {
@@ -66,15 +65,9 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
 +      store.beginPolarisHostSync(activeServerId, syncKey);
 +    }
 +    const isCurrentRoute = () => {
-+      if (typeof window === "undefined") {
-+        return parseServerIdFromPathname(pathname) === activeServerId;
-+      }
-+      const currentUrl = new URL(window.location.href);
-+      const currentScope = currentUrl.searchParams.get("scope")?.trim() ?? "";
-+      return (
-+        parseServerIdFromPathname(currentUrl.pathname) === activeServerId &&
-+        currentScope === routeScope
-+      );
++      const currentPathname =
++        typeof window === "undefined" ? pathname : new URL(window.location.href).pathname;
++      return isPolarisHostRouteCurrent(currentPathname, activeServerId);
 +    };
 +
 +    void (async () => {
@@ -91,11 +84,10 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
 +        serverId: activeServerId,
 +        upsertFromOfferUrl: (url, label) => {
 +          if (getPolarisAuthToken() !== token || !isCurrentRoute()) {
-+            throw new Error("Paseo host scope changed");
++            throw new Error("Paseo host route changed");
 +          }
 +          return upsertConnectionFromOfferUrl(url, label);
 +        },
-+        scope: routeScope,
 +      });
 +
 +      if (
@@ -116,10 +108,8 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
 +      });
 +  }, [
 +    activeServerId,
-+    globalParams.scope,
 +    hasPolarisSession,
 +    pathname,
-+    routeScope,
 +    syncKey,
 +    token,
 +    upsertConnectionFromOfferUrl,
@@ -131,7 +121,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
  function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
    const { theme } = useUnistyles();
    const surface0 = theme.colors.surface0;
-@@ -720,12 +819,21 @@ function OfferLinkListener({
+@@ -720,12 +809,21 @@ function OfferLinkListener({
    upsertDaemonFromOfferUrl: (offerUrlOrFragment: string) => Promise<unknown>;
  }) {
    const router = useRouter();
@@ -153,7 +143,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
        void upsertDaemonFromOfferUrl(url)
          .then((profile) => {
            if (cancelled) return;
-@@ -735,11 +843,16 @@ function OfferLinkListener({
+@@ -735,11 +833,16 @@ function OfferLinkListener({
            return;
          })
          .catch((error) => {
@@ -170,7 +160,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
      void Linking.getInitialURL()
        .then(handleUrl)
        .catch(() => undefined);
-@@ -747,10 +860,19 @@ function OfferLinkListener({
+@@ -747,10 +850,19 @@ function OfferLinkListener({
      const subscription = Linking.addEventListener("url", (event) => {
        handleUrl(event.url);
      });
@@ -190,7 +180,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
      };
    }, [router, upsertDaemonFromOfferUrl]);
  
-@@ -879,7 +1001,10 @@ function FaviconStatusSync() {
+@@ -879,7 +991,10 @@ function FaviconStatusSync() {
  
  function RootStack() {
    const storeReady = useStoreReady();
@@ -201,7 +191,7 @@ index 94061e25a597a9d97b443f541ea5a4bf87a14675..59f67459b97eebded26d0316f2249caf
    const stackScreenOptions = useMemo(
      () => ({
        headerShown: false,
-@@ -890,20 +1015,27 @@ function RootStack() {
+@@ -890,20 +1005,27 @@ function RootStack() {
      }),
      [theme.colors.surface0],
    );

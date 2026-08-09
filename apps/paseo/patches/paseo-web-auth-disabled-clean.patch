@@ -1,10 +1,9 @@
 diff --git a/packages/app/src/app/h/[serverId]/_layout.tsx b/packages/app/src/app/h/[serverId]/_layout.tsx
-index 0fb551f300cc3c2dc387c645e86e51d5772d6ee0..b35e857dfc4ed2a0cd0c75206992b19a304e0c17 100644
+index 0fb551f300cc3c2dc387c645e86e51d5772d6ee0..98af2453b91ab6bb9d546cb6963d0d56ab82c819 100644
 --- a/packages/app/src/app/h/[serverId]/_layout.tsx
 +++ b/packages/app/src/app/h/[serverId]/_layout.tsx
 @@ -1,8 +1,15 @@
--import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-+import { Redirect, Stack, useGlobalSearchParams, useLocalSearchParams } from "expo-router";
+ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
  import { useHostRuntimeBootstrapState } from "@/app/_layout";
 +import { buildPolarisHostSyncKey } from "@/lib/polaris-host-sync";
 +import {
@@ -20,20 +19,15 @@ index 0fb551f300cc3c2dc387c645e86e51d5772d6ee0..b35e857dfc4ed2a0cd0c75206992b19a
  
  const HOST_STACK_SCREEN_OPTIONS = {
    headerShown: false,
-@@ -20,18 +27,35 @@ function KnownHostRoute() {
+@@ -20,18 +27,30 @@ function KnownHostRoute() {
    const hosts = useHosts();
    const hostRegistryStatus = useHostRegistryStatus();
    const bootstrapState = useHostRuntimeBootstrapState();
 +  const hasPolarisSession = usePolarisAuthSession();
    const routeServerId = typeof params.serverId === "string" ? params.serverId : null;
-+  const globalParams = useGlobalSearchParams<{ scope?: string | string[] }>();
-+  const routeScope =
-+    typeof globalParams.scope === "string"
-+      ? globalParams.scope.trim()
-+      : (globalParams.scope?.[0]?.trim() ?? "");
 +  const token = getPolarisAuthToken();
 +  const syncKey = token
-+    ? buildPolarisHostSyncKey({ token, serverId: routeServerId, scope: routeScope })
++    ? buildPolarisHostSyncKey({ token, serverId: routeServerId })
 +    : null;
 +  const polarisHostSyncStatus = usePolarisHostSyncStatus(routeServerId, syncKey);
    const startupRoute = resolveStartupRoute({

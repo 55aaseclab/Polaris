@@ -887,7 +887,7 @@ index a29015647220cf7f717692327abfe4c8515d8c61..7cf7f79e2a7f75882162e6aa7aeb4194
    );
  }
 diff --git a/packages/app/src/utils/host-routes.test.ts b/packages/app/src/utils/host-routes.test.ts
-index c053bae1ac0881de06606449af6e51078d7609c8..3a151ac2f5eede5e49ca31e3aa58c251aab2c208 100644
+index c053bae1ac0881de06606449af6e51078d7609c8..f911e4362a1fc1076a9dc5bb04cc395d990ab667 100644
 --- a/packages/app/src/utils/host-routes.test.ts
 +++ b/packages/app/src/utils/host-routes.test.ts
 @@ -7,6 +7,8 @@ import {
@@ -899,15 +899,30 @@ index c053bae1ac0881de06606449af6e51078d7609c8..3a151ac2f5eede5e49ca31e3aa58c251
    decodeFilePathFromPathSegment,
    decodeWorkspaceIdFromPathSegment,
    encodeFilePathForPathSegment,
-@@ -16,6 +18,7 @@ import {
+@@ -15,9 +17,22 @@ import {
+   parseHostAgentRouteFromPathname,
    parseHostWorkspaceOpenIntentFromPathname,
    parseHostWorkspaceRouteFromPathname,
++  parseServerIdFromPathname,
    parseWorkspaceOpenIntent,
 +  resolveSidebarSettingsRoute,
  } from "./host-routes";
  
++describe("server route parsing", () => {
++  it("accepts the Paseo base path without changing the server identity", () => {
++    expect(parseServerIdFromPathname("/h/srv_selected?scope=user:vault#offer=x")).toBe(
++      "srv_selected",
++    );
++    expect(parseServerIdFromPathname("/paseo/h/srv_selected?scope=user:vault#offer=x")).toBe(
++      "srv_selected",
++    );
++  });
++});
++
  describe("parseHostAgentRouteFromPathname", () => {
-@@ -177,6 +180,17 @@ describe("projects settings routes", () => {
+   it("continues parsing detail routes", () => {
+     expect(parseHostAgentRouteFromPathname("/h/local/agent/abc123")).toEqual({
+@@ -177,6 +192,17 @@ describe("projects settings routes", () => {
    });
  });
  
@@ -926,9 +941,18 @@ index c053bae1ac0881de06606449af6e51078d7609c8..3a151ac2f5eede5e49ca31e3aa58c251
    it("keeps current host settings sections", () => {
      expect(normalizeHostSectionSlug("connections")).toBe("connections");
 diff --git a/packages/app/src/utils/host-routes.ts b/packages/app/src/utils/host-routes.ts
-index ad1a36bbacfaceaa51d49e1901dd855ff9e11dd3..329f8c77d4264be91ce2c2a30340c03983a6fc6b 100644
+index ad1a36bbacfaceaa51d49e1901dd855ff9e11dd3..3bd84241e03687b6da421d30c803e81e157443ee 100644
 --- a/packages/app/src/utils/host-routes.ts
 +++ b/packages/app/src/utils/host-routes.ts
+@@ -241,7 +241,7 @@ export function decodeFilePathFromPathSegment(filePathSegment: string): string |
+ }
+ 
+ export function parseServerIdFromPathname(pathname: string): string | null {
+-  const pathOnly = stripSearchAndHash(pathname);
++  const pathOnly = stripSearchAndHash(pathname).replace(/^\/paseo(?=\/)/, "");
+   const match = pathOnly.match(/^\/h\/([^/]+)(?:\/|$)/);
+   if (!match) {
+     return null;
 @@ -464,6 +464,11 @@ export function buildSettingsHostSectionRoute(serverId: string, section: HostSec
    return `/settings/hosts/${encodeSegment(normalized)}/${section}` as const;
  }

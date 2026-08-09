@@ -1,13 +1,15 @@
 diff --git a/packages/app/src/lib/polaris-host-sync.test.ts b/packages/app/src/lib/polaris-host-sync.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8549eabfd162b654bb6351c890b62ca8c9e3d646
+index 0000000000000000000000000000000000000000..686a59cc189135beea69dff3351622b44065bdb0
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.test.ts
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,293 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import {
++  buildPolarisHostSyncKey,
 +  extractServerIdFromPairingUrl,
 +  findPolarisHostForServerId,
++  isPolarisHostRouteCurrent,
 +  pickPolarisPairingUrl,
 +  rankPolarisHosts,
 +  resolvePostLoginHref,
@@ -37,6 +39,28 @@ index 0000000000000000000000000000000000000000..8549eabfd162b654bb6351c890b62ca8
 +}
 +
 +describe("polaris host sync helpers", () => {
++  it("uses the URL serverId as the route identity across scope and offer changes", () => {
++    expect(buildPolarisHostSyncKey({ token: "token", serverId: "srv_selected" })).toBe(
++      "token:srv_selected",
++    );
++    expect(
++      isPolarisHostRouteCurrent(
++        "/h/srv_selected?scope=old-user:old-vault#offer=old",
++        "srv_selected",
++      ),
++    ).toBe(true);
++    expect(
++      isPolarisHostRouteCurrent(
++        "/h/srv_selected#offer=new?scope=new-user:new-vault",
++        "srv_selected",
++      ),
++    ).toBe(true);
++    expect(isPolarisHostRouteCurrent("/paseo/h/srv_selected?scope=new", "srv_selected")).toBe(
++      true,
++    );
++    expect(isPolarisHostRouteCurrent("/h/srv_other", "srv_selected")).toBe(false);
++  });
++
 +  it("prefers reconnectTarget when it carries an offer", () => {
 +    const host: PolarisHostSummary = {
 +      name: "test",
@@ -275,12 +299,12 @@ index 0000000000000000000000000000000000000000..8549eabfd162b654bb6351c890b62ca8
 +});
 diff --git a/packages/app/src/lib/polaris-host-sync.ts b/packages/app/src/lib/polaris-host-sync.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..9c7af6d9970cfdf7a6a01710401083733f7f1197
+index 0000000000000000000000000000000000000000..a9958d3fb4a557524924e4371ab87be405dc2334
 --- /dev/null
 +++ b/packages/app/src/lib/polaris-host-sync.ts
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,219 @@
 +import { polarisApiBaseUrl } from "@/lib/polaris-authing";
-+import { buildHostRootRoute } from "@/utils/host-routes";
++import { buildHostRootRoute, parseServerIdFromPathname } from "@/utils/host-routes";
 +
 +export interface PolarisHostSummary {
 +  name: string;
@@ -311,9 +335,16 @@ index 0000000000000000000000000000000000000000..9c7af6d9970cfdf7a6a0171040108373
 +export function buildPolarisHostSyncKey(options: {
 +  token: string;
 +  serverId?: string | null;
-+  scope?: string | null;
 +}): string {
-+  return `${options.token}:${options.serverId?.trim() || "*"}:${options.scope?.trim() || "*"}`;
++  return `${options.token}:${options.serverId?.trim() || "*"}`;
++}
++
++/** Query and offer changes do not change ownership of a scoped host route. */
++export function isPolarisHostRouteCurrent(
++  pathname: string,
++  serverId: string | null | undefined,
++): boolean {
++  return parseServerIdFromPathname(pathname) === (serverId?.trim() || null);
 +}
 +
 +function decodeBase64UrlJson(value: string): unknown {
