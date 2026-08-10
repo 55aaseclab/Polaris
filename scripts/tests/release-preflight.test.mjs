@@ -66,7 +66,6 @@ function withPreflightFixture({
     POLARIS_RELEASE_MANIFEST: manifestPath,
     POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/jianxiaoyitech/wanghai/.github/workflows/build-admin-portal-image.yml@refs/tags/v0.3.1",
     POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
-    POLARIS_WANGHAI_BACKUP_KEY_ROOT: backupKeyRoot,
     POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "2",
     POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "900000",
     POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR: "6",
@@ -316,18 +315,6 @@ test("release preflight rejects the legacy vault export root", () => {
   });
 });
 
-test("release preflight rejects a backup-key root outside control", () => {
-  withPreflightFixture({
-    envOverrides: {
-      POLARIS_WANGHAI_BACKUP_KEY_ROOT: "/srv/polaris/data/backup-keys",
-    },
-  }, ({ bin, envFile }) => {
-    const result = runPreflight(bin, envFile);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /must be .*control\/backup-keys/);
-  });
-});
-
 test("release preflight rejects mutable Wanghai images", () => {
   withPreflightFixture({
     envOverrides: { POLARIS_WANGHAI_VAULT_IMAGE: "registry.example.test/wanghai:latest" },
@@ -376,7 +363,7 @@ test("release preflight rejects an insecure Wanghai backup key root", () => {
   withPreflightFixture({ backupKeyMode: 0o755 }, ({ bin, envFile }) => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /BACKUP_KEY_ROOT must not be group\/world accessible/);
+    assert.match(result.stderr, /derived Polaris backup key root must not be group\/world accessible/);
   });
 });
 

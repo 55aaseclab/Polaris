@@ -34,9 +34,12 @@ export function repoRelativePath(importMetaUrl: string, filePath: string): strin
   return path.relative(repoRoot(importMetaUrl), filePath) || ".";
 }
 
-export function polarisDataRoot(importMetaUrl: string): string {
+export function polarisDataRoot(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
   const root = repoRoot(importMetaUrl);
-  const configured = process.env.POLARIS_DATA_ROOT?.trim()
+  const configured = environment.POLARIS_DATA_ROOT?.trim()
     || (readEnvFileValue(path.join(root, ".env.dev"), "POLARIS_DATA_ROOT") ?? "");
   if (!configured) {
     throw new Error(
@@ -48,8 +51,11 @@ export function polarisDataRoot(importMetaUrl: string): string {
     : path.resolve(root, configured);
 }
 
-export function polarisControlRoot(importMetaUrl: string): string {
-  return path.join(polarisDataRoot(importMetaUrl), "control");
+export function polarisControlRoot(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return path.join(polarisDataRoot(importMetaUrl, environment), "control");
 }
 
 export function polarisUsersRoot(importMetaUrl: string): string {
@@ -84,12 +90,11 @@ export function polarisVaultDataRoot(importMetaUrl: string): string {
   return polarisNetfsLocalExportRoot(importMetaUrl);
 }
 
-export function polarisWanghaiBackupKeyRoot(importMetaUrl: string): string {
-  const configured = resolveOptionalConfiguredPath(
-    importMetaUrl,
-    "POLARIS_WANGHAI_BACKUP_KEY_ROOT",
-  );
-  return configured ?? path.join(polarisControlRoot(importMetaUrl), "backup-keys");
+export function polarisBackupKeyRoot(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return path.join(polarisControlRoot(importMetaUrl, environment), "backup-keys");
 }
 
 export function polarisConfigDockerRoot(importMetaUrl: string): string {

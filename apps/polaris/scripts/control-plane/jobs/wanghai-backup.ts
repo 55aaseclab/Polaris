@@ -9,6 +9,7 @@ import {
   vaultDataDockerVolumeName,
 } from "../../core/netfs.js";
 import { vaultRuntimeResourceName } from "../../core/vault-name.js";
+import { polarisBackupKeyRoot } from "../../utils/paths.js";
 
 export const WANGHAI_BACKUP_JOB_KIND = "wanghai-backup";
 
@@ -233,8 +234,8 @@ export function resolveWanghaiBackupSettings(
 ): WanghaiBackupSettings {
   return {
     keyRoot: secureDirectory(
-      String(env.POLARIS_WANGHAI_BACKUP_KEY_ROOT ?? ""),
-      "POLARIS_WANGHAI_BACKUP_KEY_ROOT",
+      polarisBackupKeyRoot(import.meta.url, env),
+      "Polaris backup key root",
     ),
     retentionCount: configuredInteger(
       env,
@@ -314,7 +315,7 @@ export function ensureWanghaiBackupKey(input: {
   tenantId: string;
   vaultId: string;
 }): string {
-  const keyRoot = secureDirectory(input.keyRoot, "POLARIS_WANGHAI_BACKUP_KEY_ROOT");
+  const keyRoot = secureDirectory(input.keyRoot, "Polaris backup key root");
   const tenant = requireIdentifier(input.tenantId, "Backup tenant ID");
   const vault = requireIdentifier(input.vaultId, "Backup vault ID");
   const keyId = createHash("sha256")

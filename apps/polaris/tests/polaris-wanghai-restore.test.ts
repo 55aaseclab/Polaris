@@ -44,10 +44,12 @@ function vault(): VaultSpec {
 
 test("Polaris restore uses an isolated staging-volume Docker contract", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-key-"));
-  fs.chmodSync(root, 0o700);
+  const dataRoot = path.join(root, "data");
+  const keyRoot = path.join(dataRoot, "control", "backup-keys");
+  fs.mkdirSync(keyRoot, { recursive: true, mode: 0o700 });
   try {
     const settings = resolveWanghaiRestoreSettings({
-      POLARIS_WANGHAI_BACKUP_KEY_ROOT: root,
+      POLARIS_DATA_ROOT: dataRoot,
       POLARIS_WANGHAI_RESTORE_MAX_ARCHIVE_BYTES: "1048576",
     });
     assert.equal(settings.submissionsPerHour, 2);
@@ -123,7 +125,7 @@ test("Polaris restore binds deduplication to the source backup and rejects bad i
   );
   assert.throws(
     () => resolveWanghaiRestoreSettings({
-      POLARIS_WANGHAI_BACKUP_KEY_ROOT: "/missing",
+      POLARIS_DATA_ROOT: "/missing",
       POLARIS_WANGHAI_RESTORE_MAX_ARCHIVE_BYTES: "invalid",
     }),
     (error: unknown) => error instanceof WanghaiRestoreError

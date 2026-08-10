@@ -356,13 +356,19 @@ function vault(source: Record<string, unknown>): VaultSpec {
   } as VaultSpec;
 }
 
+function createDerivedBackupKeyRoot(root: string): { dataRoot: string; keyRoot: string } {
+  const dataRoot = path.join(root, "data");
+  const keyRoot = path.join(dataRoot, "control", "backup-keys");
+  fs.mkdirSync(keyRoot, { recursive: true, mode: 0o700 });
+  return { dataRoot, keyRoot };
+}
+
 test("Polaris backup uses a private one-shot Docker contract", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-key-"));
-  const keyRoot = path.join(root, "keys");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   try {
     const settings = resolveWanghaiBackupSettings({
-      POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+      POLARIS_DATA_ROOT: dataRoot,
       POLARIS_WANGHAI_BACKUP_RETENTION_COUNT: "2",
       POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
     });
@@ -457,13 +463,13 @@ test("Polaris backup derives stable private keys and deduplication keys", () => 
 
 test("Polaris backup rejects unpinned images and unsafe data roots", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-key-"));
-  fs.chmodSync(root, 0o700);
+  const { dataRoot, keyRoot } = createDerivedBackupKeyRoot(root);
   try {
     const settings = resolveWanghaiBackupSettings({
-      POLARIS_WANGHAI_BACKUP_KEY_ROOT: root,
+      POLARIS_DATA_ROOT: dataRoot,
     });
     const keyFile = ensureWanghaiBackupKey({
-      keyRoot: root,
+      keyRoot,
       tenantId: "tenant-a",
       vaultId: "vault-a",
     });
@@ -482,9 +488,9 @@ test("Polaris backup rejects unpinned images and unsafe data roots", () => {
       (error: unknown) => error instanceof WanghaiBackupError && error.code === "backup-image-unpinned",
     );
 
-    fs.chmodSync(root, 0o755);
+    fs.chmodSync(keyRoot, 0o755);
     assert.throws(
-      () => resolveWanghaiBackupSettings({ POLARIS_WANGHAI_BACKUP_KEY_ROOT: root }),
+      () => resolveWanghaiBackupSettings({ POLARIS_DATA_ROOT: dataRoot }),
       (error: unknown) => error instanceof WanghaiBackupError && error.code === "backup-configuration-invalid",
     );
   } finally {
@@ -494,15 +500,14 @@ test("Polaris backup rejects unpinned images and unsafe data roots", () => {
 
 test("durable Wanghai backup runs once with no network or published port", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-worker-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
         }, async () => {
           closePolarisControlStore();
@@ -552,15 +557,14 @@ test("durable Wanghai backup runs once with no network or published port", async
 
 test("durable Wanghai restore stages a completed same-scope backup once", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-worker-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
           POLARIS_WANGHAI_RESTORE_MAX_ARCHIVE_BYTES: "1048576",
         }, async () => {
@@ -623,15 +627,14 @@ test("durable Wanghai restore stages a completed same-scope backup once", async 
 
 test("durable Wanghai restore activation and rollback preserve private lifecycle boundaries", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-lifecycle-worker-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
           POLARIS_WANGHAI_RESTORE_MAX_ARCHIVE_BYTES: "1048576",
           POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "test-wanghai-gateway-master-secret-0001",
@@ -767,15 +770,14 @@ test("durable Wanghai restore activation and rollback preserve private lifecycle
 
 test("durable Wanghai backup cancellation stops the named one-shot container", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-cancel-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId, hold: true }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
         }, async () => {
           closePolarisControlStore();
@@ -818,15 +820,14 @@ test("durable Wanghai backup cancellation stops the named one-shot container", a
 
 test("durable Wanghai backup finalizes an exited named container after restart", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-recovery-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId, recovery: true }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
         }, async () => {
           closePolarisControlStore();
@@ -858,15 +859,14 @@ test("durable Wanghai backup finalizes an exited named container after restart",
 
 test("durable Wanghai restore cancellation stops the named one-shot container", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-cancel-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId, restoreHold: true }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
           POLARIS_WANGHAI_RESTORE_TIMEOUT_MS: "60000",
         }, async () => {
@@ -923,15 +923,14 @@ test("durable Wanghai restore cancellation stops the named one-shot container", 
 
 test("durable Wanghai restore activation and rollback recover exited containers after restart", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-restore-lifecycle-recovery-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot, keyRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
       await withFakeDocker({ tenantId, vaultId, recovery: true }, async (readCommands) => {
         await withEnv({
           POLARIS_CONTROL_STORE_PATH: controlPath,
-          POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+          POLARIS_DATA_ROOT: dataRoot,
           POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
           POLARIS_WANGHAI_RESTORE_TIMEOUT_MS: "60000",
           POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "test-wanghai-gateway-master-secret-0001",
@@ -1017,9 +1016,8 @@ test("durable Wanghai restore activation and rollback recover exited containers 
 
 test("portal scopes Wanghai backup submission and status to the current vertical user", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-backup-api-"));
-  const keyRoot = path.join(root, "keys");
+  const { dataRoot, keyRoot } = createDerivedBackupKeyRoot(root);
   const controlPath = path.join(root, "control.sqlite");
-  fs.mkdirSync(keyRoot, { mode: 0o700 });
   let portal: ReturnType<typeof createPortalServer> | null = null;
   try {
     await withBackupVault(async ({ tenantId, vaultId }) => {
@@ -1036,7 +1034,7 @@ test("portal scopes Wanghai backup submission and status to the current vertical
             POLARIS_AUTH_DEFAULT_USER_ID: tenantId,
             POLARIS_AUTH_DEFAULT_ROLE: "user",
             POLARIS_CONTROL_STORE_PATH: controlPath,
-            POLARIS_WANGHAI_BACKUP_KEY_ROOT: keyRoot,
+            POLARIS_DATA_ROOT: dataRoot,
             POLARIS_WANGHAI_BACKUP_TIMEOUT_MS: "60000",
             POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR: "1",
             POLARIS_WANGHAI_GATEWAY_MASTER_SECRET: "test-wanghai-gateway-master-secret-0001",

@@ -49,7 +49,6 @@ allowed_origins="${POLARIS_PORTAL_ALLOWED_ORIGINS:-}"
 auth_mode="${POLARIS_AUTH_MODE:-}"
 data_root="${POLARIS_DATA_ROOT:-}"
 export_root="${POLARIS_NETFS_LOCAL_EXPORT_ROOT:-}"
-backup_key_root="${POLARIS_WANGHAI_BACKUP_KEY_ROOT:-}"
 backup_retention_count="${POLARIS_WANGHAI_BACKUP_RETENTION_COUNT:-}"
 backup_timeout_ms="${POLARIS_WANGHAI_BACKUP_TIMEOUT_MS:-}"
 backup_submissions_per_hour="${POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR:-}"
@@ -73,10 +72,7 @@ case "${export_root%/}" in
     fail "POLARIS_NETFS_LOCAL_EXPORT_ROOT must end in /vault-data"
     ;;
 esac
-canonical_backup_key_root="${data_root%/}/control/backup-keys"
-if [ "${backup_key_root}" != "${canonical_backup_key_root}" ]; then
-  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must be ${canonical_backup_key_root}"
-fi
+backup_key_root="${data_root%/}/control/backup-keys"
 
 if [ "${docker_gateway_host}" != "127.0.0.1" ]; then
   fail "POLARIS_WANGHAI_DOCKER_GATEWAY_HOST must be 127.0.0.1 for the single-host Docker release"
@@ -234,13 +230,13 @@ if [ -z "${backup_key_root}" ] \
   || [[ "${backup_key_root}" != /* ]] \
   || [ ! -d "${backup_key_root}" ] \
   || [ -L "${backup_key_root}" ]; then
-  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must be an existing absolute non-symlink directory"
+  fail "derived Polaris backup key root must be an existing absolute non-symlink directory"
 fi
 backup_key_mode="$(stat -c '%a' "${backup_key_root}")" \
-  || fail "unable to inspect POLARIS_WANGHAI_BACKUP_KEY_ROOT permissions"
+  || fail "unable to inspect derived Polaris backup key root permissions"
 if ! [[ "${backup_key_mode}" =~ ^[0-7]{3,4}$ ]] \
   || (( (8#${backup_key_mode} & 8#077) != 0 )); then
-  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must not be group/world accessible"
+  fail "derived Polaris backup key root must not be group/world accessible"
 fi
 require_integer_range "${backup_retention_count}" "POLARIS_WANGHAI_BACKUP_RETENTION_COUNT" 1 30
 require_integer_range "${backup_timeout_ms}" "POLARIS_WANGHAI_BACKUP_TIMEOUT_MS" 60000 21600000
