@@ -25,7 +25,7 @@ import {
   requestWanghaiBackupCancellation,
   requestWanghaiRestoreCancellation,
   resumeDurableVaultJobs,
-} from "../scripts/runtime/operations.js";
+} from "../scripts/control-plane/operations.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 import {
   WanghaiBackupError,
@@ -36,8 +36,8 @@ import {
   resolveWanghaiBackupSettings,
   wanghaiBackupArchiveName,
   wanghaiBackupDedupeKey,
-} from "../scripts/runtime/wanghai-backup.js";
-import { WanghaiRestoreError } from "../scripts/runtime/wanghai-restore.js";
+} from "../scripts/control-plane/jobs/wanghai-backup.js";
+import { WanghaiRestoreError } from "../scripts/control-plane/jobs/wanghai-restore.js";
 
 const IMAGE = `registry.example.test/wanghai@sha256:${"a".repeat(64)}`;
 const USER_ROOT = polarisUsersRoot(import.meta.url);

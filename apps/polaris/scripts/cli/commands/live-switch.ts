@@ -1,6 +1,6 @@
 import { getBackendDriver } from "../../backends/index.js";
 import { isManagedHarness, type ManagedHarness } from "../../config/credential-catalog.js";
-import { switchVaultLiveCredentialMaterial } from "../../runtime/operations.js";
+import { switchVaultLiveCredentialMaterial } from "../../control-plane/operations.js";
 import { logInfo } from "../../utils/log.js";
 import { loadVaultForCommand } from "./shared.js";
 import { statusCommand } from "./status.js";

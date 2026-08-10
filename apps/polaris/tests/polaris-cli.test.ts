@@ -821,6 +821,95 @@ test("runCli user create adds the default RightCode codex credential when config
   }
 });
 
+test("runCli user create resolves the default RightCode script from the repo root", async () => {
+  const previousApiKey = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  const previousScript = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+  const previousQuotaLimit = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT;
+  const previousAllowedPrefixes = process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES;
+  delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = "node scripts/rightcode-api-key.mjs create";
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT = "20";
+  process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = "/codex,/draw";
+  const userProfileId = uniqueProjectName("cli-user-codex-root-script");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
+  const expectedScriptPath = path.join(REPO_ROOT, "scripts", "rightcode-api-key.mjs");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-rightcode-"));
+  const commandLogPath = path.join(tempDir, "commands.log");
+  const fakeBashPath = path.join(tempDir, "bash");
+  const originalCwd = process.cwd();
+  const originalPath = process.env.PATH ?? "";
+
+  try {
+    fs.writeFileSync(
+      fakeBashPath,
+      `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(commandLogPath)}
+case "$2" in
+  *${expectedScriptPath}*)
+    printf '%s\\n' '{"apiKey":"test-default-rightcode-key"}'
+    exit 0
+    ;;
+esac
+printf 'unexpected bash command: %s\\n' "$2" >&2
+exit 42
+`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${tempDir}${path.delimiter}${originalPath}`;
+    process.chdir(tempDir);
+    const stdout = await captureStdout(async () => {
+      await runCli([
+        "user",
+        "create",
+        userProfileId,
+        "--name",
+        "CLI Root Script User",
+        "--email",
+        `${userProfileId}@polaris.local`,
+      ]);
+    });
+    const parsed = parseJsonOutput<{
+      credentials: { defaults: string[] };
+    }>(stdout);
+    const commandLog = fs.existsSync(commandLogPath)
+      ? fs.readFileSync(commandLogPath, "utf8").split("\n").map((line) => line.trim()).filter(Boolean)
+      : [];
+
+    assert.deepEqual(parsed.credentials.defaults, ["github-ssh", "codex-rightcode"]);
+    assert.ok(
+      commandLog.some((entry) => entry.includes(expectedScriptPath)),
+    );
+    assert.equal(fs.existsSync(path.join(userRoot, "credentials", "codex-rightcode.yaml")), true);
+  } finally {
+    process.chdir(originalCwd);
+    process.env.PATH = originalPath;
+    if (previousApiKey === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY = previousApiKey;
+    }
+    if (previousScript === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT = previousScript;
+    }
+    if (previousQuotaLimit === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT = previousQuotaLimit;
+    }
+    if (previousAllowedPrefixes === undefined) {
+      delete process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES;
+    } else {
+      process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES = previousAllowedPrefixes;
+    }
+    fs.rmSync(profilePath, { force: true });
+    fs.rmSync(userRoot, { recursive: true, force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runCli create allows the same vault name under a different user", async () => {
   const vault = uniqueProjectName("cli-shared-vault");
   const firstUserId = uniqueProjectName("cli-shared-user-a");

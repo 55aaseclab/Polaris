@@ -74,7 +74,7 @@ import {
 import {
   resumeDurableVaultJobs,
   stopPortalVault as stopPortalVaultDirect,
-} from "../scripts/runtime/operations.js";
+} from "../scripts/control-plane/operations.js";
 import {
   closePolarisControlStore,
   getPolarisControlStore,

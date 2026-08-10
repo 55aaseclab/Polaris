@@ -1,13 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { VaultSpec } from "../core/vault.js";
+import type { VaultSpec } from "../../core/vault.js";
 import {
   isNetfsSource,
   netfsResolvedPath,
   vaultDataDockerVolumeName,
-} from "../core/netfs.js";
-import { vaultRuntimeResourceName } from "../core/vault-name.js";
+} from "../../core/netfs.js";
+import { vaultRuntimeResourceName } from "../../core/vault-name.js";
 
 export const WANGHAI_BACKUP_JOB_KIND = "wanghai-backup";
 

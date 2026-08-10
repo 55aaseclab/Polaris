@@ -927,10 +927,18 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function normalizeDefaultCodexRightCodeApiKeyScript(script: string): string {
+  const absoluteScriptPath = shellQuote(path.join(REPO_ROOT, "scripts", "rightcode-api-key.mjs"));
+  return script.replace(
+    /(?:\.\.\/|\.\/)*scripts\/rightcode-api-key\.mjs/g,
+    absoluteScriptPath,
+  );
+}
+
 function resolveDefaultCodexRightCodeApiKey(userProfileId: string): string {
-  const script = String(
+  const script = normalizeDefaultCodexRightCodeApiKeyScript(String(
     process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT ?? "",
-  ).trim();
+  ).trim());
   if (script) {
     const quotaLimit = String(
       process.env.POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT ?? "",

@@ -9,7 +9,7 @@ import {
   scaffoldDockerVault,
   scaffoldUserProfileById,
 } from "../config/scaffold.js";
-import { resumeDurableVaultJobs } from "../runtime/operations.js";
+import { resumeDurableVaultJobs } from "../control-plane/operations.js";
 import {
   closePolarisControlStore,
   getPolarisControlStore,

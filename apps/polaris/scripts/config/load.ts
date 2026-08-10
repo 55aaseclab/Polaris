@@ -20,7 +20,7 @@ import type {
   ResolvedVaultCredentialBinding,
 } from "../core/vault.js";
 import { validateVault } from "../core/capabilities.js";
-import { vaultHarnessIds } from "../core/harness-catalog.js";
+import { vaultHarnessIds } from "../backends/index.js";
 import {
   defaultMountPathForCredentialFile,
   userIdentityDurablePaths,

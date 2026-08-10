@@ -25,6 +25,9 @@ importers:
       '@polaris/polaris-shell':
         specifier: workspace:*
         version: link:../../packages/polaris-shell
+      '@polaris/vault-runtime':
+        specifier: workspace:*
+        version: link:../../packages/vault-runtime
       '@sentry/node':
         specifier: ^10.65.0
         version: 10.65.0(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))
@@ -199,6 +202,18 @@ importers:
       tsx:
         specifier: ^4.19.4
         version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/vault-runtime:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

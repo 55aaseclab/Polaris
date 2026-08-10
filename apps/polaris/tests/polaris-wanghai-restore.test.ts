@@ -8,7 +8,7 @@ import type { VaultSpec } from "../scripts/core/vault.js";
 import {
   ensureWanghaiBackupKey,
   wanghaiBackupArchiveName,
-} from "../scripts/runtime/wanghai-backup.js";
+} from "../scripts/control-plane/jobs/wanghai-backup.js";
 import {
   WanghaiRestoreError,
   buildWanghaiRestoreActivationDockerRunArgs,
@@ -27,7 +27,7 @@ import {
   wanghaiRestoreRollbackFailedWorkspaceName,
   wanghaiRestoreDedupeKey,
   wanghaiRestoreStagingVolumeName,
-} from "../scripts/runtime/wanghai-restore.js";
+} from "../scripts/control-plane/jobs/wanghai-restore.js";
 
 const IMAGE = `registry.example.test/wanghai@sha256:${"b".repeat(64)}`;
 

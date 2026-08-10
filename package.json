@@ -10,11 +10,12 @@
     "test:paseo-embed": "pnpm --filter @paseo/embed run test",
     "build": "pnpm run build:surfaces && pnpm --filter polaris run build",
     "build:surfaces": "pnpm --filter @polaris/surface-paseo run build && pnpm --filter @polaris/surface-wanghai run build && pnpm --filter @polaris/polaris-shell run build",
-    "check": "pnpm --filter polaris run check",
+    "check": "pnpm --filter @polaris/vault-runtime run check && pnpm --filter polaris run check",
+    "test:runtime": "pnpm --filter @polaris/vault-runtime run test",
     "test:polaris": "pnpm --filter polaris run test",
     "test:surfaces": "pnpm --filter @polaris/polaris-shell --filter @polaris/surface-paseo --filter @polaris/surface-wanghai run test",
     "test:polaris:skills": "pnpm --filter polaris run test:skills",
-    "test:polaris:full-minus-infra": "pnpm --filter polaris run test:full-minus-infra",
+    "test:polaris:full-minus-infra": "pnpm run test:runtime && pnpm --filter polaris run test:full-minus-infra",
     "test:live-auth": "pnpm --filter polaris run test:live-auth",
     "test:polaris:coverage": "pnpm --filter polaris run test:coverage"
   }

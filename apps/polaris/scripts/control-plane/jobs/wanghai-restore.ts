@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { VaultSpec } from "../core/vault.js";
-import { vaultRuntimeResourceName } from "../core/vault-name.js";
+import type { VaultSpec } from "../../core/vault.js";
+import { vaultRuntimeResourceName } from "../../core/vault-name.js";
 import {
   WanghaiBackupError,
   resolveWanghaiBackupSettings,

@@ -79,7 +79,7 @@ import {
   getPolarisControlStore,
   type DurableJob,
 } from "../portal/control-store.js";
-import { durableJobWorkerConcurrency } from "./job-concurrency.js";
+import { durableJobWorkerConcurrency } from "./jobs/concurrency.js";
 import {
   WANGHAI_BACKUP_JOB_KIND,
   WanghaiBackupError,
@@ -93,7 +93,7 @@ import {
   wanghaiBackupDedupeKey,
   wanghaiBackupRateLimitBucket,
   type WanghaiBackupResult,
-} from "./wanghai-backup.js";
+} from "./jobs/wanghai-backup.js";
 import {
   WANGHAI_RESTORE_ACTIVATION_JOB_KIND,
   WANGHAI_RESTORE_JOB_KIND,
@@ -123,7 +123,7 @@ import {
   type WanghaiRestoreActivationResult,
   type WanghaiRestoreRollbackResult,
   type WanghaiRestoreResult,
-} from "./wanghai-restore.js";
+} from "./jobs/wanghai-restore.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
 const USER_ROOT = polarisUsersRoot(import.meta.url);

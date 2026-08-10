@@ -81,9 +81,9 @@ import {
   updatePortalUserAccess,
   writePortalCredentialFile,
 } from "./service.js";
-import { WanghaiBackupError } from "../runtime/wanghai-backup.js";
-import { WanghaiRestoreError } from "../runtime/wanghai-restore.js";
-import { ActiveVaultCapacityError } from "../runtime/active-vault-capacity.js";
+import { ActiveVaultCapacityError } from "../control-plane/capacity.js";
+import { WanghaiBackupError } from "../control-plane/jobs/wanghai-backup.js";
+import { WanghaiRestoreError } from "../control-plane/jobs/wanghai-restore.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {

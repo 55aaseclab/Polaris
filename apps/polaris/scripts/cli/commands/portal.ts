@@ -2,7 +2,7 @@ import { createPortalServer } from "../../portal/server.js";
 import {
   resumeDurableVaultJobs,
   startDurableJobRecoveryLoop,
-} from "../../runtime/operations.js";
+} from "../../control-plane/operations.js";
 import { captureTelemetryError, trackTelemetryEvent } from "../../telemetry/client.js";
 
 export async function portalCommand(portArg?: string, hostArg?: string): Promise<void> {

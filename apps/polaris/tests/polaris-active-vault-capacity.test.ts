@@ -13,7 +13,7 @@ import {
   ActiveVaultCapacityError,
   maxActiveVaults,
   withDockerActiveVaultCapacity,
-} from "../scripts/runtime/active-vault-capacity.js";
+} from "../scripts/control-plane/capacity.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);

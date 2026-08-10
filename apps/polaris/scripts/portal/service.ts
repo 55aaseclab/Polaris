@@ -91,7 +91,7 @@ import {
   switchPortalVaultLiveCredential as switchPortalVaultLiveCredentialExecutor,
   skillSyncVault as syncPortalVaultSkillsExecutor,
   skillUninstallVault as uninstallPortalVaultSkillExecutor,
-} from "../runtime/operations.js";
+} from "../control-plane/operations.js";
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
