@@ -32,19 +32,19 @@ test("Docker and Pod renderers preserve isolated scope and attachment roots", ()
   podSpec.attachments.vaultData.source = {
     kind: "netfs",
     server: "netfs.example.test",
-    exportPath: "/exports/vaults",
+    exportPath: "/exports/vault-data",
     subPath: "tenant-a/synthetic-vault",
   };
   const pod = renderPodVault(podSpec);
   const scope = vaultRuntimeScopeName("tenant-a", "synthetic-vault");
 
   assert.match(docker, new RegExp(`${scope}-docker`));
-  assert.match(docker, /\/vault\/project/);
+  assert.match(docker, /\/vault\/workspaces/);
   assert.match(docker, /synthetic-vault-data/);
   assert.match(pod, new RegExp(`runtimeClassName: gvisor`));
   assert.match(pod, new RegExp(`name: ${scope}`));
   assert.match(pod, /server: netfs\.example\.test/);
-  assert.match(pod, /path: \/exports\/vaults\/tenant-a\/synthetic-vault/);
+  assert.match(pod, /path: \/exports\/vault-data\/tenant-a\/synthetic-vault/);
   assert.match(pod, /\/identity/);
 });
 

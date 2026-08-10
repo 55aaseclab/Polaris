@@ -53,9 +53,9 @@ operations, and release documentation lives in the Polaris documentation site.
   browser URL.
 - Treat `9090` as a private implementation port. Docker must bind it to
   loopback; Pod and KubeVirt must use private services.
-- In integrated mode Wanghai uses the mounted vault root `/vault/project`.
-  Do not inject a separate shared Wanghai workspace root or a per-user
-  `.env` override.
+- In integrated mode Wanghai uses the fixed direct roots `/vault/workspaces`,
+  `/vault/backups`, and `/vault/cache`. Do not inject a separate shared
+  Wanghai workspace root or a per-user `.env` override.
 - Do not pass standalone `SMTP_*`, `OUTREACH_*`, `WANGHAI_*`, or
   `PORTAL_PROFILE_AUTH` settings into an integrated Wanghai runtime. Polaris
   injects only the reviewed private-root, gateway, and local-safety values.

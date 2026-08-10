@@ -918,7 +918,7 @@ test("portal service lists and reads profile auth files for user settings", () =
     });
     fs.writeFileSync(
       path.join(userRoot, "wanghai", ".env"),
-      "WANGHAI_VAULTS_ROOT=/vault/project/vaults\nPORTAL_PROFILE_AUTH=1\n",
+      "WANGHAI_WORKSPACES_ROOT=/vault/workspaces\nPORTAL_PROFILE_AUTH=1\n",
       "utf8",
     );
 

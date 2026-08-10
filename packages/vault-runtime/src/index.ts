@@ -10,6 +10,7 @@ import type {
 
 export * from "./types.js";
 export * from "./core/harness-catalog.js";
+export * from "./core/data-layout.js";
 export * from "./core/netfs.js";
 export * from "./core/vault-name.js";
 export { DockerDriver } from "./docker/driver.js";

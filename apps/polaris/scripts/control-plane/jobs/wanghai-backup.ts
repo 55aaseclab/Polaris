@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { VAULT_DATA_RUNTIME_LAYOUT } from "../../backends/vault-runtime-adapter.js";
 import type { VaultSpec } from "../../core/vault.js";
 import {
   isNetfsSource,
@@ -170,6 +171,7 @@ function dockerMount(input: {
   type: "bind" | "volume";
   source: string;
   target: string;
+  volumeSubpath?: string;
   readOnly?: boolean;
 }): string {
   const source = assertSafeDockerMountSource(input.source, "Backup mount source");
@@ -177,8 +179,27 @@ function dockerMount(input: {
     `type=${input.type}`,
     `source=${source}`,
     `target=${input.target}`,
+    ...(input.volumeSubpath ? [`volume-subpath=${input.volumeSubpath}`] : []),
     ...(input.readOnly ? ["readonly"] : []),
   ].join(",");
+}
+
+function vaultDataMountArgs(
+  dataMount: { type: "bind" | "volume"; source: string },
+  readOnly: boolean,
+): string[] {
+  return VAULT_DATA_RUNTIME_LAYOUT.flatMap(({ directory, mountRoot }) => [
+    "--mount",
+    dockerMount({
+      type: dataMount.type,
+      source: dataMount.type === "bind"
+        ? path.join(dataMount.source, directory)
+        : dataMount.source,
+      target: mountRoot,
+      ...(dataMount.type === "volume" ? { volumeSubpath: directory } : {}),
+      readOnly,
+    }),
+  ]);
 }
 
 function dataVolumeName(vault: VaultSpec): string {
@@ -349,12 +370,7 @@ export function buildWanghaiBackupDockerRunArgs(
     "--label", "polaris.managed=true",
     "--label", `polaris.job.id=${jobId}`,
     "--label", `polaris.job.kind=${WANGHAI_BACKUP_JOB_KIND}`,
-    "--mount", dockerMount({
-      type: dataMount.type,
-      source: dataMount.source,
-      target: "/vault/project",
-      readOnly: true,
-    }),
+    ...vaultDataMountArgs(dataMount, true),
     "--mount", dockerMount({
       type: "volume",
       source: backupVolume,

@@ -82,7 +82,7 @@ test("Polaris restore uses an isolated staging-volume Docker contract", () => {
     assert.ok(args.includes("--pids-limit"));
     assert.ok(args.includes("type=volume,source=tenant-a-vault-a-wanghai-backup,target=/backup,readonly"));
     assert.ok(args.includes(`type=volume,source=${stagingVolume},target=/restore`));
-    assert.equal(args.some((entry) => entry.includes("target=/vault/project")), false);
+    assert.equal(args.some((entry) => entry.includes("target=/vault/")), false);
     assert.ok(args.some((entry) => entry.includes("target=/run/secrets/wanghai-backup.key,readonly")));
     assert.ok(args.includes("WANGHAI_RUNTIME_MODE=polaris"));
     assert.ok(args.includes("WANGHAI_RESTORE_MAX_ARCHIVE_BYTES=1048576"));
@@ -148,7 +148,9 @@ test("Polaris restore activation and rollback use scoped, syntax-checked Docker 
   assert.ok(activation.includes("--network"));
   assert.ok(activation.includes("none"));
   assert.ok(activation.includes("--read-only"));
-  assert.ok(activation.includes("type=volume,source=vault-data,target=/vault/project"));
+  assert.ok(activation.includes("type=volume,source=vault-data,target=/vault/workspaces,volume-subpath=workspaces"));
+  assert.ok(activation.includes("type=volume,source=vault-data,target=/vault/backups,volume-subpath=backups"));
+  assert.ok(activation.includes("type=volume,source=vault-data,target=/vault/cache,volume-subpath=cache"));
   assert.ok(activation.includes(`type=volume,source=${stagingVolume},target=/restore,readonly`));
   assert.equal(activation.some((entry) => entry === "-p" || entry === "--publish"), false);
   const activationCommand = activation.at(-1) ?? "";
@@ -192,7 +194,7 @@ test("Polaris restore activation and rollback use scoped, syntax-checked Docker 
     restoreJobId,
     stagingVolume,
   });
-  assert.ok(activationVerification.includes("type=volume,source=vault-data,target=/vault/project,readonly"));
+  assert.ok(activationVerification.includes("type=volume,source=vault-data,target=/vault/workspaces,volume-subpath=workspaces,readonly"));
   assert.ok(activationVerification.includes(`type=volume,source=${stagingVolume},target=/restore,readonly`));
 
   const rollback = buildWanghaiRestoreRollbackDockerRunArgs({
@@ -203,7 +205,7 @@ test("Polaris restore activation and rollback use scoped, syntax-checked Docker 
   });
   assert.ok(rollback.includes("--network"));
   assert.ok(rollback.includes("none"));
-  assert.ok(rollback.includes("type=volume,source=vault-data,target=/vault/project"));
+  assert.ok(rollback.includes("type=volume,source=vault-data,target=/vault/workspaces,volume-subpath=workspaces"));
   const rollbackCommand = rollback.at(-1) ?? "";
   assert.match(rollbackCommand, new RegExp(`rollback_job_id=\"${rollbackJobId}\"`, "u"));
   assert.match(rollbackCommand, new RegExp(`activation_job_id=\"${activationJobId}\"`, "u"));
@@ -244,7 +246,7 @@ test("Polaris restore activation and rollback use scoped, syntax-checked Docker 
     jobId: rollbackJobId,
     failedWorkspaceName,
   });
-  assert.ok(rollbackVerification.includes("type=volume,source=vault-data,target=/vault/project,readonly"));
+  assert.ok(rollbackVerification.includes("type=volume,source=vault-data,target=/vault/workspaces,volume-subpath=workspaces,readonly"));
   assert.equal(
     wanghaiRestoreActivationDedupeKey("tenant-a", "vault-a", restoreJobId, "request-a"),
     wanghaiRestoreActivationDedupeKey("tenant-a", "vault-a", restoreJobId, "request-a"),
@@ -269,7 +271,7 @@ test("Polaris restore activation recovers the original root after a partial cand
     restoreJobId,
     stagingVolume: wanghaiRestoreStagingVolumeName(vault(), restoreJobId),
   }).at(-1) ?? "")
-    .replaceAll("/vault/project", dataRoot)
+    .replaceAll("/activation-root", dataRoot)
     .replaceAll("/restore", restoreRoot);
   try {
     fs.mkdirSync(path.join(dataRoot, previousWorkspaceName), { recursive: true });

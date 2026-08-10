@@ -16,6 +16,7 @@ import {
   vaultDataDockerVolumeName,
 } from "../core/netfs.js";
 import { vaultRuntimeScopeName } from "../core/vault-name.js";
+import { VAULT_DATA_RUNTIME_LAYOUT } from "../core/data-layout.js";
 import { defaultRuntimeDriverDependencies } from "../runtime-deps.js";
 import { renderDockerVault } from "./render.js";
 
@@ -45,6 +46,9 @@ function ensureDockerVaultDataVolumeConfig(
   if (source.server?.trim() === "netfs.local") {
     const exportPath = netfsResolvedPath(source);
     fs.mkdirSync(exportPath, { recursive: true });
+    for (const { directory } of VAULT_DATA_RUNTIME_LAYOUT) {
+      fs.mkdirSync(`${exportPath}/${directory}`, { recursive: true });
+    }
     dependencies.logInfo("docker-driver", "vault-netfs-export-ready", {
       project: vault.identity.projectName,
       exportPath,

@@ -13,6 +13,7 @@ import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
 } from "../core/identity-layout.js";
+import { VAULT_DATA_RUNTIME_LAYOUT, VAULT_DATA_RUNTIME_ROOTS } from "../core/data-layout.js";
 import { vaultRuntimeResourceName, vaultRuntimeScopeName } from "../core/vault-name.js";
 
 function q(value: string): string {
@@ -42,6 +43,7 @@ function buildAttachmentAssemblyLines(vault: VaultRuntimeSpec): string[] {
   const home = vault.runtime.home;
   const user = vault.runtime.user;
   const projectRoot = vault.attachments.vaultData.mountRoot;
+  const dataRoots = VAULT_DATA_RUNTIME_ROOTS.join(" ");
   const paseoRoot = `${vault.attachments.vaultRuntimeState.mountRoot}/paseo`;
   const evolutionRoot = `${paseoRoot}/evolution`;
   const toolRoot = `${vault.attachments.vaultRuntimeState.mountRoot}/tooling/polaris`;
@@ -50,8 +52,8 @@ function buildAttachmentAssemblyLines(vault: VaultRuntimeSpec): string[] {
   const runtimeRoot = vault.attachments.ephemeralRuntime.mountRoot;
   const identityDirs = userIdentityBootstrapDirs(identityRoot);
   return [
-    `          mkdir -p ${projectRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
-    `          chown -R ${user}:${user} ${projectRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${identityRoot} ${runtimeRoot} && \\`,
+    `          mkdir -p ${dataRoots} ${vault.attachments.vaultRuntimeState.mountRoot} ${paseoRoot} ${evolutionRoot} ${toolRoot} ${identityDirs.join(" ")} ${runtimeRoot}/tmp ${runtimeRoot}/pids ${runtimeRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache && \\`,
+    `          chown -R ${user}:${user} ${dataRoots} ${vault.attachments.vaultRuntimeState.mountRoot} ${identityRoot} ${runtimeRoot} && \\`,
     `          rm -rf ${home}/.codex ${home}/.claude ${home}/.copilot ${home}/.pi ${home}/.config/opencode ${home}/.local/share/opencode ${home}/.paseo ${home}/.ssh ${home}/vault && \\`,
     `          ln -sfn ${identityRoot}/codex ${home}/.codex && \\`,
     `          ln -sfn ${identityRoot}/claude ${home}/.claude && \\`,
@@ -336,6 +338,12 @@ function buildEnvLines(vault: VaultRuntimeSpec): string[] {
   }
   envLines.push("        - name: POLARIS_VAULT_DATA_ROOT");
   envLines.push(`          value: ${q(vault.attachments.vaultData.mountRoot)}`);
+  envLines.push("        - name: POLARIS_VAULT_WORKSPACES_ROOT");
+  envLines.push(`          value: ${q(VAULT_DATA_RUNTIME_ROOTS[0])}`);
+  envLines.push("        - name: POLARIS_VAULT_BACKUPS_ROOT");
+  envLines.push(`          value: ${q(VAULT_DATA_RUNTIME_ROOTS[1])}`);
+  envLines.push("        - name: POLARIS_VAULT_CACHE_ROOT");
+  envLines.push(`          value: ${q(VAULT_DATA_RUNTIME_ROOTS[2])}`);
   envLines.push("        - name: POLARIS_VAULT_RUNTIME_ROOT");
   envLines.push(`          value: ${q(vault.attachments.vaultRuntimeState.mountRoot)}`);
   envLines.push("        - name: POLARIS_USER_IDENTITY_ROOT");
@@ -437,6 +445,17 @@ export function renderPodVault(vault: VaultRuntimeSpec): string {
     `        app: ${runtimeScope(vault)}`,
     "    spec:",
     `      runtimeClassName: ${vault.backend.profile}`,
+    "      initContainers:",
+    "      - name: vault-data-layout",
+    `        image: ${vault.runtime.baseImage}`,
+    '        command: ["/bin/sh", "-c"]',
+    "        args:",
+    "        - |",
+    "          set -eu",
+    `          mkdir -p ${VAULT_DATA_RUNTIME_LAYOUT.map(({ directory }) => `/vault-data/${directory}`).join(" ")}`,
+    "        volumeMounts:",
+    "        - name: vault-data",
+    "          mountPath: /vault-data",
     "      containers:",
     "      - name: agent",
     `        image: ${vault.runtime.baseImage}`,
@@ -460,8 +479,11 @@ export function renderPodVault(vault: VaultRuntimeSpec): string {
     }
   }
   deploymentLines.push("        volumeMounts:");
-  deploymentLines.push("        - name: vault-data");
-  deploymentLines.push(`          mountPath: ${vault.attachments.vaultData.mountRoot}`);
+  for (const { directory, mountRoot } of VAULT_DATA_RUNTIME_LAYOUT) {
+    deploymentLines.push("        - name: vault-data");
+    deploymentLines.push(`          mountPath: ${mountRoot}`);
+    deploymentLines.push(`          subPath: ${directory}`);
+  }
   deploymentLines.push("        - name: vault-runtime-state");
   deploymentLines.push(`          mountPath: ${vault.attachments.vaultRuntimeState.mountRoot}`);
   deploymentLines.push("        - name: user-identity-state");

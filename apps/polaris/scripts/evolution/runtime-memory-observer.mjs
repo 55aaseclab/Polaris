@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 
 const paseoHome = process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
 const evolutionRoot = process.env.POLARIS_EVOLUTION_ROOT || path.join(paseoHome, "evolution");
-const vaultDataRoot = process.env.POLARIS_VAULT_DATA_ROOT || "/vault/project";
+const vaultDataRoot = process.env.POLARIS_VAULT_WORKSPACES_ROOT || "/vault/workspaces";
 const userIdentityRoot = process.env.POLARIS_USER_IDENTITY_ROOT || "/identity";
 const vaultMemoryFile =
   process.env.POLARIS_VAULT_MEMORY_FILE

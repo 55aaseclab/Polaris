@@ -77,10 +77,11 @@ test("remote provision keeps integrated Wanghai on the Polaris vault export", ()
   assert.doesNotMatch(script, /'\$\{REMOTE_DATA_ROOT\}\/wanghai'/);
 });
 
-test("remote provision falls back to the legacy exports/vaults data root", () => {
+test("remote provision publishes only the canonical vault-data export", () => {
   const script = fs.readFileSync("scripts/provision-remote.sh", "utf8");
-  assert.ok(script.includes("LEGACY_VAULTS_ROOT='${REMOTE_DATA_ROOT}/exports/vaults'"));
-  assert.match(script, /if \[ -d .*LEGACY_VAULTS_ROOT.*\] && \[ ! -e .*VAULTS_ROOT.*\]; then/);
+  assert.match(script, /VAULT_DATA_ROOT='\$\{REMOTE_DATA_ROOT\}\/vault-data'/);
+  assert.doesNotMatch(script, /LEGACY_VAULTS_ROOT/);
+  assert.doesNotMatch(script, /exports\/vaults/);
   assert.ok(script.includes("mount --bind"));
 });
 

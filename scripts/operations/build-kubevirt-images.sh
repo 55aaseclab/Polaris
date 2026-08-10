@@ -139,7 +139,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 POLARIS_DATA_ROOT="$(resolve_polaris_data_root)"
-POLARIS_USERS_ROOT="${POLARIS_DATA_ROOT}/users"
+POLARIS_USERS_ROOT="${POLARIS_DATA_ROOT}/control/users"
 KUBEVIRT_SPEC_PATH="${POLARIS_USERS_ROOT}/100000000000000001/vaults/demo/kubevirt.agent.yaml"
 DEFAULT_DOCKERFILE_PATH="${POLARIS_USERS_ROOT}/100000000000000001/docker/vault-prebuilt.Dockerfile"
 

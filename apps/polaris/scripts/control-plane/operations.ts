@@ -56,6 +56,7 @@ import {
   type VaultSpec,
   type VaultStatus,
 } from "../core/vault.js";
+import { VAULT_DATA_PRIMARY_RUNTIME_ROOT } from "../backends/vault-runtime-adapter.js";
 import { vaultRuntimeScopeName } from "../core/vault-name.js";
 import {
   parsePaseoDaemonStatus,
@@ -1914,7 +1915,7 @@ function resolveWanghaiBackupVault(userId: string, vault: string): VaultSpec {
       false,
     );
   }
-  if (!hasWanghaiSurface(spec) || spec.attachments.vaultData.mountRoot !== "/vault/project") {
+  if (!hasWanghaiSurface(spec) || spec.attachments.vaultData.mountRoot !== VAULT_DATA_PRIMARY_RUNTIME_ROOT) {
     throw new WanghaiBackupError(
       "backup-surface-unavailable",
       "The selected vault does not provide the integrated Wanghai backup surface",
@@ -1960,7 +1961,7 @@ function resolveWanghaiRestoreVault(userId: string, vault: string): VaultSpec {
       false,
     );
   }
-  if (!hasWanghaiSurface(spec) || spec.attachments.vaultData.mountRoot !== "/vault/project") {
+  if (!hasWanghaiSurface(spec) || spec.attachments.vaultData.mountRoot !== VAULT_DATA_PRIMARY_RUNTIME_ROOT) {
     throw new WanghaiRestoreError(
       "restore-surface-unavailable",
       "The selected vault does not provide the integrated Wanghai restore surface",

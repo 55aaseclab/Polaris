@@ -12,6 +12,9 @@ import {
   vaultPaseoPackageSpec,
   vaultToolCatalog,
   vaultToolPackageSpecs,
+  VAULT_DATA_PRIMARY_RUNTIME_ROOT,
+  VAULT_DATA_RUNTIME_LAYOUT,
+  VAULT_DATA_RUNTIME_ROOTS,
   type BackendDriver as RuntimeBackendDriver,
   type BackendKind as RuntimeBackendKind,
   type HarnessToolDefinition,
@@ -51,6 +54,9 @@ export {
   vaultPaseoPackageSpec,
   vaultToolCatalog,
   vaultToolPackageSpecs,
+  VAULT_DATA_PRIMARY_RUNTIME_ROOT,
+  VAULT_DATA_RUNTIME_LAYOUT,
+  VAULT_DATA_RUNTIME_ROOTS,
 };
 
 const WANGHAI_RESOURCE_LIMITS = {
@@ -135,6 +141,9 @@ function privateSurface(
     env: [
       { name: "WANGHAI_REPO_ROOT", value: "/opt/wanghai" },
       { name: "WANGHAI_RUNTIME_MODE", value: "polaris" },
+      { name: "POLARIS_VAULT_WORKSPACES_ROOT", value: VAULT_DATA_RUNTIME_ROOTS[0] },
+      { name: "POLARIS_VAULT_BACKUPS_ROOT", value: VAULT_DATA_RUNTIME_ROOTS[1] },
+      { name: "POLARIS_VAULT_CACHE_ROOT", value: VAULT_DATA_RUNTIME_ROOTS[2] },
       { name: "WANGHAI_GATEWAY_TENANT_ID", value: vault.userProfile.id },
       { name: "WANGHAI_GATEWAY_VAULT_ID", value: vault.identity.projectName },
       ...(frameAncestors

@@ -63,12 +63,12 @@ test("netfs helpers preserve server, export, and subpath semantics", () => {
   const source = {
     kind: "netfs" as const,
     server: "netfs.example.test",
-    exportPath: "/exports/vaults",
+    exportPath: "/exports/vault-data",
     subPath: "/tenant-a/synthetic-vault/",
   };
-  assert.equal(netfsResolvedPath(source), "/exports/vaults/tenant-a/synthetic-vault");
+  assert.equal(netfsResolvedPath(source), "/exports/vault-data/tenant-a/synthetic-vault");
   assert.equal(dockerNetfsServer(source), "netfs.example.test");
-  assert.equal(dockerNetfsDevicePath(source), ":/exports/vaults/tenant-a/synthetic-vault");
+  assert.equal(dockerNetfsDevicePath(source), ":/exports/vault-data/tenant-a/synthetic-vault");
   assert.deepEqual(netfsMountOptions(source), ["nfsvers=4.1", "hard", "rw"]);
 
   const spec = createRuntimeSpec();

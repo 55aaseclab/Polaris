@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
+import { VAULT_DATA_RUNTIME_LAYOUT } from "../../backends/vault-runtime-adapter.js";
 import type { VaultSpec } from "../../core/vault.js";
 import { vaultRuntimeResourceName } from "../../core/vault-name.js";
 import {
@@ -152,6 +154,7 @@ function dockerMount(input: {
   type: "bind" | "volume";
   source: string;
   target: string;
+  volumeSubpath?: string;
   readOnly?: boolean;
 }): string {
   const source = assertSafeDockerMountSource(input.source, "Restore mount source");
@@ -159,8 +162,42 @@ function dockerMount(input: {
     `type=${input.type}`,
     `source=${source}`,
     `target=${input.target}`,
+    ...(input.volumeSubpath ? [`volume-subpath=${input.volumeSubpath}`] : []),
     ...(input.readOnly ? ["readonly"] : []),
   ].join(",");
+}
+
+function vaultDataMountArgs(
+  dataMount: { type: "bind" | "volume"; source: string },
+  readOnly: boolean,
+): string[] {
+  return VAULT_DATA_RUNTIME_LAYOUT.flatMap(({ directory, mountRoot }) => [
+    "--mount",
+    dockerMount({
+      type: dataMount.type,
+      source: dataMount.type === "bind"
+        ? path.join(dataMount.source, directory)
+        : dataMount.source,
+      target: mountRoot,
+      ...(dataMount.type === "volume" ? { volumeSubpath: directory } : {}),
+      readOnly,
+    }),
+  ]);
+}
+
+function vaultDataRootMountArgs(
+  dataMount: { type: "bind" | "volume"; source: string },
+  readOnly: boolean,
+): string[] {
+  return [
+    "--mount",
+    dockerMount({
+      type: dataMount.type,
+      source: dataMount.source,
+      target: "/activation-root",
+      readOnly,
+    }),
+  ];
 }
 
 function restoreImage(vault: VaultSpec): string {
@@ -481,9 +518,9 @@ function activationCommand(input: {
     `restore_job_id=${JSON.stringify(restoreJobId)}`,
     `previous_workspace_name=${JSON.stringify(previousWorkspaceName)}`,
     "staged_root=/restore/workspaces",
-    "target=/vault/project/workspaces",
-    `candidate=/vault/project/${candidateWorkspaceName}`,
-    `previous=/vault/project/${previousWorkspaceName}`,
+    "target=/activation-root/workspaces",
+    `candidate=/activation-root/${candidateWorkspaceName}`,
+    `previous=/activation-root/${previousWorkspaceName}`,
     "candidate_failed=\"$candidate.failed\"",
     "original_moved=0",
     "candidate_activated=0",
@@ -580,11 +617,8 @@ export function buildWanghaiRestoreActivationDockerRunArgs(
     "--label", `polaris.job.id=${jobId}`,
     "--label", `polaris.job.kind=${WANGHAI_RESTORE_ACTIVATION_JOB_KIND}`,
     "--label", `polaris.restore.job.id=${restoreJobId}`,
-    "--mount", dockerMount({
-      type: dataMount.type,
-      source: dataMount.source,
-      target: "/vault/project",
-    }),
+    ...vaultDataMountArgs(dataMount, false),
+    ...vaultDataRootMountArgs(dataMount, false),
     "--mount", dockerMount({
       type: "volume",
       source: stagingVolume,
@@ -627,9 +661,9 @@ export function buildWanghaiRestoreActivationVerificationDockerRunArgs(input: {
     "set -euo pipefail",
     ...workspaceChecksumShellFunction(),
     "verify_workspace_tree /restore/workspaces",
-    "verify_workspace_tree /vault/project/workspaces",
-    `test -d ${JSON.stringify(`/vault/project/${previousWorkspaceName}`)}`,
-    "cmp <(workspace_checksums /restore/workspaces) <(workspace_checksums /vault/project/workspaces)",
+    "verify_workspace_tree /activation-root/workspaces",
+    `test -d ${JSON.stringify(`/activation-root/${previousWorkspaceName}`)}`,
+    "cmp <(workspace_checksums /restore/workspaces) <(workspace_checksums /activation-root/workspaces)",
   ].join("\n");
   return [
     "run",
@@ -639,12 +673,8 @@ export function buildWanghaiRestoreActivationVerificationDockerRunArgs(input: {
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
     "--pids-limit", "32",
-    "--mount", dockerMount({
-      type: dataMount.type,
-      source: dataMount.source,
-      target: "/vault/project",
-      readOnly: true,
-    }),
+    ...vaultDataMountArgs(dataMount, true),
+    ...vaultDataRootMountArgs(dataMount, true),
     "--mount", dockerMount({
       type: "volume",
       source: stagingVolume,
@@ -703,9 +733,9 @@ function rollbackCommand(input: {
     `rollback_job_id=${JSON.stringify(jobId)}`,
     `activation_job_id=${JSON.stringify(activationJobId)}`,
     `failed_workspace_name=${JSON.stringify(failedWorkspaceName)}`,
-    "target=/vault/project/workspaces",
-    `previous=/vault/project/${previousWorkspaceName}`,
-    `failed=/vault/project/${failedWorkspaceName}`,
+    "target=/activation-root/workspaces",
+    `previous=/activation-root/${previousWorkspaceName}`,
+    `failed=/activation-root/${failedWorkspaceName}`,
     "target_moved=0",
     "original_restored=0",
     ...workspaceChecksumShellFunction(),
@@ -779,11 +809,8 @@ export function buildWanghaiRestoreRollbackDockerRunArgs(
     "--label", `polaris.job.id=${jobId}`,
     "--label", `polaris.job.kind=${WANGHAI_RESTORE_ROLLBACK_JOB_KIND}`,
     "--label", `polaris.restore.activation.id=${activationJobId}`,
-    "--mount", dockerMount({
-      type: dataMount.type,
-      source: dataMount.source,
-      target: "/vault/project",
-    }),
+    ...vaultDataMountArgs(dataMount, false),
+    ...vaultDataRootMountArgs(dataMount, false),
     "--entrypoint", "/bin/bash",
     image,
     "-lc",
@@ -809,8 +836,8 @@ export function buildWanghaiRestoreRollbackVerificationDockerRunArgs(input: {
   const command = [
     "set -euo pipefail",
     ...workspaceChecksumShellFunction(),
-    "verify_workspace_tree /vault/project/workspaces",
-    `verify_workspace_tree ${JSON.stringify(`/vault/project/${expectedFailedWorkspaceName}`)}`,
+    "verify_workspace_tree /activation-root/workspaces",
+    `verify_workspace_tree ${JSON.stringify(`/activation-root/${expectedFailedWorkspaceName}`)}`,
   ].join("\n");
   return [
     "run",
@@ -820,12 +847,8 @@ export function buildWanghaiRestoreRollbackVerificationDockerRunArgs(input: {
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
     "--pids-limit", "32",
-    "--mount", dockerMount({
-      type: dataMount.type,
-      source: dataMount.source,
-      target: "/vault/project",
-      readOnly: true,
-    }),
+    ...vaultDataMountArgs(dataMount, true),
+    ...vaultDataRootMountArgs(dataMount, true),
     "--entrypoint", "/bin/bash",
     image,
     "-lc",

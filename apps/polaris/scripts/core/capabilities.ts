@@ -1,3 +1,7 @@
+import {
+  VAULT_DATA_PRIMARY_RUNTIME_ROOT,
+  VAULT_DATA_RUNTIME_ROOTS,
+} from "../backends/vault-runtime-adapter.js";
 import type { VaultSpec } from "./vault.js";
 import { assertValidVaultProjectName } from "./vault-name.js";
 
@@ -52,6 +56,16 @@ export function validateVault(vault: VaultSpec): void {
 
   if (!vault.attachments.vaultData.mountRoot) {
     throw new Error("vault-data must declare a mount root");
+  }
+  if (vault.attachments.vaultData.mountRoot !== VAULT_DATA_PRIMARY_RUNTIME_ROOT) {
+    throw new Error(
+      `vault-data must use the direct primary mount root ${VAULT_DATA_PRIMARY_RUNTIME_ROOT}`,
+    );
+  }
+  for (const mountRoot of VAULT_DATA_RUNTIME_ROOTS) {
+    if (!vault.attachments.vaultData.durablePaths.includes(mountRoot)) {
+      throw new Error(`vault-data must declare direct mount root ${mountRoot}`);
+    }
   }
   if (!vault.attachments.vaultRuntimeState.mountRoot) {
     throw new Error("vault-runtime-state must declare a mount root");

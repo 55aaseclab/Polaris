@@ -18,6 +18,7 @@ import {
   stateStoragePathForMountPath,
   userIdentityBootstrapDirs,
 } from "../core/identity-layout.js";
+import { VAULT_DATA_RUNTIME_LAYOUT, VAULT_DATA_RUNTIME_ROOTS } from "../core/data-layout.js";
 import { vaultRuntimeScopeName } from "../core/vault-name.js";
 
 function q(value: string): string {
@@ -163,14 +164,20 @@ function renderDockerVaultDataVolume(vault: VaultRuntimeSpec): {
   volumeBlock: string[];
 } {
   const source = vault.attachments.vaultData.source;
+  const mountTargets = (type: "bind" | "volume", mountSource: string): string[] => (
+    VAULT_DATA_RUNTIME_LAYOUT.flatMap(({ directory, mountRoot }) => [
+      `      - type: ${type}`,
+      `        source: ${JSON.stringify(type === "bind" ? path.posix.join(mountSource, directory) : mountSource)}`,
+      `        target: ${mountRoot}`,
+      ...(type === "volume"
+        ? ["        volume:", `          subpath: ${directory}`]
+        : []),
+    ])
+  );
   if (isNetfsSource(source)) {
     if (source.server?.trim() === "netfs.local") {
       return {
-        mountBlock: [
-          "      - type: bind",
-          `        source: ${JSON.stringify(netfsResolvedPath(source))}`,
-          "        target: /vault/project",
-        ],
+        mountBlock: mountTargets("bind", netfsResolvedPath(source)),
         volumeBlock: [],
       };
     }
@@ -180,11 +187,7 @@ function renderDockerVaultDataVolume(vault: VaultRuntimeSpec): {
     const volumeName = vaultDataDockerVolumeName(vault);
     const volumeToken = volumeKey(volumeName);
     return {
-      mountBlock: [
-        "      - type: volume",
-        `        source: ${volumeToken}`,
-        "        target: /vault/project",
-      ],
+      mountBlock: mountTargets("volume", volumeToken),
       volumeBlock: [
         `  ${volumeToken}:`,
         `    name: ${volumeName}`,
@@ -201,11 +204,7 @@ function renderDockerVaultDataVolume(vault: VaultRuntimeSpec): {
     source,
   });
   return {
-    mountBlock: [
-      "      - type: volume",
-      `        source: ${vaultDataVolume.key}`,
-      "        target: /vault/project",
-    ],
+    mountBlock: mountTargets("volume", vaultDataVolume.key),
     volumeBlock: [
       `  ${vaultDataVolume.key}:`,
       `    name: ${vaultDataVolume.name}`,
@@ -445,7 +444,7 @@ export function renderDockerVault(vault: VaultRuntimeSpec): string {
   });
   const agentBootstrapLines = vault.agent.enabled
     ? [
-        `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${vault.attachments.vaultRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
+        `mkdir -p ${VAULT_DATA_RUNTIME_ROOTS.join(" ")} ${vault.attachments.vaultRuntimeState.mountRoot}/paseo ${vault.attachments.vaultRuntimeState.mountRoot}/paseo/evolution ${toolRoot} ${identityDirs.join(" ")} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets ${home}/.config ${home}/.local ${home}/.local/share /tmp/npm-cache`,
         ...(vault.runtime.user === "root"
           ? [`chown -R root:root ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.userIdentityState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}`]
           : []),
@@ -465,7 +464,7 @@ export function renderDockerVault(vault: VaultRuntimeSpec): string {
         ...(vault.profile.vaultAlias ? [`ln -sfn ${vault.attachments.vaultData.mountRoot} ${home}/${vault.profile.vaultAlias}`] : []),
       ]
     : [
-        `mkdir -p ${vault.attachments.vaultData.mountRoot} ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets`,
+        `mkdir -p ${VAULT_DATA_RUNTIME_ROOTS.join(" ")} ${vault.attachments.vaultRuntimeState.mountRoot} ${vault.attachments.ephemeralRuntime.mountRoot}/tmp ${vault.attachments.ephemeralRuntime.mountRoot}/pids ${vault.attachments.ephemeralRuntime.mountRoot}/sockets`,
       ];
   const agentIdentityBootstrapLines = vault.agent.enabled
     ? [

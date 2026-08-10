@@ -48,12 +48,16 @@ export function polarisDataRoot(importMetaUrl: string): string {
     : path.resolve(root, configured);
 }
 
+export function polarisControlRoot(importMetaUrl: string): string {
+  return path.join(polarisDataRoot(importMetaUrl), "control");
+}
+
 export function polarisUsersRoot(importMetaUrl: string): string {
-  return path.join(polarisDataRoot(importMetaUrl), "users");
+  return path.join(polarisControlRoot(importMetaUrl), "users");
 }
 
 export function polarisStateRoot(importMetaUrl: string): string {
-  return path.join(polarisDataRoot(importMetaUrl), "state");
+  return path.join(polarisControlRoot(importMetaUrl), "state");
 }
 
 function resolveOptionalConfiguredPath(importMetaUrl: string, envKey: string): string | null {
@@ -73,7 +77,19 @@ export function polarisNetfsLocalExportRoot(importMetaUrl: string): string {
   if (configured) {
     return configured;
   }
-  return path.join(polarisDataRoot(importMetaUrl), "exports", "vaults");
+  return path.join(polarisDataRoot(importMetaUrl), "vault-data");
+}
+
+export function polarisVaultDataRoot(importMetaUrl: string): string {
+  return polarisNetfsLocalExportRoot(importMetaUrl);
+}
+
+export function polarisWanghaiBackupKeyRoot(importMetaUrl: string): string {
+  const configured = resolveOptionalConfiguredPath(
+    importMetaUrl,
+    "POLARIS_WANGHAI_BACKUP_KEY_ROOT",
+  );
+  return configured ?? path.join(polarisControlRoot(importMetaUrl), "backup-keys");
 }
 
 export function polarisConfigDockerRoot(importMetaUrl: string): string {

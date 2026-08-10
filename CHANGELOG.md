@@ -103,6 +103,8 @@ vault-scoped Wanghai surface. Formal production promotion remains separate.
   and audit authority in Polaris.
 - Kept Wanghai vault-scoped and prevented it from becoming a second control
   plane.
+- Integrated Wanghai uses the fixed `/vault/workspaces`, `/vault/backups`, and
+  `/vault/cache` mounts; it no longer uses a shared `/vault/project` root.
 
 ### Release Scope
 

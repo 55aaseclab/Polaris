@@ -760,68 +760,6 @@ function buildVaultAttachmentsFromDirectConfig(config: DirectAttachmentConfig): 
   };
 }
 
-function translateLegacyAttachments(args: {
-  projectName: string;
-  home: string;
-  persistState: boolean;
-  claimName: string;
-  authFiles: AuthFile[];
-  backendKind: VaultSpec["backend"]["kind"];
-}): VaultAttachments {
-  const vaultVolumeSource = args.persistState
-    ? {
-        kind: "persistent-volume" as const,
-        volumeRef: args.claimName,
-        description: `vault-scoped persistent storage for ${args.projectName}`,
-      }
-    : {
-        kind: "generated-material" as const,
-        description: `ephemeral vault storage for ${args.projectName}`,
-      };
-  const identityFiles = args.authFiles;
-
-  return {
-    vaultData: buildAttachment(
-      "vault-data",
-      "vault",
-      "exclusive",
-      "/vault/project",
-      ["/vault/project"],
-      vaultVolumeSource,
-    ),
-    vaultRuntimeState: buildAttachment(
-      "vault-runtime-state",
-      "vault",
-      "exclusive",
-      "/vault/state",
-      ["/vault/state/paseo", "/vault/state/paseo/evolution"],
-      {
-        ...vaultVolumeSource,
-        subPath: "state",
-        description: `vault runtime state for ${args.projectName}`,
-      },
-    ),
-    userIdentityState: buildAttachment(
-      "user-identity-state",
-      "user",
-      "cross-vault",
-      "/identity",
-      userIdentityDurablePaths("/identity"),
-      {
-        kind: "secret-material",
-        description: identityFiles.length
-          ? `user identity material sourced from ${identityFiles.map((file) => file.key).join(", ")}`
-          : "user identity material",
-      },
-    ),
-    ephemeralRuntime: {
-      mountRoot: "/run/vault",
-      paths: ["/run/vault/tmp", "/run/vault/pids", "/run/vault/sockets"],
-      staleArtifacts: ["/run/vault/pids/paseo.pid"],
-    },
-  };
-}
-
 function normalizeAuthFiles(rawFiles: unknown, baseDir = REPO_ROOT): AuthFile[] {
   const files = Array.isArray(rawFiles) ? rawFiles : [];
   return files
@@ -1102,16 +1040,12 @@ export function loadVaultFromConfigPath(
   const directAttachmentConfig = normalizeDirectAttachmentConfig(data.attachments);
   const compatibilityAuthFiles = mergeAuthFiles(vaultAuthFiles, userProfile.authFiles);
   const runtimeAuthFiles = mergeAuthFiles(boundAuthFiles, compatibilityAuthFiles);
-  const attachments = directAttachmentConfig
-    ? buildVaultAttachmentsFromDirectConfig(directAttachmentConfig)
-    : translateLegacyAttachments({
-        projectName,
-        home,
-      persistState,
-      claimName,
-      authFiles: runtimeAuthFiles,
-      backendKind,
-    });
+  if (!directAttachmentConfig) {
+    throw new Error(
+      `Vault spec '${configPath}' must declare the direct control-vault-data attachment contract; run the control-vault-data migration first`,
+    );
+  }
+  const attachments = buildVaultAttachmentsFromDirectConfig(directAttachmentConfig);
   const agentContract = buildAgentContract(home, agentKind);
 
   const vault: VaultSpec = {

@@ -2,6 +2,10 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import yaml from "js-yaml";
+import {
+  VAULT_DATA_PRIMARY_RUNTIME_ROOT,
+  VAULT_DATA_RUNTIME_ROOTS,
+} from "../backends/vault-runtime-adapter.js";
 import { userIdentityDurablePaths } from "../core/identity-layout.js";
 import { vaultRuntimeResourceName } from "../core/vault-name.js";
 import { assertNoProjectNameCollision } from "./project-ownership.js";
@@ -59,7 +63,7 @@ function sanitizeImageTagComponent(
 /**
  * The vault data mount is the sole integrated Wanghai data root. Keep this
  * path shared by provisioning and migration so Wanghai always sees the vault
- * that Polaris provisioned at /vault/project.
+ * data that Polaris provisioned at the direct runtime roots.
  */
 export function vaultDataRelativePath(userProfileId: string, project: string): string {
   return path.posix.join(
@@ -338,11 +342,9 @@ export const DEFAULT_WANGHAI_VAULT_IMAGE = "wanghai-admin-portal:latest";
 export const WANGHAI_PROFILE_ENV_FILE_KEY = "wanghai-root-env";
 export const WANGHAI_PROFILE_ENV_SOURCE_PATH = "wanghai/.env";
 export const WANGHAI_PROFILE_ENV_MOUNT_PATH = "/opt/wanghai/.env";
-export const WANGHAI_WORKSPACES_RUNTIME_ROOT = "/vault/project/workspaces";
-export const WANGHAI_BACKUP_RUNTIME_ROOT = "/vault/project/backups";
-export const WANGHAI_CACHE_RUNTIME_ROOT = "/vault/project/cache";
-/** @deprecated Use WANGHAI_WORKSPACES_RUNTIME_ROOT. */
-export const WANGHAI_VAULTS_RUNTIME_ROOT = WANGHAI_WORKSPACES_RUNTIME_ROOT;
+export const WANGHAI_WORKSPACES_RUNTIME_ROOT = VAULT_DATA_RUNTIME_ROOTS[0];
+export const WANGHAI_BACKUP_RUNTIME_ROOT = VAULT_DATA_RUNTIME_ROOTS[1];
+export const WANGHAI_CACHE_RUNTIME_ROOT = VAULT_DATA_RUNTIME_ROOTS[2];
 
 export function verticalVaultBaseImage(): string {
   return String(process.env.POLARIS_WANGHAI_VAULT_IMAGE ?? "").trim()
@@ -767,8 +769,8 @@ export function scaffoldDockerVault(
       "vault-data": {
         scope: "vault",
         sharing: "exclusive",
-        mount_root: "/vault/project",
-        durable_paths: ["/vault/project"],
+        mount_root: VAULT_DATA_PRIMARY_RUNTIME_ROOT,
+        durable_paths: [...VAULT_DATA_RUNTIME_ROOTS],
         source: vaultDataNetfsSource(project, userProfileId),
       },
       "vault-runtime-state": {

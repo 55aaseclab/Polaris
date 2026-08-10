@@ -205,8 +205,8 @@ function verticalVault(profileEnv: string): VaultSpec {
         kind: "vault-data",
         scope: "vault",
         sharing: "exclusive",
-        mountRoot: "/vault/project",
-        durablePaths: [],
+        mountRoot: "/vault/workspaces",
+        durablePaths: ["/vault/workspaces", "/vault/backups", "/vault/cache"],
         source: { kind: "persistent-volume", volumeRef: "synthetic-vault-data", volumeSize: "1Gi" },
       },
       vaultRuntimeState: {

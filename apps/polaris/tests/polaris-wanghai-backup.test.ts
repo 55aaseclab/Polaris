@@ -393,7 +393,9 @@ test("Polaris backup uses a private one-shot Docker contract", () => {
     assert.ok(args.includes("--cap-drop"));
     assert.ok(args.includes("--security-opt"));
     assert.ok(args.includes("--pids-limit"));
-    assert.ok(args.includes("type=volume,source=vault-data,target=/vault/project,readonly"));
+    assert.ok(args.includes("type=volume,source=vault-data,target=/vault/workspaces,volume-subpath=workspaces,readonly"));
+    assert.ok(args.includes("type=volume,source=vault-data,target=/vault/backups,volume-subpath=backups,readonly"));
+    assert.ok(args.includes("type=volume,source=vault-data,target=/vault/cache,volume-subpath=cache,readonly"));
     assert.ok(args.includes("type=volume,source=tenant-a-vault-a-wanghai-backup,target=/backup"));
     assert.ok(args.some((arg) => arg.includes("target=/run/secrets/wanghai-backup.key,readonly")));
     assert.ok(args.includes("WANGHAI_RUNTIME_MODE=polaris"));
@@ -531,7 +533,9 @@ test("durable Wanghai backup runs once with no network or published port", async
             assert.ok(backupRun);
             assert.match(backupRun, /--network none/u);
             assert.match(backupRun, /--read-only/u);
-            assert.match(backupRun, /target=\/vault\/project,readonly/u);
+            assert.match(backupRun, /target=\/vault\/workspaces,readonly/u);
+            assert.match(backupRun, /target=\/vault\/backups,readonly/u);
+            assert.match(backupRun, /target=\/vault\/cache,readonly/u);
             assert.equal(/(?:^|\s)(?:-p|--publish)(?:\s|$)/u.test(backupRun), false);
             assert.equal(commands.filter((entry) => entry.startsWith("run --name polaris-wanghai-backup-")).length, 1);
             assert.ok(commands.some((entry) => entry.startsWith("rm -f polaris-wanghai-backup-")));
@@ -722,7 +726,11 @@ test("durable Wanghai restore activation and rollback preserve private lifecycle
             ));
             assert.ok(activationRun);
             assert.match(activationRun, /--network none/u);
-            assert.match(activationRun, /target=\/vault\/project/u);
+            assert.match(activationRun, /target=\/vault\/workspaces/u);
+            assert.match(activationRun, /target=\/vault\/backups/u);
+            assert.match(activationRun, /target=\/vault\/cache/u);
+            assert.match(activationRun, /target=\/activation-root/u);
+            assert.equal(/target=\/vault\/project/u.test(activationRun), false);
             assert.match(activationRun, /target=\/restore,readonly/u);
             assert.equal(/(?:^|\s)(?:-p|--publish)(?:\s|$)/u.test(activationRun), false);
             assert.equal(/WANGHAI_DATA_ROOT/u.test(activationRun), false);
@@ -731,7 +739,11 @@ test("durable Wanghai restore activation and rollback preserve private lifecycle
             ));
             assert.ok(rollbackRun);
             assert.match(rollbackRun, /--network none/u);
-            assert.match(rollbackRun, /target=\/vault\/project/u);
+            assert.match(rollbackRun, /target=\/vault\/workspaces/u);
+            assert.match(rollbackRun, /target=\/vault\/backups/u);
+            assert.match(rollbackRun, /target=\/vault\/cache/u);
+            assert.match(rollbackRun, /target=\/activation-root/u);
+            assert.equal(/target=\/vault\/project/u.test(rollbackRun), false);
             assert.equal(/target=\/restore/u.test(rollbackRun), false);
             assert.ok(commands.filter((entry) => entry.endsWith(" stop")).length >= 2);
             assert.ok(commands.filter((entry) => entry.includes(" up -d")).length >= 2);

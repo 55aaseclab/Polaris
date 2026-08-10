@@ -51,7 +51,8 @@ The main values are:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
+POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/vault-data
+POLARIS_WANGHAI_BACKUP_KEY_ROOT=/path/to/polaris/data/control/backup-keys
 POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
 POLARIS_SERVER_PORT=8787
 POLARIS_PUBLIC_BASE_URL=http://HOST_IP:8081
@@ -71,7 +72,7 @@ Minimal Polaris env:
 
 ```bash
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/exports/workspaces
+POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/vault-data
 POLARIS_SERVER_BIND_HOST=127.0.0.1
 POLARIS_SERVER_PORT=8787
 POLARIS_AUTHING_APP_ID=your-authing-app-id

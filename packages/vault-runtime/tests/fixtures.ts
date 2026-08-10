@@ -127,8 +127,8 @@ export function createRuntimeSpec(options: {
         kind: "vault-data",
         scope: "vault",
         sharing: "exclusive",
-        mountRoot: "/vault/project",
-        durablePaths: ["/vault/project"],
+        mountRoot: "/vault/workspaces",
+        durablePaths: ["/vault/workspaces", "/vault/backups", "/vault/cache"],
         source: {
           kind: "persistent-volume",
           volumeRef: "synthetic-vault-data",

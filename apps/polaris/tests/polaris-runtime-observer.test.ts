@@ -121,7 +121,7 @@ test("runtime memory observer fallback memory stays memory-oriented", () => {
       title: "Fix auth wiring",
       lastStatus: "error",
       lastError: "401 Unauthorized",
-      cwd: "/vault/project",
+      cwd: "/vault/workspaces",
     },
     "session-1",
   );
@@ -145,7 +145,7 @@ test("runtime memory observer derives memory capture from daemon-owned agent rec
   const record = {
     id: "agent-1",
     provider: "codex",
-    cwd: "/vault/project",
+    cwd: "/vault/workspaces",
     title: "fix auth wiring",
     lastStatus: "idle",
     lastError: null,
@@ -163,7 +163,7 @@ test("runtime memory observer infers completion when the first poll already sees
   const record = {
     id: "agent-short",
     provider: "codex",
-    cwd: "/vault/project",
+    cwd: "/vault/workspaces",
     title: "short successful run",
     lastStatus: "idle",
     lastError: null,
@@ -184,7 +184,7 @@ test("runtime memory observer emits task-failed and vault memory for error trans
   const record = {
     id: "agent-error",
     provider: "codex",
-    cwd: "/vault/project",
+    cwd: "/vault/workspaces",
     title: "broken auth wiring",
     lastStatus: "error",
     lastError: "401 Unauthorized",

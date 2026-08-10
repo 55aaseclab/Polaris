@@ -27,14 +27,19 @@ function withPreflightFixture({
   const bin = path.join(root, "bin");
   const envFile = path.join(root, "polaris.env");
   const manifestPath = path.join(root, "release-manifest.json");
-  const backupKeyRoot = path.join(root, "backup-keys");
+  const dataRoot = path.join(root, "data");
+  const backupKeyRoot = path.join(dataRoot, "control", "backup-keys");
+  const exportRoot = path.join(dataRoot, "vault-data");
   const cosignArgsPath = path.join(root, "cosign-args.txt");
   fs.mkdirSync(bin);
-  fs.mkdirSync(backupKeyRoot, { mode: backupKeyMode });
+  fs.mkdirSync(backupKeyRoot, { recursive: true, mode: backupKeyMode });
+  fs.mkdirSync(exportRoot, { recursive: true });
   fs.chmodSync(backupKeyRoot, backupKeyMode);
   const digest = "a".repeat(64);
   const values = {
     POLARIS_RELEASE_ID: "0.3.1",
+    POLARIS_DATA_ROOT: dataRoot,
+    POLARIS_NETFS_LOCAL_EXPORT_ROOT: exportRoot,
     POLARIS_RELEASE_PROFILE: "0.3.0-single-host",
     POLARIS_DEPLOYMENT_MODE: "single-host",
     POLARIS_SERVER_REPLICAS: "1",
@@ -296,6 +301,30 @@ test("release preflight rejects a legacy integrated Wanghai data root", () => {
     const result = runPreflight(bin, envFile);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /POLARIS_WANGHAI_DATA_ROOT must be unset/);
+  });
+});
+
+test("release preflight rejects the legacy vault export root", () => {
+  withPreflightFixture({
+    envOverrides: {
+      POLARIS_NETFS_LOCAL_EXPORT_ROOT: "/srv/polaris/data/exports/vaults",
+    },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /canonical vault-data root/);
+  });
+});
+
+test("release preflight rejects a backup-key root outside control", () => {
+  withPreflightFixture({
+    envOverrides: {
+      POLARIS_WANGHAI_BACKUP_KEY_ROOT: "/srv/polaris/data/backup-keys",
+    },
+  }, ({ bin, envFile }) => {
+    const result = runPreflight(bin, envFile);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must be .*control\/backup-keys/);
   });
 });
 

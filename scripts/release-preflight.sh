@@ -47,13 +47,35 @@ wanghai_cosign_identity="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_IDENTITY:-}"
 wanghai_cosign_oidc_issuer="${POLARIS_WANGHAI_COSIGN_CERTIFICATE_OIDC_ISSUER:-}"
 allowed_origins="${POLARIS_PORTAL_ALLOWED_ORIGINS:-}"
 auth_mode="${POLARIS_AUTH_MODE:-}"
+data_root="${POLARIS_DATA_ROOT:-}"
+export_root="${POLARIS_NETFS_LOCAL_EXPORT_ROOT:-}"
 backup_key_root="${POLARIS_WANGHAI_BACKUP_KEY_ROOT:-}"
 backup_retention_count="${POLARIS_WANGHAI_BACKUP_RETENTION_COUNT:-}"
 backup_timeout_ms="${POLARIS_WANGHAI_BACKUP_TIMEOUT_MS:-}"
 backup_submissions_per_hour="${POLARIS_WANGHAI_BACKUP_SUBMISSIONS_PER_HOUR:-}"
 
 if [ -n "${POLARIS_WANGHAI_DATA_ROOT:-}" ]; then
-  fail "POLARIS_WANGHAI_DATA_ROOT must be unset; integrated Wanghai derives /vault/project"
+  fail "POLARIS_WANGHAI_DATA_ROOT must be unset; integrated Wanghai uses direct /vault/workspaces, /vault/backups, and /vault/cache mounts"
+fi
+
+if [ -z "${data_root}" ] || [[ "${data_root}" != /* ]] || [ "${data_root%/}" = "" ]; then
+  fail "POLARIS_DATA_ROOT must be an absolute non-root directory"
+fi
+if [ -z "${export_root}" ] || [[ "${export_root}" != /* ]]; then
+  fail "POLARIS_NETFS_LOCAL_EXPORT_ROOT must be an absolute vault-data export root"
+fi
+case "${export_root%/}" in
+  */vault-data) ;;
+  */exports/vaults|*/vaults)
+    fail "POLARIS_NETFS_LOCAL_EXPORT_ROOT must use the canonical vault-data root; legacy vault export roots are rejected"
+    ;;
+  *)
+    fail "POLARIS_NETFS_LOCAL_EXPORT_ROOT must end in /vault-data"
+    ;;
+esac
+canonical_backup_key_root="${data_root%/}/control/backup-keys"
+if [ "${backup_key_root}" != "${canonical_backup_key_root}" ]; then
+  fail "POLARIS_WANGHAI_BACKUP_KEY_ROOT must be ${canonical_backup_key_root}"
 fi
 
 if [ "${docker_gateway_host}" != "127.0.0.1" ]; then

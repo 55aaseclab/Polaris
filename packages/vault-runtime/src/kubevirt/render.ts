@@ -13,6 +13,7 @@ import {
   vaultRuntimeResourceName,
   vaultRuntimeScopeName,
 } from "../core/vault-name.js";
+import { VAULT_DATA_RUNTIME_LAYOUT } from "../core/data-layout.js";
 
 function runtimeScope(vault: VaultRuntimeSpec): string {
   return vaultRuntimeScopeName(vault.userProfile.id, vault.identity.projectName);
@@ -233,6 +234,16 @@ function privateSurfaceRuntimeDocs(vault: VaultRuntimeSpec): string {
     "        fsGroupChangePolicy: OnRootMismatch",
     "        seccompProfile:",
     "          type: RuntimeDefault",
+    "      initContainers:",
+    "      - name: vault-data-layout",
+    `        image: ${JSON.stringify(surface.image ?? vault.runtime.baseImage)}`,
+    "        command: [\"/bin/sh\", \"-lc\"]",
+    "        args:",
+    "        - >-",
+    "          mkdir -p /vault-data/workspaces /vault-data/backups /vault-data/cache",
+    "        volumeMounts:",
+    "        - name: vault-data",
+    "          mountPath: /vault-data",
     "      containers:",
     `      - name: ${surface.id}`,
     `        image: ${JSON.stringify(surface.image ?? vault.runtime.baseImage)}`,
@@ -284,8 +295,11 @@ function privateSurfaceRuntimeDocs(vault: VaultRuntimeSpec): string {
     "          periodSeconds: 5",
     "          failureThreshold: 3",
     "        volumeMounts:",
-    "        - name: vault-data",
-    "          mountPath: /vault/project",
+    ...VAULT_DATA_RUNTIME_LAYOUT.flatMap(({ directory, mountRoot }) => [
+      "        - name: vault-data",
+      `          mountPath: ${mountRoot}`,
+      `          subPath: ${directory}`,
+    ]),
     "        - name: private-surface-tmp",
     "          mountPath: /tmp",
     ...envVolume,
