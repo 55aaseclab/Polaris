@@ -23,7 +23,7 @@ test("remote deployment checksum-syncs Polaris source", () => {
   assert.match(script, /--exclude "config\/users"/);
   assert.match(script, /--exclude "docker-root\/\*\*\*"/);
   assert.match(script, /--exclude "data\/\*\*\*"/);
-  assert.match(script, /--exclude "apps\/paseo\/\.surface-\*\/"/);
+  assert.match(script, /--exclude "packages\/paseo\/\.surface-\*\/"/);
   assert.match(script, /RELEASE_MANIFEST_SOURCE/);
 });
 
@@ -34,11 +34,11 @@ test("remote deployment does not duplicate Paseo artifact builds after ci-local"
 });
 
 test("Paseo Dockerfiles keep dependency installation reusable across source patches", () => {
-  for (const file of ["apps/paseo/Dockerfile.tool-bundle", "apps/paseo/Dockerfile.artifact"]) {
+  for (const file of ["packages/paseo/Dockerfile.tool-bundle", "packages/paseo/Dockerfile.artifact"]) {
     const dockerfile = fs.readFileSync(file, "utf8");
     const packagePatch = dockerfile.indexOf("paseo-web-authing-package.patch");
     const dependencyInstall = dockerfile.indexOf("npm ci");
-    const sourcePatches = dockerfile.indexOf("COPY apps/paseo/patches /tmp/paseo-patches");
+    const sourcePatches = dockerfile.indexOf("COPY packages/paseo/patches /tmp/paseo-patches");
     assert.ok(packagePatch >= 0, `${file} must apply the dependency patch`);
     assert.ok(dependencyInstall > packagePatch, `${file} must install dependencies after the dependency patch`);
     assert.ok(sourcePatches > dependencyInstall, `${file} must apply source patches after dependency installation`);

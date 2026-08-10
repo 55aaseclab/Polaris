@@ -56,13 +56,13 @@ pnpm --filter @polaris/polaris-auth-server run build
 pnpm run build:surfaces
 
 paseo_local_ensure_source
-if [ ! -d "apps/paseo/source/node_modules" ]; then
-  (cd apps/paseo/source && npm ci --ignore-scripts)
+if [ ! -d "packages/paseo/source/node_modules" ]; then
+  (cd packages/paseo/source && npm ci --ignore-scripts)
 fi
-if [ ! -f "apps/paseo/source/packages/highlight/dist/index.js" ] \
-  || [ ! -f "apps/paseo/source/packages/protocol/dist/messages.js" ] \
-  || [ ! -f "apps/paseo/source/packages/client/dist/daemon-client.js" ]; then
-  (cd apps/paseo/source && npm run build:app-deps)
+if [ ! -f "packages/paseo/source/packages/highlight/dist/index.js" ] \
+  || [ ! -f "packages/paseo/source/packages/protocol/dist/messages.js" ] \
+  || [ ! -f "packages/paseo/source/packages/client/dist/daemon-client.js" ]; then
+  (cd packages/paseo/source && npm run build:app-deps)
 fi
 
 echo "[polaris-local-stack] auth_mode=${POLARIS_AUTH_MODE}" >&2
@@ -78,7 +78,7 @@ server_pid=$!
 # Outer shared coding UI. It owns /h/... only; polaris-shell is served by the
 # Polaris control plane on the outer shell routes.
 (
-  cd apps/paseo/source/packages/app
+  cd packages/paseo/source/packages/app
   EXPO_NO_TELEMETRY=1 \
   EXPO_PUBLIC_POLARIS_API_PORT="${SERVER_PORT}" \
   EXPO_PUBLIC_POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE}" \

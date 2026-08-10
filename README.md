@@ -27,7 +27,8 @@ bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 You can also start it through the `stack` service in `paseo.json`.
 
 Paseo runs through its Expo web development server in this stack. Changes under
-`apps/paseo/source` use Fast Refresh and do not rebuild the Paseo web artifact.
+`packages/paseo/source` use Fast Refresh and do not rebuild the Paseo web
+artifact.
 On the first run only, its shared package dependencies are compiled when their
 upstream `dist` entry points are absent.
 

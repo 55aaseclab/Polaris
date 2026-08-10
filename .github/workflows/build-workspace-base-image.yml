@@ -5,7 +5,7 @@ on:
     paths:
       - ".dockerignore"
       - ".github/workflows/build-workspace-base-image.yml"
-      - "apps/paseo/tool-bundle/bin/paseo"
+      - "packages/paseo/tool-bundle/bin/paseo"
       - "config/docker/**"
       - "scripts/tests/workspace-base-image-workflow.test.mjs"
   push:
@@ -16,7 +16,7 @@ on:
     paths:
       - ".dockerignore"
       - ".github/workflows/build-workspace-base-image.yml"
-      - "apps/paseo/tool-bundle/bin/paseo"
+      - "packages/paseo/tool-bundle/bin/paseo"
       - "config/docker/**"
       - "scripts/tests/workspace-base-image-workflow.test.mjs"
   workflow_dispatch:
@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           test -f config/docker/vault-prebuilt.Dockerfile
           test -f config/docker/base-tools/install-base-tools.sh
-          test -L apps/paseo/tool-bundle/bin/paseo
+          test -L packages/paseo/tool-bundle/bin/paseo
           bash -n config/docker/base-tools/install-base-tools.sh
 
       - name: Run workflow contract test

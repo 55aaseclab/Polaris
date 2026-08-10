@@ -1,12 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22 AS artifact
+FROM node:22 AS bundle
 
 ARG PASEO_SOURCE_REF=v0.1.101
-ARG PASEO_WEB_BASE_URL=
-
-ENV EXPO_NO_TELEMETRY=1
-ENV DO_NOT_TRACK=1
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -16,8 +12,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /opt/paseo
 
-COPY apps/paseo/source ./
-COPY apps/paseo/patches/paseo-web-authing-package.patch /tmp/paseo-authing-package.patch
+COPY packages/paseo/source ./
+COPY packages/paseo/patches/paseo-web-authing-package.patch /tmp/paseo-authing-package.patch
 
 RUN git reset --hard -q "${PASEO_SOURCE_REF}" \
   && git clean -fdq \
@@ -28,24 +24,29 @@ RUN --mount=type=cache,target=/root/.npm \
   npm ci --ignore-scripts --no-audit --prefer-offline \
   && PATH="/opt/paseo/node_modules/.bin:${PATH}" node scripts/postinstall-patches.mjs
 
-COPY apps/paseo/patches /tmp/paseo-patches
+COPY packages/paseo/patches /tmp/paseo-patches
 
 RUN git apply --3way /tmp/paseo-patches/paseo-web-authing-core.patch /tmp/paseo-patches/paseo-web-polaris-branding.patch /tmp/paseo-patches/paseo-web-settings-auth-visibility.patch /tmp/paseo-patches/paseo-web-host-account-isolation.patch /tmp/paseo-patches/paseo-web-embed-mode.patch /tmp/paseo-patches/paseo-web-auth-disabled-clean.patch /tmp/paseo-patches/paseo-web-surface-only.patch \
   && rm -rf .git
 
-COPY apps/paseo/rewrite-export-base-url.mjs /tmp/rewrite-paseo-base-url.mjs
-
-ENV PASEO_WEB_BASE_URL=${PASEO_WEB_BASE_URL}
-
 RUN --mount=type=cache,target=/root/.npm \
   --mount=type=cache,target=/root/.cache \
-  npm run build:web --workspace=@getpaseo/app \
-  && base_url="${PASEO_WEB_BASE_URL%/}" \
-  && if [ -n "$base_url" ]; then \
-    BASE_URL="$base_url" node /tmp/rewrite-paseo-base-url.mjs \
-    && rm -f /tmp/rewrite-paseo-base-url.mjs; \
-  fi
+  npm run build:highlight \
+  && npm run build:relay \
+  && npm run build:protocol \
+  && npm run build:client \
+  && npm run build --workspace=@getpaseo/server \
+  && npm run build --workspace=@getpaseo/cli
 
-FROM scratch AS artifact-export
+RUN mkdir -p /tmp/packs /bundle \
+  && npm pack --workspace=@getpaseo/highlight --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/relay --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/protocol --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/client --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/server --pack-destination /tmp/packs \
+  && npm pack --workspace=@getpaseo/cli --pack-destination /tmp/packs \
+  && npm install -g --prefix /bundle /tmp/packs/*.tgz
 
-COPY --from=artifact /opt/paseo/packages/app/dist /dist
+FROM scratch AS bundle-export
+
+COPY --from=bundle /bundle /bundle

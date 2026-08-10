@@ -20,7 +20,7 @@ test("local stack service does not start a standalone admin web app", () => {
 
 test("local stack service runs Paseo with Fast Refresh instead of a web artifact build", () => {
   const script = fs.readFileSync("scripts/run-polaris-local-stack-service.sh", "utf8");
-  assert.match(script, /cd apps\/paseo\/source\/packages\/app/);
+  assert.match(script, /cd packages\/paseo\/source\/packages\/app/);
   assert.match(script, /npx expo start --web --host lan/);
   assert.match(script, /EXPO_PUBLIC_POLARIS_API_PORT/);
   assert.match(script, /npm run build:app-deps/);

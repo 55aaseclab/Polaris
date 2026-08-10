@@ -10,7 +10,7 @@ BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 export BUILDKIT_PROGRESS
 
 paseo_local_ensure_source() {
-  local source_dir="apps/paseo/source"
+  local source_dir="packages/paseo/source"
 
   if [ -f "${source_dir}/package.json" ] \
     && [ -d "${source_dir}/.git" ] \
@@ -34,7 +34,7 @@ paseo_local_runtime_root() {
 }
 
 paseo_local_dist_dir() {
-  printf 'apps/paseo/dist-build\n'
+  printf 'packages/paseo/dist-build\n'
 }
 
 paseo_local_prepare_served_layout() { :; }
@@ -118,7 +118,7 @@ paseo_local_buildx_with_local_cache() {
 }
 
 paseo_local_tool_bundle_dir() {
-  printf 'apps/paseo/tool-bundle\n'
+  printf 'packages/paseo/tool-bundle\n'
 }
 
 paseo_local_tool_bundle_fingerprint_file() {
@@ -128,20 +128,20 @@ paseo_local_tool_bundle_fingerprint_file() {
 paseo_local_input_fingerprint() {
   {
     printf '%s\n' "base_url=${POLARIS_PASEO_WEB_BASE_URL}"
-    sha256sum apps/paseo/rewrite-export-base-url.mjs
-    find apps/paseo/source apps/paseo/patches -type f -print0 \
+    sha256sum packages/paseo/rewrite-export-base-url.mjs
+    find packages/paseo/source packages/paseo/patches -type f -print0 \
       | sort -z \
       | xargs -0 sha256sum
-    sha256sum apps/paseo/Dockerfile.artifact
+    sha256sum packages/paseo/Dockerfile.artifact
   } | sha256sum | awk '{print $1}'
 }
 
 paseo_local_tool_bundle_fingerprint() {
   {
-    find apps/paseo/source apps/paseo/patches -type f -print0 \
+    find packages/paseo/source packages/paseo/patches -type f -print0 \
       | sort -z \
       | xargs -0 sha256sum
-    sha256sum apps/paseo/Dockerfile.tool-bundle
+    sha256sum packages/paseo/Dockerfile.tool-bundle
   } | sha256sum | awk '{print $1}'
 }
 
@@ -173,7 +173,7 @@ paseo_local_build_dist() {
   # deploy and local artifact builds complete reliably.
   paseo_local_ensure_builder
   paseo_local_buildx_export "${cache_dir}" \
-    --file apps/paseo/Dockerfile.artifact \
+    --file packages/paseo/Dockerfile.artifact \
     --target artifact-export \
     --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
     --build-arg "PASEO_WEB_BASE_URL=${POLARIS_PASEO_WEB_BASE_URL}" \
@@ -213,7 +213,7 @@ paseo_local_build_tool_bundle() {
   # but skip cache writes here so deploys stay reliable.
   paseo_local_ensure_builder
   paseo_local_buildx_export "${cache_dir}" \
-    --file apps/paseo/Dockerfile.tool-bundle \
+    --file packages/paseo/Dockerfile.tool-bundle \
     --target bundle-export \
     --build-arg "PASEO_SOURCE_REF=${POLARIS_PASEO_SOURCE_REF}" \
     --output "type=local,dest=${tmp_dir}" \

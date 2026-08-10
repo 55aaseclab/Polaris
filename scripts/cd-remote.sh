@@ -23,11 +23,11 @@ bash ./scripts/ci-local.sh
 ssh "${REMOTE_HOST}" "mkdir -p '${REMOTE_APP_DIR}'"
 
 rsync -azc --delete --one-file-system \
-  --include "apps/paseo/tool-bundle/" \
-  --include "apps/paseo/tool-bundle/bin/***" \
-  --include "apps/paseo/tool-bundle/lib/" \
-  --include "apps/paseo/tool-bundle/lib/node_modules/***" \
-  --exclude "apps/paseo/.surface-*/" \
+  --include "packages/paseo/tool-bundle/" \
+  --include "packages/paseo/tool-bundle/bin/***" \
+  --include "packages/paseo/tool-bundle/lib/" \
+  --include "packages/paseo/tool-bundle/lib/node_modules/***" \
+  --exclude "packages/paseo/.surface-*/" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "dist" \

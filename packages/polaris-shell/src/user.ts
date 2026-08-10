@@ -30,8 +30,8 @@ export interface ShellUserPageModel {
 
 /** Pages/modules to migrate out of patched Paseo into shell UI. */
 export const SHELL_USER_MIGRATION_SOURCES = [
-  "apps/paseo/source/packages/app/src/screens/settings/polaris-user-page.tsx",
-  "apps/paseo/source/packages/app/src/lib/polaris-authing.ts",
-  "apps/paseo/source/packages/polaris-auth-client",
-  "apps/paseo/source/packages/app/src/components/create-polaris-host-modal.tsx",
+  "packages/paseo/source/packages/app/src/screens/settings/polaris-user-page.tsx",
+  "packages/paseo/source/packages/app/src/lib/polaris-authing.ts",
+  "packages/paseo/source/packages/polaris-auth-client",
+  "packages/paseo/source/packages/app/src/components/create-polaris-host-modal.tsx",
 ] as const;

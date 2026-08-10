@@ -2570,7 +2570,7 @@ test("portal serves shell documents and shell assets from the control plane", as
     const assetResponse = await fetch(`http://127.0.0.1:${address.port}/shell/shell.js`);
     assert.equal(assetResponse.status, 200);
     assert.match(assetResponse.headers.get("content-type") ?? "", /text\/javascript/);
-    assert.ok((await assetResponse.text()).includes('href="/hosts"'));
+    assert.match(await assetResponse.text(), /href[:=][`"]\/hosts/u);
 
     const shellHeadResponse = await fetch(`http://127.0.0.1:${address.port}/hosts`, {
       method: "HEAD",

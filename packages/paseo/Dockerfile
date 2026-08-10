@@ -4,7 +4,7 @@ RUN npm install -g serve@14
 
 WORKDIR /opt/paseo
 
-COPY apps/paseo/dist-build ./dist
+COPY packages/paseo/dist-build ./dist
 
 EXPOSE 8082
 

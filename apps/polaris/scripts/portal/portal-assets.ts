@@ -3,7 +3,7 @@ import path from "node:path";
 import { isShellPath } from "@polaris/polaris-shell";
 import { repoRoot } from "../utils/paths.js";
 
-const SHELL_ROOT = path.join(repoRoot(import.meta.url), "packages", "polaris-shell", "dist", "web");
+const PORTAL_ROOT = path.join(repoRoot(import.meta.url), "apps", "polaris-portal", "dist");
 
 const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -11,15 +11,15 @@ const CONTENT_TYPES: Record<string, string> = {
   ".js": "text/javascript; charset=utf-8",
 };
 
-export function shellAssetRoot(): string {
-  return SHELL_ROOT;
+export function portalAssetRoot(): string {
+  return PORTAL_ROOT;
 }
 
-export function hasShellAssets(): boolean {
-  return fs.existsSync(path.join(SHELL_ROOT, "index.html"));
+export function hasPortalAssets(): boolean {
+  return fs.existsSync(path.join(PORTAL_ROOT, "index.html"));
 }
 
-export function readShellAsset(name: string): {
+export function readPortalAsset(name: string): {
   body: Buffer;
   contentType: string;
 } | null {
@@ -27,7 +27,7 @@ export function readShellAsset(name: string): {
   if (!/^(?:index\.html|shell\.(?:js|css))$/u.test(normalized)) {
     return null;
   }
-  const filePath = path.join(SHELL_ROOT, normalized);
+  const filePath = path.join(PORTAL_ROOT, normalized);
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
@@ -37,13 +37,13 @@ export function readShellAsset(name: string): {
   };
 }
 
-export function isShellDocumentPath(pathname: string): boolean {
+export function isPortalDocumentPath(pathname: string): boolean {
   if (isShellPath(pathname)) {
     return true;
   }
   return /^\/v\/[^/]+\/wanghai\/?$/u.test(pathname);
 }
 
-export function shellFallbackHtml(): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Polaris</title></head><body><main id="app"><p>Polaris shell assets are not built.</p></main></body></html>`;
+export function portalFallbackHtml(): string {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Polaris Portal</title></head><body><main id="app"><p>Polaris Portal assets are not built.</p></main></body></html>`;
 }

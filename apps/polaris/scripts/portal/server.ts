@@ -87,10 +87,10 @@ import { WanghaiRestoreError } from "../control-plane/jobs/wanghai-restore.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
-  isShellDocumentPath,
-  readShellAsset,
-  shellFallbackHtml,
-} from "./shell-assets.js";
+  isPortalDocumentPath,
+  readPortalAsset,
+  portalFallbackHtml,
+} from "./portal-assets.js";
 import {
   configuredGatewayProtocol,
   consumeLaunchTicket,
@@ -3115,7 +3115,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
 
       if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/shell/")) {
-        const asset = readShellAsset(url.pathname.slice("/shell/".length));
+        const asset = readPortalAsset(url.pathname.slice("/shell/".length));
         if (!asset) {
           notFound(res);
           return;
@@ -3124,13 +3124,13 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         return;
       }
 
-      if ((req.method === "GET" || req.method === "HEAD") && isShellDocumentPath(url.pathname)) {
-        const document = readShellAsset("index.html");
+      if ((req.method === "GET" || req.method === "HEAD") && isPortalDocumentPath(url.pathname)) {
+        const document = readPortalAsset("index.html");
         if (document) {
           sendShellAsset(res, document.contentType, document.body, req.method);
           return;
         }
-        sendShellAsset(res, "text/html; charset=utf-8", shellFallbackHtml(), req.method);
+        sendShellAsset(res, "text/html; charset=utf-8", portalFallbackHtml(), req.method);
         return;
       }
 

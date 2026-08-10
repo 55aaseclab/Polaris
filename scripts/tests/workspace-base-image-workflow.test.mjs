@@ -55,7 +55,7 @@ test("the clean checkout keeps the optional Paseo bundle link without requiring 
     "utf8",
   );
 
-  assert.match(dockerfile, /COPY apps\/paseo\/tool-bundle \/tmp\/paseo-tool-bundle/u);
+  assert.match(dockerfile, /COPY packages\/paseo\/tool-bundle \/tmp\/paseo-tool-bundle/u);
   assert.match(installer, /if \[ -x "\$PASEO_TOOL_BUNDLE_DIR\/bin\/paseo" \]/u);
   assert.match(installer, /npm install -g --prefix "\$TOOL_PREFIX" @getpaseo\/cli@latest/u);
   assert.match(installer, /RUSTUP_PROFILE="\$\{RUSTUP_PROFILE:-minimal\}"/u);

@@ -9,7 +9,7 @@ const PASEO_LOCAL_SCRIPT = path.resolve("scripts/lib/paseo-local.sh");
 
 function withSourceFixture(setup, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-paseo-source-"));
-  const source = path.join(root, "apps", "paseo", "source");
+  const source = path.join(root, "packages", "paseo", "source");
   fs.mkdirSync(source, { recursive: true });
   fs.writeFileSync(path.join(source, "package.json"), "{}\n", "utf8");
   try {

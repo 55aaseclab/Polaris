@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_DIR="${ROOT_DIR}/apps/paseo/source"
-PATCH_DIR="${ROOT_DIR}/apps/paseo/patches"
+SOURCE_DIR="${ROOT_DIR}/packages/paseo/source"
+PATCH_DIR="${ROOT_DIR}/packages/paseo/patches"
 SOURCE_REF="${POLARIS_PASEO_SOURCE_REF:-v0.1.101}"
 
 usage() {

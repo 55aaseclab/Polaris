@@ -33,11 +33,20 @@ export {
   type HostSurfaceAction,
 } from "./hosts.js";
 export {
+  DEFAULT_POLARIS_VAULT_PATH,
+  HOST_NAME_VALIDATION_MESSAGE,
+  buildCreatedHostSurfaceHref,
+  resolveCodingSurfaceUrl,
+  validatePolarisHostName,
+} from "./create-host.js";
+export {
   SHELL_USER_MIGRATION_SOURCES,
   type ShellUserPageModel,
 } from "./user.js";
 export {
   resolveShellHostActions,
+  resolveCodingHostAction,
+  resolveWanghaiPortalAction,
   type ShellHostSummary,
   type ShellHostSurfaceAction,
   type ShellSession,
