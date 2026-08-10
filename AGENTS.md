@@ -69,8 +69,8 @@ operations, and release documentation lives in the Polaris documentation site.
 - The only integrated backup path is the Polaris-owned `wanghai-backup` Docker
   job. It uses a digest-pinned, network-disabled one-shot image, the selected
   vault data attachment read-only, a separate per-vault backup volume, and a
-  private key below `POLARIS_WANGHAI_BACKUP_KEY_ROOT`. Keep its named container
-  until the durable result is persisted. Do not add a Wanghai portal backup,
+  private key below `$POLARIS_DATA_ROOT/control/backup-keys`. Keep its named
+  container until the durable result is persisted. Do not add a Wanghai portal backup,
   restore, or rollback route. The separate Polaris-owned restore staging slice
   accepts only a completed same-tenant/vault backup, uses a digest-pinned,
   network-disabled one-shot image with read-only `/backup` and a new private
