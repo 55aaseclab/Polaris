@@ -1,45 +1,45 @@
 @import "tailwindcss";
 
-/* Paseo's default dark theme, kept as Portal-owned CSS tokens. */
+/* Paseo's visual language, expressed as a light Portal-owned theme. */
 @theme inline {
-  --color-background: #181b1a;
-  --color-foreground: #fafafa;
-  --color-card: #1e2120;
-  --color-card-foreground: #fafafa;
-  --color-muted: #272a29;
-  --color-muted-foreground: #a1a5a4;
-  --color-border: #252b2a;
-  --color-input: #272a29;
-  --color-ring: #7ccba0;
+  --color-background: #f7faf8;
+  --color-foreground: #17201b;
+  --color-card: #ffffff;
+  --color-card-foreground: #17201b;
+  --color-muted: #f0f4f1;
+  --color-muted-foreground: #5f6d65;
+  --color-border: #dfe7e1;
+  --color-input: #f4f7f5;
+  --color-ring: #2f9d68;
   --color-primary: #20744a;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #434645;
-  --color-secondary-foreground: #fafafa;
+  --color-secondary: #e8eeea;
+  --color-secondary-foreground: #223028;
   --color-accent: #20744a;
   --color-accent-foreground: #ffffff;
-  --color-destructive: #c64f43;
+  --color-destructive: #b42318;
   --color-destructive-foreground: #ffffff;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 :root {
-  color-scheme: dark;
-  --portal-surface-0: #181b1a;
-  --portal-surface-1: #1e2120;
-  --portal-surface-2: #272a29;
-  --portal-surface-3: #434645;
-  --portal-sidebar: #141716;
-  --portal-sidebar-hover: #1c1f1e;
-  --portal-border: #252b2a;
-  --portal-border-accent: #2f3534;
-  --portal-foreground: #fafafa;
-  --portal-muted: #a1a5a4;
+  color-scheme: light;
+  --portal-surface-0: #f7faf8;
+  --portal-surface-1: #ffffff;
+  --portal-surface-2: #f0f4f1;
+  --portal-surface-3: #e7ede9;
+  --portal-sidebar: #ffffff;
+  --portal-sidebar-hover: #eef5f0;
+  --portal-border: #dfe7e1;
+  --portal-border-accent: #c8d7cc;
+  --portal-foreground: #17201b;
+  --portal-muted: #5f6d65;
   --portal-accent: #20744a;
-  --portal-accent-bright: #7ccba0;
-  --portal-danger: #c64f43;
-  --portal-danger-soft: #3b2421;
-  --portal-warning-soft: #3a301e;
+  --portal-accent-bright: #2f9d68;
+  --portal-danger: #b42318;
+  --portal-danger-soft: #fff0ee;
+  --portal-warning-soft: #fff7df;
 }
 
 @layer base {
@@ -265,13 +265,13 @@
 }
 
 .metric-green .metric-icon {
-  background: #1b3327;
-  color: #7ecf9a;
+  background: #eaf7ee;
+  color: #176b39;
 }
 
 .metric-amber .metric-icon {
   background: var(--portal-warning-soft);
-  color: #e0be6e;
+  color: #8a5a00;
 }
 
 .metric strong,
@@ -375,7 +375,7 @@
 
 .form-error {
   margin: .25rem 0;
-  color: #e89090;
+  color: var(--portal-danger);
   font-size: .75rem;
   line-height: 1.45;
 }
@@ -538,7 +538,7 @@
   border: 1px solid color-mix(in srgb, var(--portal-danger) 60%, var(--portal-border));
   border-radius: .5rem;
   background: var(--portal-danger-soft);
-  color: #e89090;
+  color: var(--portal-danger);
   padding: .75rem 1rem;
   font-size: .75rem;
   line-height: 1.45;
