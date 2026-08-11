@@ -121,6 +121,7 @@ test("Docker vaults render hard CPU, memory, PID, and tmpfs limits", () => {
     assert.equal(service.memswap_limit, "1g");
     assert.equal(service.pids_limit, 128);
     assert.deepEqual(service.tmpfs, ["/run/vault:rw,nosuid,nodev,noexec,size=32m"]);
+    assert.doesNotMatch(rendered, /ulimit -u 128/u);
   } finally {
     if (previousMasterSecret === undefined) delete process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET;
     else process.env.POLARIS_WANGHAI_GATEWAY_MASTER_SECRET = previousMasterSecret;
