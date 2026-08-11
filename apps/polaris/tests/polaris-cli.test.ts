@@ -3349,8 +3349,11 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
     assert.match(rendered, /exec env WANGHAI_SUPERVISE_PORTAL=1 \/usr\/local\/bin\/wanghai-entrypoint/);
     assert.match(
       rendered,
-      /wanghai-entrypoint pnpm --dir \/opt\/wanghai\/apps\/admin-portal run start --hostname 0\.0\.0\.0 --port 9090/,
+      /wanghai-entrypoint pnpm --dir apps\/admin-portal exec node node_modules\/next\/dist\/bin\/next start --hostname 0\.0\.0\.0 --port 9090/,
     );
+    assert.match(rendered, /wanghai-entrypoint pnpm --dir apps\/admin-portal/);
+    assert.doesNotMatch(rendered, /wanghai-entrypoint pnpm --dir \/opt\/wanghai\/apps\/admin-portal/);
+    assert.doesNotMatch(rendered, /wanghai-entrypoint pnpm --dir apps\/admin-portal run start/);
     assert.doesNotMatch(rendered, /nohup .*wanghai-entrypoint/);
     assert.doesNotMatch(rendered, /touch \/tmp\/.ready[\s\S]*sleep infinity/);
   } finally {

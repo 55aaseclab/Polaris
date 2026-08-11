@@ -127,7 +127,7 @@ function privateSurface(
   const command = [
     'if [ ! -x /usr/local/bin/wanghai-entrypoint ] || [ ! -d /opt/wanghai/apps/admin-portal ]; then echo "Wanghai portal runtime is missing" >&2; exit 1; fi',
     "mkdir -p /tmp/wanghai-home",
-    `exec env WANGHAI_SUPERVISE_PORTAL=1 /usr/local/bin/wanghai-entrypoint pnpm --dir /opt/wanghai/apps/admin-portal run start --hostname 0.0.0.0 --port ${port.containerPort}`,
+    `exec env WANGHAI_SUPERVISE_PORTAL=1 /usr/local/bin/wanghai-entrypoint pnpm --dir apps/admin-portal exec node node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port ${port.containerPort}`,
   ].join(" && ");
 
   return {
