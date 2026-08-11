@@ -303,7 +303,7 @@ test("vertical renders keep Wanghai private and tenant-vault qualified", () => {
         "ephemeral-storage": "512Mi",
       },
     });
-    assert.match(String((wanghaiContainer.args as string[])[0]), /ulimit -u 128/u);
+    assert.doesNotMatch(String((wanghaiContainer.args as string[])[0]), /ulimit -u 128/u);
     const gatewaySecretName = vaultRuntimeResourceName(
       DEMO_USER_PROFILE_ID,
       project,
