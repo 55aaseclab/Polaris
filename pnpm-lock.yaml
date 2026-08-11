@@ -34,6 +34,9 @@ importers:
       js-yaml:
         specifier: ^4.1.0
         version: 4.2.0
+      polaris-workflow:
+        specifier: workspace:*
+        version: link:../../packages/polaris-workflow
       posthog-node:
         specifier: ^5.41.0
         version: 5.41.0

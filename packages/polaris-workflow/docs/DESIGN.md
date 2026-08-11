@@ -301,7 +301,7 @@ Renderer / AI：
 | **P1.1**（已有） | **1000 域包压测**；Unicode 标识符；对抗集回归 | 内核可规模化 |
 | **P2**（已有） | **`import` 跨域包**；**port version / @ver**；能力库无 flow | 组合升格 |
 | **P2.1** | pipeline 糖；跨 flow 输出接线 | 编排糖 |
-| **P3** | pack 版本/依赖；port schema 导出；真实 CLI/HTTP adapter | 可上生产宿主 |
+| **P3** | registry/API projection；port schema 导出；真实 CLI/HTTP Host adapter | 可上生产宿主 |
 | **P4** | human port；时间；补偿/saga 叙事 | 长事务 |
 
 ---

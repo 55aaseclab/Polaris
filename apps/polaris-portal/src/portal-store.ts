@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   ensureCurrentUser,
+  domainPacks,
   isRequestError,
   logout,
   request,
@@ -9,6 +10,16 @@ import {
   type PortalUserResponse,
 } from "./portal-client.js";
 import type { ShellHostSummary, ShellSession } from "@polaris/polaris-shell";
+import {
+  createInitialWorkflowState,
+  createMockRunsForCatalog,
+  cardsFromRuns,
+  updateCardFromRun,
+  workflowKey,
+  type MockWorkflowArtifact,
+  type MockWorkflowRun,
+  type WorkflowMockState,
+} from "./workflow-mocks.js";
 
 export interface PortalVaultStaticSummary {
   name: string;
@@ -101,7 +112,7 @@ export function applyVaultStreamEvent(state: PortalVaultState, event: PortalVaul
   }
 }
 
-interface PortalStore extends PortalVaultState {
+interface PortalStore extends PortalVaultState, WorkflowMockState {
   session: ShellSession | null;
   user: PortalUserResponse | null;
   bootstrapped: boolean;
@@ -112,11 +123,28 @@ interface PortalStore extends PortalVaultState {
   pendingHosts: Record<string, boolean>;
   bootstrap: () => Promise<void>;
   refreshHosts: () => Promise<void>;
+  refreshDomainPacks: () => Promise<void>;
   connectLiveStream: (userId: string) => void;
   closeLiveStream: () => void;
   createHost: (input: { hostName: string; line: string; createDefaultProject: boolean }) => Promise<ShellHostSummary | null>;
   hostAction: (name: string, action: "start" | "stop") => Promise<void>;
   deleteHost: (name: string) => Promise<void>;
+  startWorkflowRun: (input: {
+    packId: string;
+    flowId: string;
+    vaultId: string;
+    values: Record<string, string>;
+  }) => Promise<MockWorkflowRun>;
+  approveWorkflowRun: (runId: string) => Promise<void>;
+  cancelWorkflowRun: (runId: string) => Promise<void>;
+  retryWorkflowRun: (runId: string) => Promise<MockWorkflowRun | null>;
+  completeProvisioning: (input: {
+    domainPackId: string;
+    vaultId: string;
+    enabledWorkflowKeys: string[];
+  }) => Promise<void>;
+  toggleWorkflow: (packId: string, flowId: string, enabled: boolean) => void;
+  setWorkflowDefaultVault: (vaultId: string) => void;
   loadUser: () => Promise<void>;
   readCredential: (userId: string, credentialId: string) => Promise<PortalCredentialRecord>;
   clearError: () => void;
@@ -128,6 +156,55 @@ let streamUserId: string | null = null;
 let streamGeneration = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryAttempt = 0;
+const initialWorkflowState = createInitialWorkflowState();
+const workflowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let workflowIdSequence = 0;
+
+function nextWorkflowId(prefix: string): string {
+  workflowIdSequence += 1;
+  return `${prefix}-${Date.now()}-${workflowIdSequence}`;
+}
+
+function releaseWorkflowTimer(runId: string): void {
+  const timer = workflowTimers.get(runId);
+  if (timer) clearTimeout(timer);
+  workflowTimers.delete(runId);
+}
+
+function scheduleWorkflowTimer(runId: string, callback: () => void, delay: number): void {
+  releaseWorkflowTimer(runId);
+  const timer = setTimeout(() => {
+    workflowTimers.delete(runId);
+    callback();
+  }, delay);
+  workflowTimers.set(runId, timer);
+}
+
+function mockArtifact(run: MockWorkflowRun): MockWorkflowArtifact {
+  return {
+    id: `artifact-${run.id}`,
+    name: `${run.flowId}-result.md`,
+    kind: "report",
+    size: "12 KB",
+    summary: "由 mock executor 生成的结果摘要",
+    content: `# ${run.title}\n\n这是 Portal 第一阶段的 synthetic artifact。\n\n运行：${run.id}\nVault：${run.vaultName}`,
+  };
+}
+
+function mockEvent(
+  run: MockWorkflowRun,
+  title: string,
+  detail: string,
+  tone: "neutral" | "accent" | "warning" | "success",
+): MockWorkflowRun["events"][number] {
+  return {
+    id: nextWorkflowId(`evt-${run.id}`),
+    title,
+    detail,
+    timestamp: new Date().toISOString(),
+    tone,
+  };
+}
 
 function parseEvent(event: Event): PortalVaultStreamEvent | null {
   try {
@@ -140,6 +217,7 @@ function parseEvent(event: Event): PortalVaultStreamEvent | null {
 
 export const usePortalStore = create<PortalStore>((set, get) => ({
   ...emptyState,
+  ...initialWorkflowState,
   session: null,
   user: null,
   bootstrapped: false,
@@ -173,7 +251,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       }
       set({ session, bootstrapped: true });
       if (session.polarisUserId) {
-        await get().refreshHosts();
+        await Promise.all([get().refreshHosts(), get().refreshDomainPacks()]);
         get().connectLiveStream(session.polarisUserId);
       }
     } catch (error) {
@@ -187,6 +265,33 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     if (!get().session?.polarisUserId) return;
     const payload = await request<{ hosts: ShellHostSummary[] }>("/polaris-hosts");
     set((state) => ({ hostsByName: hostsWithLive(objectByName(payload.hosts), state.liveByName), error: null }));
+  },
+
+  refreshDomainPacks: async () => {
+    const payload = await domainPacks();
+    const availablePackIds = new Set(payload.packs.map((pack) => pack.id));
+    const availableWorkflowKeys = new Set(
+      payload.packs.flatMap((pack) => pack.flows.map((flow) => workflowKey(pack.id, flow.id))),
+    );
+    set((state) => {
+      const currentRuns = Object.values(state.runs);
+      const runs = currentRuns.length > 0
+        ? currentRuns
+        : createMockRunsForCatalog(payload.packs, state.vaults);
+      return {
+        packs: payload.packs,
+        runs: Object.fromEntries(runs.map((run) => [run.id, run])),
+        cards: cardsFromRuns(runs),
+        setup: {
+          ...state.setup,
+          domainPackId: state.setup.domainPackId && availablePackIds.has(state.setup.domainPackId)
+            ? state.setup.domainPackId
+            : null,
+          enabledWorkflowKeys: state.setup.enabledWorkflowKeys.filter((key) => availableWorkflowKeys.has(key)),
+        },
+        error: null,
+      };
+    });
   },
 
   connectLiveStream: (userId) => {
@@ -278,6 +383,204 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     }
   },
 
+  startWorkflowRun: async ({ packId, flowId, vaultId, values }) => {
+    const pack = get().packs.find((item) => item.id === packId);
+    const flow = pack?.flows.find((item) => item.id === flowId);
+    const vault = get().vaults.find((item) => item.id === vaultId);
+    if (!pack || !flow || !vault) throw new Error("工作流、流程或 Vault 不存在");
+    if (vault.status === "starting") throw new Error("目标 Vault 正在准备中");
+
+    const now = new Date().toISOString();
+    const runId = nextWorkflowId("run");
+    const run: MockWorkflowRun = {
+      id: runId,
+      packId,
+      flowId,
+      vaultId,
+      vaultName: vault.name,
+      status: "queued",
+      priority: "normal",
+      title: flow.title,
+      summary: flow.summary,
+      input: values,
+      progress: 0,
+      createdAt: now,
+      updatedAt: now,
+      approvalRequired: flow.approvalRequired,
+      events: [mockEvent(
+        {
+          id: runId,
+          packId,
+          flowId,
+          vaultId,
+          vaultName: vault.name,
+          status: "queued",
+          priority: "normal",
+          title: flow.title,
+          summary: flow.summary,
+          input: values,
+          progress: 0,
+          createdAt: now,
+          updatedAt: now,
+          approvalRequired: flow.approvalRequired,
+          events: [],
+          artifacts: [],
+        },
+        "已提交到执行队列",
+        `将使用 ${pack.title}@${pack.version} · ${vault.name}`,
+        "neutral",
+      )],
+      artifacts: [],
+    };
+    set((state) => ({
+      runs: { ...state.runs, [run.id]: run },
+      cards: [
+        {
+          id: `card-${run.id}`,
+          runId: run.id,
+          title: run.title,
+          summary: run.summary,
+          packId: run.packId,
+          flowId: run.flowId,
+          vaultName: run.vaultName,
+          status: run.status,
+          priority: run.priority,
+          updatedAt: run.updatedAt,
+        },
+        ...state.cards,
+      ],
+      error: null,
+    }));
+
+    scheduleWorkflowTimer(run.id, () => {
+      set((state) => {
+        const current = state.runs[run.id];
+        if (!current || current.status !== "queued") return state;
+        const next = {
+          ...current,
+          status: "running" as const,
+          progress: 28,
+          updatedAt: new Date().toISOString(),
+          events: [
+            mockEvent(current, "已在 Vault 中开始运行", `已锁定 ${pack.title}@${pack.version}。`, "accent"),
+            ...current.events,
+          ],
+        };
+        return { runs: { ...state.runs, [run.id]: next }, cards: updateCardFromRun(state.cards, next) };
+      });
+      scheduleWorkflowTimer(run.id, () => {
+        set((state) => {
+          const current = state.runs[run.id];
+          if (!current || current.status !== "running") return state;
+          const waiting = current.approvalRequired;
+          const next = {
+            ...current,
+            status: waiting ? "waiting" as const : "succeeded" as const,
+            progress: waiting ? 76 : 100,
+            updatedAt: new Date().toISOString(),
+            events: [
+              mockEvent(
+                current,
+                waiting ? "等待人工确认" : "运行完成",
+                waiting ? "结果已准备好，请确认后继续生成最终产物。" : "已生成 synthetic artifact。",
+                waiting ? "warning" : "success",
+              ),
+              ...current.events,
+            ],
+            artifacts: waiting ? current.artifacts : [mockArtifact(current)],
+          };
+          return { runs: { ...state.runs, [run.id]: next }, cards: updateCardFromRun(state.cards, next) };
+        });
+      }, 900);
+    }, 350);
+    return run;
+  },
+
+  approveWorkflowRun: async (runId) => {
+    const run = get().runs[runId];
+    if (!run || run.status !== "waiting") return;
+    releaseWorkflowTimer(runId);
+    const next = {
+      ...run,
+      status: "running" as const,
+      progress: 88,
+      updatedAt: new Date().toISOString(),
+      events: [mockEvent(run, "已批准继续运行", "当前用户确认了下一步产出。", "accent"), ...run.events],
+    };
+    set((state) => ({ runs: { ...state.runs, [runId]: next }, cards: updateCardFromRun(state.cards, next) }));
+    scheduleWorkflowTimer(runId, () => {
+      set((state) => {
+        const current = state.runs[runId];
+        if (!current || current.status !== "running") return state;
+        const completed = {
+          ...current,
+          status: "succeeded" as const,
+          progress: 100,
+          updatedAt: new Date().toISOString(),
+          events: [mockEvent(current, "最终产物已生成", "运行完成，可以打开 artifact。", "success"), ...current.events],
+          artifacts: [mockArtifact(current)],
+        };
+        return { runs: { ...state.runs, [runId]: completed }, cards: updateCardFromRun(state.cards, completed) };
+      });
+    }, 750);
+  },
+
+  cancelWorkflowRun: async (runId) => {
+    const run = get().runs[runId];
+    if (!run || !["queued", "running", "waiting"].includes(run.status)) return;
+    releaseWorkflowTimer(runId);
+    const next = {
+      ...run,
+      status: "cancelled" as const,
+      updatedAt: new Date().toISOString(),
+      events: [mockEvent(run, "运行已取消", "没有新的执行动作会被提交。", "warning"), ...run.events],
+    };
+    set((state) => ({ runs: { ...state.runs, [runId]: next }, cards: updateCardFromRun(state.cards, next) }));
+  },
+
+  retryWorkflowRun: async (runId) => {
+    const run = get().runs[runId];
+    if (!run || !["failed", "cancelled"].includes(run.status)) return null;
+    const retry = await get().startWorkflowRun({
+      packId: run.packId,
+      flowId: run.flowId,
+      vaultId: run.vaultId,
+      values: run.input,
+    });
+    set((state) => ({
+      cards: state.cards.map((card) => card.runId === runId ? { ...card, status: "cancelled" } : card),
+    }));
+    return retry;
+  },
+
+  completeProvisioning: async ({ domainPackId, vaultId, enabledWorkflowKeys }) => {
+    set((state) => ({
+      setup: {
+        completed: true,
+        domainPackId,
+        vaultId,
+        enabledWorkflowKeys,
+        completedAt: new Date().toISOString(),
+      },
+    }));
+  },
+
+  toggleWorkflow: (packId, flowId, enabled) => {
+    const key = workflowKey(packId, flowId);
+    set((state) => ({
+      setup: {
+        ...state.setup,
+        enabledWorkflowKeys: enabled
+          ? [...new Set([...state.setup.enabledWorkflowKeys, key])]
+          : state.setup.enabledWorkflowKeys.filter((currentKey) => currentKey !== key),
+      },
+    }));
+  },
+
+  setWorkflowDefaultVault: (vaultId) => {
+    set((state) => ({ setup: { ...state.setup, vaultId } }));
+  },
+
   loadUser: async () => set({ user: await request<PortalUserResponse>("/polaris-user") }),
   readCredential: (userId, credentialId) => request<PortalCredentialRecord>(
     `/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`,
@@ -285,7 +588,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
   clearError: () => set({ error: null }),
   signOut: async () => {
     get().closeLiveStream();
-    set({ ...emptyState, session: null, user: null, bootstrapped: true });
+    set({ ...emptyState, ...createInitialWorkflowState(), session: null, user: null, bootstrapped: true });
     await logout();
   },
 }));

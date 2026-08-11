@@ -40,6 +40,7 @@ import {
   createPortalCredential,
   createPortalSkill,
   listPortalAdminUsers,
+  listPortalDomainPacks,
   deletePortalUser,
   getPortalCredentialCatalog,
   getPortalWanghaiBackupJob,
@@ -2434,6 +2435,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/vaults/:vaultName/restores/:restoreJobId/activate",
             "/api/users/:userId/vaults/:vaultName/restore-activations/:activationJobId/rollback",
             "/api/users/:userId/credentials",
+            "/api/domain-packs",
           ],
         });
         return;
@@ -2653,6 +2655,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             },
             credentials: listUserPortalCredentials(userId),
           });
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "domain-packs" && req.method === "GET") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          sendJson(res, 200, { packs: listPortalDomainPacks() });
           return;
         }
         if (

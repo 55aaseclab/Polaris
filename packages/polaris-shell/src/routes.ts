@@ -4,8 +4,11 @@
  */
 
 export const SHELL_ROUTE_PREFIXES = [
+  "/work",
+  "/setup",
   "/welcome",
   "/auth",
+  "/settings/workflows",
   "/settings/user",
   "/hosts",
 ] as const;
@@ -60,8 +63,17 @@ export function isShellPath(pathname: string): boolean {
   if (path === "/" || path === "") {
     return true;
   }
+  if (path === "/work" || path.startsWith("/work/")) {
+    return true;
+  }
+  if (path === "/setup" || path.startsWith("/setup/")) {
+    return true;
+  }
   if (path === "/settings" || path === "/settings/") {
     // Settings root is shared chrome; user page is shell, host IDE settings are not.
+    return true;
+  }
+  if (path === "/settings/workflows" || path.startsWith("/settings/workflows/")) {
     return true;
   }
   if (path === "/settings/user" || path.startsWith("/settings/user/")) {

@@ -1,5 +1,6 @@
 import type {
   DomainAst,
+  DomainAccent,
   EntityAst,
   EnumAst,
   FieldAst,
@@ -68,6 +69,8 @@ function parseInputLine(line: string): InputFieldAst | null {
   if (/\brequired\b/.test(rest)) input.required = true
   const minM = rest.match(/\bmin\s+(-?\d+(?:\.\d+)?)/)
   if (minM) input.min = Number(minM[1])
+  const controlM = rest.match(/\bcontrol\s+(text|textarea)\b/i)
+  if (controlM) input.inputKind = controlM[1].toLowerCase() as 'text' | 'textarea'
   const labelM = rest.match(/\blabel\s+("([^"]*)"|'([^']*)')/)
   if (labelM) input.label = labelM[2] ?? labelM[3]
   const phM = rest.match(/\bplaceholder\s+("([^"]*)"|'([^']*)')/)
@@ -623,6 +626,15 @@ export function parse(source: string): ParseResult {
   if (titleM) ast.title = titleM[2] ?? titleM[3]
   const descM = head.match(/\bdescription\s+("([^"]*)"|'([^']*)')/)
   if (descM) ast.description = descM[2] ?? descM[3]
+  const categoryM = head.match(/\bcategory\s+("([^"]*)"|'([^']*)')/)
+  if (categoryM) ast.category = categoryM[2] ?? categoryM[3]
+  const accentM = head.match(/\baccent\s+("([^"]*)"|'([^']*)')/)
+  const accent = accentM?.[2] ?? accentM?.[3]
+  if (accent === 'green' || accent === 'blue' || accent === 'amber') {
+    ast.accent = accent as DomainAccent
+  } else if (accent) {
+    errors.push({ message: `Unsupported domain accent: ${accent}` })
+  }
 
   const moduleRe = new RegExp(String.raw`\bmodule\s+${ID}`, "giu")
   const moduleHits: number[] = []

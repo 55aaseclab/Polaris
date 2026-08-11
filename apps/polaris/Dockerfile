@@ -13,6 +13,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY apps/polaris-portal/package.json apps/polaris-portal/package.json
 COPY packages/polaris-auth-server/package.json packages/polaris-auth-server/package.json
+COPY packages/polaris-workflow/package.json packages/polaris-workflow/package.json
 COPY packages/polaris-shell/package.json packages/polaris-shell/package.json
 COPY packages/surface-coding/package.json packages/surface-coding/package.json
 COPY packages/surface-wanghai/package.json packages/surface-wanghai/package.json
@@ -23,6 +24,7 @@ RUN --mount=type=cache,target=/pnpm/store \
 COPY apps/polaris ./apps/polaris
 COPY apps/polaris-portal ./apps/polaris-portal
 COPY packages/polaris-auth-server ./packages/polaris-auth-server
+COPY packages/polaris-workflow ./packages/polaris-workflow
 COPY packages/polaris-shell ./packages/polaris-shell
 COPY packages/surface-coding ./packages/surface-coding
 COPY packages/surface-wanghai ./packages/surface-wanghai
@@ -41,6 +43,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /vault/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY --from=build /vault/packages/polaris-auth-server ./packages/polaris-auth-server
+COPY --from=build /vault/packages/polaris-workflow ./packages/polaris-workflow
 COPY --from=build /vault/packages/polaris-shell ./packages/polaris-shell
 COPY --from=build /vault/packages/surface-coding ./packages/surface-coding
 COPY --from=build /vault/packages/surface-wanghai ./packages/surface-wanghai

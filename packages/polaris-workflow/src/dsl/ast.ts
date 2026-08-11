@@ -6,6 +6,7 @@
 export type FieldType = 'ID' | 'String' | 'Number' | 'Money' | 'Boolean' | string
 
 export type PortEffect = 'pure' | 'read' | 'write' | 'ffi' | 'human' | 'time'
+export type DomainAccent = 'green' | 'blue' | 'amber'
 
 /** 跨域包导入 */
 export interface ImportAst {
@@ -33,6 +34,8 @@ export interface DomainAst {
   version: string
   title?: string
   description?: string
+  category?: string
+  accent?: DomainAccent
   imports: ImportAst[]
   enums: EnumAst[]
   entities: EntityAst[]
@@ -100,6 +103,7 @@ export interface InputFieldAst {
   type: FieldType
   required?: boolean
   min?: number
+  inputKind?: 'text' | 'textarea'
   label?: string
   placeholder?: string
 }

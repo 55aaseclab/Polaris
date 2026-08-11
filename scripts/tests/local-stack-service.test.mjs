@@ -23,6 +23,7 @@ test("local stack service runs Paseo with Fast Refresh instead of a web artifact
   assert.match(script, /cd packages\/paseo\/source\/packages\/app/);
   assert.match(script, /npx expo start --web --host lan/);
   assert.match(script, /EXPO_PUBLIC_POLARIS_API_PORT/);
+  assert.match(script, /PASEO_PORT="\$\{PASEO_PORT:-\$\{POLARIS_PASEO_APP_PORT:-8082\}\}"/);
   assert.match(script, /npm run build:app-deps/);
   assert.doesNotMatch(script, /paseo_local_build_dist/);
   assert.doesNotMatch(script, /paseo_local_build_tool_bundle/);

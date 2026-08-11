@@ -82,6 +82,7 @@ import {
 import { vaultRuntimeScopeName } from "../scripts/core/vault-name.js";
 import { readVaultDriverSelection } from "../scripts/output/state-store.js";
 import { polarisUsersRoot } from "../scripts/utils/paths.js";
+import { addDomainPack } from "../scripts/config/domain-packs.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 const USER_ROOT = polarisUsersRoot(import.meta.url);
@@ -2748,6 +2749,62 @@ test("portal disabled auth mode returns a local development session without cred
       }
     });
   });
+});
+
+test("portal domain pack route returns the verified DSL flow projection", async () => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-portal-domain-pack-"));
+  const previousDataRoot = process.env.POLARIS_DATA_ROOT;
+  process.env.POLARIS_DATA_ROOT = dataRoot;
+  try {
+    const sourcePath = path.join(dataRoot, "portal-catalog-test.ord");
+    fs.writeFileSync(sourcePath, `domain PortalCatalogTest version "1.0.0"
+title "Synthetic Catalog"
+port ReadValue version "1.0.0" {
+  in { brief: String }
+  out { result: String }
+  effect read
+}
+flow Review title "Review" create {
+  input { brief: String required label "Brief" placeholder "Synthetic brief" }
+  needs { ReadValue }
+  steps {
+    read "Read" { uses { brief } call ReadValue output { result: String } }
+  }
+  output { result: String from result }
+  ui { layout form primary "Review" }
+}
+`, "utf8");
+    await addDomainPack(import.meta.url, sourcePath);
+
+    await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+      await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", uniqueName("domain-pack-route-user"), async () => {
+        const server = createPortalServer(0);
+        await once(server, "listening");
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          throw new Error("Portal server did not expose a TCP address");
+        }
+        try {
+          const response = await fetch(`http://127.0.0.1:${address.port}/api/domain-packs`);
+          assert.equal(response.status, 200);
+          const payload = await response.json() as {
+            packs: Array<{ id: string; flows: Array<{ id: string; fields: Array<{ required: boolean }> }> }>;
+          };
+          assert.equal(payload.packs.length, 1);
+          assert.equal(payload.packs[0]?.id, "PortalCatalogTest");
+          assert.equal(payload.packs[0]?.flows[0]?.id, "Review");
+          assert.equal(payload.packs[0]?.flows[0]?.fields[0]?.required, true);
+        } finally {
+          server.close();
+          await once(server, "close");
+        }
+      });
+    });
+  } finally {
+    if (previousDataRoot === undefined) delete process.env.POLARIS_DATA_ROOT;
+    else process.env.POLARIS_DATA_ROOT = previousDataRoot;
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
 });
 
 test("portal oauth2-proxy auth mode trusts forwarded username headers", async () => {

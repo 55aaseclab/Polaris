@@ -148,7 +148,7 @@ export function validate(ast: DomainAst): ValidateResult {
     const called: PortRef[] = []
 
     for (const step of flow.steps) {
-      if (step.uses.length === 0) {
+      if (step.uses.length === 0 && !step.call) {
         push(issues, 'warning', 'W_STEP_NO_USES', `step ${step.id} 未声明 uses`, `flow.${flow.name}.${step.id}`)
       }
       for (const u of step.uses) {

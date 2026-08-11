@@ -2,9 +2,10 @@ import { userCommand } from "./commands/user.js";
 import { vaultCommand } from "./commands/vault.js";
 import { portalCommand } from "./commands/portal.js";
 import { opsCommand } from "./commands/ops.js";
+import { packCommand } from "./commands/pack.js";
 
 function usage(): never {
-  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|vault|portal|server|ops> ...");
+  throw new Error("Usage: pnpm --dir apps/polaris run polaris -- <user|vault|pack|portal|server|ops> ...");
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -27,6 +28,10 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (first === "vault") {
     await vaultCommand(argv.slice(1));
+    return;
+  }
+  if (first === "pack") {
+    await packCommand(argv.slice(1));
     return;
   }
   usage();

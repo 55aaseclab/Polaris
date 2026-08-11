@@ -51,3 +51,29 @@ test("public package pipeline parses, validates, and interprets a flow", () => {
   assert.equal(result.record?.status, "Created");
   assert.equal(store.events[0]?.name, "OrderCreated");
 });
+
+test("zero-input host ports may be called without a uses declaration", () => {
+  const pipeline = runPipeline(`
+domain ContextPack version "1.0.0"
+port ResolveContext version "1.0.0" {
+  out { contextId: String }
+  effect read
+}
+flow ReadContext title "Read context" create {
+  steps {
+    context "Resolve context" {
+      call ResolveContext
+      output { contextId: String }
+    }
+  }
+  output { contextId: String from contextId }
+  ui { layout form primary "Read" }
+}
+`);
+
+  assert.equal(pipeline.ok, true);
+  assert.deepEqual(
+    pipeline.issues.filter((issue) => issue.level === "warning"),
+    [],
+  );
+});

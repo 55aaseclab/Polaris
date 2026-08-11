@@ -61,6 +61,7 @@ import {
 } from "./user-map.js";
 import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
+import { listDomainPackProjections } from "../config/domain-packs.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
   getWanghaiBackupJob as getWanghaiBackupJobExecutor,
@@ -95,6 +96,10 @@ import {
 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const statusRefreshJobs = new Map<string, Promise<void>>();
+
+export function listPortalDomainPacks() {
+  return listDomainPackProjections(import.meta.url);
+}
 
 export interface PortalWanghaiBackupJob {
   id: string;

@@ -66,6 +66,13 @@ export function polarisStateRoot(importMetaUrl: string): string {
   return path.join(polarisControlRoot(importMetaUrl), "state");
 }
 
+export function polarisDomainPacksRoot(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return path.join(polarisControlRoot(importMetaUrl, environment), "domain-packs");
+}
+
 function resolveOptionalConfiguredPath(importMetaUrl: string, envKey: string): string | null {
   const root = repoRoot(importMetaUrl);
   const configured = process.env[envKey]?.trim()

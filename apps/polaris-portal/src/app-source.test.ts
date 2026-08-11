@@ -7,8 +7,17 @@ const htmlSource = readFileSync(new URL("../index.html", import.meta.url), "utf8
 const cssSource = readFileSync(new URL("./index.css", import.meta.url), "utf8");
 
 test("user page keeps session as a peer section beside profile and credentials", () => {
-  assert.match(appSource, /<section className="peer-section"><h2>会话<\/h2>/u);
+  assert.match(appSource, /account-tabs/u);
+  assert.match(appSource, /activeTab === "session"/u);
+  assert.match(appSource, /role="tabpanel"/u);
+  assert.doesNotMatch(appSource, /className="peer-section"/u);
   assert.doesNotMatch(appSource, /<Card>\s*<CardHeader>\s*<CardTitle>会话/u);
+  assert.doesNotMatch(appSource, /<p className="eyebrow">ACCOUNT<\/p>/u);
+  assert.doesNotMatch(appSource, /<h1>账户<\/h1>/u);
+  assert.doesNotMatch(appSource, /身份、凭证和当前会话。/u);
+  assert.doesNotMatch(appSource, /className="brand-caption"/u);
+  assert.doesNotMatch(appSource, /className="connection-badge"/u);
+  assert.doesNotMatch(appSource, />实时<|>离线</u);
 });
 
 test("Portal declares and owns a light color scheme", () => {
@@ -17,4 +26,104 @@ test("Portal declares and owns a light color scheme", () => {
   assert.match(cssSource, /color-scheme:\s*light;/u);
   assert.doesNotMatch(cssSource, /color-scheme:\s*dark;/u);
   assert.match(cssSource, /--portal-surface-0:\s*#f7faf8;/u);
+});
+
+test("Portal exposes the complete mock-first work journey", () => {
+  for (const route of ["/work", "/setup", "/settings/workflows", "/work/runs/"]) {
+    assert.match(appSource, new RegExp(route.replace("/", "\\/"), "u"));
+  }
+  assert.match(appSource, /PortalLayout active="workflows" session=\{session\} navigate=\{navigate\}><ProvisioningPage/u);
+  for (const action of ["discover", "批准继续", "取消运行", "重试", "打开结果"]) {
+    if (action === "discover") {
+      assert.match(appSource, /settings-tabs/u);
+    } else {
+      assert.match(appSource, new RegExp(action, "u"));
+    }
+  }
+  assert.match(appSource, /synthetic services/u);
+  assert.doesNotMatch(appSource, /VAULT DIRECTORY/u);
+  assert.doesNotMatch(appSource, /<h1>主机<\/h1>/u);
+  assert.doesNotMatch(appSource, /管理当前账户拥有的隔离运行时，并进入已授权的工作面。/u);
+  assert.doesNotMatch(appSource, /WORKFLOW SETTINGS/u);
+  assert.doesNotMatch(appSource, /<h1>工作流设置<\/h1>/u);
+  assert.doesNotMatch(appSource, /工作流定义在 Vault 外部管理；每次运行时再选择执行 Vault。/u);
+  assert.match(appSource, /vault-filter-tabs/u);
+  assert.match(appSource, /处理中/u);
+  assert.match(appSource, /未运行/u);
+  assert.doesNotMatch(appSource, /metric-strip/u);
+  assert.match(appSource, /onClick=\{\(\) => setCreateOpen\(true\)\}/u);
+  assert.match(appSource, /aria-label="新建 Vault"/u);
+  assert.match(appSource, /className="vault-toolbar-button"/u);
+  assert.doesNotMatch(appSource, /刷新 Vaults/u);
+  assert.doesNotMatch(appSource, /handleRefresh/u);
+  assert.match(appSource, /function CreateHostModal/u);
+  assert.match(appSource, /await refreshHosts\(\)/u);
+  assert.match(appSource, /onClose\(\);/u);
+  assert.doesNotMatch(appSource, /const \[loading, setLoading\]/u);
+  assert.match(appSource, /settings-tabs/u);
+  assert.match(appSource, /完成首次设置/u);
+  assert.match(appSource, /activeTab === "enabled"/u);
+  assert.match(appSource, /activeTab === "available"/u);
+  assert.match(appSource, /className="settings-provision-button"/u);
+  assert.match(appSource, /navigate\("\/setup"\)/u);
+  assert.doesNotMatch(appSource, /activeTab === "runtime"/u);
+  assert.doesNotMatch(appSource, /执行位置/u);
+  assert.doesNotMatch(appSource, /FIRST-TIME SETUP/u);
+  assert.doesNotMatch(appSource, /设置只需要一次/u);
+  assert.doesNotMatch(appSource, /STEP \{step \+ 1\} \/ 3/u);
+  assert.doesNotMatch(appSource, /aria-label="新建工作"/u);
+  assert.doesNotMatch(appSource, /aria-label="回到工作台"/u);
+});
+
+test("daily work surface is card-first and touch-aware", () => {
+  assert.match(appSource, /className="card-first-layout"/u);
+  assert.match(appSource, /function DeckPreview/u);
+  assert.match(appSource, /className="work-grid-view"/u);
+  assert.match(appSource, /layout="grid"/u);
+  assert.match(appSource, /className="work-deck-view"/u);
+  assert.match(appSource, /onPointerDown=\{isDeck \? handlePointerDown : undefined\}/u);
+  assert.doesNotMatch(appSource, /className="deck-control deck-control-(skip|heart|accept)"/u);
+  assert.match(appSource, /cn\("swipe-hint"/u);
+  assert.match(appSource, /swipe-hint-skip/u);
+  assert.match(appSource, /swipe-hint-detail/u);
+  assert.match(appSource, />跳过</u);
+  assert.match(appSource, />详情</u);
+  assert.match(cssSource, /\.swipe-hint\s*\{[\s\S]*top:\s*50%;[\s\S]*left:\s*50%;[\s\S]*transform:\s*translate\(-50%,\s*-50%\)/u);
+  assert.match(cssSource, /\.deck-card\.is-dragging::before/u);
+  assert.match(cssSource, /filter:\s*grayscale\(1\)/u);
+  assert.match(cssSource, /\.filter-tab\s*\{[\s\S]*font-size:\s*\.75rem;[\s\S]*line-height:\s*1rem;[\s\S]*white-space:\s*nowrap;/u);
+  assert.doesNotMatch(appSource, /<aside className="card-support-column">/u);
+  assert.doesNotMatch(appSource, /<CardTitle>可用工作流<\/CardTitle>/u);
+  assert.doesNotMatch(appSource, /<CardTitle>执行中的 Vault<\/CardTitle>/u);
+  assert.doesNotMatch(appSource, /aria-label="管理工作流"/u);
+  assert.doesNotMatch(appSource, /POLARIS · WORK DECK/u);
+  assert.doesNotMatch(appSource, />今天<\/strong>/u);
+  assert.doesNotMatch(appSource, />工作卡片<\/h1>/u);
+  assert.doesNotMatch(appSource, /className="deck-count"/u);
+  assert.doesNotMatch(appSource, /className="deck-position"/u);
+  assert.match(appSource, /className="filter-tab-count"/u);
+  assert.doesNotMatch(cssSource, /\.card-deck-toolbar\s*\{[\s\S]*padding-bottom:\s*\.35rem;/u);
+  assert.match(cssSource, /\.card-deck\s*\{[\s\S]*height:\s*calc\(100svh\s*-/u);
+  assert.doesNotMatch(cssSource, /\.card-deck\s*\{[\s\S]*min-height:\s*(?:26|30)rem/u);
+  assert.match(cssSource, /\.work-grid-view\s*\{[\s\S]*display:\s*grid;/u);
+  assert.match(cssSource, /\.work-deck-view\s*\{[\s\S]*display:\s*none;/u);
+  assert.match(cssSource, /\.grid-work-card\s*\{[\s\S]*height:\s*calc\(100svh\s*-\s*13rem\);[\s\S]*height:\s*calc\(100dvh\s*-\s*13rem\);/u);
+  assert.match(appSource, /<CardContent className="work-card-content">/u);
+  assert.match(cssSource, /\.grid-work-card\s*>\s*\.work-card-content\s*\{[\s\S]*overflow:\s*auto;/u);
+  assert.match(cssSource, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.work-grid-view\s*\{[\s\S]*display:\s*none;/u);
+  assert.match(cssSource, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.work-deck-view\s*\{[\s\S]*display:\s*block;/u);
+});
+
+test("workflow setup keeps Domain Pack and internal flow selection separate", () => {
+  assert.match(appSource, /domainPackId/u);
+  assert.match(appSource, /enabledWorkflowKeys/u);
+  assert.match(appSource, /选择一个 Domain Pack 作为工作场景/u);
+  assert.match(appSource, /groupWorkflowFlows\(selectedPack\.flows\)/u);
+  assert.match(appSource, /groupTitle/u);
+  assert.match(appSource, /groupWorkflowFlows/u);
+  assert.match(cssSource, /\.workflow-group-heading\s*\{/u);
+  assert.match(appSource, /settings-pack-tabs/u);
+  assert.match(appSource, /const visibleFlows/u);
+  assert.doesNotMatch(appSource, /toggleWorkflowPack/u);
+  assert.doesNotMatch(appSource, /settings-pack-grid/u);
 });

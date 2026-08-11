@@ -29,7 +29,9 @@ SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-0.0.0.0}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
 # paseo-web runs OUTSIDE vault containers (shared coding UI capability).
 # Expo `--host lan` already exposes it beyond loopback.
-PASEO_PORT="${POLARIS_PASEO_APP_PORT:-8082}"
+# Paseo service scripts receive an assigned proxy port through PASEO_PORT.
+# Keep the configured local fallback when this script is run directly.
+PASEO_PORT="${PASEO_PORT:-${POLARIS_PASEO_APP_PORT:-8082}}"
 LOG_DIR=".runtime/paseo"
 
 mkdir -p "${LOG_DIR}"

@@ -8,9 +8,13 @@ import {
 } from "./product.js";
 import { buildOpenCodingHref } from "./hosts.js";
 
-test("shell paths cover auth user hosts only", () => {
+test("shell paths cover Portal work, auth, user, and Vault routes", () => {
+  assert.equal(isShellPath("/work"), true);
+  assert.equal(isShellPath("/work/runs/run-1"), true);
+  assert.equal(isShellPath("/setup"), true);
   assert.equal(isShellPath("/welcome"), true);
   assert.equal(isShellPath("/auth/callback"), true);
+  assert.equal(isShellPath("/settings/workflows"), true);
   assert.equal(isShellPath("/settings/user"), true);
   assert.equal(isShellPath("/hosts"), true);
   assert.equal(isShellPath("/hosts/demo"), true);

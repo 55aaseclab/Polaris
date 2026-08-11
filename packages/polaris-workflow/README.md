@@ -31,7 +31,8 @@ Polaris 0.4.0 的可嵌入 Business DSL / workflow IR Node.js 包。
 | shadcn 渲染 + 数据流 + FFI 日志 | ✅ |
 | **1000 域包压测 + Unicode 标识符** | ✅ |
 | **`import` 跨域包 + port 版本 (`@ver`)** | ✅ P2 |
-| 真实 CLI/HTTP adapter | 🚧 P3 |
+| Polaris Domain Pack 安装/列出/删除 CLI | ✅ 0.4 foundation |
+| 真实 Host CLI/HTTP 执行 adapter | 🚧 P3 |
 
 开发演示位于 `apps/polaris-workflow-demo`，可运行示例（手写域包）：
 

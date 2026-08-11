@@ -3,6 +3,7 @@ import {
   type ShellHostSummary,
   type ShellSession,
 } from "@polaris/polaris-shell";
+import type { MockDomainPack } from "./workflow-mocks.js";
 
 const SESSION_TOKEN_KEY = "polaris_authing_session";
 const ID_TOKEN_KEY = "polaris_authing_id_token";
@@ -132,10 +133,14 @@ export async function authingConfig(): Promise<AuthingConfig> {
   return request<AuthingConfig>("/authing-config");
 }
 
+export async function domainPacks(): Promise<{ packs: MockDomainPack[] }> {
+  return request<{ packs: MockDomainPack[] }>("/domain-packs");
+}
+
 export async function beginSignIn(config: AuthingConfig, returnPath: string): Promise<void> {
   setTransientValue(RETURN_PATH_KEY, returnPath);
   if (config.authMode === "disabled") {
-    history.replaceState({}, "", "/hosts");
+    history.replaceState({}, "", "/work");
     dispatchEvent(new PopStateEvent("popstate"));
     return;
   }
@@ -170,7 +175,7 @@ export async function completeSignIn(): Promise<string> {
   const config = await authingConfig();
   const params = new URLSearchParams(location.search);
   const code = params.get("code");
-  if (config.authMode === "oauth2-proxy" && !code) return transientValue(RETURN_PATH_KEY) || "/hosts";
+  if (config.authMode === "oauth2-proxy" && !code) return transientValue(RETURN_PATH_KEY) || "/work";
   const verifier = transientValue(PKCE_VERIFIER_KEY);
   const state = transientValue(PKCE_STATE_KEY);
   if (!code || !verifier || params.get("state") !== state) throw new Error("登录状态无效，请重新登录");
@@ -190,7 +195,7 @@ export async function completeSignIn(): Promise<string> {
     setCookie(ID_TOKEN_KEY, result.idToken.trim());
   }
   for (const key of [PKCE_VERIFIER_KEY, PKCE_STATE_KEY, REDIRECT_URI_KEY]) clearTransientValue(key);
-  const returnPath = transientValue(RETURN_PATH_KEY) || "/hosts";
+  const returnPath = transientValue(RETURN_PATH_KEY) || "/work";
   clearTransientValue(RETURN_PATH_KEY);
   return returnPath;
 }

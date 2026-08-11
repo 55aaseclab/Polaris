@@ -15,6 +15,7 @@
     "test:polaris": "pnpm --filter polaris run test",
     "test:surfaces": "pnpm --filter @polaris/polaris-shell --filter @polaris/surface-paseo --filter @polaris/surface-wanghai --filter polaris-portal run test",
     "test:polaris:skills": "pnpm --filter polaris run test:skills",
+    "test:polaris:domain-packs": "pnpm --filter polaris run test:domain-packs",
     "test:polaris:full-minus-infra": "pnpm run test:runtime && pnpm --filter polaris run test:full-minus-infra",
     "test:live-auth": "pnpm --filter polaris run test:live-auth",
     "test:polaris:coverage": "pnpm --filter polaris run test:coverage"

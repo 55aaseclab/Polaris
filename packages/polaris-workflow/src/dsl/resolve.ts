@@ -18,8 +18,8 @@ export interface PackSource {
   path?: string
 }
 
-/** 按 domain 名加载源码 */
-export type PackLoader = (domainName: string) => PackSource | null
+/** 按 domain 名和可选版本范围加载源码 */
+export type PackLoader = (domainName: string, versionRange?: string) => PackSource | null
 
 export interface ResolveResult {
   ok: boolean
@@ -120,7 +120,7 @@ function loadDomain(
   loader: PackLoader,
   issues: ValidationIssue[],
 ): DomainAst | null {
-  const pack = loader(imp.domain)
+  const pack = loader(imp.domain, imp.version)
   if (!pack) {
     push(issues, 'error', 'E_IMPORT_MISSING', `找不到域包 ${imp.domain}`, `import.${imp.domain}`)
     return null
