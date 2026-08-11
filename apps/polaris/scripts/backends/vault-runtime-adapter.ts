@@ -127,9 +127,9 @@ function privateSurface(
   const command = [
     'if [ ! -x /usr/local/bin/wanghai-entrypoint ] || [ ! -d /opt/wanghai/apps/admin-portal ]; then echo "Wanghai portal runtime is missing" >&2; exit 1; fi',
     "mkdir -p /tmp/wanghai-home",
-    "printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [ \"$$1\" = \"--dir\" ] && [ \"$$2\" = \"apps/admin-portal\" ] && [ \"$$3\" = \"exec\" ] && [ \"$$4\" = \"env\" ] && [ \"$$5\" = \"NODE_OPTIONS=--max-old-space-size=256\" ] && [ \"$$6\" = \"node\" ]; then shift 6; cd /opt/wanghai; exec env NODE_OPTIONS=--max-old-space-size=256 node \"$$@\"; fi' 'exec /vault/state/tooling/polaris/bin/pnpm \"$$@\"' > /tmp/polaris-pnpm",
+    "printf '%s\\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [ \"$1\" = \"--dir\" ] && [ \"$2\" = \"apps/admin-portal\" ] && [ \"$3\" = \"exec\" ] && [ \"$4\" = \"env\" ] && [ \"$5\" = \"NODE_OPTIONS=--max-old-space-size=256\" ] && [ \"$6\" = \"node\" ]; then shift 6; cd /opt/wanghai; exec env NODE_OPTIONS=--max-old-space-size=256 node \"$@\"; fi' 'exec /vault/state/tooling/polaris/bin/pnpm \"$@\"' > /tmp/polaris-pnpm",
     "chmod 755 /tmp/polaris-pnpm",
-    `exec env WANGHAI_SUPERVISE_PORTAL=1 NODE_OPTIONS=--max-old-space-size=64 PATH=/tmp:/vault/state/tooling/polaris/bin:$$PATH /usr/local/bin/wanghai-entrypoint pnpm --dir apps/admin-portal exec env NODE_OPTIONS=--max-old-space-size=256 node node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port ${port.containerPort}`,
+    `exec env WANGHAI_SUPERVISE_PORTAL=1 NODE_OPTIONS=--max-old-space-size=64 PATH=/tmp:/vault/state/tooling/polaris/bin:$PATH /usr/local/bin/wanghai-entrypoint pnpm --dir apps/admin-portal exec env NODE_OPTIONS=--max-old-space-size=256 node node_modules/next/dist/bin/next start --hostname 0.0.0.0 --port ${port.containerPort}`,
   ].join(" && ");
 
   return {
