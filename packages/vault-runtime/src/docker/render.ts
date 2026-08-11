@@ -382,7 +382,6 @@ function buildPaseoBootstrapLines(vault: VaultRuntimeSpec): string[] {
     `    paseo_sync_pairing || true`,
     `    PASEO_HOME=${home}/.paseo paseo daemon start --listen 0.0.0.0:6767`,
     `    paseo_wait_ready`,
-    `  fi`,
     `fi`,
     ...buildRuntimeObserverLines(vault),
   ];

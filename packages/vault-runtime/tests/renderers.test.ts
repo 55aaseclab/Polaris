@@ -79,6 +79,25 @@ test("agent bootstrap prepares Paseo pairing before starting the daemon", () => 
   }
 });
 
+test("Docker Paseo bootstrap keeps its conditional shell balanced", () => {
+  const spec = createRuntimeSpec({ backendKind: "docker" });
+  spec.agent.enabled = true;
+  spec.agent.managerId = "paseo";
+  spec.agent.capabilities.requiresDaemon = true;
+
+  const rendered = renderDockerVault(spec);
+
+  assert.doesNotMatch(
+    rendered,
+    /paseo_wait_ready\n\s+fi\n\s+fi\n/u,
+    "Docker bootstrap must close the if/elif exactly once",
+  );
+  assert.match(
+    rendered,
+    /elif ! paseo_wait_ready; then[\s\S]*paseo_wait_ready\n\s+fi\n/u,
+  );
+});
+
 test("KubeVirt renderer is testable with package-owned template fixtures", async () => {
   const spec = createRuntimeSpec({ backendKind: "kubevirt-vm" });
   const rendered = await withTemplates(spec, () => renderKubevirtVault(spec));
