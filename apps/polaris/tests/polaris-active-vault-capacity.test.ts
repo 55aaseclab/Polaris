@@ -69,7 +69,7 @@ test("active-vault capacity requires a release value and defaults to the reviewe
   );
 });
 
-test("Docker start admits the 20th vault and rejects the 21st under the 0.3.3 ceiling", async () => {
+test("Docker start admits the 20th vault and rejects the 21st under the 0.3.4 ceiling", async () => {
   const users: string[] = [];
   const vaults: string[] = [];
   const activeContainersPath = path.join(os.tmpdir(), `${uniqueName("active-20")}.txt`);

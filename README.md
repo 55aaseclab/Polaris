@@ -12,8 +12,10 @@ operator runbooks, and release evidence live in the
 [Jianxiaoyi documentation site](https://www.jianxiaoyitech.com/docs/).
 Start with the [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/)
 for architecture and the
-[Polaris 0.3.3 user-growth records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.3/)
-for release status.
+[Polaris 0.3.4 current state](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.4/)
+for the active release work. The archived
+[0.3.3 capacity records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.3/)
+remain the baseline for the 20-vault profile.
 Release history is maintained in [CHANGELOG.md](CHANGELOG.md).
 
 ## Local Development

@@ -3,6 +3,33 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [0.3.4] - Unreleased
+
+Started the next working release after the archived 0.3.3 capacity ship.
+This release keeps the reviewed single-host envelope at 20 active vaults and
+consolidates the current control/vault-data, Portal, and Paseo surface state.
+
+### Current state
+
+- Polaris remains the only integrated control plane for identity, tenant and
+  vault ownership, capability checks, gateway sessions, quotas, lifecycle,
+  durable jobs, audit, backup/restore, ingress, and deployment policy.
+- The control store and vault data use separate canonical roots; the old
+  layout is migrated and archived rather than read through a compatibility
+  fallback.
+- Portal is an independent React application under `apps/polaris-portal`,
+  while the Polaris-owned Paseo integration lives under `packages/paseo`.
+- Portal's visual system is aligned with Paseo and the deployed m00 smoke
+  checks remain healthy.
+
+### Next
+
+- Produce and verify the 0.3.4 release manifest and host environment.
+- Re-run the focused source, deployment, and read-only remote checks for the
+  new release identity before promotion.
+- Close or explicitly defer the remaining external perimeter, authenticated
+  tenant-matrix, restart-safety, supply-chain, and operator-approval gaps.
+
 ## [0.3.3] - 2026-08-09
 
 Released the single-host active-vault ceiling raise from 10 to 20, with a
