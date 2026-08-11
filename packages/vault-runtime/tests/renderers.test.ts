@@ -48,6 +48,37 @@ test("Docker and Pod renderers preserve isolated scope and attachment roots", ()
   assert.match(pod, /\/identity/);
 });
 
+test("agent bootstrap prepares Paseo pairing before starting the daemon", () => {
+  const dockerSpec = createRuntimeSpec({ backendKind: "docker" });
+  dockerSpec.agent.enabled = true;
+  dockerSpec.agent.managerId = "paseo";
+  dockerSpec.agent.capabilities.requiresDaemon = true;
+
+  const podSpec = createRuntimeSpec({ backendKind: "pod" });
+  podSpec.agent.enabled = true;
+  podSpec.agent.managerId = "paseo";
+  podSpec.agent.capabilities.requiresDaemon = true;
+
+  for (const rendered of [renderDockerVault(dockerSpec), renderPodVault(podSpec)]) {
+    const pairingCall = rendered.indexOf("paseo_sync_pairing || true");
+    const daemonStart = rendered.indexOf(
+      "PASEO_HOME=/root/.paseo paseo daemon start --listen 0.0.0.0:6767",
+    );
+
+    assert.ok(pairingCall >= 0, "bootstrap must prepare a pairing file");
+    assert.ok(daemonStart >= 0, "bootstrap must start the daemon");
+    assert.ok(
+      pairingCall < daemonStart,
+      "pairing generation must happen before the daemon can capture the RPC hang",
+    );
+    assert.match(rendered, /timeout 30s env PASEO_HOME=\/root\/\.paseo paseo daemon pair --json/);
+    assert.match(
+      rendered,
+      /pairing\.json.*grep -q '\"url\"\[\[:space:\]\]\*:' .*return 0/,
+    );
+  }
+});
+
 test("KubeVirt renderer is testable with package-owned template fixtures", async () => {
   const spec = createRuntimeSpec({ backendKind: "kubevirt-vm" });
   const rendered = await withTemplates(spec, () => renderKubevirtVault(spec));
