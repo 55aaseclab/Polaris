@@ -3346,11 +3346,12 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
       vault.connectivity.servicePorts.some((port) => port.containerPort === "9090"),
     );
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
-    assert.match(rendered, /exec env WANGHAI_SUPERVISE_PORTAL=1 \/usr\/local\/bin\/wanghai-entrypoint/);
+    assert.match(rendered, /exec env WANGHAI_SUPERVISE_PORTAL=1 NODE_OPTIONS=--max-old-space-size=64 \/usr\/local\/bin\/wanghai-entrypoint/);
     assert.match(
       rendered,
-      /wanghai-entrypoint pnpm --dir apps\/admin-portal exec node node_modules\/next\/dist\/bin\/next start --hostname 0\.0\.0\.0 --port 9090/,
+      /wanghai-entrypoint pnpm --dir apps\/admin-portal exec env NODE_OPTIONS=--max-old-space-size=256 node node_modules\/next\/dist\/bin\/next start --hostname 0\.0\.0\.0 --port 9090/,
     );
+    assert.match(rendered, /WANGHAI_SUPERVISE_PORTAL=1 NODE_OPTIONS=--max-old-space-size=64/);
     assert.match(rendered, /wanghai-entrypoint pnpm --dir apps\/admin-portal/);
     assert.doesNotMatch(rendered, /wanghai-entrypoint pnpm --dir \/opt\/wanghai\/apps\/admin-portal/);
     assert.doesNotMatch(rendered, /wanghai-entrypoint pnpm --dir apps\/admin-portal run start/);
