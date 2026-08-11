@@ -3348,7 +3348,7 @@ test("docker vertical bootstrap starts the Wanghai portal after Paseo", async ()
     assert.match(rendered, /PASEO_HOME=\/root\/\.paseo paseo daemon start --listen 0\.0\.0\.0:6767/);
     assert.match(rendered, /exec env WANGHAI_SUPERVISE_PORTAL=1 NODE_OPTIONS=--max-old-space-size=64 PATH=.* \/usr\/local\/bin\/wanghai-entrypoint/);
     assert.match(rendered, /' > \/tmp\/pnpm/);
-    assert.match(rendered, /cd \/opt\/wanghai; exec env NODE_OPTIONS=--max-old-space-size=256 node/);
+    assert.match(rendered, /cd \/opt\/wanghai\/apps\/admin-portal; exec env NODE_OPTIONS=--max-old-space-size=256 node/);
     assert.match(
       rendered,
       /wanghai-entrypoint pnpm --dir apps\/admin-portal exec env NODE_OPTIONS=--max-old-space-size=256 node node_modules\/next\/dist\/bin\/next start --hostname 0\.0\.0\.0 --port 9090/,
