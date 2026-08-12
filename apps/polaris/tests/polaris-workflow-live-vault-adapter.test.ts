@@ -9,6 +9,7 @@ import {
   invokeWorkflowLiveVaultArtifactMetadataWithEvidence,
   normalizeWorkflowLiveVaultArtifactMetadata,
   readWorkflowLiveVaultArtifactMetadata,
+  WorkflowLiveVaultMetadataReadError,
 } from "../scripts/portal/workflow-live-vault-adapter.js";
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
@@ -552,5 +553,32 @@ test("durable evidence records admitted metadata reader failures", async () => {
     assert.equal(run?.receipts[0]?.status, "failed");
     assert.equal(run?.receipts[0]?.errorCode, "live-vault-metadata-read-failed");
     assert.equal(store.listAuditEvents()[0]?.outcome, "failure");
+  });
+});
+
+test("durable evidence records admitted classified metadata reader failures", async () => {
+  await withTemporaryStore(async (store) => {
+    createSyntheticRun(store);
+    const result = await invokeWorkflowLiveVaultArtifactMetadataWithEvidence({
+      store,
+      request: request(),
+      environment: { [WORKFLOW_LIVE_ADAPTER_FLAG]: "enabled" },
+      readiness: completeReadiness(),
+      catalog: [enabledAction()],
+      readMetadata: () => {
+        throw new WorkflowLiveVaultMetadataReadError(
+          "synthetic default-reader classified failure",
+          "vault-running-required",
+        );
+      },
+    });
+    assert.equal(result.allowed, false);
+    if (!result.allowed) {
+      assert.equal(result.code, "vault-running-required");
+    }
+    const run = store.getWorkflowRun("tenant-synthetic", "run-synthetic");
+    assert.equal(run?.receipts.length, 1);
+    assert.equal(run?.receipts[0]?.errorCode, "vault-running-required");
+    assert.equal(store.listAuditEvents().length, 1);
   });
 });

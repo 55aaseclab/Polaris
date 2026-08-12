@@ -10,8 +10,10 @@ export type WorkflowLiveWorkerPrecondition =
   | "metadata-action"
   | "read-only-action"
   | "action-disabled"
+  | "action-enabled"
   | "source-review"
   | "worker-unwired"
+  | "worker-binding-state"
   | "release-profile"
   | "timeout"
   | "retry"
@@ -160,6 +162,7 @@ export interface EvaluateWorkflowLiveWorkerIntegrationInput {
   catalog?: readonly WorkflowActionCatalogEntry[];
   releaseProfile?: WorkflowLiveWorkerReleaseProfile;
   preconditions?: WorkflowLiveWorkerIntegrationPreconditions;
+  stage?: "review" | "candidate";
 }
 
 const ACTION_CATALOG = [
@@ -269,6 +272,7 @@ export function missingWorkflowLiveWorkerIntegrationPreconditions(
   input: EvaluateWorkflowLiveWorkerIntegrationInput = {},
 ): WorkflowLiveWorkerPrecondition[] {
   const missing: WorkflowLiveWorkerPrecondition[] = [];
+  const stage = input.stage ?? "review";
   const actionId = input.actionId?.trim() || WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID;
   const action = findWorkflowActionById(actionId, input.catalog);
   if (!action || action.id !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
@@ -277,8 +281,11 @@ export function missingWorkflowLiveWorkerIntegrationPreconditions(
     if (action.effect !== "read" || action.risk !== "read" || action.adapter !== "future-vault") {
       missing.push("read-only-action");
     }
-    if (action.liveEnabled !== false) {
+    if (stage === "review" && action.liveEnabled !== false) {
       missing.push("action-disabled");
+    }
+    if (stage === "candidate" && action.liveEnabled !== true) {
+      missing.push("action-enabled");
     }
   }
 
@@ -288,8 +295,11 @@ export function missingWorkflowLiveWorkerIntegrationPreconditions(
   if (preconditions?.sourceReview !== true) {
     missing.push("source-review");
   }
-  if (preconditions?.workerWiring !== "unwired") {
+  if (stage === "review" && preconditions?.workerWiring !== "unwired") {
     missing.push("worker-unwired");
+  }
+  if (stage === "candidate" && preconditions?.workerWiring !== "candidate") {
+    missing.push("worker-binding-state");
   }
   if (!profileReady) {
     missing.push("release-profile");
@@ -419,11 +429,17 @@ export function evaluateWorkflowLiveWorkerIntegration(
   return {
     ready: true,
     action,
-    reasons: [
-      "metadata-action-source-reviewed",
-      "worker-remains-unwired",
-      "release-profile-budget-preserved",
-    ],
+    reasons: input.stage === "candidate"
+      ? [
+        "metadata-action-source-reviewed",
+        "worker-binding-candidate",
+        "release-profile-budget-preserved",
+      ]
+      : [
+        "metadata-action-source-reviewed",
+        "worker-remains-unwired",
+        "release-profile-budget-preserved",
+      ],
   };
 }
 

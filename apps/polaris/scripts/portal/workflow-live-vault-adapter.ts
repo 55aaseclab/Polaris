@@ -45,6 +45,7 @@ export interface WorkflowLiveVaultArtifactMetadataReaderInput {
   request: FfiRpcRequest;
   action: WorkflowActionCatalogEntry;
   decision: Extract<WorkflowLiveInvocationDecision, { allowed: true }>;
+  signal?: AbortSignal;
 }
 
 export type WorkflowLiveVaultArtifactMetadataReader = (
@@ -250,7 +251,9 @@ export async function invokeWorkflowLiveVaultArtifactMetadata(
   } catch (error) {
     return {
       allowed: false,
-      code: "live-vault-metadata-read-failed",
+      code: error instanceof WorkflowLiveVaultMetadataReadError
+        ? error.code
+        : "live-vault-metadata-read-failed",
       message: error instanceof Error
         ? error.message
         : "Workflow live Vault metadata read failed",
@@ -311,27 +314,36 @@ function auditIdForMetadataInvocation(request: FfiRpcRequest): string {
     .digest("hex")}`;
 }
 
-export async function invokeWorkflowLiveVaultArtifactMetadataWithEvidence(
-  input: WorkflowLiveVaultArtifactMetadataDurableEvidenceInput,
-): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
-  const startedAt = new Date().toISOString();
-  const result = await invokeWorkflowLiveVaultArtifactMetadata(input);
-  const completedAt = new Date().toISOString();
-  const shouldRecordEvidence = result.allowed
+function shouldRecordMetadataEvidence(
+  result: WorkflowLiveVaultArtifactMetadataInvocationResult,
+): boolean {
+  return result.allowed
     || (
       !result.allowed
-      && result.code === "live-vault-metadata-read-failed"
       && result.action?.id === WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID
+      && (
+        result.reasons.includes("metadata-read-failed")
+        || result.reasons.includes("metadata-read-timeout")
+      )
     );
-  if (!shouldRecordEvidence) {
-    return result;
+}
+
+export function recordWorkflowLiveVaultArtifactMetadataEvidence(input: {
+  store: PolarisControlStore;
+  request: FfiRpcRequest;
+  result: WorkflowLiveVaultArtifactMetadataInvocationResult;
+  startedAt: string;
+  completedAt: string;
+}): void {
+  if (!shouldRecordMetadataEvidence(input.result)) {
+    return;
   }
   input.store.recordWorkflowEffectReceipt(
     receiptForMetadataInvocation({
       request: input.request,
-      result,
-      startedAt,
-      completedAt,
+      result: input.result,
+      startedAt: input.startedAt,
+      completedAt: input.completedAt,
     }),
   );
   input.store.recordAuditOnce({
@@ -341,22 +353,37 @@ export async function invokeWorkflowLiveVaultArtifactMetadataWithEvidence(
     vaultId: input.request.vaultId,
     action: WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION,
     requestId: input.request.requestId,
-    outcome: result.allowed ? "success" : "failure",
+    outcome: input.result.allowed ? "success" : "failure",
     metadata: {
-      action: result.action?.id ?? WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+      action: input.result.action?.id ?? WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
       port: input.request.call.port,
       version: input.request.call.version,
       effect: input.request.call.effect,
       runId: input.request.runId,
       idempotencyKey: input.request.idempotencyKey,
-      reasons: result.reasons,
-      ...(result.allowed
+      reasons: input.result.reasons,
+      ...(input.result.allowed
         ? {
-          artifactCount: result.metadata.artifactCount,
-          metadataDigest: metadataDigest(result.metadata),
+          artifactCount: input.result.metadata.artifactCount,
+          metadataDigest: metadataDigest(input.result.metadata),
         }
-        : { errorCode: result.code }),
+        : { errorCode: input.result.code }),
     },
+  });
+}
+
+export async function invokeWorkflowLiveVaultArtifactMetadataWithEvidence(
+  input: WorkflowLiveVaultArtifactMetadataDurableEvidenceInput,
+): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
+  const startedAt = new Date().toISOString();
+  const result = await invokeWorkflowLiveVaultArtifactMetadata(input);
+  const completedAt = new Date().toISOString();
+  recordWorkflowLiveVaultArtifactMetadataEvidence({
+    store: input.store,
+    request: input.request,
+    result,
+    startedAt,
+    completedAt,
   });
   return result;
 }
