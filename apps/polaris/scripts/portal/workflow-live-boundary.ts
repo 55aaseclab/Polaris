@@ -2,6 +2,25 @@ import { checkFfiAdmission } from "polaris-workflow";
 import type { FfiRpcRequest } from "polaris-workflow";
 
 export const WORKFLOW_LIVE_ADAPTER_FLAG = "POLARIS_WORKFLOW_LIVE_ADAPTER";
+export const WORKFLOW_LIVE_WORKER_BINDING_FLAG = "POLARIS_WORKFLOW_LIVE_WORKER_BINDING";
+export const WORKFLOW_LIVE_RELEASE_PROFILE_ID = "0.3.0-single-host";
+export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = "vault.artifact.metadata.read";
+
+export type WorkflowLiveWorkerPrecondition =
+  | "metadata-action"
+  | "read-only-action"
+  | "action-disabled"
+  | "source-review"
+  | "worker-unwired"
+  | "release-profile"
+  | "timeout"
+  | "retry"
+  | "budget"
+  | "kill-switch"
+  | "receipt-reconciliation"
+  | "audit"
+  | "rollback"
+  | "deployment-evidence";
 
 export type WorkflowLiveGate =
   | "receipt-reconciliation"
@@ -27,6 +46,63 @@ export interface WorkflowLiveReadiness {
   audit: boolean;
   rollback: boolean;
   deploymentEvidence: boolean;
+}
+
+export interface WorkflowLiveWorkerReleaseProfile {
+  readonly id: string;
+  readonly capacity: {
+    readonly jobWorkerConcurrency: number;
+    readonly jobLeaseMs: number;
+  };
+  readonly slo: {
+    readonly readP95Ms: number;
+    readonly recoverySeconds: number;
+  };
+}
+
+export interface WorkflowLiveWorkerIntegrationPreconditions {
+  readonly sourceReview?: boolean;
+  readonly workerWiring?: "unwired" | "candidate";
+  readonly timeout?: {
+    readonly perAttemptMs?: number;
+    readonly maxTotalMs?: number;
+    readonly abortSignal?: boolean;
+  };
+  readonly retry?: {
+    readonly maxAttempts?: number;
+    readonly idempotentByRequestId?: boolean;
+    readonly retryOnlyReadFailures?: boolean;
+  };
+  readonly budget?: {
+    readonly releaseProfileId?: string;
+    readonly maxConcurrentLiveReads?: number;
+    readonly countsAgainstJobWorker?: boolean;
+    readonly readP95Ms?: number;
+  };
+  readonly killSwitch?: {
+    readonly environmentFlag?: string;
+    readonly disabledValue?: "disabled";
+    readonly failClosedWhenUnset?: boolean;
+    readonly checkedBeforeEachAttempt?: boolean;
+  };
+  readonly receiptReconciliation?: {
+    readonly durableReceipts?: boolean;
+    readonly duplicateRequestIdsReconcile?: boolean;
+    readonly admittedFailuresPersisted?: boolean;
+  };
+  readonly audit?: {
+    readonly immutableEvents?: boolean;
+    readonly noPreAdmissionWrites?: boolean;
+  };
+  readonly rollback?: {
+    readonly disablesWorkerBinding?: boolean;
+    readonly preservesDurableEvidence?: boolean;
+  };
+  readonly deploymentEvidence?: {
+    readonly releaseId?: string;
+    readonly profileId?: string;
+    readonly focusedChecks?: readonly string[];
+  };
 }
 
 export interface WorkflowActionCatalogEntry {
@@ -57,12 +133,33 @@ export type WorkflowLiveInvocationDecision =
       action?: WorkflowActionCatalogEntry;
     };
 
+export type WorkflowLiveWorkerIntegrationDecision =
+  | {
+      ready: true;
+      action: WorkflowActionCatalogEntry;
+      reasons: string[];
+    }
+  | {
+      ready: false;
+      code: string;
+      message: string;
+      reasons: WorkflowLiveWorkerPrecondition[];
+      action?: WorkflowActionCatalogEntry;
+    };
+
 export interface EvaluateWorkflowLiveInvocationInput {
   request: FfiRpcRequest;
   environment?: Record<string, string | undefined>;
   readiness?: Partial<WorkflowLiveReadiness>;
   catalog?: readonly WorkflowActionCatalogEntry[];
   now?: Date;
+}
+
+export interface EvaluateWorkflowLiveWorkerIntegrationInput {
+  actionId?: string;
+  catalog?: readonly WorkflowActionCatalogEntry[];
+  releaseProfile?: WorkflowLiveWorkerReleaseProfile;
+  preconditions?: WorkflowLiveWorkerIntegrationPreconditions;
 }
 
 const ACTION_CATALOG = [
@@ -80,7 +177,7 @@ const ACTION_CATALOG = [
     description: "Human approval interface owned by Polaris workflow state.",
   },
   {
-    id: "vault.artifact.metadata.read",
+    id: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
     version: 1,
     port: "ArtifactMetadata",
     portVersion: "1.0.0",
@@ -92,6 +189,11 @@ const ACTION_CATALOG = [
     description: "Future read-only Vault artifact metadata action.",
   },
 ] as const satisfies readonly WorkflowActionCatalogEntry[];
+
+const REQUIRED_WORKFLOW_LIVE_WORKER_FOCUSED_CHECKS = [
+  "polaris-workflow-live-boundary",
+  "polaris-workflow-live-vault-adapter",
+] as const;
 
 function readinessForGate(
   readiness: Partial<WorkflowLiveReadiness> | undefined,
@@ -115,6 +217,15 @@ export function listWorkflowActionCatalog(): readonly WorkflowActionCatalogEntry
   return ACTION_CATALOG;
 }
 
+export function findWorkflowActionById(
+  actionId: string,
+  catalog: readonly WorkflowActionCatalogEntry[] = ACTION_CATALOG,
+): WorkflowActionCatalogEntry | undefined {
+  const id = actionId.trim();
+  if (!id) return undefined;
+  return catalog.find((action) => action.id === id);
+}
+
 export function findWorkflowActionForCall(
   request: FfiRpcRequest,
   catalog: readonly WorkflowActionCatalogEntry[] = ACTION_CATALOG,
@@ -128,6 +239,192 @@ export function findWorkflowActionForCall(
     }
     return action.port === request.call.port && !request.call.builtin;
   });
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function nonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasFocusedChecks(actual: readonly string[] | undefined): boolean {
+  if (!actual) return false;
+  const checks = new Set(actual.map((entry) => entry.trim()).filter(Boolean));
+  return REQUIRED_WORKFLOW_LIVE_WORKER_FOCUSED_CHECKS.every((entry) => checks.has(entry));
+}
+
+function profileIsCurrentSingleHost(
+  profile: WorkflowLiveWorkerReleaseProfile | undefined,
+): profile is WorkflowLiveWorkerReleaseProfile {
+  return profile?.id === WORKFLOW_LIVE_RELEASE_PROFILE_ID
+    && isPositiveInteger(profile.capacity.jobWorkerConcurrency)
+    && isPositiveInteger(profile.capacity.jobLeaseMs)
+    && isPositiveInteger(profile.slo.readP95Ms)
+    && isPositiveInteger(profile.slo.recoverySeconds);
+}
+
+export function missingWorkflowLiveWorkerIntegrationPreconditions(
+  input: EvaluateWorkflowLiveWorkerIntegrationInput = {},
+): WorkflowLiveWorkerPrecondition[] {
+  const missing: WorkflowLiveWorkerPrecondition[] = [];
+  const actionId = input.actionId?.trim() || WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID;
+  const action = findWorkflowActionById(actionId, input.catalog);
+  if (!action || action.id !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
+    missing.push("metadata-action");
+  } else {
+    if (action.effect !== "read" || action.risk !== "read" || action.adapter !== "future-vault") {
+      missing.push("read-only-action");
+    }
+    if (action.liveEnabled !== false) {
+      missing.push("action-disabled");
+    }
+  }
+
+  const preconditions = input.preconditions;
+  const releaseProfile = input.releaseProfile;
+  const profileReady = profileIsCurrentSingleHost(releaseProfile);
+  if (preconditions?.sourceReview !== true) {
+    missing.push("source-review");
+  }
+  if (preconditions?.workerWiring !== "unwired") {
+    missing.push("worker-unwired");
+  }
+  if (!profileReady) {
+    missing.push("release-profile");
+  }
+
+  const timeout = preconditions?.timeout;
+  const timeoutValid = Boolean(
+    timeout
+      && isPositiveInteger(timeout.perAttemptMs)
+      && isPositiveInteger(timeout.maxTotalMs)
+      && timeout.abortSignal === true
+      && timeout.perAttemptMs <= timeout.maxTotalMs
+      && profileReady
+      && timeout.maxTotalMs <= releaseProfile.slo.readP95Ms
+      && timeout.maxTotalMs < releaseProfile.capacity.jobLeaseMs,
+  );
+  if (!timeoutValid) {
+    missing.push("timeout");
+  }
+
+  const retry = preconditions?.retry;
+  const retryValid = Boolean(
+    retry
+      && isPositiveInteger(retry.maxAttempts)
+      && retry.maxAttempts <= 2
+      && retry.idempotentByRequestId === true
+      && retry.retryOnlyReadFailures === true
+      && timeout
+      && isPositiveInteger(timeout.perAttemptMs)
+      && isPositiveInteger(timeout.maxTotalMs)
+      && timeout.perAttemptMs * retry.maxAttempts <= timeout.maxTotalMs,
+  );
+  if (!retryValid) {
+    missing.push("retry");
+  }
+
+  const budget = preconditions?.budget;
+  const budgetValid = Boolean(
+    budget
+      && profileReady
+      && budget.releaseProfileId === releaseProfile.id
+      && isPositiveInteger(budget.maxConcurrentLiveReads)
+      && budget.maxConcurrentLiveReads <= releaseProfile.capacity.jobWorkerConcurrency
+      && budget.countsAgainstJobWorker === true
+      && budget.readP95Ms === releaseProfile.slo.readP95Ms,
+  );
+  if (!budgetValid) {
+    missing.push("budget");
+  }
+
+  const killSwitch = preconditions?.killSwitch;
+  if (
+    !killSwitch
+    || killSwitch.environmentFlag !== WORKFLOW_LIVE_WORKER_BINDING_FLAG
+    || killSwitch.disabledValue !== "disabled"
+    || killSwitch.failClosedWhenUnset !== true
+    || killSwitch.checkedBeforeEachAttempt !== true
+  ) {
+    missing.push("kill-switch");
+  }
+
+  const receipt = preconditions?.receiptReconciliation;
+  if (
+    !receipt
+    || receipt.durableReceipts !== true
+    || receipt.duplicateRequestIdsReconcile !== true
+    || receipt.admittedFailuresPersisted !== true
+  ) {
+    missing.push("receipt-reconciliation");
+  }
+
+  const audit = preconditions?.audit;
+  if (
+    !audit
+    || audit.immutableEvents !== true
+    || audit.noPreAdmissionWrites !== true
+  ) {
+    missing.push("audit");
+  }
+
+  const rollback = preconditions?.rollback;
+  if (
+    !rollback
+    || rollback.disablesWorkerBinding !== true
+    || rollback.preservesDurableEvidence !== true
+  ) {
+    missing.push("rollback");
+  }
+
+  const deploymentEvidence = preconditions?.deploymentEvidence;
+  if (
+    !deploymentEvidence
+    || !nonEmptyString(deploymentEvidence.releaseId)
+    || !profileReady
+    || deploymentEvidence.profileId !== releaseProfile.id
+    || !hasFocusedChecks(deploymentEvidence.focusedChecks)
+  ) {
+    missing.push("deployment-evidence");
+  }
+
+  return missing;
+}
+
+export function evaluateWorkflowLiveWorkerIntegration(
+  input: EvaluateWorkflowLiveWorkerIntegrationInput = {},
+): WorkflowLiveWorkerIntegrationDecision {
+  const actionId = input.actionId?.trim() || WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID;
+  const action = findWorkflowActionById(actionId, input.catalog);
+  const missing = missingWorkflowLiveWorkerIntegrationPreconditions(input);
+  if (missing.length > 0) {
+    return {
+      ready: false,
+      code: "workflow-live-worker-preconditions-incomplete",
+      message: `Workflow live worker integration is missing preconditions: ${missing.join(", ")}`,
+      reasons: missing,
+      ...(action ? { action } : {}),
+    };
+  }
+  if (!action) {
+    return {
+      ready: false,
+      code: "workflow-live-worker-action-not-found",
+      message: "Workflow live worker integration requires a cataloged action",
+      reasons: ["metadata-action"],
+    };
+  }
+  return {
+    ready: true,
+    action,
+    reasons: [
+      "metadata-action-source-reviewed",
+      "worker-remains-unwired",
+      "release-profile-budget-preserved",
+    ],
+  };
 }
 
 export function evaluateWorkflowLiveInvocation(

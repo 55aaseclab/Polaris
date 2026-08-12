@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import type { FfiRpcRequest } from "polaris-workflow";
 import {
+  evaluateWorkflowLiveWorkerIntegration,
   evaluateWorkflowLiveInvocation,
   findWorkflowActionForCall,
   listWorkflowActionCatalog,
+  missingWorkflowLiveWorkerIntegrationPreconditions,
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
+  WORKFLOW_LIVE_RELEASE_PROFILE_ID,
+  WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+  WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
   type WorkflowActionCatalogEntry,
+  type WorkflowLiveWorkerIntegrationPreconditions,
+  type WorkflowLiveWorkerReleaseProfile,
   type WorkflowLiveReadiness,
 } from "../scripts/portal/workflow-live-boundary.js";
 
@@ -49,6 +57,70 @@ function completeReadiness(): WorkflowLiveReadiness {
     audit: true,
     rollback: true,
     deploymentEvidence: true,
+  };
+}
+
+function releaseProfile(): WorkflowLiveWorkerReleaseProfile {
+  return {
+    id: WORKFLOW_LIVE_RELEASE_PROFILE_ID,
+    capacity: {
+      jobWorkerConcurrency: 1,
+      jobLeaseMs: 60_000,
+    },
+    slo: {
+      readP95Ms: 500,
+      recoverySeconds: 120,
+    },
+  };
+}
+
+function completeWorkerPreconditions(): WorkflowLiveWorkerIntegrationPreconditions {
+  return {
+    sourceReview: true,
+    workerWiring: "unwired",
+    timeout: {
+      perAttemptMs: 200,
+      maxTotalMs: 400,
+      abortSignal: true,
+    },
+    retry: {
+      maxAttempts: 2,
+      idempotentByRequestId: true,
+      retryOnlyReadFailures: true,
+    },
+    budget: {
+      releaseProfileId: WORKFLOW_LIVE_RELEASE_PROFILE_ID,
+      maxConcurrentLiveReads: 1,
+      countsAgainstJobWorker: true,
+      readP95Ms: 500,
+    },
+    killSwitch: {
+      environmentFlag: WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+      disabledValue: "disabled",
+      failClosedWhenUnset: true,
+      checkedBeforeEachAttempt: true,
+    },
+    receiptReconciliation: {
+      durableReceipts: true,
+      duplicateRequestIdsReconcile: true,
+      admittedFailuresPersisted: true,
+    },
+    audit: {
+      immutableEvents: true,
+      noPreAdmissionWrites: true,
+    },
+    rollback: {
+      disablesWorkerBinding: true,
+      preservesDurableEvidence: true,
+    },
+    deploymentEvidence: {
+      releaseId: "release-synthetic",
+      profileId: WORKFLOW_LIVE_RELEASE_PROFILE_ID,
+      focusedChecks: [
+        "polaris-workflow-live-boundary",
+        "polaris-workflow-live-vault-adapter",
+      ],
+    },
   };
 }
 
@@ -130,4 +202,114 @@ test("a fully gated action can be evaluated without wiring a live executor", () 
     action,
     reasons: ["ffi-admission-allowed", "live-gates-complete"],
   });
+});
+
+test("metadata worker integration preconditions fail closed by default", () => {
+  const decision = evaluateWorkflowLiveWorkerIntegration();
+  assert.equal(decision.ready, false);
+  if (!decision.ready) {
+    assert.equal(decision.code, "workflow-live-worker-preconditions-incomplete");
+    assert.deepEqual(decision.reasons, [
+      "source-review",
+      "worker-unwired",
+      "release-profile",
+      "timeout",
+      "retry",
+      "budget",
+      "kill-switch",
+      "receipt-reconciliation",
+      "audit",
+      "rollback",
+      "deployment-evidence",
+    ]);
+  }
+});
+
+test("metadata worker integration preconditions keep the source-level pilot unwired", () => {
+  const decision = evaluateWorkflowLiveWorkerIntegration({
+    releaseProfile: releaseProfile(),
+    preconditions: completeWorkerPreconditions(),
+  });
+  assert.equal(decision.ready, true);
+  if (!decision.ready) {
+    throw new Error("expected complete source-level preconditions");
+  }
+  assert.equal(decision.action.id, WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID);
+  assert.deepEqual(decision.reasons, [
+    "metadata-action-source-reviewed",
+    "worker-remains-unwired",
+    "release-profile-budget-preserved",
+  ]);
+
+  const workerSource = fs.readFileSync(
+    new URL("../scripts/portal/workflow-control.ts", import.meta.url),
+    "utf8",
+  );
+  assert.equal(workerSource.includes("workflow-live-vault-adapter"), false);
+  assert.equal(workerSource.includes("invokeWorkflowLiveVaultArtifactMetadata"), false);
+});
+
+test("metadata worker integration preconditions reject budget growth beyond the release profile", () => {
+  const preconditions = completeWorkerPreconditions();
+  const missing = missingWorkflowLiveWorkerIntegrationPreconditions({
+    releaseProfile: releaseProfile(),
+    preconditions: {
+      ...preconditions,
+      budget: {
+        ...preconditions.budget,
+        maxConcurrentLiveReads: 2,
+      },
+    },
+  });
+  assert.deepEqual(missing, ["budget"]);
+});
+
+test("metadata worker integration preconditions bind timeout and retry to the read SLO", () => {
+  const preconditions = completeWorkerPreconditions();
+  assert.deepEqual(
+    missingWorkflowLiveWorkerIntegrationPreconditions({
+      releaseProfile: releaseProfile(),
+      preconditions: {
+        ...preconditions,
+        timeout: {
+          ...preconditions.timeout,
+          maxTotalMs: 501,
+        },
+      },
+    }),
+    ["timeout"],
+  );
+  assert.deepEqual(
+    missingWorkflowLiveWorkerIntegrationPreconditions({
+      releaseProfile: releaseProfile(),
+      preconditions: {
+        ...preconditions,
+        timeout: {
+          ...preconditions.timeout,
+          perAttemptMs: 300,
+        },
+      },
+    }),
+    ["retry"],
+  );
+});
+
+test("metadata worker integration preconditions require rollback and kill-switch control", () => {
+  const preconditions = completeWorkerPreconditions();
+  const missing = missingWorkflowLiveWorkerIntegrationPreconditions({
+    releaseProfile: releaseProfile(),
+    preconditions: {
+      ...preconditions,
+      workerWiring: "candidate",
+      killSwitch: {
+        ...preconditions.killSwitch,
+        checkedBeforeEachAttempt: false,
+      },
+      rollback: {
+        ...preconditions.rollback,
+        disablesWorkerBinding: false,
+      },
+    },
+  });
+  assert.deepEqual(missing, ["worker-unwired", "kill-switch", "rollback"]);
 });

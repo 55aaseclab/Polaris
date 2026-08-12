@@ -16,7 +16,10 @@ import {
   type EvaluateWorkflowLiveInvocationInput,
   type WorkflowActionCatalogEntry,
   type WorkflowLiveInvocationDecision,
+  WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
 } from "./workflow-live-boundary.js";
+
+export { WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID } from "./workflow-live-boundary.js";
 
 export interface WorkflowLiveVaultArtifactMetadataEntry {
   title: string;
@@ -76,7 +79,6 @@ export interface WorkflowLiveVaultArtifactMetadataDurableEvidenceInput
 const MAX_LATEST_ARTIFACTS = 5;
 const MAX_LATEST_TITLES = 5;
 const MAX_RETRIEVAL_REASONS = 5;
-export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = "vault.artifact.metadata.read";
 const WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION = "workflow.live.vault.metadata.read";
 
 export class WorkflowLiveVaultMetadataReadError extends Error {
