@@ -3,7 +3,18 @@ import {
   type ShellHostSummary,
   type ShellSession,
 } from "@polaris/polaris-shell";
-import type { MockDomainPack } from "./workflow-mocks.js";
+import type {
+  WorkflowDomainPackProjection,
+  WorkflowEventsResponse,
+  WorkflowMockScenario,
+  WorkflowRunProjection,
+  WorkflowRunRequest,
+  WorkflowRunsResponse,
+  WorkflowSetupProjection,
+  WorkflowSetupRequest,
+  WorkflowSuggestionProjection,
+  WorkflowVaultProjection,
+} from "@polaris/polaris-shell";
 
 const SESSION_TOKEN_KEY = "polaris_authing_session";
 const ID_TOKEN_KEY = "polaris_authing_id_token";
@@ -133,8 +144,74 @@ export async function authingConfig(): Promise<AuthingConfig> {
   return request<AuthingConfig>("/authing-config");
 }
 
-export async function domainPacks(): Promise<{ packs: MockDomainPack[] }> {
-  return request<{ packs: MockDomainPack[] }>("/domain-packs");
+export async function domainPacks(): Promise<{ packs: WorkflowDomainPackProjection[] }> {
+  return request<{ packs: WorkflowDomainPackProjection[] }>("/domain-packs");
+}
+
+export async function workflowVaults(): Promise<{ vaults: WorkflowVaultProjection[] }> {
+  return request<{ vaults: WorkflowVaultProjection[] }>("/workflow-vaults");
+}
+
+export async function workflowRuns(): Promise<WorkflowRunsResponse> {
+  return request<WorkflowRunsResponse>("/workflow-runs");
+}
+
+export async function workflowSetup(): Promise<WorkflowSetupProjection> {
+  return request<WorkflowSetupProjection>("/workflow-setup");
+}
+
+export async function saveWorkflowSetup(
+  input: WorkflowSetupRequest,
+): Promise<{ setup: WorkflowSetupProjection }> {
+  return request<{ setup: WorkflowSetupProjection }>("/workflow-setup", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function workflowSuggestions(): Promise<{ suggestions: WorkflowSuggestionProjection[] }> {
+  return request<{ suggestions: WorkflowSuggestionProjection[] }>("/workflow-suggestions");
+}
+
+export async function createWorkflowSuggestion(
+  runId: string,
+): Promise<{ suggestion: WorkflowSuggestionProjection }> {
+  return request<{ suggestion: WorkflowSuggestionProjection }>("/workflow-suggestions", {
+    method: "POST",
+    body: JSON.stringify({ runId }),
+  });
+}
+
+export async function createWorkflowRun(
+  input: WorkflowRunRequest,
+): Promise<{ run: WorkflowRunProjection }> {
+  return request<{ run: WorkflowRunProjection }>("/workflow-runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function workflowRunAction(
+  runId: string,
+  action: "approve" | "cancel" | "retry",
+  scenario?: WorkflowMockScenario,
+): Promise<{ run: WorkflowRunProjection }> {
+  return request<{ run: WorkflowRunProjection }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/${action}`,
+    {
+      method: "POST",
+      ...(scenario ? { body: JSON.stringify({ scenario }) } : {}),
+    },
+  );
+}
+
+export async function workflowRunEvents(
+  runId: string,
+  after = 0,
+): Promise<WorkflowEventsResponse> {
+  return request<WorkflowEventsResponse>(
+    `/workflow-runs/${encodeURIComponent(runId)}/events?after=${after}`,
+  );
 }
 
 export async function beginSignIn(config: AuthingConfig, returnPath: string): Promise<void> {

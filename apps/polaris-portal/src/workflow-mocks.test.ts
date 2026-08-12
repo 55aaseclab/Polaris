@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { usePortalStore } from "./portal-store.js";
 import {
   cardsFromRuns,
   createMockRunsForCatalog,
   createInitialWorkflowState,
   flowForRun,
+  MOCK_WORKFLOW_VAULTS,
   packForRun,
   type MockDomainPack,
   updateCardFromRun,
@@ -37,10 +37,12 @@ const SYNTHETIC_PACKS: MockDomainPack[] = [
 function createInitialWorkflowMockState() {
   const state = createInitialWorkflowState();
   const packs = structuredClone(SYNTHETIC_PACKS);
-  const runs = createMockRunsForCatalog(packs, state.vaults);
+  const vaults = structuredClone(MOCK_WORKFLOW_VAULTS);
+  const runs = createMockRunsForCatalog(packs, vaults);
   return {
     ...state,
     packs,
+    vaults,
     runs: Object.fromEntries(runs.map((run) => [run.id, run])),
     cards: cardsFromRuns(runs),
     setup: {
@@ -80,7 +82,7 @@ test("production workflow state leaves the Domain Pack catalog to Polaris", () =
 test("mock runs bind to the catalog returned by Polaris", () => {
   const state = createInitialWorkflowState();
   const catalog = createInitialWorkflowMockState().packs.slice(1, 2);
-  const runs = createMockRunsForCatalog(catalog, state.vaults);
+  const runs = createMockRunsForCatalog(catalog);
 
   assert.equal(runs.length, 1);
   assert.equal(runs[0]?.packId, catalog[0]?.id);
@@ -105,30 +107,4 @@ test("pack, flow, and work-card projections stay linked to a run", () => {
   const card = updated.find((item) => item.runId === run.id);
   assert.equal(card?.status, "succeeded");
   assert.equal(card?.updatedAt, "2026-08-11T09:30:00.000Z");
-});
-
-test("Zustand mock run supports cancel and retry without losing the old card", async () => {
-  usePortalStore.setState(createInitialWorkflowMockState());
-  try {
-    const created = await usePortalStore.getState().startWorkflowRun({
-      packId: "pack-alpha",
-      flowId: "flow-alpha",
-      vaultId: "vault-disposable",
-      values: { question: "synthetic question", audience: "synthetic audience" },
-    });
-    assert.equal(created.status, "queued");
-
-    await usePortalStore.getState().cancelWorkflowRun(created.id);
-    assert.equal(usePortalStore.getState().runs[created.id]?.status, "cancelled");
-
-    const retried = await usePortalStore.getState().retryWorkflowRun(created.id);
-    if (!retried) throw new Error("expected cancelled run to be retryable");
-    assert.notEqual(retried.id, created.id);
-    assert.equal(usePortalStore.getState().runs[retried.id]?.status, "queued");
-    assert.equal(usePortalStore.getState().cards.find((card) => card.runId === created.id)?.status, "cancelled");
-
-    await usePortalStore.getState().cancelWorkflowRun(retried.id);
-  } finally {
-    usePortalStore.setState(createInitialWorkflowMockState());
-  }
 });

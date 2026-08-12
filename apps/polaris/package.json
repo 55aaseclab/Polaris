@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "build:runtime": "pnpm --filter @polaris/vault-runtime run build",
+    "build:shell": "pnpm --filter @polaris/polaris-shell run build",
     "build:workflow": "pnpm --filter polaris-workflow run build",
-    "build:auth": "pnpm run build:workflow && pnpm run build:runtime && pnpm --filter @polaris/polaris-auth-server run build",
+    "build:auth": "pnpm run build:workflow && pnpm run build:runtime && pnpm run build:shell && pnpm --filter @polaris/polaris-auth-server run build",
     "polaris": "sh -lc 'pnpm run build:auth && if [ \"$1\" = \"--\" ]; then shift; fi; exec ./node_modules/.bin/tsx scripts/polaris.ts \"$@\"' --",
     "server": "pnpm run polaris -- server",
     "migrate:wanghai-data-root": "tsx scripts/migrate-wanghai-data-root.ts",

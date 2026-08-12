@@ -400,6 +400,44 @@ export function listDomainPackProjections(
   return projections.sort((a, b) => a.title.localeCompare(b.title));
 }
 
+export interface VerifiedDomainPackRuntime {
+  summary: DomainPackSummary;
+  source: string;
+  pipeline: PipelineResult;
+}
+
+/** Load exactly the installed bytes named by a run's immutable pack pin. */
+export function loadVerifiedDomainPackRuntime(
+  importMetaUrl: string,
+  idInput: string,
+  versionInput: string,
+  digestInput: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): VerifiedDomainPackRuntime {
+  const id = assertDomainPackId(idInput);
+  const version = canonicalPackVersion(versionInput);
+  const digest = digestInput.trim().replace(/^sha256:/u, "");
+  const installed = readStoredDomainPacks(importMetaUrl, environment);
+  const pack = installed.find((candidate) =>
+    candidate.id === id
+    && candidate.version === version
+    && candidate.status === "verified"
+    && candidate.sha256 === digest,
+  );
+  if (!pack) {
+    throw new Error(`Verified Domain Pack pin is unavailable: ${id}@${version} sha256:${digest}`);
+  }
+  const pipeline = runPipeline(pack.source, { loader: packLoader(installed) });
+  if (!pipeline.ok || !pipeline.program || !pipeline.ast) {
+    throw new Error(`Pinned Domain Pack cannot be executed: ${id}@${version}`);
+  }
+  return {
+    summary: summaryFromStored(pack),
+    source: pack.source,
+    pipeline,
+  };
+}
+
 export async function addDomainPack(
   importMetaUrl: string,
   inputPath: string,

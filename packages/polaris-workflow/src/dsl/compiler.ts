@@ -44,6 +44,7 @@ export interface ProgramPortMeta {
   qualifiedName?: string
   originDomain?: string
   effect: string
+  builtin?: string
   inFields: string[]
   outFields: string[]
 }
@@ -310,6 +311,7 @@ function portMeta(p: PortAst): ProgramPortMeta {
     qualifiedName: p.qualifiedName,
     originDomain: p.originDomain,
     effect: p.effect,
+    ...(p.builtin ? { builtin: p.builtin } : {}),
     inFields: p.inFields.map((f) => `${f.name}:${f.type}`),
     outFields: p.outFields.map((f) => `${f.name}:${f.type}`),
   }

@@ -1,0 +1,805 @@
+import { randomUUID, createHash } from "node:crypto";
+import type {
+  FfiCallLog,
+  FfiHost,
+  FfiInvokeRequest,
+  FfiInvokeResult,
+  FfiRpcRequest,
+  FfiRpcResponse,
+  PortAst,
+} from "polaris-workflow";
+import {
+  builtinCallForPort,
+  DocStore,
+  FFI_RPC_PROTOCOL_VERSION,
+  mockRpcResponse,
+  resolvePort,
+  type Program,
+} from "polaris-workflow";
+import type {
+  WorkflowArtifact,
+  WorkflowDomainPackProjection,
+  WorkflowEffectReceipt,
+  WorkflowEvent,
+  WorkflowEventsResponse,
+  WorkflowExecutionClass,
+  WorkflowMockScenario,
+  WorkflowRunProjection,
+  WorkflowRunRequest,
+  WorkflowRunsResponse,
+  WorkflowSetupProjection,
+  WorkflowSetupRequest,
+  WorkflowSuggestionProjection,
+  WorkflowVaultProjection,
+} from "@polaris/polaris-shell";
+import {
+  loadVerifiedDomainPackRuntime,
+} from "../config/domain-packs.js";
+import {
+  getPolarisControlStore,
+  type PolarisControlStore,
+  type WorkflowRunRecord,
+} from "./control-store.js";
+
+export class WorkflowControlError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "WorkflowControlError";
+  }
+}
+
+type WorkflowControlOptions = {
+  importMetaUrl: string;
+  listPacks: () => WorkflowDomainPackProjection[];
+  listVaults: (tenantId: string) => Promise<WorkflowVaultProjection[]>;
+  now?: () => Date;
+  pollMs?: number;
+  autoStart?: boolean;
+};
+
+type ProvisionHook = (tenantId: string, vaultId: string) => void;
+const provisionHooks = new Set<ProvisionHook>();
+
+export function registerWorkflowProvisionHook(hook: ProvisionHook): () => void {
+  provisionHooks.add(hook);
+  return () => provisionHooks.delete(hook);
+}
+
+export function notifyWorkflowVaultProvisioned(tenantId: string, vaultId: string): void {
+  for (const hook of provisionHooks) hook(tenantId, vaultId);
+}
+
+function safeInput(values: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [String(key), String(value ?? "")]),
+  );
+}
+
+function flowFromPack(
+  packs: WorkflowDomainPackProjection[],
+  packId: string,
+  flowId: string,
+): { pack: WorkflowDomainPackProjection; flow: WorkflowDomainPackProjection["flows"][number] } | null {
+  const pack = packs.find((candidate) => candidate.id === packId);
+  const flow = pack?.flows.find((candidate) => candidate.id === flowId);
+  return pack && flow ? { pack, flow } : null;
+}
+
+function defaultFlowInput(flow: WorkflowDomainPackProjection["flows"][number]): Record<string, string> {
+  return Object.fromEntries(flow.fields.map((field) => [field.id, "synthetic provisioning input"]));
+}
+
+function projectionForRun(
+  run: WorkflowRunRecord,
+  packs: WorkflowDomainPackProjection[],
+): WorkflowRunProjection {
+  const pack = packs.find((candidate) => candidate.id === run.packId);
+  const flow = pack?.flows.find((candidate) => candidate.id === run.flowId);
+  const artifacts: WorkflowArtifact[] = run.artifacts.map((artifact) => ({
+    id: artifact.id,
+    name: artifact.name,
+    kind: artifact.kind,
+    size: artifact.size,
+    summary: artifact.summary,
+    content: artifact.content,
+    ...(artifact.digest ? { digest: artifact.digest } : {}),
+    redacted: artifact.redacted,
+  }));
+  const receipts: WorkflowEffectReceipt[] = run.receipts.map((receipt) => ({
+    id: receipt.id,
+    requestId: receipt.requestId,
+    port: receipt.port,
+    version: receipt.version,
+    effect: receipt.effect,
+    status: receipt.status,
+    createdAt: receipt.createdAt,
+    completedAt: receipt.completedAt,
+  }));
+  const events: WorkflowEvent[] = run.events.map((event) => ({
+    id: event.id,
+    sequence: event.sequence,
+    kind: event.kind,
+    title: event.title,
+    detail: event.detail,
+    timestamp: event.timestamp,
+    tone: event.tone,
+  }));
+  return {
+    id: run.id,
+    packId: run.packId,
+    flowId: run.flowId,
+    packVersion: run.packVersion,
+    packDigest: run.packDigest,
+    vaultId: run.vaultId,
+    vaultName: run.vaultName,
+    status: run.status,
+    priority: run.priority,
+    title: flow?.title ?? run.flowId,
+    summary: flow?.summary ?? "由 Polaris 控制面调度的工作流运行",
+    input: run.input,
+    progress: run.progress,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    approvalRequired: run.approvalRequired,
+    source: run.source,
+    executionClass: run.executionClass,
+    capabilityLeaseId: run.capabilityLeaseId,
+    capabilityLeaseExpiresAt: run.capabilityLeaseExpiresAt,
+    policy: {
+      decision: run.policy.decision === "deny" ? "deny" : "allow",
+      mode: run.policy.mode === "live" ? "live" : "mock",
+      reasons: Array.isArray(run.policy.reasons)
+        ? run.policy.reasons.map((reason) => String(reason))
+        : [],
+    },
+    events,
+    receipts,
+    artifacts,
+    ...(run.errorCode || run.errorMessage
+      ? { error: { code: run.errorCode ?? "workflow-failed", message: run.errorMessage ?? "workflow failed" } }
+      : {}),
+  };
+}
+
+class MockWorkflowRpcHost implements FfiHost {
+  readonly log: FfiCallLog[] = [];
+  readonly rpcLog: Array<{
+    request: FfiRpcRequest;
+    response: FfiRpcResponse;
+  }> = [];
+  private readonly ports: PortAst[];
+  private callSequence = 0;
+
+  constructor(
+    private readonly run: WorkflowRunRecord,
+    private readonly program: Program,
+  ) {
+    this.ports = program.ports.map((port) => ({
+      kind: "Port",
+      name: port.name,
+      version: port.version,
+      qualifiedName: port.qualifiedName,
+      effect: port.effect as PortAst["effect"],
+      ...(port.builtin ? { builtin: port.builtin } : {}),
+      inFields: port.inFields.map((field) => {
+        const [name, ...typeParts] = field.split(":");
+        return { name: name ?? field, type: typeParts.join(":") || "String" };
+      }),
+      outFields: port.outFields.map((field) => {
+        const [name, ...typeParts] = field.split(":");
+        return { name: name ?? field, type: typeParts.join(":") || "String" };
+      }),
+    }));
+  }
+
+  has(port: string, version?: string): boolean {
+    return resolvePort(this.ports, port, version) != null;
+  }
+
+  clearLog(): void {
+    this.log.length = 0;
+    this.rpcLog.length = 0;
+  }
+
+  invoke(req: FfiInvokeRequest): FfiInvokeResult {
+    const port = resolvePort(this.ports, req.port, req.version);
+    if (!port) {
+      return {
+        ok: false,
+        output: {},
+        error: `FFI port is not available: ${req.port}${req.version ? `@${req.version}` : ""}`,
+      };
+    }
+    const builtin = builtinCallForPort(port);
+    const requestId = `ffi-${this.run.id}-${++this.callSequence}`;
+    const request: FfiRpcRequest = {
+      protocolVersion: FFI_RPC_PROTOCOL_VERSION,
+      requestId,
+      idempotencyKey: `${this.run.id}:${requestId}`,
+      runId: this.run.id,
+      tenantId: this.run.tenantId,
+      vaultId: this.run.vaultId,
+      pack: {
+        id: this.run.packId,
+        version: this.run.packVersion,
+        digest: this.run.packDigest,
+      },
+      capabilityLease: {
+        id: this.run.capabilityLeaseId,
+        packDigest: this.run.packDigest,
+        vaultId: this.run.vaultId,
+        expiresAt: this.run.capabilityLeaseExpiresAt,
+      },
+      call: {
+        port: port.qualifiedName ?? port.name,
+        version: port.version,
+        effect: port.effect,
+        ...(builtin ? { builtin: builtin.id } : {}),
+      },
+      input: { ...req.input },
+      mode: "mock",
+      traceId: req.meta?.flowName,
+    };
+    const response = mockRpcResponse(request);
+    if (port.effect === "human") {
+      response.output.approved = true;
+      response.output.reviewId = response.output.reviewId ?? `review-${requestId}`;
+      response.status = "waiting";
+      response.receipt.status = "waiting";
+    }
+    this.rpcLog.push({ request, response });
+    this.log.push({
+      at: response.receipt.startedAt,
+      port: req.port,
+      ...(req.version ? { version: req.version } : {}),
+      ...(req.meta?.stepId ? { stepId: req.meta.stepId } : {}),
+      ...(req.meta?.flowName ? { flowName: req.meta.flowName } : {}),
+      ...(req.meta?.mode ? { mode: req.meta.mode } : {}),
+      input: { ...req.input },
+      output: { ...response.output },
+      ok: response.status !== "failed" && response.status !== "denied",
+      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})`,
+    });
+    return {
+      ok: response.status !== "failed" && response.status !== "denied",
+      output: response.output,
+      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})`,
+      ...(response.error ? { error: response.error.message } : {}),
+      resolvedVersion: port.version,
+    };
+  }
+}
+
+function executionClassForProgram(program: Program, flowId: string): WorkflowExecutionClass {
+  const flow = program.flows.find((candidate) => candidate.meta.name === flowId);
+  if (!flow) return "ai";
+  return flow.meta.steps.some((step) => Boolean(step.call)) ? "ai" : "pure";
+}
+
+function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): WorkflowArtifact {
+  const content = [
+    `# ${run.flowId}`,
+    "",
+    "Synthetic artifact from the Polaris mock Vault Host.",
+    `run: ${run.id}`,
+    `pack: ${run.packId}@${run.packVersion}`,
+    `pack-digest: ${run.packDigest}`,
+    `vault: ${run.vaultName}`,
+    `output: ${JSON.stringify(output)}`,
+  ].join("\n");
+  return {
+    id: `artifact-${run.id}`,
+    name: `${run.flowId}-result.md`,
+    kind: "report",
+    size: `${Buffer.byteLength(content, "utf8")} B`,
+    summary: "mock Vault Host 生成的 synthetic artifact",
+    content,
+    digest: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
+    redacted: false,
+  };
+}
+
+export class WorkflowControlService {
+  private readonly store: PolarisControlStore;
+  private readonly now: () => Date;
+  private readonly workerId = `workflow-${process.pid}-${randomUUID().slice(0, 8)}`;
+  private readonly pollMs: number;
+  private readonly autoStart: boolean;
+  private timer: NodeJS.Timeout | null = null;
+  private drainPromise: Promise<void> | null = null;
+  private closed = false;
+
+  constructor(private readonly options: WorkflowControlOptions) {
+    this.store = getPolarisControlStore(options.importMetaUrl);
+    this.now = options.now ?? (() => new Date());
+    this.pollMs = Math.max(50, Math.floor(options.pollMs ?? 250));
+    this.autoStart = options.autoStart !== false;
+    if (this.autoStart) {
+      this.timer = setInterval(() => void this.drain(), this.pollMs);
+      this.timer.unref();
+      void this.drain();
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  getSetup(tenantId: string): WorkflowSetupProjection {
+    const setup = this.store.getWorkflowSetup(tenantId);
+    return setup
+      ? {
+          completed: setup.completed,
+          domainPackId: setup.domainPackId,
+          vaultId: setup.vaultId,
+          enabledWorkflowKeys: setup.enabledWorkflowKeys,
+          completedAt: setup.completedAt,
+        }
+      : {
+          completed: false,
+          domainPackId: null,
+          vaultId: null,
+          enabledWorkflowKeys: [],
+          completedAt: null,
+        };
+  }
+
+  async saveSetup(tenantId: string, input: WorkflowSetupRequest): Promise<WorkflowSetupProjection> {
+    const packs = this.options.listPacks();
+    const pack = input.domainPackId ? packs.find((candidate) => candidate.id === input.domainPackId) : null;
+    const enabledWorkflowKeys = [...new Set(
+      input.enabledWorkflowKeys.map((key) => String(key).trim()).filter(Boolean),
+    )];
+    if (input.completed && (!pack || !input.vaultId || enabledWorkflowKeys.length === 0)) {
+      throw new WorkflowControlError("首次设置需要域包、Vault 和至少一个工作流", 400, "workflow-setup-incomplete");
+    }
+    if (input.completed) {
+      if (!pack) {
+        throw new WorkflowControlError("设置使用的域包不存在", 404, "workflow-pack-not-found");
+      }
+      const vaults = await this.options.listVaults(tenantId);
+      const vault = vaults.find((candidate) => candidate.id === input.vaultId);
+      if (!vault || !vault.canRun) {
+        throw new WorkflowControlError("设置使用的 Vault 当前不可运行", 409, "vault-unavailable");
+      }
+      const invalid = enabledWorkflowKeys.some((key) => {
+        const [packId, flowId] = key.split(":");
+        return packId !== pack.id || !pack.flows.some((flow) => flow.id === flowId);
+      });
+      if (invalid) {
+        throw new WorkflowControlError("设置包含未安装或不属于当前域包的工作流", 400, "workflow-not-found");
+      }
+    }
+    const saved = this.store.saveWorkflowSetup({
+      tenantId,
+      completed: input.completed,
+      domainPackId: input.domainPackId,
+      vaultId: input.vaultId,
+      enabledWorkflowKeys,
+      completedAt: input.completedAt,
+    });
+    if (saved.completed) await this.enqueueEnabledWorkflows(tenantId);
+    return {
+      completed: saved.completed,
+      domainPackId: saved.domainPackId,
+      vaultId: saved.vaultId,
+      enabledWorkflowKeys: saved.enabledWorkflowKeys,
+      completedAt: saved.completedAt,
+    };
+  }
+
+  async notifyProvisioned(tenantId: string, vaultId: string): Promise<void> {
+    const setup = this.store.getWorkflowSetup(tenantId);
+    if (!setup?.completed || setup.vaultId !== vaultId) return;
+    await this.enqueueEnabledWorkflows(tenantId);
+    await this.drain();
+  }
+
+  async listRuns(tenantId: string): Promise<WorkflowRunsResponse> {
+    await this.enqueueEnabledWorkflows(tenantId);
+    await this.drain();
+    const runs = this.store.listWorkflowRuns(tenantId).map((run) => projectionForRun(run, this.options.listPacks()));
+    const events = this.store.listWorkflowRuns(tenantId).flatMap((run) => run.events);
+    return {
+      runs,
+      replayCursor: events.reduce((cursor, event) => Math.max(cursor, event.cursor), 0),
+    };
+  }
+
+  async getRun(tenantId: string, runId: string): Promise<WorkflowRunProjection> {
+    const run = this.store.getWorkflowRun(tenantId, runId);
+    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    return projectionForRun(run, this.options.listPacks());
+  }
+
+  async createRun(tenantId: string, input: WorkflowRunRequest): Promise<WorkflowRunProjection> {
+    return this.createAdmittedRun(tenantId, input, "manual");
+  }
+
+  private async createAdmittedRun(
+    tenantId: string,
+    input: WorkflowRunRequest,
+    source: "manual" | "retry",
+  ): Promise<WorkflowRunProjection> {
+    const packs = this.options.listPacks();
+    const selected = flowFromPack(packs, input.packId, input.flowId);
+    if (!selected) throw new WorkflowControlError("工作流或流程不存在", 404, "workflow-not-found");
+    const vaults = await this.options.listVaults(tenantId);
+    const vault = vaults.find((candidate) => candidate.id === input.vaultId);
+    if (!vault) throw new WorkflowControlError("目标 Vault 不属于当前用户", 404, "vault-not-found");
+    if (input.scenario === "quota-denied") {
+      throw new WorkflowControlError("当前 Vault 的工作流配额已用尽", 429, "quota-denied");
+    }
+    if (input.scenario === "vault-unavailable" || !vault.canRun) {
+      throw new WorkflowControlError("目标 Vault 当前不可用", 409, "vault-unavailable");
+    }
+    const runtime = this.loadPinnedRuntime(selected.pack.id, selected.pack.version, selected.pack.digest);
+    const executionClass = executionClassForProgram(runtime.pipeline.program!, selected.flow.id);
+    const now = this.now();
+    const leaseExpiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
+    const run = this.store.createWorkflowRun({
+      tenantId,
+      vaultId: vault.id,
+      vaultName: vault.name,
+      packId: selected.pack.id,
+      packVersion: selected.pack.version,
+      packDigest: selected.pack.digest,
+      flowId: selected.flow.id,
+      source,
+      input: safeInput(input.values),
+      approvalRequired: selected.flow.approvalRequired,
+      executionClass,
+      scenario: input.scenario ?? "normal",
+      capabilityLease: {
+        capabilities: selected.pack.capabilities,
+        expiresAt: leaseExpiresAt,
+      },
+      policy: {
+        decision: "allow",
+        mode: "mock",
+        reasons: ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
+      },
+      dedupeKey: `workflow-manual:${tenantId}:${randomUUID()}`,
+      event: {
+        kind: "submitted",
+        title: "已提交到执行队列",
+        detail: `已固定 ${selected.pack.title}@${selected.pack.version} · ${vault.name}`,
+        tone: "neutral",
+      },
+    });
+    if (this.autoStart) void this.drain();
+    return projectionForRun(run, packs);
+  }
+
+  async approve(tenantId: string, runId: string): Promise<WorkflowRunProjection> {
+    const run = this.store.getWorkflowRun(tenantId, runId);
+    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    if (run.status !== "waiting") {
+      throw new WorkflowControlError("当前运行不在等待确认状态", 409, "approval-not-available");
+    }
+    const updated = this.store.updateWorkflowRun({
+      tenantId,
+      runId,
+      status: "running",
+      progress: Math.max(80, run.progress),
+      output: { ...run.output, approvalGranted: true },
+      event: {
+        kind: "approved",
+        title: "已批准继续运行",
+        detail: "当前用户确认了下一步产出。",
+        tone: "accent",
+      },
+    });
+    if (this.autoStart) void this.drain();
+    return projectionForRun(updated, this.options.listPacks());
+  }
+
+  async cancel(tenantId: string, runId: string): Promise<WorkflowRunProjection> {
+    const updated = this.store.requestWorkflowCancellation(tenantId, runId);
+    if (!updated) {
+      const existing = this.store.getWorkflowRun(tenantId, runId);
+      if (!existing) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+      throw new WorkflowControlError("当前运行不可取消", 409, "cancel-not-available");
+    }
+    return projectionForRun(updated, this.options.listPacks());
+  }
+
+  async retry(tenantId: string, runId: string, scenario: WorkflowMockScenario = "normal"): Promise<WorkflowRunProjection> {
+    const previous = this.store.getWorkflowRun(tenantId, runId);
+    if (!previous) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    if (previous.status !== "failed" && previous.status !== "cancelled") {
+      throw new WorkflowControlError("只有失败或取消的运行可以重试", 409, "retry-not-available");
+    }
+    const next = await this.createAdmittedRun(tenantId, {
+      packId: previous.packId,
+      flowId: previous.flowId,
+      vaultId: previous.vaultId,
+      values: previous.input,
+      scenario,
+    }, "retry");
+    return next;
+  }
+
+  async events(tenantId: string, runId: string, after = 0): Promise<WorkflowEventsResponse> {
+    const run = this.store.getWorkflowRun(tenantId, runId);
+    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    const replay = this.store.listWorkflowEvents(tenantId, runId, after);
+    return {
+      runId,
+      events: replay.events.map((event) => ({
+        id: event.id,
+        sequence: event.sequence,
+        kind: event.kind,
+        title: event.title,
+        detail: event.detail,
+        timestamp: event.timestamp,
+        tone: event.tone,
+      })),
+      nextCursor: replay.nextCursor,
+    };
+  }
+
+  async createSuggestion(tenantId: string, runId: string): Promise<WorkflowSuggestionProjection> {
+    const run = this.store.getWorkflowRun(tenantId, runId);
+    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    if (run.status !== "succeeded") {
+      throw new WorkflowControlError("只有成功运行可以生成 workflow draft", 409, "suggestion-not-ready");
+    }
+    const suggestion = this.store.createWorkflowSuggestion({
+      tenantId,
+      sourceRunId: run.id,
+      packId: run.packId,
+      flowId: run.flowId,
+      status: "suggested",
+      draft: {
+        kind: "workflow-draft",
+        source: "server-confirmed-workflow-run",
+        pack: { id: run.packId, version: run.packVersion, digest: run.packDigest },
+        flowId: run.flowId,
+        calls: run.receipts.map((receipt) => `${receipt.port}@${receipt.version}`),
+      },
+      evidence: [run.id, ...run.events.map((event) => event.id)],
+    });
+    return {
+      id: suggestion.id,
+      sourceRunId: suggestion.sourceRunId,
+      packId: suggestion.packId,
+      flowId: suggestion.flowId,
+      status: suggestion.status,
+      draft: suggestion.draft,
+      evidence: suggestion.evidence,
+      createdAt: suggestion.createdAt,
+      updatedAt: suggestion.updatedAt,
+    };
+  }
+
+  listSuggestions(tenantId: string): WorkflowSuggestionProjection[] {
+    return this.store.listWorkflowSuggestions(tenantId).map((suggestion) => ({
+      id: suggestion.id,
+      sourceRunId: suggestion.sourceRunId,
+      packId: suggestion.packId,
+      flowId: suggestion.flowId,
+      status: suggestion.status,
+      draft: suggestion.draft,
+      evidence: suggestion.evidence,
+      createdAt: suggestion.createdAt,
+      updatedAt: suggestion.updatedAt,
+    }));
+  }
+
+  private loadPinnedRuntime(packId: string, packVersion: string, packDigest: string) {
+    try {
+      return loadVerifiedDomainPackRuntime(
+        this.options.importMetaUrl,
+        packId,
+        packVersion,
+        packDigest,
+      );
+    } catch (error) {
+      throw new WorkflowControlError(
+        error instanceof Error ? error.message : "固定的 Domain Pack 不可用",
+        409,
+        "pack-pin-unavailable",
+      );
+    }
+  }
+
+  private async enqueueEnabledWorkflows(tenantId: string): Promise<void> {
+    const setup = this.store.getWorkflowSetup(tenantId);
+    if (!setup?.completed || !setup.domainPackId || !setup.vaultId) return;
+    const packs = this.options.listPacks();
+    const pack = packs.find((candidate) => candidate.id === setup.domainPackId);
+    if (!pack) return;
+    const vault = (await this.options.listVaults(tenantId)).find((candidate) => candidate.id === setup.vaultId);
+    if (!vault?.canRun) return;
+    const existing = this.store.listWorkflowRuns(tenantId);
+    for (const key of setup.enabledWorkflowKeys) {
+      const [, flowId] = key.split(":");
+      const flow = pack.flows.find((candidate) => candidate.id === flowId);
+      if (!flow) continue;
+      if (existing.some((run) => run.source === "provisioning" && run.packDigest === pack.digest && run.flowId === flow.id && run.vaultId === vault.id)) {
+        continue;
+      }
+      const runtime = this.loadPinnedRuntime(pack.id, pack.version, pack.digest);
+      const executionClass = executionClassForProgram(runtime.pipeline.program!, flow.id);
+      const now = this.now();
+      const created = this.store.createWorkflowRun({
+        tenantId,
+        vaultId: vault.id,
+        vaultName: vault.name,
+        packId: pack.id,
+        packVersion: pack.version,
+        packDigest: pack.digest,
+        flowId: flow.id,
+        source: "provisioning",
+        priority: flow.approvalRequired ? "urgent" : "normal",
+        input: defaultFlowInput(flow),
+        approvalRequired: flow.approvalRequired,
+        executionClass,
+        capabilityLease: {
+          capabilities: pack.capabilities,
+          expiresAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
+        },
+        policy: {
+          decision: "allow",
+          mode: "mock",
+          reasons: ["pack-digest-pinned", "vault-capability-lease", "provisioning-enqueue", "mock-host-only"],
+        },
+        dedupeKey: `workflow-provisioning:${tenantId}:${pack.id}:${pack.version}:${pack.digest}:${flow.id}:${vault.id}`,
+        event: {
+          kind: "submitted",
+          title: "已由首次设置加入执行队列",
+          detail: `已固定 ${pack.title}@${pack.version} · ${vault.name}`,
+          tone: "neutral",
+        },
+      });
+      existing.push(created);
+    }
+  }
+
+  private async drain(): Promise<void> {
+    if (this.closed) return;
+    if (this.drainPromise) return this.drainPromise;
+    this.drainPromise = (async () => {
+      for (;;) {
+        if (this.closed) return;
+        const run = this.store.claimWorkflowRun(this.workerId);
+        if (!run) return;
+        try {
+          await this.execute(run);
+        } catch (error) {
+          this.fail(
+            run,
+            "workflow-worker-error",
+            error instanceof Error ? error.message : "workflow worker failed unexpectedly",
+          );
+        }
+      }
+    })().finally(() => {
+      this.drainPromise = null;
+    });
+    return this.drainPromise;
+  }
+
+  private async execute(run: WorkflowRunRecord): Promise<void> {
+    const lease = this.store.getWorkflowCapabilityLease(run.tenantId, run.capabilityLeaseId);
+    if (!lease || lease.status !== "active" || lease.packDigest !== run.packDigest || lease.vaultId !== run.vaultId) {
+      this.fail(run, "capability-lease-invalid", "运行没有有效的 Vault capability lease");
+      return;
+    }
+    const vault = (await this.options.listVaults(run.tenantId)).find((candidate) => candidate.id === run.vaultId);
+    if (!vault?.canRun) {
+      this.fail(run, "vault-unavailable", "执行前 Vault admission recheck 失败");
+      return;
+    }
+    if (run.scenario === "executor-failure") {
+      this.fail(run, "executor-failure", "mock Vault Host 报告了一个可重试错误");
+      return;
+    }
+    let runtime;
+    try {
+      runtime = this.loadPinnedRuntime(run.packId, run.packVersion, run.packDigest);
+    } catch (error) {
+      this.fail(
+        run,
+        "pack-pin-unavailable",
+        error instanceof Error ? error.message : "固定的 Domain Pack 不可用",
+      );
+      return;
+    }
+    const program = runtime.pipeline.program!;
+    const host = new MockWorkflowRpcHost(run, program);
+    const docStore = new DocStore();
+    const result = program.run(run.flowId, run.input, docStore, host);
+    for (const entry of host.rpcLog) {
+      const receipt = entry.response.receipt;
+      this.store.recordWorkflowEffectReceipt({
+        id: receipt.id,
+        runId: run.id,
+        tenantId: run.tenantId,
+        requestId: receipt.requestId,
+        port: receipt.call.port,
+        version: receipt.call.version,
+        effect: receipt.call.effect,
+        status: receipt.status,
+        input: entry.request.input,
+        output: entry.response.output,
+        ...(entry.response.error ? { errorCode: entry.response.error.code, errorMessage: entry.response.error.message } : {}),
+        createdAt: receipt.startedAt,
+        completedAt: receipt.completedAt,
+      });
+    }
+    if (!result.ok) {
+      this.fail(run, "workflow-execution-failed", result.message);
+      return;
+    }
+    const requiresApproval = run.approvalRequired && run.output.approvalGranted !== true;
+    if (requiresApproval) {
+      this.store.updateWorkflowRun({
+        tenantId: run.tenantId,
+        runId: run.id,
+        status: "waiting",
+        progress: 76,
+        workerId: this.workerId,
+        output: result.outputs ?? {},
+        event: {
+          kind: "approval-required",
+          title: "等待人工确认",
+          detail: "mock FFI 已准备结果，下一步需要用户处理卡片。",
+          tone: "warning",
+        },
+      });
+      return;
+    }
+    const artifact = mockArtifact(run, result.outputs ?? {});
+    this.store.addWorkflowArtifact({
+      ...artifact,
+      runId: run.id,
+      tenantId: run.tenantId,
+      redacted: false,
+      createdAt: this.now().toISOString(),
+    });
+    this.store.updateWorkflowRun({
+      tenantId: run.tenantId,
+      runId: run.id,
+      status: "succeeded",
+      progress: 100,
+      workerId: this.workerId,
+      output: result.outputs ?? {},
+      event: {
+        kind: "succeeded",
+        title: "最终产物已生成",
+        detail: "mock Vault Host 已生成 synthetic artifact。",
+        tone: "success",
+      },
+    });
+  }
+
+  private fail(run: WorkflowRunRecord, code: string, message: string): void {
+    try {
+      this.store.updateWorkflowRun({
+        tenantId: run.tenantId,
+        runId: run.id,
+        status: "failed",
+        progress: run.progress,
+        workerId: this.workerId,
+        errorCode: code,
+        errorMessage: message,
+        event: {
+          kind: "failed",
+          title: "工作流执行失败",
+          detail: message,
+          tone: "warning",
+        },
+      });
+    } catch {
+      // The run lease may have expired; the recovery pass will reconcile it.
+    }
+  }
+}

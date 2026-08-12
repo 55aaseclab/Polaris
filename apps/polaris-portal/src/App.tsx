@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Activity,
+  Bug,
   CheckCircle2,
   ChevronRight,
   Check,
@@ -21,6 +23,7 @@ import {
   Orbit,
   Plus,
   Play,
+  RefreshCw,
   RotateCcw,
   Server,
   Sparkles,
@@ -28,6 +31,7 @@ import {
   ShieldCheck,
   Square,
   Trash2,
+  Terminal,
   UserRound,
   Wifi,
   Workflow,
@@ -122,6 +126,9 @@ export default function App() {
   if (path === "/work" || path === "/work/") {
     return <PortalLayout active="work" session={session} navigate={navigate}><WorkPage navigate={navigate} /></PortalLayout>;
   }
+  if (path === "/debug" || path === "/debug/") {
+    return <PortalLayout active="debug" session={session} navigate={navigate}><DebugPage /></PortalLayout>;
+  }
   const runMatch = path.match(/^\/work\/runs\/([^/]+)$/u);
   if (runMatch) {
     return <PortalLayout active="work" session={session} navigate={navigate}><RunDetailPage runId={decodeURIComponent(runMatch[1])} navigate={navigate} /></PortalLayout>;
@@ -149,13 +156,13 @@ function PortalLayout({
   navigate,
   children,
 }: {
-  active: "work" | "hosts" | "workflows" | "user";
+  active: "work" | "hosts" | "workflows" | "user" | "debug";
   session: ShellSession;
   navigate: (path: string, replace?: boolean) => void;
   children: React.ReactNode;
 }) {
   const signOut = usePortalStore((state) => state.signOut);
-  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "user") => (
+  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "user" | "debug") => (
     <a
       href={path}
       onClick={(event) => { event.preventDefault(); navigate(path); }}
@@ -177,6 +184,7 @@ function PortalLayout({
             {link("/work", "工作", LayoutDashboard, "work")}
             {link("/hosts", "Vaults", Server, "hosts")}
             {link("/settings/workflows", "工作流", Workflow, "workflows")}
+            {link("/debug", "Debug", Bug, "debug")}
             {link("/settings/user", "账户", CircleUserRound, "user")}
           </nav>
           <div className="portal-topbar-actions">
@@ -221,6 +229,10 @@ const WORKFLOW_PRIORITY_LABELS: Record<WorkflowPriority, string> = {
 
 function WorkflowStatusBadge({ status }: { status: WorkflowStatus }) {
   return <Badge variant={WORKFLOW_STATUS_VARIANTS[status]}>{WORKFLOW_STATUS_LABELS[status]}</Badge>;
+}
+
+function workflowVaultStatusLabel(vault: { canRun: boolean }): string {
+  return vault.canRun ? "运行中" : "不可用";
 }
 
 type WorkflowGroup = {
@@ -335,6 +347,141 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
         </div>
       </div>
     </div>
+  );
+}
+
+type DebugRunFilter = "all" | "active" | "waiting" | "terminal";
+
+function DebugPage() {
+  const runs = usePortalStore((state) => state.runs);
+  const packs = usePortalStore((state) => state.packs);
+  const error = usePortalStore((state) => state.error);
+  const replayCursor = usePortalStore((state) => state.replayCursor);
+  const refreshWorkflowRuns = usePortalStore((state) => state.refreshWorkflowRuns);
+  const [filter, setFilter] = useState<DebugRunFilter>("all");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const orderedRuns = useMemo(() => Object.values(runs).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)), [runs]);
+  const counts = useMemo(() => ({
+    all: orderedRuns.length,
+    active: orderedRuns.filter((run) => ["queued", "running"].includes(run.status)).length,
+    waiting: orderedRuns.filter((run) => run.status === "waiting").length,
+    terminal: orderedRuns.filter((run) => ["succeeded", "failed", "cancelled"].includes(run.status)).length,
+    failed: orderedRuns.filter((run) => run.status === "failed").length,
+  }), [orderedRuns]);
+  const visibleRuns = useMemo(() => orderedRuns.filter((run) => {
+    if (filter === "active") return ["queued", "running"].includes(run.status);
+    if (filter === "waiting") return run.status === "waiting";
+    if (filter === "terminal") return ["succeeded", "failed", "cancelled"].includes(run.status);
+    return true;
+  }), [filter, orderedRuns]);
+  useEffect(() => {
+    if (selectedRunId && visibleRuns.some((run) => run.id === selectedRunId)) return;
+    setSelectedRunId(visibleRuns[0]?.id || null);
+  }, [selectedRunId, visibleRuns]);
+  const selectedRun = visibleRuns.find((run) => run.id === selectedRunId) || visibleRuns[0];
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshWorkflowRuns();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  return (
+    <div className="page-stack debug-page">
+      <div className="debug-heading">
+        <div>
+          <p className="eyebrow">RUN INSPECTOR</p>
+          <h1>Debug</h1>
+        </div>
+        <div className="debug-heading-actions">
+          <span className="debug-live-indicator"><span />自动更新</span>
+          <Button variant="ghost" size="icon" aria-label="刷新运行投影" title="刷新运行投影" onClick={() => void refresh()} disabled={refreshing}>
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+          </Button>
+        </div>
+      </div>
+      {error && <ErrorBanner message={error} />}
+      <div className="debug-metrics" aria-label="运行概览">
+        <DebugMetric label="运行" value={counts.all} />
+        <DebugMetric label="活跃" value={counts.active} tone="accent" />
+        <DebugMetric label="待确认" value={counts.waiting} tone="warning" />
+        <DebugMetric label="失败" value={counts.failed} tone="danger" />
+      </div>
+      <div className="debug-filter-row">
+        <div className="filter-tabs debug-tabs" role="tablist" aria-label="运行筛选">
+          {([
+            ["all", "全部", counts.all],
+            ["active", "活跃", counts.active],
+            ["waiting", "待确认", counts.waiting],
+            ["terminal", "结束", counts.terminal],
+          ] as const).map(([value, label, count]) => (
+            <button key={value} type="button" role="tab" aria-selected={filter === value} className={cn("filter-tab", filter === value && "is-active")} onClick={() => setFilter(value)}>
+              {label}<span className="filter-tab-count">{count}</span>
+            </button>
+          ))}
+        </div>
+        <span className="debug-cursor"><Terminal className="h-3.5 w-3.5" />cursor {replayCursor}</span>
+      </div>
+      <div className="debug-layout">
+        <section className="debug-run-list" aria-label="工作流运行列表">
+          {visibleRuns.map((run) => {
+            const pack = packForRun(packs, run);
+            return <button type="button" key={run.id} className={cn("debug-run-row", selectedRun?.id === run.id && "is-selected")} onClick={() => setSelectedRunId(run.id)}>
+              <span className={cn("debug-run-dot", `debug-run-dot-${run.status}`)} />
+              <span className="debug-run-copy"><strong>{run.title}</strong><small>{pack?.title || run.packId} · {run.vaultName}</small></span>
+              <span className="debug-run-state"><WorkflowStatusBadge status={run.status} /><small>{run.progress}%</small></span>
+            </button>;
+          })}
+          {visibleRuns.length === 0 && <div className="empty-state debug-empty"><Bug className="h-6 w-6" /><strong>没有匹配的运行</strong></div>}
+        </section>
+        {selectedRun ? <DebugInspector run={selectedRun} packs={packs} /> : <div className="empty-state debug-inspector-empty"><Activity className="h-7 w-7" /><strong>选择一次运行</strong></div>}
+      </div>
+    </div>
+  );
+}
+
+function DebugMetric({ label, value, tone = "neutral" }: { label: string; value: number; tone?: "neutral" | "accent" | "warning" | "danger" }) {
+  return <div className={cn("debug-metric", `debug-metric-${tone}`)}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function DebugInspector({ run, packs }: { run: MockWorkflowRun; packs: MockDomainPack[] }) {
+  const pack = packForRun(packs, run);
+  const flow = flowForRun(packs, run);
+  const events = [...run.events].sort((left, right) => left.sequence - right.sequence);
+  return (
+    <section className="debug-inspector" aria-label={`${run.title} 调试信息`}>
+      <Card className="debug-focus-card">
+        <CardHeader className="debug-focus-header">
+          <div className="debug-focus-title"><span className="debug-focus-icon"><Activity className="h-4 w-4" /></span><div><CardTitle>{run.title}</CardTitle><CardDescription>{pack?.title || run.packId} · {flow?.title || run.flowId}</CardDescription></div></div>
+          <WorkflowStatusBadge status={run.status} />
+        </CardHeader>
+        <CardContent>
+          <div className="debug-context-line"><span><Server className="h-3.5 w-3.5" />{run.vaultName}</span><span><Clock3 className="h-3.5 w-3.5" />{run.updatedAt.slice(11, 19)}</span><code>{run.id}</code></div>
+          <div className="debug-progress"><div className="debug-progress-bar"><span style={{ width: `${run.progress}%` }} /></div><strong>{run.progress}%</strong></div>
+          <div className="debug-flow-rail" aria-label="运行事件轨道">
+            {events.length === 0 ? <span className="debug-flow-empty">等待事件</span> : events.map((event, index) => <div className="debug-flow-step" key={event.id}>
+              <span className={cn("debug-flow-node", `timeline-dot-${event.tone}`)}>{index + 1}</span>
+              <small>{event.title}</small>
+            </div>)}
+          </div>
+          {run.error && <div className="debug-error"><Bug className="h-4 w-4" /><span><strong>{run.error.code}</strong>{run.error.message}</span></div>}
+        </CardContent>
+      </Card>
+      <Card className="debug-log-card">
+        <CardHeader className="debug-log-header"><div><CardTitle>事件日志</CardTitle><CardDescription>按 sequence 重放</CardDescription></div><Badge variant="outline">{events.length} events</Badge></CardHeader>
+        <CardContent>
+          <div className="debug-log-list">
+            {[...events].reverse().map((event) => <div className="debug-log-entry" key={event.id}>
+              <span className={cn("timeline-dot", `timeline-dot-${event.tone}`)} />
+              <div className="debug-log-copy"><div><strong>{event.title}</strong><time>{event.timestamp.slice(11, 19)}</time></div><p>{event.detail}</p><code>#{event.sequence} · {event.kind}</code></div>
+            </div>)}
+            {events.length === 0 && <p className="empty-copy">暂时没有事件。</p>}
+          </div>
+        </CardContent>
+      </Card>
+    </section>
   );
 }
 
@@ -496,7 +643,7 @@ function WorkflowComposer({
   const enabledFlows = selectedPack?.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(selectedPack.id, flow.id))) || [];
   const [flowId, setFlowId] = useState(enabledFlows[0]?.id || "");
   const selectedFlow = enabledFlows.find((flow) => flow.id === flowId) || enabledFlows[0];
-  const [vaultId, setVaultId] = useState(setup.vaultId || vaults.find((vault) => vault.status === "running")?.id || vaults[0]?.id || "");
+  const [vaultId, setVaultId] = useState(setup.vaultId || vaults.find((vault) => vault.canRun)?.id || vaults[0]?.id || "");
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -565,12 +712,12 @@ function WorkflowComposer({
           <div>
             <label className="field-label" htmlFor="workflow-vault">3 · 选择执行 Vault</label>
             <select id="workflow-vault" className="select" value={vaultId} onChange={(event) => setVaultId(event.target.value)}>
-              {vaults.map((vault) => <option key={vault.id} value={vault.id} disabled={vault.status === "starting"}>{vault.name} · {vault.profile}{vault.kind === "disposable" ? " · 一次性" : ""}</option>)}
+              {vaults.map((vault) => <option key={vault.id} value={vault.id} disabled={!vault.canRun}>{vault.name} · {vault.profile} · {workflowVaultStatusLabel(vault)}{vault.kind === "disposable" ? " · 一次性" : ""}</option>)}
             </select>
             <p className="field-hint"><ShieldCheck className="h-3.5 w-3.5" />输入和执行产物会留在选定的 Vault 中。</p>
           </div>
           {error && <p className="form-error">{error}</p>}
-          <div className="composer-footer"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />当前使用 synthetic services</span><div className="card-actions"><Button type="button" variant="ghost" onClick={onClose}>取消</Button><Button type="submit" disabled={busy || !selectedFlow || !vaultId}>{busy ? <><Loader2 className="h-4 w-4 animate-spin" />提交中</> : <><Play className="h-4 w-4" />提交运行</>}</Button></div></div>
+          <div className="composer-footer"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />确定性 mock host</span><div className="card-actions"><Button type="button" variant="ghost" onClick={onClose}>取消</Button><Button type="submit" disabled={busy || !selectedFlow || !vaultId}>{busy ? <><Loader2 className="h-4 w-4 animate-spin" />提交中</> : <><Play className="h-4 w-4" />提交运行</>}</Button></div></div>
         </form>
       </section>
     </div>
@@ -632,6 +779,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
   };
 
   const next = () => {
+    const selectedVault = vaults.find((vault) => vault.id === vaultId);
     if (step === 0 && !selectedPack) {
       setError("请选择一个 Domain Pack 作为工作场景");
       return;
@@ -640,17 +788,30 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
       setError("请选择一个执行 Vault");
       return;
     }
+    if (step === 1 && selectedVault && !selectedVault.canRun) {
+      setError("请选择一个正在运行的 Vault");
+      return;
+    }
     setError(null);
     setStep((current) => Math.min(2, current + 1));
   };
   const previous = () => setStep((current) => Math.max(0, current - 1));
   const finish = async () => {
-    if (!selectedPack || !vaultId || selectedPackEnabledFlowKeys.length === 0) {
+    const selectedVault = vaults.find((vault) => vault.id === vaultId);
+    if (!selectedPack || !selectedVault || selectedPackEnabledFlowKeys.length === 0) {
       setError("请选择一个 Domain Pack、执行 Vault 和至少一个工作流");
       return;
     }
-    await completeProvisioning({ domainPackId: selectedPack.id, vaultId, enabledWorkflowKeys });
-    navigate("/work", true);
+    if (!selectedVault.canRun) {
+      setError("请选择一个正在运行的 Vault");
+      return;
+    }
+    try {
+      await completeProvisioning({ domainPackId: selectedPack.id, vaultId, enabledWorkflowKeys });
+      navigate("/work", true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
   };
   return (
     <div className="page-stack setup-page">
@@ -659,7 +820,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
         <CardHeader><CardTitle>{step === 0 ? "选择一个 Domain Pack 作为工作场景" : step === 1 ? "任务应该在哪里运行？" : `${selectedPack?.title || "这个 Domain Pack"} · 启用工作流`}</CardTitle></CardHeader>
         <CardContent>
           {step === 0 && <div className="setup-pack-list">{packs.map((pack) => <button type="button" key={pack.id} className={cn("setup-pack-option", domainPackId === pack.id && "is-selected")} onClick={() => chooseDomainPack(pack.id)}><span className={cn("pack-dot", `pack-dot-${pack.accent}`)} /><span><strong>{pack.title}</strong><small>{pack.category} · v{pack.version}</small><em>{pack.flows.length} 个工作流 · {pack.description}</em></span>{domainPackId === pack.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>)}</div>}
-          {step === 1 && <div className="setup-vault-list">{vaults.map((vault) => <button type="button" key={vault.id} className={cn("setup-vault-option", vaultId === vault.id && "is-selected")} onClick={() => setVaultId(vault.id)}><span className="vault-option-icon"><Server className="h-4 w-4" /></span><span><strong>{vault.name}</strong><small>{vault.description}</small><em>{vault.profile} · {vault.capacity}</em></span><span className="vault-option-status">{vault.kind === "disposable" ? "一次性" : vault.status === "running" ? "运行中" : "可启动"}</span>{vaultId === vault.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>)}</div>}
+          {step === 1 && <div className="setup-vault-list">{vaults.map((vault) => { const selectable = vault.canRun; return <button type="button" key={vault.id} disabled={!selectable} className={cn("setup-vault-option", vaultId === vault.id && "is-selected")} onClick={() => setVaultId(vault.id)}><span className="vault-option-icon"><Server className="h-4 w-4" /></span><span><strong>{vault.name}</strong><small>{vault.description}</small><em>{vault.profile} · {vault.capacity}</em></span><span className="vault-option-status">{vault.kind === "disposable" ? "一次性" : workflowVaultStatusLabel(vault)}</span>{vaultId === vault.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>; })}</div>}
           {step === 2 && selectedPack && <div className="setup-flow-list">{groupWorkflowFlows(selectedPack.flows).map((group) => <section className="workflow-group" key={group.id}>{group.id !== "other" && <WorkflowGroupHeading group={group} />}{group.flows.map((flow) => { const enabled = enabledWorkflowKeys.includes(workflowKey(selectedPack.id, flow.id)); return <button type="button" key={flow.id} className={cn("setup-pack-option", enabled && "is-selected")} aria-pressed={enabled} onClick={() => toggleFlow(flow.id)}><span className={cn("pack-dot", `pack-dot-${selectedPack.accent}`)} /><span><strong>{flow.title}</strong><small>{flow.summary}</small><em>{flow.estimate}{flow.approvalRequired ? " · 完成前需确认" : ""}</em></span><span className={cn("toggle-pill", enabled && "is-on")}>{enabled ? "已启用" : "启用"}</span></button>; })}</section>)}</div>}
           {step === 0 && packs.length === 0 && <div className="empty-state">暂无已安装 Domain Pack</div>}
           {step === 2 && !selectedPack && <div className="empty-state">请先选择 Domain Pack</div>}
@@ -750,11 +911,12 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     <div className="page-stack run-detail-page">
       <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />返回工作台</a>
       <section className="run-detail-heading"><div><p className="eyebrow">WORKFLOW RUN · {run.id}</p><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
-      <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />synthetic run projection</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
+      <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />确定性 mock host</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
       <div className="run-detail-layout">
         <div className="run-detail-main">
           <Card><CardHeader><CardTitle>运行进度</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{run.progress}% 完成</span><span>{run.vaultName}</span></div></CardContent></Card>
           <Card><CardHeader><CardTitle>运行轨迹</CardTitle><CardDescription>每个状态都来自同一个 run projection。</CardDescription></CardHeader><CardContent><div className="run-timeline">{run.events.map((event) => <div className="timeline-item" key={event.id}><span className={cn("timeline-dot", `timeline-dot-${event.tone}`)} /><div><div className="timeline-title"><strong>{event.title}</strong><time>{event.timestamp.slice(11, 16)}</time></div><p>{event.detail}</p></div></div>)}</div></CardContent></Card>
+          {run.error && <Card className="run-error-card"><CardHeader><CardTitle>需要处理</CardTitle></CardHeader><CardContent><p>{run.error.message}</p><code>{run.error.code}</code></CardContent></Card>}
           {run.artifacts.length > 0 && <Card><CardHeader><CardTitle>产物</CardTitle><CardDescription>结果仍属于目标 Vault，Portal 只展示受控投影。</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <button type="button" className="artifact-row" key={item.id} onClick={() => setArtifact(item)}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></button>)}</div></CardContent></Card>}
         </div>
         <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>目标 Vault</dt><dd>{run.vaultName}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{run.createdAt.slice(11, 16)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>

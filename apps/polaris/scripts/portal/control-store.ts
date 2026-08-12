@@ -71,6 +71,156 @@ export interface EnqueueJobInput {
   availableAt?: number;
 }
 
+export type WorkflowRunStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type WorkflowRunSource = "manual" | "provisioning" | "retry" | "suggestion";
+export type WorkflowExecutionClass = "pure" | "workspace" | "ai";
+
+export interface WorkflowSetupRecord {
+  tenantId: string;
+  completed: boolean;
+  domainPackId: string | null;
+  vaultId: string | null;
+  enabledWorkflowKeys: string[];
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+export interface WorkflowCapabilityLeaseRecord {
+  id: string;
+  tenantId: string;
+  vaultId: string;
+  packDigest: string;
+  capabilities: string[];
+  status: "active" | "expired" | "revoked";
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowEffectReceiptRecord {
+  id: string;
+  runId: string;
+  tenantId: string;
+  requestId: string;
+  port: string;
+  version: string;
+  effect: string;
+  status: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  completedAt: string;
+}
+
+export interface WorkflowArtifactRecord {
+  id: string;
+  runId: string;
+  tenantId: string;
+  name: string;
+  kind: "report" | "data" | "log";
+  size: string;
+  summary: string;
+  content: string;
+  digest?: string;
+  redacted: boolean;
+  createdAt: string;
+}
+
+export interface WorkflowEventRecord {
+  id: string;
+  cursor: number;
+  runId: string;
+  tenantId: string;
+  sequence: number;
+  kind: string;
+  title: string;
+  detail: string;
+  timestamp: string;
+  tone: "neutral" | "accent" | "warning" | "success";
+}
+
+export interface WorkflowRunRecord {
+  id: string;
+  envelopeId: string;
+  tenantId: string;
+  vaultId: string;
+  vaultName: string;
+  packId: string;
+  packVersion: string;
+  packDigest: string;
+  flowId: string;
+  source: WorkflowRunSource;
+  status: WorkflowRunStatus;
+  priority: "urgent" | "normal" | "low";
+  input: Record<string, string>;
+  progress: number;
+  approvalRequired: boolean;
+  executionClass: WorkflowExecutionClass;
+  scenario: string;
+  capabilityLeaseId: string;
+  capabilityLeaseExpiresAt: string;
+  policy: Record<string, unknown>;
+  output: Record<string, unknown>;
+  errorCode?: string;
+  errorMessage?: string;
+  workerOwner?: string;
+  workerExpiresAt?: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  events: WorkflowEventRecord[];
+  receipts: WorkflowEffectReceiptRecord[];
+  artifacts: WorkflowArtifactRecord[];
+}
+
+export interface CreateWorkflowRunInput {
+  id?: string;
+  envelopeId?: string;
+  tenantId: string;
+  vaultId: string;
+  vaultName: string;
+  packId: string;
+  packVersion: string;
+  packDigest: string;
+  flowId: string;
+  source: WorkflowRunSource;
+  priority?: "urgent" | "normal" | "low";
+  input: Record<string, string>;
+  approvalRequired: boolean;
+  executionClass: WorkflowExecutionClass;
+  scenario?: string;
+  capabilityLease: {
+    id?: string;
+    capabilities: string[];
+    expiresAt: string;
+  };
+  policy?: Record<string, unknown>;
+  dedupeKey: string;
+  event: Omit<WorkflowEventRecord, "id" | "cursor" | "runId" | "tenantId" | "sequence" | "timestamp"> & { timestamp?: string };
+}
+
+export interface WorkflowSuggestionRecord {
+  id: string;
+  tenantId: string;
+  sourceRunId: string;
+  packId: string;
+  flowId: string;
+  status: "suggested" | "accepted" | "dismissed";
+  draft: Record<string, unknown>;
+  evidence: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface IdempotencyResponse {
   statusCode: number;
   contentType: string;
@@ -260,6 +410,168 @@ function rowToJob(row: SqlRow): DurableJob {
   };
 }
 
+function parseStringArray(value: unknown): string[] {
+  const parsed = parseOptionalPayload(value);
+  if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+  try {
+    const raw = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(raw) ? raw.map((item) => String(item)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseRecord(value: unknown): Record<string, unknown> {
+  return parsePayload(value);
+}
+
+function rowToWorkflowSetup(row: SqlRow): WorkflowSetupRecord {
+  return {
+    tenantId: String(row.tenant_id),
+    completed: Number(row.completed ?? 0) === 1,
+    domainPackId: asOptionalString(row.domain_pack_id) ?? null,
+    vaultId: asOptionalString(row.vault_id) ?? null,
+    enabledWorkflowKeys: parseStringArray(row.enabled_workflow_keys_json),
+    completedAt: asOptionalString(row.completed_at) ?? null,
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowToWorkflowLease(row: SqlRow): WorkflowCapabilityLeaseRecord {
+  const status = String(row.status);
+  if (status !== "active" && status !== "expired" && status !== "revoked") {
+    throw new Error("Workflow capability lease has an invalid status");
+  }
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    vaultId: String(row.vault_id),
+    packDigest: String(row.pack_digest),
+    capabilities: parseStringArray(row.capabilities_json),
+    status,
+    expiresAt: String(row.expires_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowToWorkflowEvent(row: SqlRow): WorkflowEventRecord {
+  const tone = String(row.tone);
+  if (tone !== "neutral" && tone !== "accent" && tone !== "warning" && tone !== "success") {
+    throw new Error("Workflow event has an invalid tone");
+  }
+  return {
+    id: String(row.id),
+    cursor: Number(row.cursor),
+    runId: String(row.run_id),
+    tenantId: String(row.tenant_id),
+    sequence: Number(row.sequence),
+    kind: String(row.kind),
+    title: String(row.title),
+    detail: String(row.detail),
+    timestamp: String(row.timestamp),
+    tone,
+  };
+}
+
+function rowToWorkflowReceipt(row: SqlRow): WorkflowEffectReceiptRecord {
+  return {
+    id: String(row.id),
+    runId: String(row.run_id),
+    tenantId: String(row.tenant_id),
+    requestId: String(row.request_id),
+    port: String(row.port),
+    version: String(row.version),
+    effect: String(row.effect),
+    status: String(row.status),
+    input: parseRecord(row.input_json),
+    output: parseRecord(row.output_json),
+    errorCode: asOptionalString(row.error_code),
+    errorMessage: asOptionalString(row.error_message),
+    createdAt: String(row.created_at),
+    completedAt: String(row.completed_at),
+  };
+}
+
+function rowToWorkflowArtifact(row: SqlRow): WorkflowArtifactRecord {
+  const kind = String(row.kind);
+  if (kind !== "report" && kind !== "data" && kind !== "log") {
+    throw new Error("Workflow artifact has an invalid kind");
+  }
+  return {
+    id: String(row.id),
+    runId: String(row.run_id),
+    tenantId: String(row.tenant_id),
+    name: String(row.name),
+    kind,
+    size: String(row.size),
+    summary: String(row.summary),
+    content: String(row.content),
+    digest: asOptionalString(row.digest),
+    redacted: Number(row.redacted ?? 0) === 1,
+    createdAt: String(row.created_at),
+  };
+}
+
+function rowToWorkflowRun(
+  row: SqlRow,
+  events: WorkflowEventRecord[],
+  receipts: WorkflowEffectReceiptRecord[],
+  artifacts: WorkflowArtifactRecord[],
+): WorkflowRunRecord {
+  const status = String(row.status);
+  const source = String(row.source);
+  const priority = String(row.priority);
+  const executionClass = String(row.execution_class);
+  if (!['queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled'].includes(status)) {
+    throw new Error('Workflow run has an invalid status');
+  }
+  if (!['manual', 'provisioning', 'retry', 'suggestion'].includes(source)) {
+    throw new Error('Workflow run has an invalid source');
+  }
+  if (!['urgent', 'normal', 'low'].includes(priority)) {
+    throw new Error('Workflow run has an invalid priority');
+  }
+  if (!['pure', 'workspace', 'ai'].includes(executionClass)) {
+    throw new Error('Workflow run has an invalid execution class');
+  }
+  return {
+    id: String(row.id),
+    envelopeId: String(row.envelope_id),
+    tenantId: String(row.tenant_id),
+    vaultId: String(row.vault_id),
+    vaultName: String(row.vault_name),
+    packId: String(row.pack_id),
+    packVersion: String(row.pack_version),
+    packDigest: String(row.pack_digest),
+    flowId: String(row.flow_id),
+    source: source as WorkflowRunSource,
+    status: status as WorkflowRunStatus,
+    priority: priority as WorkflowRunRecord['priority'],
+    input: Object.fromEntries(
+      Object.entries(parseRecord(row.input_json)).map(([key, value]) => [key, String(value ?? '')]),
+    ),
+    progress: Number(row.progress),
+    approvalRequired: Number(row.approval_required ?? 0) === 1,
+    executionClass: executionClass as WorkflowExecutionClass,
+    scenario: String(row.scenario),
+    capabilityLeaseId: String(row.capability_lease_id),
+    capabilityLeaseExpiresAt: String(row.capability_lease_expires_at),
+    policy: parseRecord(row.policy_json),
+    output: parseRecord(row.output_json),
+    errorCode: asOptionalString(row.error_code),
+    errorMessage: asOptionalString(row.error_message),
+    workerOwner: asOptionalString(row.worker_owner),
+    workerExpiresAt: row.worker_expires_at == null ? undefined : Number(row.worker_expires_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    completedAt: asOptionalString(row.completed_at),
+    events,
+    receipts,
+    artifacts,
+  };
+}
+
 function rowToQuotaReservation(row: SqlRow): QuotaReservation {
   const status = String(row.status);
   if (
@@ -385,6 +697,13 @@ function ensureIdempotencyResponseColumns(db: DatabaseSync): void {
   }
 }
 
+function ensureWorkflowRunColumns(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(workflow_runs)").all() as SqlRow[];
+  if (columns.length > 0 && !columns.some((column) => String(column.name) === "available_at")) {
+    db.exec("ALTER TABLE workflow_runs ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 /**
  * Durable control-plane state for one Polaris installation.
  *
@@ -447,6 +766,160 @@ export class PolarisControlStore {
 
       CREATE INDEX IF NOT EXISTS idx_jobs_claim
         ON jobs(status, available_at, lease_expires_at, created_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_setups (
+        tenant_id TEXT PRIMARY KEY,
+        completed INTEGER NOT NULL DEFAULT 0,
+        domain_pack_id TEXT,
+        vault_id TEXT,
+        enabled_workflow_keys_json TEXT NOT NULL DEFAULT '[]',
+        completed_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_envelopes (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        run_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_capability_leases (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        tenant_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        pack_digest TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'revoked')),
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES workflow_envelopes(run_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL UNIQUE,
+        tenant_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        vault_name TEXT NOT NULL,
+        pack_id TEXT NOT NULL,
+        pack_version TEXT NOT NULL,
+        pack_digest TEXT NOT NULL,
+        flow_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('manual', 'provisioning', 'retry', 'suggestion')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')),
+        priority TEXT NOT NULL CHECK (priority IN ('urgent', 'normal', 'low')),
+        input_json TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+        approval_required INTEGER NOT NULL DEFAULT 0,
+        execution_class TEXT NOT NULL CHECK (execution_class IN ('pure', 'workspace', 'ai')),
+        scenario TEXT NOT NULL DEFAULT 'normal',
+        capability_lease_id TEXT NOT NULL,
+        capability_lease_expires_at TEXT NOT NULL,
+        policy_json TEXT NOT NULL DEFAULT '{}',
+        output_json TEXT NOT NULL DEFAULT '{}',
+        error_code TEXT,
+        error_message TEXT,
+        worker_owner TEXT,
+        worker_expires_at INTEGER,
+        available_at INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (envelope_id) REFERENCES workflow_envelopes(id),
+        FOREIGN KEY (capability_lease_id) REFERENCES workflow_capability_leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_claim
+        ON workflow_runs(status, worker_expires_at, created_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_scope
+        ON workflow_runs(tenant_id, updated_at, created_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_events (
+        id TEXT NOT NULL UNIQUE,
+        cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        tone TEXT NOT NULL CHECK (tone IN ('neutral', 'accent', 'warning', 'success')),
+        UNIQUE(run_id, sequence),
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_events_replay
+        ON workflow_events(tenant_id, cursor);
+
+      CREATE TABLE IF NOT EXISTS workflow_outbox (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
+        tenant_id TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'delivered')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_outbox_claim
+        ON workflow_outbox(status, available_at, created_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_effect_receipts (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        request_id TEXT NOT NULL UNIQUE,
+        port TEXT NOT NULL,
+        version TEXT NOT NULL,
+        effect TEXT NOT NULL,
+        status TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        output_json TEXT NOT NULL,
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_artifacts (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('report', 'data', 'log')),
+        size TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        content TEXT NOT NULL,
+        digest TEXT,
+        redacted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_suggestions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        source_run_id TEXT NOT NULL,
+        pack_id TEXT NOT NULL,
+        flow_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('suggested', 'accepted', 'dismissed')),
+        draft_json TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (source_run_id) REFERENCES workflow_runs(id)
+      );
 
       CREATE TABLE IF NOT EXISTS wanghai_restore_activation_state (
         tenant_id TEXT NOT NULL,
@@ -550,6 +1023,7 @@ export class PolarisControlStore {
     ensureJobCancellationColumn(db);
     ensureJobResultColumn(db);
     ensureIdempotencyResponseColumns(db);
+    ensureWorkflowRunColumns(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
   }
@@ -560,6 +1034,516 @@ export class PolarisControlStore {
 
   close(): void {
     this.db.close();
+  }
+
+  getWorkflowSetup(tenantId: string): WorkflowSetupRecord | null {
+    const tenant = tenantId.trim();
+    if (!tenant) throw new Error("A workflow setup tenant ID is required");
+    const row = this.db.prepare(
+      "SELECT * FROM workflow_setups WHERE tenant_id = ?",
+    ).get(tenant) as SqlRow | undefined;
+    return row ? rowToWorkflowSetup(row) : null;
+  }
+
+  saveWorkflowSetup(input: {
+    tenantId: string;
+    completed: boolean;
+    domainPackId?: string | null;
+    vaultId?: string | null;
+    enabledWorkflowKeys: string[];
+    completedAt?: string | null;
+  }): WorkflowSetupRecord {
+    const tenantId = input.tenantId.trim();
+    const domainPackId = input.domainPackId?.trim() || null;
+    const vaultId = input.vaultId?.trim() || null;
+    const enabledWorkflowKeys = [...new Set(input.enabledWorkflowKeys.map((key) => key.trim()).filter(Boolean))];
+    if (!tenantId || enabledWorkflowKeys.length > 512) {
+      throw new Error("Workflow setup is invalid");
+    }
+    const encodedKeys = boundedJson(enabledWorkflowKeys as unknown as Record<string, unknown>);
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_setups (
+        tenant_id, completed, domain_pack_id, vault_id,
+        enabled_workflow_keys_json, completed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(tenant_id) DO UPDATE SET
+        completed = excluded.completed,
+        domain_pack_id = excluded.domain_pack_id,
+        vault_id = excluded.vault_id,
+        enabled_workflow_keys_json = excluded.enabled_workflow_keys_json,
+        completed_at = excluded.completed_at,
+        updated_at = excluded.updated_at
+    `).run(
+      tenantId,
+      input.completed ? 1 : 0,
+      domainPackId,
+      vaultId,
+      encodedKeys,
+      input.completedAt?.trim() || (input.completed ? now : null),
+      now,
+    );
+    const row = this.db.prepare(
+      "SELECT * FROM workflow_setups WHERE tenant_id = ?",
+    ).get(tenantId) as SqlRow | undefined;
+    if (!row) throw new Error("Workflow setup disappeared after save");
+    return rowToWorkflowSetup(row);
+  }
+
+  createWorkflowRun(input: CreateWorkflowRunInput): WorkflowRunRecord {
+    const tenantId = input.tenantId.trim();
+    const vaultId = input.vaultId.trim();
+    const dedupeKey = input.dedupeKey.trim();
+    const runId = input.id?.trim() || `run-${randomUUID()}`;
+    const envelopeId = input.envelopeId?.trim() || `envelope-${randomUUID()}`;
+    const leaseId = input.capabilityLease.id?.trim() || `lease-${randomUUID()}`;
+    const now = nowIso();
+    if (!tenantId || !vaultId || !dedupeKey || !input.packId.trim() || !input.flowId.trim()) {
+      throw new Error("Workflow run identity is incomplete");
+    }
+    const payload = boundedJson({
+      packId: input.packId,
+      packVersion: input.packVersion,
+      packDigest: input.packDigest,
+      flowId: input.flowId,
+      vaultId,
+      source: input.source,
+    });
+    const inputJson = boundedJson(input.input as unknown as Record<string, unknown>);
+    const policyJson = boundedJson(input.policy);
+    const capabilitiesJson = boundedJson(input.capabilityLease.capabilities as unknown as Record<string, unknown>);
+    let created = false;
+    this.transaction(() => {
+      const existing = this.db.prepare(`
+        SELECT id FROM workflow_envelopes WHERE dedupe_key = ?
+      `).get(dedupeKey) as SqlRow | undefined;
+      if (existing) return;
+
+      this.db.prepare(`
+        INSERT INTO workflow_envelopes
+          (id, tenant_id, run_id, kind, dedupe_key, payload_json, created_at)
+        VALUES (?, ?, ?, 'workflow-run', ?, ?, ?)
+      `).run(envelopeId, tenantId, runId, dedupeKey, payload, now);
+      this.db.prepare(`
+        INSERT INTO workflow_capability_leases
+          (id, run_id, tenant_id, vault_id, pack_digest, capabilities_json,
+           status, expires_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+      `).run(
+        leaseId,
+        runId,
+        tenantId,
+        vaultId,
+        input.packDigest,
+        capabilitiesJson,
+        input.capabilityLease.expiresAt,
+        now,
+        now,
+      );
+      this.db.prepare(`
+        INSERT INTO workflow_runs (
+          id, envelope_id, tenant_id, vault_id, vault_name, pack_id,
+          pack_version, pack_digest, flow_id, source, status, priority,
+          input_json, progress, approval_required, execution_class, scenario,
+          capability_lease_id, capability_lease_expires_at, policy_json,
+          output_json, available_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)
+      `).run(
+        runId,
+        envelopeId,
+        tenantId,
+        vaultId,
+        input.vaultName,
+        input.packId,
+        input.packVersion,
+        input.packDigest,
+        input.flowId,
+        input.source,
+        input.priority ?? "normal",
+        inputJson,
+        input.approvalRequired ? 1 : 0,
+        input.executionClass,
+        input.scenario ?? "normal",
+        leaseId,
+        input.capabilityLease.expiresAt,
+        policyJson,
+        Date.now(),
+        now,
+        now,
+      );
+      this.appendWorkflowEventWithinTransaction({
+        runId,
+        tenantId,
+        event: input.event,
+        timestamp: input.event.timestamp ?? now,
+      });
+      created = true;
+    });
+    const run = this.getWorkflowRun(tenantId, created ? runId : this.workflowRunIdForDedupe(dedupeKey));
+    if (!run) throw new Error("Workflow run disappeared after create");
+    return run;
+  }
+
+  private workflowRunIdForDedupe(dedupeKey: string): string {
+    const row = this.db.prepare(`
+      SELECT run_id FROM workflow_envelopes WHERE dedupe_key = ?
+    `).get(dedupeKey) as SqlRow | undefined;
+    if (!row) throw new Error("Workflow run dedupe record disappeared");
+    return String(row.run_id);
+  }
+
+  claimWorkflowRun(workerId: string, leaseMs = 60_000): WorkflowRunRecord | null {
+    const owner = workerId.trim();
+    if (!owner) throw new Error("A workflow worker ID is required");
+    const now = Date.now();
+    let claimedId: string | null = null;
+    this.transaction(() => {
+      this.db.prepare(`
+        UPDATE workflow_runs
+        SET status = 'queued', worker_owner = NULL, worker_expires_at = NULL,
+            updated_at = ?
+        WHERE status = 'running' AND worker_expires_at IS NOT NULL
+          AND worker_expires_at <= ?
+      `).run(nowIso(), now);
+      const row = this.db.prepare(`
+        SELECT id FROM workflow_runs
+        WHERE (status = 'queued' OR (status = 'running' AND worker_owner IS NULL))
+          AND available_at <= ?
+        ORDER BY created_at ASC
+        LIMIT 1
+      `).get(now) as SqlRow | undefined;
+      if (!row) return;
+      claimedId = String(row.id);
+      this.db.prepare(`
+        UPDATE workflow_runs
+        SET status = 'running', worker_owner = ?, worker_expires_at = ?,
+            updated_at = ?
+        WHERE id = ? AND (status = 'queued' OR (status = 'running' AND worker_owner IS NULL))
+      `).run(owner, now + Math.max(1_000, leaseMs), nowIso(), claimedId);
+    });
+    return claimedId ? this.getWorkflowRunById(claimedId) : null;
+  }
+
+  heartbeatWorkflowRun(runId: string, workerId: string, leaseMs = 60_000): boolean {
+    const result = this.db.prepare(`
+      UPDATE workflow_runs
+      SET worker_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'running' AND worker_owner = ?
+        AND worker_expires_at > ?
+    `).run(Date.now() + Math.max(1_000, leaseMs), nowIso(), runId, workerId, Date.now());
+    return result.changes === 1;
+  }
+
+  getWorkflowRun(tenantId: string, runId: string): WorkflowRunRecord | null {
+    const tenant = tenantId.trim();
+    const id = runId.trim();
+    if (!tenant || !id) return null;
+    const row = this.db.prepare(`
+      SELECT * FROM workflow_runs WHERE tenant_id = ? AND id = ?
+    `).get(tenant, id) as SqlRow | undefined;
+    return row ? this.readWorkflowRun(row) : null;
+  }
+
+  private getWorkflowRunById(runId: string): WorkflowRunRecord | null {
+    const row = this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) as SqlRow | undefined;
+    return row ? this.readWorkflowRun(row) : null;
+  }
+
+  private readWorkflowRun(row: SqlRow): WorkflowRunRecord {
+    const runId = String(row.id);
+    const events = (this.db.prepare(`
+      SELECT * FROM workflow_events WHERE run_id = ? ORDER BY sequence DESC
+    `).all(runId) as SqlRow[]).map(rowToWorkflowEvent);
+    const receipts = (this.db.prepare(`
+      SELECT * FROM workflow_effect_receipts WHERE run_id = ? ORDER BY created_at ASC
+    `).all(runId) as SqlRow[]).map(rowToWorkflowReceipt);
+    const artifacts = (this.db.prepare(`
+      SELECT * FROM workflow_artifacts WHERE run_id = ? ORDER BY created_at ASC
+    `).all(runId) as SqlRow[]).map(rowToWorkflowArtifact);
+    return rowToWorkflowRun(row, events, receipts, artifacts);
+  }
+
+  listWorkflowRuns(tenantId: string): WorkflowRunRecord[] {
+    const tenant = tenantId.trim();
+    if (!tenant) throw new Error("A workflow run tenant ID is required");
+    const rows = this.db.prepare(`
+      SELECT * FROM workflow_runs WHERE tenant_id = ?
+      ORDER BY updated_at DESC, created_at DESC
+    `).all(tenant) as SqlRow[];
+    return rows.map((row) => this.readWorkflowRun(row));
+  }
+
+  listWorkflowEvents(tenantId: string, runId: string, after = 0): { events: WorkflowEventRecord[]; nextCursor: number } {
+    const tenant = tenantId.trim();
+    const id = runId.trim();
+    const cursor = Number.isSafeInteger(after) && after >= 0 ? after : 0;
+    if (!tenant || !id) throw new Error("A workflow event scope is required");
+    const events = (this.db.prepare(`
+      SELECT * FROM workflow_events
+      WHERE tenant_id = ? AND run_id = ? AND cursor > ?
+      ORDER BY cursor ASC
+    `).all(tenant, id, cursor) as SqlRow[]).map(rowToWorkflowEvent);
+    const row = this.db.prepare(`
+      SELECT COALESCE(MAX(cursor), 0) AS cursor
+      FROM workflow_events WHERE tenant_id = ?
+    `).get(tenant) as SqlRow | undefined;
+    return { events, nextCursor: Number(row?.cursor ?? 0) };
+  }
+
+  updateWorkflowRun(input: {
+    tenantId: string;
+    runId: string;
+    status: WorkflowRunStatus;
+    progress: number;
+    event: Omit<WorkflowEventRecord, "id" | "cursor" | "runId" | "tenantId" | "sequence" | "timestamp"> & { timestamp?: string };
+    workerId?: string;
+    output?: Record<string, unknown>;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): WorkflowRunRecord {
+    const tenant = input.tenantId.trim();
+    const runId = input.runId.trim();
+    const progress = Math.max(0, Math.min(100, Math.floor(input.progress)));
+    const now = nowIso();
+    let updated = false;
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT status, worker_owner FROM workflow_runs WHERE tenant_id = ? AND id = ?
+      `).get(tenant, runId) as SqlRow | undefined;
+      if (!row) throw new Error("Workflow run not found");
+      if (input.workerId && String(row.worker_owner ?? "") !== input.workerId) {
+        throw new Error("Workflow worker lease is not held");
+      }
+      const terminal = input.status === "succeeded" || input.status === "failed" || input.status === "cancelled";
+      const result = this.db.prepare(`
+        UPDATE workflow_runs
+        SET status = ?, progress = ?, output_json = COALESCE(?, output_json),
+            error_code = ?, error_message = ?,
+            worker_owner = CASE WHEN ? THEN NULL ELSE worker_owner END,
+            worker_expires_at = CASE WHEN ? THEN NULL ELSE worker_expires_at END,
+            updated_at = ?, completed_at = CASE WHEN ? THEN ? ELSE completed_at END
+        WHERE tenant_id = ? AND id = ?
+      `).run(
+        input.status,
+        progress,
+        input.output === undefined ? null : boundedJson(input.output),
+        input.errorCode?.trim() || null,
+        input.errorMessage?.trim() || null,
+        terminal || input.status === "waiting" ? 1 : 0,
+        terminal || input.status === "waiting" ? 1 : 0,
+        now,
+        terminal ? 1 : 0,
+        terminal ? now : null,
+        tenant,
+        runId,
+      );
+      if (result.changes !== 1) throw new Error("Workflow run update did not apply");
+      this.appendWorkflowEventWithinTransaction({
+        runId,
+        tenantId: tenant,
+        event: input.event,
+        timestamp: input.event.timestamp ?? now,
+      });
+      updated = true;
+    });
+    if (!updated) throw new Error("Workflow run update did not complete");
+    const run = this.getWorkflowRun(tenant, runId);
+    if (!run) throw new Error("Workflow run disappeared after update");
+    return run;
+  }
+
+  requestWorkflowCancellation(tenantId: string, runId: string): WorkflowRunRecord | null {
+    const tenant = tenantId.trim();
+    const id = runId.trim();
+    const now = nowIso();
+    let changed = false;
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT status FROM workflow_runs WHERE tenant_id = ? AND id = ?
+      `).get(tenant, id) as SqlRow | undefined;
+      if (!row || !['queued', 'running', 'waiting'].includes(String(row.status))) return;
+      const result = this.db.prepare(`
+        UPDATE workflow_runs
+        SET status = 'cancelled', progress = CASE WHEN progress < 100 THEN progress ELSE 100 END,
+            worker_owner = NULL, worker_expires_at = NULL,
+            error_code = 'workflow-cancelled', error_message = 'workflow cancelled by user',
+            updated_at = ?, completed_at = ?
+        WHERE tenant_id = ? AND id = ?
+      `).run(now, now, tenant, id);
+      if (result.changes !== 1) return;
+      this.appendWorkflowEventWithinTransaction({
+        runId: id,
+        tenantId: tenant,
+        event: {
+          kind: 'cancelled',
+          title: '运行已取消',
+          detail: '没有新的执行动作会被提交。',
+          tone: 'warning',
+        },
+        timestamp: now,
+      });
+      changed = true;
+    });
+    return changed ? this.getWorkflowRun(tenant, id) : null;
+  }
+
+  getWorkflowCapabilityLease(tenantId: string, leaseId: string): WorkflowCapabilityLeaseRecord | null {
+    const tenant = tenantId.trim();
+    const id = leaseId.trim();
+    if (!tenant || !id) return null;
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE workflow_capability_leases
+      SET status = 'expired', updated_at = ?
+      WHERE tenant_id = ? AND id = ? AND status = 'active' AND expires_at <= ?
+    `).run(nowIso(), tenant, id, new Date(now).toISOString());
+    const row = this.db.prepare(`
+      SELECT * FROM workflow_capability_leases WHERE tenant_id = ? AND id = ?
+    `).get(tenant, id) as SqlRow | undefined;
+    return row ? rowToWorkflowLease(row) : null;
+  }
+
+  revokeWorkflowCapabilityLease(tenantId: string, leaseId: string): boolean {
+    const result = this.db.prepare(`
+      UPDATE workflow_capability_leases
+      SET status = 'revoked', updated_at = ?
+      WHERE tenant_id = ? AND id = ? AND status = 'active'
+    `).run(nowIso(), tenantId.trim(), leaseId.trim());
+    return result.changes === 1;
+  }
+
+  recordWorkflowEffectReceipt(receipt: WorkflowEffectReceiptRecord): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO workflow_effect_receipts (
+        id, run_id, tenant_id, request_id, port, version, effect, status,
+        input_json, output_json, error_code, error_message, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      receipt.id,
+      receipt.runId,
+      receipt.tenantId,
+      receipt.requestId,
+      receipt.port,
+      receipt.version,
+      receipt.effect,
+      receipt.status,
+      boundedJson(receipt.input),
+      boundedJson(receipt.output),
+      receipt.errorCode ?? null,
+      receipt.errorMessage ?? null,
+      receipt.createdAt,
+      receipt.completedAt,
+    );
+  }
+
+  addWorkflowArtifact(artifact: WorkflowArtifactRecord): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO workflow_artifacts (
+        id, run_id, tenant_id, name, kind, size, summary, content, digest,
+        redacted, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      artifact.id,
+      artifact.runId,
+      artifact.tenantId,
+      artifact.name,
+      artifact.kind,
+      artifact.size,
+      artifact.summary,
+      artifact.content,
+      artifact.digest ?? null,
+      artifact.redacted ? 1 : 0,
+      artifact.createdAt,
+    );
+  }
+
+  createWorkflowSuggestion(input: Omit<WorkflowSuggestionRecord, "id" | "createdAt" | "updatedAt">): WorkflowSuggestionRecord {
+    const id = `suggestion-${randomUUID()}`;
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO workflow_suggestions (
+        id, tenant_id, source_run_id, pack_id, flow_id, status,
+        draft_json, evidence_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.tenantId,
+      input.sourceRunId,
+      input.packId,
+      input.flowId,
+      input.status,
+      boundedJson(input.draft),
+      boundedJson(input.evidence as unknown as Record<string, unknown>),
+      now,
+      now,
+    );
+    return { ...input, id, createdAt: now, updatedAt: now };
+  }
+
+  listWorkflowSuggestions(tenantId: string): WorkflowSuggestionRecord[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM workflow_suggestions WHERE tenant_id = ?
+      ORDER BY updated_at DESC
+    `).all(tenantId.trim()) as SqlRow[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      tenantId: String(row.tenant_id),
+      sourceRunId: String(row.source_run_id),
+      packId: String(row.pack_id),
+      flowId: String(row.flow_id),
+      status: String(row.status) as WorkflowSuggestionRecord['status'],
+      draft: parseRecord(row.draft_json),
+      evidence: parseStringArray(row.evidence_json),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    }));
+  }
+
+  private appendWorkflowEventWithinTransaction(input: {
+    runId: string;
+    tenantId: string;
+    event: Omit<WorkflowEventRecord, "id" | "cursor" | "runId" | "tenantId" | "sequence" | "timestamp">;
+    timestamp: string;
+  }): WorkflowEventRecord {
+    const previous = this.db.prepare(`
+      SELECT COALESCE(MAX(sequence), 0) AS sequence
+      FROM workflow_events WHERE run_id = ?
+    `).get(input.runId) as SqlRow | undefined;
+    const sequence = Number(previous?.sequence ?? 0) + 1;
+    const id = `workflow-event-${randomUUID()}`;
+    this.db.prepare(`
+      INSERT INTO workflow_events (
+        id, run_id, tenant_id, sequence, kind, title, detail, timestamp, tone
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      input.runId,
+      input.tenantId,
+      sequence,
+      input.event.kind,
+      input.event.title,
+      input.event.detail,
+      input.timestamp,
+      input.event.tone,
+    );
+    const row = this.db.prepare(`
+      SELECT * FROM workflow_events WHERE id = ?
+    `).get(id) as SqlRow | undefined;
+    if (!row) throw new Error("Workflow event disappeared after append");
+    const event = rowToWorkflowEvent(row);
+    this.db.prepare(`
+      INSERT INTO workflow_outbox (
+        id, event_id, tenant_id, topic, payload_json, status, available_at, created_at
+      ) VALUES (?, ?, ?, 'workflow.event', ?, 'queued', ?, ?)
+    `).run(
+      `outbox-${randomUUID()}`,
+      event.id,
+      input.tenantId,
+      boundedJson(event as unknown as Record<string, unknown>),
+      Date.now(),
+      input.timestamp,
+    );
+    return event;
   }
 
   redeemGatewayTicket(ticketId: string, expiresAt: number, now = Math.floor(Date.now() / 1000)): boolean {

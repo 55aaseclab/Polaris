@@ -1,105 +1,38 @@
+import type {
+  WorkflowArtifact,
+  WorkflowDomainPackProjection,
+  WorkflowEvent,
+  WorkflowEventTone,
+  WorkflowFlowProjection,
+  WorkflowPriority as ShellWorkflowPriority,
+  WorkflowRunProjection,
+  WorkflowStatus as ShellWorkflowStatus,
+  WorkflowVaultProjection,
+  WorkflowWorkCard,
+} from "@polaris/polaris-shell";
+
 export type WorkflowStatus =
-  | "queued"
-  | "running"
-  | "waiting"
-  | "succeeded"
-  | "failed"
-  | "cancelled";
+  ShellWorkflowStatus;
 
-export type WorkflowPriority = "urgent" | "normal" | "low";
+export type WorkflowPriority = ShellWorkflowPriority;
 
-export type WorkflowField = {
-  id: string;
-  label: string;
-  type: "text" | "textarea";
-  placeholder: string;
-  required: boolean;
-};
+export type WorkflowField = WorkflowFlowProjection["fields"][number];
 
-export type MockWorkflowFlow = {
-  id: string;
-  title: string;
-  summary: string;
-  estimate: string;
-  approvalRequired: boolean;
-  groupId?: string;
-  groupTitle?: string;
-  fields: WorkflowField[];
-};
+export type MockWorkflowFlow = WorkflowFlowProjection;
 
-export type MockDomainPack = {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  version: string;
-  digest: string;
-  capabilities: string[];
-  accent: "green" | "blue" | "amber";
-  flows: MockWorkflowFlow[];
-};
+export type MockDomainPack = WorkflowDomainPackProjection;
 
-export type MockWorkflowVault = {
-  id: string;
-  name: string;
-  description: string;
-  kind: "existing" | "disposable";
-  status: "running" | "ready" | "starting";
-  profile: string;
-  capacity: string;
-};
+export type MockWorkflowVault = WorkflowVaultProjection;
 
-export type WorkflowEventTone = "neutral" | "accent" | "warning" | "success";
+export type { WorkflowEventTone };
 
-export type MockWorkflowEvent = {
-  id: string;
-  title: string;
-  detail: string;
-  timestamp: string;
-  tone: WorkflowEventTone;
-};
+export type MockWorkflowEvent = WorkflowEvent;
 
-export type MockWorkflowArtifact = {
-  id: string;
-  name: string;
-  kind: "report" | "data" | "log";
-  size: string;
-  summary: string;
-  content: string;
-};
+export type MockWorkflowArtifact = WorkflowArtifact;
 
-export type MockWorkflowRun = {
-  id: string;
-  packId: string;
-  flowId: string;
-  vaultId: string;
-  vaultName: string;
-  status: WorkflowStatus;
-  priority: WorkflowPriority;
-  title: string;
-  summary: string;
-  input: Record<string, string>;
-  progress: number;
-  createdAt: string;
-  updatedAt: string;
-  approvalRequired: boolean;
-  events: MockWorkflowEvent[];
-  artifacts: MockWorkflowArtifact[];
-  error?: string;
-};
+export type MockWorkflowRun = WorkflowRunProjection;
 
-export type MockWorkCard = {
-  id: string;
-  runId: string;
-  title: string;
-  summary: string;
-  packId: string;
-  flowId: string;
-  vaultName: string;
-  status: WorkflowStatus;
-  priority: WorkflowPriority;
-  updatedAt: string;
-};
+export type MockWorkCard = WorkflowWorkCard;
 
 export type WorkflowSetup = {
   completed: boolean;
@@ -114,6 +47,7 @@ export type WorkflowMockState = {
   vaults: MockWorkflowVault[];
   runs: Record<string, MockWorkflowRun>;
   cards: MockWorkCard[];
+  replayCursor: number;
   setup: WorkflowSetup;
 };
 
@@ -130,8 +64,13 @@ export const MOCK_WORKFLOW_VAULTS: MockWorkflowVault[] = [
     description: "长期任务的工作舱",
     kind: "existing",
     status: "running",
+    canRun: true,
+    availabilityReason: null,
     profile: "General / 长周期",
     capacity: "2 个运行位可用",
+    surfaces: [],
+    serverId: null,
+    wanghaiId: null,
   },
   {
     id: "vault-default",
@@ -139,17 +78,27 @@ export const MOCK_WORKFLOW_VAULTS: MockWorkflowVault[] = [
     description: "日常轻量任务的默认 Vault",
     kind: "existing",
     status: "running",
+    canRun: true,
+    availabilityReason: null,
     profile: "General / 交互",
     capacity: "1 个运行位可用",
+    surfaces: [],
+    serverId: null,
+    wanghaiId: null,
   },
   {
     id: "vault-disposable",
     name: "disposable-review",
     description: "完成后自动回收的临时执行舱",
     kind: "disposable",
-    status: "ready",
+    status: null,
+    canRun: false,
+    availabilityReason: "提交时创建",
     profile: "Review / 一次性",
     capacity: "提交时创建",
+    surfaces: [],
+    serverId: null,
+    wanghaiId: null,
   },
 ];
 
@@ -189,6 +138,8 @@ function seedRun(
   const events: MockWorkflowEvent[] = [
     {
       id: `mock-event-${index + 1}-latest`,
+      sequence: 2,
+      kind: status,
       title: status === "waiting" ? "等待人工确认" : status === "running" ? "已在 Vault 中开始运行" : "结果已生成",
       detail: status === "waiting"
         ? "结果已准备好，下一步需要人工确认。"
@@ -200,6 +151,8 @@ function seedRun(
     },
     {
       id: `mock-event-${index + 1}-queued`,
+      sequence: 1,
+      kind: "submitted",
       title: "已提交到执行队列",
       detail: `将使用 ${pack.title} · ${vault.name}`,
       timestamp: createdAt,
@@ -220,6 +173,8 @@ function seedRun(
     id: `mock-run-${index + 1}`,
     packId: pack.id,
     flowId: flow.id,
+    packVersion: pack.version,
+    packDigest: pack.digest,
     vaultId: vault.id,
     vaultName: vault.name,
     status,
@@ -231,7 +186,17 @@ function seedRun(
     createdAt,
     updatedAt,
     approvalRequired: flow.approvalRequired,
+    source: "manual",
+    executionClass: "workspace",
+    capabilityLeaseId: `mock-lease-${index + 1}`,
+    capabilityLeaseExpiresAt: new Date(Date.parse(updatedAt) + 30 * 60_000).toISOString(),
+    policy: {
+      decision: "allow",
+      mode: "mock",
+      reasons: ["synthetic-fixture"],
+    },
     events,
+    receipts: [],
     artifacts,
   };
 }
@@ -257,9 +222,10 @@ export function createMockRunsForCatalog(
 export function createInitialWorkflowState(): WorkflowMockState {
   return {
     packs: [],
-    vaults: clone(MOCK_WORKFLOW_VAULTS),
+    vaults: [],
     runs: {},
     cards: [],
+    replayCursor: 0,
     setup: {
       completed: false,
       domainPackId: null,

@@ -80,6 +80,7 @@ import {
   getPolarisControlStore,
   type DurableJob,
 } from "../portal/control-store.js";
+import { notifyWorkflowVaultProvisioned } from "../portal/workflow-control.js";
 import { durableJobWorkerConcurrency } from "./jobs/concurrency.js";
 import {
   WANGHAI_BACKUP_JOB_KIND,
@@ -3591,6 +3592,7 @@ async function executeClaimedProvisionJob(
         }
         throw new Error("Lost durable job lease while completing provision");
       }
+      notifyWorkflowVaultProvisioned(userId, vault);
       store.recordAudit({
         actorId: userId,
         tenantId: userId,
@@ -4686,6 +4688,11 @@ export async function startPortalVault(
         context: { userId, vault, ref, backend: selectedDriver.backend, profile: selectedDriver.profile },
         phase: "start-vault",
         execute: async () => {
+          // Portal starts may target a previously provisioned Vault whose
+          // managed image was removed from the local Docker cache. Restore
+          // the canonical image before compose tries to pull the per-Vault
+          // tag from a registry.
+          ensureCanonicalVaultImage(ref, userId);
           await startCommand(ref, userId);
           await refreshPortalVaultStatus(userId, vault);
         },

@@ -91,6 +91,8 @@ export interface PortAst {
   inFields: FieldAst[]
   outFields: FieldAst[]
   effect: PortEffect
+  /** Optional Polaris built-in binding, for example manual.review. */
+  builtin?: string
   module?: string
   originDomain?: string
   originDomainVersion?: string

@@ -162,6 +162,59 @@ test("control store persists durable job results across reopen", () => {
   }
 });
 
+test("workflow run admission is atomic and a worker lease recovers after expiry", () => {
+  const fixture = temporaryStore();
+  try {
+    const store = PolarisControlStore.open(fixture.filePath);
+    const packDigest = `sha256:${"a".repeat(64)}`;
+    const run = store.createWorkflowRun({
+      tenantId: "tenant-synthetic",
+      vaultId: "vault-synthetic",
+      vaultName: "Synthetic Vault",
+      packId: "synthetic-pack",
+      packVersion: "1.0.0",
+      packDigest,
+      flowId: "synthetic-flow",
+      source: "manual",
+      priority: "normal",
+      input: { subject: "synthetic" },
+      approvalRequired: false,
+      executionClass: "workspace",
+      capabilityLease: {
+        capabilities: ["synthetic.read"],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      policy: { decision: "allow", mode: "mock" },
+      dedupeKey: "tenant-synthetic:run-synthetic",
+      event: {
+        kind: "submitted",
+        title: "Synthetic run submitted",
+        detail: "Synthetic event",
+        tone: "neutral",
+      },
+    });
+    assert.equal(run.events.length, 1);
+    assert.equal(store.getWorkflowCapabilityLease("tenant-synthetic", run.capabilityLeaseId)?.packDigest, packDigest);
+    const database = new DatabaseSync(fixture.filePath);
+    assert.equal(
+      Number(database.prepare("SELECT COUNT(*) AS count FROM workflow_outbox WHERE event_id = ?").get(run.events[0]?.id).count),
+      1,
+    );
+    database.close();
+
+    assert.equal(store.claimWorkflowRun("worker-before", 10_000)?.id, run.id);
+    const expired = new DatabaseSync(fixture.filePath);
+    expired.prepare("UPDATE workflow_runs SET worker_expires_at = ? WHERE id = ?").run(Date.now() - 1, run.id);
+    expired.close();
+    const recovered = store.claimWorkflowRun("worker-after", 10_000);
+    assert.equal(recovered?.id, run.id);
+    assert.equal(recovered?.workerOwner, "worker-after");
+    store.close();
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("control store makes only the current Wanghai restore activation rollback eligible", () => {
   const fixture = temporaryStore();
   try {

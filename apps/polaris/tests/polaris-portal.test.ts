@@ -1829,6 +1829,15 @@ test("portal service starts the selected vault driver", async () => {
     await withFakePath(
       {
         docker: `
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  exit 1
+fi
+if [[ "$1" == "pull" ]]; then
+  exit 1
+fi
+if [[ "$1" == "build" || "$1" == "tag" ]]; then
+  exit 0
+fi
 if [[ "$1" == "compose" && "$4" == "up" ]]; then
   exit 0
 fi
@@ -1858,6 +1867,12 @@ exit 0
         const payload = await startPortalVault(userId, vault);
         assert.equal(payload.started, true);
         const commandLog = readCommandLog();
+        const imageRepairIndex = commandLog.findIndex((entry) => entry.startsWith("build "));
+        const imageTagIndex = commandLog.findIndex((entry) => entry.startsWith("tag "));
+        const composeStartIndex = commandLog.findIndex((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d"));
+        assert.ok(imageRepairIndex >= 0);
+        assert.ok(imageTagIndex > imageRepairIndex);
+        assert.ok(composeStartIndex > imageTagIndex);
         assert.ok(commandLog.some((entry) => entry.includes("compose") && entry.includes("up") && entry.includes("-d")));
         assert.ok(commandLog.some((entry) => entry.includes("cat /root/.paseo/server-id")));
         assert.ok(commandLog.some((entry) => entry.includes("cat /root/.paseo/pairing.json")));
@@ -2805,6 +2820,78 @@ flow Review title "Review" create {
     else process.env.POLARIS_DATA_ROOT = previousDataRoot;
     fs.rmSync(dataRoot, { recursive: true, force: true });
   }
+});
+
+test("portal workflow Vault route projects a real owned Vault for run admission", async () => {
+  await withSyntheticMemberUser(async (userId, vault) => {
+    const templatePath = vaultConfigPath("demo", "docker", DEMO_USER_ID);
+    const fixturePath = vaultConfigPath(vault, "docker", userId);
+    fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
+    fs.writeFileSync(
+      fixturePath,
+      fs.readFileSync(templatePath, "utf8")
+        .replaceAll("demo", vault)
+        .replaceAll(DEMO_USER_ID, userId),
+      "utf8",
+    );
+    writeVaultStatus({
+      schemaVersion: 1.1,
+      project: vault,
+      driver: {
+        selected: { backend: "docker" },
+        status: "running",
+        reason: "synthetic running Vault",
+      },
+      paseo: {
+        daemon: "absent",
+        web: "unavailable",
+        reconnectMode: "unknown",
+        liveTarget: null,
+        reconnectTarget: null,
+      },
+      details: {
+        capacity: "synthetic capacity",
+      },
+    }, userId);
+
+    await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+      await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", userId, async () => {
+        const server = createPortalServer(0);
+        await once(server, "listening");
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          throw new Error("Portal server did not expose a TCP address");
+        }
+        try {
+          const response = await fetch(`http://127.0.0.1:${address.port}/api/workflow-vaults`);
+          assert.equal(response.status, 200);
+          const payload = await response.json() as {
+            vaults: Array<{
+              id: string;
+              status: string | null;
+              canRun: boolean;
+              availabilityReason: string | null;
+            }>;
+          };
+          assert.equal(payload.vaults.length, 1);
+          assert.deepEqual({
+            id: payload.vaults[0]?.id,
+            status: payload.vaults[0]?.status,
+            canRun: payload.vaults[0]?.canRun,
+            availabilityReason: payload.vaults[0]?.availabilityReason,
+          }, {
+            id: vault,
+            status: "running",
+            canRun: true,
+            availabilityReason: null,
+          });
+        } finally {
+          server.close();
+          await once(server, "close");
+        }
+      });
+    });
+  });
 });
 
 test("portal oauth2-proxy auth mode trusts forwarded username headers", async () => {

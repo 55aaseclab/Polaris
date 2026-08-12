@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { WorkflowVaultProjection } from "@polaris/polaris-shell";
 import {
   activateManagedCredential,
   createManagedHarnessCredential,
@@ -62,6 +63,7 @@ import {
 import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import { listDomainPackProjections } from "../config/domain-packs.js";
+import { projectWorkflowVaults } from "./workflow-mock.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
   getWanghaiBackupJob as getWanghaiBackupJobExecutor,
@@ -318,6 +320,10 @@ async function refreshPortalVaultStatus(
 export async function listPortalVaults(userId: string): Promise<PortalVaultSummary[]> {
   const vaults = listOwnedVaults(userId);
   return vaults.map((vault) => loadVaultListSummary(userId, vault));
+}
+
+export async function listPortalWorkflowVaults(userId: string): Promise<WorkflowVaultProjection[]> {
+  return projectWorkflowVaults(await listPortalVaults(userId));
 }
 
 export async function listPortalVaultStaticState(

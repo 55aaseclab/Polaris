@@ -41,6 +41,7 @@ import {
   createPortalSkill,
   listPortalAdminUsers,
   listPortalDomainPacks,
+  listPortalWorkflowVaults,
   deletePortalUser,
   getPortalCredentialCatalog,
   getPortalWanghaiBackupJob,
@@ -136,6 +137,16 @@ import {
 import { readUserAccessSummary } from "./user-map.js";
 import { vaultRuntimeResourceName, vaultRuntimeScopeName } from "../core/vault-name.js";
 import type { VaultSpec } from "../core/vault.js";
+import {
+  WorkflowControlError,
+  WorkflowControlService,
+  registerWorkflowProvisionHook,
+} from "./workflow-control.js";
+import type {
+  WorkflowMockScenario,
+  WorkflowRunRequest,
+  WorkflowSetupRequest,
+} from "@polaris/polaris-shell";
 
 type ParsedBody = Record<string, string>;
 
@@ -369,6 +380,72 @@ function badRequest(res: ServerResponse, message: string): void {
   sendJson(res, 400, { error: message });
 }
 
+function parseWorkflowValues(raw: string): Record<string, string> {
+  if (!raw.trim()) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new PortalRequestError("Workflow values must be a JSON object", 400);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new PortalRequestError("Workflow values must be a JSON object", 400);
+  }
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, value]) => [key, String(value ?? "")]),
+  );
+}
+
+function parseWorkflowScenario(raw: string | undefined): WorkflowMockScenario | undefined {
+  const scenario = raw?.trim();
+  if (!scenario) {
+    return undefined;
+  }
+  if (
+    scenario !== "normal"
+    && scenario !== "quota-denied"
+    && scenario !== "vault-unavailable"
+    && scenario !== "executor-failure"
+  ) {
+    throw new PortalRequestError("Unknown workflow mock scenario", 400);
+  }
+  return scenario;
+}
+
+function parseWorkflowRunRequest(body: ParsedBody): WorkflowRunRequest {
+  const packId = body.packId?.trim() || "";
+  const flowId = body.flowId?.trim() || "";
+  const vaultId = body.vaultId?.trim() || "";
+  if (!packId || !flowId || !vaultId) {
+    throw new PortalRequestError("packId, flowId, and vaultId are required", 400);
+  }
+  const scenario = parseWorkflowScenario(body.scenario);
+  return {
+    packId,
+    flowId,
+    vaultId,
+    values: parseWorkflowValues(body.values ?? ""),
+    ...(scenario ? { scenario } : {}),
+  };
+}
+
+function parseWorkflowSetupRequest(body: ParsedBody): WorkflowSetupRequest {
+  const completed = body.completed === "true" || body.completed === "1";
+  const enabledWorkflowKeys = (body.enabledWorkflowKeys ?? "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+  return {
+    completed,
+    domainPackId: body.domainPackId?.trim() || null,
+    vaultId: body.vaultId?.trim() || null,
+    enabledWorkflowKeys,
+    completedAt: body.completedAt?.trim() || null,
+  };
+}
+
 function parseFormBody(raw: string): ParsedBody {
   const params = new URLSearchParams(raw);
   const result: ParsedBody = {};
@@ -407,7 +484,11 @@ async function readBody(req: IncomingMessage): Promise<ParsedBody> {
     }
     const body: ParsedBody = {};
     for (const [key, value] of Object.entries(parsed)) {
-      body[key] = Array.isArray(value) ? value.map((item) => String(item)).join(",") : String(value ?? "");
+      body[key] = Array.isArray(value)
+        ? value.map((item) => String(item)).join(",")
+        : typeof value === "object" && value !== null
+          ? JSON.stringify(value)
+          : String(value ?? "");
     }
     return body;
   }
@@ -2381,7 +2462,20 @@ function isApiPath(segments: string[]): boolean {
 
 export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
   const allowedOrigins = configuredPortalOrigins();
-  return createServer(async (req, res) => {
+  const workflowControl = new WorkflowControlService({
+    importMetaUrl: import.meta.url,
+    listPacks: listPortalDomainPacks,
+    listVaults: listPortalWorkflowVaults,
+  });
+  const unregisterWorkflowProvisionHook = registerWorkflowProvisionHook((tenantId, vaultId) => {
+    void workflowControl.notifyProvisioned(tenantId, vaultId).catch((error) => {
+      process.emitWarning(
+        error instanceof Error ? error.message : String(error),
+        "workflow-provision-notification",
+      );
+    });
+  });
+  const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       if (req.method === "GET" || req.method === "HEAD") {
@@ -2436,6 +2530,11 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/vaults/:vaultName/restore-activations/:activationJobId/rollback",
             "/api/users/:userId/credentials",
             "/api/domain-packs",
+            "/api/workflow-vaults",
+            "/api/workflow-setup",
+            "/api/workflow-runs",
+            "/api/workflow-runs/:runId/events",
+            "/api/workflow-suggestions",
           ],
         });
         return;
@@ -2663,6 +2762,108 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           sendJson(res, 200, { packs: listPortalDomainPacks() });
+          return;
+        }
+        if (segments.length >= 2 && segments[1] === "workflow-vaults") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          if (segments.length === 2 && req.method === "GET") {
+            sendJson(res, 200, { vaults: await listPortalWorkflowVaults(session.polarisUserId) });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (segments.length >= 2 && segments[1] === "workflow-setup") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          const userId = session.polarisUserId;
+          if (segments.length === 2 && req.method === "GET") {
+            sendJson(res, 200, workflowControl.getSetup(userId));
+            return;
+          }
+          if (segments.length === 2 && req.method === "PUT") {
+            sendJson(res, 200, {
+              setup: await workflowControl.saveSetup(userId, parseWorkflowSetupRequest(await readBody(req))),
+            });
+            return;
+          }
+          notFound(res);
+          return;
+        }
+        if (segments.length >= 2 && segments[1] === "workflow-runs") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          const userId = session.polarisUserId;
+          if (segments.length === 2 && req.method === "GET") {
+            sendJson(res, 200, await workflowControl.listRuns(userId));
+            return;
+          }
+          if (segments.length === 2 && req.method === "POST") {
+            const run = await workflowControl.createRun(userId, parseWorkflowRunRequest(await readBody(req)));
+            sendJson(res, 202, { run });
+            return;
+          }
+          if (segments.length === 3 && req.method === "GET") {
+            sendJson(res, 200, {
+              run: await workflowControl.getRun(userId, decodeURIComponent(segments[2] ?? "")),
+            });
+            return;
+          }
+          if (segments.length === 4 && req.method === "GET" && segments[3] === "events") {
+            const runId = decodeURIComponent(segments[2] ?? "");
+            const after = Number(url.searchParams.get("after") ?? "0");
+            sendJson(res, 200, await workflowControl.events(userId, runId, after));
+            return;
+          }
+          if (segments.length === 4 && req.method === "POST") {
+            const runId = decodeURIComponent(segments[2] ?? "");
+            const action = segments[3];
+            if (action === "approve") {
+              sendJson(res, 200, { run: await workflowControl.approve(userId, runId) });
+              return;
+            }
+            if (action === "cancel") {
+              sendJson(res, 200, { run: await workflowControl.cancel(userId, runId) });
+              return;
+            }
+            if (action === "retry") {
+              const body = await readBody(req);
+              sendJson(res, 202, {
+                run: await workflowControl.retry(userId, runId, parseWorkflowScenario(body.scenario) ?? "normal"),
+              });
+              return;
+            }
+          }
+          notFound(res);
+          return;
+        }
+        if (segments.length >= 2 && segments[1] === "workflow-suggestions") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          const userId = session.polarisUserId;
+          if (segments.length === 2 && req.method === "GET") {
+            sendJson(res, 200, { suggestions: workflowControl.listSuggestions(userId) });
+            return;
+          }
+          if (segments.length === 2 && req.method === "POST") {
+            const body = await readBody(req);
+            const runId = body.runId?.trim() || "";
+            if (!runId) throw new PortalRequestError("runId is required", 400);
+            sendJson(res, 201, {
+              suggestion: await workflowControl.createSuggestion(userId, runId),
+            });
+            return;
+          }
+          notFound(res);
           return;
         }
         if (
@@ -3150,6 +3351,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         ? error.statusCode
         : error instanceof PortalRequestError
           ? error.statusCode
+          : error instanceof WorkflowControlError
+            ? error.statusCode
           : error instanceof ActiveVaultCapacityError
             ? error.statusCode
           : 500;
@@ -3161,5 +3364,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       }
       sendText(res, statusCode, message);
     }
-  }).listen(port, host);
+  });
+  server.once("close", () => {
+    unregisterWorkflowProvisionHook();
+    workflowControl.close();
+  });
+  return server.listen(port, host);
 }

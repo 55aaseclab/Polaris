@@ -249,6 +249,7 @@ function parsePort(header: string, body: string): PortAst | ParseError {
   let inFields: FieldAst[] = []
   let outFields: FieldAst[] = []
   let effect: PortEffect = 'ffi'
+  let builtin: string | undefined
 
   let i = 0
   while (i < body.length) {
@@ -260,6 +261,13 @@ function parsePort(header: string, body: string): PortAst | ParseError {
     if (effM) {
       effect = effM[1].toLowerCase() as PortEffect
       i += effM[0].length
+      continue
+    }
+
+    const builtinM = slice.match(new RegExp(`^builtin\\s+(${ID}(?:\\.${ID})?)\\b`, 'iu'))
+    if (builtinM) {
+      builtin = builtinM[1]
+      i += builtinM[0].length
       continue
     }
 
@@ -286,7 +294,7 @@ function parsePort(header: string, body: string): PortAst | ParseError {
     i = blk.end
   }
 
-  return { kind: 'Port', name, version, inFields, outFields, effect }
+  return { kind: 'Port', name, version, inFields, outFields, effect, ...(builtin ? { builtin } : {}) }
 }
 
 /** call Foo | call Foo@1.2.0 | call Inv.Foo@2 */

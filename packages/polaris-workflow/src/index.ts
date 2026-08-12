@@ -6,6 +6,7 @@ export * from "./dsl/parser.js";
 export * from "./dsl/pipeline.js";
 export * from "./dsl/resolve.js";
 export * from "./dsl/runtime.js";
+export * from "./dsl/rpc.js";
 export * from "./dsl/semver.js";
 export * from "./dsl/ui-model.js";
 export * from "./dsl/validator.js";

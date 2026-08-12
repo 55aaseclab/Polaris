@@ -40,7 +40,7 @@ test("Portal exposes the complete mock-first work journey", () => {
       assert.match(appSource, new RegExp(action, "u"));
     }
   }
-  assert.match(appSource, /synthetic services/u);
+  assert.match(appSource, /确定性 mock host/u);
   assert.doesNotMatch(appSource, /VAULT DIRECTORY/u);
   assert.doesNotMatch(appSource, /<h1>主机<\/h1>/u);
   assert.doesNotMatch(appSource, /管理当前账户拥有的隔离运行时，并进入已授权的工作面。/u);
@@ -73,6 +73,19 @@ test("Portal exposes the complete mock-first work journey", () => {
   assert.doesNotMatch(appSource, /STEP \{step \+ 1\} \/ 3/u);
   assert.doesNotMatch(appSource, /aria-label="新建工作"/u);
   assert.doesNotMatch(appSource, /aria-label="回到工作台"/u);
+});
+
+test("debug tab exposes the server run projection as a live inspector", () => {
+  assert.match(appSource, /path === "\/debug"/u);
+  assert.match(appSource, /link\("\/debug", "Debug", Bug, "debug"\)/u);
+  assert.match(appSource, /function DebugPage/u);
+  assert.match(appSource, /function DebugInspector/u);
+  assert.match(appSource, /事件日志/u);
+  assert.match(appSource, /运行事件轨道/u);
+  assert.match(appSource, /refreshWorkflowRuns/u);
+  assert.match(cssSource, /\.debug-layout\s*\{[\s\S]*grid-template-columns/u);
+  assert.match(cssSource, /\.debug-flow-rail\s*\{/u);
+  assert.match(cssSource, /\.debug-log-list\s*\{[\s\S]*overflow:\s*auto/u);
 });
 
 test("daily work surface is card-first and touch-aware", () => {
