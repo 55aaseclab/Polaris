@@ -1,5 +1,10 @@
 import type { FfiRpcRequest } from "polaris-workflow";
 import {
+  listOwnedVaults,
+  listVaultDriverTargets,
+  readVaultStatus,
+} from "../core/portal.js";
+import {
   evaluateWorkflowLiveInvocation,
   type EvaluateWorkflowLiveInvocationInput,
   type WorkflowActionCatalogEntry,
@@ -38,7 +43,7 @@ export type WorkflowLiveVaultArtifactMetadataReader = (
 
 export interface WorkflowLiveVaultArtifactMetadataInvocationInput
   extends EvaluateWorkflowLiveInvocationInput {
-  readMetadata: WorkflowLiveVaultArtifactMetadataReader;
+  readMetadata?: WorkflowLiveVaultArtifactMetadataReader;
 }
 
 export type WorkflowLiveVaultArtifactMetadataInvocationResult =
@@ -59,6 +64,17 @@ export type WorkflowLiveVaultArtifactMetadataInvocationResult =
 const MAX_LATEST_ARTIFACTS = 5;
 const MAX_LATEST_TITLES = 5;
 const MAX_RETRIEVAL_REASONS = 5;
+export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = "vault.artifact.metadata.read";
+
+export class WorkflowLiveVaultMetadataReadError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "WorkflowLiveVaultMetadataReadError";
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -129,6 +145,62 @@ export function normalizeWorkflowLiveVaultArtifactMetadata(
   };
 }
 
+function selectedTargetsMatch(
+  left: { backend: string; profile?: string },
+  right: { backend: string; profile?: string },
+): boolean {
+  return left.backend === right.backend && (left.profile ?? "") === (right.profile ?? "");
+}
+
+export function readWorkflowLiveVaultArtifactMetadata(
+  input: WorkflowLiveVaultArtifactMetadataReaderInput,
+): WorkflowLiveVaultArtifactMetadata {
+  const tenantId = input.request.tenantId.trim();
+  const vaultId = input.request.vaultId.trim();
+  if (!tenantId || !vaultId) {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires tenant and Vault scope",
+      "vault-scope-required",
+    );
+  }
+  if (!listOwnedVaults(tenantId).includes(vaultId)) {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires a user-owned Vault",
+      "vault-not-owned",
+    );
+  }
+  const status = readVaultStatus(tenantId, vaultId);
+  if (!status) {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires current Vault status",
+      "vault-status-required",
+    );
+  }
+  const selected = status.driver?.selected ?? null;
+  if (!selected) {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires a selected Vault driver",
+      "vault-driver-selected-required",
+    );
+  }
+  if (status.driver?.status !== "running") {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires a running Vault",
+      "vault-running-required",
+    );
+  }
+  const selectedAvailable = listVaultDriverTargets(tenantId, vaultId).some((target) =>
+    target.available && selectedTargetsMatch(target, selected)
+  );
+  if (!selectedAvailable) {
+    throw new WorkflowLiveVaultMetadataReadError(
+      "Workflow live Vault metadata requires the selected Vault driver config",
+      "vault-selected-driver-config-required",
+    );
+  }
+  return normalizeWorkflowLiveVaultArtifactMetadata(status.evolution ?? {});
+}
+
 export async function invokeWorkflowLiveVaultArtifactMetadata(
   input: WorkflowLiveVaultArtifactMetadataInvocationInput,
 ): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
@@ -136,9 +208,19 @@ export async function invokeWorkflowLiveVaultArtifactMetadata(
   if (!decision.allowed) {
     return decision;
   }
+  if (decision.action.id !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
+    return {
+      allowed: false,
+      code: "workflow-vault-metadata-action-required",
+      message: "Workflow live Vault metadata adapter accepts only the Vault metadata action",
+      reasons: ["metadata-action-required"],
+      action: decision.action,
+    };
+  }
   try {
+    const readMetadata = input.readMetadata ?? readWorkflowLiveVaultArtifactMetadata;
     const metadata = normalizeWorkflowLiveVaultArtifactMetadata(
-      await input.readMetadata({
+      await readMetadata({
         request: input.request,
         action: decision.action,
         decision,
