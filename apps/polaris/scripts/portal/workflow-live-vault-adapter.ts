@@ -1,5 +1,12 @@
 import type { FfiRpcRequest } from "polaris-workflow";
 import {
+  createHash,
+} from "node:crypto";
+import type {
+  PolarisControlStore,
+  WorkflowEffectReceiptRecord,
+} from "./control-store.js";
+import {
   listOwnedVaults,
   listVaultDriverTargets,
   readVaultStatus,
@@ -61,10 +68,16 @@ export type WorkflowLiveVaultArtifactMetadataInvocationResult =
       action?: WorkflowActionCatalogEntry;
     };
 
+export interface WorkflowLiveVaultArtifactMetadataDurableEvidenceInput
+  extends WorkflowLiveVaultArtifactMetadataInvocationInput {
+  store: PolarisControlStore;
+}
+
 const MAX_LATEST_ARTIFACTS = 5;
 const MAX_LATEST_TITLES = 5;
 const MAX_RETRIEVAL_REASONS = 5;
 export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = "vault.artifact.metadata.read";
+const WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION = "workflow.live.vault.metadata.read";
 
 export class WorkflowLiveVaultMetadataReadError extends Error {
   constructor(
@@ -243,4 +256,105 @@ export async function invokeWorkflowLiveVaultArtifactMetadata(
       action: decision.action,
     };
   }
+}
+
+function metadataDigest(metadata: WorkflowLiveVaultArtifactMetadata): string {
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(metadata), "utf8")
+    .digest("hex")}`;
+}
+
+function receiptForMetadataInvocation(input: {
+  request: FfiRpcRequest;
+  result: WorkflowLiveVaultArtifactMetadataInvocationResult;
+  startedAt: string;
+  completedAt: string;
+}): WorkflowEffectReceiptRecord {
+  const status = input.result.allowed ? "completed" : "failed";
+  return {
+    id: `receipt-${input.request.requestId}`,
+    runId: input.request.runId,
+    tenantId: input.request.tenantId,
+    requestId: input.request.requestId,
+    port: input.request.call.port,
+    version: input.request.call.version,
+    effect: input.request.call.effect,
+    status,
+    input: input.request.input,
+    output: input.result.allowed
+      ? {
+        metadataDigest: metadataDigest(input.result.metadata),
+        artifactCount: input.result.metadata.artifactCount,
+        pendingMemoryChanges: input.result.metadata.pendingMemoryChanges,
+      }
+      : {},
+    ...(!input.result.allowed
+      ? {
+        errorCode: input.result.code,
+        errorMessage: input.result.message,
+      }
+      : {}),
+    createdAt: input.startedAt,
+    completedAt: input.completedAt,
+  };
+}
+
+function auditIdForMetadataInvocation(request: FfiRpcRequest): string {
+  return `workflow-live-vault-metadata:${createHash("sha256")
+    .update(request.tenantId, "utf8")
+    .update("\0", "utf8")
+    .update(request.runId, "utf8")
+    .update("\0", "utf8")
+    .update(request.requestId, "utf8")
+    .digest("hex")}`;
+}
+
+export async function invokeWorkflowLiveVaultArtifactMetadataWithEvidence(
+  input: WorkflowLiveVaultArtifactMetadataDurableEvidenceInput,
+): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
+  const startedAt = new Date().toISOString();
+  const result = await invokeWorkflowLiveVaultArtifactMetadata(input);
+  const completedAt = new Date().toISOString();
+  const shouldRecordEvidence = result.allowed
+    || (
+      !result.allowed
+      && result.code === "live-vault-metadata-read-failed"
+      && result.action?.id === WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID
+    );
+  if (!shouldRecordEvidence) {
+    return result;
+  }
+  input.store.recordWorkflowEffectReceipt(
+    receiptForMetadataInvocation({
+      request: input.request,
+      result,
+      startedAt,
+      completedAt,
+    }),
+  );
+  input.store.recordAuditOnce({
+    id: auditIdForMetadataInvocation(input.request),
+    actorId: input.request.tenantId,
+    tenantId: input.request.tenantId,
+    vaultId: input.request.vaultId,
+    action: WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION,
+    requestId: input.request.requestId,
+    outcome: result.allowed ? "success" : "failure",
+    metadata: {
+      action: result.action?.id ?? WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+      port: input.request.call.port,
+      version: input.request.call.version,
+      effect: input.request.call.effect,
+      runId: input.request.runId,
+      idempotencyKey: input.request.idempotencyKey,
+      reasons: result.reasons,
+      ...(result.allowed
+        ? {
+          artifactCount: result.metadata.artifactCount,
+          metadataDigest: metadataDigest(result.metadata),
+        }
+        : { errorCode: result.code }),
+    },
+  });
+  return result;
 }

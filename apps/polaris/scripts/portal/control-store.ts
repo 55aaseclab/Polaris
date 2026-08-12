@@ -2515,6 +2515,53 @@ export class PolarisControlStore {
     return id;
   }
 
+  recordAuditOnce(event: DurableAuditEvent & { id: string }): string {
+    const id = event.id.trim();
+    if (!id) {
+      throw new Error("A deterministic audit event ID is required");
+    }
+    const occurredAt = nowIso();
+    const metadataJson = boundedJson(event.metadata);
+    const actorId = event.actorId?.trim() || undefined;
+    const tenantId = event.tenantId?.trim() || undefined;
+    const vaultId = event.vaultId?.trim() || undefined;
+    const action = event.action.trim();
+    const requestId = event.requestId?.trim() || undefined;
+    this.transaction(() => {
+      const existing = this.db.prepare(
+        "SELECT id FROM audit_events WHERE id = ?",
+      ).get(id) as SqlRow | undefined;
+      if (existing) return;
+      const previous = this.db.prepare(
+        "SELECT event_hash FROM audit_events ORDER BY occurred_at DESC, rowid DESC LIMIT 1",
+      ).get() as SqlRow | undefined;
+      const previousHash = asOptionalString(previous?.event_hash) ?? "";
+      const eventHash = auditEventHash({
+        id,
+        actorId,
+        tenantId,
+        vaultId,
+        action,
+        requestId,
+        outcome: event.outcome,
+        metadataJson,
+        previousHash,
+        occurredAt,
+      });
+      this.db.prepare(`
+        INSERT OR IGNORE INTO audit_events (
+          id, actor_id, tenant_id, vault_id, action, request_id, outcome,
+          metadata_json, previous_hash, event_hash, occurred_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id, actorId ?? null, tenantId ?? null,
+        vaultId ?? null, action, requestId ?? null,
+        event.outcome, metadataJson, previousHash || null, eventHash, occurredAt,
+      );
+    });
+    return id;
+  }
+
   listAuditEvents(limit = 100): Array<{
     id: string;
     actorId?: string;
