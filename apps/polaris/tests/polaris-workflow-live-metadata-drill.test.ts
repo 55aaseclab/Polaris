@@ -5,6 +5,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  addDomainPack,
+} from "../scripts/config/domain-packs.js";
 import { runWorkflowLiveMetadataDrill } from "../scripts/cli/commands/workflow-live-metadata-drill.js";
 import { closePolarisControlStore, PolarisControlStore } from "../scripts/portal/control-store.js";
 import {
@@ -14,6 +17,48 @@ import {
 } from "../scripts/portal/workflow-live-boundary.js";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const ADMISSION_METADATA_PACK_SOURCE = `
+domain MetadataPack version "1.0.0"
+title "Synthetic metadata pack"
+description "Synthetic live metadata workflow fixture"
+
+port ArtifactMetadata version "1.0.0" {
+  in {
+    artifactScope: String?
+  }
+  out {
+    artifactCount: Number
+    latestTitles: String
+    pendingMemoryChanges: Number
+  }
+  effect read
+}
+
+flow ReadMetadata title "Read metadata" create {
+  needs { ArtifactMetadata }
+  input {
+    artifactScope: String
+  }
+  steps {
+    metadata "Read metadata" {
+      uses { artifactScope }
+      call ArtifactMetadata
+      output {
+        artifactCount: Number
+        latestTitles: String
+        pendingMemoryChanges: Number
+      }
+    }
+  }
+  output {
+    artifactCount: Number from artifactCount
+    latestTitles: String from latestTitles
+    pendingMemoryChanges: Number from pendingMemoryChanges
+  }
+  ui { layout form primary "Read" }
+}
+`;
 
 type DrillOutput = {
   mode: string;
@@ -32,6 +77,21 @@ type DrillOutput = {
     artifactCount: number;
     latestTitles: string[];
   };
+};
+
+type AdmitOutput = {
+  mode: string;
+  action: string;
+  admitted: boolean;
+  tenantId: string;
+  vaultId: string;
+  packId: string;
+  flowId: string;
+  runId: string;
+  status: string;
+  receipts: number;
+  artifacts: number;
+  auditEvents: number;
 };
 
 function uniqueName(prefix: string): string {
@@ -199,6 +259,87 @@ test("workflow live metadata drill requires explicit live flags", async () => {
     );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /requires POLARIS_WORKFLOW_LIVE_ADAPTER=enabled, POLARIS_WORKFLOW_LIVE_WORKER_BINDING=enabled/u);
+  });
+});
+
+test("workflow live metadata admission CLI admits a pinned pack flow", async () => {
+  await withLiveMetadataFixture(async ({ root, userId, vault, controlStorePath }) => {
+    const sourcePath = path.join(root, "metadata-pack.ord");
+    fs.writeFileSync(sourcePath, ADMISSION_METADATA_PACK_SOURCE, "utf8");
+    const installed = await addDomainPack(import.meta.url, sourcePath);
+
+    const result = spawnSync(
+      "pnpm",
+      [
+        "--filter",
+        "polaris",
+        "exec",
+        "tsx",
+        "scripts/polaris.ts",
+        "ops",
+        "workflow-admit-live-metadata",
+        "--tenant",
+        userId,
+        "--vault",
+        vault,
+        "--pack",
+        installed.pack.id,
+        "--flow",
+        "ReadMetadata",
+        "--operator",
+        "operator-synthetic",
+        "--candidate-live-enabled",
+        "--value",
+        "artifactScope=latest",
+        "--release-id",
+        "release-synthetic",
+        "--dedupe-key",
+        `workflow-admit-live-metadata:${userId}:${vault}`,
+        "--wait",
+        "--json",
+      ],
+      {
+        cwd: APP_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          [WORKFLOW_LIVE_ADAPTER_FLAG]: "enabled",
+          [WORKFLOW_LIVE_WORKER_BINDING_FLAG]: "enabled",
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout) as AdmitOutput;
+    assert.equal(parsed.mode, "live");
+    assert.equal(parsed.action, WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID);
+    assert.equal(parsed.admitted, true);
+    assert.equal(parsed.tenantId, userId);
+    assert.equal(parsed.vaultId, vault);
+    assert.equal(parsed.packId, installed.pack.id);
+    assert.equal(parsed.flowId, "ReadMetadata");
+    assert.equal(parsed.status, "succeeded");
+    assert.equal(parsed.receipts, 1);
+    assert.equal(parsed.artifacts, 1);
+    assert.equal(parsed.auditEvents, 2);
+
+    const store = PolarisControlStore.open(controlStorePath);
+    try {
+      const run = store.getWorkflowRun(userId, parsed.runId);
+      assert.equal(run?.status, "succeeded");
+      assert.equal(run?.policy.mode, "live");
+      assert.equal(run?.policy.reasons.includes("operator-live-admission"), true);
+      assert.equal(run?.receipts[0]?.status, "completed");
+      assert.deepEqual(
+        store.listAuditEvents().map((event) => event.action).sort(),
+        [
+          "workflow.live.admit",
+          "workflow.live.vault.metadata.read",
+        ],
+      );
+      assert.deepEqual(store.verifyAuditChain(), { valid: true, checked: 2 });
+    } finally {
+      store.close();
+    }
   });
 });
 

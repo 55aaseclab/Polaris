@@ -413,6 +413,122 @@ test("a durable live-policy metadata run invokes the candidate worker binding", 
   }
 });
 
+test("operator live admission creates a durable live-policy metadata run", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticMetadataPack(fixture.root);
+    let calls = 0;
+    process.env[WORKFLOW_LIVE_ADAPTER_FLAG] = "enabled";
+    process.env[WORKFLOW_LIVE_WORKER_BINDING_FLAG] = "enabled";
+    process.env.POLARIS_RELEASE_ID = "release-synthetic";
+    service = serviceFor(pack, {
+      liveMetadataReader: ({ request }) => {
+        calls += 1;
+        assert.equal(request.input.artifactScope, "recent");
+        return {
+          artifactCount: 3,
+          activeVaultArtifacts: 2,
+          activeUserArtifacts: 1,
+          latestTitles: ["Admitted metadata"],
+          latestArtifacts: [],
+          pendingMemoryChanges: 2,
+        };
+      },
+    });
+
+    const admitted = await service.admitLiveMetadataRun("tenant-synthetic", {
+      operatorId: "operator-synthetic",
+      vaultId: "vault-synthetic",
+      packId: pack.id,
+      flowId: "ReadMetadata",
+      values: { artifactScope: "recent" },
+      candidateLiveEnabled: true,
+      releaseId: "release-synthetic",
+      dedupeKey: "workflow-live-metadata-admission:test",
+    });
+    assert.equal(admitted.status, "queued");
+    assert.equal(admitted.policy.mode, "live");
+    assert.deepEqual(admitted.policy.reasons, [
+      "operator-live-admission",
+      "candidate-live-metadata",
+      "pack-digest-pinned",
+      "vault-capability-lease",
+      "release:release-synthetic",
+    ]);
+
+    const listed = await service.listRuns("tenant-synthetic");
+    const completed = listed.runs.find((run) => run.id === admitted.id);
+    assert.equal(completed?.status, "succeeded");
+    assert.equal(completed?.policy.mode, "live");
+    assert.equal(completed?.receipts.length, 1);
+    assert.equal(completed?.receipts[0]?.port, "ArtifactMetadata");
+    assert.equal(completed?.artifacts.length, 1);
+    assert.equal(calls, 1);
+
+    const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+    try {
+      const stored = store.getWorkflowRun("tenant-synthetic", admitted.id);
+      assert.equal(stored?.output.artifactCount, 3);
+      assert.equal(stored?.output.latestTitles, "Admitted metadata");
+      assert.equal(stored?.output.pendingMemoryChanges, 2);
+      assert.deepEqual(
+        store.listAuditEvents().map((event) => event.action).sort(),
+        [
+          "workflow.live.admit",
+          "workflow.live.vault.metadata.read",
+        ],
+      );
+      assert.deepEqual(store.verifyAuditChain(), { valid: true, checked: 2 });
+    } finally {
+      store.close();
+    }
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("operator live admission rejects non-metadata workflow calls before persistence", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    process.env[WORKFLOW_LIVE_ADAPTER_FLAG] = "enabled";
+    process.env[WORKFLOW_LIVE_WORKER_BINDING_FLAG] = "enabled";
+    service = serviceFor(pack);
+
+    await assert.rejects(
+      () => service!.admitLiveMetadataRun("tenant-synthetic", {
+        operatorId: "operator-synthetic",
+        vaultId: "vault-synthetic",
+        packId: pack.id,
+        flowId: "Review",
+        values: { subject: "synthetic" },
+        candidateLiveEnabled: true,
+        releaseId: "release-synthetic",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkflowControlError);
+        assert.equal(error.code, "live-flow-call-not-supported");
+        assert.equal(error.statusCode, 400);
+        return true;
+      },
+    );
+
+    const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+    try {
+      assert.equal(store.listWorkflowRuns("tenant-synthetic").length, 0);
+      assert.equal(store.listAuditEvents().length, 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
 test("a durable live-policy metadata run fails closed when live flags are unset", { concurrency: false }, async () => {
   const fixture = testEnvironment();
   let service: WorkflowControlService | undefined;

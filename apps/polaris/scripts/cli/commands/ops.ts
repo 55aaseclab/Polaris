@@ -13,6 +13,7 @@ import {
 import { getPolarisControlStore } from "../../portal/control-store.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisStateRoot } from "../../utils/paths.js";
+import { workflowAdmitLiveMetadataCommand } from "./workflow-admit-live-metadata.js";
 import { workflowLiveMetadataDrillCommand } from "./workflow-live-metadata-drill.js";
 import { workflowSmokeCommand } from "./workflow-smoke.js";
 
@@ -57,7 +58,7 @@ type AuditOptions = {
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]\n       pnpm --dir apps/polaris run polaris -- ops audit [--limit <1-1000>] [--verify] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-smoke [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-live-metadata-drill --user <userId> --vault <vault> --candidate-live-enabled [--release-id <id>] [--json]",
+    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]\n       pnpm --dir apps/polaris run polaris -- ops audit [--limit <1-1000>] [--verify] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-smoke [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-live-metadata-drill --user <userId> --vault <vault> --candidate-live-enabled [--release-id <id>] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-admit-live-metadata --tenant <userId> --vault <vault> --pack <packId> --flow <flowId> --operator <operatorId> --candidate-live-enabled [--value key=value ...] [--release-id <id>] [--dedupe-key <key>] [--wait] [--json]",
   );
 }
 
@@ -352,6 +353,10 @@ export async function opsCommand(action: string | undefined, argv: string[]): Pr
   }
   if (action === "workflow-live-metadata-drill") {
     await workflowLiveMetadataDrillCommand(argv);
+    return;
+  }
+  if (action === "workflow-admit-live-metadata") {
+    await workflowAdmitLiveMetadataCommand(argv);
     return;
   }
   usage();

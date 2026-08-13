@@ -15,6 +15,7 @@ import {
   DocStore,
   FFI_RPC_PROTOCOL_VERSION,
   mockRpcResponse,
+  parsePortRef,
   resolvePort,
   type Program,
 } from "polaris-workflow";
@@ -26,6 +27,7 @@ import {
 } from "./workflow-live-worker-binding.js";
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
+  WORKFLOW_LIVE_ADAPTER_FLAG,
   WORKFLOW_LIVE_RELEASE_PROFILE_ID,
   WORKFLOW_LIVE_WORKER_BINDING_FLAG,
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
@@ -84,6 +86,18 @@ type WorkflowControlOptions = {
 type ProvisionHook = (tenantId: string, vaultId: string) => void;
 const provisionHooks = new Set<ProvisionHook>();
 
+export type WorkflowLiveMetadataAdmissionRequest = {
+  operatorId: string;
+  vaultId: string;
+  packId: string;
+  flowId: string;
+  values: Record<string, string>;
+  candidateLiveEnabled: boolean;
+  releaseId: string;
+  actionId?: string;
+  dedupeKey?: string;
+};
+
 export function registerWorkflowProvisionHook(hook: ProvisionHook): () => void {
   provisionHooks.add(hook);
   return () => provisionHooks.delete(hook);
@@ -111,6 +125,58 @@ function flowFromPack(
 
 function defaultFlowInput(flow: WorkflowDomainPackProjection["flows"][number]): Record<string, string> {
   return Object.fromEntries(flow.fields.map((field) => [field.id, "synthetic provisioning input"]));
+}
+
+function portAstFromProgramPort(port: Program["ports"][number]): PortAst {
+  return {
+    kind: "Port",
+    name: port.name,
+    version: port.version,
+    qualifiedName: port.qualifiedName,
+    effect: port.effect as PortAst["effect"],
+    ...(port.builtin ? { builtin: port.builtin } : {}),
+    inFields: port.inFields.map((field) => {
+      const [name, ...typeParts] = field.split(":");
+      return { name: name ?? field, type: typeParts.join(":") || "String" };
+    }),
+    outFields: port.outFields.map((field) => {
+      const [name, ...typeParts] = field.split(":");
+      return { name: name ?? field, type: typeParts.join(":") || "String" };
+    }),
+  };
+}
+
+function programPortsAsAst(program: Program): PortAst[] {
+  return program.ports.map(portAstFromProgramPort);
+}
+
+function workflowLiveAdmissionAuditId(tenantId: string, runId: string): string {
+  return `workflow-live-admission:${createHash("sha256")
+    .update(tenantId, "utf8")
+    .update("\0", "utf8")
+    .update(runId, "utf8")
+    .digest("hex")}`;
+}
+
+function liveMetadataCallsForFlow(program: Program, flowId: string): Array<{
+  stepId: string;
+  call: string;
+  port: PortAst | null;
+}> {
+  const flow = program.flows.find((candidate) => candidate.meta.name === flowId);
+  if (!flow) return [];
+  const ports = programPortsAsAst(program);
+  return flow.meta.steps
+    .filter((step) => step.call)
+    .map((step) => {
+      const ref = parsePortRef(step.call ?? "");
+      const port = resolvePort(ports, ref.name, ref.version);
+      return {
+        stepId: step.id,
+        call: step.call ?? "",
+        port,
+      };
+    });
 }
 
 function projectionForRun(
@@ -205,22 +271,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
       liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
     },
   ) {
-    this.ports = program.ports.map((port) => ({
-      kind: "Port",
-      name: port.name,
-      version: port.version,
-      qualifiedName: port.qualifiedName,
-      effect: port.effect as PortAst["effect"],
-      ...(port.builtin ? { builtin: port.builtin } : {}),
-      inFields: port.inFields.map((field) => {
-        const [name, ...typeParts] = field.split(":");
-        return { name: name ?? field, type: typeParts.join(":") || "String" };
-      }),
-      outFields: port.outFields.map((field) => {
-        const [name, ...typeParts] = field.split(":");
-        return { name: name ?? field, type: typeParts.join(":") || "String" };
-      }),
-    }));
+    this.ports = programPortsAsAst(program);
   }
 
   private policyMode(): "mock" | "live" {
@@ -683,6 +734,155 @@ export class WorkflowControlService {
 
   async createRun(tenantId: string, input: WorkflowRunRequest): Promise<WorkflowRunProjection> {
     return this.createAdmittedRun(tenantId, input, "manual");
+  }
+
+  async admitLiveMetadataRun(
+    tenantId: string,
+    input: WorkflowLiveMetadataAdmissionRequest,
+  ): Promise<WorkflowRunProjection> {
+    const operatorId = input.operatorId.trim();
+    const releaseId = input.releaseId.trim();
+    const actionId = input.actionId?.trim() || WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID;
+    if (!operatorId) {
+      throw new WorkflowControlError("Live workflow admission requires an operator identity", 400, "operator-required");
+    }
+    if (!releaseId) {
+      throw new WorkflowControlError("Live workflow admission requires a release id", 400, "release-id-required");
+    }
+    if (!input.candidateLiveEnabled) {
+      throw new WorkflowControlError(
+        "Live workflow admission requires explicit candidate acknowledgement",
+        400,
+        "candidate-live-ack-required",
+      );
+    }
+    if (actionId !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
+      throw new WorkflowControlError(
+        "Only vault.artifact.metadata.read can be admitted through this live path",
+        400,
+        "live-action-not-supported",
+      );
+    }
+    const missingFlags = [
+      WORKFLOW_LIVE_ADAPTER_FLAG,
+      WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+    ].filter((key) => process.env[key] !== "enabled");
+    if (missingFlags.length > 0) {
+      throw new WorkflowControlError(
+        `Live workflow admission requires ${missingFlags.map((key) => `${key}=enabled`).join(", ")}`,
+        409,
+        "live-deployment-disabled",
+      );
+    }
+
+    const packs = this.options.listPacks();
+    const selected = flowFromPack(packs, input.packId, input.flowId);
+    if (!selected) throw new WorkflowControlError("工作流或流程不存在", 404, "workflow-not-found");
+    const vaults = await this.options.listVaults(tenantId);
+    const vault = vaults.find((candidate) => candidate.id === input.vaultId);
+    if (!vault) throw new WorkflowControlError("目标 Vault 不属于当前用户", 404, "vault-not-found");
+    if (!vault.canRun) {
+      throw new WorkflowControlError("目标 Vault 当前不可用", 409, "vault-unavailable");
+    }
+    const values = safeInput(input.values);
+    const missingInput = selected.flow.fields.find((field) =>
+      field.required && !values[field.id]?.trim()
+    );
+    if (missingInput) {
+      throw new WorkflowControlError(
+        `Live workflow admission is missing required input: ${missingInput.id}`,
+        400,
+        "workflow-input-required",
+      );
+    }
+
+    const runtime = this.loadPinnedRuntime(selected.pack.id, selected.pack.version, selected.pack.digest);
+    const program = runtime.pipeline.program!;
+    const calls = liveMetadataCallsForFlow(program, selected.flow.id);
+    if (calls.length !== 1) {
+      throw new WorkflowControlError(
+        "Live metadata admission requires exactly one workflow tool call",
+        400,
+        "live-flow-call-shape-invalid",
+      );
+    }
+    const call = calls[0]!;
+    const port = call.port;
+    if (
+      !port
+      || port.effect !== "read"
+      || port.version !== "1.0.0"
+      || (port.qualifiedName ?? port.name) !== "ArtifactMetadata"
+    ) {
+      throw new WorkflowControlError(
+        "Live metadata admission accepts only ArtifactMetadata@1.0.0 read calls",
+        400,
+        "live-flow-call-not-supported",
+      );
+    }
+
+    const executionClass = executionClassForProgram(program, selected.flow.id);
+    const now = this.now();
+    const leaseExpiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
+    const run = this.store.createWorkflowRun({
+      tenantId,
+      vaultId: vault.id,
+      vaultName: vault.name,
+      packId: selected.pack.id,
+      packVersion: selected.pack.version,
+      packDigest: selected.pack.digest,
+      flowId: selected.flow.id,
+      source: "manual",
+      priority: "normal",
+      input: values,
+      approvalRequired: false,
+      executionClass,
+      capabilityLease: {
+        capabilities: [WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID],
+        expiresAt: leaseExpiresAt,
+      },
+      policy: {
+        decision: "allow",
+        mode: "live",
+        reasons: [
+          "operator-live-admission",
+          "candidate-live-metadata",
+          "pack-digest-pinned",
+          "vault-capability-lease",
+          `release:${releaseId}`,
+        ],
+      },
+      dedupeKey: input.dedupeKey?.trim()
+        || `workflow-live-metadata-admission:${tenantId}:${randomUUID()}`,
+      event: {
+        kind: "submitted",
+        title: "Live metadata workflow admitted",
+        detail: `Operator ${operatorId} admitted ${WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID}.`,
+        tone: "accent",
+      },
+    });
+    this.store.recordAuditOnce({
+      id: workflowLiveAdmissionAuditId(tenantId, run.id),
+      actorId: operatorId,
+      tenantId,
+      vaultId: vault.id,
+      action: "workflow.live.admit",
+      requestId: run.id,
+      outcome: "success",
+      metadata: {
+        runId: run.id,
+        actionId: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+        packId: selected.pack.id,
+        packVersion: selected.pack.version,
+        packDigest: selected.pack.digest,
+        flowId: selected.flow.id,
+        call: call.call,
+        releaseId,
+        policyMode: "live",
+      },
+    });
+    if (this.autoStart) void this.drain();
+    return projectionForRun(run, packs);
   }
 
   private async createAdmittedRun(
