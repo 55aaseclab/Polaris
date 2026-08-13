@@ -6,6 +6,10 @@ import {
   DocStore,
   flattenDomain,
   runPipeline,
+  type AsyncFfiHost,
+  type FfiCallLog,
+  type FfiInvokeRequest,
+  type FfiInvokeResult,
 } from "../src/index.js";
 
 const source = `
@@ -76,4 +80,100 @@ flow ReadContext title "Read context" create {
     pipeline.issues.filter((issue) => issue.level === "warning"),
     [],
   );
+});
+
+const asyncSource = `
+domain AsyncPack version "1.0.0"
+port ReadThing version "1.0.0" {
+  in {
+    subject: String
+  }
+  out {
+    summary: String
+  }
+  effect read
+}
+flow Read title "Read" create {
+  needs { ReadThing }
+  input {
+    subject: String required
+  }
+  steps {
+    read "Read" {
+      uses { subject }
+      call ReadThing
+      output {
+        summary: String
+      }
+    }
+  }
+  output {
+    summary: String from summary
+  }
+  ui { layout form primary "Read" }
+}
+`;
+
+class AsyncReadHost implements AsyncFfiHost {
+  readonly log: FfiCallLog[] = [];
+  syncCalls = 0;
+  asyncCalls = 0;
+
+  has(port: string, version?: string): boolean {
+    return port === "ReadThing" && (version === undefined || version === "1.0.0");
+  }
+
+  invoke(req: FfiInvokeRequest): FfiInvokeResult {
+    this.syncCalls += 1;
+    return {
+      ok: true,
+      output: { summary: `sync:${req.input.subject}` },
+      resolvedVersion: "1.0.0",
+    };
+  }
+
+  async invokeAsync(req: FfiInvokeRequest): Promise<FfiInvokeResult> {
+    this.asyncCalls += 1;
+    await Promise.resolve();
+    return {
+      ok: true,
+      output: { summary: `async:${req.input.subject}` },
+      resolvedVersion: "1.0.0",
+    };
+  }
+
+  clearLog(): void {
+    this.log.length = 0;
+  }
+}
+
+test("compiled programs can await async FFI hosts without changing sync execution", async () => {
+  const pipeline = runPipeline(asyncSource);
+  assert.equal(pipeline.ok, true);
+  assert.ok(pipeline.program);
+  const program = pipeline.program;
+
+  const syncHost = new AsyncReadHost();
+  const syncResult = program.run(
+    "Read",
+    { subject: "synthetic" },
+    new DocStore(),
+    syncHost,
+  );
+  assert.equal(syncResult.ok, true);
+  assert.equal(syncResult.outputs?.summary, "sync:synthetic");
+  assert.equal(syncHost.syncCalls, 1);
+  assert.equal(syncHost.asyncCalls, 0);
+
+  const asyncHost = new AsyncReadHost();
+  const asyncResult = await program.runAsync(
+    "Read",
+    { subject: "synthetic" },
+    new DocStore(),
+    asyncHost,
+  );
+  assert.equal(asyncResult.ok, true);
+  assert.equal(asyncResult.outputs?.summary, "async:synthetic");
+  assert.equal(asyncHost.syncCalls, 0);
+  assert.equal(asyncHost.asyncCalls, 1);
 });

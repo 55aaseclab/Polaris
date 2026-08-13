@@ -119,6 +119,7 @@ function completeWorkerPreconditions(): WorkflowLiveWorkerIntegrationPreconditio
       focusedChecks: [
         "polaris-workflow-live-boundary",
         "polaris-workflow-live-vault-adapter",
+        "polaris-workflow-control",
       ],
     },
   };
@@ -225,14 +226,30 @@ test("metadata worker integration preconditions fail closed by default", () => {
   }
 });
 
-test("metadata worker integration preconditions keep the source-level pilot unwired", () => {
+function candidateMetadataAction(): WorkflowActionCatalogEntry {
+  return {
+    id: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+    version: 1,
+    port: "ArtifactMetadata",
+    portVersion: "1.0.0",
+    effect: "read",
+    risk: "read",
+    adapter: "future-vault",
+    liveEnabled: true,
+    requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
+    description: "Synthetic candidate metadata worker action.",
+  };
+}
+
+test("metadata worker integration preconditions keep the review-stage catalog unwired", () => {
   const decision = evaluateWorkflowLiveWorkerIntegration({
     releaseProfile: releaseProfile(),
     preconditions: completeWorkerPreconditions(),
+    stage: "review",
   });
   assert.equal(decision.ready, true);
   if (!decision.ready) {
-    throw new Error("expected complete source-level preconditions");
+    throw new Error("expected complete review-stage preconditions");
   }
   assert.equal(decision.action.id, WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID);
   assert.deepEqual(decision.reasons, [
@@ -240,13 +257,38 @@ test("metadata worker integration preconditions keep the source-level pilot unwi
     "worker-remains-unwired",
     "release-profile-budget-preserved",
   ]);
+});
+
+test("metadata worker integration preconditions allow only candidate worker wiring", () => {
+  const preconditions = {
+    ...completeWorkerPreconditions(),
+    workerWiring: "candidate" as const,
+  };
+  const decision = evaluateWorkflowLiveWorkerIntegration({
+    releaseProfile: releaseProfile(),
+    preconditions,
+    catalog: [candidateMetadataAction()],
+    stage: "candidate",
+  });
+  assert.equal(decision.ready, true);
+  if (!decision.ready) {
+    throw new Error("expected complete candidate-stage preconditions");
+  }
+  assert.equal(decision.action.id, WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID);
+  assert.deepEqual(decision.reasons, [
+    "metadata-action-source-reviewed",
+    "worker-binding-candidate",
+    "release-profile-budget-preserved",
+  ]);
 
   const workerSource = fs.readFileSync(
     new URL("../scripts/portal/workflow-control.ts", import.meta.url),
     "utf8",
   );
-  assert.equal(workerSource.includes("workflow-live-vault-adapter"), false);
-  assert.equal(workerSource.includes("invokeWorkflowLiveVaultArtifactMetadata"), false);
+  assert.equal(workerSource.includes('this.run.policy.mode === "live"'), true);
+  assert.equal(workerSource.includes("WORKFLOW_LIVE_WORKER_BINDING_FLAG"), true);
+  assert.equal(workerSource.includes("program.runAsync"), true);
+  assert.equal(workerSource.includes('entry.request.mode === "live"'), true);
 });
 
 test("metadata worker integration preconditions reject budget growth beyond the release profile", () => {
@@ -300,7 +342,6 @@ test("metadata worker integration preconditions require rollback and kill-switch
     releaseProfile: releaseProfile(),
     preconditions: {
       ...preconditions,
-      workerWiring: "candidate",
       killSwitch: {
         ...preconditions.killSwitch,
         checkedBeforeEachAttempt: false,
@@ -311,5 +352,5 @@ test("metadata worker integration preconditions require rollback and kill-switch
       },
     },
   });
-  assert.deepEqual(missing, ["worker-unwired", "kill-switch", "rollback"]);
+  assert.deepEqual(missing, ["kill-switch", "rollback"]);
 });

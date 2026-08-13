@@ -229,6 +229,7 @@ function livePreconditions(
       focusedChecks: [
         "polaris-workflow-live-boundary",
         "polaris-workflow-live-vault-adapter",
+        "polaris-workflow-control",
       ],
     },
   };

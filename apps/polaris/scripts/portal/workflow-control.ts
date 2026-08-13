@@ -1,7 +1,9 @@
 import { randomUUID, createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type {
+  AsyncFfiHost,
   FfiCallLog,
-  FfiHost,
   FfiInvokeRequest,
   FfiInvokeResult,
   FfiRpcRequest,
@@ -16,6 +18,22 @@ import {
   resolvePort,
   type Program,
 } from "polaris-workflow";
+import type {
+  WorkflowLiveVaultArtifactMetadataReader,
+} from "./workflow-live-vault-adapter.js";
+import {
+  invokeWorkflowLiveVaultArtifactMetadataFromWorker,
+} from "./workflow-live-worker-binding.js";
+import {
+  REQUIRED_WORKFLOW_LIVE_GATES,
+  WORKFLOW_LIVE_RELEASE_PROFILE_ID,
+  WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+  WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+  type WorkflowActionCatalogEntry,
+  type WorkflowLiveReadiness,
+  type WorkflowLiveWorkerIntegrationPreconditions,
+  type WorkflowLiveWorkerReleaseProfile,
+} from "./workflow-live-boundary.js";
 import type {
   WorkflowArtifact,
   WorkflowDomainPackProjection,
@@ -40,6 +58,7 @@ import {
   type PolarisControlStore,
   type WorkflowRunRecord,
 } from "./control-store.js";
+import { repoRoot } from "../utils/paths.js";
 
 export class WorkflowControlError extends Error {
   constructor(
@@ -59,6 +78,7 @@ type WorkflowControlOptions = {
   now?: () => Date;
   pollMs?: number;
   autoStart?: boolean;
+  liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
 };
 
 type ProvisionHook = (tenantId: string, vaultId: string) => void;
@@ -165,11 +185,12 @@ function projectionForRun(
   };
 }
 
-class MockWorkflowRpcHost implements FfiHost {
+class WorkflowRpcHost implements AsyncFfiHost {
   readonly log: FfiCallLog[] = [];
   readonly rpcLog: Array<{
     request: FfiRpcRequest;
     response: FfiRpcResponse;
+    evidenceRecorded?: boolean;
   }> = [];
   private readonly ports: PortAst[];
   private callSequence = 0;
@@ -177,6 +198,12 @@ class MockWorkflowRpcHost implements FfiHost {
   constructor(
     private readonly run: WorkflowRunRecord,
     private readonly program: Program,
+    private readonly options: {
+      store: PolarisControlStore;
+      environment: Record<string, string | undefined>;
+      now: () => Date;
+      liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
+    },
   ) {
     this.ports = program.ports.map((port) => ({
       kind: "Port",
@@ -196,27 +223,137 @@ class MockWorkflowRpcHost implements FfiHost {
     }));
   }
 
-  has(port: string, version?: string): boolean {
-    return resolvePort(this.ports, port, version) != null;
+  private policyMode(): "mock" | "live" {
+    return this.run.policy.mode === "live" ? "live" : "mock";
   }
 
-  clearLog(): void {
-    this.log.length = 0;
-    this.rpcLog.length = 0;
+  private liveRequestedFor(port: PortAst): boolean {
+    return this.policyMode() === "live"
+      && port.effect === "read"
+      && port.version === "1.0.0"
+      && (port.qualifiedName ?? port.name) === "ArtifactMetadata";
   }
 
-  invoke(req: FfiInvokeRequest): FfiInvokeResult {
-    const port = resolvePort(this.ports, req.port, req.version);
-    if (!port) {
-      return {
-        ok: false,
-        output: {},
-        error: `FFI port is not available: ${req.port}${req.version ? `@${req.version}` : ""}`,
+  private liveReadiness(): WorkflowLiveReadiness {
+    return {
+      receiptReconciliation: true,
+      budget: true,
+      killSwitch: true,
+      audit: true,
+      rollback: true,
+      deploymentEvidence: true,
+    };
+  }
+
+  private readReleaseProfile(): WorkflowLiveWorkerReleaseProfile {
+    const profilePath = path.join(
+      repoRoot(import.meta.url),
+      "config",
+      "release-profiles",
+      `${WORKFLOW_LIVE_RELEASE_PROFILE_ID}.json`,
+    );
+    const parsed = JSON.parse(fs.readFileSync(profilePath, "utf8")) as {
+      id?: unknown;
+      capacity?: {
+        jobWorkerConcurrency?: unknown;
+        jobLeaseMs?: unknown;
       };
-    }
+      slo?: {
+        readP95Ms?: unknown;
+        recoverySeconds?: unknown;
+      };
+    };
+    return {
+      id: String(parsed.id ?? ""),
+      capacity: {
+        jobWorkerConcurrency: Number(parsed.capacity?.jobWorkerConcurrency),
+        jobLeaseMs: Number(parsed.capacity?.jobLeaseMs),
+      },
+      slo: {
+        readP95Ms: Number(parsed.slo?.readP95Ms),
+        recoverySeconds: Number(parsed.slo?.recoverySeconds),
+      },
+    };
+  }
+
+  private livePreconditions(
+    profile: WorkflowLiveWorkerReleaseProfile,
+  ): WorkflowLiveWorkerIntegrationPreconditions {
+    const perAttemptMs = Math.max(1, Math.floor(profile.slo.readP95Ms / 2));
+    const maxTotalMs = Math.max(perAttemptMs, profile.slo.readP95Ms);
+    return {
+      sourceReview: true,
+      workerWiring: "candidate",
+      timeout: {
+        perAttemptMs,
+        maxTotalMs,
+        abortSignal: true,
+      },
+      retry: {
+        maxAttempts: 2,
+        idempotentByRequestId: true,
+        retryOnlyReadFailures: true,
+      },
+      budget: {
+        releaseProfileId: profile.id,
+        maxConcurrentLiveReads: 1,
+        countsAgainstJobWorker: true,
+        readP95Ms: profile.slo.readP95Ms,
+      },
+      killSwitch: {
+        environmentFlag: WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+        disabledValue: "disabled",
+        failClosedWhenUnset: true,
+        checkedBeforeEachAttempt: true,
+      },
+      receiptReconciliation: {
+        durableReceipts: true,
+        duplicateRequestIdsReconcile: true,
+        admittedFailuresPersisted: true,
+      },
+      audit: {
+        immutableEvents: true,
+        noPreAdmissionWrites: true,
+      },
+      rollback: {
+        disablesWorkerBinding: true,
+        preservesDurableEvidence: true,
+      },
+      deploymentEvidence: {
+        releaseId: this.options.environment.POLARIS_RELEASE_ID?.trim() || "local-worker",
+        profileId: profile.id,
+        focusedChecks: [
+          "polaris-workflow-live-boundary",
+          "polaris-workflow-live-vault-adapter",
+          "polaris-workflow-control",
+        ],
+      },
+    };
+  }
+
+  private candidateMetadataAction(): WorkflowActionCatalogEntry {
+    return {
+      id: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+      version: 1,
+      port: "ArtifactMetadata",
+      portVersion: "1.0.0",
+      effect: "read",
+      risk: "read",
+      adapter: "future-vault",
+      liveEnabled: true,
+      requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
+      description: "Candidate read-only Vault artifact metadata action.",
+    };
+  }
+
+  private createRpcRequest(
+    port: PortAst,
+    req: FfiInvokeRequest,
+    mode: "mock" | "live",
+  ): FfiRpcRequest {
     const builtin = builtinCallForPort(port);
     const requestId = `ffi-${this.run.id}-${++this.callSequence}`;
-    const request: FfiRpcRequest = {
+    return {
       protocolVersion: FFI_RPC_PROTOCOL_VERSION,
       requestId,
       idempotencyKey: `${this.run.id}:${requestId}`,
@@ -241,17 +378,19 @@ class MockWorkflowRpcHost implements FfiHost {
         ...(builtin ? { builtin: builtin.id } : {}),
       },
       input: { ...req.input },
-      mode: "mock",
+      mode,
       traceId: req.meta?.flowName,
     };
-    const response = mockRpcResponse(request);
-    if (port.effect === "human") {
-      response.output.approved = true;
-      response.output.reviewId = response.output.reviewId ?? `review-${requestId}`;
-      response.status = "waiting";
-      response.receipt.status = "waiting";
-    }
-    this.rpcLog.push({ request, response });
+  }
+
+  private logRpcInvocation(input: {
+    req: FfiInvokeRequest;
+    request: FfiRpcRequest;
+    response: FfiRpcResponse;
+    evidenceRecorded?: boolean;
+  }): FfiInvokeResult {
+    const { req, request, response, evidenceRecorded } = input;
+    this.rpcLog.push({ request, response, evidenceRecorded });
     this.log.push({
       at: response.receipt.startedAt,
       port: req.port,
@@ -269,8 +408,128 @@ class MockWorkflowRpcHost implements FfiHost {
       output: response.output,
       detail: `rpc://${request.call.port}@${request.call.version} (${response.status})`,
       ...(response.error ? { error: response.error.message } : {}),
-      resolvedVersion: port.version,
+      resolvedVersion: request.call.version,
     };
+  }
+
+  private liveMetadataResponse(input: {
+    request: FfiRpcRequest;
+    result: Awaited<ReturnType<typeof invokeWorkflowLiveVaultArtifactMetadataFromWorker>>;
+  }): FfiRpcResponse {
+    const completedAt = this.options.now().toISOString();
+    if (input.result.allowed) {
+      const output = {
+        artifactCount: input.result.metadata.artifactCount,
+        latestTitles: input.result.metadata.latestTitles.join("\n"),
+        pendingMemoryChanges: input.result.metadata.pendingMemoryChanges,
+      };
+      return {
+        protocolVersion: FFI_RPC_PROTOCOL_VERSION,
+        requestId: input.request.requestId,
+        status: "completed",
+        output,
+        receipt: {
+          id: `receipt-${input.request.requestId}`,
+          requestId: input.request.requestId,
+          status: "completed",
+          call: input.request.call,
+          startedAt: completedAt,
+          completedAt,
+        },
+      };
+    }
+    return {
+      protocolVersion: FFI_RPC_PROTOCOL_VERSION,
+      requestId: input.request.requestId,
+      status: "failed",
+      output: {},
+      receipt: {
+        id: `receipt-${input.request.requestId}`,
+        requestId: input.request.requestId,
+        status: "failed",
+        call: input.request.call,
+        startedAt: completedAt,
+        completedAt,
+      },
+      error: {
+        code: input.result.code,
+        message: input.result.message,
+      },
+    };
+  }
+
+  has(port: string, version?: string): boolean {
+    return resolvePort(this.ports, port, version) != null;
+  }
+
+  clearLog(): void {
+    this.log.length = 0;
+    this.rpcLog.length = 0;
+  }
+
+  invoke(req: FfiInvokeRequest): FfiInvokeResult {
+    const port = resolvePort(this.ports, req.port, req.version);
+    if (!port) {
+      return {
+        ok: false,
+        output: {},
+        error: `FFI port is not available: ${req.port}${req.version ? `@${req.version}` : ""}`,
+      };
+    }
+    if (this.liveRequestedFor(port)) {
+      return {
+        ok: false,
+        output: {},
+        error: "Workflow live FFI requires async worker execution",
+        resolvedVersion: port.version,
+      };
+    }
+    return this.invokeMock(req, port);
+  }
+
+  async invokeAsync(req: FfiInvokeRequest): Promise<FfiInvokeResult> {
+    const port = resolvePort(this.ports, req.port, req.version);
+    if (!port) {
+      return {
+        ok: false,
+        output: {},
+        error: `FFI port is not available: ${req.port}${req.version ? `@${req.version}` : ""}`,
+      };
+    }
+    if (!this.liveRequestedFor(port)) {
+      return this.invokeMock(req, port);
+    }
+    const request = this.createRpcRequest(port, req, "live");
+    const profile = this.readReleaseProfile();
+    const result = await invokeWorkflowLiveVaultArtifactMetadataFromWorker({
+      store: this.options.store,
+      request,
+      environment: this.options.environment,
+      readiness: this.liveReadiness(),
+      releaseProfile: profile,
+      preconditions: this.livePreconditions(profile),
+      catalog: [this.candidateMetadataAction()],
+      now: this.options.now(),
+      readMetadata: this.options.liveMetadataReader,
+    });
+    return this.logRpcInvocation({
+      req,
+      request,
+      response: this.liveMetadataResponse({ request, result }),
+      evidenceRecorded: result.workerBinding === "executed",
+    });
+  }
+
+  private invokeMock(req: FfiInvokeRequest, port: PortAst): FfiInvokeResult {
+    const request = this.createRpcRequest(port, req, "mock");
+    const response = mockRpcResponse(request);
+    if (port.effect === "human") {
+      response.output.approved = true;
+      response.output.reviewId = response.output.reviewId ?? `review-${request.requestId}`;
+      response.status = "waiting";
+      response.receipt.status = "waiting";
+    }
+    return this.logRpcInvocation({ req, request, response });
   }
 }
 
@@ -281,10 +540,12 @@ function executionClassForProgram(program: Program, flowId: string): WorkflowExe
 }
 
 function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): WorkflowArtifact {
+  const live = run.policy.mode === "live";
+  const source = live ? "Polaris live workflow adapter" : "Polaris mock Vault Host";
   const content = [
     `# ${run.flowId}`,
     "",
-    "Synthetic artifact from the Polaris mock Vault Host.",
+    `Synthetic artifact from the ${source}.`,
     `run: ${run.id}`,
     `pack: ${run.packId}@${run.packVersion}`,
     `pack-digest: ${run.packDigest}`,
@@ -296,7 +557,9 @@ function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): 
     name: `${run.flowId}-result.md`,
     kind: "report",
     size: `${Buffer.byteLength(content, "utf8")} B`,
-    summary: "mock Vault Host 生成的 synthetic artifact",
+    summary: live
+      ? "Polaris live workflow adapter 生成的 synthetic artifact"
+      : "mock Vault Host 生成的 synthetic artifact",
     content,
     digest: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
     redacted: false,
@@ -714,10 +977,18 @@ export class WorkflowControlService {
       return;
     }
     const program = runtime.pipeline.program!;
-    const host = new MockWorkflowRpcHost(run, program);
+    const host = new WorkflowRpcHost(run, program, {
+      store: this.store,
+      environment: process.env,
+      now: this.now,
+      liveMetadataReader: this.options.liveMetadataReader,
+    });
     const docStore = new DocStore();
-    const result = program.run(run.flowId, run.input, docStore, host);
+    const result = await program.runAsync(run.flowId, run.input, docStore, host);
     for (const entry of host.rpcLog) {
+      if (entry.request.mode === "live") {
+        continue;
+      }
       const receipt = entry.response.receipt;
       this.store.recordWorkflowEffectReceipt({
         id: receipt.id,

@@ -15,6 +15,14 @@ import {
   WorkflowControlError,
   WorkflowControlService,
 } from "../scripts/portal/workflow-control.js";
+import {
+  WORKFLOW_LIVE_ADAPTER_FLAG,
+  WORKFLOW_LIVE_WORKER_BINDING_FLAG,
+  WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+} from "../scripts/portal/workflow-live-boundary.js";
+import type {
+  WorkflowLiveVaultArtifactMetadataReader,
+} from "../scripts/portal/workflow-live-vault-adapter.js";
 import type {
   WorkflowDomainPackProjection,
   WorkflowVaultProjection,
@@ -27,35 +35,97 @@ description "Synthetic workflow fixture"
 
 port ReviewPlan version "1.0.0" {
   builtin manual.review
-  in { title: String, instructions: String }
-  out { approved: Boolean, reviewId: ID }
+  in {
+    title: String
+    instructions: String
+  }
+  out {
+    approved: Boolean
+    reviewId: ID
+  }
   effect human
 }
 
 flow Review title "Synthetic review" create {
   needs { ReviewPlan }
-  input { subject: String required }
+  input {
+    subject: String required
+  }
   steps {
     review "Review" {
       uses { subject }
       call ReviewPlan
-      output { approved: Boolean, reviewId: ID }
+      output {
+        approved: Boolean
+        reviewId: ID
+      }
     }
   }
-  output { approved: Boolean from approved, reviewId: ID from reviewId }
+  output {
+    approved: Boolean from approved
+    reviewId: ID from reviewId
+  }
   ui { layout form primary "Review" }
 }
 
 flow Summarize title "Synthetic summary" create {
-  input { subject: String required }
+  input {
+    subject: String required
+  }
   steps {
     summarize "Summarize" {
       uses { subject }
-      output { summary: String }
+      output {
+        summary: String
+      }
     }
   }
-  output { summary: String from summary }
+  output {
+    summary: String from summary
+  }
   ui { layout form primary "Summarize" }
+}
+`;
+
+const METADATA_PACK_SOURCE = `
+domain MetadataPack version "1.0.0"
+title "Synthetic metadata pack"
+description "Synthetic live metadata workflow fixture"
+
+port ArtifactMetadata version "1.0.0" {
+  in {
+    artifactScope: String?
+  }
+  out {
+    artifactCount: Number
+    latestTitles: String
+    pendingMemoryChanges: Number
+  }
+  effect read
+}
+
+flow ReadMetadata title "Read metadata" create {
+  needs { ArtifactMetadata }
+  input {
+    artifactScope: String
+  }
+  steps {
+    metadata "Read metadata" {
+      uses { artifactScope }
+      call ArtifactMetadata
+      output {
+        artifactCount: Number
+        latestTitles: String
+        pendingMemoryChanges: Number
+      }
+    }
+  }
+  output {
+    artifactCount: Number from artifactCount
+    latestTitles: String from latestTitles
+    pendingMemoryChanges: Number from pendingMemoryChanges
+  }
+  ui { layout form primary "Read" }
 }
 `;
 
@@ -78,11 +148,21 @@ function syntheticVault(id = "vault-synthetic"): WorkflowVaultProjection {
 
 function testEnvironment(): { root: string; previous: Record<string, string | undefined> } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-workflow-control-"));
-  const keys = ["NODE_ENV", "POLARIS_DATA_ROOT", "POLARIS_CONTROL_STORE_PATH"];
+  const keys = [
+    "NODE_ENV",
+    "POLARIS_DATA_ROOT",
+    "POLARIS_CONTROL_STORE_PATH",
+    "POLARIS_WORKFLOW_LIVE_ADAPTER",
+    "POLARIS_WORKFLOW_LIVE_WORKER_BINDING",
+    "POLARIS_RELEASE_ID",
+  ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   process.env.NODE_ENV = "test";
   process.env.POLARIS_DATA_ROOT = path.join(root, "data");
   process.env.POLARIS_CONTROL_STORE_PATH = path.join(root, "control.sqlite");
+  delete process.env.POLARIS_WORKFLOW_LIVE_ADAPTER;
+  delete process.env.POLARIS_WORKFLOW_LIVE_WORKER_BINDING;
+  delete process.env.POLARIS_RELEASE_ID;
   return { root, previous };
 }
 
@@ -98,6 +178,16 @@ function restoreEnvironment(fixture: ReturnType<typeof testEnvironment>): void {
 async function installSyntheticPack(root: string): Promise<WorkflowDomainPackProjection> {
   const sourcePath = path.join(root, "review-pack.ord");
   fs.writeFileSync(sourcePath, DOMAIN_PACK_SOURCE, "utf8");
+  return installPack(sourcePath);
+}
+
+async function installSyntheticMetadataPack(root: string): Promise<WorkflowDomainPackProjection> {
+  const sourcePath = path.join(root, "metadata-pack.ord");
+  fs.writeFileSync(sourcePath, METADATA_PACK_SOURCE, "utf8");
+  return installPack(sourcePath);
+}
+
+async function installPack(sourcePath: string): Promise<WorkflowDomainPackProjection> {
   const installed = await addDomainPack(import.meta.url, sourcePath);
   const projection = listDomainPackProjections(import.meta.url).find(
     (pack) => pack.id === installed.pack.id,
@@ -108,14 +198,64 @@ async function installSyntheticPack(root: string): Promise<WorkflowDomainPackPro
 
 function serviceFor(
   pack: WorkflowDomainPackProjection,
-  options: { autoStart?: boolean } = {},
+  options: {
+    autoStart?: boolean;
+    liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
+  } = {},
 ): WorkflowControlService {
   return new WorkflowControlService({
     importMetaUrl: import.meta.url,
     listPacks: () => [pack],
     listVaults: async () => [syntheticVault()],
     autoStart: options.autoStart ?? false,
+    liveMetadataReader: options.liveMetadataReader,
   });
+}
+
+function createLiveMetadataRun(pack: WorkflowDomainPackProjection): string {
+  const runId = `run-live-metadata-${Date.now()}`;
+  const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+  try {
+    store.createWorkflowRun({
+      id: runId,
+      tenantId: "tenant-synthetic",
+      vaultId: "vault-synthetic",
+      vaultName: "Synthetic Vault",
+      packId: pack.id,
+      packVersion: pack.version,
+      packDigest: pack.digest,
+      flowId: "ReadMetadata",
+      source: "manual",
+      priority: "normal",
+      input: { artifactScope: "recent" },
+      approvalRequired: false,
+      executionClass: "ai",
+      capabilityLease: {
+        id: `lease-${runId}`,
+        capabilities: [WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      policy: {
+        decision: "allow",
+        mode: "live",
+        reasons: [
+          "pack-digest-pinned",
+          "vault-capability-lease",
+          "candidate-live-metadata",
+        ],
+      },
+      dedupeKey: `workflow-live-metadata:tenant-synthetic:${runId}`,
+      event: {
+        kind: "submitted",
+        title: "Synthetic live metadata run submitted",
+        detail: "Synthetic live metadata run",
+        tone: "neutral",
+      },
+    });
+  } finally {
+    store.close();
+  }
+  return runId;
 }
 
 test("setup atomically enqueues every enabled flow and completes manual review", { concurrency: false }, async () => {
@@ -213,6 +353,100 @@ test("workflow cancellation, retry, tenant isolation, and lease denial are durab
     const deniedRun = denied.runs.find((run) => run.id === retried.id);
     assert.equal(deniedRun?.status, "failed");
     assert.equal(deniedRun?.error?.code, "capability-lease-invalid");
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("a durable live-policy metadata run invokes the candidate worker binding", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticMetadataPack(fixture.root);
+    const runId = createLiveMetadataRun(pack);
+    let calls = 0;
+    process.env[WORKFLOW_LIVE_ADAPTER_FLAG] = "enabled";
+    process.env[WORKFLOW_LIVE_WORKER_BINDING_FLAG] = "enabled";
+    process.env.POLARIS_RELEASE_ID = "release-synthetic";
+    service = serviceFor(pack, {
+      liveMetadataReader: ({ request }) => {
+        calls += 1;
+        assert.equal(request.input.artifactScope, "recent");
+        return {
+          artifactCount: 2,
+          activeVaultArtifacts: 1,
+          activeUserArtifacts: 1,
+          latestTitles: ["Synthetic metadata"],
+          latestArtifacts: [],
+          pendingMemoryChanges: 1,
+        };
+      },
+    });
+
+    const listed = await service.listRuns("tenant-synthetic");
+    const completed = listed.runs.find((run) => run.id === runId);
+    assert.equal(completed?.status, "succeeded");
+    assert.equal(completed?.policy.mode, "live");
+    assert.equal(completed?.receipts.length, 1);
+    assert.equal(completed?.receipts[0]?.port, "ArtifactMetadata");
+    assert.equal(completed?.receipts[0]?.status, "completed");
+    assert.equal(completed?.artifacts.length, 1);
+    assert.equal(calls, 1);
+
+    const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+    try {
+      const stored = store.getWorkflowRun("tenant-synthetic", runId);
+      assert.equal(stored?.output.artifactCount, 2);
+      assert.equal(stored?.output.latestTitles, "Synthetic metadata");
+      assert.equal(stored?.output.pendingMemoryChanges, 1);
+      assert.equal(stored?.receipts.length, 1);
+      assert.equal(stored?.receipts[0]?.output.artifactCount, 2);
+      assert.equal(store.listAuditEvents().length, 1);
+      assert.deepEqual(store.verifyAuditChain(), { valid: true, checked: 1 });
+    } finally {
+      store.close();
+    }
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("a durable live-policy metadata run fails closed when live flags are unset", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticMetadataPack(fixture.root);
+    const runId = createLiveMetadataRun(pack);
+    let calls = 0;
+    service = serviceFor(pack, {
+      liveMetadataReader: () => {
+        calls += 1;
+        return {};
+      },
+    });
+
+    const listed = await service.listRuns("tenant-synthetic");
+    const failed = listed.runs.find((run) => run.id === runId);
+    assert.equal(failed?.status, "failed");
+    assert.equal(failed?.policy.mode, "live");
+    assert.equal(failed?.error?.code, "workflow-execution-failed");
+    assert.match(
+      failed?.error?.message ?? "",
+      /Workflow live metadata worker binding is disabled by deployment policy/u,
+    );
+    assert.equal(failed?.receipts.length, 0);
+    assert.equal(failed?.artifacts.length, 0);
+    assert.equal(calls, 0);
+
+    const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+    try {
+      assert.equal(store.getWorkflowRun("tenant-synthetic", runId)?.receipts.length, 0);
+      assert.equal(store.listAuditEvents().length, 0);
+    } finally {
+      store.close();
+    }
   } finally {
     service?.close();
     restoreEnvironment(fixture);

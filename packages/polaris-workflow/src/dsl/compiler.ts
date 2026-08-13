@@ -1,10 +1,11 @@
 import { flattenDomain, type DomainAst, type FlowAst, type InputFieldAst, type PortAst } from './ast.js'
-import type { FfiHost } from './host.js'
+import type { AsyncFfiHost, FfiHost } from './host.js'
 import {
   applyFlowEffects,
   collectFlowOutputs,
   evalRequireExpr,
   execStepWithIO,
+  execStepWithIOAsync,
   type DocStore,
   type RunInput,
   type RunResult,
@@ -71,6 +72,7 @@ export interface ProgramFlowMeta {
 export interface CompiledFlowHandler {
   meta: ProgramFlowMeta
   execute: (input: RunInput, store: DocStore, host: FfiHost) => RunResult
+  executeAsync: (input: RunInput, store: DocStore, host: FfiHost | AsyncFfiHost) => Promise<RunResult>
 }
 
 export interface ProgramModuleMeta {
@@ -102,6 +104,7 @@ export interface Program {
   flows: CompiledFlowHandler[]
   jsSource: string
   run: (flowName: string, input: RunInput, store: DocStore, host: FfiHost) => RunResult
+  runAsync: (flowName: string, input: RunInput, store: DocStore, host: FfiHost | AsyncFfiHost) => Promise<RunResult>
 }
 
 function labelOf(inp: InputFieldAst): string {
@@ -287,7 +290,104 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
     }
   }
 
-  return { meta, execute }
+  const executeAsync = async (
+    rawInput: RunInput,
+    store: DocStore,
+    host: FfiHost | AsyncFfiHost,
+  ): Promise<RunResult> => {
+    for (const port of needs) {
+      if (!host.has(port.name, port.version)) {
+        return { ok: false, message: `缺少能力 port: ${port.raw}`, mode: 'compile', stepLog: [] }
+      }
+    }
+
+    const input: RunInput = { ...rawInput }
+    for (const f of inputs) {
+      if ((f.type === 'Number' || f.type === 'Money') && input[f.name] !== undefined && input[f.name] !== '') {
+        input[f.name] = Number(input[f.name])
+      }
+    }
+    for (const f of inputs) {
+      const v = input[f.name]
+      if (f.required && (v === undefined || v === '')) {
+        return { ok: false, message: `${f.label} 为必填`, mode: 'compile', stepLog: [] }
+      }
+      if (f.min !== undefined && typeof v === 'number' && v < f.min) {
+        return { ok: false, message: `${f.label} 不能小于 ${f.min}`, mode: 'compile', stepLog: [] }
+      }
+    }
+
+    const recordId = String(input.recordId ?? input.id ?? '')
+    let record = recordId ? (store.get(recordId) ?? null) : null
+
+    if (!create) {
+      if (!recordId) return { ok: false, message: '请选择业务单据', mode: 'compile', stepLog: [] }
+      if (!record) return { ok: false, message: `单据不存在: ${recordId}`, mode: 'compile', stepLog: [] }
+    }
+
+    const guard = evalRequireExpr(requireExpr, record)
+    if (!guard.ok) {
+      return { ok: false, message: `编译守卫: ${guard.reason}`, mode: 'compile', stepLog: [] }
+    }
+
+    const ctx: StepContext = { ...input }
+    if (record) {
+      ctx.recordId = record.id
+      for (const [k, v] of Object.entries(record.data)) {
+        if (ctx[k] === undefined) ctx[k] = v
+      }
+    }
+
+    const stepLog = []
+    for (const step of steps) {
+      const log = await execStepWithIOAsync(step, {
+        ctx,
+        record,
+        host,
+        flowName,
+        mode: 'compile',
+      })
+      stepLog.push(log)
+      if (!log.ok) {
+        return {
+          ok: false,
+          message: log.detail ?? `步骤失败: ${step.label}`,
+          mode: 'compile',
+          stepLog,
+          record: record ?? undefined,
+        }
+      }
+    }
+
+    const applied = applyFlowEffects({
+      flowName,
+      title,
+      entity,
+      create,
+      input,
+      record,
+      transitionTo,
+      emit,
+      stepLog,
+      mode: 'compile',
+      store,
+      ctx,
+    })
+
+    const outputs = collectFlowOutputs(flowOutSpecs, ctx, applied.record)
+
+    return {
+      ok: true,
+      message: `[编译] ${title} 完成`,
+      mode: 'compile',
+      record: applied.record,
+      stepLog,
+      outputs,
+      event: applied.event,
+    }
+  }
+
+  return { meta, execute, executeAsync }
 }
 
 function fingerprint(ast: DomainAst): string {
@@ -382,6 +482,11 @@ export function compile(ast: DomainAst): Program {
       const h = byName.get(flowName)
       if (!h) return { ok: false, message: `Program 无 flow ${flowName}`, mode: 'compile', stepLog: [] }
       return h.execute(input, store, host)
+    },
+    async runAsync(flowName, input, store, host) {
+      const h = byName.get(flowName)
+      if (!h) return { ok: false, message: `Program 无 flow ${flowName}`, mode: 'compile', stepLog: [] }
+      return h.executeAsync(input, store, host)
     },
   }
 }

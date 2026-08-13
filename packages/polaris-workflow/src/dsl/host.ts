@@ -49,6 +49,10 @@ export interface FfiHost {
   clearLog(): void
 }
 
+export interface AsyncFfiHost extends FfiHost {
+  invokeAsync(req: FfiInvokeRequest): Promise<FfiInvokeResult>
+}
+
 export class MockHost implements FfiHost {
   readonly log: FfiCallLog[] = []
   private readonly ports: PortAst[]

@@ -148,14 +148,21 @@ export interface StepExecOptions {
   mode?: 'interpret' | 'compile'
 }
 
-/**
- * 执行一步：
- * 1. 从 ctx 取 uses
- * 2. 若 call port → Host.invoke（FFI）；否则纯计算 produce
- * 3. 写 outputs 回 ctx
- */
-export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
-  const { ctx, record, host, flowName, mode } = opts
+export interface AsyncStepExecOptions {
+  ctx: StepContext
+  record: DocRecord | null
+  host?: StepExecOptions['host'] & {
+    invokeAsync?: (req: Parameters<NonNullable<StepExecOptions['host']>['invoke']>[0]) => Promise<ReturnType<NonNullable<StepExecOptions['host']>['invoke']>>
+  }
+  flowName?: string
+  mode?: 'interpret' | 'compile'
+}
+
+function collectStepUses(
+  step: StepSpec,
+  ctx: StepContext,
+  record: DocRecord | null,
+): { ok: true; used: Record<string, CtxValue> } | { ok: false; log: StepLog } {
   const used: Record<string, CtxValue> = {}
   for (const name of step.uses) {
     if (!(name in ctx) || ctx[name] === undefined || ctx[name] === '') {
@@ -165,77 +172,120 @@ export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
         continue
       }
       return {
-        id: step.id,
-        label: step.label,
         ok: false,
-        detail: `缺少 uses 依赖: ${name}`,
-        used,
-        call: step.call,
+        log: {
+          id: step.id,
+          label: step.label,
+          ok: false,
+          detail: `缺少 uses 依赖: ${name}`,
+          used,
+          call: step.call,
+        },
       }
     }
     used[name] = ctx[name]
   }
+  return { ok: true, used }
+}
+
+function ffiMissingHostLog(
+  step: StepSpec,
+  used: Record<string, CtxValue>,
+): StepLog {
+  const callLabel = step.callVersion ? `${step.call}@${step.callVersion}` : step.call
+  return {
+    id: step.id,
+    label: step.label,
+    ok: false,
+    detail: `step call ${callLabel} 但未注入 FfiHost`,
+    used,
+    call: callLabel,
+    ffi: true,
+  }
+}
+
+function ffiFailureLog(
+  step: StepSpec,
+  used: Record<string, CtxValue>,
+  error: string | undefined,
+): StepLog {
+  const callLabel = step.callVersion ? `${step.call}@${step.callVersion}` : step.call
+  return {
+    id: step.id,
+    label: step.label,
+    ok: false,
+    detail: error ?? `FFI ${callLabel} 失败`,
+    used,
+    call: callLabel,
+    ffi: true,
+  }
+}
+
+function ffiSuccessLog(
+  step: StepSpec,
+  ctx: StepContext,
+  used: Record<string, CtxValue>,
+  res: {
+    output: StepContext
+    detail?: string
+    resolvedVersion?: string
+  },
+): StepLog {
+  const produced: Record<string, CtxValue> = {}
+  for (const out of step.outputs) {
+    const v = res.output[out.name] ?? res.output[Object.keys(res.output)[0]!]
+    produced[out.name] = v
+    ctx[out.name] = v
+  }
+  if (step.outputs.length === 0) {
+    for (const [k, v] of Object.entries(res.output)) {
+      produced[k] = v
+      ctx[k] = v
+    }
+  }
+  const usedSummary = step.uses.map((u) => `${u}=${fmt(used[u])}`).join(', ') || '(no uses)'
+  const outSummary =
+    Object.entries(produced)
+      .map(([k, v]) => `${k}=${fmt(v)}`)
+      .join(', ') || '(no output)'
+  const resolved = res.resolvedVersion ? `@${res.resolvedVersion}` : ''
+  return {
+    id: step.id,
+    label: step.label,
+    ok: true,
+    detail: `call ${step.call}${resolved} · uses{ ${usedSummary} } → out{ ${outSummary} } · ${res.detail ?? 'ffi'}`,
+    used,
+    produced,
+    call: `${step.call}${resolved}`,
+    ffi: true,
+  }
+}
+
+/**
+ * 执行一步：
+ * 1. 从 ctx 取 uses
+ * 2. 若 call port → Host.invoke（FFI）；否则纯计算 produce
+ * 3. 写 outputs 回 ctx
+ */
+export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
+  const { ctx, record, host, flowName, mode } = opts
+  const collected = collectStepUses(step, ctx, record)
+  if (!collected.ok) return collected.log
+  const { used } = collected
 
   const produced: Record<string, CtxValue> = {}
 
   // ── FFI 路径 ──
   if (step.call) {
-    const callLabel = step.callVersion ? `${step.call}@${step.callVersion}` : step.call
-    if (!host) {
-      return {
-        id: step.id,
-        label: step.label,
-        ok: false,
-        detail: `step call ${callLabel} 但未注入 FfiHost`,
-        used,
-        call: callLabel,
-        ffi: true,
-      }
-    }
+    if (!host) return ffiMissingHostLog(step, used)
     const res = host.invoke({
       port: step.call,
       version: step.callVersion,
       input: { ...used },
       meta: { stepId: step.id, flowName, mode },
     })
-    if (!res.ok) {
-      return {
-        id: step.id,
-        label: step.label,
-        ok: false,
-        detail: res.error ?? `FFI ${callLabel} 失败`,
-        used,
-        call: callLabel,
-        ffi: true,
-      }
-    }
-    for (const out of step.outputs) {
-      const v = res.output[out.name] ?? res.output[Object.keys(res.output)[0]!]
-      produced[out.name] = v
-      ctx[out.name] = v
-    }
-    if (step.outputs.length === 0) {
-      for (const [k, v] of Object.entries(res.output)) {
-        produced[k] = v
-        ctx[k] = v
-      }
-    }
-    const usedSummary = step.uses.map((u) => `${u}=${fmt(used[u])}`).join(', ') || '(no uses)'
-    const outSummary =
-      Object.entries(produced)
-        .map(([k, v]) => `${k}=${fmt(v)}`)
-        .join(', ') || '(no output)'
-    const resolved = res.resolvedVersion ? `@${res.resolvedVersion}` : ''
-    return {
-      id: step.id,
-      label: step.label,
-      ok: true,
-      detail: `call ${step.call}${resolved} · uses{ ${usedSummary} } → out{ ${outSummary} } · ${res.detail ?? 'ffi'}`,
-      used,
-      produced,
-      call: `${step.call}${resolved}`,
-      ffi: true,
-    }
+    if (!res.ok) return ffiFailureLog(step, used, res.error)
+    return ffiSuccessLog(step, ctx, used, res)
   }
 
   // ── 纯计算路径 ──
@@ -267,6 +317,33 @@ export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
     used,
     produced,
   }
+}
+
+export async function execStepWithIOAsync(
+  step: StepSpec,
+  opts: AsyncStepExecOptions,
+): Promise<StepLog> {
+  const { ctx, record, host, flowName, mode } = opts
+  const collected = collectStepUses(step, ctx, record)
+  if (!collected.ok) return collected.log
+  const { used } = collected
+
+  if (!step.call) {
+    return execStepWithIO(step, opts)
+  }
+
+  if (!host) return ffiMissingHostLog(step, used)
+  const invoke = host.invokeAsync
+    ? (req: Parameters<NonNullable<AsyncStepExecOptions['host']>['invoke']>[0]) => host.invokeAsync!(req)
+    : (req: Parameters<NonNullable<AsyncStepExecOptions['host']>['invoke']>[0]) => Promise.resolve(host.invoke(req))
+  const res = await invoke({
+    port: step.call,
+    version: step.callVersion,
+    input: { ...used },
+    meta: { stepId: step.id, flowName, mode },
+  })
+  if (!res.ok) return ffiFailureLog(step, used, res.error)
+  return ffiSuccessLog(step, ctx, used, res)
 }
 
 function fmt(v: CtxValue): string {

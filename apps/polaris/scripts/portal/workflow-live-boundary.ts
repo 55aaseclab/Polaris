@@ -166,6 +166,7 @@ const ACTION_CATALOG: readonly WorkflowActionCatalogEntry[] =
 const REQUIRED_WORKFLOW_LIVE_WORKER_FOCUSED_CHECKS = [
   "polaris-workflow-live-boundary",
   "polaris-workflow-live-vault-adapter",
+  "polaris-workflow-control",
 ] as const;
 
 function readinessForGate(
