@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   flattenDomain,
   normalizeVersion,
+  resolvePort,
   runPipeline,
   satisfies,
   type DomainAccent,
@@ -62,6 +63,14 @@ export interface DomainPackFlowProjection {
   approvalRequired: boolean;
   groupId?: string;
   groupTitle?: string;
+  toolCalls: Array<{
+    id: string;
+    port: string;
+    version: string;
+    effect: PortAst["effect"];
+    builtin?: string;
+    unresolved: boolean;
+  }>;
   fields: Array<{
     id: string;
     label: string;
@@ -102,11 +111,33 @@ function inputControlType(input: InputFieldAst): "text" | "textarea" {
   return input.inputKind ?? "text";
 }
 
-function portForStep(ports: PortAst[], flowStep: { call?: { name: string } }): PortAst | null {
+function portForStep(
+  ports: PortAst[],
+  flowStep: { call?: { name: string; version?: string } },
+): PortAst | null {
   if (!flowStep.call) return null;
-  return ports.find((port) =>
-    port.name === flowStep.call?.name || port.qualifiedName === flowStep.call?.name
-  ) ?? null;
+  return resolvePort(ports, flowStep.call.name, flowStep.call.version);
+}
+
+function flowToolCalls(
+  ports: PortAst[],
+  flowSteps: readonly { id: string; call?: { name: string; version?: string } }[],
+): DomainPackFlowProjection["toolCalls"] {
+  return flowSteps
+    .filter((step) => step.call)
+    .map((step) => {
+      const port = step.call ? resolvePort(ports, step.call.name, step.call.version) : null;
+      const portName = port?.qualifiedName ?? port?.name ?? step.call?.name ?? "unknown";
+      const portVersion = port?.version ?? step.call?.version ?? "1.0.0";
+      return {
+        id: step.id,
+        port: portName,
+        version: portVersion,
+        effect: port?.effect ?? "ffi",
+        ...(port?.builtin ? { builtin: port.builtin } : {}),
+        unresolved: port == null,
+      };
+    });
 }
 
 function assertDomainPackId(value: string): string {
@@ -376,10 +407,11 @@ export function listDomainPackProjections(
         estimate: `${flow.steps.length} 个阶段`,
         approvalRequired: flow.steps.some((step) => portForStep(ports, step)?.effect === "human"),
         ...(groupId ? { groupId, groupTitle: module?.title } : {}),
+        toolCalls: flowToolCalls(ports, flow.steps),
         fields: flow.inputs.map((input) => ({
           id: input.name,
           label: input.label ?? input.name,
-        type: inputControlType(input),
+          type: inputControlType(input),
           placeholder: input.placeholder ?? "",
           required: Boolean(input.required),
         })),

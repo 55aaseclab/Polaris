@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
+import {
+  listPolarisDomainPackToolPortalCatalogRows,
+  listPolarisToolPortalCatalogRows,
+} from "polaris-tools";
 import type { ManagedHarness } from "../config/credential-catalog.js";
 import { isSkillHarness, type SkillHarness } from "../config/skills.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
@@ -93,6 +97,11 @@ import {
   readPortalAsset,
   portalFallbackHtml,
 } from "./portal-assets.js";
+import {
+  isToolPortalDocumentPath,
+  readToolPortalAsset,
+  toolPortalFallbackHtml,
+} from "./tool-portal-assets.js";
 import {
   configuredGatewayProtocol,
   consumeLaunchTicket,
@@ -2535,6 +2544,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/workflow-runs",
             "/api/workflow-runs/:runId/events",
             "/api/workflow-suggestions",
+            "/api/tool-portal/catalog",
           ],
         });
         return;
@@ -2543,6 +2553,19 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       if (isApiPath(segments)) {
         if (isPolarisGatewayLaunchRoute(segments) && req.method === "POST") {
           await handleWanghaiLaunch(req, res, decodeURIComponent(segments[2]));
+          return;
+        }
+        if (segments.length >= 2 && segments[1] === "tool-portal") {
+          if (segments.length === 3 && segments[2] === "catalog" && req.method === "GET") {
+            sendJson(res, 200, {
+              tools: [
+                ...listPolarisToolPortalCatalogRows(),
+                ...listPolarisDomainPackToolPortalCatalogRows(listPortalDomainPacks()),
+              ],
+            });
+            return;
+          }
+          notFound(res);
           return;
         }
         if (segments.length === 2 && segments[1] === "authing-config" && req.method === "GET") {
@@ -3327,6 +3350,26 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
 
       if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/shell/")) {
         const asset = readPortalAsset(url.pathname.slice("/shell/".length));
+        if (!asset) {
+          notFound(res);
+          return;
+        }
+        sendShellAsset(res, asset.contentType, asset.body, req.method);
+        return;
+      }
+
+      if ((req.method === "GET" || req.method === "HEAD") && isToolPortalDocumentPath(url.pathname)) {
+        const document = readToolPortalAsset("index.html");
+        if (document) {
+          sendShellAsset(res, document.contentType, document.body, req.method);
+          return;
+        }
+        sendShellAsset(res, "text/html; charset=utf-8", toolPortalFallbackHtml(), req.method);
+        return;
+      }
+
+      if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/tools/")) {
+        const asset = readToolPortalAsset(url.pathname.slice("/tools/".length));
         if (!asset) {
           notFound(res);
           return;

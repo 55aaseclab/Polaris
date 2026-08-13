@@ -1,10 +1,18 @@
 import { checkFfiAdmission } from "polaris-workflow";
 import type { FfiRpcRequest } from "polaris-workflow";
+import {
+  listPolarisWorkflowActionCatalogEntries,
+  POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID,
+  REQUIRED_POLARIS_LIVE_TOOL_GATES,
+  type PolarisToolAdapter,
+  type PolarisToolGate,
+  type PolarisToolRisk,
+} from "polaris-tools";
 
 export const WORKFLOW_LIVE_ADAPTER_FLAG = "POLARIS_WORKFLOW_LIVE_ADAPTER";
 export const WORKFLOW_LIVE_WORKER_BINDING_FLAG = "POLARIS_WORKFLOW_LIVE_WORKER_BINDING";
 export const WORKFLOW_LIVE_RELEASE_PROFILE_ID = "0.3.0-single-host";
-export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = "vault.artifact.metadata.read";
+export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID;
 
 export type WorkflowLiveWorkerPrecondition =
   | "metadata-action"
@@ -24,22 +32,9 @@ export type WorkflowLiveWorkerPrecondition =
   | "rollback"
   | "deployment-evidence";
 
-export type WorkflowLiveGate =
-  | "receipt-reconciliation"
-  | "budget"
-  | "kill-switch"
-  | "audit"
-  | "rollback"
-  | "deployment-evidence";
+export type WorkflowLiveGate = PolarisToolGate;
 
-export const REQUIRED_WORKFLOW_LIVE_GATES = [
-  "receipt-reconciliation",
-  "budget",
-  "kill-switch",
-  "audit",
-  "rollback",
-  "deployment-evidence",
-] as const satisfies readonly WorkflowLiveGate[];
+export const REQUIRED_WORKFLOW_LIVE_GATES = REQUIRED_POLARIS_LIVE_TOOL_GATES;
 
 export interface WorkflowLiveReadiness {
   receiptReconciliation: boolean;
@@ -114,8 +109,8 @@ export interface WorkflowActionCatalogEntry {
   readonly portVersion: string;
   readonly effect: FfiRpcRequest["call"]["effect"];
   readonly builtin?: string;
-  readonly risk: "read" | "workspace" | "external" | "human";
-  readonly adapter: "polaris-human" | "future-vault";
+  readonly risk: PolarisToolRisk;
+  readonly adapter: PolarisToolAdapter;
   readonly liveEnabled: boolean;
   readonly requiredGates: readonly WorkflowLiveGate[];
   readonly description: string;
@@ -165,33 +160,8 @@ export interface EvaluateWorkflowLiveWorkerIntegrationInput {
   stage?: "review" | "candidate";
 }
 
-const ACTION_CATALOG = [
-  {
-    id: "manual.review",
-    version: 1,
-    port: "manual.review",
-    portVersion: "1.0.0",
-    effect: "human",
-    builtin: "manual.review",
-    risk: "human",
-    adapter: "polaris-human",
-    liveEnabled: false,
-    requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
-    description: "Human approval interface owned by Polaris workflow state.",
-  },
-  {
-    id: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
-    version: 1,
-    port: "ArtifactMetadata",
-    portVersion: "1.0.0",
-    effect: "read",
-    risk: "read",
-    adapter: "future-vault",
-    liveEnabled: false,
-    requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
-    description: "Future read-only Vault artifact metadata action.",
-  },
-] as const satisfies readonly WorkflowActionCatalogEntry[];
+const ACTION_CATALOG: readonly WorkflowActionCatalogEntry[] =
+  listPolarisWorkflowActionCatalogEntries();
 
 const REQUIRED_WORKFLOW_LIVE_WORKER_FOCUSED_CHECKS = [
   "polaris-workflow-live-boundary",

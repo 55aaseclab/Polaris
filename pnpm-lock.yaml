@@ -34,6 +34,9 @@ importers:
       js-yaml:
         specifier: ^4.1.0
         version: 4.2.0
+      polaris-tools:
+        specifier: workspace:*
+        version: link:../../packages/polaris-tools
       polaris-workflow:
         specifier: workspace:*
         version: link:../../packages/polaris-workflow
@@ -89,6 +92,58 @@ importers:
       zustand:
         specifier: ^5.0.3
         version: 5.0.14(@types/react@19.2.18)(react@19.2.8)
+    devDependencies:
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.11))
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.4(@types/react@19.2.18)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.4
+        version: 6.0.5(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.11))
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.2.0
+        version: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.11)
+
+  apps/polaris-tool-portal:
+    dependencies:
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      lucide-react:
+        specifier: ^1.29.0
+        version: 1.30.0(react@19.2.8)
+      polaris-tools:
+        specifier: workspace:*
+        version: link:../../packages/polaris-tools
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      tailwind-merge:
+        specifier: ^3.6.0
+        version: 3.6.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -224,6 +279,18 @@ importers:
       tsx:
         specifier: ^4.19.4
         version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/polaris-tools:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

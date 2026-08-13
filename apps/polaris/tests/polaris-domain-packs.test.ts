@@ -160,6 +160,7 @@ port ReadValue version "1.0.0" {
 }
 
 port ConfirmResult version "1.0.0" {
+  builtin manual.review
   in { result: String }
   out { approved: Boolean }
   effect human
@@ -186,6 +187,31 @@ flow Review title "Review evidence" create {
     assert.equal(projections[0]?.flows[0]?.fields[0]?.required, true);
     assert.equal(projections[0]?.flows[0]?.fields[0]?.type, "textarea");
     assert.equal(projections[0]?.flows[0]?.approvalRequired, true);
+    assert.deepEqual(
+      projections[0]?.flows[0]?.toolCalls.map((call) => ({
+        id: call.id,
+        port: call.port,
+        effect: call.effect,
+        builtin: call.builtin,
+        unresolved: call.unresolved,
+      })),
+      [
+        {
+          id: "read",
+          port: "ReadValue",
+          effect: "read",
+          builtin: undefined,
+          unresolved: false,
+        },
+        {
+          id: "confirm",
+          port: "ConfirmResult",
+          effect: "human",
+          builtin: "manual.review",
+          unresolved: false,
+        },
+      ],
+    );
     assert.match(projections[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/u);
   });
 });
