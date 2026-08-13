@@ -4,7 +4,6 @@ import {
 } from "node:crypto";
 import type {
   PolarisControlStore,
-  WorkflowEffectReceiptRecord,
 } from "./control-store.js";
 import {
   listOwnedVaults,
@@ -12,12 +11,19 @@ import {
   readVaultStatus,
 } from "../core/portal.js";
 import {
-  evaluateWorkflowLiveInvocation,
   type EvaluateWorkflowLiveInvocationInput,
   type WorkflowActionCatalogEntry,
   type WorkflowLiveInvocationDecision,
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
 } from "./workflow-live-boundary.js";
+import {
+  invokeWorkflowLiveTool,
+  invokeWorkflowLiveToolWithEvidence,
+  recordWorkflowLiveToolEvidence,
+  WorkflowLiveToolExecutionError,
+  type WorkflowLiveToolDefinition,
+  type WorkflowLiveToolInvocationResult,
+} from "./workflow-live-tool-gateway.js";
 
 export { WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID } from "./workflow-live-boundary.js";
 
@@ -55,6 +61,7 @@ export type WorkflowLiveVaultArtifactMetadataReader = (
 export interface WorkflowLiveVaultArtifactMetadataInvocationInput
   extends EvaluateWorkflowLiveInvocationInput {
   readMetadata?: WorkflowLiveVaultArtifactMetadataReader;
+  signal?: AbortSignal;
 }
 
 export type WorkflowLiveVaultArtifactMetadataInvocationResult =
@@ -81,13 +88,14 @@ const MAX_LATEST_ARTIFACTS = 5;
 const MAX_LATEST_TITLES = 5;
 const MAX_RETRIEVAL_REASONS = 5;
 const WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION = "workflow.live.vault.metadata.read";
+const WORKFLOW_LIVE_VAULT_METADATA_EXECUTOR_FAMILY = "polaris.projection";
 
-export class WorkflowLiveVaultMetadataReadError extends Error {
+export class WorkflowLiveVaultMetadataReadError extends WorkflowLiveToolExecutionError {
   constructor(
     message: string,
-    readonly code: string,
+    code: string,
   ) {
-    super(message);
+    super(message, code);
     this.name = "WorkflowLiveVaultMetadataReadError";
   }
 }
@@ -217,91 +225,10 @@ export function readWorkflowLiveVaultArtifactMetadata(
   return normalizeWorkflowLiveVaultArtifactMetadata(status.evolution ?? {});
 }
 
-export async function invokeWorkflowLiveVaultArtifactMetadata(
-  input: WorkflowLiveVaultArtifactMetadataInvocationInput,
-): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
-  const decision = evaluateWorkflowLiveInvocation(input);
-  if (!decision.allowed) {
-    return decision;
-  }
-  if (decision.action.id !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
-    return {
-      allowed: false,
-      code: "workflow-vault-metadata-action-required",
-      message: "Workflow live Vault metadata adapter accepts only the Vault metadata action",
-      reasons: ["metadata-action-required"],
-      action: decision.action,
-    };
-  }
-  try {
-    const readMetadata = input.readMetadata ?? readWorkflowLiveVaultArtifactMetadata;
-    const metadata = normalizeWorkflowLiveVaultArtifactMetadata(
-      await readMetadata({
-        request: input.request,
-        action: decision.action,
-        decision,
-      }),
-    );
-    return {
-      allowed: true,
-      action: decision.action,
-      reasons: decision.reasons,
-      metadata,
-    };
-  } catch (error) {
-    return {
-      allowed: false,
-      code: error instanceof WorkflowLiveVaultMetadataReadError
-        ? error.code
-        : "live-vault-metadata-read-failed",
-      message: error instanceof Error
-        ? error.message
-        : "Workflow live Vault metadata read failed",
-      reasons: ["metadata-read-failed"],
-      action: decision.action,
-    };
-  }
-}
-
 function metadataDigest(metadata: WorkflowLiveVaultArtifactMetadata): string {
   return `sha256:${createHash("sha256")
     .update(JSON.stringify(metadata), "utf8")
     .digest("hex")}`;
-}
-
-function receiptForMetadataInvocation(input: {
-  request: FfiRpcRequest;
-  result: WorkflowLiveVaultArtifactMetadataInvocationResult;
-  startedAt: string;
-  completedAt: string;
-}): WorkflowEffectReceiptRecord {
-  const status = input.result.allowed ? "completed" : "failed";
-  return {
-    id: `receipt-${input.request.requestId}`,
-    runId: input.request.runId,
-    tenantId: input.request.tenantId,
-    requestId: input.request.requestId,
-    port: input.request.call.port,
-    version: input.request.call.version,
-    effect: input.request.call.effect,
-    status,
-    input: input.request.input,
-    output: input.result.allowed
-      ? {
-        metadataDigest: metadataDigest(input.result.metadata),
-        artifactCount: input.result.metadata.artifactCount,
-        pendingMemoryChanges: input.result.metadata.pendingMemoryChanges,
-      }
-      : {},
-    ...(!input.result.allowed
-      ? {
-        errorCode: input.result.code,
-        errorMessage: input.result.message,
-      }
-      : {}),
-    createdAt: input.startedAt,
-    completedAt: input.completedAt,
-  };
 }
 
 function auditIdForMetadataInvocation(request: FfiRpcRequest): string {
@@ -314,18 +241,71 @@ function auditIdForMetadataInvocation(request: FfiRpcRequest): string {
     .digest("hex")}`;
 }
 
-function shouldRecordMetadataEvidence(
+export const WORKFLOW_LIVE_VAULT_METADATA_TOOL =
+  {
+    actionId: WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
+    executorFamily: WORKFLOW_LIVE_VAULT_METADATA_EXECUTOR_FAMILY,
+    auditAction: WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION,
+    auditId: auditIdForMetadataInvocation,
+    failureReason: "metadata-read-failed",
+    timeoutReason: "metadata-read-timeout",
+    execute: readWorkflowLiveVaultArtifactMetadata,
+    normalize: normalizeWorkflowLiveVaultArtifactMetadata,
+    receiptOutput: (metadata) => ({
+      metadataDigest: metadataDigest(metadata),
+      artifactCount: metadata.artifactCount,
+      pendingMemoryChanges: metadata.pendingMemoryChanges,
+    }),
+    auditMetadata: (metadata) => ({
+      artifactCount: metadata.artifactCount,
+      metadataDigest: metadataDigest(metadata),
+    }),
+    unsupportedActionCode: "workflow-vault-metadata-action-required",
+    unsupportedActionMessage:
+      "Workflow live Vault metadata gateway accepts only the Vault metadata action",
+    unsupportedActionReason: "metadata-action-required",
+    readFailedCode: "live-vault-metadata-read-failed",
+    readFailedMessage: "Workflow live Vault metadata read failed",
+  } as const satisfies WorkflowLiveToolDefinition<WorkflowLiveVaultArtifactMetadata>;
+
+function toMetadataInvocationResult(
+  result: WorkflowLiveToolInvocationResult<WorkflowLiveVaultArtifactMetadata>,
+): WorkflowLiveVaultArtifactMetadataInvocationResult {
+  if (!result.allowed) {
+    return result;
+  }
+  return {
+    allowed: true,
+    action: result.action,
+    reasons: result.reasons,
+    metadata: result.output,
+  };
+}
+
+function toToolInvocationResult(
   result: WorkflowLiveVaultArtifactMetadataInvocationResult,
-): boolean {
-  return result.allowed
-    || (
-      !result.allowed
-      && result.action?.id === WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID
-      && (
-        result.reasons.includes("metadata-read-failed")
-        || result.reasons.includes("metadata-read-timeout")
-      )
-    );
+): WorkflowLiveToolInvocationResult<WorkflowLiveVaultArtifactMetadata> {
+  if (!result.allowed) {
+    return result;
+  }
+  return {
+    allowed: true,
+    action: result.action,
+    reasons: result.reasons,
+    output: result.metadata,
+  };
+}
+
+export async function invokeWorkflowLiveVaultArtifactMetadata(
+  input: WorkflowLiveVaultArtifactMetadataInvocationInput,
+): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
+  return toMetadataInvocationResult(
+    await invokeWorkflowLiveTool({
+      ...input,
+      tool: WORKFLOW_LIVE_VAULT_METADATA_TOOL,
+      ...(input.readMetadata ? { execute: input.readMetadata } : {}),
+    }),
+  );
 }
 
 export function recordWorkflowLiveVaultArtifactMetadataEvidence(input: {
@@ -335,55 +315,21 @@ export function recordWorkflowLiveVaultArtifactMetadataEvidence(input: {
   startedAt: string;
   completedAt: string;
 }): void {
-  if (!shouldRecordMetadataEvidence(input.result)) {
-    return;
-  }
-  input.store.recordWorkflowEffectReceipt(
-    receiptForMetadataInvocation({
-      request: input.request,
-      result: input.result,
-      startedAt: input.startedAt,
-      completedAt: input.completedAt,
-    }),
-  );
-  input.store.recordAuditOnce({
-    id: auditIdForMetadataInvocation(input.request),
-    actorId: input.request.tenantId,
-    tenantId: input.request.tenantId,
-    vaultId: input.request.vaultId,
-    action: WORKFLOW_LIVE_VAULT_METADATA_AUDIT_ACTION,
-    requestId: input.request.requestId,
-    outcome: input.result.allowed ? "success" : "failure",
-    metadata: {
-      action: input.result.action?.id ?? WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
-      port: input.request.call.port,
-      version: input.request.call.version,
-      effect: input.request.call.effect,
-      runId: input.request.runId,
-      idempotencyKey: input.request.idempotencyKey,
-      reasons: input.result.reasons,
-      ...(input.result.allowed
-        ? {
-          artifactCount: input.result.metadata.artifactCount,
-          metadataDigest: metadataDigest(input.result.metadata),
-        }
-        : { errorCode: input.result.code }),
-    },
+  recordWorkflowLiveToolEvidence({
+    ...input,
+    tool: WORKFLOW_LIVE_VAULT_METADATA_TOOL,
+    result: toToolInvocationResult(input.result),
   });
 }
 
 export async function invokeWorkflowLiveVaultArtifactMetadataWithEvidence(
   input: WorkflowLiveVaultArtifactMetadataDurableEvidenceInput,
 ): Promise<WorkflowLiveVaultArtifactMetadataInvocationResult> {
-  const startedAt = new Date().toISOString();
-  const result = await invokeWorkflowLiveVaultArtifactMetadata(input);
-  const completedAt = new Date().toISOString();
-  recordWorkflowLiveVaultArtifactMetadataEvidence({
-    store: input.store,
-    request: input.request,
-    result,
-    startedAt,
-    completedAt,
-  });
-  return result;
+  return toMetadataInvocationResult(
+    await invokeWorkflowLiveToolWithEvidence({
+      ...input,
+      tool: WORKFLOW_LIVE_VAULT_METADATA_TOOL,
+      ...(input.readMetadata ? { execute: input.readMetadata } : {}),
+    }),
+  );
 }

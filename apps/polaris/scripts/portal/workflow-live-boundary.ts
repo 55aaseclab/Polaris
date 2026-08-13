@@ -13,6 +13,7 @@ export const WORKFLOW_LIVE_ADAPTER_FLAG = "POLARIS_WORKFLOW_LIVE_ADAPTER";
 export const WORKFLOW_LIVE_WORKER_BINDING_FLAG = "POLARIS_WORKFLOW_LIVE_WORKER_BINDING";
 export const WORKFLOW_LIVE_RELEASE_PROFILE_ID = "0.3.0-single-host";
 export const WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID = POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID;
+export const WORKFLOW_LIVE_PROJECTION_EXECUTOR_FAMILY = "polaris.projection";
 
 export type WorkflowLiveWorkerPrecondition =
   | "metadata-action"
@@ -165,7 +166,7 @@ const ACTION_CATALOG: readonly WorkflowActionCatalogEntry[] =
 
 const REQUIRED_WORKFLOW_LIVE_WORKER_FOCUSED_CHECKS = [
   "polaris-workflow-live-boundary",
-  "polaris-workflow-live-vault-adapter",
+  "polaris-workflow-live-tool-gateway",
   "polaris-workflow-control",
 ] as const;
 
@@ -249,7 +250,11 @@ export function missingWorkflowLiveWorkerIntegrationPreconditions(
   if (!action || action.id !== WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID) {
     missing.push("metadata-action");
   } else {
-    if (action.effect !== "read" || action.risk !== "read" || action.adapter !== "future-vault") {
+    if (
+      action.effect !== "read"
+      || action.risk !== "read"
+      || action.adapter !== WORKFLOW_LIVE_PROJECTION_EXECUTOR_FAMILY
+    ) {
       missing.push("read-only-action");
     }
     if (stage === "review" && action.liveEnabled !== false) {
@@ -439,7 +444,7 @@ export function evaluateWorkflowLiveInvocation(
     return {
       allowed: false,
       code: "live-mode-required",
-      message: "Workflow live adapter accepts only live RPC requests",
+      message: "Workflow live tool gateway accepts only live RPC requests",
       reasons: ["live-mode-required"],
       action,
     };
@@ -448,7 +453,7 @@ export function evaluateWorkflowLiveInvocation(
     return {
       allowed: false,
       code: "live-adapter-disabled",
-      message: "Workflow live adapter is disabled by deployment policy",
+      message: "Workflow live tool gateway is disabled by deployment policy",
       reasons: ["feature-flag-disabled"],
       action,
     };
@@ -458,7 +463,7 @@ export function evaluateWorkflowLiveInvocation(
     return {
       allowed: false,
       code: "live-adapter-gates-incomplete",
-      message: `Workflow live adapter is missing gates: ${missing.join(", ")}`,
+      message: `Workflow live tool gateway is missing gates: ${missing.join(", ")}`,
       reasons: missing,
       action,
     };

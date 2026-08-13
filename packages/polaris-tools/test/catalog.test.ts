@@ -29,6 +29,7 @@ test("workflow action entries are derived from the tool manifests", () => {
     .find((entry) => entry.id === POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID);
   assert.equal(action?.port, "ArtifactMetadata");
   assert.equal(action?.effect, "read");
+  assert.equal(action?.adapter, "polaris.projection");
   assert.equal(action?.liveEnabled, false);
   assert.deepEqual(action?.requiredGates, REQUIRED_POLARIS_LIVE_TOOL_GATES);
 });

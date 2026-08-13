@@ -123,7 +123,7 @@ function preconditions(
       profileId: WORKFLOW_LIVE_RELEASE_PROFILE_ID,
       focusedChecks: [
         "polaris-workflow-live-boundary",
-        "polaris-workflow-live-vault-adapter",
+        "polaris-workflow-live-tool-gateway",
         "polaris-workflow-control",
       ],
     },
@@ -139,7 +139,7 @@ function candidateAction(): WorkflowActionCatalogEntry {
     portVersion: "1.0.0",
     effect: "read",
     risk: "read",
-    adapter: "future-vault",
+    adapter: "polaris.projection",
     liveEnabled: true,
     requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
     description: "Synthetic candidate metadata worker action.",

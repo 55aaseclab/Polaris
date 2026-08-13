@@ -7,7 +7,7 @@ export const POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID = "vault.artifact.metadata.
 
 export type PolarisToolEffect = "pure" | "read" | "write" | "ffi" | "human" | "time";
 export type PolarisToolRisk = "read" | "workspace" | "external" | "human";
-export type PolarisToolAdapter = "polaris-human" | "future-vault";
+export type PolarisToolAdapter = "polaris.human" | "polaris.projection";
 export type PolarisToolExecutionMode = "mock-only" | "disabled-live-boundary";
 export type PolarisToolCredentialPolicy = "none" | "polaris-managed";
 export type PolarisToolGate =
@@ -233,7 +233,7 @@ const manualReviewManifest = {
     builtin: "manual.review",
     actionId: POLARIS_MANUAL_REVIEW_TOOL_ID,
     risk: "human",
-    adapter: "polaris-human",
+    adapter: "polaris.human",
     executionMode: "mock-only",
     liveEnabled: false,
     requiredGates: REQUIRED_POLARIS_LIVE_TOOL_GATES,
@@ -325,7 +325,7 @@ const vaultArtifactMetadataManifest = {
     effect: "read",
     actionId: POLARIS_VAULT_ARTIFACT_METADATA_TOOL_ID,
     risk: "read",
-    adapter: "future-vault",
+    adapter: "polaris.projection",
     executionMode: "disabled-live-boundary",
     liveEnabled: false,
     requiredGates: REQUIRED_POLARIS_LIVE_TOOL_GATES,
@@ -363,7 +363,7 @@ const vaultArtifactMetadataManifest = {
   credentials: {
     policy: "polaris-managed",
     owner: "polaris",
-    notes: "The live adapter reads only Polaris-owned Vault metadata.",
+    notes: "The live executor reads only Polaris-owned Vault metadata.",
   },
   receipts: {
     owner: "polaris",

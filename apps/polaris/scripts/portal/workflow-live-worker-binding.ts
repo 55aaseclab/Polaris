@@ -37,7 +37,7 @@ export type WorkflowLiveMetadataWorkerBindingResult =
     workerBinding: "disabled" | "executed";
   };
 
-let activeLiveMetadataReads = 0;
+let activeLiveToolReads = 0;
 
 export function rollbackWorkflowLiveMetadataWorkerBinding(
   environment: Record<string, string | undefined>,
@@ -126,7 +126,7 @@ export async function invokeWorkflowLiveVaultArtifactMetadataFromWorker(
   if (input.environment?.[WORKFLOW_LIVE_ADAPTER_FLAG] !== "enabled") {
     return disabledResult(
       "live-adapter-disabled",
-      "Workflow live adapter is disabled by deployment policy",
+      "Workflow live tool gateway is disabled by deployment policy",
       ["feature-flag-disabled"],
     );
   }
@@ -152,7 +152,7 @@ export async function invokeWorkflowLiveVaultArtifactMetadataFromWorker(
 
   const budget = input.preconditions.budget;
   const maxConcurrentLiveReads = Math.max(1, Math.floor(budget?.maxConcurrentLiveReads ?? 1));
-  if (activeLiveMetadataReads >= maxConcurrentLiveReads) {
+  if (activeLiveToolReads >= maxConcurrentLiveReads) {
     return {
       allowed: false,
       code: "live-worker-budget-exhausted",
@@ -172,7 +172,7 @@ export async function invokeWorkflowLiveVaultArtifactMetadataFromWorker(
   let attempts = 0;
   let finalResult: WorkflowLiveVaultArtifactMetadataInvocationResult | null = null;
 
-  activeLiveMetadataReads += 1;
+  activeLiveToolReads += 1;
   try {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (input.environment?.[WORKFLOW_LIVE_WORKER_BINDING_FLAG] !== "enabled") {
@@ -203,9 +203,8 @@ export async function invokeWorkflowLiveVaultArtifactMetadataFromWorker(
           readiness: input.readiness,
           catalog: input.catalog,
           now: input.now,
-          readMetadata: input.readMetadata
-            ? (readerInput) => input.readMetadata!({ ...readerInput, signal })
-            : undefined,
+          readMetadata: input.readMetadata,
+          signal,
         }),
       ).catch((error): WorkflowLiveVaultArtifactMetadataInvocationResult => {
         if (error instanceof WorkflowLiveVaultMetadataReadError) {
@@ -236,7 +235,7 @@ export async function invokeWorkflowLiveVaultArtifactMetadataFromWorker(
       }
     }
   } finally {
-    activeLiveMetadataReads -= 1;
+    activeLiveToolReads -= 1;
   }
 
   const completedAt = new Date().toISOString();

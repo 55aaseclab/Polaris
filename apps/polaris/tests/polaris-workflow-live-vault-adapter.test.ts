@@ -81,7 +81,7 @@ function enabledAction(): WorkflowActionCatalogEntry {
     portVersion: "1.0.0",
     effect: "read",
     risk: "read",
-    adapter: "future-vault",
+    adapter: "polaris.projection",
     liveEnabled: true,
     requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
     description: "Synthetic live Vault metadata action.",

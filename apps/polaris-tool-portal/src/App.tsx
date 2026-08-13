@@ -390,7 +390,7 @@ function ToolDetailPage({
               <Fact label="Port" value={`${tool.port}@${tool.portVersion}`} mono />
               <Fact label="Effect" value={tool.effect} />
               <Fact label="Risk" value={tool.risk} />
-              <Fact label="Adapter" value={tool.adapter} />
+              <Fact label="Executor family" value={tool.adapter} />
               <Fact label="Credentials" value={tool.credentialPolicy} />
             </dl>
           </CardContent>

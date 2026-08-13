@@ -22,6 +22,7 @@ import {
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
+  WORKFLOW_LIVE_PROJECTION_EXECUTOR_FAMILY,
   WORKFLOW_LIVE_RELEASE_PROFILE_ID,
   WORKFLOW_LIVE_WORKER_BINDING_FLAG,
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
@@ -228,7 +229,7 @@ function livePreconditions(
       profileId: profile.id,
       focusedChecks: [
         "polaris-workflow-live-boundary",
-        "polaris-workflow-live-vault-adapter",
+        "polaris-workflow-live-tool-gateway",
         "polaris-workflow-control",
       ],
     },
@@ -243,7 +244,7 @@ function candidateMetadataAction(): WorkflowActionCatalogEntry {
     portVersion: "1.0.0",
     effect: "read",
     risk: "read",
-    adapter: "future-vault",
+    adapter: WORKFLOW_LIVE_PROJECTION_EXECUTOR_FAMILY,
     liveEnabled: true,
     requiredGates: REQUIRED_WORKFLOW_LIVE_GATES,
     description: "Candidate read-only Vault artifact metadata action.",
