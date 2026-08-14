@@ -125,6 +125,14 @@ export interface PolarisToolPortalCallRef {
   readonly unresolved: boolean;
 }
 
+export interface PolarisToolPortalFieldRef {
+  readonly id: string;
+  readonly label?: string;
+  readonly type?: string;
+  readonly placeholder?: string;
+  readonly required: boolean;
+}
+
 export interface PolarisDomainPackToolFlowProjection {
   readonly id: string;
   readonly title: string;
@@ -138,10 +146,7 @@ export interface PolarisDomainPackToolFlowProjection {
     readonly builtin?: string;
     readonly unresolved: boolean;
   }[];
-  readonly fields: readonly {
-    readonly id: string;
-    readonly required: boolean;
-  }[];
+  readonly fields: readonly PolarisToolPortalFieldRef[];
 }
 
 export interface PolarisDomainPackToolProjection {
@@ -160,6 +165,7 @@ export interface PolarisToolPortalCatalogRow {
   readonly scope: PolarisToolPortalScope;
   readonly scopeLabel: string;
   readonly domainPack?: PolarisToolPortalDomainPackRef;
+  readonly fields?: readonly PolarisToolPortalFieldRef[];
   readonly toolCalls: readonly PolarisToolPortalCallRef[];
   readonly category: PolarisToolManifest["category"];
   readonly tags: readonly string[];
@@ -441,6 +447,7 @@ export function listPolarisDomainPackToolPortalCatalogRows(
         scope: "domain-pack",
         scopeLabel: pack.title,
         domainPack: domainPackRef(pack),
+        fields: flow.fields,
         toolCalls: domainPackFlowToolCalls(flow),
         category: "workflow",
         tags: ["domain-pack", pack.id],

@@ -88,6 +88,13 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
+const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.join(
+  REPO_ROOT,
+  "apps",
+  "polaris",
+  "domain-packs",
+  "vault-knowledge-health",
+);
 
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
@@ -3358,25 +3365,7 @@ test("tool portal catalog includes Domain Pack flow tools without live execution
   const previousDataRoot = process.env.POLARIS_DATA_ROOT;
   process.env.POLARIS_DATA_ROOT = dataRoot;
   try {
-    const sourcePath = path.join(dataRoot, "tool-portal-pack.ord");
-    fs.writeFileSync(sourcePath, `domain ToolPortalPack version "1.0.0"
-title "Tool Portal Pack"
-port ReadEvidence version "1.0.0" {
-  in { brief: String }
-  out { result: String }
-  effect read
-}
-flow ReviewEvidence title "Review Evidence" create {
-  input { brief: String required label "Brief" placeholder "Synthetic brief" }
-  needs { ReadEvidence }
-  steps {
-    read "Read" { uses { brief } call ReadEvidence output { result: String } }
-  }
-  output { result: String from result }
-  ui { layout form primary "Review" }
-}
-`, "utf8");
-    await addDomainPack(import.meta.url, sourcePath);
+    await addDomainPack(import.meta.url, FIRST_PARTY_VAULT_KNOWLEDGE_PACK);
 
     const server = createPortalServer(0);
     await once(server, "listening");
@@ -3391,15 +3380,20 @@ flow ReviewEvidence title "Review Evidence" create {
         tools: Array<Record<string, unknown>>;
       };
       const domainTool = catalogPayload.tools.find((tool) =>
-        tool.id === "domain-pack:ToolPortalPack:ReviewEvidence"
+        tool.id === "domain-pack:VaultKnowledgeHealth:ReviewKnowledgeHealth"
       );
       assert.equal(domainTool?.scope, "domain-pack");
-      assert.equal(domainTool?.scopeLabel, "Tool Portal Pack");
-      assert.equal((domainTool?.domainPack as { id?: string } | undefined)?.id, "ToolPortalPack");
+      assert.equal(domainTool?.scopeLabel, "Vault Knowledge Health");
+      assert.equal((domainTool?.domainPack as { id?: string } | undefined)?.id, "VaultKnowledgeHealth");
       assert.equal(domainTool?.liveState, "mock-only");
-      assert.equal((domainTool?.toolCalls as Array<{ port?: string }> | undefined)?.[0]?.port, "ReadEvidence");
+      assert.equal((domainTool?.toolCalls as Array<{ mappedToolId?: string; port?: string }> | undefined)?.[0]?.port, "ArtifactMetadata");
+      assert.equal(
+        (domainTool?.toolCalls as Array<{ mappedToolId?: string; port?: string }> | undefined)?.[0]?.mappedToolId,
+        "vault.artifact.metadata.read",
+      );
+      assert.equal(domainTool?.href, "/tools/packs/VaultKnowledgeHealth/vault-knowledge-health-review-knowledge-health");
       assert.ok(catalogPayload.tools.some((tool) => tool.scope === "common"));
-      assert.ok(catalogPayload.tools.some((tool) => tool.id === "domain-pack:ToolPortalPack:ReviewEvidence"));
+      assert.ok(catalogPayload.tools.some((tool) => tool.id === "domain-pack:VaultKnowledgeHealth:ReviewKnowledgeHealth"));
       assert.ok(catalogPayload.tools.every((tool) => !("executionUrl" in tool)));
       assert.ok(catalogPayload.tools.every((tool) => !("credentialValue" in tool)));
     } finally {

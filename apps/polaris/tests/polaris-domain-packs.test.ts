@@ -9,6 +9,13 @@ import {
   listDomainPacks,
 } from "../scripts/config/domain-packs.js";
 
+const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "..",
+  "domain-packs",
+  "vault-knowledge-health",
+);
+
 function packSource(version: string, body: string): string {
   return `domain SamplePack version "${version}"
 title "Sample Pack"
@@ -269,6 +276,38 @@ module Student title "Student workflows" code "student" {
       { groupId: student?.groupId, groupTitle: student?.groupTitle },
       { groupId: "student", groupTitle: "Student workflows" },
     );
+  });
+});
+
+test("first-party Vault Knowledge Health pack projects the ArtifactMetadata read call", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    await runCli(["pack", "add", FIRST_PARTY_VAULT_KNOWLEDGE_PACK]);
+
+    const projections = listDomainPackProjections(import.meta.url);
+    const pack = projections.find((candidate) => candidate.id === "VaultKnowledgeHealth");
+    assert.ok(pack);
+    assert.equal(pack.title, "Vault Knowledge Health");
+    assert.equal(pack.category, "Vault Operations");
+    assert.equal(pack.flows.length, 1);
+    assert.deepEqual(pack.capabilities, ["Artifact Metadata"]);
+
+    const flow = pack.flows[0];
+    assert.equal(flow?.id, "ReviewKnowledgeHealth");
+    assert.equal(flow?.approvalRequired, false);
+    assert.deepEqual(flow?.fields, [{
+      id: "artifactScope",
+      label: "Artifact scope",
+      type: "text",
+      placeholder: "latest",
+      required: false,
+    }]);
+    assert.deepEqual(flow?.toolCalls, [{
+      id: "metadata",
+      port: "ArtifactMetadata",
+      version: "1.0.0",
+      effect: "read",
+      unresolved: false,
+    }]);
   });
 });
 

@@ -71,7 +71,13 @@ test("domain pack tool rows are derived without live execution material", () => 
         builtin: "manual.review",
         unresolved: false,
       }],
-      fields: [{ id: "brief", required: true }],
+      fields: [{
+        id: "brief",
+        label: "Evidence brief",
+        type: "textarea",
+        placeholder: "Synthetic input",
+        required: true,
+      }],
     }],
   }];
 
@@ -82,6 +88,13 @@ test("domain pack tool rows are derived without live execution material", () => 
   assert.equal(catalog[0]?.scopeLabel, "Synthetic Pack");
   assert.equal(catalog[0]?.domainPack?.id, "SyntheticPack");
   assert.equal(catalog[0]?.domainPack?.version, "1.0.0");
+  assert.deepEqual(catalog[0]?.fields, [{
+    id: "brief",
+    label: "Evidence brief",
+    type: "textarea",
+    placeholder: "Synthetic input",
+    required: true,
+  }]);
   assert.equal(catalog[0]?.href, "/tools/packs/SyntheticPack/synthetic-pack-review-evidence");
   assert.equal(catalog[0]?.liveState, "mock-only");
   assert.equal(catalog[0]?.toolCalls[0]?.port, "ReviewPlan");

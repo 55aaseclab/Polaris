@@ -316,6 +316,11 @@ tbody tr:last-child td {
   overflow-wrap: anywhere;
 }
 
+.registry-id-line {
+  max-width: 100%;
+  word-break: break-word;
+}
+
 .scope-cell {
   display: grid;
   gap: .2rem;
@@ -394,6 +399,10 @@ tbody tr:last-child td {
   min-width: 0;
 }
 
+.fact-list .fact-wide {
+  grid-column: 1 / -1;
+}
+
 .fact-list dt {
   color: var(--muted-text);
   font-size: .72rem;
@@ -410,6 +419,47 @@ tbody tr:last-child td {
   display: flex;
   flex-wrap: wrap;
   gap: .4rem;
+}
+
+.mapped-call-list,
+.field-token-list {
+  display: grid;
+  gap: .5rem;
+}
+
+.mapped-call-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: .6rem;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: .55rem;
+}
+
+.mapped-call-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mapped-call-row div {
+  display: grid;
+  min-width: 0;
+  gap: .15rem;
+}
+
+.mapped-call-row strong,
+.mapped-call-row span {
+  overflow-wrap: anywhere;
+}
+
+.mapped-call-row span {
+  color: var(--muted-text);
+  font-size: .78rem;
+}
+
+.field-token-list {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 .schema-list {
@@ -586,7 +636,7 @@ tbody tr:last-child td {
   }
 
   .registry-filterbar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 1fr;
     gap: .5rem;
   }
 
@@ -606,7 +656,11 @@ tbody tr:last-child td {
 
   .filter-count {
     align-self: center;
-    justify-self: end;
+    justify-self: start;
+  }
+
+  .pack-select {
+    min-width: 0;
   }
 
   .detail-grid,
@@ -643,8 +697,8 @@ tbody tr:last-child td {
 
   .mobile-tool-head {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .75rem;
+    grid-template-columns: 1fr;
+    gap: .35rem;
     align-items: start;
   }
 

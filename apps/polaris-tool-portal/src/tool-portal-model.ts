@@ -7,6 +7,8 @@ import {
 
 export interface ToolPortalRoute {
   readonly slug?: string;
+  readonly packId?: string;
+  readonly packSlug?: string;
 }
 
 export type ToolPortalScopeFilter = "all" | PolarisToolPortalCatalogRow["scope"];
@@ -31,6 +33,13 @@ export function normalizeToolPortalPath(pathname: string): string {
 export function parseToolPortalRoute(pathname: string): ToolPortalRoute {
   const path = normalizeToolPortalPath(pathname);
   if (path === "/" || path === "" || path === "/console" || path === "/publisher") return {};
+  const pack = path.match(/^\/packs\/([^/]+)\/([^/]+)$/u);
+  if (pack) {
+    return {
+      packId: decodeURIComponent(pack[1] ?? ""),
+      packSlug: decodeURIComponent(pack[2] ?? ""),
+    };
+  }
   const slug = path.match(/^\/([^/]+)$/u)?.[1];
   if (slug) return { slug: decodeURIComponent(slug) };
   return {};
@@ -57,6 +66,18 @@ export function toolDetail(slug: string): PolarisToolPortalDetail | undefined {
   return getPolarisToolPortalDetail(slug, TOOL_PORTAL_BASE_PATH);
 }
 
+export function domainPackToolRow(
+  rows: readonly PolarisToolPortalCatalogRow[],
+  route: ToolPortalRoute,
+): PolarisToolPortalCatalogRow | undefined {
+  if (!route.packId || !route.packSlug) return undefined;
+  return rows.find((row) =>
+    row.scope === "domain-pack"
+    && row.domainPack?.id === route.packId
+    && row.slug === route.packSlug
+  );
+}
+
 export function formatLiveState(value: string): string {
   return value === "mock-only" ? "Mock only" : "Live blocked";
 }
@@ -78,6 +99,13 @@ function toolPortalCatalogSearchText(row: PolarisToolPortalCatalogRow): string {
     row.risk,
     row.liveState,
     ...row.tags,
+    ...(row.fields ?? []).flatMap((field) => [
+      field.id,
+      field.label,
+      field.type,
+      field.placeholder,
+      field.required ? "required" : "optional",
+    ]),
     ...row.toolCalls.flatMap((call) => [
       call.id,
       call.port,

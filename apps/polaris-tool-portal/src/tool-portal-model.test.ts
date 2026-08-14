@@ -15,6 +15,10 @@ test("tool portal routes stay under the Polaris /tools base path", () => {
   assert.deepEqual(parseToolPortalRoute("/tools/manual-review"), {
     slug: "manual-review",
   });
+  assert.deepEqual(parseToolPortalRoute("/tools/packs/VaultKnowledgeHealth/vault-knowledge-health-review-knowledge-health"), {
+    packId: "VaultKnowledgeHealth",
+    packSlug: "vault-knowledge-health-review-knowledge-health",
+  });
 });
 
 test("catalog rows are inspect-only and do not point at Wanghai", () => {

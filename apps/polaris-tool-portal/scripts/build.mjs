@@ -10,6 +10,9 @@ async function assetVersion(fileName) {
 }
 
 function addAssetVersion(html, fileName, version) {
+  if (!version) {
+    throw new Error(`Tool portal asset version is unavailable for ${fileName}`);
+  }
   const assetPath = `/tools/${fileName}`;
   const pattern = new RegExp(`${assetPath}(?!\\?v=)`, "g");
   const rewritten = html.replace(pattern, `${assetPath}?v=${version}`);
@@ -28,6 +31,7 @@ const [html, javascriptVersion, cssVersion] = await Promise.all([
 const versionedHtml = addAssetVersion(
   addAssetVersion(html, "tools.js", javascriptVersion),
   "tools.css",
+  cssVersion,
 );
 
 await writeFile(resolve(distRoot, "index.html"), versionedHtml, "utf8");

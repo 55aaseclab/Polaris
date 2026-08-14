@@ -82,7 +82,19 @@ pnpm --dir apps/polaris run polaris -- pack remove <domain> \
 被引用的 pack 必须已经安装。多版本同时存在时，删除必须明确版本；
 删除不影响任何 Vault 数据。
 
-示例：`apps/polaris-workflow-demo/src/examples/packs/{inventory,notify,sales-fulfillment}.ord`
+第一方业务域包从 Polaris 仓库发布，安装后会出现在 Workflow 设置和
+`/tools` 的 Domain Pack flow 视图里：
+
+```bash
+pnpm --dir apps/polaris run polaris -- pack add \
+  apps/polaris/domain-packs/vault-knowledge-health
+```
+
+| 域包 | 路径 | 作用 |
+|------|------|------|
+| Vault Knowledge Health | `apps/polaris/domain-packs/vault-knowledge-health/main.ord` | 最小业务域，调用 `ArtifactMetadata@1.0.0` 并映射到 `vault.artifact.metadata.read` |
+
+更多 DSL 示例：`apps/polaris-workflow-demo/src/examples/packs/{inventory,notify,sales-fulfillment}.ord`
 
 ## 手写样例
 

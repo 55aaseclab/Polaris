@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   FileCode2,
   Search,
+  Route,
   Wrench,
 } from "lucide-react";
 import type {
@@ -20,12 +21,14 @@ import {
 } from "./components/ui/card.js";
 import {
   catalogRows,
+  domainPackToolRow,
   filterToolPortalCatalogRows,
   formatLiveState,
   parseToolPortalRoute,
   toolDetail,
   TOOL_PORTAL_BASE_PATH,
   type ToolPortalCatalogFilter,
+  type ToolPortalRoute,
   type ToolPortalScopeFilter,
 } from "./tool-portal-model.js";
 import {
@@ -73,6 +76,8 @@ export default function App() {
     <ToolPortalShell navigate={navigate}>
       {selectedTool ? (
         <ToolDetailPage tool={selectedTool} navigate={navigate} />
+      ) : route.packId && route.packSlug ? (
+        <DomainPackFlowRoute route={route} navigate={navigate} />
       ) : (
         <CatalogPage navigate={navigate} />
       )}
@@ -295,7 +300,7 @@ function ToolRegistryTable({
               <tr key={tool.id}>
                 <td>
                   <ToolNameCell tool={tool} navigate={navigate} />
-                  <div className="table-subtitle mono">{tool.id}</div>
+                  <RegistryIdLine tool={tool} />
                   <div className="table-subtitle">{tool.summary}</div>
                 </td>
                 <td><ScopeCell tool={tool} /></td>
@@ -310,6 +315,145 @@ function ToolRegistryTable({
       </div>
       <MobileToolRegistryList tools={tools} navigate={navigate} />
     </>
+  );
+}
+
+function DomainPackFlowRoute({
+  route,
+  navigate,
+}: {
+  route: ToolPortalRoute;
+  navigate: (path: string) => void;
+}) {
+  const { data, error, loading } = useCatalogData();
+  const tools = data ?? catalogRows();
+  const flowTool = domainPackToolRow(tools, route);
+
+  if (flowTool) {
+    return <DomainPackFlowPage tool={flowTool} navigate={navigate} />;
+  }
+
+  if (loading) {
+    return (
+      <div className="page-stack narrow-page">
+        <PageHeading title="Loading pack flow" detail="Reading the Polaris tool catalog." />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page-stack narrow-page">
+        <Button variant="ghost" size="sm" onClick={() => navigate(TOOL_PORTAL_BASE_PATH)}>
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Registry
+        </Button>
+        <InlineNotice label="Live catalog unavailable. Domain Pack flow details require the Polaris catalog." />
+      </div>
+    );
+  }
+
+  return <NotFoundPage navigate={navigate} />;
+}
+
+function DomainPackFlowPage({
+  tool,
+  navigate,
+}: {
+  tool: PolarisToolPortalCatalogRow;
+  navigate: (path: string) => void;
+}) {
+  const pack = tool.domainPack;
+  const flowId = domainPackFlowId(tool);
+  return (
+    <div className="page-stack">
+      <div>
+        <Button variant="ghost" size="sm" onClick={() => navigate(TOOL_PORTAL_BASE_PATH)}>
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Registry
+        </Button>
+      </div>
+      <PageHeading
+        title={tool.name}
+        detail={`${pack?.name ?? tool.scopeLabel} · ${flowId} · ${tool.toolCalls.length} call${tool.toolCalls.length === 1 ? "" : "s"} · ${formatLiveState(tool.liveState)}`}
+      />
+      <div className="detail-grid">
+        <Card>
+          <CardHeader>
+            <CardTitle>Pack Flow</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="fact-list">
+              <Fact label="Pack" value={pack ? `${pack.id}@${pack.version}` : tool.scopeLabel} mono />
+              <Fact label="Flow" value={flowId} mono />
+              <Fact label="Effect" value={tool.effect} />
+              <Fact label="Risk" value={tool.risk} />
+              <Fact label="State" value={formatLiveState(tool.liveState)} />
+              <Fact label="Digest" value={pack?.digest ?? "unavailable"} mono wide />
+              <Fact label="Registry ID" value={tool.id} mono wide />
+            </dl>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Mapped Tools</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="mapped-call-list">
+              {tool.toolCalls.map((call) => {
+                const mapped = call.mappedToolId ? toolDetail(call.mappedToolId) : undefined;
+                return (
+                  <div className="mapped-call-row" key={`${call.id}:${call.port}:${call.version}`}>
+                    <Route className="h-4 w-4" aria-hidden="true" />
+                    <div>
+                      <strong className="mono">{call.port}@{call.version}</strong>
+                      <span>{call.unresolved ? "Unresolved" : mapped?.id ?? call.builtin ?? call.effect}</span>
+                    </div>
+                    {mapped ? (
+                      <Button variant="outline" size="sm" onClick={() => navigate(mapped.href)}>
+                        Open
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Inputs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="field-token-list">
+            {(tool.fields ?? []).map((field) => (
+              <Badge key={field.id} variant="outline" title={formatFieldTitle(field)}>
+                {field.label ?? field.id}{field.required ? " required" : ""}
+              </Badge>
+            ))}
+            {tool.fields?.length ? null : <span className="muted-text">No inputs declared</span>}
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Call Effects</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="field-token-list">
+            {tool.toolCalls.length > 0
+              ? tool.toolCalls.map((call) => (
+                <Badge key={`${call.id}:${call.port}`} variant="outline">
+                  {call.id}: {call.effect}
+                </Badge>
+              ))
+              : null}
+            {tool.toolCalls.length === 0 ? <span className="muted-text">No tool calls declared</span> : null}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -330,7 +474,7 @@ function MobileToolRegistryList({
           <div className="mobile-tool-head">
             <div className="mobile-tool-name">
               <ToolNameCell tool={tool} navigate={navigate} />
-              <div className="table-subtitle mono">{tool.id}</div>
+              <RegistryIdLine tool={tool} />
             </div>
             <ReadinessBadge liveState={tool.liveState} />
           </div>
@@ -441,9 +585,25 @@ function ScopeCell({
   return (
     <div className="scope-cell">
       <span className="scope-pill is-domain-pack">{tool.scopeLabel}</span>
-      <span className="table-subtitle mono">{tool.domainPack.id}@{tool.domainPack.version}</span>
+      <span className="table-subtitle mono" title={`${tool.domainPack.id}@${tool.domainPack.version}`}>
+        v{tool.domainPack.version}
+      </span>
     </div>
   );
+}
+
+function RegistryIdLine({ tool }: { tool: PolarisToolPortalCatalogRow }) {
+  return (
+    <div className="table-subtitle mono registry-id-line" title={tool.id}>
+      {tool.scope === "domain-pack" ? `flow: ${domainPackFlowId(tool)}` : tool.id}
+    </div>
+  );
+}
+
+function domainPackFlowId(tool: PolarisToolPortalCatalogRow): string {
+  if (!tool.domainPack) return tool.id;
+  const prefix = `domain-pack:${tool.domainPack.id}:`;
+  return tool.id.startsWith(prefix) ? tool.id.slice(prefix.length) : tool.id;
 }
 
 function ToolNameCell({
@@ -453,9 +613,6 @@ function ToolNameCell({
   tool: PolarisToolPortalCatalogRow;
   navigate: (path: string) => void;
 }) {
-  if (tool.scope !== "common") {
-    return <div className="table-title">{tool.name}</div>;
-  }
   return (
     <a
       href={tool.href}
@@ -496,6 +653,18 @@ function formatToolCallTitle(
     ? "unresolved"
     : call.mappedToolId ?? call.builtin ?? call.effect;
   return `${call.port}@${call.version} -> ${target}`;
+}
+
+function formatFieldTitle(
+  field: NonNullable<PolarisToolPortalCatalogRow["fields"]>[number],
+): string {
+  return [
+    field.id,
+    field.type,
+    field.placeholder ? `placeholder: ${field.placeholder}` : undefined,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
 }
 
 function SchemaPanel({
@@ -578,13 +747,15 @@ function Fact({
   label,
   value,
   mono = false,
+  wide = false,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  wide?: boolean;
 }) {
   return (
-    <div>
+    <div className={wide ? "fact-wide" : undefined}>
       <dt>{label}</dt>
       <dd className={mono ? "mono" : ""}>{value}</dd>
     </div>

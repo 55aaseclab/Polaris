@@ -1,0 +1,42 @@
+domain VaultKnowledgeHealth version "1.0.0"
+title "Vault Knowledge Health"
+description "Review bounded Vault artifact metadata before enabling live tool execution."
+category "Vault Operations"
+accent "green"
+
+port ArtifactMetadata version "1.0.0" {
+  in {
+    artifactScope: String?
+  }
+  out {
+    artifactCount: Number
+    latestTitles: String
+    pendingMemoryChanges: Number
+  }
+  effect read
+}
+
+flow ReviewKnowledgeHealth title "Review knowledge health" create {
+  description "Read Vault artifact metadata and surface pending memory curation work."
+  needs { ArtifactMetadata }
+  input {
+    artifactScope: String control text label "Artifact scope" placeholder "latest"
+  }
+  steps {
+    metadata "Read Vault metadata" {
+      uses { artifactScope }
+      call ArtifactMetadata
+      output {
+        artifactCount: Number
+        latestTitles: String
+        pendingMemoryChanges: Number
+      }
+    }
+  }
+  output {
+    artifactCount: Number from artifactCount
+    latestTitles: String from latestTitles
+    pendingMemoryChanges: Number from pendingMemoryChanges
+  }
+  ui { layout form primary "Review" }
+}
