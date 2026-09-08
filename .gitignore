@@ -23,6 +23,8 @@ node_modules/
 coverage/
 dist/
 test-results/
+**/.next/
+**/.next-*/
 apps/polaris/.tmp/
 apps/polaris-web/dist/
 apps/polaris-web/test-results/

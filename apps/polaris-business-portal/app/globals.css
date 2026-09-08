@@ -1,0 +1,70 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "react-json-view-lite/dist/index.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.985 0.002 255);
+  --foreground: oklch(0.22 0.012 255);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.34 0.062 151);
+  --primary-foreground: oklch(0.98 0.01 100);
+  --secondary: oklch(0.955 0.004 255);
+  --secondary-foreground: oklch(0.28 0.012 255);
+  --muted: oklch(0.96 0.003 255);
+  --muted-foreground: oklch(0.48 0.01 255);
+  --accent: oklch(0.9 0.033 174);
+  --accent-foreground: oklch(0.24 0.02 175);
+  --destructive: oklch(0.56 0.18 28);
+  --destructive-foreground: oklch(0.98 0.01 96);
+  --border: oklch(0.88 0.004 255);
+  --input: var(--border);
+  --ring: oklch(0.55 0.08 151);
+  --radius: 0.45rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  min-height: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+}

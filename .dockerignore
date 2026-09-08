@@ -40,3 +40,4 @@ apps/polaris-web/playwright-report
 apps/polaris-web/playwright-report/**
 apps/polaris-web/test-results
 apps/polaris-web/test-results/**
+apps/polaris-business-portal/.next*
