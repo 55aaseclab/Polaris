@@ -32,3 +32,11 @@ may still expose version, validation, and other bounded read-only commands.
 Some migrated documents intentionally retain `wanghai.*` schema identifiers.
 Those are versioned legacy contracts for existing workspace data, not a
 runtime dependency on the Wanghai repository.
+
+## Legacy names
+
+The former `wanghai-content-production` and `wanghai-product-video` wrappers
+are now `polaris-content-production` and `polaris-product-video`. The Chinese
+logistics note was consolidated into `logistics-management/README.zh-CN.md`.
+The former tool-specific ignore rules are covered by the repository root
+`.gitignore`; generated backends and run state are not migrated as source.

@@ -1,0 +1,57 @@
+{
+  "schema_version": "wanghai.content-production.input.v1",
+  "job_id": "xhs-carousel-12",
+  "content_kind": "carousel",
+  "title": "Product story",
+  "subtitle": null,
+  "locale": "zh",
+  "market": "CN",
+  "product_selection": {
+    "mode": "explicit",
+    "product_ids": [12],
+    "batch": null,
+    "filters": null
+  },
+  "brand": {
+    "name": "Demo Brand",
+    "tagline": null,
+    "logo_path": null,
+    "contact_lines": ["sales@example.com"]
+  },
+  "pipeline": {
+    "phases": [
+      "validate",
+      "select",
+      "freeze",
+      "plan",
+      "produce",
+      "package",
+      "review",
+      "publish"
+    ],
+    "require_ready": true,
+    "require_include_in_external": true,
+    "review_mode": "auto-pass",
+    "skip_package": false,
+    "strict": true
+  },
+  "kind_config": {
+    "product_catalog": null,
+    "carousel": {
+      "platform": "xiaohongshu",
+      "aspect_ratio": "3:4",
+      "slide_count": 6,
+      "template_id": "product-story.v1",
+      "hook": null,
+      "cta": "评论区留「想要」",
+      "options": {
+        "require_images": ["near"],
+        "max_selling_points": 3,
+        "include_price": false,
+        "include_sku": false
+      }
+    },
+    "video": null
+  },
+  "notes": []
+}

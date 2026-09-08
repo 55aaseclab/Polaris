@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>报检单模板</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 0;
+    }
+
+    :root {
+      --line: #111;
+      --accent: #234b6b;
+      --muted: #5d6b78;
+      --bg: #ffffff;
+      --soft: #eef4f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: #111;
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 10mm 10mm 8mm;
+      background: #fff;
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: 8mm;
+      margin-bottom: 5mm;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 10mm;
+      letter-spacing: 1mm;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin-top: 2mm;
+      font-size: 3.5mm;
+      color: var(--muted);
+    }
+
+    .doc-meta {
+      border: 1px solid var(--line);
+      padding: 3mm 4mm;
+      min-width: 54mm;
+      font-size: 3.4mm;
+      line-height: 1.7;
+    }
+
+    .band {
+      margin: 5mm 0 4mm;
+      padding: 2.5mm 3mm;
+      background: var(--soft);
+      border-left: 3px solid var(--accent);
+      font-size: 3.6mm;
+      color: #223;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 3.6mm;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 2mm 1.8mm;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    th {
+      background: #f7fafc;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .label {
+      width: 20mm;
+      background: #f7fafc;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    .small {
+      font-size: 3.1mm;
+      color: var(--muted);
+    }
+
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 3mm 4mm;
+      margin-top: 4mm;
+    }
+
+    .check-item {
+      border: 1px solid var(--line);
+      padding: 3mm;
+      min-height: 22mm;
+    }
+
+    .check-title {
+      font-weight: 700;
+      margin-bottom: 2mm;
+      color: var(--accent);
+    }
+
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6mm;
+      margin-top: 6mm;
+      font-size: 3.6mm;
+    }
+
+    .sign-box {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: end;
+      gap: 3mm;
+    }
+
+    .line {
+      border-bottom: 1px solid var(--line);
+      height: 0;
+      width: 100%;
+    }
+
+    .note {
+      margin-top: 5mm;
+      font-size: 3.1mm;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div>
+        <h1 class="title">报检单</h1>
+        <div class="subtitle">适用于跨境订单发货前的验货、包装、标签与随货资料确认</div>
+      </div>
+      <div class="doc-meta">
+        单号：`{{报检单号}}`<br>
+        订单号：`{{订单号}}`<br>
+        日期：`{{报检日期}}`
+      </div>
+    </div>
+
+    <table>
+      <tr>
+        <td class="label">客户名称</td>
+        <td>{{客户名称}}</td>
+        <td class="label">目的国</td>
+        <td>{{目的国}}</td>
+      </tr>
+      <tr>
+        <td class="label">销售渠道</td>
+        <td>{{销售渠道}}</td>
+        <td class="label">币种</td>
+        <td>{{币种}}</td>
+      </tr>
+      <tr>
+        <td class="label">包装要求</td>
+        <td colspan="3">{{包装要求}}</td>
+      </tr>
+      <tr>
+        <td class="label">备注</td>
+        <td colspan="3">{{备注}}</td>
+      </tr>
+    </table>
+
+    <div class="band">商品与数量核对</div>
+    <table>
+      <tr>
+        <th style="width: 12mm;">序号</th>
+        <th>商品名称</th>
+        <th style="width: 18mm;">数量</th>
+        <th style="width: 30mm;">外观检查</th>
+        <th style="width: 30mm;">包装检查</th>
+        <th style="width: 30mm;">结论</th>
+      </tr>
+      <tr>
+        <td class="center">1</td>
+        <td>{{商品1}}</td>
+        <td class="center">{{数量1}}</td>
+        <td>{{外观1}}</td>
+        <td>{{包装1}}</td>
+        <td>{{结论1}}</td>
+      </tr>
+      <tr>
+        <td class="center">2</td>
+        <td>{{商品2}}</td>
+        <td class="center">{{数量2}}</td>
+        <td>{{外观2}}</td>
+        <td>{{包装2}}</td>
+        <td>{{结论2}}</td>
+      </tr>
+      <tr>
+        <td class="center">3</td>
+        <td>{{商品3}}</td>
+        <td class="center">{{数量3}}</td>
+        <td>{{外观3}}</td>
+        <td>{{包装3}}</td>
+        <td>{{结论3}}</td>
+      </tr>
+      <tr>
+        <td class="center">4</td>
+        <td>{{商品4}}</td>
+        <td class="center">{{数量4}}</td>
+        <td>{{外观4}}</td>
+        <td>{{包装4}}</td>
+        <td>{{结论4}}</td>
+      </tr>
+      <tr>
+        <td class="center">5</td>
+        <td>{{商品5}}</td>
+        <td class="center">{{数量5}}</td>
+        <td>{{外观5}}</td>
+        <td>{{包装5}}</td>
+        <td>{{结论5}}</td>
+      </tr>
+    </table>
+
+    <div class="check-grid">
+      <div class="check-item">
+        <div class="check-title">标签与配件检查</div>
+        吊牌/标签：{{标签检查}}<br>
+        配件齐全：{{配件检查}}<br>
+        赠品/随货附件：{{随货附件}}
+      </div>
+      <div class="check-item">
+        <div class="check-title">物流与单证检查</div>
+        面单信息：{{面单检查}}<br>
+        发票/装箱清单：{{单证检查}}<br>
+        特殊要求：{{特殊要求}}
+      </div>
+      <div class="check-item">
+        <div class="check-title">问题记录</div>
+        {{问题记录}}
+      </div>
+      <div class="check-item">
+        <div class="check-title">报检结论</div>
+        {{报检结论}}
+      </div>
+    </div>
+
+    <div class="signatures">
+      <div class="sign-box"><span>验货人</span><span class="line"></span></div>
+      <div class="sign-box"><span>复核人</span><span class="line"></span></div>
+      <div class="sign-box"><span>日期</span><span class="line"></span></div>
+    </div>
+
+    <div class="note">
+      说明：本模板用于发货前留痕，重点确认数量、外观、包装、标签、配件和随货资料是否完整。若包装方案尚未确定，可先出具待确认版，并在报检结论中标注“待包装方案确认后复检”。
+    </div>
+  </div>
+</body>
+</html>

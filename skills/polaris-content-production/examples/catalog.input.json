@@ -1,0 +1,68 @@
+{
+  "schema_version": "wanghai.content-production.input.v1",
+  "job_id": "demo-ch-2026q3",
+  "content_kind": "product-catalog",
+  "title": "Seasonal Collection",
+  "subtitle": null,
+  "locale": "en",
+  "market": "CH",
+  "product_selection": {
+    "mode": "explicit",
+    "product_ids": [12, 15, 43],
+    "batch": null,
+    "filters": null
+  },
+  "brand": {
+    "name": "Demo Brand",
+    "tagline": null,
+    "logo_path": null,
+    "contact_lines": ["sales@example.com"]
+  },
+  "pipeline": {
+    "phases": [
+      "validate",
+      "select",
+      "freeze",
+      "plan",
+      "produce",
+      "package",
+      "review",
+      "publish"
+    ],
+    "require_ready": true,
+    "require_include_in_external": true,
+    "review_mode": "auto-pass",
+    "skip_package": false,
+    "strict": false
+  },
+  "kind_config": {
+    "product_catalog": {
+      "template_id": "single-product-page.v1",
+      "page_size": "A4",
+      "orientation": "portrait",
+      "price_policy": {
+        "mode": "list_price",
+        "show_currency": true,
+        "hide_if_null": true,
+        "label": "List price"
+      },
+      "include_sections": {
+        "cover": true,
+        "toc": false,
+        "brand_intro": false,
+        "product_pages": true,
+        "packaging": false,
+        "contact": true
+      },
+      "options": {
+        "require_images": ["near"],
+        "max_selling_points": 5,
+        "image_slots_on_page": ["near", "wear", "detail"]
+      },
+      "catalog_input_ref": null
+    },
+    "carousel": null,
+    "video": null
+  },
+  "notes": []
+}

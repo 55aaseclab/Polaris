@@ -6,6 +6,8 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { runCli } from "../scripts/cli/main.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
+import { listAvailableSkills } from "../scripts/install-skills.js";
+import { runPipeline } from "polaris-workflow";
 import { loadVaultFromConfigPath, resolveVaultConfigPath } from "../scripts/config/load.js";
 import { vaultConfigPath } from "../scripts/config/scaffold.js";
 import {
@@ -28,6 +30,43 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const STDOUT_CAPTURE_QUEUE_KEY = "__polaris_skill_stdout_capture_queue__";
 const DEMO_USER_PROFILE_ID = "100000000000000001";
+
+test("built-in skill installer reads the repository skill tree", () => {
+  const skills = listAvailableSkills();
+  assert.ok(skills.includes("rc-draw"));
+  assert.ok(skills.includes("polaris-business"));
+  assert.ok(skills.includes("polaris-data-collection"));
+});
+
+test("migrated skill bundle and coursework pack are Polaris-owned", () => {
+  const migratedSkills = [
+    "polaris-business",
+    "polaris-content-production",
+    "polaris-data-collection",
+    "polaris-intelligence-analysis",
+    "polaris-order-ops",
+    "polaris-outreach",
+    "polaris-report-writing",
+    "polaris-ads-system-setup",
+  ];
+  for (const skill of migratedSkills) {
+    const skillPath = path.join(REPO_ROOT, "skills", skill, "SKILL.md");
+    assert.equal(fs.existsSync(skillPath), true, skillPath);
+    const source = fs.readFileSync(skillPath, "utf8");
+    assert.doesNotMatch(source, /@wanghai\/|apps\/wanghai|skills\/wanghai|pnpm wanghai/u, skillPath);
+  }
+
+  const courseworkPath = path.join(
+    REPO_ROOT,
+    "third_party",
+    "coursework-vaults",
+    "polaris-domain-pack",
+    "main.ord",
+  );
+  const coursework = fs.readFileSync(courseworkPath, "utf8");
+  const parsed = runPipeline(coursework);
+  assert.equal(parsed.ok, true, parsed.parseErrors.map((error) => error.message).join("; "));
+});
 
 function uniqueName(prefix: string): string {
   return `${prefix}-${process.pid}-${Date.now()}`;

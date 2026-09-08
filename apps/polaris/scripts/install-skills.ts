@@ -26,8 +26,8 @@ export interface CliOptions {
 }
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
-const SOURCE_ROOT = path.join(REPO_ROOT, "apps", "polaris", "skills");
+const REPO_ROOT = path.resolve(SCRIPT_DIR, "../../..");
+const SOURCE_ROOT = path.join(REPO_ROOT, "skills");
 
 function usage(): string {
   return [
@@ -42,10 +42,10 @@ function usage(): string {
     "  --help                   Show this message",
     "",
     "Examples:",
-    "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex use-polaris",
+    "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex polaris-business",
     "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target claude --force",
     "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex "
-      + "--scope project --mode link use-polaris",
+      + "--scope project --mode link polaris-business",
   ].join("\n");
 }
 

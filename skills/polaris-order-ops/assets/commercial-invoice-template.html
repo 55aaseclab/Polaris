@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commercial Invoice Template</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    :root { --line:#1d2430; --ink:#1d2430; --accent:#8d5415; --soft:#f8efe5; --muted:#66707b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: Arial, "Noto Sans", sans-serif; color:var(--ink); background:#fff; }
+    .page { width:210mm; min-height:297mm; margin:0 auto; padding:10mm; background:#fff; }
+    .header { display:grid; grid-template-columns:1fr auto; gap:8mm; align-items:end; }
+    .title { margin:0; font-size:10mm; letter-spacing:1mm; color:var(--accent); font-weight:700; }
+    .subtitle { margin-top:2mm; font-size:3.4mm; color:var(--muted); }
+    .meta { border:1px solid var(--line); padding:3mm 4mm; min-width:62mm; font-size:3.4mm; line-height:1.7; }
+    .section { margin:5mm 0 3mm; padding:2.5mm 3mm; background:var(--soft); border-left:3px solid var(--accent); font-size:3.7mm; font-weight:700; }
+    table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:3.5mm; }
+    td, th { border:1px solid var(--line); padding:2mm 1.8mm; vertical-align:top; word-break:break-word; }
+    th { background:#fbf8f3; text-align:center; }
+    .label { width:24mm; background:#fbf8f3; font-weight:700; text-align:center; }
+    .center { text-align:center; }
+    .right { text-align:right; }
+    .note { margin-top:5mm; font-size:3.1mm; line-height:1.7; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div>
+        <h1 class="title">COMMERCIAL INVOICE</h1>
+        <div class="subtitle">Issued for shipment and trade documentation</div>
+      </div>
+      <div class="meta">
+        CI No.: `{{CI编号}}`<br>
+        Order No.: `{{订单号}}`<br>
+        Date: `{{日期}}`<br>
+        Currency: `{{币种}}`<br>
+        Incoterm: `{{贸易术语}}`
+      </div>
+    </div>
+
+    <div class="section">Seller / Buyer Information</div>
+    <table>
+      <tr><td class="label">Seller</td><td>{{卖方名称}}</td><td class="label">Buyer</td><td>{{客户名称}}</td></tr>
+      <tr><td class="label">Seller Address</td><td>{{卖方地址}}</td><td class="label">Country</td><td>{{收货国家}}</td></tr>
+      <tr><td class="label">Contact</td><td>{{卖方联系方式}}</td><td class="label">Order Date</td><td>{{下单日期}}</td></tr>
+      <tr><td class="label">Payment Terms</td><td>{{付款条款}}</td><td class="label">Invoice Type</td><td>Commercial Invoice</td></tr>
+    </table>
+
+    <div class="section">Goods Description</div>
+    <table>
+      <tr>
+        <th style="width:12mm;">No.</th>
+        <th>Item Description</th>
+        <th style="width:18mm;">Qty</th>
+        <th style="width:26mm;">Unit Price</th>
+        <th style="width:30mm;">Amount</th>
+        <th style="width:34mm;">Remarks</th>
+      </tr>
+      <tr><td class="center">1</td><td>{{商品1}}</td><td class="center">{{数量1}}</td><td>{{折扣价1}}</td><td>{{金额1}}</td><td>{{备注1}}</td></tr>
+      <tr><td class="center">2</td><td>{{商品2}}</td><td class="center">{{数量2}}</td><td>{{折扣价2}}</td><td>{{金额2}}</td><td>{{备注2}}</td></tr>
+      <tr><td class="center">3</td><td>{{商品3}}</td><td class="center">{{数量3}}</td><td>{{折扣价3}}</td><td>{{金额3}}</td><td>{{备注3}}</td></tr>
+      <tr><td class="center">4</td><td>{{商品4}}</td><td class="center">{{数量4}}</td><td>{{折扣价4}}</td><td>{{金额4}}</td><td>{{备注4}}</td></tr>
+      <tr><td class="center">5</td><td>{{商品5}}</td><td class="center">{{数量5}}</td><td>{{折扣价5}}</td><td>{{金额5}}</td><td>{{备注5}}</td></tr>
+      <tr><td colspan="4" class="right">Subtotal</td><td colspan="2">{{商品折后小计}}</td></tr>
+      <tr><td colspan="4" class="right">Shipping</td><td colspan="2">{{运费优惠后}}</td></tr>
+      <tr><td colspan="4" class="right">Total Invoice Amount</td><td colspan="2">{{客户应付总额}}</td></tr>
+    </table>
+
+    <div class="section">Additional Information</div>
+    <table>
+      <tr><td class="label">Country of Origin</td><td>{{原产地}}</td><td class="label">Shipping Method</td><td>{{运输方式}}</td></tr>
+      <tr><td class="label">Declaration</td><td colspan="3">{{申报声明}}</td></tr>
+    </table>
+
+    <div class="note">
+      Notes: This Commercial Invoice reflects the actual invoiced amount for the current order based on confirmed order details available at the time of issuance.
+    </div>
+  </div>
+</body>
+</html>

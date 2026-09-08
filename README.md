@@ -152,6 +152,25 @@ Current runtime behavior:
 - runtime skill listing is resolved from the running backend with `docker exec`
   or `kubectl exec`, not from host-side path inspection
 
+Repository-provided skills are kept under `skills/` and can be installed with
+the same installer.  The migrated business and research routers are:
+
+- `polaris-business`
+- `polaris-content-production`
+- `polaris-data-collection`
+- `polaris-intelligence-analysis`
+- `polaris-order-ops`
+- `polaris-outreach`
+- `polaris-report-writing`
+- `polaris-ads-system-setup`
+
+For example:
+
+```bash
+pnpm --dir apps/polaris exec tsx scripts/install-skills.ts \
+  --target codex polaris-business polaris-data-collection
+```
+
 ## Local CI
 
 ```bash

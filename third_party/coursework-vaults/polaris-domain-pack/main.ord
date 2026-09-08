@@ -1,0 +1,564 @@
+domain CourseworkVaults version "0.1.0"
+title "Coursework Vaults"
+description "课程作业的隔离运行环境：同一 base image、每生独立 Vault、截止后只读或快照，并支持教师复现学生环境。"
+category "Education"
+accent "amber"
+
+enum ActorRole {
+  teacher
+  student
+}
+
+enum AssignmentStatus {
+  draft
+  published
+  active
+  frozen
+  archived
+}
+
+enum VaultMode {
+  readWrite
+  readOnly
+  snapshot
+}
+
+entity Course {
+  courseId: ID
+  title: String
+  term: String
+}
+
+entity Assignment {
+  assignmentId: ID
+  courseId: ID
+  baseImageDigest: String
+  deadline: String
+  status: AssignmentStatus
+}
+
+entity StudentVault {
+  vaultId: ID
+  assignmentId: ID
+  studentId: ID
+  baseImageDigest: String
+  mode: VaultMode
+}
+
+entity Submission {
+  submissionId: ID
+  assignmentId: ID
+  studentId: ID
+  snapshotId: ID
+}
+
+port ResolveCurrentTeacher version "1.0.0" {
+  out {
+    teacherId: String
+    role: ActorRole
+  }
+  effect read
+}
+
+port ResolveCurrentStudent version "1.0.0" {
+  out {
+    studentId: String
+    role: ActorRole
+  }
+  effect read
+}
+
+port ResolveBaseImage version "1.0.0" {
+  in {
+    baseImageRef: String
+  }
+  out {
+    imageDigest: String
+  }
+  effect read
+}
+
+port ResolveAssignmentEnvironment version "1.0.0" {
+  in {
+    assignmentId: String
+  }
+  out {
+    imageDigest: String
+    deadline: String
+    accessMode: String
+  }
+  effect read
+}
+
+port PublishAssignmentCatalog version "1.0.0" {
+  in {
+    teacherId: String
+    courseId: String
+    assignmentTitle: String
+    imageDigest: String
+    deadline: String
+  }
+  out {
+    assignmentId: String
+  }
+  effect human
+}
+
+port ReadCourseRoster version "1.0.0" {
+  in {
+    teacherId: String
+    courseId: String
+    assignmentId: String
+  }
+  out {
+    rosterDigest: String
+  }
+  effect read
+}
+
+port ProvisionStudentVaults version "1.0.0" {
+  in {
+    teacherId: String
+    courseId: String
+    assignmentId: String
+    rosterDigest: String
+    imageDigest: String
+  }
+  out {
+    provisionedCount: Number
+    vaultPolicy: String
+  }
+  effect write
+}
+
+port VerifyVaultIsolation version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    provisionedCount: Number
+  }
+  out {
+    isolated: Boolean
+    uniformImage: Boolean
+  }
+  effect read
+}
+
+port FreezeAssignment version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    deadline: String
+  }
+  out {
+    freezeId: String
+  }
+  effect human
+}
+
+port SnapshotClassVaults version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    freezeId: String
+  }
+  out {
+    snapshotCount: Number
+    snapshotManifest: String
+  }
+  effect write
+}
+
+port VerifyClassClosure version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    snapshotCount: Number
+  }
+  out {
+    readOnly: Boolean
+    uniformImage: Boolean
+  }
+  effect read
+}
+
+port InspectStudentVault version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    studentId: String
+  }
+  out {
+    vaultId: String
+    imageDigest: String
+    vaultMode: String
+    snapshotId: String
+  }
+  effect read
+}
+
+port ReproduceStudentEnvironment version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    studentId: String
+    snapshotId: String
+    imageDigest: String
+  }
+  out {
+    reproductionVaultId: String
+    reproductionImageDigest: String
+  }
+  effect write
+}
+
+port VerifyReproduction version "1.0.0" {
+  in {
+    teacherId: String
+    assignmentId: String
+    reproductionVaultId: String
+    imageDigest: String
+  }
+  out {
+    matched: Boolean
+  }
+  effect read
+}
+
+port EnsureStudentVault version "1.0.0" {
+  in {
+    studentId: String
+    assignmentId: String
+    imageDigest: String
+  }
+  out {
+    vaultId: String
+    imageDigest: String
+    accessMode: String
+  }
+  effect write
+}
+
+port OpenAgentEnvironment version "1.0.0" {
+  in {
+    studentId: String
+    vaultId: String
+  }
+  out {
+    launchToken: String
+  }
+  effect ffi
+}
+
+port SaveCheckpoint version "1.0.0" {
+  in {
+    studentId: String
+    assignmentId: String
+    note: String
+  }
+  out {
+    checkpointId: String
+    vaultId: String
+  }
+  effect write
+}
+
+port CheckAssignmentDeadline version "1.0.0" {
+  in {
+    studentId: String
+    assignmentId: String
+  }
+  out {
+    acceptingSubmissions: Boolean
+  }
+  effect read
+}
+
+port SubmitAssignmentSnapshot version "1.0.0" {
+  in {
+    studentId: String
+    assignmentId: String
+    checkpointId: String
+  }
+  out {
+    submissionId: String
+    snapshotId: String
+    vaultMode: String
+  }
+  effect human
+}
+
+port ReadSubmissionFeedback version "1.0.0" {
+  in {
+    studentId: String
+    assignmentId: String
+    submissionId: String
+  }
+  out {
+    feedback: String
+    grade: String
+  }
+  effect read
+}
+
+module Teacher title "教师工作流" code "teacher" {
+  description "教师发布作业、批量配置隔离 Vault、截止后冻结快照，并复现任一学生环境。"
+
+  flow PublishAssignment on Assignment create title "发布课程作业环境" {
+    description "锁定课程规定的 base image 和截止时间，再发布作业。"
+    input {
+      courseId: String required label "课程" placeholder "例如：course-01"
+      assignmentTitle: String required label "作业名称" placeholder "例如：第一次实验"
+      baseImageRef: String required label "Base image" placeholder "课程规定的镜像引用"
+      deadline: String required label "截止时间" placeholder "例如：2026-09-30T23:59:00Z"
+    }
+    needs { ResolveCurrentTeacher, ResolveBaseImage, PublishAssignmentCatalog }
+    steps {
+      actor "确认教师身份" { call ResolveCurrentTeacher output { teacherId: String } }
+      image "锁定 base image" { uses { baseImageRef } call ResolveBaseImage output { imageDigest: String } }
+      publish "发布作业" { uses { teacherId, courseId, assignmentTitle, imageDigest, deadline } call PublishAssignmentCatalog output { assignmentId: String } }
+    }
+    output {
+      assignmentId: String from assignmentId
+      imageDigest: String from imageDigest
+    }
+    ui { layout wizard primary "发布作业" icon "book-open-check" }
+  }
+
+  flow ProvisionClassVaults on Assignment create title "配置全班作业 Vault" {
+    description "按选课名单为每名学生创建独立 Vault，所有 Vault 固定使用同一 image digest，并验证互不可见。"
+    input {
+      courseId: String required label "课程" placeholder "课程 ID"
+      assignmentId: String required label "作业" placeholder "已发布的作业 ID"
+    }
+    needs { ResolveCurrentTeacher, ResolveAssignmentEnvironment, ReadCourseRoster, ProvisionStudentVaults, VerifyVaultIsolation }
+    steps {
+      actor "确认教师身份" { call ResolveCurrentTeacher output { teacherId: String } }
+      environment "读取作业环境" {
+        uses { assignmentId }
+        call ResolveAssignmentEnvironment
+        output {
+          imageDigest: String
+          deadline: String
+        }
+      }
+      roster "读取选课名单" { uses { teacherId, courseId, assignmentId } call ReadCourseRoster output { rosterDigest: String } }
+      provision "创建学生 Vault" {
+        uses { teacherId, courseId, assignmentId, rosterDigest, imageDigest }
+        call ProvisionStudentVaults
+        output {
+          provisionedCount: Number
+          vaultPolicy: String
+        }
+      }
+      verify "验证隔离与镜像一致" {
+        uses { teacherId, assignmentId, provisionedCount }
+        call VerifyVaultIsolation
+        output {
+          isolated: Boolean
+          uniformImage: Boolean
+        }
+      }
+    }
+    output {
+      provisionedCount: Number from provisionedCount
+      isolated: Boolean from isolated
+      uniformImage: Boolean from uniformImage
+      imageDigest: String from imageDigest
+    }
+    ui { layout wizard primary "配置全班 Vault" icon "users-round" }
+  }
+
+  flow FreezeAndSnapshotClass on Assignment create title "截止并快照全班环境" {
+    description "截止后将学生 Vault 切换为只读，并生成可审计的班级快照清单。"
+    input {
+      assignmentId: String required label "作业" placeholder "要截止的作业 ID"
+    }
+    needs { ResolveCurrentTeacher, ResolveAssignmentEnvironment, FreezeAssignment, SnapshotClassVaults, VerifyClassClosure }
+    steps {
+      actor "确认教师身份" { call ResolveCurrentTeacher output { teacherId: String } }
+      environment "读取截止时间" { uses { assignmentId } call ResolveAssignmentEnvironment output { deadline: String } }
+      freeze "冻结作业" { uses { teacherId, assignmentId, deadline } call FreezeAssignment output { freezeId: String } }
+      snapshot "快照学生 Vault" {
+        uses { teacherId, assignmentId, freezeId }
+        call SnapshotClassVaults
+        output {
+          snapshotCount: Number
+          snapshotManifest: String
+        }
+      }
+      verify "验证截止结果" {
+        uses { teacherId, assignmentId, snapshotCount }
+        call VerifyClassClosure
+        output {
+          readOnly: Boolean
+          uniformImage: Boolean
+        }
+      }
+    }
+    output {
+      snapshotCount: Number from snapshotCount
+      snapshotManifest: String from snapshotManifest
+      readOnly: Boolean from readOnly
+      uniformImage: Boolean from uniformImage
+    }
+    ui { layout wizard primary "截止并快照" icon "lock-keyhole" }
+  }
+
+  flow ReproduceStudentEnvironment on StudentVault create title "复现学生环境" {
+    description "以学生 Vault 的快照和原始 image digest 创建教师可检查的复现环境。"
+    input {
+      assignmentId: String required label "作业" placeholder "作业 ID"
+      studentId: String required label "学生" placeholder "学生 ID"
+    }
+    needs { ResolveCurrentTeacher, InspectStudentVault, ReproduceStudentEnvironment, VerifyReproduction }
+    steps {
+      actor "确认教师身份" { call ResolveCurrentTeacher output { teacherId: String } }
+      inspect "读取学生快照" {
+        uses { teacherId, assignmentId, studentId }
+        call InspectStudentVault
+        output {
+          vaultId: String
+          imageDigest: String
+          vaultMode: String
+          snapshotId: String
+        }
+      }
+      reproduce "创建复现 Vault" {
+        uses { teacherId, assignmentId, studentId, snapshotId, imageDigest }
+        call ReproduceStudentEnvironment
+        output {
+          reproductionVaultId: String
+          reproductionImageDigest: String
+        }
+      }
+      verify "验证复现一致" { uses { teacherId, assignmentId, reproductionVaultId, imageDigest } call VerifyReproduction output { matched: Boolean } }
+    }
+    output {
+      reproductionVaultId: String from reproductionVaultId
+      reproductionImageDigest: String from reproductionImageDigest
+      matched: Boolean from matched
+    }
+    ui { layout form primary "复现环境" icon "copy-check" }
+  }
+}
+
+module Student title "学生工作流" code "student" {
+  description "学生只能访问当前身份对应的课程 Vault，并在课程规定的 Agent 环境中完成、保存和提交作业。"
+
+  flow EnterAssignmentEnvironment on StudentVault create title "进入课程 Agent 环境" {
+    description "一键获取当前学生对应的隔离 Vault 和课程规定的 Agent 入口。"
+    input {
+      courseId: String required label "课程" placeholder "课程 ID"
+      assignmentId: String required label "作业" placeholder "要进入的作业 ID"
+    }
+    needs { ResolveCurrentStudent, ResolveAssignmentEnvironment, EnsureStudentVault, OpenAgentEnvironment }
+    steps {
+      actor "确认学生身份" { call ResolveCurrentStudent output { studentId: String } }
+      environment "读取课程环境" {
+        uses { assignmentId }
+        call ResolveAssignmentEnvironment
+        output {
+          imageDigest: String
+          deadline: String
+          accessMode: String
+        }
+      }
+      vault "进入本人 Vault" {
+        uses { studentId, assignmentId, imageDigest }
+        call EnsureStudentVault
+        output {
+          vaultId: String
+          imageDigest: String
+          accessMode: String
+        }
+      }
+      open "打开 Agent 环境" { uses { studentId, vaultId } call OpenAgentEnvironment output { launchToken: String } }
+    }
+    output {
+      vaultId: String from vaultId
+      imageDigest: String from imageDigest
+      accessMode: String from accessMode
+      launchToken: String from launchToken
+    }
+    ui { layout form primary "进入作业环境" icon "log-in" }
+  }
+
+  flow SaveAssignmentCheckpoint on Submission create title "保存作业检查点" {
+    description "把当前学生 Vault 的进度保存为可继续工作的检查点。"
+    input {
+      assignmentId: String required label "作业" placeholder "作业 ID"
+      note: String required label "检查点说明" placeholder "例如：完成实验二并记录结果"
+    }
+    needs { ResolveCurrentStudent, SaveCheckpoint }
+    steps {
+      actor "确认学生身份" { call ResolveCurrentStudent output { studentId: String } }
+      checkpoint "保存检查点" {
+        uses { studentId, assignmentId, note }
+        call SaveCheckpoint
+        output {
+          checkpointId: String
+          vaultId: String
+        }
+      }
+    }
+    output {
+      checkpointId: String from checkpointId
+      vaultId: String from vaultId
+    }
+    ui { layout form primary "保存检查点" icon "save" }
+  }
+
+  flow SubmitAssignment on Submission create title "提交作业快照" {
+    description "截止前提交当前学生 Vault 的快照；截止后由 Polaris 拒绝新的提交。"
+    input {
+      assignmentId: String required label "作业" placeholder "作业 ID"
+      checkpointId: String required label "检查点" placeholder "要提交的检查点 ID"
+    }
+    needs { ResolveCurrentStudent, CheckAssignmentDeadline, SubmitAssignmentSnapshot }
+    steps {
+      actor "确认学生身份" { call ResolveCurrentStudent output { studentId: String } }
+      deadline "检查截止状态" { uses { studentId, assignmentId } call CheckAssignmentDeadline output { acceptingSubmissions: Boolean } }
+      submit "提交 Vault 快照" {
+        uses { studentId, assignmentId, checkpointId }
+        call SubmitAssignmentSnapshot
+        output {
+          submissionId: String
+          snapshotId: String
+          vaultMode: String
+        }
+      }
+    }
+    output {
+      submissionId: String from submissionId
+      snapshotId: String from snapshotId
+      vaultMode: String from vaultMode
+    }
+    ui { layout form primary "提交作业" icon "send" }
+  }
+
+  flow ViewSubmissionFeedback on Submission create title "查看作业反馈" {
+    description "查看当前学生提交对应的反馈和成绩，不暴露其他学生的提交。"
+    input {
+      assignmentId: String required label "作业" placeholder "作业 ID"
+      submissionId: String required label "提交" placeholder "提交 ID"
+    }
+    needs { ResolveCurrentStudent, ReadSubmissionFeedback }
+    steps {
+      actor "确认学生身份" { call ResolveCurrentStudent output { studentId: String } }
+      feedback "读取我的反馈" {
+        uses { studentId, assignmentId, submissionId }
+        call ReadSubmissionFeedback
+        output {
+          feedback: String
+          grade: String
+        }
+      }
+    }
+    output {
+      feedback: String from feedback
+      grade: String from grade
+    }
+    ui { layout form primary "查看反馈" icon "message-square-text" }
+  }
+}
