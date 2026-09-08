@@ -14,12 +14,17 @@ const SELLER = Object.freeze({
   companyNameEn: "SHENZHEN JIANXIAOYI TECHNOLOGY CO., LTD.",
   email: "contact@jianxiaoyitech.com",
   headerAddress: "ROOM 2F134, 2/F, WENZHENGXIN BUILDING, BUILDING 3, AREA 30, NO. 2 KEFA ROAD, KEJIYUAN COMMUNITY, YUEHAI SUBDISTRICT, NANSHAN DISTRICT, SHENZHEN, CHINA",
-  swift: "ICBKCNBJSZN",
-  bankName: "INDUSTRIAL AND COMMERCIAL BANK OF CHINA SHENZHEN BRANCH",
-  bankAddress: "1255 HAIDE 3RD ROAD, NANSHAN DISTRICT, SHENZHEN, CHINA 518052",
-  beneficiary: "SHENZHEN JIANXIAOYI TECHNOLOGY CO., LTD.",
-  beneficiaryAddress: "ROOM 2F134, 2/F, WENZHENGXIN BUILDING, BUILDING 3, AREA 30, NO. 2 KEFA ROAD, KEJIYUAN COMMUNITY, YUEHAI SUBDISTRICT, NANSHAN DISTRICT, SHENZHEN, CHINA",
-  accountNo: "4000119009100075388",
+  accountName: "SHENZHEN JIANXIAOYI TECHNOLOGY CO., LTD.",
+  accountNameNote: "If the account name exceeds the available space, please continue in the address field.",
+  accountNumber: "88800006424532",
+  swiftBic: "WIHBHKHHXXX",
+  bankName: "OCBC Hong Kong Branch",
+  bankAddress: "161 Queen's Road Central, Central, Hong Kong",
+  bankCountry: "Hong Kong (China)",
+  accountType: "Business Account",
+  bankCode: "035",
+  paymentMethod: "For the payment of goods, please make a FPS/CHATS/SWIFT Payment",
+  paymentNotes: "Please include the following memo/message to receiver when making a payment: [Buyer Name] [Invoice/Contract Number] [Product]",
 });
 
 const TEMPLATE_FILES: Record<TradeDocumentKind, string> = {
@@ -28,6 +33,7 @@ const TEMPLATE_FILES: Record<TradeDocumentKind, string> = {
 };
 
 const DOCUMENT_FONT_PATH = path.join(PACKAGE_ROOT, "assets", "fonts", "NotoSansCJKsc-Regular.otf");
+const DEFAULT_CNY_PER_USD = 6.72;
 
 type TradeDocumentItem = {
   line_no: number;
@@ -90,6 +96,10 @@ function unitPriceHeader(currency: string): string {
 function totalWordsLabel(currency: string): string {
   const normalized = text(currency).toUpperCase() || "USD";
   return `TOTAL ${normalized}`;
+}
+
+function documentCurrency(order: OrderMeta): string {
+  return text(order.currency).toUpperCase() || "USD";
 }
 
 function orderMoney(value: unknown): number | null {
@@ -185,21 +195,35 @@ function productUnitWeight(product: ProductSummary | null, packaging: "normal" |
   return numberValue(productPackaging(product, packaging).weight_with_packaging_kg);
 }
 
-function marketPriceForCurrency(product: ProductSummary | null, currency: string): number | null {
+function cnyPerUsd(order: OrderMeta): number {
+  const payment = asObject(order.payment);
+  const exchangeRate = numberValue(payment.exchange_rate);
+  return exchangeRate !== null && exchangeRate > 0 ? exchangeRate : DEFAULT_CNY_PER_USD;
+}
+
+function marketPriceForCurrency(product: ProductSummary | null, order: OrderMeta): number | null {
   if (!product) return null;
   const pricing = asObject(asObject(product.meta).pricing);
   const markets = asObject(pricing.markets);
-  const normalizedCurrency = text(currency).toUpperCase();
+  const normalizedCurrency = documentCurrency(order);
   for (const market of Object.values(markets)) {
     const entry = asObject(market);
     if (text(entry.currency).toUpperCase() === normalizedCurrency) {
       return numberValue(entry.list_price ?? entry.promo_price ?? entry.floor_price);
     }
   }
-  const defaultMarket = text(pricing.default_market);
-  if (!defaultMarket) return null;
-  const fallback = asObject(markets[defaultMarket]);
-  return numberValue(fallback.list_price ?? fallback.promo_price ?? fallback.floor_price);
+  const fallback = normalizedCurrency === "USD"
+    ? Object.values(markets).find((market) => text(asObject(market).currency).toUpperCase() === "CNY")
+      ?? asObject(markets[text(pricing.default_market)])
+    : asObject(markets[text(pricing.default_market)]);
+  const sourceCurrency = text(fallback.currency).toUpperCase();
+  const sourceAmount = numberValue(fallback.list_price ?? fallback.promo_price ?? fallback.floor_price);
+  if (sourceAmount === null) return null;
+  if (sourceCurrency === normalizedCurrency || !sourceCurrency) return sourceAmount;
+  if (sourceCurrency === "CNY" && normalizedCurrency === "USD") {
+    return Number((sourceAmount / cnyPerUsd(order)).toFixed(2));
+  }
+  return null;
 }
 
 function alignItems(workspaceRoot: string, order: OrderMeta, existingItems: unknown, fallbackItems: unknown): TradeDocumentItem[] {
@@ -217,7 +241,6 @@ function alignItems(workspaceRoot: string, order: OrderMeta, existingItems: unkn
   });
   const lines = Array.isArray(order.lines) ? order.lines : [];
   const packaging = orderPackagingKey(order);
-  const pricingCurrency = text(order.currency) || "USD";
   return lines.map((line, index) => {
     const productId = typeof line === "string" || typeof line === "number"
       ? line
@@ -231,7 +254,7 @@ function alignItems(workspaceRoot: string, order: OrderMeta, existingItems: unkn
     const product = productId === null || productId === undefined ? null : findProductById(workspaceRoot, productId);
     const unitWeight = productUnitWeight(product, packaging);
     const derivedWeight = unitWeight === null ? null : Number((unitWeight * quantity).toFixed(3));
-    const derivedPrice = marketPriceForCurrency(product, pricingCurrency);
+    const derivedPrice = marketPriceForCurrency(product, order);
     const derivedSize = formatSize(productPackaging(product, packaging).dimensions_mm);
     const derivedAmount = derivedPrice === null ? null : Number((derivedPrice * quantity).toFixed(2));
     return {
@@ -360,6 +383,7 @@ function shippingNoteRowHtml(shippingAmount: number | null): string {
 function replacements(workspaceRoot: string, kind: TradeDocumentKind, order: OrderMeta, record: TradeDocumentRecord, fallbackItems: unknown): Record<string, string> {
   const items = alignItems(workspaceRoot, order, record.items, fallbackItems);
   const summary = summarize(items);
+  const currency = documentCurrency(order);
   const orderTotals = asObject(order.totals);
   const shippingAmount = orderMoney(orderTotals.shipping);
   const payableAmount = orderMoney(orderTotals.customer_payable);
@@ -378,8 +402,8 @@ function replacements(workspaceRoot: string, kind: TradeDocumentKind, order: Ord
     "{{PORT_DISCHARGE}}": text(ports.discharge),
     "{{TRADE_TERM_LABEL}}": text(tradeTerm.label),
     "{{TRADE_TERM_PLACE}}": text(tradeTerm.place),
-    "{{UNIT_PRICE_HEADER}}": unitPriceHeader(text(record.currency) || text(order.currency) || "USD"),
-    "{{TOTAL_WORDS_LABEL}}": totalWordsLabel(text(record.currency) || text(order.currency) || "USD"),
+    "{{UNIT_PRICE_HEADER}}": unitPriceHeader(currency),
+    "{{TOTAL_WORDS_LABEL}}": totalWordsLabel(currency),
     "{{ITEM_ROWS}}": itemRowsHtml(kind, items),
     "{{SUMMARY_ROWS}}": summaryRowsHtml(
       summary.quantity_ctns,
@@ -398,12 +422,17 @@ function replacements(workspaceRoot: string, kind: TradeDocumentKind, order: Ord
     "{{PAYMENT_TERMS}}": kind === "quotes" ? "ONE-TIME PAYMENT" : text(record.payment_terms) || "ONE-TIME PAYMENT",
     "{{DELIVERY_TIME}}": text(record.delivery_time) || "AFTER DEPOSIT 14 DAYS",
     "{{PARTIAL_SHIPMENT}}": text(record.partial_shipment) || "NO ALLOWED",
-    "{{BENEFICIARY}}": SELLER.beneficiary,
-    "{{BENEFICIARY_ADDRESS}}": SELLER.beneficiaryAddress,
-    "{{ACCOUNT_NO}}": SELLER.accountNo,
+    "{{ACCOUNT_NAME}}": SELLER.accountName,
+    "{{ACCOUNT_NAME_NOTE}}": SELLER.accountNameNote,
+    "{{ACCOUNT_NUMBER}}": SELLER.accountNumber,
+    "{{SWIFT_BIC}}": SELLER.swiftBic,
     "{{BANK_NAME}}": SELLER.bankName,
     "{{BANK_ADDRESS}}": SELLER.bankAddress,
-    "{{SWIFT_CODE}}": SELLER.swift,
+    "{{BANK_COUNTRY}}": SELLER.bankCountry,
+    "{{ACCOUNT_TYPE}}": SELLER.accountType,
+    "{{BANK_CODE}}": SELLER.bankCode,
+    "{{PAYMENT_METHOD}}": SELLER.paymentMethod,
+    "{{PAYMENT_NOTES}}": SELLER.paymentNotes,
   };
 }
 
@@ -440,6 +469,9 @@ export async function generateTradeDocument(
     ...(draftRecord ?? {}),
     order_no: orderNo,
   } as TradeDocumentRecord;
+  // PI and CI are sales documents for the order, so an old submodule currency
+  // must not override the order's current currency when regenerating them.
+  record.currency = documentCurrency(order);
   if (kind === "invoices") {
     record.issue_date = generatedAt;
   }
