@@ -158,6 +158,38 @@ The run writes durable local state below:
   inputs/  work/  outputs/  runs/
 ```
 
+## Historical Wanghai import
+
+Historical Wanghai literature data is an offline archive, not an active
+workflow workspace. Import it under a tenant- and Vault-qualified archive root
+with the Polaris migration command:
+
+```sh
+pnpm --dir apps/polaris run migrate:wanghai-literature-data -- \
+  --source-root <wanghai-literature-workspace> \
+  --archive-root <polaris-archive-root> \
+  --tenant-id <tenant-id> \
+  --vault-id <vault-id> \
+  --workspace-id literature-review \
+  --report <migration-report.json>
+
+pnpm --dir apps/polaris run migrate:wanghai-literature-data -- \
+  --apply \
+  --source-root <wanghai-literature-workspace> \
+  --archive-root <polaris-archive-root> \
+  --tenant-id <tenant-id> \
+  --vault-id <vault-id> \
+  --workspace-id literature-review \
+  --report <migration-report.json>
+```
+
+Run `--verify` after the apply. The importer preserves collection and
+workflow history byte-for-byte while excluding browser profiles, virtual
+environments, Python caches, incomplete downloads, and symbolic links. It
+records those omissions in the report. Imported history is evidence only;
+the old Wanghai run state is never presented as a Polaris durable run, and the
+source is not removed by the importer.
+
 Use `literature-review status --run-manifest <path>` to inspect that manifest.
 
 For a pending analysis review, submit the Polaris-owned review result and
