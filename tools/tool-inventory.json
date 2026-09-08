@@ -1,0 +1,97 @@
+{
+  "schema_version": "polaris.common-tool-inventory.v1",
+  "catalog_id": "polaris-common-tools",
+  "workflow_consumers": ["literature-review"],
+  "tools": [
+    {
+      "id": "literature.collection",
+      "entrypoint": "data-collection/clue-data-collection",
+      "version_file": "data-collection/VERSION",
+      "commands": ["version", "validate-input", "validate-output", "list-sources", "run"],
+      "capabilities": ["source-discovery", "normalization", "scope-filter", "pdf-link-inventory", "three-phase-review"]
+    },
+    {
+      "id": "literature.source.crossref",
+      "entrypoint": "crossref/clue-crossref-cli",
+      "version_file": "crossref/VERSION",
+      "commands": ["version", "doi", "search"],
+      "capabilities": ["bibliographic-search", "doi-hydration"]
+    },
+    {
+      "id": "literature.source.semantic-scholar",
+      "entrypoint": "semantic-scholar/clue-semantic-scholar-cli",
+      "version_file": "semantic-scholar/VERSION",
+      "commands": ["version", "paper", "search", "citations", "references"],
+      "capabilities": ["paper-search", "citation-expansion", "reference-expansion", "cache"]
+    },
+    {
+      "id": "literature.source.deepsec",
+      "entrypoint": "deepsec/clue-deepsec-cli",
+      "version_file": "deepsec/VERSION",
+      "commands": ["version", "search"],
+      "capabilities": ["security-paper-search", "pagination"]
+    },
+    {
+      "id": "literature.source.curated-web",
+      "entrypoint": "web-search/clue-web-search-cli",
+      "version_file": "web-search/VERSION",
+      "commands": ["version", "backend-status", "server-start", "server-stop", "batch"],
+      "capabilities": ["catalog-restricted-search", "local-searxng"]
+    },
+    {
+      "id": "literature.pdf.capture",
+      "entrypoint": "browser/clue-browser",
+      "version_file": "browser/VERSION",
+      "commands": ["version", "run"],
+      "capabilities": ["candidate-ranking", "browser-capture", "shared-pdf-cache", "partial-evidence"]
+    },
+    {
+      "id": "literature.collection.review",
+      "entrypoint": "collection-review/clue-collection-review",
+      "version_file": "collection-review/VERSION",
+      "commands": ["bootstrap", "save", "export", "complete"],
+      "capabilities": ["durable-review-state", "review-audit", "collection-continuation"]
+    },
+    {
+      "id": "literature.analysis.review",
+      "entrypoint": "analysis-review/clue-analysis-review",
+      "version_file": "analysis-review/VERSION",
+      "commands": ["bootstrap", "save", "export"],
+      "capabilities": ["revision-bound-review-state", "review-audit", "analysis-continuation"]
+    },
+    {
+      "id": "literature.analysis",
+      "entrypoint": "intelligence-analysis/clue-intelligence-analysis",
+      "version_file": "intelligence-analysis/VERSION",
+      "commands": ["version", "validate-input", "validate-output", "prepare", "run", "complete-review"],
+      "capabilities": ["snapshot-freeze", "iterate", "batches", "propose", "claim-validation", "review-gate", "finalize"]
+    },
+    {
+      "id": "literature.analysis.iterator",
+      "entrypoint": "intelligence-analysis/literature-review/literature-review",
+      "version_file": "intelligence-analysis/literature-review/VERSION",
+      "commands": ["version", "prepare", "propose", "propose-batches", "merge-cache", "iterate", "validate", "review-list", "auto-pass", "auto-approve", "finalize"],
+      "capabilities": ["exact-quote-binding", "typed-claim-graph", "checkpoint-resume", "review-revision-hash"]
+    },
+    {
+      "id": "literature.codex",
+      "entrypoint": "codex/clue-codex-cli",
+      "version_file": "codex/VERSION",
+      "commands": ["version", "exec", "topic-judge"],
+      "capabilities": ["persistent-session", "structured-json", "read-only-attachment"]
+    },
+    {
+      "id": "literature.report",
+      "entrypoint": "report-writing/clue-report-writing",
+      "version_file": "report-writing/VERSION",
+      "commands": ["version", "templates", "prepare", "draft", "review", "revise", "publish", "preview", "pdf", "latex", "run"],
+      "capabilities": ["compress-outline-expand", "coverage", "four-reviewers", "markdown", "bibtex", "xelatex"]
+    }
+  ],
+  "policy": {
+    "implementation_owner": "polaris",
+    "public_entrypoint": "polaris literature-review",
+    "direct_wanghai_dependency": false,
+    "live_enabled_by_default": false
+  }
+}

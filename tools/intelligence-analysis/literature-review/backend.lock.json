@@ -1,0 +1,20 @@
+{
+  "schema": "clue.intelligence-analysis.backend-lock.v1",
+  "wrapper_version": "0.3.0",
+  "model_provider": {
+    "name": "Local Codex",
+    "protocol": "Persistent local Codex CLI session",
+    "configuration": "Codex CLI user configuration and environment"
+  },
+  "runtime": {
+    "python": ">=3.11",
+    "external_python_dependencies": [],
+    "required_executables": ["codex"]
+  },
+  "safety_boundary": {
+    "network_access": "The analysis wrapper does not directly call external model APIs.",
+    "evidence_access": "Codex receives only the immutable analysis input.",
+    "review": "High-risk, contradictory and uncertain claims are handed to the Polaris review adapter.",
+    "final_output": "Final output is generated only after all required reviews are resolved."
+  }
+}

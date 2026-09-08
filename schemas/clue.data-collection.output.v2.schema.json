@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Generic data collection output v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "collection_kind",
+    "status",
+    "records",
+    "rejected_records",
+    "run_artifacts",
+    "information_gaps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clue.data-collection.output.v2"
+    },
+    "collection_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_kind": {
+      "enum": [
+        "customer-leads",
+        "literature",
+        "ad-content-intel"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "record_id",
+          "record_kind",
+          "source_url",
+          "observed_at",
+          "content_hash",
+          "evidence",
+          "payload"
+        ],
+        "properties": {
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "quote"
+              ],
+              "properties": {
+                "quote": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "payload": {
+            "type": "object",
+            "description": "Kind-specific fields. Literature may include pdf_links; ad-content-intel typically includes title/text, author, engagement, platform ids, media hints, and optional comment threads — not lead CRM fields.",
+            "properties": {
+              "pdf_links": {
+                "type": "object",
+                "required": [
+                  "status",
+                  "candidates",
+                  "validation"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "listed"
+                  },
+                  "validation": {
+                    "enum": [
+                      "not_downloaded",
+                      "partial",
+                      "retrieved",
+                      "failed"
+                    ]
+                  },
+                  "local_pdf": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "url",
+                        "link_kind",
+                        "validation"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "link_kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "validation": {
+                          "enum": [
+                            "not_downloaded",
+                            "retrieved",
+                            "failed"
+                          ]
+                        },
+                        "local_path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "bytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "platform": {
+                "type": "string",
+                "description": "e.g. xiaohongshu"
+              },
+              "title": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "description": "Note/caption/body text"
+              },
+              "author_id": {
+                "type": "string"
+              },
+              "author_handle": {
+                "type": "string"
+              },
+              "published_at": {
+                "type": "string"
+              },
+              "note_type": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "other"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "engagement": {
+                "type": "object",
+                "properties": {
+                  "likes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "collects": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "comments": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "shares": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": true
+              },
+              "is_ad_like": {
+                "type": "boolean",
+                "description": "Heuristic: looks like commercial promotion"
+              },
+              "parent_record_id": {
+                "type": "string",
+                "description": "For comments: parent note/video record_id"
+              },
+              "comments": {
+                "type": "array",
+                "description": "Optional inlined comment samples (prefer separate records when full threads are kept)",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "record_kind": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable kind for this record. Literature often uses paper-like ids; customer-leads use lead-oriented kinds; ad-content-intel uses content kinds such as xhs_note, xhs_video, xhs_comment, social_post, ad_creative."
+          }
+        }
+      }
+    },
+    "rejected_records": {
+      "type": "array"
+    },
+    "run_artifacts": {
+      "type": "array"
+    },
+    "information_gaps": {
+      "type": "array"
+    },
+    "literature_scope": {
+      "type": "object",
+      "description": "Seed/expand scope filter summary (year/venue/topic keyword).",
+      "additionalProperties": true
+    },
+    "literature_expansion": {
+      "type": "object",
+      "description": "Citation expansion stats and paths.",
+      "additionalProperties": true
+    },
+    "pdf_capture": {
+      "type": "object",
+      "description": "Phase-2 PDF capture summary.",
+      "additionalProperties": true
+    },
+    "topic_judgments": {
+      "type": "object",
+      "description": "Optional LLM topic-judge result (clue.codex.topic-judge.v1 shape or path reference).",
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "input_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_scope_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_of_scope_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "judgments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "record_id",
+              "in_scope"
+            ],
+            "properties": {
+              "record_id": {
+                "type": "string"
+              },
+              "in_scope": {
+                "type": "boolean"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "matched_aspects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "artifact_path": {
+          "type": "string",
+          "description": "Path to full topic-judge wrapper JSON when not inlined."
+        }
+      },
+      "additionalProperties": true
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ad_content_summary": {
+      "type": "object",
+      "description": "Optional rollup for ad-content-intel runs (counts by platform/kind).",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

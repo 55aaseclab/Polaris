@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.intelligence.analysis-candidates.v1",
+  "title": "Structured model candidate claims",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "snapshot_id",
+    "claims",
+    "framework",
+    "unresolved"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.intelligence.analysis-candidates.v1" },
+    "case_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "title",
+          "statement",
+          "classification",
+          "status",
+          "risk_level",
+          "confidence",
+          "evidence",
+          "questions",
+          "limitations"
+        ],
+        "properties": {
+          "claim_id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "statement": { "type": "string", "minLength": 1 },
+          "classification": {
+            "enum": ["identical", "contradictory", "new", "uncertain"]
+          },
+          "status": {
+            "enum": [
+              "supported",
+              "contradicted",
+              "inconclusive",
+              "insufficient_evidence"
+            ]
+          },
+          "risk_level": { "enum": ["low", "medium", "high"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["clue_id", "observation_id", "relation", "quote"],
+              "properties": {
+                "clue_id": { "type": "string", "minLength": 1 },
+                "observation_id": { "type": "string", "minLength": 1 },
+                "relation": {
+                  "enum": ["supports", "contradicts", "context"]
+                },
+                "quote": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "questions": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "limitations": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "framework": {
+      "type": "object",
+      "required": ["title", "stages"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "stage_id",
+              "sequence",
+              "title",
+              "explanation",
+              "transition",
+              "claim_ids"
+            ],
+            "properties": {
+              "stage_id": { "type": "string", "minLength": 1 },
+              "sequence": { "type": "integer", "minimum": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "explanation": { "type": "string", "minLength": 1 },
+              "transition": { "type": "string", "minLength": 1 },
+              "claim_ids": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "unresolved": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": true
+}

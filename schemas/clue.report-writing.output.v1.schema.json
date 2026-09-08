@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.report-writing.output.v1",
+  "title": "Published report manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_id",
+    "status",
+    "published_at",
+    "template_id",
+    "title",
+    "source",
+    "draft_sha256",
+    "reviews_sha256",
+    "used_claim_ids",
+    "limitations",
+    "report_path"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.report-writing.output.v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "status": { "const": "published" },
+    "published_at": { "type": "string", "format": "date-time" },
+    "template_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "source": { "type": "object" },
+    "draft_sha256": { "type": "string", "minLength": 1 },
+    "reviews_sha256": { "type": "string", "minLength": 1 },
+    "used_claim_ids": { "type": "array", "items": { "type": "string" } },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "report_path": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

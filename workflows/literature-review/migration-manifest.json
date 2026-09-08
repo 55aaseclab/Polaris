@@ -1,0 +1,146 @@
+{
+  "schema_version": "polaris.literature-review.migration.v1",
+  "source_project": "Wanghai literature-review implementation snapshot",
+  "source_commit": "7734fc106c221784264a22113b411e8f07394861",
+  "source_worktree_overrides": [
+    "tools/intelligence-analysis/literature-review/iterate.py",
+    "tools/intelligence-analysis/literature-review/tests/test_iterate.py",
+    "tools/report-writing/literature_pipeline.py",
+    "tools/report-writing/tests/test_runner.py"
+  ],
+  "migrated_source_roots": [
+    "tools/browser",
+    "tools/codex",
+    "tools/crossref",
+    "tools/data-collection",
+    "tools/deepsec",
+    "tools/image-review",
+    "tools/intelligence-analysis",
+    "tools/report-writing",
+    "tools/semantic-scholar",
+    "tools/social-media",
+    "tools/video-review",
+    "tools/web-search",
+    "tools/paths.py"
+  ],
+  "intentionally_unmigrated_source_roots": [
+    {
+      "path": "tools/content-production",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/google-map",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/industry-directories",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/logistics-management",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/outreach",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/product-video",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/social-publish",
+      "reason": "Not called by the literature-review workflow."
+    },
+    {
+      "path": "tools/物流管理",
+      "reason": "Not called by the literature-review workflow."
+    }
+  ],
+  "workflow_root": "workflows/literature-review",
+  "common_tools_root": "tools",
+  "definition": "workflows/literature-review/main.ord",
+  "environment_namespace": "POLARIS_LITERATURE_*",
+  "wire_contracts": [
+    "clue.data-collection.input.v2",
+    "clue.data-collection.output.v2",
+    "clue.data-collection.review-state.v1",
+    "clue.data-collection.review-output.v1",
+    "clue.data-collection.review-list.v1",
+    "clue.data-collection.non-review.v1",
+    "clue.intelligence-analysis.input.v2",
+    "clue.intelligence-analysis.output.v2",
+    "clue.intelligence.analysis-task.v2",
+    "clue.intelligence.collection-snapshot.v2",
+    "clue.intelligence.analysis-candidates.v2",
+    "clue.manual-review.v2",
+    "clue.manual-review.state.v2",
+    "clue.manual-review.result.v2",
+    "clue.report-writing.input.v2",
+    "clue.report-writing.output.v2"
+  ],
+  "migrated_components": {
+    "collection": ["data-collection", "data-collection/literature", "data-collection/ad_content"],
+    "collection_review": ["collection-review/review.py", "collection-review/clue-collection-review"],
+    "analysis_review": ["analysis-review/review.py", "analysis-review/clue-analysis-review"],
+    "shared_support": ["paths.py", "load-env.sh"],
+    "source_adapters": ["crossref", "semantic-scholar", "deepsec", "web-search"],
+    "pdf_and_media": ["browser", "image-review", "video-review"],
+    "analysis": ["intelligence-analysis", "intelligence-analysis/literature-review", "codex"],
+    "report": ["report-writing"],
+    "skills": [
+      "skills/polaris-literature-review",
+      "skills/polaris-literature-collection",
+      "skills/polaris-literature-analysis",
+      "skills/polaris-literature-report"
+    ],
+    "setup": ["install-dependencies.sh"]
+  },
+  "omitted_generated_state": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "browser/node_modules",
+    "web-search/backend/searxng",
+    "social-media/backend/justoneapi-python",
+    "social-media/.venv"
+  ],
+  "omission_reason": "Generated dependencies and locked external backend checkouts are installed or selected by the Polaris execution environment; no runtime import points to the source project checkout.",
+  "direct_source_dependency": false,
+  "live_execution_default": false,
+  "polaris_adaptations": [
+    {
+      "area": "orchestration",
+      "detail": "The Polaris runner owns collection, analysis, report, resume, status, and review continuation; no source-application orchestrator is called."
+    },
+    {
+      "area": "environment",
+      "detail": "The shared Polaris tool loader translates canonical POLARIS_LITERATURE_* settings, removes WANGHAI_* settings before execution, and is reused by the workflow adapter."
+    },
+    {
+      "area": "tool-binding",
+      "detail": "Each LiteratureReviewExecution node is bound in workflow.json to one root-level entry in tools/tool-inventory.json; the workflow is not registered as a common tool."
+    },
+    {
+      "area": "codex",
+      "detail": "POLARIS_LITERATURE_CODEX_BIN selects the underlying binary while the fixed Polaris workflow wrapper remains the default CODEX_CLI."
+    },
+    {
+      "area": "contracts",
+      "detail": "Collection and analysis handoffs are validated again at the Polaris boundary and bound to the requested collection, analysis, and report identifiers."
+    },
+    {
+      "area": "collection-review",
+      "detail": "The collection manual-review state machine, stable review identities, audit trail, atomic export, and v2 continuation are owned by the Polaris workflow; the producer metadata is Polaris-owned while the clue review-output contract remains compatible."
+    },
+    {
+      "area": "integrated-mode",
+      "detail": "Direct execution and review continuation fail closed when POLARIS_LITERATURE_RUNTIME_MODE=polaris; the durable Polaris job remains the integration point."
+    }
+  ],
+  "polaris_verification": [
+    "apps/polaris/tests/polaris-literature-review.test.ts",
+    "tools/collection-review/tests/test_review.py",
+    "tools/analysis-review/tests/test_review.py",
+    "pnpm --dir apps/polaris run test:literature-review"
+  ]
+}

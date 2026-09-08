@@ -1,0 +1,36 @@
+{
+  "schema_version": "clue.browser.input.v1",
+  "run_id": "example-homepage",
+  "start_url": "https://example.com/",
+  "browser": {
+    "headless": true,
+    "stealth": true,
+    "humanize": true,
+    "timeout_ms": 30000,
+    "pacing": {
+      "min_delay_ms": 400,
+      "max_delay_ms": 1200
+    }
+  },
+  "actions": [
+    {
+      "type": "wait-for",
+      "selector": "h1"
+    },
+    {
+      "type": "scroll",
+      "times": 1,
+      "delta_y": 300
+    },
+    {
+      "type": "extract-text",
+      "selector": "h1",
+      "name": "heading"
+    },
+    {
+      "type": "screenshot",
+      "name": "homepage",
+      "full_page": true
+    }
+  ]
+}

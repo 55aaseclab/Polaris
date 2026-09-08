@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# literature-review: structured local-Codex intelligence analysis.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../load-env.sh
+source "$ROOT_DIR/../../load-env.sh"
+exec python3 "$ROOT_DIR/runner.py" "$@"

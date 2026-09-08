@@ -1,0 +1,12 @@
+{
+  "template_id": "research-brief",
+  "title": "Research Brief",
+  "description": "A non-decision literature-style brief: research question, search scope, and merged findings with evidence.",
+  "draft_prompt": "draft-literature.v1.md",
+  "require_full_claim_coverage": true,
+  "sections": [
+    {"section_id": "question", "heading": "Research Question", "claims_required": false},
+    {"section_id": "search_scope", "heading": "Search Scope", "claims_required": false},
+    {"section_id": "findings", "heading": "Findings and Evidence", "claims_required": true}
+  ]
+}

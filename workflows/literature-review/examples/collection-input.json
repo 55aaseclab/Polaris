@@ -1,0 +1,30 @@
+{
+  "schema_version": "clue.data-collection.input.v2",
+  "collection_id": "synthetic-literature",
+  "collection_kind": "literature",
+  "question": "What does the synthetic evidence establish about bounded workflows?",
+  "decision_context": "Validate the Polaris literature-review migration.",
+  "audience": "research and engineering",
+  "scope": {
+    "time_range": "2024..2026",
+    "include": ["workflow", "evidence"]
+  },
+  "evidence_policy": {
+    "required_fields": ["source_url", "quote", "observed_at", "content_hash"]
+  },
+  "source_tasks": [
+    {
+      "task_id": "synthetic-seed",
+      "source_type": "crossref-search",
+      "config": { "query": "bounded workflow evidence" }
+    }
+  ],
+  "payload": {
+    "literature_scope": { "enabled": true },
+    "pdf_links": { "enabled": true }
+  },
+  "pipeline": {
+    "review_mode": "auto-pass",
+    "skip_augmentation": false
+  }
+}

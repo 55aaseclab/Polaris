@@ -304,6 +304,18 @@ Renderer / AI：
 | **P3** | registry/API projection；port schema 导出；真实 CLI/HTTP Host adapter | 可上生产宿主 |
 | **P4** | human port；时间；补偿/saga 叙事 | 长事务 |
 
+### v0.4-trial（实验层）
+
+v0.3 保留为默认语言表面，后续仍可独立使用。显式声明
+`dsl version "0.4-trial"` 的 Domain Pack 才能使用 `trial`、节点、条件边、
+反馈、重试、预算和 artifact 声明。该层用于表达有界 Agent control graph，
+不把模型、prompt、shell 或宿主路径写入 DSL。
+
+具体语法和运行语义见 [TRIAL-0.4.md](./TRIAL-0.4.md)。
+
+v0.4-trial 的 durable state store、Host binding 和真实执行 cell 仍由
+Polaris 宿主负责；语言包只提供可验证的图和运行时协议。
+
 ---
 
 ## 10. 我们与「照搬」的差别（自我定位）

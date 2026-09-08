@@ -16,8 +16,19 @@ import type {
   PortRef,
   StepAst,
   StepOutputAst,
+  TrialArtifactAst,
+  TrialAst,
+  TrialEdgeAst,
+  TrialExecutionAst,
+  TrialNodeAst,
+  TrialRetryAst,
 } from './ast.js'
-import { normalizeVersion, parsePortRef } from './ast.js'
+import {
+  DEFAULT_DSL_LANGUAGE_VERSION,
+  normalizeVersion,
+  parsePortRef,
+  TRIAL_DSL_LANGUAGE_VERSION,
+} from './ast.js'
 
 export interface ParseResult {
   ok: boolean
@@ -45,6 +56,31 @@ function unquote(s: string): string {
     return t.slice(1, -1)
   }
   return t
+}
+
+function splitEntries(source: string): string[] {
+  const entries: string[] = []
+  let start = 0
+  let quote = ''
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i]
+    if (quote) {
+      if (char === quote && source[i - 1] !== '\\') quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === ',' || char === '\n' || char === '\r') {
+      const entry = source.slice(start, i).trim()
+      if (entry) entries.push(entry)
+      start = i + 1
+    }
+  }
+  const last = source.slice(start).trim()
+  if (last) entries.push(last)
+  return entries
 }
 
 function parseFieldLine(line: string): FieldAst | null {
@@ -102,10 +138,8 @@ function parseEnum(body: string, name: string): EnumAst {
 
 function parseEntity(body: string, name: string): EntityAst {
   const fields: FieldAst[] = []
-  for (const raw of body.split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
-    const f = parseFieldLine(line)
+  for (const raw of splitEntries(body)) {
+    const f = parseFieldLine(raw)
     if (f) fields.push(f)
   }
   return { kind: 'Entity', name, fields }
@@ -194,10 +228,8 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
     if (!blk) return { message: `Unclosed ${kind} block in flow ${name}` }
 
     if (kind === 'input') {
-      for (const raw of blk.body.split('\n')) {
-        const line = raw.trim()
-        if (!line) continue
-        const inp = parseInputLine(line)
+      for (const raw of splitEntries(blk.body)) {
+        const inp = parseInputLine(raw)
         if (inp) inputs.push(inp)
       }
     } else if (kind === 'output') {
@@ -283,10 +315,8 @@ function parsePort(header: string, body: string): PortAst | ParseError {
     const blk = extractBlock(body, i)
     if (!blk) return { message: `Unclosed ${km[1]} in port ${name}` }
     const fields: FieldAst[] = []
-    for (const raw of blk.body.split('\n')) {
-      const line = raw.trim()
-      if (!line) continue
-      const f = parseFieldLine(line)
+    for (const raw of splitEntries(blk.body)) {
+      const f = parseFieldLine(raw)
       if (f) fields.push(f)
     }
     if (km[1].toLowerCase() === 'in') inFields = fields
@@ -365,9 +395,7 @@ function parsePipelines(cleaned: string, errors: ParseError[]): PipelineAst[] {
 /** flow.output { name : Type [from step.out | name] [label "..."] } */
 function parseFlowOutputs(body: string): FlowOutputAst[] {
   const list: FlowOutputAst[] = []
-  for (const raw of body.split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
+  for (const line of splitEntries(body)) {
     const m = line.match(
       re(`^(${ID})\\s*:\\s*(${ID})(?:\\s+from\\s+(${ID}(?:\\.${ID})?))?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
     )
@@ -384,7 +412,7 @@ function parseFlowOutputs(body: string): FlowOutputAst[] {
 
 function parseUsesList(body: string): string[] {
   return body
-    .split(/[\n,]+/)
+    .split(/[\s,]+/)
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => s.replace(/,$/, ''))
@@ -392,14 +420,12 @@ function parseUsesList(body: string): string[] {
 
 function parseStepOutputs(body: string): StepOutputAst[] {
   const list: StepOutputAst[] = []
-  for (const raw of body.split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
+  for (const line of splitEntries(body)) {
     const m = line.match(
-      re(`^(${ID})\\s*:\\s*(${ID})(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
+      re(`^(${ID})\\s*:\\s*(${ID})(\\?)?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
     )
     if (!m) continue
-    list.push({ name: m[1], type: m[2], label: m[4] ?? m[5] })
+    list.push({ name: m[1], type: m[2], optional: Boolean(m[3]), label: m[5] ?? m[6] })
   }
   return list
 }
@@ -493,6 +519,286 @@ function parseStepsBlock(body: string): StepAst[] | string {
     steps.push({ id, label, uses, outputs, call })
   }
   return steps
+}
+
+function parseDurationMs(raw: string): number | null {
+  const match = raw.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/i)
+  if (!match) return null
+  const value = Number(match[1])
+  const unit = (match[2] ?? 'ms').toLowerCase()
+  const multiplier = unit === 'h' ? 3_600_000 : unit === 'm' ? 60_000 : unit === 's' ? 1_000 : 1
+  const result = value * multiplier
+  return Number.isFinite(result) ? Math.round(result) : null
+}
+
+function parseListBlock(body: string): string[] {
+  return parseUsesList(body)
+}
+
+function parseTrialRetry(body: string): TrialRetryAst {
+  const maxM = body.match(/\bmax(?:Attempts)?\s+([^\s}]+)/i)
+  const backoffToken = body.match(/\bbackoff\s+([^\s}]+)/i)
+  const backoffMs = backoffToken ? parseDurationMs(backoffToken[1]) : 0
+  return {
+    maxAttempts: maxM ? Number(maxM[1]) : 1,
+    backoffMs: backoffToken ? (backoffMs ?? Number.NaN) : 0,
+  }
+}
+
+function parseTrialNodeBody(body: string): Omit<TrialNodeAst, 'kind' | 'id' | 'label'> | string {
+  let i = 0
+  let role: TrialNodeAst['role']
+  let uses: string[] = []
+  let outputs: StepOutputAst[] = []
+  let call: PortRef | undefined
+  let capabilities: string[] = []
+  let retry: TrialRetryAst = { maxAttempts: 1, backoffMs: 0 }
+  let timeoutMs: number | undefined
+  let maxActions: number | undefined
+
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    const slice = body.slice(i)
+
+    const callRef = parseCallRef(slice)
+    if (callRef) {
+      call = callRef
+      const eaten = slice.match(re(`^call\\s+(${ID}(?:\\.${ID})?)(?:@[\\d.]+)?`, 'i'))
+      i += eaten?.[0].length ?? callRef.raw.length + 5
+      continue
+    }
+
+    const roleM = slice.match(new RegExp(`^role\\s+(${ID})`, 'iu'))
+    if (roleM) {
+      role = roleM[1]
+      i += roleM[0].length
+      continue
+    }
+
+    const scalarM = slice.match(/^(timeout|maxActions)\s+([^\s}]+)/i)
+    if (scalarM) {
+      if (scalarM[1].toLowerCase() === 'timeout') {
+        const parsed = parseDurationMs(scalarM[2])
+        timeoutMs = parsed ?? Number.NaN
+      } else {
+        const parsed = Number(scalarM[2])
+        maxActions = parsed
+      }
+      i += scalarM[0].length
+      continue
+    }
+
+    const blockM = slice.match(/^(uses|output|out|capabilities|retry)\b/i)
+    if (!blockM) {
+      const nl = body.indexOf('\n', i)
+      i = nl === -1 ? body.length : nl + 1
+      continue
+    }
+    const key = blockM[1].toLowerCase()
+    i += blockM[0].length
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (body[i] !== '{') return `Expected '{' after ${key} in trial node`
+    const block = extractBlock(body, i)
+    if (!block) return `Unclosed ${key} in trial node`
+    if (key === 'uses') uses = parseListBlock(block.body)
+    else if (key === 'output' || key === 'out') outputs = parseStepOutputs(block.body)
+    else if (key === 'capabilities') capabilities = parseListBlock(block.body)
+    else retry = parseTrialRetry(block.body)
+    i = block.end
+  }
+
+  return { role, uses, outputs, call, capabilities, retry, timeoutMs, maxActions }
+}
+
+function parseTrialNodes(body: string): TrialNodeAst[] | string {
+  const nodes: TrialNodeAst[] = []
+  let i = 0
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    const head = body.slice(i).match(re(`^(${ID})(?:\\s+("([^"]*)"|'([^']*)'))?`))
+    if (!head) {
+      const nl = body.indexOf('\n', i)
+      i = nl === -1 ? body.length : nl + 1
+      continue
+    }
+    const id = head[1]
+    const label = head[3] ?? head[4] ?? id
+    i += head[0].length
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (body[i] !== '{') return `Expected '{' after trial node ${id}`
+    const block = extractBlock(body, i)
+    if (!block) return `Unclosed trial node ${id}`
+    const parsed = parseTrialNodeBody(block.body)
+    if (typeof parsed === 'string') return parsed
+    nodes.push({ kind: 'TrialNode', id, label, ...parsed })
+    i = block.end
+  }
+  return nodes
+}
+
+function parseTrialEdges(body: string): TrialEdgeAst[] {
+  const edges: TrialEdgeAst[] = []
+  for (const raw of splitEntries(body)) {
+    const line = raw.trim()
+    if (!line) continue
+    const head = line.match(re(`^edge\\s+(${ID})\\s*->\\s*(${ID})(.*)$`, 'i'))
+    if (!head) continue
+    const rest = head[3] ?? ''
+    let when: string | undefined
+    const whenIndex = rest.search(/\bwhen\b/i)
+    if (whenIndex >= 0) {
+      const tail = rest.slice(whenIndex + 4).trim()
+      if (tail.startsWith('"') || tail.startsWith("'")) {
+        const quote = tail[0]
+        const end = tail.indexOf(quote, 1)
+        if (end >= 0) when = tail.slice(1, end)
+      } else {
+        const end = tail.search(/\s+(?:feedback|reset)\b/i)
+        when = (end >= 0 ? tail.slice(0, end) : tail).trim()
+      }
+    }
+    const feedbackM = rest.match(new RegExp('\\bfeedback\\s+(' + ID + ')(?:\\s+as\\s+(' + ID + '))?', 'iu'))
+    edges.push({
+      kind: 'TrialEdge',
+      from: head[1],
+      to: head[2],
+      ...(when ? { when } : {}),
+      ...(feedbackM ? { feedback: feedbackM[1] } : {}),
+      ...(feedbackM?.[2] ? { feedbackAs: feedbackM[2] } : {}),
+      ...(new RegExp('\\breset(?:\\s+attempts)?\\b', 'i').test(rest)
+        ? { resetAttempts: true }
+        : {}),
+    })
+  }
+  return edges
+}
+
+function parseTrialArtifacts(body: string): TrialArtifactAst[] {
+  const artifacts: TrialArtifactAst[] = []
+  for (const line of splitEntries(body)) {
+    const match = line.match(
+      re(`^(${ID})\\s*:\\s*(${ID})(?:\\s+kind\\s+(data|report|log|snapshot|script))?(?:\\s+(redacted))?$`, 'i'),
+    )
+    if (!match) continue
+    artifacts.push({
+      name: match[1],
+      type: match[2],
+      kind: (match[3]?.toLowerCase() as TrialArtifactAst['kind'] | undefined) ?? 'data',
+      redacted: Boolean(match[4]),
+    })
+  }
+  return artifacts
+}
+
+function parseTrialExecution(body: string): TrialExecutionAst {
+  const classM = body.match(/\bclass\s+(pure|workspace|ai)\b/i)
+  const isolationM = body.match(/\bisolation\s+(disposable|scoped|none)\b/i)
+  const networkM = body.match(/\bnetwork\s+(deny|allow)\b/i)
+  return {
+    class: (classM?.[1].toLowerCase() as TrialExecutionAst['class'] | undefined) ?? 'ai',
+    isolation: (isolationM?.[1].toLowerCase() as TrialExecutionAst['isolation'] | undefined) ?? 'disposable',
+    network: (networkM?.[1].toLowerCase() as TrialExecutionAst['network'] | undefined) ?? 'deny',
+  }
+}
+
+function parseTrialBudget(body: string): TrialAst['budget'] {
+  const timeoutM = body.match(/\btimeout\s+([^\s}]+)/i)
+  const costM = body.match(/\b(?:cost|maxCost)\s+([^\s}]+)/i)
+  const transitionM = body.match(/\bmaxTransitions\s+([^\s}]+)/i)
+  return {
+    timeoutMs: timeoutM ? (parseDurationMs(timeoutM[1]) ?? Number.NaN) : 2_700_000,
+    maxCost: costM ? Number(costM[1]) : 5,
+    maxTransitions: transitionM ? Number(transitionM[1]) : 128,
+  }
+}
+
+function parseTrial(header: string, body: string): TrialAst | ParseError {
+  const nameM = header.match(re(`^trial\\s+(${ID})`, 'i'))
+  if (!nameM) return { message: `Invalid trial header: ${header}` }
+  const titleM = header.match(/\btitle\s+("([^"]*)"|'([^']*)')/)
+  const trial: TrialAst = {
+    kind: 'Trial',
+    name: nameM[1],
+    title: titleM ? (titleM[2] ?? titleM[3]) : nameM[1],
+    inputs: [],
+    nodes: [],
+    edges: [],
+    start: '',
+    terminal: [],
+    budget: { timeoutMs: 2_700_000, maxCost: 5, maxTransitions: 128 },
+    execution: { class: 'ai', isolation: 'disposable', network: 'deny' },
+    artifacts: [],
+  }
+  let i = 0
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    const slice = body.slice(i)
+    const startM = slice.match(new RegExp(`^start\\s+(${ID})`, 'iu'))
+    if (startM) {
+      trial.start = startM[1]
+      i += startM[0].length
+      continue
+    }
+
+    const blockM = slice.match(/^(input|budget|execution|artifacts|nodes|edges|terminal)\b/i)
+    if (!blockM) {
+      const nl = body.indexOf('\n', i)
+      i = nl === -1 ? body.length : nl + 1
+      continue
+    }
+    const key = blockM[1].toLowerCase()
+    i += blockM[0].length
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (body[i] !== '{') return { message: `Expected '{' after ${key} in trial ${trial.name}` }
+    const block = extractBlock(body, i)
+    if (!block) return { message: `Unclosed ${key} in trial ${trial.name}` }
+    if (key === 'input') {
+      for (const raw of splitEntries(block.body)) {
+        const input = parseInputLine(raw)
+        if (input) trial.inputs.push(input)
+      }
+    } else if (key === 'budget') trial.budget = parseTrialBudget(block.body)
+    else if (key === 'execution') trial.execution = parseTrialExecution(block.body)
+    else if (key === 'artifacts') trial.artifacts = parseTrialArtifacts(block.body)
+    else if (key === 'nodes') {
+      const nodes = parseTrialNodes(block.body)
+      if (typeof nodes === 'string') return { message: nodes }
+      trial.nodes = nodes
+    } else if (key === 'edges') trial.edges = parseTrialEdges(block.body)
+    else trial.terminal = parseListBlock(block.body)
+    i = block.end
+  }
+  return trial
+}
+
+function parseTrials(cleaned: string, errors: ParseError[]): { trials: TrialAst[]; ranges: { start: number; end: number }[] } {
+  const trials: TrialAst[] = []
+  const ranges: { start: number; end: number }[] = []
+  const trialRe = new RegExp(`^[ \\t]*trial\\s+${ID}`, 'gimu')
+  let match: RegExpExecArray | null
+  while ((match = trialRe.exec(cleaned)) !== null) {
+    const start = match.index
+    const headerStart = cleaned.slice(start)
+    const brace = headerStart.indexOf('{')
+    if (brace < 0) {
+      errors.push({ message: `trial ${match[0].trim()} missing body` })
+      continue
+    }
+    const absBrace = start + brace
+    const block = extractBlock(cleaned, absBrace)
+    if (!block) {
+      errors.push({ message: `Unclosed trial ${match[0].trim()}` })
+      continue
+    }
+    const parsed = parseTrial(cleaned.slice(start, absBrace).trim(), block.body)
+    if ('kind' in parsed && parsed.kind === 'Trial') trials.push(parsed)
+    else errors.push(parsed as ParseError)
+    ranges.push({ start, end: block.end })
+  }
+  return { trials, ranges }
 }
 
 /** 解析 entity|enum|flow|port|outputs */
@@ -609,6 +915,7 @@ export function parse(source: string): ParseResult {
     kind: 'Domain',
     name: 'Untitled',
     version: '0.0.0',
+    languageVersion: DEFAULT_DSL_LANGUAGE_VERSION,
     imports: [],
     enums: [],
     entities: [],
@@ -616,6 +923,17 @@ export function parse(source: string): ParseResult {
     flows: [],
     modules: [],
     pipelines: [],
+    trials: [],
+  }
+
+  const languageM = cleaned.match(/^\s*dsl\s+version\s+(?:"([^"]*)"|'([^']*)')/im)
+  if (languageM) {
+    const requested = (languageM[1] ?? languageM[2] ?? '').trim().replace(/^v(?=\d)/i, '')
+    if (requested === '0.3' || requested === TRIAL_DSL_LANGUAGE_VERSION) {
+      ast.languageVersion = requested
+    } else {
+      errors.push({ message: `Unsupported DSL language version: ${requested}` })
+    }
   }
 
   const domM = cleaned.match(re(`domain\\s+(${ID})(?:\\s+version\\s+(\"([^\"]*)\"|\'([^\']*)\'))?`, 'i'))
@@ -627,8 +945,15 @@ export function parse(source: string): ParseResult {
   ast.version = normalizeVersion(domM[3] ?? domM[4] ?? '0.0.0')
   ast.imports = parseImports(cleaned)
   ast.pipelines = parsePipelines(cleaned, errors)
+  const trials = parseTrials(cleaned, errors)
+  ast.trials = trials.trials
+  if (ast.trials.length > 0 && ast.languageVersion !== TRIAL_DSL_LANGUAGE_VERSION) {
+    errors.push({
+      message: `trial requires dsl version "${TRIAL_DSL_LANGUAGE_VERSION}"`,
+    })
+  }
 
-  const headEnd = cleaned.search(new RegExp(String.raw`\b(module|entity|enum|flow|port)\s+${ID}`, 'iu'))
+  const headEnd = cleaned.search(new RegExp(String.raw`\b(module|entity|enum|flow|port|trial)\s+${ID}`, 'iu'))
   const head = headEnd >= 0 ? cleaned.slice(0, headEnd) : cleaned
   const titleM = head.match(/\btitle\s+("([^"]*)"|'([^']*)')/)
   if (titleM) ast.title = titleM[2] ?? titleM[3]
@@ -673,6 +998,9 @@ export function parse(source: string): ParseResult {
   for (const r of moduleRanges) {
     masked = masked.slice(0, r.start) + ' '.repeat(r.end - r.start) + masked.slice(r.end)
   }
+  for (const r of trials.ranges) {
+    masked = masked.slice(0, r.start) + ' '.repeat(r.end - r.start) + masked.slice(r.end)
+  }
 
   const top = parseMembers(masked, errors)
   ast.entities.push(...top.entities)
@@ -683,7 +1011,7 @@ export function parse(source: string): ParseResult {
   // 能力域包可只有 port/entity（供 import），不强制 flow
   const totalFlows = ast.flows.length + ast.modules.reduce((n, m) => n + m.flows.length, 0)
   const totalPorts = ast.ports.length + ast.modules.reduce((n, m) => n + m.ports.length, 0)
-  if (totalFlows === 0 && totalPorts === 0 && ast.entities.length === 0) {
+  if (totalFlows === 0 && totalPorts === 0 && ast.entities.length === 0 && ast.trials.length === 0) {
     errors.push({ message: 'Domain is empty (no flow / port / entity)' })
   }
 

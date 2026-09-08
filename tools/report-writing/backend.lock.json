@@ -1,0 +1,28 @@
+{
+  "schema": "clue.report-writing.backend-lock.v1",
+  "wrapper_version": "0.3.0",
+  "model_provider": {
+    "name": "Local Codex",
+    "protocol": "Persistent local Codex CLI session",
+    "configuration": "Codex CLI user configuration and environment",
+    "default_model": "gpt-5.4",
+    "default_model_reasoning_effort": "medium",
+    "environment_overrides": [
+      "REPORT_WRITING_MODEL",
+      "CODEX_MODEL",
+      "REPORT_WRITING_REASONING_EFFORT"
+    ]
+  },
+  "runtime": {
+    "python": ">=3.11",
+    "external_python_dependencies": [],
+    "required_executables": ["codex"],
+    "formal_report_renderer": "XeLaTeX with xeCJK"
+  },
+  "safety_boundary": {
+    "input": "Only final clue.intelligence-analysis.output.v2 is accepted.",
+    "evidence": "Every report section binds to approved judgment claim IDs.",
+    "publication": "All four reviewer dimensions must pass before publishing.",
+    "network_access": "The report-writing wrapper does not directly call external model APIs."
+  }
+}

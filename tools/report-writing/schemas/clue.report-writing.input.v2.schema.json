@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.report-writing.input.v2",
+  "title": "Formatted report-writing input v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_id",
+    "prepared_at",
+    "source",
+    "question",
+    "decision_context",
+    "audience",
+    "template",
+    "evidence_registry",
+    "references",
+    "allowed_limitations",
+    "rejected_claim_ids"
+  ],
+  "$defs": {
+    "prompt_spec": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": {
+          "enum": [
+            "generate-text",
+            "generate-file",
+            "derive",
+            "copy-file"
+          ]
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_kind": {
+          "enum": [
+            "text",
+            "markdown",
+            "json",
+            "string_array"
+          ]
+        },
+        "output_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "template_section": {
+      "type": "object",
+      "required": [
+        "section_id",
+        "heading",
+        "claims_required"
+      ],
+      "properties": {
+        "section_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "heading": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claims_required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_item": {
+      "type": "object",
+      "required": [
+        "source_url",
+        "quote",
+        "observed_at"
+      ],
+      "properties": {
+        "source_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "clue_id": {
+          "type": "string"
+        },
+        "observation_id": {
+          "type": "string"
+        },
+        "source_metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clue.report-writing.input.v2"
+    },
+    "report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prepared_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "analysis_output_id",
+        "analysis_output_sha256",
+        "case_id",
+        "snapshot_id",
+        "snapshot_sha256"
+      ],
+      "properties": {
+        "analysis_output_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "analysis_output_sha256": {
+          "type": "string",
+          "minLength": 1
+        },
+        "case_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot_sha256": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "decision_context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_context_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audience_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "template_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "template": {
+      "type": "object",
+      "required": [
+        "template_id",
+        "title",
+        "description",
+        "sections",
+        "draft_prompt",
+        "require_full_claim_coverage"
+      ],
+      "properties": {
+        "template_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/template_section"
+          }
+        },
+        "draft_prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "require_full_claim_coverage": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_registry": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "title",
+          "statement",
+          "classification",
+          "status",
+          "confidence",
+          "evidence",
+          "limitations"
+        ],
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "classification": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/evidence_item"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "references": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "reference_id",
+          "title",
+          "url"
+        ],
+        "properties": {
+          "reference_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "search_scope": {
+      "type": "object"
+    },
+    "framework": {
+      "type": "object"
+    },
+    "claim_filter": {
+      "type": "object"
+    },
+    "allowed_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rejected_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false
+}

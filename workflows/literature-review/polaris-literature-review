@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Polaris-owned literature-review workflow CLI.
+set -euo pipefail
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# ``--env-file`` is a workflow-CLI option, so discover it before sourcing the
+# loader.  This makes file-only configuration available to the Python runner
+# during its initial workspace validation as well as to every child tool.
+for ((_polaris_arg_index = 1; _polaris_arg_index <= $#; _polaris_arg_index++)); do
+  if [[ "${!_polaris_arg_index}" == "--env-file" ]]; then
+    _polaris_env_arg_index=$((_polaris_arg_index + 1))
+    if (( _polaris_env_arg_index > $# )); then
+      echo "error: --env-file requires a path" >&2
+      exit 2
+    fi
+    export POLARIS_LITERATURE_ENV_FILE="${!_polaris_env_arg_index}"
+    break
+  fi
+done
+source "$ROOT_DIR/load-env.sh"
+exec python3 "$ROOT_DIR/workflow.py" "$@"

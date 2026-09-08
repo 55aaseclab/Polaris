@@ -1,0 +1,12 @@
+{
+  "template_id": "system-framework",
+  "title": "Systems Intelligence Report",
+  "description": "A report that develops an evidence-bound, traceable viewpoint framework.",
+  "sections": [
+    {"section_id": "headline", "heading": "Core Proposition", "claims_required": true},
+    {"section_id": "progression", "heading": "Viewpoint Progression", "claims_required": true},
+    {"section_id": "architecture", "heading": "System and Boundaries", "claims_required": true},
+    {"section_id": "evidence", "heading": "Evidence", "claims_required": true},
+    {"section_id": "scope", "heading": "Scope and Limitations", "claims_required": false}
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Polaris literature collection review output v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "generated_at",
+    "manually_rejected_records",
+    "outreach_ready_records",
+    "pending_manual_review_records",
+    "source_rejected_records",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.data-collection.review-output.v1" },
+    "collection_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "manually_rejected_records": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "outreach_ready_records": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "pending_manual_review_records": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "source_rejected_records": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "producer": { "type": "object" },
+    "review_state": { "type": "object" },
+    "sources": { "type": "object" },
+    "summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

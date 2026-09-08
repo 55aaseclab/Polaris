@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Literature collection non-review records v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "collection_kind",
+    "qualified_without_manual_review",
+    "rejected_records"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.data-collection.non-review.v1" },
+    "collection_id": { "type": "string", "minLength": 1 },
+    "collection_kind": { "const": "literature" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "phase_id": { "const": 3 },
+    "phase": { "const": "manual-review" },
+    "review_mode": { "const": "manual-review" },
+    "qualified_without_manual_review": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "rejected_records": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

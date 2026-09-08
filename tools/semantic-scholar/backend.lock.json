@@ -1,0 +1,16 @@
+{
+  "schema": "clue.semantic-scholar.backend-lock.v1",
+  "wrapper_version": "0.1.0",
+  "api": {
+    "provider": "Allen Institute for AI — Semantic Scholar",
+    "base_url": "https://api.semanticscholar.org/graph/v1",
+    "auth": "optional x-api-key from SEMANTIC_SCHOLAR_API_KEY",
+    "endpoints": [
+      "GET /paper/DOI:{doi}",
+      "GET /paper/{paperId}/citations",
+      "GET /paper/{paperId}/references",
+      "GET /paper/search"
+    ]
+  },
+  "request_policy": "polite rate limiting; prefer API key for batch expand"
+}

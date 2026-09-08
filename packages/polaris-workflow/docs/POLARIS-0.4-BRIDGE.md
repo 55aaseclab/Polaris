@@ -24,6 +24,7 @@
 - `import` + `port version` + `@ver` 钉扎  
 - `pipeline` 糖（主路径元数据）  
 - 千级域包压测 + Unicode 标识  
+- v0.4-trial `trial` graph：节点、条件边、反馈、attempt、预算、checkpoint
 
 尚未替代 Polaris 的部分（有意为之）：
 
@@ -31,6 +32,10 @@
 - 事件账本 / outbox 推送  
 - wait/approval/compensate 运行时表  
 - 真实 action catalog 与 effect 对账  
+
+v0.4-trial 的 CVE-Genie 示例和语义说明见
+[docs/TRIAL-0.4.md](./TRIAL-0.4.md)。它是独立实验语言表面，不会改变 v0.3
+flow，也不会自动进入现有 Portal worker。
 
 ## 推荐落地顺序
 

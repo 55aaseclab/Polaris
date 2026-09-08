@@ -15,6 +15,12 @@ const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.resolve(
   "domain-packs",
   "vault-knowledge-health",
 );
+const FIRST_PARTY_LITERATURE_REVIEW_PACK = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../../..",
+  "workflows",
+  "literature-review",
+);
 
 function packSource(version: string, body: string): string {
   return `domain SamplePack version "${version}"
@@ -308,6 +314,95 @@ test("first-party Vault Knowledge Health pack projects the ArtifactMetadata read
       effect: "read",
       unresolved: false,
     }]);
+  });
+});
+
+test("pack projection exposes v0.4-trial graph metadata", { concurrency: false }, async () => {
+  await withDataRoot(async (dataRoot) => {
+    const sourcePath = path.join(dataRoot, "trial-pack.ord");
+    fs.writeFileSync(sourcePath, `dsl version "0.4-trial"
+domain TrialPack version "1.0.0"
+title "Synthetic trial pack"
+port Work version "1.0.0" {
+  in {
+    token: String
+  }
+  out {
+    result: String
+  }
+  effect ffi
+}
+trial Main title "Synthetic trial" {
+  input {
+    token: String required
+  }
+  budget {
+    timeout 10s
+    cost 1
+    maxTransitions 4
+  }
+  execution {
+    class ai
+    isolation disposable
+    network deny
+  }
+  start work
+  terminal { work }
+  nodes {
+    work "Work" {
+      uses { token }
+      call Work
+      output { result: String }
+      retry { max 1 }
+    }
+  }
+}
+`, "utf8");
+
+    await runCli(["pack", "add", sourcePath]);
+
+    const projection = listDomainPackProjections(import.meta.url)[0];
+    assert.ok(projection);
+    assert.deepEqual(projection.trials, [{
+      id: "Main",
+      title: "Synthetic trial",
+      nodeCount: 1,
+      edgeCount: 0,
+      terminalNodes: ["work"],
+      capabilities: [],
+      budget: {
+        timeoutMs: 10_000,
+        maxCost: 1,
+        maxTransitions: 4,
+      },
+      execution: {
+        class: "ai",
+        isolation: "disposable",
+        network: "deny",
+      },
+    }]);
+  });
+});
+
+test("first-party literature-review pack is independently parseable and projects its complete graph", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    await runCli(["pack", "add", FIRST_PARTY_LITERATURE_REVIEW_PACK]);
+
+    const projection = listDomainPackProjections(import.meta.url)
+      .find((candidate) => candidate.id === "PolarisLiteratureReview");
+    assert.ok(projection);
+    assert.equal(projection.languageVersion, "0.4-trial");
+    assert.equal(projection.flows.length, 4);
+    const trial = projection.trials.find(
+      (candidate) => candidate.id === "LiteratureReviewExecution",
+    );
+    assert.ok(trial);
+    assert.equal(trial.nodeCount, 18);
+    assert.equal(trial.edgeCount, 22);
+    assert.deepEqual(trial.terminalNodes, ["renderPdf"]);
+    assert.equal(trial.budget.timeoutMs, 7_200_000);
+    assert.equal(trial.execution.network, "allow");
+    assert.ok(trial.capabilities.includes("literature.codex.invoke"));
   });
 });
 

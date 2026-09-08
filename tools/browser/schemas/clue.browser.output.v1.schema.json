@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Declared browser run output v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tool",
+    "status",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "start_url",
+    "final_url",
+    "page",
+    "actions",
+    "extractions",
+    "artifacts",
+    "automation_policy"
+  ],
+  "properties": {
+    "schema_version": {"const": "clue.browser.output.v1"},
+    "status": {"const": "succeeded"},
+    "run_id": {"type": "string", "minLength": 1},
+    "start_url": {"type": "string", "format": "uri"},
+    "final_url": {"type": "string", "format": "uri"},
+    "actions": {"type": "array"},
+    "extractions": {"type": "array"},
+    "artifacts": {"type": "array"}
+  }
+}

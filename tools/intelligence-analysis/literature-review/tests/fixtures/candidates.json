@@ -1,0 +1,27 @@
+{
+  "schema_version": "clue.intelligence.analysis-candidates.v2",
+  "case_id": "case-example",
+  "snapshot_id": "snapshot-example",
+  "claims": [
+    {
+      "claim_id": "claim-001",
+      "title": "Synthetic finding",
+      "statement": "The source makes a synthetic statement.",
+      "classification": "contradictory",
+      "status": "supported",
+      "risk_level": "high",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "clue_id": "clue-001",
+          "observation_id": "observation-001",
+          "relation": "supports",
+          "quote": "Synthetic source statement."
+        }
+      ],
+      "questions": ["Confirm the conflict scope."],
+      "limitations": ["Only one synthetic source is available."]
+    }
+  ],
+  "unresolved": ["Synthetic conflict remains."]
+}

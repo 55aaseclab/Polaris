@@ -1,0 +1,26 @@
+{
+  "lock_version": 1,
+  "cli": {
+    "name": "clue-justoneapi-cli",
+    "version": "0.4.1"
+  },
+  "backend": {
+    "name": "justoneapi/justoneapi-python",
+    "repository": "https://github.com/justoneapi/justoneapi-python.git",
+    "ref": "v3.0.30",
+    "commit": "9fe12fe4244412279283204651af104d3ba046af",
+    "license": "MIT",
+    "path": "backend/justoneapi-python",
+    "python_requires": ">=3.10",
+    "api_base_url": "https://api.justoneapi.com"
+  },
+  "token": {
+    "default_file": ".env",
+    "env_keys": ["JUSTONEAPI_TOKEN"],
+    "read_rule": "Prefer JUSTONEAPI_TOKEN from the environment or repository-root .env (KEY=value). Legacy: first non-comment line of the token file. Never persist, print, or log the token."
+  },
+  "run_defaults": {
+    "max_pages_per_task": 1,
+    "request_timeout_seconds": 60
+  }
+}

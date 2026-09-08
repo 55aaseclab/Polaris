@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Polaris generic manual review result v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "review_set_id",
+    "review_kind",
+    "approval_mode",
+    "approved_records",
+    "pending_records",
+    "rejected_records",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.manual-review.result.v2" },
+    "review_set_id": { "type": "string", "minLength": 1 },
+    "review_kind": { "type": "string", "minLength": 1 },
+    "approval_mode": { "enum": ["manual", "auto_pass", "auto_approve"] },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "approved_records": { "type": "array", "items": { "type": "object" } },
+    "pending_records": { "type": "array", "items": { "type": "object" } },
+    "rejected_records": { "type": "array", "items": { "type": "object" } },
+    "producer": { "type": "object" },
+    "review_state": { "type": "object" },
+    "sources": { "type": "object" },
+    "summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

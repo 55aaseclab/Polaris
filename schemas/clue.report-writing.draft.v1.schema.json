@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.report-writing.draft.v1",
+  "title": "Structured evidence-bound report draft",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_id",
+    "template_id",
+    "title",
+    "sections",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.report-writing.draft.v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "template_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["section_id", "paragraphs", "claim_ids"],
+        "properties": {
+          "section_id": { "type": "string", "minLength": 1 },
+          "paragraphs": { "type": "array", "items": { "type": "string" } },
+          "claim_ids": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

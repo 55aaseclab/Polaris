@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.report-writing.input.v1",
+  "title": "Formatted report-writing input",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_id",
+    "prepared_at",
+    "source",
+    "question",
+    "decision_context",
+    "audience",
+    "template",
+    "evidence_registry",
+    "allowed_limitations",
+    "rejected_claim_ids"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.report-writing.input.v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "object" },
+    "question": { "type": "string", "minLength": 1 },
+    "decision_context": { "type": "string", "minLength": 1 },
+    "audience": { "type": "string", "minLength": 1 },
+    "template": { "type": "object" },
+    "evidence_registry": { "type": "array" },
+    "framework": { "type": "object" },
+    "allowed_limitations": { "type": "array", "items": { "type": "string" } },
+    "rejected_claim_ids": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

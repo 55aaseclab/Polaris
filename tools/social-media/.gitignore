@@ -1,0 +1,7 @@
+# Optional local run outputs. Production collection outputs belong under the
+# collection project's runs/ directory, not under this tool.
+runs/*
+!runs/.gitkeep
+
+__pycache__/
+.env

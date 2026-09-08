@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.intelligence-analysis.output.v2",
+  "title": "Intelligence analysis output v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "analysis_id",
+    "analysis_kind",
+    "status",
+    "judgments",
+    "unresolved",
+    "run_artifacts"
+  ],
+  "$defs": {
+    "prompt_spec": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": {
+          "enum": [
+            "generate-text",
+            "generate-file",
+            "derive",
+            "copy-file"
+          ]
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_kind": {
+          "enum": [
+            "text",
+            "markdown",
+            "json",
+            "string_array"
+          ]
+        },
+        "output_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clue.intelligence-analysis.output.v2"
+    },
+    "analysis_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "analysis_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "analysis_context": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        },
+        "decision_context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decision_context_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audience_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        }
+      },
+      "additionalProperties": true
+    },
+    "collection_snapshot": {
+      "type": "object"
+    },
+    "search_scope": {
+      "type": "object"
+    },
+    "judgments": {
+      "type": "array"
+    },
+    "rejected_claims": {
+      "type": "array"
+    },
+    "unresolved": {
+      "type": "array"
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "status",
+        "approval_mode",
+        "review_set_id",
+        "review_result_sha256",
+        "summary"
+      ],
+      "properties": {
+        "status": {
+          "const": "completed"
+        },
+        "approval_mode": {
+          "enum": [
+            "manual",
+            "auto_pass",
+            "auto_approve"
+          ]
+        },
+        "review_set_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review_result_sha256": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "run_artifacts": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": true
+}

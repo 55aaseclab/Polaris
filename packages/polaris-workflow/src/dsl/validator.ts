@@ -6,6 +6,7 @@ import {
   type ValidationIssue,
 } from './ast.js'
 import { resolvePort } from './resolve.js'
+import { validateTrial } from './trial.js'
 
 const BUILTIN_TYPES = new Set(['ID', 'String', 'Number', 'Money', 'Boolean', 'Status'])
 
@@ -61,6 +62,10 @@ function findPort(ports: PortAst[], ref: PortRef): PortAst | null {
 export function validate(ast: DomainAst): ValidateResult {
   const issues: ValidationIssue[] = []
   if (!ast.name) push(issues, 'error', 'E_DOMAIN_NAME', 'Domain name is required')
+  const languageVersion = ast.languageVersion ?? '0.3'
+  if (languageVersion !== '0.3' && languageVersion !== '0.4-trial') {
+    push(issues, 'error', 'E_DSL_VERSION', `Unsupported DSL language version ${languageVersion}`)
+  }
 
   const flat = flattenDomain(ast)
   const entityNames = new Set(flat.entities.map((e) => e.name))
@@ -254,6 +259,22 @@ export function validate(ast: DomainAst): ValidateResult {
         )
       }
     }
+  }
+
+  const trialNames = new Set<string>()
+  for (const trial of ast.trials ?? []) {
+    if (trialNames.has(trial.name)) push(issues, 'error', 'E_DUP_TRIAL', `Duplicate trial ${trial.name}`)
+    trialNames.add(trial.name)
+    if (languageVersion !== '0.4-trial') {
+      push(
+        issues,
+        'error',
+        'E_TRIAL_LANGUAGE_VERSION',
+        `trial ${trial.name} requires DSL language version 0.4-trial`,
+        `trial.${trial.name}`,
+      )
+    }
+    issues.push(...validateTrial(trial, flat.ports))
   }
 
   return { ok: !issues.some((i) => i.level === 'error'), issues }

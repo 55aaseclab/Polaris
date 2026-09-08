@@ -1,0 +1,7 @@
+# Query runs may include public result snippets and are local run artifacts.
+runs/*
+!runs/.gitkeep
+
+# Runtime state belongs to the local SearXNG service.
+runtime/*
+!runtime/.gitkeep

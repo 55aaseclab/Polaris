@@ -1,0 +1,11 @@
+{
+  "template_id": "risk-brief",
+  "title": "Risk Intelligence Brief",
+  "description": "A management brief for conflicting evidence, high-risk judgments, or unresolved matters.",
+  "sections": [
+    {"section_id": "risk-headline", "heading": "Risk Summary", "claims_required": true},
+    {"section_id": "confirmed-signals", "heading": "Confirmed Signals", "claims_required": true},
+    {"section_id": "conflicts", "heading": "Conflicts and Open Questions", "claims_required": true},
+    {"section_id": "scope", "heading": "Scope and Limitations", "claims_required": false}
+  ]
+}

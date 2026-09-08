@@ -1,0 +1,33 @@
+use_default_settings: true
+
+general:
+  instance_name: "Clue local web search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "clue-local-web-search-only-change-before-network-exposure"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+outgoing:
+  request_timeout: 5.0
+  enable_http2: true
+
+engines:
+  - name: bing
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: mojeek
+    disabled: false

@@ -3,6 +3,7 @@ import { validate } from './validator.js'
 import { compile, type Program } from './compiler.js'
 import { resolveImports, type PackLoader } from './resolve.js'
 import type { DomainAst, ParseError, ValidationIssue } from './ast.js'
+import type { TrialProgram } from './trial.js'
 
 export interface PipelineOptions {
   /** 跨域包 import 加载器；无 import 时可省略 */
@@ -19,6 +20,8 @@ export interface PipelineResult {
   /** 展开 import 后的 AST */
   ast?: DomainAst
   program?: Program
+  /** v0.4-trial durable control graphs compiled alongside the v0.3 Program. */
+  trialPrograms?: TrialProgram[]
   importGraph?: { from: string; to: string; versionRange: string }[]
   stages: {
     parse: 'pass' | 'fail'
@@ -101,6 +104,7 @@ export function runPipeline(source: string, options: PipelineOptions = {}): Pipe
   }
 
   const program = compile(ast)
+  const trialPrograms = program.trials
   return {
     ok: true,
     source,
@@ -109,6 +113,7 @@ export function runPipeline(source: string, options: PipelineOptions = {}): Pipe
     rawAst,
     ast,
     program,
+    trialPrograms,
     importGraph,
     stages: {
       parse: 'pass',

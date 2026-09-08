@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LiteratureTopicJudgments",
+  "type": "object",
+  "required": ["judgments"],
+  "additionalProperties": false,
+  "properties": {
+    "judgments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["record_id", "in_scope", "confidence", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "record_id": { "type": "string" },
+          "in_scope": { "type": "boolean" },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": { "type": "string" },
+          "matched_aspects": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

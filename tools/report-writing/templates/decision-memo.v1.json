@@ -1,0 +1,11 @@
+{
+  "template_id": "decision-memo",
+  "title": "Decision Memo",
+  "description": "A management memo organized around confirmed judgments in a defined decision context.",
+  "sections": [
+    {"section_id": "decision-headline", "heading": "Decision Summary", "claims_required": true},
+    {"section_id": "decision-evidence", "heading": "Decision-Relevant Judgments", "claims_required": true},
+    {"section_id": "decision-boundaries", "heading": "Decision Boundaries", "claims_required": true},
+    {"section_id": "scope", "heading": "Scope and Limitations", "claims_required": false}
+  ]
+}

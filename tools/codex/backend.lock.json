@@ -1,0 +1,15 @@
+{
+  "schema": "clue.codex.backend-lock.v1",
+  "wrapper_version": "0.1.2",
+  "runtime": {
+    "cli": "codex",
+    "commands": ["exec", "exec resume"],
+    "default_model": "gpt-5.4-mini",
+    "env": [
+      "CODEX_MODEL",
+      "OPENAI_API_KEY",
+      "CODEX_HOME"
+    ]
+  },
+  "request_policy": "Non-interactive codex exec; prefer --sandbox read-only for judgment tasks; structured JSON via --output-schema"
+}

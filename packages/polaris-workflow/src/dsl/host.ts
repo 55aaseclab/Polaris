@@ -16,6 +16,23 @@ export interface FfiInvokeRequest {
     stepId?: string
     flowName?: string
     mode?: 'interpret' | 'compile'
+    runId?: string
+    nodeId?: string
+    attempt?: number
+    requestId?: string
+    idempotencyKey?: string
+    deadlineAt?: string
+    definitionDigest?: string
+    transition?: number
+    timeoutMs?: number
+    costUsd?: number
+    elapsedMs?: number
+    execution?: {
+      class: 'pure' | 'workspace' | 'ai'
+      isolation: 'disposable' | 'scoped' | 'none'
+      network: 'deny' | 'allow'
+    }
+    feedback?: { name: string; value: CtxValue }
   }
 }
 

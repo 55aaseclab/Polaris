@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# clue-data-collection: three-phase pipeline + fused phase-2 customer_leads commands.
+set -euo pipefail
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../load-env.sh
+source "$ROOT_DIR/../load-env.sh"
+polaris_literature_assert_local_command "${1:-}"
+
+# Single-post XHS capture uses the same locked SDK runtime as the social-media
+# tool (the general data-collection runtime intentionally has no http client
+# dependency).  It is an explicit opt-in path and does not alter discovery
+# retention behavior.
+if [[ "${1:-}" == "capture-xhs-post" ]]; then
+  shift
+  SOCIAL_ROOT="$ROOT_DIR/../social-media"
+  SOCIAL_PYTHON="${CLUE_SOCIAL_MEDIA_PYTHON:-$SOCIAL_ROOT/.venv/bin/python}"
+  if [[ ! -x "$SOCIAL_PYTHON" ]]; then
+    SOCIAL_PYTHON="python3"
+  fi
+  exec "$SOCIAL_PYTHON" "$ROOT_DIR/ad_content/xhs_capture.py" "$@"
+fi
+
+if [[ "${1:-}" == "mine-xhs-knowledge" ]]; then
+  shift
+  exec python3 "$ROOT_DIR/ad_content/xhs_knowledge.py" "$@"
+fi
+
+RUNTIME_PYTHON="$ROOT_DIR/runtime/python/bin/python"
+
+# Prefer the tool runtime when present (needed for phase-2 email extract).
+if [[ -x "$RUNTIME_PYTHON" ]]; then
+  exec "$RUNTIME_PYTHON" "$ROOT_DIR/runner.py" "$@"
+fi
+exec python3 "$ROOT_DIR/runner.py" "$@"

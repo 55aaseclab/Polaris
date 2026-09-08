@@ -13,6 +13,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY apps/polaris-portal/package.json apps/polaris-portal/package.json
 COPY packages/polaris-auth-server/package.json packages/polaris-auth-server/package.json
+COPY packages/polaris-tools/package.json packages/polaris-tools/package.json
+COPY packages/vault-runtime/package.json packages/vault-runtime/package.json
 COPY packages/polaris-workflow/package.json packages/polaris-workflow/package.json
 COPY packages/polaris-shell/package.json packages/polaris-shell/package.json
 COPY packages/surface-coding/package.json packages/surface-coding/package.json
@@ -22,8 +24,13 @@ RUN --mount=type=cache,target=/pnpm/store \
   pnpm install --frozen-lockfile --filter polaris... --filter polaris-portal...
 
 COPY apps/polaris ./apps/polaris
+COPY schemas ./schemas
+COPY tools ./tools
+COPY workflows ./workflows
 COPY apps/polaris-portal ./apps/polaris-portal
 COPY packages/polaris-auth-server ./packages/polaris-auth-server
+COPY packages/polaris-tools ./packages/polaris-tools
+COPY packages/vault-runtime ./packages/vault-runtime
 COPY packages/polaris-workflow ./packages/polaris-workflow
 COPY packages/polaris-shell ./packages/polaris-shell
 COPY packages/surface-coding ./packages/surface-coding
@@ -43,6 +50,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /vault/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY --from=build /vault/packages/polaris-auth-server ./packages/polaris-auth-server
+COPY --from=build /vault/packages/polaris-tools ./packages/polaris-tools
+COPY --from=build /vault/packages/vault-runtime ./packages/vault-runtime
 COPY --from=build /vault/packages/polaris-workflow ./packages/polaris-workflow
 COPY --from=build /vault/packages/polaris-shell ./packages/polaris-shell
 COPY --from=build /vault/packages/surface-coding ./packages/surface-coding
@@ -50,6 +59,9 @@ COPY --from=build /vault/packages/surface-wanghai ./packages/surface-wanghai
 COPY --from=build /vault/apps/polaris-portal/dist ./apps/polaris-portal/dist
 COPY --from=build /vault/apps/polaris/node_modules ./apps/polaris/node_modules
 COPY --from=build /vault/apps/polaris/dist ./apps/polaris/dist
+COPY --from=build /vault/schemas ./schemas
+COPY --from=build /vault/tools ./tools
+COPY --from=build /vault/workflows ./workflows
 
 EXPOSE 8787
 

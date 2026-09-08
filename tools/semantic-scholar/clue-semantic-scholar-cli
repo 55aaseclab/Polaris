@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# clue-semantic-scholar-cli: Semantic Scholar graph (paper / citations / references).
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../load-env.sh
+source "$ROOT_DIR/../load-env.sh"
+polaris_literature_assert_local_command "${1:-}"
+exec python3 "$ROOT_DIR/runner.py" "$@"

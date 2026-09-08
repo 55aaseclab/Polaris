@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# clue-report-writing: evidence-bound report writing from final analysis output.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$ROOT_DIR/../load-env.sh"
+polaris_literature_assert_local_command "${1:-}"
+exec python3 "$ROOT_DIR/runner.py" "$@"

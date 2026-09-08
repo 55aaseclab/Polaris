@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.report-writing.review.v1",
+  "title": "Structured four-dimension report review",
+  "type": "object",
+  "required": ["schema_version", "report_id", "draft_sha256", "reviews"],
+  "properties": {
+    "schema_version": { "const": "clue.report-writing.review.v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "draft_sha256": { "type": "string", "minLength": 1 },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dimension", "score", "status", "blocking_issues", "notes"],
+        "properties": {
+          "dimension": {
+            "enum": ["unity", "support", "coherence", "sentence_skills"]
+          },
+          "score": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "status": { "enum": ["pass", "revise"] },
+          "blocking_issues": { "type": "array" },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

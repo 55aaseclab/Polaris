@@ -1,0 +1,12 @@
+{
+  "template_id": "literature-report",
+  "title": "Literature Report",
+  "description": "An evidence-bound literature review: research question, search scope, and multi-section findings with integrated evidence.",
+  "draft_prompt": "draft-literature.v1.md",
+  "require_full_claim_coverage": true,
+  "sections": [
+    {"section_id": "question", "heading": "Research Question", "claims_required": false},
+    {"section_id": "search_scope", "heading": "Search Scope", "claims_required": false},
+    {"section_id": "findings", "heading": "Findings and Evidence", "claims_required": true}
+  ]
+}

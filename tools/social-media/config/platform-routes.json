@@ -1,0 +1,92 @@
+{
+  "schema_version": "clue-justoneapi-cli.routes.v1",
+  "platforms": {
+    "instagram": {
+      "enabled": true,
+      "source_type": "social_media",
+      "resource": "instagram",
+      "method": "search_hashtag_posts_v1",
+      "endpoint_path": "/api/instagram/search-hashtag-posts/v1",
+      "query_parameter": "hashtag",
+      "query_normalization": "strip_leading_hash",
+      "pagination_style": "cursor",
+      "pagination_parameter": "end_cursor",
+      "candidate_adapter": "business_account",
+      "merge_by": "account",
+      "record_shape": "instagram_post",
+      "account_url_template": "https://www.instagram.com/{account_handle}/",
+      "post_url_template": "https://www.instagram.com/p/{post_code}/",
+      "documentation_url": "https://docs.justoneapi.com/zh/api/instagram/hashtag-posts-search-v1",
+      "public_data_policy": {
+        "retain_only_explicit_business_accounts": true,
+        "exclude_comments": true,
+        "exclude_private_contact_data": true,
+        "retain_media": false
+      },
+      "account_enrichment": {
+        "enabled": true,
+        "post_detail": {
+          "resource": "instagram",
+          "method": "get_post_detail_v1",
+          "endpoint_path": "/api/instagram/get-post-detail/v1",
+          "parameter": "code"
+        },
+        "profile": {
+          "resource": "instagram",
+          "method": "get_user_detail_v1",
+          "endpoint_path": "/api/instagram/get-user-detail/v1",
+          "parameter": "username"
+        }
+      }
+    },
+    "xiaohongshu": {
+      "enabled": true,
+      "source_type": "social_media",
+      "resource": "xiaohongshu",
+      "method": "search_note_v4",
+      "endpoint_path": "/api/xiaohongshu/search-note/v4",
+      "query_parameter": "keyword",
+      "query_normalization": "strip",
+      "pagination_style": "page",
+      "pagination_parameter": "page",
+      "pagination_start": 1,
+      "pagination_session_parameters": {
+        "search_id": ["search_id", "searchId"],
+        "session_id": ["session_id", "sessionId"]
+      },
+      "static_parameters": {
+        "sort_type": "general",
+        "note_type": "ALL",
+        "time_filter": "ALL"
+      },
+      "candidate_adapter": "content_note",
+      "merge_by": "post",
+      "record_shape": "xiaohongshu_note",
+      "account_url_template": "https://www.xiaohongshu.com/user/profile/{user_id}",
+      "post_url_template": "https://www.xiaohongshu.com/explore/{note_id}",
+      "documentation_url": "https://docs.justoneapi.com/zh/api/xiaohongshu-rednote/note-search-v4",
+      "public_data_policy": {
+        "retain_only_explicit_business_accounts": false,
+        "retain_public_notes": true,
+        "exclude_comments": true,
+        "exclude_private_contact_data": true,
+        "retain_media": false
+      },
+      "account_enrichment": {
+        "enabled": false,
+        "note_detail": {
+          "resource": "xiaohongshu",
+          "method": "get_note_detail_v1",
+          "endpoint_path": "/api/xiaohongshu/get-note-detail/v1",
+          "parameter": "note_id"
+        },
+        "profile": {
+          "resource": "xiaohongshu",
+          "method": "get_user_v3",
+          "endpoint_path": "/api/xiaohongshu/get-user/v3",
+          "parameter": "user_id"
+        }
+      }
+    }
+  }
+}

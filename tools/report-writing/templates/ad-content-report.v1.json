@@ -1,0 +1,39 @@
+{
+  "template_id": "ad-content-report",
+  "title": "Ad & Content Intelligence Report",
+  "description": "Evidence-bound report for social/ad content judgments: question, corpus scope, key creatives/themes, and limitations.",
+  "draft_prompt": "draft-ad-content.v1.md",
+  "require_full_claim_coverage": false,
+  "sections": [
+    {
+      "section_id": "headline",
+      "heading": "Executive Summary",
+      "claims_required": true
+    },
+    {
+      "section_id": "corpus",
+      "heading": "Corpus and Platforms",
+      "claims_required": false
+    },
+    {
+      "section_id": "judgments",
+      "heading": "Key Content Judgments",
+      "claims_required": true
+    },
+    {
+      "section_id": "creatives",
+      "heading": "Themes and Creative Patterns",
+      "claims_required": true
+    },
+    {
+      "section_id": "evidence",
+      "heading": "Evidence",
+      "claims_required": true
+    },
+    {
+      "section_id": "scope",
+      "heading": "Scope and Limitations",
+      "claims_required": false
+    }
+  ]
+}

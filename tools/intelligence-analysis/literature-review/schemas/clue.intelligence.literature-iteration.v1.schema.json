@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Literature iteration corpus v1",
+  "description": "Growing claim graph built by iterative paper absorption: seed cores first, then identical / new / contradictory merges.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "snapshot_id",
+    "question",
+    "seed_paper_ids",
+    "paper_order",
+    "claim_graph",
+    "iterations",
+    "stats"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "clue.intelligence.literature-iteration.v1" },
+    "case_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "analysis_input_sha256": { "type": "string" },
+    "question": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string" },
+    "seed_paper_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "paper_order": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "claim_graph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/claim_node" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/claim_edge" }
+        }
+      }
+    },
+    "iterations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/iteration_record" }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "evidence_binding": {
+      "type": "object",
+      "required": ["clue_id", "observation_id", "quote", "relation", "paper_id"],
+      "additionalProperties": false,
+      "properties": {
+        "clue_id": { "type": "string" },
+        "observation_id": { "type": "string" },
+        "quote": { "type": "string" },
+        "relation": { "enum": ["supports", "contradicts", "context"] },
+        "paper_id": { "type": "string" }
+      }
+    },
+    "claim_node": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "title",
+        "statement",
+        "status",
+        "confidence",
+        "risk_level",
+        "first_paper_id",
+        "first_iteration",
+        "last_iteration",
+        "evidence",
+        "support_papers",
+        "member_extractions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "node_id": { "type": "string" },
+        "title": { "type": "string" },
+        "statement": { "type": "string" },
+        "status": {
+          "enum": [
+            "supported",
+            "contradicted",
+            "inconclusive",
+            "insufficient_evidence"
+          ]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "risk_level": { "enum": ["low", "medium", "high"] },
+        "paper_type": {
+          "enum": ["tool_paper", "measurement_paper", "sok_survey_paper"]
+        },
+        "focus": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["problem", "method", "conclusion"] }
+        },
+        "first_paper_id": { "type": "string" },
+        "first_iteration": { "type": "integer", "minimum": 0 },
+        "last_iteration": { "type": "integer", "minimum": 0 },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_binding" }
+        },
+        "support_papers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "member_extractions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "paper_id",
+              "extraction_id",
+              "statement",
+              "relation",
+              "iteration"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "paper_id": { "type": "string" },
+              "extraction_id": { "type": "string" },
+              "statement": { "type": "string" },
+              "paper_type": {
+                "enum": ["tool_paper", "measurement_paper", "sok_survey_paper"]
+              },
+              "focus": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "enum": ["problem", "method", "conclusion"] }
+              },
+              "relation": {
+                "enum": ["identical", "new", "contradictory", "uncertain"]
+              },
+              "iteration": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "claim_edge": {
+      "type": "object",
+      "required": [
+        "edge_id",
+        "kind",
+        "from_node_id",
+        "to_node_id",
+        "introduced_by_paper_id",
+        "iteration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "edge_id": { "type": "string" },
+        "kind": { "enum": ["contradicts", "related"] },
+        "from_node_id": { "type": "string" },
+        "to_node_id": { "type": "string" },
+        "introduced_by_paper_id": { "type": "string" },
+        "iteration": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string" }
+      }
+    },
+    "iteration_record": {
+      "type": "object",
+      "required": ["iteration", "kind", "paper_id", "extractions", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "iteration": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["seed", "absorb"] },
+        "paper_id": { "type": "string" },
+        "extractions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/paper_extraction" }
+        },
+        "judgments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/absorb_judgment" }
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graph_action" }
+        }
+      }
+    },
+    "paper_extraction": {
+      "type": "object",
+      "required": [
+        "extraction_id",
+        "title",
+        "statement",
+        "status",
+        "confidence",
+        "risk_level",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "extraction_id": { "type": "string" },
+        "title": { "type": "string" },
+        "statement": { "type": "string" },
+        "status": {
+          "enum": [
+            "supported",
+            "contradicted",
+            "inconclusive",
+            "insufficient_evidence"
+          ]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "risk_level": { "enum": ["low", "medium", "high"] },
+        "paper_type": {
+          "enum": ["tool_paper", "measurement_paper", "sok_survey_paper"]
+        },
+        "focus": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["problem", "method", "conclusion"] }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence_binding" }
+        },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "absorb_judgment": {
+      "type": "object",
+      "required": ["extraction_id", "relation", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "extraction_id": { "type": "string" },
+        "relation": {
+          "enum": ["identical", "new", "contradictory", "uncertain"]
+        },
+        "target_node_id": { "type": ["string", "null"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "graph_action": {
+      "type": "object",
+      "required": ["action", "extraction_id"],
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "enum": [
+            "create_node",
+            "merge_identical",
+            "link_contradiction",
+            "record_uncertain"
+          ]
+        },
+        "extraction_id": { "type": "string" },
+        "node_id": { "type": "string" },
+        "edge_id": { "type": "string" },
+        "against_node_id": { "type": "string" }
+      }
+    }
+  }
+}

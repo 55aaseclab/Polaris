@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Generic data collection input v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "collection_kind",
+    "question",
+    "decision_context",
+    "scope",
+    "evidence_policy",
+    "source_tasks",
+    "payload"
+  ],
+  "$defs": {
+    "prompt_spec": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": {
+          "enum": [
+            "generate-text",
+            "generate-file",
+            "derive",
+            "copy-file"
+          ]
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_kind": {
+          "enum": [
+            "text",
+            "markdown",
+            "json",
+            "string_array"
+          ]
+        },
+        "output_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clue.data-collection.input.v2"
+    },
+    "collection_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_kind": {
+      "enum": [
+        "customer-leads",
+        "literature",
+        "ad-content-intel"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "decision_context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_context_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "scope": {
+      "type": "object",
+      "description": "Collection scope. For literature, drives year bounds, keyword topic filter, and optional LLM topic-judge criteria.",
+      "properties": {
+        "time_range": {
+          "type": "string",
+          "description": "Year window as START..END (e.g. 2022..2026).",
+          "pattern": "^\\d{4}\\.\\.\\d{4}$"
+        },
+        "include": {
+          "type": "array",
+          "description": "In-scope themes / keyword phrases (also used as title+abstract topic keywords unless overridden).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "include_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Out-of-scope themes (used by LLM topic-judge; keyword filter is include-only).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        },
+        "topic_criteria": {
+          "type": "array",
+          "description": "Domain-specific LLM topic-judge rules for this collection only (not hardcoded in tools). Alias: judgment_criteria / criteria.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "topic_criteria_prompt": {
+          "$ref": "#/$defs/prompt_spec"
+        },
+        "judgment_criteria": {
+          "type": "array",
+          "description": "Alias of topic_criteria.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "description": "Alias of topic_criteria.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "evidence_policy": {
+      "type": "object",
+      "required": [
+        "required_fields"
+      ],
+      "properties": {
+        "required_fields": {
+          "type": "array",
+          "contains": {
+            "const": "source_url"
+          }
+        }
+      }
+    },
+    "source_tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "source_type",
+          "config"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "pdf_links": {
+          "type": "object",
+          "description": "Optional unvalidated paper-link inventory for manual download.",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "const": true
+            }
+          }
+        },
+        "literature_scope": {
+          "type": "object",
+          "description": "Literature year/venue/topic bounds and optional LLM topic-judge criteria.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "from_year": {
+              "type": "integer"
+            },
+            "to_year": {
+              "type": "integer"
+            },
+            "allow_arxiv_corr": {
+              "type": "boolean"
+            },
+            "max_records": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ccf_ranks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "topic_filter": {
+              "type": "boolean",
+              "description": "When false, skip keyword topic filter (year/venue still apply)."
+            },
+            "topic_keywords": {
+              "type": "array",
+              "description": "Override scope.include for keyword title+abstract matching.",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "topic_keywords_prompt": {
+              "$ref": "#/$defs/prompt_spec"
+            },
+            "topic_criteria": {
+              "type": "array",
+              "description": "LLM topic-judge criteria (preferred under literature_scope for literature collections).",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "topic_criteria_prompt": {
+              "$ref": "#/$defs/prompt_spec"
+            },
+            "judgment_criteria": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "criteria": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "topic_judge": {
+              "type": "object",
+              "description": "LLM topic-judge via tools/codex (domain rules from topic_criteria).",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Default true when topic_criteria present."
+                },
+                "stages": {
+                  "type": "array",
+                  "description": "When to run: seed (after year/venue/keyword), expand (each citation candidate before corpus/frontier), post_expand (after full expand).",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "seed",
+                      "expand",
+                      "post_expand"
+                    ]
+                  }
+                },
+                "batch_size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 40
+                },
+                "cache": {
+                  "type": "boolean",
+                  "description": "Disk cache under POLARIS_LITERATURE_CACHE_ROOT/topic-judgments/ (default true)."
+                },
+                "model": {
+                  "type": "string"
+                },
+                "timeout_s": {
+                  "type": "integer",
+                  "minimum": 30
+                },
+                "max_papers": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Optional cap for testing."
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "citation_expansion": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "use_semantic_scholar": {
+              "type": "boolean"
+            },
+            "sleep_s": {
+              "type": "number"
+            },
+            "topic_keywords": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "max_rounds": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "seed_papers": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "ad_content_scope": {
+          "type": "object",
+          "description": "Optional bounds for ad-content-intel collections (platform, queries, whether comments/videos are required). Details live in records[].payload.",
+          "properties": {
+            "platforms": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "e.g. xiaohongshu, douyin"
+            },
+            "queries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "include_comments": {
+              "type": "boolean"
+            },
+            "include_videos": {
+              "type": "boolean"
+            },
+            "time_window": {
+              "type": "string",
+              "description": "Human or machine window, e.g. last_90_days or 2026-01-01..2026-07-28"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "pipeline": {
+      "type": "object",
+      "properties": {
+        "review_mode": {
+          "type": "string",
+          "enum": [
+            "auto-pass",
+            "auto-approve",
+            "manual-review"
+          ],
+          "default": "auto-pass"
+        },
+        "skip_augmentation": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "topic_criteria": {
+      "type": "array",
+      "description": "Top-level alias for LLM topic-judge criteria.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "judgment_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schemas/clue.social-publish.output.v1.schema.json",
+  "title": "clue.social-publish.output v1",
+  "description": "Result of a social-publish job. Status values are stable for callers; adapter-specific detail lives under error and adapter.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "publish_id",
+    "platform",
+    "account_id",
+    "status",
+    "started_at",
+    "finished_at",
+    "cli",
+    "adapter"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clue.social-publish.output.v1"
+    },
+    "publish_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "account_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["video", "note", "image"]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "queued",
+        "logging_in",
+        "uploading",
+        "processing",
+        "scheduled",
+        "published",
+        "cancelled",
+        "failed_validation",
+        "failed_session_expired",
+        "failed_captcha",
+        "failed_sms_verification",
+        "failed_rate_limit",
+        "failed_policy_reject",
+        "failed_upload",
+        "failed_transport",
+        "failed_not_implemented",
+        "failed_adapter",
+        "failed_unknown"
+      ],
+      "description": "Terminal success: published | scheduled. planned = dry_run. failed_* are terminal errors; non-failed non-success may be in-flight when streamed."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "platform_post_id": {
+      "type": ["string", "null"],
+      "description": "Native post/video id when the platform returns one."
+    },
+    "platform_url": {
+      "type": ["string", "null"],
+      "description": "Public or studio URL when known."
+    },
+    "schedule_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "cli": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "backend_kind"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adapter id, e.g. douyin.browser, youtube.oauth, sau.cli."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "backend_kind": {
+          "type": "string",
+          "enum": [
+            "browser_session",
+            "official_oauth",
+            "subprocess_cli",
+            "http_gateway",
+            "stub"
+          ]
+        },
+        "detail": {
+          "type": ["object", "null"],
+          "description": "Non-secret adapter diagnostics (browser build, CLI exit code, etc.)."
+        }
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["classification", "message"],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "description": "Usually mirrors status without the failed_ prefix, or a finer code."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "retryable": {
+          "type": "boolean",
+          "default": false
+        },
+        "resume_hint": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "run_dir": {
+      "type": ["string", "null"],
+      "description": "Local audit directory for this job when persisted."
+    },
+    "artifacts": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "screenshot",
+              "log",
+              "cookie_ref",
+              "request_snapshot",
+              "other"
+            ]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "note": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

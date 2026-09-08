@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.intelligence.analysis-input.v1",
+  "title": "Formatted intelligence analysis model input",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "input_id",
+    "input_sha256",
+    "prepared_at",
+    "task",
+    "snapshot"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clue.intelligence.analysis-input.v1"
+    },
+    "input_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input_sha256": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prepared_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "task": {
+      "$ref": "clue.intelligence.analysis-task.v2.schema.json"
+    },
+    "snapshot": {
+      "$ref": "clue.intelligence.collection-snapshot.v2.schema.json"
+    }
+  },
+  "additionalProperties": false
+}

@@ -27,16 +27,37 @@ export type WorkflowFlowProjection = {
   fields: WorkflowField[];
 };
 
+export type WorkflowTrialProjection = {
+  id: string;
+  title: string;
+  nodeCount: number;
+  edgeCount: number;
+  terminalNodes: string[];
+  capabilities: string[];
+  budget: {
+    timeoutMs: number;
+    maxCost: number;
+    maxTransitions: number;
+  };
+  execution: {
+    class: "pure" | "workspace" | "ai";
+    isolation: "disposable" | "scoped" | "none";
+    network: "deny" | "allow";
+  };
+};
+
 export type WorkflowDomainPackProjection = {
   id: string;
   title: string;
   category: string;
   description: string;
   version: string;
+  languageVersion?: string;
   digest: string;
   capabilities: string[];
   accent: "green" | "blue" | "amber";
   flows: WorkflowFlowProjection[];
+  trials?: WorkflowTrialProjection[];
 };
 
 export type WorkflowVaultProjection = {

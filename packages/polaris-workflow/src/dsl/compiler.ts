@@ -1,5 +1,6 @@
 import { flattenDomain, type DomainAst, type FlowAst, type InputFieldAst, type PortAst } from './ast.js'
 import type { AsyncFfiHost, FfiHost } from './host.js'
+import { compileTrial, type TrialProgram } from './trial.js'
 import {
   applyFlowEffects,
   collectFlowOutputs,
@@ -93,6 +94,7 @@ export interface ProgramPipelineMeta {
 export interface Program {
   name: string
   version: string
+  languageVersion: string
   title: string
   description?: string
   fingerprint: string
@@ -101,6 +103,7 @@ export interface Program {
   /** 编译期 port 符号表（仍不内联 CLI） */
   ports: ProgramPortMeta[]
   pipelines: ProgramPipelineMeta[]
+  trials: TrialProgram[]
   flows: CompiledFlowHandler[]
   jsSource: string
   run: (flowName: string, input: RunInput, store: DocStore, host: FfiHost) => RunResult
@@ -398,6 +401,12 @@ function fingerprint(ast: DomainAst): string {
     p: flat.ports.map((p) => p.name),
     f: flat.flows.map((x) => x.name),
     e: flat.entities.map((e) => e.name),
+    ...((ast.trials ?? []).length > 0
+      ? {
+          l: ast.languageVersion,
+          t: ast.trials,
+        }
+      : {}),
   })
   let h = 0
   for (let i = 0; i < raw.length; i++) h = (h * 31 + raw.charCodeAt(i)) | 0
@@ -424,6 +433,7 @@ function emitJsSource(ast: DomainAst, flows: CompiledFlowHandler[], ports: Progr
     `// ports 仅保留符号；Host.invoke 在运行时绑定（不内联 CLI）`,
     ``,
     `export const ports = ${JSON.stringify(ports, null, 2)};`,
+    `export const trials = ${JSON.stringify(ast.trials ?? [], null, 2)};`,
     ``,
     `export const program = {`,
     `  flows: {`,
@@ -454,10 +464,12 @@ export function compile(ast: DomainAst): Program {
   const handlers = flat.flows.map(compileFlow)
   const byName = new Map(handlers.map((h) => [h.meta.name, h]))
   const ports = flat.ports.map(portMeta)
+  const trials = (ast.trials ?? []).map((trial) => compileTrial(trial, flat.ports))
 
   return {
     name: ast.name,
     version: ast.version,
+    languageVersion: ast.languageVersion ?? '0.3',
     title: ast.title ?? ast.name,
     description: ast.description,
     fingerprint: fingerprint(ast),
@@ -476,6 +488,7 @@ export function compile(ast: DomainAst): Program {
       title: p.title,
       steps: [...p.steps],
     })),
+    trials,
     flows: handlers,
     jsSource: emitJsSource(ast, handlers, ports),
     run(flowName, input, store, host) {

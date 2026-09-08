@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Polaris literature collection review state v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "created_at",
+    "updated_at",
+    "reviews",
+    "audit"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.data-collection.review-state.v1" },
+    "collection_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": "string", "minLength": 1 },
+    "producer": { "type": "object" },
+    "sources": { "type": "object" },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "note", "updated_at"],
+        "properties": {
+          "status": { "enum": ["pending", "approved", "rejected"] },
+          "note": { "type": "string", "maxLength": 5000 },
+          "updated_at": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "audit": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schemas/clue.social-publish.input.v1.schema.json",
+  "title": "clue.social-publish.input v1",
+  "description": "Versioned request to publish media to one social platform account. Implementation adapters (browser automation, official OAuth, or third-party backends) are out of band; callers only depend on this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "publish_id",
+    "platform",
+    "account_id",
+    "content_kind",
+    "title",
+    "media",
+    "publish"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clue.social-publish.input.v1"
+    },
+    "publish_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Stable id for this publish job (also used as run folder name)."
+    },
+    "platform": {
+      "type": "string",
+      "enum": [
+        "douyin",
+        "kuaishou",
+        "xiaohongshu",
+        "bilibili",
+        "channels",
+        "baijiahao",
+        "tiktok",
+        "youtube",
+        "instagram",
+        "facebook",
+        "x",
+        "linkedin"
+      ],
+      "description": "Target network. channels = WeChat Channels (视频号). x = X/Twitter."
+    },
+    "account_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Local account handle; maps to a stored session/token vault entry for this platform."
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["video", "note", "image"],
+      "description": "video = short/long video; note = multi-image post (e.g. 小红书图文); image = single image where supported."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "body": {
+      "type": "string",
+      "default": "",
+      "description": "Caption / description / note body. Platforms truncate independently."
+    },
+    "tags": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "maxItems": 40
+    },
+    "media": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "Ordered media assets. For video, typically one file; for note, one or more images.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "media_kind"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Absolute path or workspace-relative path to a local file. No '..' escape."
+          },
+          "media_kind": {
+            "type": "string",
+            "enum": ["video", "image"]
+          },
+          "mime_type": {
+            "type": ["string", "null"],
+            "description": "Optional hint, e.g. video/mp4, image/jpeg."
+          },
+          "cover_path": {
+            "type": ["string", "null"],
+            "description": "Optional cover image path for video posts."
+          }
+        }
+      }
+    },
+    "publish": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["immediate", "scheduled"],
+          "description": "immediate = publish as soon as the adapter finishes upload; scheduled = platform-native schedule when supported."
+        },
+        "schedule_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO-8601 datetime required when mode is scheduled. Timezone should be explicit (Z or offset)."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "unlisted", "private", "friends", "platform_default"],
+          "default": "platform_default",
+          "description": "Best-effort; ignored when the platform has no matching control."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false,
+          "description": "Validate and plan only; do not call the network adapter."
+        }
+      }
+    },
+    "platform_options": {
+      "type": "object",
+      "default": {},
+      "description": "Optional platform-specific knobs (playlist id, bilibili tid, collection name, etc.). Unknown keys may be rejected by a strict adapter.",
+      "additionalProperties": true
+    },
+    "workspace_id": {
+      "type": ["string", "null"],
+      "description": "Optional Polaris literature workspace id for path resolution under POLARIS_LITERATURE_WORKSPACES_ROOT."
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional caller metadata for audit.",
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "request_id": { "type": "string" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "publish": {
+            "properties": { "mode": { "const": "scheduled" } },
+            "required": ["mode"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "publish": {
+            "required": ["mode", "schedule_at"],
+            "properties": {
+              "schedule_at": {
+                "type": "string",
+                "format": "date-time",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

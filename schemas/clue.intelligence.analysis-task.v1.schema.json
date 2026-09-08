@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.intelligence.analysis-task.v1",
+  "title": "Intelligence analysis task v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "question",
+    "decision_context",
+    "audience",
+    "collection_snapshot_id"
+  ],
+  "$defs": {
+    "prompt_spec": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": {
+          "enum": [
+            "generate-text",
+            "generate-file",
+            "derive",
+            "copy-file"
+          ]
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_kind": {
+          "enum": [
+            "text",
+            "markdown",
+            "json",
+            "string_array"
+          ]
+        },
+        "output_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clue.intelligence.analysis-task.v1"
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "decision_context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_context_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audience_prompt": {
+      "$ref": "#/$defs/prompt_spec"
+    },
+    "collection_snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coverage_mode": {
+      "enum": [
+        "selected_evidence",
+        "all_observations"
+      ]
+    },
+    "time_range": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "review_policy": {
+      "type": "object",
+      "properties": {
+        "minimum_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "review_all_claims": {
+          "type": "boolean"
+        },
+        "mode": {
+          "enum": [
+            "auto-pass",
+            "auto-approve",
+            "manual-review"
+          ],
+          "default": "auto-pass"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

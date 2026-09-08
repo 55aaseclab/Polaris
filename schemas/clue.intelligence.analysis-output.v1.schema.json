@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clue.intelligence.analysis-output.v1",
+  "title": "Final intelligence analysis output",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "output_id",
+    "status",
+    "case_id",
+    "collection_snapshot",
+    "review",
+    "judgments",
+    "rejected_claims",
+    "unresolved",
+    "framework",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.intelligence.analysis-output.v1" },
+    "output_id": { "type": "string", "minLength": 1 },
+    "status": { "const": "final" },
+    "case_id": { "type": "string", "minLength": 1 },
+    "collection_snapshot": {
+      "type": "object",
+      "required": ["snapshot_id", "sha256"],
+      "properties": {
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "review": { "type": "object" },
+    "judgments": { "type": "array" },
+    "rejected_claims": { "type": "array" },
+    "unresolved": { "type": "array", "items": { "type": "string" } },
+    "framework": { "type": "object" },
+    "summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

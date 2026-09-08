@@ -1,0 +1,52 @@
+{
+  "schema": "clue.tool-backend-lock.v1",
+  "tool": {
+    "name": "clue-browser",
+    "version": "0.3.2"
+  },
+  "backend": {
+    "default": "camofox",
+    "engines": [
+      {
+        "name": "Camofox / Camoufox",
+        "package": "@askjo/camofox-browser",
+        "version": "1.13.0",
+        "engine": "Camoufox (Firefox C++ anti-detect)",
+        "role": "default for remote HTTP(S) targets"
+      },
+      {
+        "name": "Playwright Extra + Stealth",
+        "package": "playwright-extra",
+        "version": "4.3.6",
+        "engine": "Chromium",
+        "plugins": [
+          {
+            "package": "puppeteer-extra-plugin-stealth",
+            "version": "2.11.2"
+          }
+        ],
+        "peer": {
+          "package": "playwright",
+          "version": "1.55.0"
+        },
+        "role": "fallback; default for localhost/loopback"
+      }
+    ]
+  },
+  "runtime": {
+    "name": "Node.js",
+    "minimum_version": "22",
+    "external_dependencies": [
+      "Camoufox browser binary (fetched by camofox postinstall)",
+      "Playwright Chromium browser binary (optional fallback)"
+    ]
+  },
+  "capabilities": {
+    "browser_mode": "Camofox manages its own virtual display; Playwright headless by default.",
+    "stealth": "Camoufox C++ fingerprint spoofing by default; Playwright stealth plugins on fallback path.",
+    "proxy": "BROWSER_PROXY_* / browser.proxy mapped to Camofox PROXY_* env.",
+    "challenge": "Camofox handles Cloudflare natively; Playwright path keeps wait/click helpers.",
+    "downloads": "Download events stored as artifacts when available.",
+    "extract_html": "extract-html action writes full rendered outerHTML as an html artifact for parsers (e.g. Google Scholar)."
+  }
+}

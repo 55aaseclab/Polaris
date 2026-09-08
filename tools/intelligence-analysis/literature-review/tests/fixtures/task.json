@@ -1,0 +1,13 @@
+{
+  "schema_version": "clue.intelligence.analysis-task.v2",
+  "case_id": "case-example",
+  "question": "What does the collected evidence establish?",
+  "decision_context": "Synthetic decision context.",
+  "audience": "management",
+  "collection_snapshot_id": "snapshot-example",
+  "review_policy": {
+    "minimum_confidence": 0.8,
+    "review_all_claims": false,
+    "mode": "auto-pass"
+  }
+}

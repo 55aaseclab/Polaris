@@ -1,0 +1,11 @@
+{
+  "template_id": "intelligence-report",
+  "title": "Intelligence Report",
+  "description": "A general report for scoped, confirmed judgments that can be delivered to management.",
+  "sections": [
+    {"section_id": "headline", "heading": "Executive Summary", "claims_required": true},
+    {"section_id": "judgments", "heading": "Key Judgments", "claims_required": true},
+    {"section_id": "evidence", "heading": "Evidence", "claims_required": true},
+    {"section_id": "scope", "heading": "Scope and Limitations", "claims_required": false}
+  ]
+}

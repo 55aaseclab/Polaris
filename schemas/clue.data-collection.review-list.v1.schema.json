@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Literature collection manual-review list v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collection_id",
+    "collection_kind",
+    "review_records"
+  ],
+  "properties": {
+    "schema_version": { "const": "clue.data-collection.review-list.v1" },
+    "collection_id": { "type": "string", "minLength": 1 },
+    "collection_kind": { "const": "literature" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "phase_id": { "const": 3 },
+    "phase": { "const": "manual-review" },
+    "review_mode": { "const": "manual-review" },
+    "review_records": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

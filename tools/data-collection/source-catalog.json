@@ -1,0 +1,215 @@
+{
+  "schema_version": "clue.data-collection.source-catalog.v1",
+  "topics": [
+    {
+      "topic_id": "cybersecurity",
+      "title": "Cybersecurity research and conference sources"
+    },
+    {
+      "topic_id": "research-funding",
+      "title": "Research funding, grants, and programme sources"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "black-hat",
+      "topic_ids": ["cybersecurity"],
+      "title": "Black Hat",
+      "search_domains": ["blackhat.com"],
+      "seed_urls": ["https://www.blackhat.com/html/archives.html"]
+    },
+    {
+      "source_id": "black-hat-usa",
+      "topic_ids": ["cybersecurity"],
+      "title": "Black Hat USA archives",
+      "search_domains": ["blackhat.com"],
+      "seed_urls": ["https://www.blackhat.com/html/archives.html"]
+    },
+    {
+      "source_id": "black-hat-asia",
+      "topic_ids": ["cybersecurity"],
+      "title": "Black Hat Asia archives",
+      "search_domains": ["blackhat.com"],
+      "seed_urls": ["https://www.blackhat.com/html/archives.html"]
+    },
+    {
+      "source_id": "black-hat-europe",
+      "topic_ids": ["cybersecurity"],
+      "title": "Black Hat Europe archives",
+      "search_domains": ["blackhat.com"],
+      "seed_urls": ["https://www.blackhat.com/html/archives.html"]
+    },
+    {
+      "source_id": "defcon",
+      "topic_ids": ["cybersecurity"],
+      "title": "DEF CON",
+      "search_domains": ["defcon.org"],
+      "seed_urls": ["https://defcon.org/html/links/dc-archives.html"]
+    },
+    {
+      "source_id": "chaos-communication-congress",
+      "topic_ids": ["cybersecurity"],
+      "title": "Chaos Communication Congress",
+      "search_domains": ["media.ccc.de", "events.ccc.de"],
+      "seed_urls": ["https://media.ccc.de/c/congress"]
+    },
+    {
+      "source_id": "ywhack-today-security",
+      "topic_ids": ["cybersecurity"],
+      "title": "YWHack Today Security",
+      "search_domains": ["forum.ywhack.com"],
+      "seed_urls": ["https://forum.ywhack.com/today_security.php?action=all&time=today"]
+    },
+    {
+      "source_id": "phrack-news",
+      "topic_ids": ["cybersecurity"],
+      "title": "Phrack news",
+      "search_domains": ["phrack.org"],
+      "seed_urls": ["https://phrack.org/news"]
+    },
+    {
+      "source_id": "kvm-forum",
+      "topic_ids": ["cybersecurity"],
+      "title": "KVM Forum",
+      "search_domains": ["kvmforum.org"],
+      "seed_urls": ["https://www.kvmforum.org/"]
+    },
+    {
+      "source_id": "kanxue-bbs",
+      "topic_ids": ["cybersecurity"],
+      "title": "Kanxue forum",
+      "search_domains": ["bbs.kanxue.com"],
+      "seed_urls": ["https://bbs.kanxue.com/"]
+    },
+    {
+      "source_id": "360-vulnerability-archive",
+      "topic_ids": ["cybersecurity"],
+      "title": "360 vulnerability archive",
+      "search_domains": ["vul.360.net"],
+      "seed_urls": ["https://vul.360.net/archive"]
+    },
+    {
+      "source_id": "mlsec-top-100",
+      "topic_ids": ["cybersecurity"],
+      "title": "MLSec Top 100 security papers",
+      "search_domains": ["mlsec.org"],
+      "seed_urls": ["https://www.mlsec.org/topnotch/sec_top100.html"]
+    },
+    {
+      "source_id": "offensivecon",
+      "topic_ids": ["cybersecurity"],
+      "title": "OffensiveCon",
+      "search_domains": ["offensivecon.org"],
+      "seed_urls": ["https://www.offensivecon.org/"]
+    },
+    {
+      "source_id": "microsoft-cloud-infrastructure-security",
+      "topic_ids": ["cybersecurity"],
+      "title": "Microsoft Cloud and Infrastructure Security publications",
+      "search_domains": ["microsoft.com"],
+      "seed_urls": [
+        "https://www.microsoft.com/en-us/research/group/cloud-and-infrastructure-security/publications/"
+      ]
+    },
+    {
+      "source_id": "microsoft-security-research",
+      "topic_ids": ["cybersecurity"],
+      "title": "Microsoft Security research publications",
+      "search_domains": ["microsoft.com"],
+      "seed_urls": [
+        "https://www.microsoft.com/en-us/research/group/security/publications/"
+      ]
+    },
+    {
+      "source_id": "swiss-national-science-foundation-grants",
+      "topic_ids": ["research-funding"],
+      "title": "Swiss National Science Foundation grants",
+      "search_domains": ["data.snf.ch"],
+      "seed_urls": ["https://data.snf.ch/grants"]
+    },
+    {
+      "source_id": "us-national-science-foundation-awards",
+      "topic_ids": ["research-funding"],
+      "title": "US National Science Foundation award search",
+      "search_domains": ["nsf.gov"],
+      "seed_urls": ["https://www.nsf.gov/awardsearch/search-results/"]
+    },
+    {
+      "source_id": "nsfc-project-search",
+      "topic_ids": ["research-funding"],
+      "title": "National Natural Science Foundation of China project search",
+      "search_domains": ["isisn.nsfc.gov.cn"],
+      "seed_urls": ["http://isisn.nsfc.gov.cn/egrantindex/funcindex/prjsearch-list"]
+    },
+    {
+      "source_id": "china-most-programmes",
+      "topic_ids": ["research-funding"],
+      "title": "China Ministry of Science and Technology programmes",
+      "search_domains": ["program.most.gov.cn"],
+      "seed_urls": ["http://program.most.gov.cn/"]
+    },
+    {
+      "source_id": "china-most-programme-notices",
+      "topic_ids": ["research-funding"],
+      "title": "China Ministry of Science and Technology programme notices",
+      "search_domains": ["most.gov.cn"],
+      "seed_urls": ["http://www.most.gov.cn/kjjh/xmsb/gggs/"]
+    },
+    {
+      "source_id": "international-foundation-for-science",
+      "topic_ids": ["research-funding"],
+      "title": "International Foundation for Science",
+      "search_domains": ["ifs.se"],
+      "seed_urls": ["http://www.ifs.se"]
+    },
+    {
+      "source_id": "german-research-foundation-projects",
+      "topic_ids": ["research-funding"],
+      "title": "German Research Foundation funded projects",
+      "search_domains": ["dfg.de"],
+      "seed_urls": ["http://www.dfg.de/en/funded_projects/index.html"]
+    },
+    {
+      "source_id": "sino-german-science-center",
+      "topic_ids": ["research-funding"],
+      "title": "Sino-German Science Center",
+      "search_domains": ["sinogermanscience.org.cn"],
+      "seed_urls": ["http://www.sinogermanscience.org.cn"]
+    },
+    {
+      "source_id": "uk-research-councils-funding",
+      "topic_ids": ["research-funding"],
+      "title": "UK Research Councils funding",
+      "search_domains": ["rcuk.ac.uk"],
+      "seed_urls": ["http://www.rcuk.ac.uk/funding/"]
+    },
+    {
+      "source_id": "european-science-foundation",
+      "topic_ids": ["research-funding"],
+      "title": "European Science Foundation",
+      "search_domains": ["esf.org"],
+      "seed_urls": ["http://www.esf.org"]
+    },
+    {
+      "source_id": "canada-nserc",
+      "topic_ids": ["research-funding"],
+      "title": "Natural Sciences and Engineering Research Council of Canada",
+      "search_domains": ["nserc.ca"],
+      "seed_urls": ["http://www.nserc.ca"]
+    },
+    {
+      "source_id": "australian-research-council",
+      "topic_ids": ["research-funding"],
+      "title": "Australian Research Council",
+      "search_domains": ["arc.gov.au"],
+      "seed_urls": ["http://www.arc.gov.au"]
+    },
+    {
+      "source_id": "ccf-enterprise-fund",
+      "topic_ids": ["research-funding"],
+      "title": "China Computer Federation enterprise fund",
+      "search_domains": ["ccf.org.cn"],
+      "seed_urls": ["https://www.ccf.org.cn/Collaboration/Enterprise_Fund/"]
+    }
+  ]
+}

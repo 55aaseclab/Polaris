@@ -1,0 +1,764 @@
+#!/usr/bin/env bash
+# clue-web-search-cli: versioned batch wrapper around a local SearXNG backend.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../load-env.sh
+source "$ROOT_DIR/../load-env.sh"
+polaris_literature_assert_local_command "${1:-}"
+LOCK_FILE="$ROOT_DIR/backend.lock.json"
+VERSION_FILE="$ROOT_DIR/VERSION"
+CONFIG_FILE="$ROOT_DIR/config/settings.yml"
+RUNS_DIR="$ROOT_DIR/runs"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+load_lock() {
+  [[ -f "$LOCK_FILE" ]] || die "missing backend lock file: $LOCK_FILE"
+  [[ -f "$CONFIG_FILE" ]] || die "missing SearXNG settings file: $CONFIG_FILE"
+  require_command jq
+
+  CLI_NAME="$(jq -er '.cli.name' "$LOCK_FILE")"
+  LOCKED_CLI_VERSION="$(jq -er '.cli.version' "$LOCK_FILE")"
+  BACKEND_REPOSITORY="$(jq -er '.backend.repository' "$LOCK_FILE")"
+  BACKEND_REF="$(jq -er '.backend.ref' "$LOCK_FILE")"
+  BACKEND_COMMIT="$(jq -er '.backend.commit' "$LOCK_FILE")"
+  BACKEND_PATH_RELATIVE="$(jq -er '.backend.path' "$LOCK_FILE")"
+  BACKEND_RUNTIME_IMAGE="$(jq -er '.backend.runtime_image' "$LOCK_FILE")"
+  BACKEND_RUNTIME_IMAGE_TAG="$(jq -er '.backend.runtime_image_tag' "$LOCK_FILE")"
+  BACKEND_IMAGE="$(jq -er '.backend.local_image' "$LOCK_FILE")"
+  SERVER_HOST="$(jq -er '.server.host' "$LOCK_FILE")"
+  SERVER_PORT="$(jq -er '.server.port' "$LOCK_FILE")"
+  SERVER_CONTAINER_NAME="$(jq -er '.server.container_name' "$LOCK_FILE")"
+  DEFAULT_ENGINES="$(jq -er '.search_defaults.engines | join(",")' "$LOCK_FILE")"
+  DEFAULT_RESULT_LIMIT="$(jq -er '.search_defaults.result_limit_per_task' "$LOCK_FILE")"
+  BACKEND_DIR="$ROOT_DIR/$BACKEND_PATH_RELATIVE"
+  CLI_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+
+  [[ -n "$CLI_VERSION" ]] || die "VERSION is empty"
+  [[ "$CLI_VERSION" == "$LOCKED_CLI_VERSION" ]] || die \
+    "VERSION ($CLI_VERSION) and backend.lock.json ($LOCKED_CLI_VERSION) differ"
+}
+
+utc_now() {
+  date -u +'%Y-%m-%dT%H:%M:%SZ'
+}
+
+absolute_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$PWD" "$path"
+  fi
+}
+
+validate_workspace_id() {
+  [[ "$1" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die \
+    "--workspace must match ^[a-z][a-z0-9-]{0,62}$"
+}
+
+validate_run_id() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die \
+    "--run-id may contain only letters, numbers, dot, underscore and hyphen"
+}
+
+collection_scope_for_workspace() {
+  local workspace="$1"
+  local configured_root="$2"
+  local workspaces_root="${configured_root:-${POLARIS_LITERATURE_WORKSPACES_ROOT:-}}"
+  [[ -n "$workspaces_root" ]] || die \
+    "--workspaces-root is required unless POLARIS_LITERATURE_WORKSPACES_ROOT is set"
+  [[ -d "$workspaces_root" ]] || die "workspace root does not exist: $workspaces_root"
+  validate_workspace_id "$workspace"
+  workspaces_root="$(cd -- "$workspaces_root" && pwd -P)"
+  local workspace_path="$workspaces_root/$workspace"
+  local scope="$workspace_path/acquisition/customer-data-collection"
+  [[ -d "$workspace_path" && ! -L "$workspace_path" ]] || die \
+    "workspace does not exist or is a symlink: $workspace_path"
+  [[ -d "$scope" && ! -L "$scope" ]] || die \
+    "customer-data-collection scope does not exist or is a symlink: $scope"
+  printf '%s\n' "$scope"
+}
+
+assert_positive_integer() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer"
+}
+
+backend_actual_commit() {
+  [[ -d "$BACKEND_DIR/.git" ]] || return 1
+  git -C "$BACKEND_DIR" rev-parse HEAD
+}
+
+assert_backend_checkout() {
+  [[ -d "$BACKEND_DIR/.git" ]] || die "backend clone is missing: $BACKEND_DIR"
+
+  local actual_commit
+  actual_commit="$(backend_actual_commit)"
+  [[ "$actual_commit" == "$BACKEND_COMMIT" ]] || die \
+    "backend commit is $actual_commit; expected locked commit $BACKEND_COMMIT"
+  [[ -z "$(git -C "$BACKEND_DIR" status --porcelain)" ]] || die \
+    "backend has local modifications; restore or commit them before running"
+}
+
+base_url() {
+  printf 'http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
+}
+
+server_is_healthy() {
+  curl --fail --silent --show-error --max-time 2 "$(base_url)/healthz" >/dev/null 2>&1
+}
+
+image_is_ready() {
+  docker image inspect "$BACKEND_IMAGE" >/dev/null 2>&1
+}
+
+prepare_backend() {
+  load_lock
+  assert_backend_checkout
+  require_command docker
+
+  if image_is_ready; then
+    return 0
+  fi
+
+  printf 'Pulling pinned SearXNG runtime %s\n' "$BACKEND_RUNTIME_IMAGE"
+  docker pull "$BACKEND_RUNTIME_IMAGE"
+  docker tag "$BACKEND_RUNTIME_IMAGE" "$BACKEND_IMAGE"
+  printf 'Prepared %s from %s\n' "$BACKEND_IMAGE" "$BACKEND_RUNTIME_IMAGE_TAG"
+}
+
+start_server() {
+  load_lock
+  require_command docker
+  require_command curl
+  prepare_backend
+
+  if server_is_healthy; then
+    return 0
+  fi
+
+  local existing_container
+  existing_container="$(docker ps -aq --filter "name=^/${SERVER_CONTAINER_NAME}$")"
+  if [[ -n "$existing_container" ]]; then
+    docker start "$existing_container" >/dev/null
+  else
+    docker run --detach --rm \
+      --name "$SERVER_CONTAINER_NAME" \
+      --publish "${SERVER_HOST}:${SERVER_PORT}:8080" \
+      --volume "$CONFIG_FILE:/etc/searxng/settings.yml:ro" \
+      "$BACKEND_IMAGE" >/dev/null
+  fi
+
+  local attempt
+  for attempt in $(seq 1 30); do
+    if server_is_healthy; then
+      printf 'SearXNG server is ready at %s\n' "$(base_url)"
+      return 0
+    fi
+    sleep 1
+  done
+
+  docker logs "$SERVER_CONTAINER_NAME" 2>&1 | tail -n 80 >&2 || true
+  die "SearXNG did not become healthy at $(base_url)"
+}
+
+stop_server() {
+  load_lock
+  require_command docker
+
+  if docker ps -q --filter "name=^/${SERVER_CONTAINER_NAME}$" | grep -q .; then
+    docker stop "$SERVER_CONTAINER_NAME" >/dev/null
+    printf 'Stopped local SearXNG server.\n'
+  fi
+}
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  clue-web-search-cli version
+  clue-web-search-cli backend-status
+  clue-web-search-cli build-backend
+  clue-web-search-cli server-start
+  clue-web-search-cli server-stop
+  clue-web-search-cli normalize-command-log --input <commands.jsonl>
+  clue-web-search-cli batch (--input <customer-input.json> --output <run-directory> | --workspace <id> --run-id <id>) [options]
+
+Commands:
+  version         Print the CLI and locked SearXNG versions.
+  backend-status  Verify the local source checkout against the version lock.
+  build-backend   Pull the exact locked SearXNG image and tag it locally.
+  server-start    Start the local-only SearXNG API on 127.0.0.1:8188.
+  server-stop     Stop the local SearXNG API if it is running.
+  normalize-command-log  Convert a JSON stream into valid JSON Lines in place.
+  batch           Execute every source_type=web_search task in an input JSON.
+
+Batch options:
+  --input <file>          Collection input JSON containing sources[].
+  --output <directory>    New directory for results.json, run.json and logs.
+  --workspace <id>        Use <root>/<id>/acquisition/customer-data-collection.
+  --workspaces-root <dir> Override POLARIS_LITERATURE_WORKSPACES_ROOT for --workspace.
+  --run-id <id>           With --workspace and no --output, write runs/<id>/.
+  --engines <csv>         SearXNG engines; default: google,duckduckgo,bing.
+  --result-limit <count>  Retained results per task; default: 10.
+  --no-auto-start         Require an already-running local SearXNG server.
+  --keep-server           Do not stop a server started by this batch.
+  --help                  Print this help.
+
+The batch keeps only title, URL, result snippet, engine, score, category and
+published date. It records every local API call and deletes transient raw API
+responses after building the structured result.
+EOF
+}
+
+normalize_command_log() {
+  local input_path=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input)
+        [[ $# -ge 2 ]] || die "--input requires a command-log file path"
+        input_path="$2"
+        shift 2
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown normalize-command-log option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$input_path" ]] || die "normalize-command-log requires --input"
+  input_path="$(absolute_path "$input_path")"
+  [[ -f "$input_path" ]] || die "command log not found: $input_path"
+  require_command jq
+
+  local temporary_output
+  temporary_output="$(mktemp "$(dirname "$input_path")/.commands.jsonl.XXXXXX")"
+  if ! jq -c '.' "$input_path" > "$temporary_output"; then
+    rm -f "$temporary_output"
+    die "command log is not a valid JSON stream: $input_path"
+  fi
+  mv "$temporary_output" "$input_path"
+  printf 'Normalized command log: %s\n' "$input_path"
+}
+
+print_version() {
+  load_lock
+  assert_backend_checkout
+
+  jq -n \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg backend_repository "$BACKEND_REPOSITORY" \
+    --arg backend_ref "$BACKEND_REF" \
+    --arg backend_commit "$BACKEND_COMMIT" \
+    --arg backend_runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg backend_runtime_image_tag "$BACKEND_RUNTIME_IMAGE_TAG" \
+    --arg backend_image "$BACKEND_IMAGE" \
+    --arg endpoint "$(base_url)" \
+    '{
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        repository: $backend_repository,
+        ref: $backend_ref,
+        commit: $backend_commit,
+        runtime_image: $backend_runtime_image,
+        runtime_image_tag: $backend_runtime_image_tag,
+        local_image: $backend_image
+      },
+      endpoint: $endpoint
+    }'
+}
+
+print_backend_status() {
+  load_lock
+
+  local actual_commit="missing"
+  local working_tree="unknown"
+  if [[ -d "$BACKEND_DIR/.git" ]]; then
+    actual_commit="$(backend_actual_commit)"
+    if [[ -z "$(git -C "$BACKEND_DIR" status --porcelain)" ]]; then
+      working_tree="clean"
+    else
+      working_tree="modified"
+    fi
+  fi
+
+  jq -n \
+    --arg path "$BACKEND_DIR" \
+    --arg ref "$BACKEND_REF" \
+    --arg expected_commit "$BACKEND_COMMIT" \
+    --arg actual_commit "$actual_commit" \
+    --arg working_tree "$working_tree" \
+    --arg runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg local_image "$BACKEND_IMAGE" \
+    --arg endpoint "$(base_url)" \
+    '{
+      backend_path: $path,
+      locked_ref: $ref,
+      expected_commit: $expected_commit,
+      actual_commit: $actual_commit,
+      commit_matches_lock: ($actual_commit == $expected_commit),
+      working_tree: $working_tree,
+      runtime_image: $runtime_image,
+      local_image: $local_image,
+      endpoint: $endpoint
+    }'
+}
+
+write_run_metadata() {
+  local output_path="$1"
+  local collection_id="$2"
+  local run_id="$3"
+  local status="$4"
+  local started_at="$5"
+  local finished_at="$6"
+  local task_count="$7"
+  local succeeded_count="$8"
+  local failed_count="$9"
+  local engines="${10}"
+  local result_limit="${11}"
+  local error_message="${12}"
+
+  jq -n \
+    --arg schema_version 'clue-web-search-cli.run.v1' \
+    --arg collection_id "$collection_id" \
+    --arg run_id "$run_id" \
+    --arg status "$status" \
+    --arg started_at "$started_at" \
+    --arg finished_at "$finished_at" \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg backend_repository "$BACKEND_REPOSITORY" \
+    --arg backend_ref "$BACKEND_REF" \
+    --arg backend_commit "$BACKEND_COMMIT" \
+    --arg runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg local_image "$BACKEND_IMAGE" \
+    --arg endpoint "$(base_url)" \
+    --arg engines "$engines" \
+    --arg result_limit "$result_limit" \
+    --arg error_message "$error_message" \
+    --argjson task_count "$task_count" \
+    --argjson succeeded_count "$succeeded_count" \
+    --argjson failed_count "$failed_count" \
+    '{
+      schema_version: $schema_version,
+      collection_id: $collection_id,
+      run_id: $run_id,
+      status: $status,
+      started_at: $started_at,
+      finished_at: (if $finished_at == "" then null else $finished_at end),
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        repository: $backend_repository,
+        ref: $backend_ref,
+        commit: $backend_commit,
+        runtime_image: $runtime_image,
+        local_image: $local_image,
+        endpoint: $endpoint
+      },
+      request: {
+        engines: ($engines | split(",")),
+        result_limit_per_task: ($result_limit | tonumber)
+      },
+      task_counts: {
+        total: $task_count,
+        succeeded: $succeeded_count,
+        failed: $failed_count
+      },
+      error: (if $error_message == "" then null else $error_message end)
+    }' > "$output_path"
+}
+
+create_task_result() {
+  local task_json="$1"
+  local response_path="$2"
+  local task_output="$3"
+  local status="$4"
+  local error_message="$5"
+  local engines="$6"
+  local result_limit="$7"
+  local searched_at="$8"
+
+  if [[ "$status" == "succeeded" ]]; then
+    jq -cn \
+      --argjson task "$task_json" \
+      --slurpfile response "$response_path" \
+      --arg searched_at "$searched_at" \
+      --arg engines "$engines" \
+      --argjson result_limit "$result_limit" \
+      '{
+        task_id: $task.task_id,
+        market: ($task.market // null),
+        city: ($task.city // null),
+        locale: $task.locale,
+        query: $task.query,
+        buyer_type_ids: $task.buyer_type_ids,
+        status: "succeeded",
+        searched_at: $searched_at,
+        search_engines_requested: ($engines | split(",")),
+        result_count: (($response[0].results // []) | length),
+        retained_result_count: ((($response[0].results // []) | length) | if . < $result_limit then . else $result_limit end),
+        engine_errors: ($response[0].unresponsive_engines // []),
+        results: [
+          ($response[0].results // [])[:$result_limit][] |
+          {
+            title,
+            url,
+            content,
+            engines,
+            score,
+            category,
+            publishedDate
+          }
+        ]
+      }' > "$task_output"
+  else
+    jq -n \
+      --argjson task "$task_json" \
+      --arg searched_at "$searched_at" \
+      --arg engines "$engines" \
+      --arg error_message "$error_message" \
+      '{
+        task_id: $task.task_id,
+        market: ($task.market // null),
+        city: ($task.city // null),
+        locale: $task.locale,
+        query: $task.query,
+        buyer_type_ids: $task.buyer_type_ids,
+        status: "failed",
+        searched_at: $searched_at,
+        search_engines_requested: ($engines | split(",")),
+        result_count: 0,
+        retained_result_count: 0,
+        engine_errors: [],
+        results: [],
+        error: $error_message
+      }' > "$task_output"
+  fi
+}
+
+write_execution_log() {
+  local log_path="$1"
+  local input_path="$2"
+  local run_directory="$3"
+  local engines="$4"
+  local result_limit="$5"
+  local task_count="$6"
+
+  printf '# Web 搜索执行日志\n\n' > "$log_path"
+  printf '本日志记录 `input.json` 中 `source_type=web_search` 的批量执行。\n\n' >> "$log_path"
+  printf '## 运行命令\n\n```sh\n' >> "$log_path"
+  printf '%s batch --input %q --output %q --engines %q --result-limit %q\n' \
+    "$CLI_NAME" "$input_path" "$run_directory" "$engines" "$result_limit" >> "$log_path"
+  printf '```\n\n' >> "$log_path"
+  printf '## 固定运行时\n\n' >> "$log_path"
+  printf -- '- CLI：`%s` `%s`\n' "$CLI_NAME" "$CLI_VERSION" >> "$log_path"
+  printf -- '- 后端：`%s` `%s`\n' "$BACKEND_REPOSITORY" "$BACKEND_COMMIT" >> "$log_path"
+  printf -- '- 镜像：`%s`\n' "$BACKEND_RUNTIME_IMAGE" >> "$log_path"
+  printf -- '- 本地 API：`%s`\n' "$(base_url)" >> "$log_path"
+  printf -- '- 任务数：`%s`\n' "$task_count" >> "$log_path"
+  printf -- '- 请求引擎：`%s`\n' "$engines" >> "$log_path"
+  printf -- '- 每任务最多保留：`%s` 条结果\n' "$result_limit" >> "$log_path"
+  printf '\n## 任务结果\n\n' >> "$log_path"
+}
+
+append_task_log() {
+  local log_path="$1"
+  local task_json="$2"
+  local task_output="$3"
+
+  local task_id query status retained error_message
+  task_id="$(jq -r '.task_id' <<< "$task_json")"
+  query="$(jq -r '.query' <<< "$task_json")"
+  status="$(jq -r '.status' "$task_output")"
+  retained="$(jq -r '.retained_result_count' "$task_output")"
+  error_message="$(jq -r '.error // empty' "$task_output")"
+
+  printf -- '- `%s` — `%s`：`%s`，保留 `%s` 条结果。' \
+    "$task_id" "$query" "$status" "$retained" >> "$log_path"
+  if [[ -n "$error_message" ]]; then
+    printf ' 错误：`%s`。' "$error_message" >> "$log_path"
+  fi
+  printf '\n' >> "$log_path"
+}
+
+run_batch() {
+  local input_path=""
+  local output_directory=""
+  local workspace=""
+  local workspaces_root=""
+  local run_id=""
+  local engines=""
+  local result_limit=""
+  local auto_start=true
+  local keep_server=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input)
+        [[ $# -ge 2 ]] || die "--input requires a file path"
+        input_path="$2"
+        shift 2
+        ;;
+      --output)
+        [[ $# -ge 2 ]] || die "--output requires a directory path"
+        output_directory="$2"
+        shift 2
+        ;;
+      --workspace)
+        [[ $# -ge 2 ]] || die "--workspace requires an identifier"
+        workspace="$2"
+        shift 2
+        ;;
+      --workspaces-root)
+        [[ $# -ge 2 ]] || die "--workspaces-root requires a directory path"
+        workspaces_root="$2"
+        shift 2
+        ;;
+      --run-id)
+        [[ $# -ge 2 ]] || die "--run-id requires an identifier"
+        run_id="$2"
+        shift 2
+        ;;
+      --engines)
+        [[ $# -ge 2 ]] || die "--engines requires a comma-separated list"
+        engines="$2"
+        shift 2
+        ;;
+      --result-limit)
+        [[ $# -ge 2 ]] || die "--result-limit requires a positive integer"
+        result_limit="$2"
+        shift 2
+        ;;
+      --no-auto-start)
+        auto_start=false
+        shift
+        ;;
+      --keep-server)
+        keep_server=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown batch option: $1"
+        ;;
+    esac
+  done
+
+  [[ -z "$workspaces_root" || -n "$workspace" ]] || die \
+    "--workspaces-root requires --workspace"
+  [[ -z "$run_id" || -n "$workspace" ]] || die "--run-id requires --workspace"
+  [[ -z "$run_id" || -z "$output_directory" ]] || die \
+    "--output and --run-id cannot be used together"
+  if [[ -n "$workspace" ]]; then
+    local workspace_scope
+    workspace_scope="$(collection_scope_for_workspace "$workspace" "$workspaces_root")"
+    [[ -n "$input_path" ]] || input_path="$workspace_scope/inputs/input.json"
+    if [[ -z "$output_directory" ]]; then
+      [[ -n "$run_id" ]] || die "--run-id is required with --workspace when --output is omitted"
+      validate_run_id "$run_id"
+      output_directory="$workspace_scope/runs/$run_id"
+    fi
+  fi
+  [[ -n "$input_path" ]] || die "batch requires --input unless --workspace is set"
+  [[ -n "$output_directory" ]] || die "batch requires --output unless --workspace is used with --run-id"
+  input_path="$(absolute_path "$input_path")"
+  output_directory="$(absolute_path "$output_directory")"
+  [[ -f "$input_path" ]] || die "input file not found: $input_path"
+  [[ ! -e "$output_directory" ]] || die "output directory already exists: $output_directory"
+  jq empty "$input_path"
+
+  load_lock
+  assert_backend_checkout
+  [[ -n "$engines" ]] || engines="$DEFAULT_ENGINES"
+  [[ -n "$result_limit" ]] || result_limit="$DEFAULT_RESULT_LIMIT"
+  assert_positive_integer --result-limit "$result_limit"
+  [[ "$engines" =~ ^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$ ]] || die \
+    "--engines must be comma-separated engine names"
+
+  local server_was_running=false
+  if server_is_healthy; then
+    server_was_running=true
+  elif [[ "$auto_start" == true ]]; then
+    start_server
+  else
+    die "SearXNG is not running at $(base_url); use server-start or omit --no-auto-start"
+  fi
+
+  mkdir -p "$output_directory/tasks" "$output_directory/.responses"
+  local collection_id
+  collection_id="$(jq -er '.collection_id' "$input_path")"
+  local run_id
+  run_id="$(basename "$output_directory")"
+  local started_at
+  started_at="$(utc_now)"
+  local task_count
+  task_count="$(jq '[.sources[] | select(.source_type == "web_search") | .tasks[]] | length' "$input_path")"
+  [[ "$task_count" -gt 0 ]] || die "input has no source_type=web_search tasks"
+
+  local run_metadata="$output_directory/run.json"
+  local execution_log="$output_directory/execution-log.md"
+  write_run_metadata "$run_metadata" "$collection_id" "$run_id" "running" \
+    "$started_at" "" "$task_count" 0 0 "$engines" "$result_limit" ""
+  write_execution_log "$execution_log" "$input_path" "$output_directory" \
+    "$engines" "$result_limit" "$task_count"
+
+  local succeeded_count=0
+  local failed_count=0
+  local task_json task_id response_path task_output searched_at error_message
+  while IFS= read -r task_json; do
+    task_id="$(jq -er '.task_id' <<< "$task_json")"
+    response_path="$output_directory/.responses/$task_id.json"
+    task_output="$output_directory/tasks/$task_id.json"
+    searched_at="$(utc_now)"
+    error_message=""
+
+    jq -n \
+      --arg task_id "$task_id" \
+      --arg method GET \
+      --arg endpoint "$(base_url)/search" \
+      --arg query "$(jq -r '.query' <<< "$task_json")" \
+      --arg language "$(jq -r '.locale' <<< "$task_json")" \
+      --arg engines "$engines" \
+      --arg started_at "$searched_at" \
+      '{task_id: $task_id, method: $method, endpoint: $endpoint, query: $query, language: $language, engines: ($engines | split(",")), started_at: $started_at}' \
+      >> "$output_directory/commands.jsonl"
+
+    if curl --fail --silent --show-error --max-time 35 --get "$(base_url)/search" \
+      --data-urlencode "q=$(jq -r '.query' <<< "$task_json")" \
+      --data-urlencode "language=$(jq -r '.locale' <<< "$task_json")" \
+      --data-urlencode "engines=$engines" \
+      --data-urlencode 'format=json' \
+      > "$response_path"; then
+      if jq -e 'has("results")' "$response_path" >/dev/null; then
+        create_task_result "$task_json" "$response_path" "$task_output" \
+          "succeeded" "" "$engines" "$result_limit" "$searched_at"
+        succeeded_count=$((succeeded_count + 1))
+      else
+        error_message="SearXNG response has no results field"
+        create_task_result "$task_json" "$response_path" "$task_output" \
+          "failed" "$error_message" "$engines" "$result_limit" "$searched_at"
+        failed_count=$((failed_count + 1))
+      fi
+    else
+      error_message="SearXNG request failed"
+      create_task_result "$task_json" "$response_path" "$task_output" \
+        "failed" "$error_message" "$engines" "$result_limit" "$searched_at"
+      failed_count=$((failed_count + 1))
+    fi
+    rm -f "$response_path"
+    append_task_log "$execution_log" "$task_json" "$task_output"
+  done < <(jq -c '.sources[] | select(.source_type == "web_search") | .tasks[]' "$input_path")
+
+  jq -s \
+    --arg schema_version 'clue.data-collection.web-search-results.v1' \
+    --arg collection_id "$collection_id" \
+    --arg source_type web_search \
+    --arg generated_at "$(utc_now)" \
+    --arg backend_name "$CLI_NAME" \
+    --arg backend_version "$CLI_VERSION" \
+    --arg backend_commit "$BACKEND_COMMIT" \
+    --arg engines "$engines" \
+    '{
+      schema_version: $schema_version,
+      collection_id: $collection_id,
+      source_type: $source_type,
+      generated_at: $generated_at,
+      backend: {
+        tool: $backend_name,
+        version: $backend_version,
+        searxng_commit: $backend_commit,
+        engines_requested: ($engines | split(","))
+      },
+      task_results: .
+    }' "$output_directory/tasks"/*.json > "$output_directory/results.json"
+  rmdir "$output_directory/.responses"
+
+  local final_status="succeeded"
+  local final_error=""
+  if [[ "$failed_count" -gt 0 && "$succeeded_count" -gt 0 ]]; then
+    final_status="partial"
+    final_error="$failed_count task(s) failed; inspect task_results and execution-log.md"
+  elif [[ "$failed_count" -gt 0 ]]; then
+    final_status="failed"
+    final_error="all web search tasks failed; inspect execution-log.md"
+  fi
+  write_run_metadata "$run_metadata" "$collection_id" "$run_id" "$final_status" \
+    "$started_at" "$(utc_now)" "$task_count" "$succeeded_count" "$failed_count" \
+    "$engines" "$result_limit" "$final_error"
+
+  printf '\n## 汇总\n\n' >> "$execution_log"
+  printf -- '- 状态：`%s`\n' "$final_status" >> "$execution_log"
+  printf -- '- 成功任务：`%s`\n' "$succeeded_count" >> "$execution_log"
+  printf -- '- 失败任务：`%s`\n' "$failed_count" >> "$execution_log"
+
+  if [[ "$server_was_running" == false && "$keep_server" == false ]]; then
+    stop_server
+  fi
+
+  printf 'Results: %s\nMetadata: %s\nLog: %s\n' \
+    "$output_directory/results.json" "$run_metadata" "$execution_log"
+  [[ "$final_status" != failed ]]
+}
+
+main() {
+  local command="${1:-help}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$command" in
+    help|--help|-h)
+      print_help
+      ;;
+    version)
+      [[ $# -eq 0 ]] || die "version does not accept arguments"
+      print_version
+      ;;
+    backend-status)
+      [[ $# -eq 0 ]] || die "backend-status does not accept arguments"
+      print_backend_status
+      ;;
+    build-backend)
+      [[ $# -eq 0 ]] || die "build-backend does not accept arguments"
+      prepare_backend
+      ;;
+    server-start)
+      [[ $# -eq 0 ]] || die "server-start does not accept arguments"
+      start_server
+      ;;
+    server-stop)
+      [[ $# -eq 0 ]] || die "server-stop does not accept arguments"
+      stop_server
+      ;;
+    normalize-command-log)
+      normalize_command_log "$@"
+      ;;
+    batch)
+      run_batch "$@"
+      ;;
+    *)
+      die "unknown command: $command (run clue-web-search-cli help)"
+      ;;
+  esac
+}
+
+main "$@"

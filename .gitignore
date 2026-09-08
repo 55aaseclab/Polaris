@@ -42,6 +42,18 @@ apps/docs/tsconfig.node.tsbuildinfo
 .env.prod
 deploy/release-manifest.json
 
+# Polaris literature-review execution dependencies and local run state.
+tools/browser/node_modules/
+tools/web-search/backend/searxng/
+tools/web-search/runs/*
+!tools/web-search/runs/.gitkeep
+tools/web-search/runtime/*
+!tools/web-search/runtime/.gitkeep
+tools/social-media/backend/justoneapi-python/
+tools/social-media/.venv/
+tools/social-media/runs/*
+!tools/social-media/runs/.gitkeep
+
 # K3S kata configs
 agents
 config/state/

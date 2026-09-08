@@ -12,6 +12,7 @@ import {
   type PipelineResult,
   type PortAst,
   type InputFieldAst,
+  type TrialAst,
 } from "polaris-workflow";
 import { withControlMutationLock } from "../utils/control-mutation-lock.js";
 import {
@@ -80,16 +81,29 @@ export interface DomainPackFlowProjection {
   }>;
 }
 
+export interface DomainPackTrialProjection {
+  id: string;
+  title: string;
+  nodeCount: number;
+  edgeCount: number;
+  terminalNodes: string[];
+  capabilities: string[];
+  budget: TrialAst["budget"];
+  execution: TrialAst["execution"];
+}
+
 export interface DomainPackProjection {
   id: string;
   title: string;
   category: string;
   description: string;
   version: string;
+  languageVersion: string;
   digest: string;
   capabilities: string[];
   accent: DomainAccent;
   flows: DomainPackFlowProjection[];
+  trials: DomainPackTrialProjection[];
 }
 
 interface StoredDomainPack extends DomainPackSummary {
@@ -417,16 +431,28 @@ export function listDomainPackProjections(
         })),
       };
     });
+    const trials = (pipeline.ast.trials ?? []).map((trial) => ({
+      id: trial.name,
+      title: trial.title,
+      nodeCount: trial.nodes.length,
+      edgeCount: trial.edges.length,
+      terminalNodes: [...trial.terminal],
+      capabilities: [...new Set(trial.nodes.flatMap((node) => node.capabilities))],
+      budget: { ...trial.budget },
+      execution: { ...trial.execution },
+    }));
     projections.push({
       id: pack.id,
       title: pipeline.ast.title ?? pack.title ?? pack.id,
       category: pipeline.ast.category ?? "Workflow",
       description: pipeline.ast.description ?? pack.description ?? "",
       version: pack.version,
+      languageVersion: pipeline.ast.languageVersion ?? "0.3",
       digest: `sha256:${pack.sha256}`,
       capabilities: [...new Set(ports.map((port) => capabilityLabel(port.name)))],
       accent: pipeline.ast.accent ?? accentFromDigest(pack.sha256),
       flows,
+      trials,
     });
   }
   return projections.sort((a, b) => a.title.localeCompare(b.title));
