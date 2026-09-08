@@ -22,6 +22,18 @@ consolidates the current control/vault-data, Portal, and Paseo surface state.
 - Portal's visual system is aligned with Paseo and the deployed m00 smoke
   checks remain healthy.
 
+### Wanghai migration boundary
+
+- Migrated Wanghai Literature Review execution, history import, shared tools,
+  business surface, skills, and third-party coursework into Polaris-owned
+  workflow, tool, business-core, Portal, skill, and third-party locations.
+- Kept the Literature Review import historical-only and receipt-verified;
+  Polaris does not treat legacy Wanghai completion records as new durable
+  workflow runs.
+- Wanghai is now a private surface repository. Its deployment files and
+  fixed-mount format adapters remain there because Polaris owns the integrated
+  lifecycle and release policy.
+
 ### Next
 
 - Produce and verify the 0.3.4 release manifest and host environment.
