@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.crm.customer.v1.schema.json",
+  "title": "wanghai.crm.customer v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "country",
+    "contact_name",
+    "contact_email",
+    "order_count",
+    "total_amount",
+    "currency",
+    "latest_order_date"
+  ],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "country": { "type": ["string", "null"] },
+    "contact_name": { "type": ["string", "null"] },
+    "contact_email": { "type": ["string", "null"] },
+    "order_count": { "type": "integer" },
+    "total_amount": { "type": ["number", "null"] },
+    "currency": { "type": ["string", "null"] },
+    "latest_order_date": { "type": ["string", "null"] }
+  }
+}

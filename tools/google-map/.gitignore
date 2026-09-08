@@ -1,0 +1,6 @@
+# Scrape results may contain public business contact information and are run artifacts.
+runs/*
+!runs/.gitkeep
+
+# Docker-generated and editor-local files.
+.DS_Store

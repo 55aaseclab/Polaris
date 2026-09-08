@@ -1,0 +1,26 @@
+{
+  "lock_version": 1,
+  "cli": {
+    "name": "clue-industry-directory-cli",
+    "version": "0.2.1"
+  },
+  "backend": {
+    "name": "clue-web-search-cli",
+    "path": "../web-search",
+    "version": "0.2.1",
+    "backend_lock_sha256": "5ff80773ebe8ec36bb839a2083c8de016ca3a638f1d8ec7fee0f8a4250dc77ab",
+    "search_backend": {
+      "repository": "https://github.com/searxng/searxng.git",
+      "commit": "c19d86faa393bdd696a5708e3c294f956d750683",
+      "runtime_image": "searxng/searxng@sha256:fb4a500b95b29304b2e08b2bd4162a41ef805f6ade98e6075d12187b9fde3639"
+    }
+  },
+  "search_defaults": {
+    "engines": [
+      "google",
+      "duckduckgo",
+      "bing"
+    ],
+    "result_limit_per_directory_task": 10
+  }
+}

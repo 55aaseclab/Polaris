@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.operations.reconciliation.v1.schema.json",
+  "title": "wanghai.operations.reconciliation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "order_no", "status", "checked_at", "sales_amount", "received_amount", "invoice_amount", "logistics_cost", "supplier_payable", "difference", "documents", "notes"],
+  "properties": {
+    "schema": { "const": "wanghai.operations.reconciliation" },
+    "schema_version": { "const": 1 },
+    "order_no": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["pending", "matched", "mismatch", "closed"] },
+    "checked_at": { "type": ["string", "null"] },
+    "sales_amount": { "type": ["number", "null"] },
+    "received_amount": { "type": ["number", "null"] },
+    "invoice_amount": { "type": ["number", "null"] },
+    "logistics_cost": { "type": ["number", "null"] },
+    "supplier_payable": { "type": ["number", "null"] },
+    "difference": { "type": ["number", "null"] },
+    "documents": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["label", "path", "kind"], "properties": { "label": { "type": "string" }, "path": { "type": "string" }, "kind": { "type": "string" } } } },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

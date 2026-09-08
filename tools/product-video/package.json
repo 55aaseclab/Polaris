@@ -1,0 +1,22 @@
+{
+  "name": "@polaris/product-video",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "polaris-product-video": "./polaris-product-video"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "fixture": "tsx scripts/build-fixture.ts"
+  },
+  "dependencies": {
+    "@polaris/business-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

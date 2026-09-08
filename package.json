@@ -21,6 +21,12 @@
     "test:polaris:domain-packs": "pnpm --filter polaris run test:domain-packs",
     "test:polaris:full-minus-infra": "pnpm run test:runtime && pnpm --filter polaris run test:full-minus-infra",
     "test:live-auth": "pnpm --filter polaris run test:live-auth",
-    "test:polaris:coverage": "pnpm --filter polaris run test:coverage"
+    "test:polaris:coverage": "pnpm --filter polaris run test:coverage",
+    "business-core:typecheck": "pnpm --filter @polaris/business-core run typecheck",
+    "content-production:typecheck": "pnpm --filter @polaris/content-production run typecheck",
+    "content-production:test": "pnpm --filter @polaris/content-production run test",
+    "product-video:typecheck": "pnpm --filter @polaris/product-video run typecheck",
+    "product-video:test": "pnpm --filter @polaris/product-video run test",
+    "test:polaris:business-tools": "node --test scripts/tests/polaris-business-tools.test.mjs"
   }
 }

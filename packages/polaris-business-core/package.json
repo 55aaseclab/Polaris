@@ -1,0 +1,37 @@
+{
+  "name": "@polaris/business-core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./repo": "./src/repo.ts",
+    "./load-env": "./src/load-env.ts",
+    "./json": "./src/json.ts",
+    "./workspaces": "./src/workspaces.ts",
+    "./workspace-usage": "./src/workspace-usage.ts",
+    "./workspace-version": "./src/workspace-version.ts",
+    "./workflow-runtime-status": "./src/workflow-runtime-status.ts",
+    "./products": "./src/products.ts",
+    "./meta-schema": "./src/meta-schema.ts",
+    "./schema-validation": "./src/schema-validation.ts",
+    "./operations": "./src/operations.ts",
+    "./pdf": "./src/pdf.ts",
+    "./trade-documents": "./src/trade-documents.ts",
+    "./jiekou": "./src/jiekou.ts",
+    "./manual-review": "./src/manual-review.ts",
+    "./seo-ops": "./src/seo-ops.ts",
+    "./seo-playbook": "./src/seo-playbook.ts"
+  },
+  "scripts": {
+    "migrate-product-library": "tsx scripts/migrate-product-library.ts",
+    "migrate-product-sku-taxonomy": "tsx scripts/migrate-product-sku-taxonomy.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

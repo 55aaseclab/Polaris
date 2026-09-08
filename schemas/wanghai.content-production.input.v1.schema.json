@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.content-production.input.v1.schema.json",
+  "title": "wanghai.content-production.input v1",
+  "description": "Umbrella job request for content production (product-catalog, carousel, video). Kind-specific tools may freeze a narrower projection; this file is the operator/agent entry contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "content_kind",
+    "title",
+    "locale",
+    "market",
+    "product_selection",
+    "brand",
+    "pipeline",
+    "kind_config",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "wanghai.content-production.input.v1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Stable job id; used as case folder name under content-production/ or deliverables."
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["product-catalog", "carousel", "video"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subtitle": {
+      "type": ["string", "null"]
+    },
+    "locale": {
+      "type": "string",
+      "enum": ["zh", "en"]
+    },
+    "market": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pricing/copy market key, e.g. CN or CH."
+    },
+    "product_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "product_ids", "batch", "filters"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["explicit", "batch", "external"]
+        },
+        "product_ids": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "batch": {
+          "type": ["string", "null"]
+        },
+        "filters": {
+          "type": ["object", "null"],
+          "description": "Optional filters (category, status, include_in_external). Tool-defined."
+        }
+      }
+    },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "tagline", "logo_path", "contact_lines"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tagline": { "type": ["string", "null"] },
+        "logo_path": {
+          "type": ["string", "null"],
+          "description": "Workspace-relative path; no '..' segments."
+        },
+        "contact_lines": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phases",
+        "require_ready",
+        "require_include_in_external",
+        "review_mode",
+        "skip_package",
+        "strict"
+      ],
+      "properties": {
+        "phases": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Ordered phase ids to run. Empty means tool default for content_kind.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "validate",
+              "select",
+              "freeze",
+              "plan",
+              "produce",
+              "package",
+              "review",
+              "publish"
+            ]
+          }
+        },
+        "require_ready": {
+          "type": "boolean",
+          "description": "Only admit products with status=ready."
+        },
+        "require_include_in_external": {
+          "type": "boolean",
+          "description": "Only admit products with include_in_external=true."
+        },
+        "review_mode": {
+          "type": "string",
+          "enum": ["auto-pass", "manual-review"],
+          "description": "auto-pass skips human gate; manual-review writes a review list and stops before publish unless approved."
+        },
+        "skip_package": {
+          "type": "boolean",
+          "description": "Stop after produce (e.g. HTML without PDF, frames without encode)."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "Fail if any requested product is skipped."
+        }
+      }
+    },
+    "kind_config": {
+      "type": "object",
+      "description": "Kind-specific options. Exactly the branch matching content_kind should be populated; others null.",
+      "additionalProperties": false,
+      "required": ["product_catalog", "carousel", "video"],
+      "properties": {
+        "product_catalog": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "template_id",
+                "page_size",
+                "orientation",
+                "price_policy",
+                "include_sections",
+                "options"
+              ],
+              "properties": {
+                "template_id": {
+                  "type": "string",
+                  "enum": ["single-product-page.v1"]
+                },
+                "page_size": { "type": "string", "enum": ["A4"] },
+                "orientation": { "type": "string", "enum": ["portrait"] },
+                "price_policy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["mode", "show_currency", "hide_if_null", "label"],
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": ["list_price", "promo_price", "hide", "inquiry"]
+                    },
+                    "show_currency": { "type": "boolean" },
+                    "hide_if_null": { "type": "boolean" },
+                    "label": { "type": ["string", "null"] }
+                  }
+                },
+                "include_sections": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "cover",
+                    "toc",
+                    "brand_intro",
+                    "product_pages",
+                    "packaging",
+                    "contact"
+                  ],
+                  "properties": {
+                    "cover": { "type": "boolean" },
+                    "toc": { "type": "boolean" },
+                    "brand_intro": { "type": "boolean" },
+                    "product_pages": { "type": "boolean" },
+                    "packaging": { "type": "boolean" },
+                    "contact": { "type": "boolean" }
+                  }
+                },
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "require_images",
+                    "max_selling_points",
+                    "image_slots_on_page"
+                  ],
+                  "properties": {
+                    "require_images": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["near", "wear", "detail"]
+                      }
+                    },
+                    "max_selling_points": { "type": "integer" },
+                    "image_slots_on_page": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["near", "wear", "detail"]
+                      }
+                    }
+                  }
+                },
+                "catalog_input_ref": {
+                  "type": ["string", "null"],
+                  "description": "Optional path to a frozen wanghai.promo.catalog-input document."
+                }
+              }
+            }
+          ]
+        },
+        "carousel": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "aspect_ratio",
+                "slide_count",
+                "template_id",
+                "hook",
+                "cta",
+                "options"
+              ],
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "xiaohongshu",
+                    "instagram",
+                    "generic"
+                  ]
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": ["1:1", "4:5", "3:4", "9:16"]
+                },
+                "slide_count": {
+                  "type": "integer",
+                  "description": "Target slide count including cover/CTA when used."
+                },
+                "template_id": {
+                  "type": "string",
+                  "enum": ["product-story.v1"]
+                },
+                "hook": {
+                  "type": ["string", "null"],
+                  "description": "Cover hook line; null = derive from product copy."
+                },
+                "cta": {
+                  "type": ["string", "null"]
+                },
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "require_images",
+                    "max_selling_points",
+                    "include_price",
+                    "include_sku"
+                  ],
+                  "properties": {
+                    "require_images": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["near", "wear", "detail"]
+                      }
+                    },
+                    "max_selling_points": { "type": "integer" },
+                    "include_price": { "type": "boolean" },
+                    "include_sku": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "video": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "aspect_ratio",
+                "duration_sec",
+                "template_id",
+                "source_mode",
+                "hook",
+                "cta",
+                "options"
+              ],
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "xiaohongshu",
+                    "douyin",
+                    "tiktok",
+                    "instagram",
+                    "generic"
+                  ]
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": ["9:16", "1:1", "16:9"]
+                },
+                "duration_sec": {
+                  "type": "integer",
+                  "description": "Target duration; v1 templates target 15–30."
+                },
+                "template_id": {
+                  "type": "string",
+                  "enum": ["still-motion.v1", "script-beats.v1"]
+                },
+                "source_mode": {
+                  "type": "string",
+                  "enum": ["stills", "footage", "mixed"],
+                  "description": "stills = animate product photos; footage = edit real clips; mixed = both."
+                },
+                "hook": {
+                  "type": ["string", "null"]
+                },
+                "cta": {
+                  "type": ["string", "null"]
+                },
+                "options": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "require_images",
+                    "burn_subtitles",
+                    "include_cover_frame",
+                    "max_selling_points"
+                  ],
+                  "properties": {
+                    "require_images": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["near", "wear", "detail"]
+                      }
+                    },
+                    "burn_subtitles": { "type": "boolean" },
+                    "include_cover_frame": { "type": "boolean" },
+                    "max_selling_points": { "type": "integer" },
+                    "bgm_path": {
+                      "type": ["string", "null"],
+                      "description": "Workspace-relative licensed BGM path."
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

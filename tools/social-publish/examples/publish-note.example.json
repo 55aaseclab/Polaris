@@ -1,0 +1,37 @@
+{
+  "schema_version": "clue.social-publish.input.v1",
+  "publish_id": "demo-xhs-note-001",
+  "platform": "xiaohongshu",
+  "account_id": "main",
+  "content_kind": "note",
+  "title": "图文示例",
+  "body": "图文正文",
+  "tags": ["示例"],
+  "media": [
+    {
+      "path": "images/1.png",
+      "media_kind": "image",
+      "mime_type": "image/png",
+      "cover_path": null
+    },
+    {
+      "path": "images/2.png",
+      "media_kind": "image",
+      "mime_type": "image/png",
+      "cover_path": null
+    }
+  ],
+  "publish": {
+    "mode": "immediate",
+    "schedule_at": null,
+    "visibility": "public",
+    "dry_run": true
+  },
+  "platform_options": {},
+  "workspace_id": null,
+  "client": {
+    "name": "example",
+    "version": "0.0.0",
+    "request_id": "req-demo-note-001"
+  }
+}

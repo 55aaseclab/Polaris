@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.promo.product-meta.v5.schema.json",
+  "title": "wanghai.promo.product-meta v5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "schema_version", "sku", "sku_category", "sku_subcategory",
+    "id", "name", "name_en", "status", "inventory", "packaging",
+    "pricing", "copy", "assets", "notes", "include_in_external", "source"
+  ],
+  "properties": {
+    "schema": { "const": "wanghai.promo.product-meta" },
+    "schema_version": { "const": 5 },
+    "sku": { "type": "string", "minLength": 11 },
+    "sku_category": {
+      "type": "string",
+      "enum": ["wear", "display", "hang", "use", "test"]
+    },
+    "sku_subcategory": {
+      "type": "string",
+      "enum": [
+        "earrings", "necklaces", "hair_clips", "hairpins", "hair_ties",
+        "ornaments", "gourds", "pendants", "health_hammers", "test_products"
+      ]
+    },
+    "id": { "type": "integer", "minimum": 0 },
+    "name": { "type": ["string", "null"] },
+    "name_en": { "type": ["string", "null"] },
+    "status": { "type": "string", "enum": ["draft", "review", "ready"] },
+    "inventory": { "type": ["integer", "null"], "minimum": 0 },
+    "source": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["legacy_batch", "legacy_slug"],
+      "properties": {
+        "legacy_batch": { "type": "string", "minLength": 1 },
+        "legacy_slug": { "type": "string", "minLength": 1 }
+      }
+    },
+    "packaging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normal", "gift"],
+      "properties": {
+        "normal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dimensions_mm", "weight_with_packaging_kg"],
+          "properties": {
+            "dimensions_mm": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["length", "width", "height"],
+              "properties": {
+                "length": { "type": ["number", "null"] },
+                "width": { "type": ["number", "null"] },
+                "height": { "type": ["number", "null"] }
+              }
+            },
+            "weight_with_packaging_kg": { "type": ["number", "null"] }
+          }
+        },
+        "gift": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dimensions_mm", "weight_with_packaging_kg"],
+          "properties": {
+            "dimensions_mm": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["length", "width", "height"],
+              "properties": {
+                "length": { "type": ["number", "null"] },
+                "width": { "type": ["number", "null"] },
+                "height": { "type": ["number", "null"] }
+              }
+            },
+            "weight_with_packaging_kg": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_market", "costs", "markets"],
+      "properties": {
+        "default_market": { "type": "string", "minLength": 1 },
+        "costs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency", "purchase_price", "packaging_price", "labor_price"],
+          "properties": {
+            "currency": { "type": "string", "minLength": 1 },
+            "purchase_price": { "type": ["number", "null"] },
+            "packaging_price": { "type": ["number", "null"] },
+            "labor_price": { "type": ["number", "null"] }
+          }
+        },
+        "markets": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["currency", "list_price", "promo_price", "floor_price"],
+            "properties": {
+              "currency": { "type": "string", "minLength": 1 },
+              "list_price": { "type": ["number", "null"] },
+              "promo_price": { "type": ["number", "null"] },
+              "floor_price": { "type": ["number", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "selling_points", "description", "faq"],
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "selling_points": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": ["string", "null"] },
+        "faq": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["figures_dir", "source_dir", "selected", "promo_usage_image"],
+      "properties": {
+        "figures_dir": { "type": "string", "minLength": 1 },
+        "source_dir": { "type": "string", "minLength": 1 },
+        "selected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["near", "wear", "detail"],
+          "properties": {
+            "near": { "type": ["string", "null"] },
+            "wear": { "type": ["string", "null"] },
+            "detail": { "type": ["string", "null"] }
+          }
+        },
+        "promo_usage_image": { "type": ["string", "null"] }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "include_in_external": { "type": "boolean" }
+  }
+}

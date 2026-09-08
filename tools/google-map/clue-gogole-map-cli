@@ -1,0 +1,809 @@
+#!/usr/bin/env bash
+# clue-gogole-map-cli: versioned wrapper around gosom/google-maps-scraper.
+# The upstream backend is pinned in backend.lock.json and is never modified here.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../business-load-env.sh
+source "$ROOT_DIR/../business-load-env.sh"
+LOCK_FILE="$ROOT_DIR/backend.lock.json"
+VERSION_FILE="$ROOT_DIR/VERSION"
+RUNS_DIR="$ROOT_DIR/runs"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+require_lock() {
+  [[ -f "$LOCK_FILE" ]] || die "missing backend lock file: $LOCK_FILE"
+  require_command jq
+}
+
+load_lock() {
+  require_lock
+
+  CLI_NAME="$(jq -er '.cli.name' "$LOCK_FILE")"
+  LOCKED_CLI_VERSION="$(jq -er '.cli.version' "$LOCK_FILE")"
+  BACKEND_REPOSITORY="$(jq -er '.backend.repository' "$LOCK_FILE")"
+  BACKEND_REF="$(jq -er '.backend.ref' "$LOCK_FILE")"
+  BACKEND_COMMIT="$(jq -er '.backend.commit' "$LOCK_FILE")"
+  BACKEND_PATH_RELATIVE="$(jq -er '.backend.path' "$LOCK_FILE")"
+  BACKEND_RUNTIME_IMAGE="$(jq -er '.backend.runtime_image' "$LOCK_FILE")"
+  BACKEND_RUNTIME_IMAGE_TAG="$(jq -er '.backend.runtime_image_tag' "$LOCK_FILE")"
+  BACKEND_PLAYWRIGHT_DRIVER_PATH="$(jq -er '.backend.playwright_driver_path' "$LOCK_FILE")"
+  BACKEND_IMAGE="$(jq -er '.backend.local_image' "$LOCK_FILE")"
+  BACKEND_DIR="$ROOT_DIR/$BACKEND_PATH_RELATIVE"
+  CLI_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+
+  [[ -n "$CLI_VERSION" ]] || die "VERSION is empty"
+  [[ "$CLI_VERSION" == "$LOCKED_CLI_VERSION" ]] || die \
+    "VERSION ($CLI_VERSION) and backend.lock.json ($LOCKED_CLI_VERSION) differ"
+}
+
+utc_now() {
+  date -u +'%Y-%m-%dT%H:%M:%SZ'
+}
+
+default_run_id() {
+  date -u +'%Y%m%dT%H%M%SZ'
+}
+
+absolute_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$PWD" "$path"
+  fi
+}
+
+validate_workspace_id() {
+  [[ "$1" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die \
+    "--workspace must match ^[a-z][a-z0-9-]{0,62}$"
+}
+
+collection_scope_for_workspace() {
+  local workspace="$1"
+  local configured_root="$2"
+  local workspaces_root="${configured_root:-${POLARIS_BUSINESS_WORKSPACES_ROOT:-}}"
+  [[ -n "$workspaces_root" ]] || die \
+    "--workspaces-root is required unless POLARIS_BUSINESS_WORKSPACES_ROOT is set"
+  [[ -d "$workspaces_root" ]] || die "workspace root does not exist: $workspaces_root"
+  validate_workspace_id "$workspace"
+  workspaces_root="$(cd -- "$workspaces_root" && pwd -P)"
+  local workspace_path="$workspaces_root/$workspace"
+  local scope="$workspace_path/acquisition/customer-data-collection"
+  [[ -d "$workspace_path" && ! -L "$workspace_path" ]] || die \
+    "workspace does not exist or is a symlink: $workspace_path"
+  [[ -d "$scope" && ! -L "$scope" ]] || die \
+    "customer-data-collection scope does not exist or is a symlink: $scope"
+  printf '%s\n' "$scope"
+}
+
+validate_run_id() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die \
+    "--run-id may contain only letters, numbers, dot, underscore and hyphen"
+}
+
+assert_positive_integer() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer"
+}
+
+assert_duration() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]+(ms|s|m|h)$ ]] || die \
+    "--exit-on-inactivity must use Go duration syntax, for example 3m or 30s"
+}
+
+backend_actual_commit() {
+  [[ -d "$BACKEND_DIR/.git" ]] || return 1
+  git -C "$BACKEND_DIR" rev-parse HEAD
+}
+
+assert_backend_checkout() {
+  [[ -d "$BACKEND_DIR/.git" ]] || die \
+    "backend clone is missing: $BACKEND_DIR (run git clone from backend.lock.json)"
+
+  local actual_commit
+  actual_commit="$(backend_actual_commit)"
+  [[ "$actual_commit" == "$BACKEND_COMMIT" ]] || die \
+    "backend commit is $actual_commit; expected locked commit $BACKEND_COMMIT"
+
+  [[ -z "$(git -C "$BACKEND_DIR" status --porcelain)" ]] || die \
+    "backend has local modifications; restore or commit them before running"
+}
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  clue-gogole-map-cli version
+  clue-gogole-map-cli backend-status
+  clue-gogole-map-cli build-backend [--from-source] [--no-cache]
+  clue-gogole-map-cli run [options]
+  clue-gogole-map-cli sanitize-results --input <raw-jsonl> (--output <safe-json> | --replace-input) [--remove-input]
+  clue-gogole-map-cli backend-upgrade <upstream-tag> <runtime-image-digest> <playwright-driver-path>
+
+Commands:
+  version                   Print the wrapper and locked backend versions.
+  backend-status            Verify the local backend checkout against the lock.
+  build-backend             Prepare the pinned backend Docker image locally.
+  run                       Run a Google Maps search through the local backend.
+  sanitize-results          Remove non-business fields from Maps NDJSON output.
+  backend-upgrade <tag>     Explicitly upgrade the backend and update its lock.
+
+Run options:
+  --query <text>            Search text. May be repeated.
+  --queries <file>          Text file with one search query per line.
+  --lang <code>             Google interface language; default: en.
+  --depth <number>          Maximum Maps result scroll depth; default: 1.
+  --concurrency <number>    Backend job concurrency; default: backend default.
+  --exit-on-inactivity <d>  Stop after idle duration; default: 3m.
+  --email                   Extract public email addresses from official websites.
+  --workspace <id>          Use <root>/<id>/acquisition/customer-data-collection.
+  --workspaces-root <dir>   Override POLARIS_BUSINESS_WORKSPACES_ROOT for --workspace.
+  --output <file>           Result JSON path. Overrides the standard run location.
+  --run-id <id>             Identifier for a default run directory. With --workspace,
+                            defaults to that scope's runs/<run-id>/results.json.
+  --no-auto-build           Fail if the locked Docker image has not been built.
+  --dry-run                 Print the planned run without building or scraping.
+  --help                    Print this help.
+
+Examples:
+  clue-gogole-map-cli run \
+    --query 'product category in target city' \
+    --lang <language-code> --depth 1
+
+  clue-gogole-map-cli run \
+    --queries examples/target-market.queries.txt \
+    --lang <language-code> --output ./results.json
+
+  clue-gogole-map-cli run \
+    --workspace <workspace-id> --run-id <run-id> \
+    --query 'product category in target city' --lang <language-code> --depth 1
+
+By default, build-backend pulls the exact upstream image digest pinned in the
+lock, then tags it locally. --from-source builds the checked-out source instead.
+The wrapper records queries, versions, result path and execution status in
+run.json next to every actual result. It collects public business listings;
+review Google Maps terms and applicable privacy rules before each run.
+EOF
+}
+
+sanitize_business_results() {
+  local input_path="$1"
+  local output_path="$2"
+  local output_directory
+  output_directory="$(dirname "$output_path")"
+  local temporary_output
+  temporary_output="$(mktemp "$output_directory/.clue-google-map-sanitized.XXXXXX")"
+
+  if ! jq -s '
+    map({
+      input_id,
+      maps_url: .link,
+      cid,
+      company_name: .title,
+      categories,
+      primary_category: .category,
+      address,
+      open_hours,
+      website_url: .web_site,
+      phone,
+      plus_code,
+      review_count,
+      review_rating,
+      latitude,
+      longitude: .longtitude,
+      listing_status: .status,
+      description,
+      timezone,
+      price_range,
+      data_id,
+      place_id,
+      location: .complete_address,
+      business_attributes: .about
+    })
+  ' "$input_path" > "$temporary_output"; then
+    rm -f "$temporary_output"
+    return 1
+  fi
+
+  mv "$temporary_output" "$output_path"
+}
+
+sanitize_results_command() {
+  local input_path=""
+  local output_path=""
+  local remove_input=false
+  local replace_input=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input)
+        [[ $# -ge 2 ]] || die "--input requires a raw NDJSON file path"
+        input_path="$2"
+        shift 2
+        ;;
+      --output)
+        [[ $# -ge 2 ]] || die "--output requires a JSON file path"
+        output_path="$2"
+        shift 2
+        ;;
+      --remove-input)
+        remove_input=true
+        shift
+        ;;
+      --replace-input)
+        replace_input=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown sanitize-results option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$input_path" ]] || die "sanitize-results requires --input"
+  input_path="$(absolute_path "$input_path")"
+  [[ -f "$input_path" ]] || die "raw NDJSON input not found: $input_path"
+  [[ -z "$output_path" || "$replace_input" == false ]] || die \
+    "use --output or --replace-input, not both"
+  if [[ "$replace_input" == true ]]; then
+    output_path="$input_path"
+  else
+    [[ -n "$output_path" ]] || die \
+      "sanitize-results requires --output or --replace-input"
+    output_path="$(absolute_path "$output_path")"
+  fi
+  mkdir -p "$(dirname "$output_path")"
+  require_command jq
+
+  sanitize_business_results "$input_path" "$output_path" || die \
+    "failed to sanitize Maps NDJSON: $input_path"
+
+  if [[ "$remove_input" == true && "$replace_input" == false ]]; then
+    rm -f "$input_path"
+  fi
+
+  local record_count
+  record_count="$(jq 'length' "$output_path")"
+  printf 'Sanitized %s Maps records: %s\n' "$record_count" "$output_path"
+}
+
+print_version() {
+  load_lock
+
+  jq -n \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg backend_repository "$BACKEND_REPOSITORY" \
+    --arg backend_ref "$BACKEND_REF" \
+    --arg backend_commit "$BACKEND_COMMIT" \
+    --arg backend_runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg backend_runtime_image_tag "$BACKEND_RUNTIME_IMAGE_TAG" \
+    --arg backend_playwright_driver_path "$BACKEND_PLAYWRIGHT_DRIVER_PATH" \
+    --arg backend_image "$BACKEND_IMAGE" \
+    '{
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        repository: $backend_repository,
+        ref: $backend_ref,
+        commit: $backend_commit,
+        runtime_image: $backend_runtime_image,
+        runtime_image_tag: $backend_runtime_image_tag,
+        playwright_driver_path: $backend_playwright_driver_path,
+        local_image: $backend_image
+      }
+    }'
+}
+
+print_backend_status() {
+  load_lock
+
+  local actual_commit="missing"
+  local working_tree="unknown"
+  if [[ -d "$BACKEND_DIR/.git" ]]; then
+    actual_commit="$(backend_actual_commit)"
+    if [[ -z "$(git -C "$BACKEND_DIR" status --porcelain)" ]]; then
+      working_tree="clean"
+    else
+      working_tree="modified"
+    fi
+  fi
+
+  jq -n \
+    --arg path "$BACKEND_DIR" \
+    --arg repository "$BACKEND_REPOSITORY" \
+    --arg ref "$BACKEND_REF" \
+    --arg expected_commit "$BACKEND_COMMIT" \
+    --arg actual_commit "$actual_commit" \
+    --arg working_tree "$working_tree" \
+    --arg runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg runtime_image_tag "$BACKEND_RUNTIME_IMAGE_TAG" \
+    --arg playwright_driver_path "$BACKEND_PLAYWRIGHT_DRIVER_PATH" \
+    --arg image "$BACKEND_IMAGE" \
+    '{
+      backend_path: $path,
+      repository: $repository,
+      locked_ref: $ref,
+      expected_commit: $expected_commit,
+      actual_commit: $actual_commit,
+      commit_matches_lock: ($actual_commit == $expected_commit),
+      working_tree: $working_tree,
+      runtime_image: $runtime_image,
+      runtime_image_tag: $runtime_image_tag,
+      playwright_driver_path: $playwright_driver_path,
+      local_image: $image
+    }'
+}
+
+build_backend() {
+  local from_source=false
+  local no_cache=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from-source)
+        from_source=true
+        shift
+        ;;
+      --no-cache)
+        no_cache=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown build-backend option: $1"
+        ;;
+    esac
+  done
+
+  load_lock
+  assert_backend_checkout
+  require_command docker
+
+  if [[ "$from_source" == false ]]; then
+    [[ "$no_cache" == false ]] || die "--no-cache requires --from-source"
+    printf 'Pulling pinned runtime %s\n' "$BACKEND_RUNTIME_IMAGE"
+    docker pull "$BACKEND_RUNTIME_IMAGE"
+    docker tag "$BACKEND_RUNTIME_IMAGE" "$BACKEND_IMAGE"
+    printf 'Prepared %s from %s\n' "$BACKEND_IMAGE" "$BACKEND_RUNTIME_IMAGE_TAG"
+    return 0
+  fi
+
+  local build_args=()
+  if [[ "$no_cache" == true ]]; then
+    build_args+=(--no-cache)
+  fi
+
+  printf 'Building %s from source %s at %s\n' \
+    "$BACKEND_IMAGE" "$BACKEND_REF" "$BACKEND_COMMIT"
+  docker build "${build_args[@]}" --tag "$BACKEND_IMAGE" "$BACKEND_DIR"
+}
+
+ensure_backend_image() {
+  local auto_build="$1"
+  require_command docker
+
+  if docker image inspect "$BACKEND_IMAGE" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$auto_build" == true ]]; then
+    build_backend
+    return 0
+  fi
+
+  die "Docker image $BACKEND_IMAGE is not built; run build-backend first"
+}
+
+write_run_metadata() {
+  local metadata_path="$1"
+  local status="$2"
+  local started_at="$3"
+  local finished_at="$4"
+  local run_id="$5"
+  local query_json="$6"
+  local language="$7"
+  local result_path="$8"
+  local depth="$9"
+  local concurrency="${10}"
+  local extract_email="${11}"
+  local inactivity="${12}"
+  local error_message="${13}"
+
+  jq -n \
+    --arg schema_version 'clue-gogole-map-cli.run.v1' \
+    --arg run_id "$run_id" \
+    --arg status "$status" \
+    --arg started_at "$started_at" \
+    --arg finished_at "$finished_at" \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg backend_repository "$BACKEND_REPOSITORY" \
+    --arg backend_ref "$BACKEND_REF" \
+    --arg backend_commit "$BACKEND_COMMIT" \
+    --arg backend_runtime_image "$BACKEND_RUNTIME_IMAGE" \
+    --arg backend_runtime_image_tag "$BACKEND_RUNTIME_IMAGE_TAG" \
+    --arg backend_playwright_driver_path "$BACKEND_PLAYWRIGHT_DRIVER_PATH" \
+    --arg backend_image "$BACKEND_IMAGE" \
+    --arg language "$language" \
+    --arg result_path "$result_path" \
+    --arg depth "$depth" \
+    --arg concurrency "$concurrency" \
+    --arg inactivity "$inactivity" \
+    --arg error_message "$error_message" \
+    --argjson queries "$query_json" \
+    --argjson extract_email "$extract_email" \
+    '{
+      schema_version: $schema_version,
+      run_id: $run_id,
+      status: $status,
+      started_at: $started_at,
+      finished_at: (if $finished_at == "" then null else $finished_at end),
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        repository: $backend_repository,
+        ref: $backend_ref,
+        commit: $backend_commit,
+        runtime_image: $backend_runtime_image,
+        runtime_image_tag: $backend_runtime_image_tag,
+        playwright_driver_path: $backend_playwright_driver_path,
+        local_image: $backend_image
+      },
+      request: {
+        queries: $queries,
+        language: $language,
+        depth: ($depth | tonumber),
+        concurrency: (if $concurrency == "" then null else ($concurrency | tonumber) end),
+        exit_on_inactivity: $inactivity,
+        extract_public_email: $extract_email
+      },
+      result_path: $result_path,
+      error: (if $error_message == "" then null else $error_message end)
+    }' > "$metadata_path"
+}
+
+run_backend() {
+  local -a inline_queries=()
+  local queries_file=""
+  local language="en"
+  local depth="1"
+  local concurrency=""
+  local inactivity="3m"
+  local extract_email=false
+  local output_file=""
+  local run_id=""
+  local workspace=""
+  local workspaces_root=""
+  local auto_build=true
+  local dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --query)
+        [[ $# -ge 2 ]] || die "--query requires a value"
+        inline_queries+=("$2")
+        shift 2
+        ;;
+      --queries)
+        [[ $# -ge 2 ]] || die "--queries requires a file path"
+        queries_file="$2"
+        shift 2
+        ;;
+      --lang)
+        [[ $# -ge 2 ]] || die "--lang requires a language code"
+        language="$2"
+        shift 2
+        ;;
+      --depth)
+        [[ $# -ge 2 ]] || die "--depth requires a number"
+        depth="$2"
+        shift 2
+        ;;
+      --concurrency)
+        [[ $# -ge 2 ]] || die "--concurrency requires a number"
+        concurrency="$2"
+        shift 2
+        ;;
+      --exit-on-inactivity)
+        [[ $# -ge 2 ]] || die "--exit-on-inactivity requires a duration"
+        inactivity="$2"
+        shift 2
+        ;;
+      --email)
+        extract_email=true
+        shift
+        ;;
+      --output)
+        [[ $# -ge 2 ]] || die "--output requires a result file path"
+        output_file="$2"
+        shift 2
+        ;;
+      --run-id)
+        [[ $# -ge 2 ]] || die "--run-id requires an identifier"
+        run_id="$2"
+        shift 2
+        ;;
+      --workspace)
+        [[ $# -ge 2 ]] || die "--workspace requires an identifier"
+        workspace="$2"
+        shift 2
+        ;;
+      --workspaces-root)
+        [[ $# -ge 2 ]] || die "--workspaces-root requires a directory path"
+        workspaces_root="$2"
+        shift 2
+        ;;
+      --no-auto-build)
+        auto_build=false
+        shift
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown run option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$language" ]] || die "--lang must not be empty"
+  assert_positive_integer --depth "$depth"
+  if [[ -n "$concurrency" ]]; then
+    assert_positive_integer --concurrency "$concurrency"
+  fi
+  assert_duration "$inactivity"
+  [[ ${#inline_queries[@]} -eq 0 || -z "$queries_file" ]] || die \
+    "use --query or --queries, not both"
+  [[ ${#inline_queries[@]} -gt 0 || -n "$queries_file" ]] || die \
+    "provide at least one --query or a --queries file"
+  [[ -z "$output_file" || -z "$run_id" ]] || die \
+    "--output and --run-id cannot be used together"
+  [[ -z "$workspaces_root" || -n "$workspace" ]] || die \
+    "--workspaces-root requires --workspace"
+  if [[ -n "$run_id" ]]; then
+    validate_run_id "$run_id"
+  fi
+
+  local workspace_runs_dir=""
+  if [[ -n "$workspace" ]]; then
+    workspace_runs_dir="$(collection_scope_for_workspace "$workspace" "$workspaces_root")/runs"
+  fi
+
+  if [[ -n "$queries_file" ]]; then
+    queries_file="$(absolute_path "$queries_file")"
+    [[ -f "$queries_file" ]] || die "queries file not found: $queries_file"
+  fi
+
+  load_lock
+
+  if [[ "$dry_run" == true ]]; then
+    printf 'Dry run — no Docker image will be built and no request will be sent.\n'
+    printf 'Backend: %s at %s (%s)\n' "$BACKEND_REPOSITORY" "$BACKEND_REF" "$BACKEND_COMMIT"
+    printf 'Language: %s; depth: %s; inactivity timeout: %s\n' \
+      "$language" "$depth" "$inactivity"
+    if [[ -n "$queries_file" ]]; then
+      printf 'Queries file: %s\n' "$queries_file"
+    else
+      printf 'Queries:\n'
+      printf '  - %s\n' "${inline_queries[@]}"
+    fi
+    [[ "$extract_email" == true ]] && printf 'Public email extraction: enabled\n'
+    if [[ -n "$workspace" ]]; then
+      local planned_run_id="$run_id"
+      [[ -n "$planned_run_id" ]] || planned_run_id="<generated-at-runtime>"
+      if [[ -n "$output_file" ]]; then
+        printf 'Explicit result path: %s\n' "$(absolute_path "$output_file")"
+      else
+        printf 'Workspace run path: %s/%s/results.json\n' "$workspace_runs_dir" "$planned_run_id"
+      fi
+    fi
+    return 0
+  fi
+
+  assert_backend_checkout
+  ensure_backend_image "$auto_build"
+
+  local run_dir
+  local result_name
+  local raw_result_name
+  local raw_result_path
+  local metadata_path
+  if [[ -n "$output_file" ]]; then
+    output_file="$(absolute_path "$output_file")"
+    run_dir="$(dirname "$output_file")"
+    result_name="$(basename "$output_file")"
+    raw_result_name=".${result_name}.raw.jsonl"
+    raw_result_path="$run_dir/$raw_result_name"
+    metadata_path="$run_dir/run.json"
+    run_id="$(basename "$run_dir")"
+    [[ ! -e "$output_file" ]] || die "refusing to overwrite existing result: $output_file"
+  else
+    [[ -n "$run_id" ]] || run_id="$(default_run_id)"
+    validate_run_id "$run_id"
+    if [[ -n "$workspace_runs_dir" ]]; then
+      run_dir="$workspace_runs_dir/$run_id"
+    else
+      run_dir="$RUNS_DIR/$run_id"
+    fi
+    result_name="results.json"
+    output_file="$run_dir/$result_name"
+    raw_result_name=".${result_name}.raw.jsonl"
+    raw_result_path="$run_dir/$raw_result_name"
+    metadata_path="$run_dir/run.json"
+    [[ ! -e "$run_dir" ]] || die "run directory already exists: $run_dir"
+  fi
+
+  mkdir -p "$run_dir"
+  local query_path="$run_dir/queries.txt"
+  if [[ -n "$queries_file" ]]; then
+    sed -e 's/\r$//' -e '/^[[:space:]]*$/d' "$queries_file" > "$query_path"
+  else
+    printf '%s\n' "${inline_queries[@]}" | sed -e '/^[[:space:]]*$/d' > "$query_path"
+  fi
+  [[ -s "$query_path" ]] || die "queries are empty after blank lines were removed"
+
+  local query_json
+  query_json="$(jq -Rsc 'split("\n") | map(select(length > 0))' "$query_path")"
+  local started_at
+  started_at="$(utc_now)"
+  write_run_metadata "$metadata_path" "running" "$started_at" "" "$run_id" \
+    "$query_json" "$language" "$output_file" "$depth" "$concurrency" \
+    "$extract_email" "$inactivity" ""
+
+  local cache_volume="clue-gogole-map-playwright-${BACKEND_REF//[^a-zA-Z0-9]/-}"
+  local -a docker_args=(
+    run --rm
+    -e "PLAYWRIGHT_DRIVER_PATH=$BACKEND_PLAYWRIGHT_DRIVER_PATH"
+    -v "$cache_volume:/opt"
+    -v "$run_dir:/out"
+    "$BACKEND_IMAGE"
+    -input /out/queries.txt
+    -results "/out/$raw_result_name"
+    -json
+    -lang "$language"
+    -depth "$depth"
+    -exit-on-inactivity "$inactivity"
+  )
+  if [[ -n "$concurrency" ]]; then
+    docker_args+=(-c "$concurrency")
+  fi
+  if [[ "$extract_email" == true ]]; then
+    docker_args+=(-email)
+  fi
+
+  printf 'Running %s query/queries through %s\n' \
+    "$(jq 'length' <<< "$query_json")" "$BACKEND_IMAGE"
+  if docker "${docker_args[@]}"; then
+    if ! sanitize_business_results "$raw_result_path" "$output_file"; then
+      local sanitize_error="failed to sanitize raw Google Maps output"
+      write_run_metadata "$metadata_path" "failed" "$started_at" "$(utc_now)" \
+        "$run_id" "$query_json" "$language" "$output_file" "$depth" \
+        "$concurrency" "$extract_email" "$inactivity" "$sanitize_error"
+      die "$sanitize_error; raw file retained for diagnosis: $raw_result_path"
+    fi
+    rm -f "$raw_result_path"
+    write_run_metadata "$metadata_path" "succeeded" "$started_at" "$(utc_now)" \
+      "$run_id" "$query_json" "$language" "$output_file" "$depth" \
+      "$concurrency" "$extract_email" "$inactivity" ""
+    printf 'Results: %s\nMetadata: %s\n' "$output_file" "$metadata_path"
+    return 0
+  fi
+
+  local run_error="Google Maps backend exited with a non-zero status"
+  write_run_metadata "$metadata_path" "failed" "$started_at" "$(utc_now)" \
+    "$run_id" "$query_json" "$language" "$output_file" "$depth" \
+    "$concurrency" "$extract_email" "$inactivity" "$run_error"
+  die "$run_error; see $metadata_path"
+}
+
+upgrade_backend() {
+  [[ $# -eq 3 ]] || die \
+    "usage: clue-gogole-map-cli backend-upgrade <upstream-tag> <runtime-image-digest> <playwright-driver-path>"
+  local target_ref="$1"
+  local runtime_digest="$2"
+  local playwright_driver_path="$3"
+  [[ "$target_ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die \
+    "backend tag must use vMAJOR.MINOR.PATCH, for example v1.9.2"
+  [[ "$runtime_digest" =~ ^sha256:[a-f0-9]{64}$ ]] || die \
+    "runtime image digest must use sha256:<64 lowercase hexadecimal characters>"
+  [[ "$playwright_driver_path" = /* ]] || die \
+    "playwright driver path must be an absolute container path"
+
+  load_lock
+  assert_backend_checkout
+  require_command git
+
+  git -C "$BACKEND_DIR" fetch --depth 1 origin \
+    "refs/tags/$target_ref:refs/tags/$target_ref"
+  git -C "$BACKEND_DIR" checkout --detach "refs/tags/$target_ref"
+
+  local upgraded_commit
+  upgraded_commit="$(backend_actual_commit)"
+  local updated_image="clue-gogole-map-backend:gosom-$target_ref"
+  local updated_runtime_image="gosom/google-maps-scraper@$runtime_digest"
+  local updated_runtime_tag="gosom/google-maps-scraper:$target_ref"
+  local temporary_lock
+  temporary_lock="$(mktemp "$ROOT_DIR/backend.lock.json.XXXXXX")"
+
+  jq \
+    --arg ref "$target_ref" \
+    --arg commit "$upgraded_commit" \
+    --arg image "$updated_image" \
+    --arg runtime_image "$updated_runtime_image" \
+    --arg runtime_tag "$updated_runtime_tag" \
+    --arg playwright_driver_path "$playwright_driver_path" \
+    '.backend.ref = $ref |
+      .backend.commit = $commit |
+      .backend.local_image = $image |
+      .backend.runtime_image = $runtime_image |
+      .backend.runtime_image_tag = $runtime_tag |
+      .backend.playwright_driver_path = $playwright_driver_path' \
+    "$LOCK_FILE" > "$temporary_lock"
+  mv "$temporary_lock" "$LOCK_FILE"
+
+  printf 'Backend upgraded and locked:\n'
+  printf '  ref: %s\n  commit: %s\n  runtime: %s\n  driver path: %s\n  local image: %s\n' \
+    "$target_ref" "$upgraded_commit" "$updated_runtime_image" \
+    "$playwright_driver_path" "$updated_image"
+  printf 'Run build-backend before the next scrape.\n'
+}
+
+main() {
+  local command="${1:-help}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+  polaris_business_assert_command "$command" || exit $?
+
+  case "$command" in
+    help|--help|-h)
+      print_help
+      ;;
+    version)
+      [[ $# -eq 0 ]] || die "version does not accept arguments"
+      print_version
+      ;;
+    backend-status)
+      [[ $# -eq 0 ]] || die "backend-status does not accept arguments"
+      print_backend_status
+      ;;
+    build-backend)
+      build_backend "$@"
+      ;;
+    run)
+      run_backend "$@"
+      ;;
+    sanitize-results)
+      sanitize_results_command "$@"
+      ;;
+    backend-upgrade)
+      upgrade_backend "$@"
+      ;;
+    *)
+      die "unknown command: $command (run clue-gogole-map-cli help)"
+      ;;
+  esac
+}
+
+main "$@"

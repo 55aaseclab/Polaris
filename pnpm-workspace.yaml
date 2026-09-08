@@ -1,6 +1,8 @@
 packages:
   - apps/*
   - packages/*
+  - tools/content-production
+  - tools/product-video
 minimumReleaseAge: 0
 overrides:
   '@clerk/shared': 4.25.6

@@ -1,0 +1,104 @@
+{
+  "schema": "wanghai.promo.video-input",
+  "schema_version": 1,
+  "video_id": "seed-pendant-demo-v1",
+  "product_id": 90001,
+  "platform": "douyin",
+  "purpose": "seed",
+  "locale": "zh",
+  "mode": "stills_motion",
+  "target": {
+    "aspect_ratio": "9:16",
+    "duration_sec": 16,
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "allow_duration_tolerance_sec": 0.5
+  },
+  "script": {
+    "hook": "3s hook: seed pendant",
+    "cta": "Comment for the link",
+    "beats": [
+      {
+        "role": "hook",
+        "text": "3s hook: seed pendant",
+        "duration_sec": 3,
+        "motion": "zoom_in",
+        "image_slot": "near",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      },
+      {
+        "role": "show",
+        "text": "Wear look — remember it",
+        "duration_sec": 5,
+        "motion": "pan_right",
+        "image_slot": "wear",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      },
+      {
+        "role": "proof",
+        "text": "Detail craft close-up",
+        "duration_sec": 5,
+        "motion": "zoom_in",
+        "image_slot": "detail",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      },
+      {
+        "role": "cta",
+        "text": "Comment for the link",
+        "duration_sec": 3,
+        "motion": "static",
+        "image_slot": "near",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      }
+    ]
+  },
+  "compare": null,
+  "captions": {
+    "enabled": true,
+    "burn_in": true,
+    "style": "safe_zone_bottom"
+  },
+  "cover": {
+    "source": "auto",
+    "frame_at_sec": null
+  },
+  "audio": {
+    "bgm": {
+      "path": "产品管理/素材库/audio/fixture-bgm.m4a",
+      "volume": 0.7,
+      "license_note": "fixture/test only"
+    },
+    "tts": null,
+    "voiceover": null,
+    "mix": {
+      "require_bgm": true,
+      "loop_bgm": true,
+      "music_duck_db": null
+    }
+  },
+  "render": {
+    "engine": "ffmpeg_kenburns",
+    "transition": "fade",
+    "fallback": null,
+    "api": null
+  },
+  "options": {
+    "require_ready": true,
+    "require_include_in_external": false,
+    "require_images": [
+      "near",
+      "wear",
+      "detail"
+    ]
+  },
+  "notes": []
+}

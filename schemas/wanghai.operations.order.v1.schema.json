@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.operations.order.v1.schema.json",
+  "title": "wanghai.operations.order v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "order_no",
+    "status",
+    "dates",
+    "customer",
+    "currency",
+    "lines",
+    "totals",
+    "source",
+    "payment",
+    "fulfillment",
+    "reconciliation",
+    "archive",
+    "documents",
+    "timeline",
+    "notes"
+  ],
+  "properties": {
+    "schema": { "const": "wanghai.operations.order" },
+    "schema_version": { "const": 1 },
+    "order_no": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["draft", "quoted", "confirmed", "in_progress", "shipped", "completed", "cancelled"] },
+    "dates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_at", "order_date"],
+      "properties": {
+        "created_at": { "type": ["string", "null"] },
+        "order_date": { "type": ["string", "null"] }
+      }
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "country", "contact"],
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "country": { "type": ["string", "null"] },
+        "contact": { "type": ["string", "null"] }
+      }
+    },
+    "currency": { "type": "string", "minLength": 1 },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["line_no", "product_id", "quantity", "unit_price", "amount", "notes"],
+        "properties": {
+          "line_no": { "type": "integer" },
+          "product_id": { "type": ["string", "integer", "null"] },
+          "quantity": { "type": ["number", "null"] },
+          "unit_price": { "type": ["number", "null"] },
+          "amount": { "type": ["number", "null"] },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items_subtotal", "shipping", "customer_payable"],
+      "properties": {
+        "items_subtotal": { "type": ["number", "null"] },
+        "shipping": { "type": ["number", "null"] },
+        "customer_payable": { "type": ["number", "null"] }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "reference"],
+      "properties": {
+        "channel": { "type": ["string", "null"] },
+        "reference": { "type": ["string", "null"] }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "receivable_amount", "received_amount", "method", "received_at", "exchange_rate", "proof_documents", "notes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "partial", "paid", "refunded", "unverified"] },
+        "receivable_amount": { "type": ["number", "null"] },
+        "received_amount": { "type": ["number", "null"] },
+        "method": { "type": ["string", "null"] },
+        "received_at": { "type": ["string", "null"] },
+        "exchange_rate": { "type": ["number", "null"] },
+        "proof_documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "path", "kind"],
+            "properties": {
+              "label": { "type": "string" },
+              "path": { "type": "string" },
+              "kind": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "fulfillment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "ship_date", "carrier", "channel", "tracking_no", "destination_country", "package_count", "estimated_weight_kg", "actual_weight_kg", "shipping_cost", "documents", "notes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "ready", "shipped", "delivered", "blocked"] },
+        "ship_date": { "type": ["string", "null"] },
+        "carrier": { "type": ["string", "null"] },
+        "channel": { "type": ["string", "null"] },
+        "tracking_no": { "type": ["string", "null"] },
+        "destination_country": { "type": ["string", "null"] },
+        "package_count": { "type": ["number", "null"] },
+        "estimated_weight_kg": { "type": ["number", "null"] },
+        "actual_weight_kg": { "type": ["number", "null"] },
+        "shipping_cost": { "type": ["number", "null"] },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "path", "kind"],
+            "properties": {
+              "label": { "type": "string" },
+              "path": { "type": "string" },
+              "kind": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checked_at", "sales_amount", "received_amount", "invoice_amount", "logistics_cost", "supplier_payable", "difference", "documents", "notes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "matched", "mismatch", "closed"] },
+        "checked_at": { "type": ["string", "null"] },
+        "sales_amount": { "type": ["number", "null"] },
+        "received_amount": { "type": ["number", "null"] },
+        "invoice_amount": { "type": ["number", "null"] },
+        "logistics_cost": { "type": ["number", "null"] },
+        "supplier_payable": { "type": ["number", "null"] },
+        "difference": { "type": ["number", "null"] },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "path", "kind"],
+            "properties": {
+              "label": { "type": "string" },
+              "path": { "type": "string" },
+              "kind": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "archived_at", "location", "documents", "notes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "partial", "complete"] },
+        "archived_at": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "path", "kind"],
+            "properties": {
+              "label": { "type": "string" },
+              "path": { "type": "string" },
+              "kind": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "path", "kind"],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "kind": { "type": "string" }
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "event", "notes"],
+        "properties": {
+          "date": { "type": ["string", "null"] },
+          "event": { "type": "string" },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

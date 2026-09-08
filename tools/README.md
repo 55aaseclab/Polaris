@@ -16,3 +16,19 @@ directory. Its orchestration, DSL declaration, skills, and local CLI live in
 Common tools are implementation code, not a second control plane. Integrated
 execution remains admitted, leased, budgeted, auditable, and recoverable only
 through Polaris durable jobs.
+
+## Business tools
+
+Business implementations migrated from the former Wanghai tool tree live under
+`content-production`, `product-video`, `google-map`, `industry-directories`,
+`logistics-management`, `outreach`, and `social-publish`. Their ownership and
+runtime policy are recorded in `business-tool-inventory.json`.
+
+These tools use `POLARIS_BUSINESS_*` configuration in standalone local mode.
+Integrated mode is fail-closed: writes, external requests, publishing, SMTP,
+and other side effects require a Polaris durable action service. The wrappers
+may still expose version, validation, and other bounded read-only commands.
+
+Some migrated documents intentionally retain `wanghai.*` schema identifiers.
+Those are versioned legacy contracts for existing workspace data, not a
+runtime dependency on the Wanghai repository.

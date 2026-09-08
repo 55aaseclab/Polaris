@@ -1,0 +1,60 @@
+{
+  "schema_version": "polaris.business-tool-inventory.v1",
+  "owner": "polaris",
+  "purpose": "migrated business implementations and their execution boundary",
+  "integrated_execution": "polaris-durable-action-required",
+  "direct_wanghai_dependency": false,
+  "tools": [
+    {
+      "id": "business.content-production",
+      "entrypoint": "tools/content-production/polaris-content-production",
+      "kind": "executable",
+      "capabilities": ["product-catalog", "html-render", "pdf-render"]
+    },
+    {
+      "id": "business.product-video",
+      "entrypoint": "tools/product-video/polaris-product-video",
+      "kind": "executable",
+      "capabilities": ["product-video", "ffmpeg-render", "seedance-adapter"]
+    },
+    {
+      "id": "business.google-map",
+      "entrypoint": "tools/google-map/clue-gogole-map-cli",
+      "kind": "executable",
+      "capabilities": ["public-business-discovery", "result-sanitization"]
+    },
+    {
+      "id": "business.industry-directories",
+      "entrypoint": "tools/industry-directories/clue-industry-directory-cli",
+      "kind": "executable",
+      "capabilities": ["directory-targeted-discovery", "host-filtering"]
+    },
+    {
+      "id": "business.logistics-management",
+      "entrypoint": "tools/logistics-management",
+      "kind": "library",
+      "capabilities": ["carrier-rate-card", "shipment-record", "reconciliation"]
+    },
+    {
+      "id": "business.outreach",
+      "entrypoint": "tools/outreach/clue-outreach",
+      "kind": "executable",
+      "capabilities": ["lead-state", "operator-tasks", "human-approved-outreach"]
+    },
+    {
+      "id": "business.social-publish",
+      "entrypoint": "tools/social-publish/clue-social-publish",
+      "kind": "executable",
+      "capabilities": ["publish-contract", "input-output-validation"]
+    }
+  ],
+  "legacy_contracts": [
+    "wanghai.content-production",
+    "wanghai.promo.catalog",
+    "wanghai.promo.video",
+    "wanghai.operations",
+    "wanghai.crm",
+    "wanghai.seo",
+    "wanghai.workspace"
+  ]
+}

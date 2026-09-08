@@ -1,0 +1,2 @@
+carrier,channel,destination_country,weight_band_kg,base_price,currency,delivery_days,remarks
+Example Carrier,Express Line,US,0-1,0,USD,,

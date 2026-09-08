@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wanghai.local/schemas/wanghai.promo.video-output.v1.schema.json",
+  "title": "wanghai.promo.video-output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "video_id",
+    "status",
+    "generated_at",
+    "input_sha256",
+    "snapshot_sha256",
+    "platform",
+    "purpose",
+    "locale",
+    "mode",
+    "engine",
+    "duration_sec",
+    "aspect_ratio",
+    "product",
+    "compare",
+    "timeline_summary",
+    "artifacts",
+    "publish_hints",
+    "warnings"
+  ],
+  "properties": {
+    "schema": { "const": "wanghai.promo.video-output" },
+    "schema_version": { "const": 1 },
+    "video_id": { "type": "string", "minLength": 2 },
+    "status": { "type": "string", "enum": ["generated"] },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "input_sha256": { "type": "string", "minLength": 1 },
+    "snapshot_sha256": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string" },
+    "purpose": { "type": "string" },
+    "locale": { "type": "string" },
+    "mode": { "type": "string" },
+    "engine": { "type": "string" },
+    "duration_sec": { "type": "number" },
+    "aspect_ratio": { "type": "string" },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_id",
+        "slug",
+        "batch",
+        "name",
+        "source_meta_sha256"
+      ],
+      "properties": {
+        "product_id": { "type": "integer" },
+        "slug": { "type": "string" },
+        "batch": { "type": "string" },
+        "name": { "type": "string" },
+        "source_meta_sha256": { "type": "string" }
+      }
+    },
+    "compare": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["mode", "baseline_label", "other_product_id", "other_label"],
+      "properties": {
+        "mode": { "type": "string" },
+        "baseline_label": { "type": "string" },
+        "other_product_id": { "type": ["integer", "null"] },
+        "other_label": { "type": ["string", "null"] }
+      }
+    },
+    "timeline_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "role", "t_start", "t_end", "text", "source_path"],
+        "properties": {
+          "index": { "type": "integer" },
+          "role": { "type": "string" },
+          "t_start": { "type": "number" },
+          "t_end": { "type": "number" },
+          "text": { "type": "string" },
+          "source_path": { "type": "string" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "video",
+        "cover",
+        "captions_srt",
+        "snapshot",
+        "manifest",
+        "audio_mix"
+      ],
+      "properties": {
+        "video": { "type": "string", "minLength": 1 },
+        "cover": { "type": "string", "minLength": 1 },
+        "captions_srt": { "type": "string", "minLength": 1 },
+        "snapshot": { "type": "string", "minLength": 1 },
+        "manifest": { "type": "string", "minLength": 1 },
+        "audio_mix": { "type": ["string", "null"] }
+      }
+    },
+    "publish_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title_candidate", "caption_lines", "hashtags"],
+      "properties": {
+        "title_candidate": { "type": "string" },
+        "caption_lines": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "hashtags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

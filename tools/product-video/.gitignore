@@ -1,0 +1,3 @@
+node_modules/
+# Fixture workspace is rebuilt by `pnpm run fixture`.
+test/fixtures/workspace/

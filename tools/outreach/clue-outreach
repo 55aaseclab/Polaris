@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# clue-outreach: durable multi-channel customer outreach state machine.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../business-load-env.sh
+source "$ROOT_DIR/../business-load-env.sh"
+exec python3 "$ROOT_DIR/runner.py" "$@"

@@ -1,0 +1,730 @@
+#!/usr/bin/env bash
+# clue-industry-directory-cli: versioned business-directory discovery wrapper.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../business-load-env.sh
+source "$ROOT_DIR/../business-load-env.sh"
+LOCK_FILE="$ROOT_DIR/backend.lock.json"
+VERSION_FILE="$ROOT_DIR/VERSION"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+utc_now() {
+  date -u +'%Y-%m-%dT%H:%M:%SZ'
+}
+
+absolute_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$PWD" "$path"
+  fi
+}
+
+validate_workspace_id() {
+  [[ "$1" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die \
+    "--workspace must match ^[a-z][a-z0-9-]{0,62}$"
+}
+
+validate_run_id() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die \
+    "--run-id may contain only letters, numbers, dot, underscore and hyphen"
+}
+
+collection_scope_for_workspace() {
+  local workspace="$1"
+  local configured_root="$2"
+  local workspaces_root="${configured_root:-${POLARIS_BUSINESS_WORKSPACES_ROOT:-}}"
+  [[ -n "$workspaces_root" ]] || die \
+    "--workspaces-root is required unless POLARIS_BUSINESS_WORKSPACES_ROOT is set"
+  [[ -d "$workspaces_root" ]] || die "workspace root does not exist: $workspaces_root"
+  validate_workspace_id "$workspace"
+  workspaces_root="$(cd -- "$workspaces_root" && pwd -P)"
+  local workspace_path="$workspaces_root/$workspace"
+  local scope="$workspace_path/acquisition/customer-data-collection"
+  [[ -d "$workspace_path" && ! -L "$workspace_path" ]] || die \
+    "workspace does not exist or is a symlink: $workspace_path"
+  [[ -d "$scope" && ! -L "$scope" ]] || die \
+    "customer-data-collection scope does not exist or is a symlink: $scope"
+  printf '%s\n' "$scope"
+}
+
+assert_positive_integer() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer"
+}
+
+load_lock() {
+  [[ -f "$LOCK_FILE" ]] || die "missing backend lock file: $LOCK_FILE"
+  [[ -f "$VERSION_FILE" ]] || die "missing VERSION file: $VERSION_FILE"
+  require_command jq
+  require_command sha256sum
+
+  CLI_NAME="$(jq -er '.cli.name' "$LOCK_FILE")"
+  LOCKED_CLI_VERSION="$(jq -er '.cli.version' "$LOCK_FILE")"
+  WEB_SEARCH_PATH_RELATIVE="$(jq -er '.backend.path' "$LOCK_FILE")"
+  WEB_SEARCH_VERSION="$(jq -er '.backend.version' "$LOCK_FILE")"
+  WEB_SEARCH_LOCK_SHA256="$(jq -er '.backend.backend_lock_sha256' "$LOCK_FILE")"
+  SEARCH_BACKEND_REPOSITORY="$(jq -er '.backend.search_backend.repository' "$LOCK_FILE")"
+  SEARCH_BACKEND_COMMIT="$(jq -er '.backend.search_backend.commit' "$LOCK_FILE")"
+  SEARCH_BACKEND_IMAGE="$(jq -er '.backend.search_backend.runtime_image' "$LOCK_FILE")"
+  DEFAULT_ENGINES="$(jq -er '.search_defaults.engines | join(",")' "$LOCK_FILE")"
+  DEFAULT_RESULT_LIMIT="$(jq -er '.search_defaults.result_limit_per_directory_task' "$LOCK_FILE")"
+  WEB_SEARCH_DIR="$ROOT_DIR/$WEB_SEARCH_PATH_RELATIVE"
+  WEB_SEARCH_CLI="$WEB_SEARCH_DIR/clue-web-search-cli"
+  WEB_SEARCH_LOCK_FILE="$WEB_SEARCH_DIR/backend.lock.json"
+  CLI_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+
+  [[ -n "$CLI_VERSION" ]] || die "VERSION is empty"
+  [[ "$CLI_VERSION" == "$LOCKED_CLI_VERSION" ]] || die \
+    "VERSION ($CLI_VERSION) and backend.lock.json ($LOCKED_CLI_VERSION) differ"
+  [[ -x "$WEB_SEARCH_CLI" ]] || die "dependent CLI is missing or not executable: $WEB_SEARCH_CLI"
+  [[ -f "$WEB_SEARCH_LOCK_FILE" ]] || die "dependent lock file is missing: $WEB_SEARCH_LOCK_FILE"
+
+  local actual_lock_sha256
+  actual_lock_sha256="$(sha256sum "$WEB_SEARCH_LOCK_FILE" | awk '{print $1}')"
+  [[ "$actual_lock_sha256" == "$WEB_SEARCH_LOCK_SHA256" ]] || die \
+    "dependent web-search lock hash differs; update this wrapper's lock before running"
+}
+
+check_dependency_version() {
+  local actual_version
+  actual_version="$("$WEB_SEARCH_CLI" version | jq -er '.cli.version')"
+  [[ "$actual_version" == "$WEB_SEARCH_VERSION" ]] || die \
+    "dependent CLI version is $actual_version; expected $WEB_SEARCH_VERSION"
+}
+
+prepare_domains() {
+  local supplied_domains="$1"
+  local compact_domains="${supplied_domains//[[:space:]]/}"
+  local -a values=()
+  local -a accepted=()
+  local domain
+
+  IFS=',' read -r -a values <<< "$compact_domains"
+  [[ "${#values[@]}" -gt 0 ]] || die "at least one directory domain is required"
+
+  for domain in "${values[@]}"; do
+    domain="${domain,,}"
+    [[ "$domain" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || die \
+      "invalid directory domain: $domain"
+    accepted+=("$domain")
+  done
+
+  DIRECTORY_DOMAINS_JSON="$(printf '%s\n' "${accepted[@]}" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+}
+
+directory_domains_from_input() {
+  local input_path="$1"
+
+  jq -er '
+    [
+      .sources[]?
+      | select(.source_type == "industry_directories")
+      | .directory_domains?
+      | if . == null then empty
+        elif type == "array" then .[]
+        else error("industry_directories.directory_domains must be an array")
+        end
+    ]
+    | unique
+    | join(",")
+  ' "$input_path"
+}
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  clue-industry-directory-cli version
+  clue-industry-directory-cli backend-status
+  clue-industry-directory-cli batch (--input <customer-input.json> --output <run-directory> | --workspace <id> --run-id <id>) [options]
+  clue-industry-directory-cli finalize (--output <run-directory> | --workspace <id> --run-id <id>)
+
+Commands:
+  version         Print the wrapper and locked web-search dependency versions.
+  backend-status  Verify the dependent web-search lock and show its backend status.
+  batch           Execute every source_type=industry_directories task through
+                  directory-targeted web searches and retain matching listing URLs.
+  finalize        Rebuild wrapper outputs from a completed web-search child run
+                  without sending any additional search requests.
+
+Batch options:
+  --input <file>                 Collection input JSON containing sources[].
+  --output <directory>           New directory for the wrapper and search outputs.
+  --workspace <id>               Use <root>/<id>/acquisition/customer-data-collection.
+  --workspaces-root <dir>        Override POLARIS_BUSINESS_WORKSPACES_ROOT for --workspace.
+  --run-id <id>                  With --workspace and no --output, write runs/<id>/.
+  --directory-domains <csv>      Directory publisher hostnames. Overrides the
+                                 source's directory_domains input field.
+  --engines <csv>                SearXNG engines; default: google,duckduckgo,bing.
+  --result-limit <count>         Retained listing results per directory task; default: 10.
+  --no-auto-start                Require the local SearXNG server to be running.
+  --keep-server                  Do not stop a server started by this batch.
+  --help                         Print this help.
+
+The output is a listing-candidate discovery set, not verified customer leads.
+EOF
+}
+
+print_version() {
+  load_lock
+  jq -n \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg backend_name "clue-web-search-cli" \
+    --arg backend_version "$WEB_SEARCH_VERSION" \
+    --arg backend_lock_sha256 "$WEB_SEARCH_LOCK_SHA256" \
+    --arg search_repository "$SEARCH_BACKEND_REPOSITORY" \
+    --arg search_commit "$SEARCH_BACKEND_COMMIT" \
+    --arg search_runtime_image "$SEARCH_BACKEND_IMAGE" \
+    '{
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        name: $backend_name,
+        version: $backend_version,
+        lock_sha256: $backend_lock_sha256,
+        search_backend: {
+          repository: $search_repository,
+          commit: $search_commit,
+          runtime_image: $search_runtime_image
+        }
+      },
+      directory_domains: {
+        source: "input directory_domains or explicit --directory-domains",
+        required: true
+      }
+    }'
+}
+
+print_backend_status() {
+  load_lock
+  check_dependency_version
+
+  local dependency_status
+  dependency_status="$("$WEB_SEARCH_CLI" backend-status)"
+  jq -n \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg dependency_name "clue-web-search-cli" \
+    --arg dependency_version "$WEB_SEARCH_VERSION" \
+    --arg dependency_lock_sha256 "$WEB_SEARCH_LOCK_SHA256" \
+    --argjson dependency_status "$dependency_status" \
+    '{
+      cli: {name: $cli_name, version: $cli_version},
+      dependency: {
+        name: $dependency_name,
+        expected_version: $dependency_version,
+        expected_lock_sha256: $dependency_lock_sha256,
+        status: $dependency_status
+      }
+    }'
+}
+
+write_execution_log() {
+  local log_path="$1"
+  local input_path="$2"
+  local output_directory="$3"
+  local domains="$4"
+  local engines="$5"
+  local result_limit="$6"
+  local task_count="$7"
+
+  printf '# 行业企业目录发现：执行日志\n\n' > "$log_path"
+  printf '本次执行以目录域名为网页搜索关键词，再严格按结果 URL 主机名筛选公开企业目录的列表页；不进行目录翻页抓取，也不把结果当作已核验客户。\n\n' >> "$log_path"
+  printf '## 运行命令\n\n```sh\n' >> "$log_path"
+  printf '%s batch --input %q --output %q --directory-domains %q --engines %q --result-limit %q\n' \
+    "$CLI_NAME" "$input_path" "$output_directory" "$domains" "$engines" "$result_limit" >> "$log_path"
+  printf '```\n\n## 固定依赖\n\n' >> "$log_path"
+  printf -- '- CLI：`%s` `%s`\n' "$CLI_NAME" "$CLI_VERSION" >> "$log_path"
+  printf -- '- 网页搜索封装：`clue-web-search-cli` `%s`\n' "$WEB_SEARCH_VERSION" >> "$log_path"
+  printf -- '- SearXNG 源码：`%s` `%s`\n' "$SEARCH_BACKEND_REPOSITORY" "$SEARCH_BACKEND_COMMIT" >> "$log_path"
+  printf -- '- 固定镜像：`%s`\n' "$SEARCH_BACKEND_IMAGE" >> "$log_path"
+  printf -- '- 目录域名：`%s`\n' "$domains" >> "$log_path"
+  printf -- '- 原始目录任务数：`%s`\n' "$task_count" >> "$log_path"
+  printf -- '- 每个目录任务最多保留：`%s` 条结果\n' "$result_limit" >> "$log_path"
+  printf '\n## 结果\n\n' >> "$log_path"
+}
+
+append_execution_summary() {
+  local log_path="$1"
+  local wrapper_status="$2"
+  local candidate_count="$3"
+  local web_status="$4"
+
+  printf -- '- 网页搜索子运行状态：`%s`\n' "$web_status" >> "$log_path"
+  printf -- '- 匹配目录域名的公开列表页候选：`%s`\n' "$candidate_count" >> "$log_path"
+  printf -- '- 包装器状态：`%s`\n' "$wrapper_status" >> "$log_path"
+}
+
+write_wrapper_command_log() {
+  local output_path="$1"
+  local input_path="$2"
+  local output_directory="$3"
+  local engines="$4"
+  local result_limit="$5"
+  local auto_start="$6"
+  local keep_server="$7"
+
+  jq -n \
+    --arg executed_at "$(utc_now)" \
+    --arg tool "$WEB_SEARCH_CLI" \
+    --arg action batch \
+    --arg input "$input_path" \
+    --arg output "$output_directory/web-search" \
+    --arg engines "$engines" \
+    --argjson result_limit "$result_limit" \
+    --argjson auto_start "$auto_start" \
+    --argjson keep_server "$keep_server" \
+    '{
+      executed_at: $executed_at,
+      tool: $tool,
+      action: $action,
+      input: $input,
+      output: $output,
+      engines: ($engines | split(",")),
+      result_limit: $result_limit,
+      auto_start: $auto_start,
+      keep_server: $keep_server
+    }' > "$output_path"
+}
+
+generate_web_search_input() {
+  local input_path="$1"
+  local generated_path="$2"
+
+  jq \
+    --argjson domains "$DIRECTORY_DOMAINS_JSON" \
+    '{
+      collection_id,
+      generated_by: "clue-industry-directory-cli",
+      generated_at: (now | todateiso8601),
+      sources: [
+        {
+          source_type: "web_search",
+          purpose: "Generated directory-targeted listing discovery tasks; result URLs are host-filtered by the wrapper.",
+          tasks: [
+            (.sources[] | select(.source_type == "industry_directories") | .tasks[]) as $task
+            | $domains[] as $domain
+            | $task + {
+                task_id: ($task.task_id + "--" + ($domain | gsub("[^A-Za-z0-9]+"; "-"))),
+                parent_task_id: $task.task_id,
+                directory_domain: $domain,
+                query: ($domain + " " + $task.query)
+              }
+          ]
+        }
+      ]
+    }' "$input_path" > "$generated_path"
+}
+
+write_directory_candidates() {
+  local generated_input="$1"
+  local web_results="$2"
+  local output_path="$3"
+
+  jq -n \
+    --slurpfile generated "$generated_input" \
+    --slurpfile web_results "$web_results" \
+    --arg generated_at "$(utc_now)" \
+    '(
+      [
+        $generated[0].sources[0].tasks[] as $planned_task
+        | $web_results[0].task_results[]
+        | select(.task_id == $planned_task.task_id and .status == "succeeded")
+        | . as $search_task
+        | $search_task.results[]
+        | . as $result
+        | ($result.url | try (capture("^https?://(?<host>[^/:?#]+)"; "i").host | ascii_downcase) catch "") as $host
+        | select($host == $planned_task.directory_domain or ($host | endswith("." + $planned_task.directory_domain)))
+        | {
+            parent_task_id: $planned_task.parent_task_id,
+            directory_task_id: $planned_task.task_id,
+            market: ($planned_task.market // null),
+            city: ($planned_task.city // null),
+            locale: ($planned_task.locale // null),
+            buyer_type_ids: $planned_task.buyer_type_ids,
+            directory_domain: $planned_task.directory_domain,
+            directory_listing_url: $result.url,
+            listing_title: $result.title,
+            listing_snippet: $result.content,
+            discovered_at: $search_task.searched_at,
+            source_trace: {
+              source_type: "industry_directories",
+              discovery_method: "directory_targeted_web_search",
+              directory_domain: $planned_task.directory_domain,
+              directory_listing_url: $result.url,
+              query: $search_task.query,
+              search_engines: $result.engines,
+              searched_at: $search_task.searched_at
+            }
+          }
+      ]
+      | unique_by([.parent_task_id, .directory_listing_url])
+    ) as $candidates
+    | {
+        schema_version: "clue.customer-data-collection.industry-directory-candidates.v1",
+        collection_id: $generated[0].collection_id,
+        source_type: "industry_directories",
+        generated_at: $generated_at,
+        discovery_method: "directory_targeted_web_search",
+        directory_domains: ($generated[0].sources[0].tasks | map(.directory_domain) | unique),
+        candidate_count: ($candidates | length),
+        candidates: $candidates
+      }' > "$output_path"
+}
+
+write_run_metadata() {
+  local output_path="$1"
+  local generated_input="$2"
+  local web_run="$3"
+  local candidates_path="$4"
+  local started_at="$5"
+  local finished_at="$6"
+  local wrapper_status="$7"
+  local web_exit_code="$8"
+
+  jq -n \
+    --slurpfile generated "$generated_input" \
+    --slurpfile web_run "$web_run" \
+    --slurpfile candidates "$candidates_path" \
+    --arg started_at "$started_at" \
+    --arg finished_at "$finished_at" \
+    --arg status "$wrapper_status" \
+    --arg cli_name "$CLI_NAME" \
+    --arg cli_version "$CLI_VERSION" \
+    --arg dependency_name "clue-web-search-cli" \
+    --arg dependency_version "$WEB_SEARCH_VERSION" \
+    --arg dependency_lock_sha256 "$WEB_SEARCH_LOCK_SHA256" \
+    --argjson web_exit_code "$web_exit_code" \
+    '{
+      schema_version: "clue-industry-directory-cli.run.v1",
+      collection_id: $generated[0].collection_id,
+      status: $status,
+      started_at: $started_at,
+      finished_at: $finished_at,
+      cli: {name: $cli_name, version: $cli_version},
+      backend: {
+        name: $dependency_name,
+        version: $dependency_version,
+        lock_sha256: $dependency_lock_sha256
+      },
+      generated_directory_task_count: ($generated[0].sources[0].tasks | length),
+      directory_domains: ($generated[0].sources[0].tasks | map(.directory_domain) | unique),
+      listing_candidate_count: $candidates[0].candidate_count,
+      delegated_web_search_exit_code: $web_exit_code,
+      delegated_web_search_run: {
+        status: $web_run[0].status,
+        task_counts: $web_run[0].task_counts,
+        path: "web-search/run.json"
+      }
+    }' > "$output_path"
+}
+
+finalize_output() {
+  local output_directory="$1"
+  local generated_input="$2"
+  local web_run="$3"
+  local candidates_path="$4"
+  local execution_log="$5"
+  local started_at="$6"
+  local web_exit_code="$7"
+
+  write_directory_candidates "$generated_input" "$output_directory/web-search/results.json" "$candidates_path"
+
+  local web_status candidate_count wrapper_status
+  web_status="$(jq -er '.status' "$web_run")"
+  candidate_count="$(jq -er '.candidate_count' "$candidates_path")"
+  if [[ "$web_exit_code" -eq 0 ]]; then
+    wrapper_status="succeeded"
+  elif [[ "$web_status" == "failed" ]]; then
+    wrapper_status="failed"
+  else
+    wrapper_status="completed_with_errors"
+  fi
+
+  write_run_metadata "$output_directory/run.json" "$generated_input" "$web_run" \
+    "$candidates_path" "$started_at" "$(utc_now)" "$wrapper_status" "$web_exit_code"
+  append_execution_summary "$execution_log" "$wrapper_status" "$candidate_count" "$web_status"
+}
+
+finalize_existing_run() {
+  local output_directory=""
+  local workspace=""
+  local workspaces_root=""
+  local run_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --output)
+        [[ $# -ge 2 ]] || die "--output requires a directory path"
+        output_directory="$2"
+        shift 2
+        ;;
+      --workspace)
+        [[ $# -ge 2 ]] || die "--workspace requires an identifier"
+        workspace="$2"
+        shift 2
+        ;;
+      --workspaces-root)
+        [[ $# -ge 2 ]] || die "--workspaces-root requires a directory path"
+        workspaces_root="$2"
+        shift 2
+        ;;
+      --run-id)
+        [[ $# -ge 2 ]] || die "--run-id requires an identifier"
+        run_id="$2"
+        shift 2
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown finalize option: $1"
+        ;;
+    esac
+  done
+
+  [[ -z "$workspaces_root" || -n "$workspace" ]] || die \
+    "--workspaces-root requires --workspace"
+  [[ -z "$run_id" || -n "$workspace" ]] || die "--run-id requires --workspace"
+  [[ -z "$run_id" || -z "$output_directory" ]] || die \
+    "--output and --run-id cannot be used together"
+  if [[ -n "$workspace" && -z "$output_directory" ]]; then
+    [[ -n "$run_id" ]] || die "--run-id is required with --workspace when --output is omitted"
+    validate_run_id "$run_id"
+    output_directory="$(collection_scope_for_workspace "$workspace" "$workspaces_root")/runs/$run_id"
+  fi
+  [[ -n "$output_directory" ]] || die "finalize requires --output unless --workspace is used with --run-id"
+  output_directory="$(absolute_path "$output_directory")"
+  load_lock
+  check_dependency_version
+
+  local generated_input="$output_directory/generated-web-search-input.json"
+  local web_output="$output_directory/web-search"
+  local web_run="$web_output/run.json"
+  local web_results="$web_output/results.json"
+  local candidates_path="$output_directory/directory-candidates.json"
+  local execution_log="$output_directory/execution-log.md"
+  [[ -f "$generated_input" ]] || die "generated input is missing: $generated_input"
+  [[ -f "$web_run" ]] || die "web-search metadata is missing: $web_run"
+  [[ -f "$web_results" ]] || die "web-search results are missing: $web_results"
+  [[ -f "$execution_log" ]] || die "execution log is missing: $execution_log"
+  if [[ -e "$candidates_path" ]]; then
+    # Accept prior output during the one-way generic-schema migration.
+    if [[ -s "$candidates_path" ]] && jq -e \
+      '.schema_version == "clue.customer-data-collection.industry-directory-candidates.v1" or .schema_version == "songjin.customer-data-collection.industry-directory-candidates.v1"' \
+      "$candidates_path" >/dev/null 2>&1; then
+      die "directory candidates already exist: $candidates_path"
+    fi
+    rm -f "$candidates_path"
+  fi
+
+  printf '\n## 恢复命令\n\n```sh\n' >> "$execution_log"
+  printf '%s finalize --output %q\n' "$CLI_NAME" "$output_directory" >> "$execution_log"
+  printf '```\n\n' >> "$execution_log"
+  finalize_output "$output_directory" "$generated_input" "$web_run" "$candidates_path" \
+    "$execution_log" "$(jq -er '.started_at' "$web_run")" 0
+}
+
+run_batch() {
+  local input_path=""
+  local output_directory=""
+  local workspace=""
+  local workspaces_root=""
+  local run_id=""
+  local directory_domains=""
+  local engines=""
+  local result_limit=""
+  local auto_start=true
+  local keep_server=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input)
+        [[ $# -ge 2 ]] || die "--input requires a file path"
+        input_path="$2"
+        shift 2
+        ;;
+      --output)
+        [[ $# -ge 2 ]] || die "--output requires a directory path"
+        output_directory="$2"
+        shift 2
+        ;;
+      --workspace)
+        [[ $# -ge 2 ]] || die "--workspace requires an identifier"
+        workspace="$2"
+        shift 2
+        ;;
+      --workspaces-root)
+        [[ $# -ge 2 ]] || die "--workspaces-root requires a directory path"
+        workspaces_root="$2"
+        shift 2
+        ;;
+      --run-id)
+        [[ $# -ge 2 ]] || die "--run-id requires an identifier"
+        run_id="$2"
+        shift 2
+        ;;
+      --directory-domains)
+        [[ $# -ge 2 ]] || die "--directory-domains requires a comma-separated hostname list"
+        directory_domains="$2"
+        shift 2
+        ;;
+      --engines)
+        [[ $# -ge 2 ]] || die "--engines requires a comma-separated list"
+        engines="$2"
+        shift 2
+        ;;
+      --result-limit)
+        [[ $# -ge 2 ]] || die "--result-limit requires a positive integer"
+        result_limit="$2"
+        shift 2
+        ;;
+      --no-auto-start)
+        auto_start=false
+        shift
+        ;;
+      --keep-server)
+        keep_server=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        return 0
+        ;;
+      *)
+        die "unknown batch option: $1"
+        ;;
+    esac
+  done
+
+  [[ -z "$workspaces_root" || -n "$workspace" ]] || die \
+    "--workspaces-root requires --workspace"
+  [[ -z "$run_id" || -n "$workspace" ]] || die "--run-id requires --workspace"
+  [[ -z "$run_id" || -z "$output_directory" ]] || die \
+    "--output and --run-id cannot be used together"
+  if [[ -n "$workspace" ]]; then
+    local workspace_scope
+    workspace_scope="$(collection_scope_for_workspace "$workspace" "$workspaces_root")"
+    [[ -n "$input_path" ]] || input_path="$workspace_scope/inputs/input.json"
+    if [[ -z "$output_directory" ]]; then
+      [[ -n "$run_id" ]] || die "--run-id is required with --workspace when --output is omitted"
+      validate_run_id "$run_id"
+      output_directory="$workspace_scope/runs/$run_id"
+    fi
+  fi
+  [[ -n "$input_path" ]] || die "batch requires --input unless --workspace is set"
+  [[ -n "$output_directory" ]] || die "batch requires --output unless --workspace is used with --run-id"
+  input_path="$(absolute_path "$input_path")"
+  output_directory="$(absolute_path "$output_directory")"
+  [[ -f "$input_path" ]] || die "input file not found: $input_path"
+  [[ ! -e "$output_directory" ]] || die "output directory already exists: $output_directory"
+  jq empty "$input_path"
+
+  load_lock
+  check_dependency_version
+  [[ -n "$engines" ]] || engines="$DEFAULT_ENGINES"
+  [[ -n "$result_limit" ]] || result_limit="$DEFAULT_RESULT_LIMIT"
+  if [[ -z "$directory_domains" ]]; then
+    directory_domains="$(directory_domains_from_input "$input_path")"
+  fi
+  [[ -n "$directory_domains" ]] || die \
+    "set industry_directories.directory_domains in input.json or pass --directory-domains"
+  assert_positive_integer --result-limit "$result_limit"
+  [[ "$engines" =~ ^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$ ]] || die \
+    "--engines must be comma-separated engine names"
+  prepare_domains "$directory_domains"
+
+  local source_task_count
+  source_task_count="$(jq '[.sources[] | select(.source_type == "industry_directories") | .tasks[]] | length' "$input_path")"
+  [[ "$source_task_count" -gt 0 ]] || die "input has no source_type=industry_directories tasks"
+
+  mkdir -p "$output_directory"
+  local generated_input="$output_directory/generated-web-search-input.json"
+  local execution_log="$output_directory/execution-log.md"
+  local wrapper_commands="$output_directory/commands.jsonl"
+  local web_output="$output_directory/web-search"
+  local candidates_path="$output_directory/directory-candidates.json"
+  local started_at
+  started_at="$(utc_now)"
+
+  generate_web_search_input "$input_path" "$generated_input"
+  write_execution_log "$execution_log" "$input_path" "$output_directory" \
+    "$(jq -r 'join(",")' <<< "$DIRECTORY_DOMAINS_JSON")" "$engines" "$result_limit" "$source_task_count"
+  write_wrapper_command_log "$wrapper_commands" "$generated_input" "$output_directory" \
+    "$engines" "$result_limit" "$auto_start" "$keep_server"
+
+  local -a web_args=(batch --input "$generated_input" --output "$web_output" --engines "$engines" --result-limit "$result_limit")
+  if [[ "$auto_start" == false ]]; then
+    web_args+=(--no-auto-start)
+  fi
+  if [[ "$keep_server" == true ]]; then
+    web_args+=(--keep-server)
+  fi
+
+  local web_exit_code=0
+  if "$WEB_SEARCH_CLI" "${web_args[@]}"; then
+    web_exit_code=0
+  else
+    web_exit_code=$?
+  fi
+
+  [[ -f "$web_output/results.json" ]] || die \
+    "dependent web-search run produced no results.json; inspect $web_output"
+  [[ -f "$web_output/run.json" ]] || die \
+    "dependent web-search run produced no run.json; inspect $web_output"
+
+  finalize_output "$output_directory" "$generated_input" "$web_output/run.json" "$candidates_path" \
+    "$execution_log" "$started_at" "$web_exit_code"
+
+  if [[ "$web_exit_code" -ne 0 ]]; then
+    return "$web_exit_code"
+  fi
+}
+
+main() {
+  [[ $# -gt 0 ]] || {
+    print_help
+    exit 1
+  }
+
+  local command="$1"
+  shift
+  polaris_business_assert_command "$command" || exit $?
+  case "$command" in
+    version)
+      [[ $# -eq 0 ]] || die "version accepts no options"
+      print_version
+      ;;
+    backend-status)
+      [[ $# -eq 0 ]] || die "backend-status accepts no options"
+      print_backend_status
+      ;;
+    batch)
+      run_batch "$@"
+      ;;
+    finalize)
+      finalize_existing_run "$@"
+      ;;
+    --help|-h|help)
+      print_help
+      ;;
+    *)
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

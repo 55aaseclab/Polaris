@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schemas/wanghai.promo.catalog-input.v1.schema.json",
+  "title": "wanghai.promo.catalog-input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "catalog_id",
+    "title",
+    "subtitle",
+    "locale",
+    "market",
+    "template_id",
+    "page_size",
+    "orientation",
+    "selection",
+    "price_policy",
+    "include_sections",
+    "brand",
+    "options",
+    "notes"
+  ],
+  "properties": {
+    "schema": { "const": "wanghai.promo.catalog-input" },
+    "schema_version": { "const": 1 },
+    "catalog_id": { "type": "string", "minLength": 2 },
+    "title": { "type": "string", "minLength": 1 },
+    "subtitle": { "type": ["string", "null"] },
+    "locale": { "type": "string", "enum": ["zh", "en"] },
+    "market": { "type": "string", "minLength": 1 },
+    "template_id": {
+      "type": "string",
+      "enum": ["single-product-page.v1"]
+    },
+    "page_size": { "type": "string", "enum": ["A4"] },
+    "orientation": { "type": "string", "enum": ["portrait"] },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "product_ids", "batch", "filters"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["explicit", "batch", "external"] },
+        "product_ids": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "batch": { "type": ["string", "null"] },
+        "filters": { "type": ["object", "null"] }
+      }
+    },
+    "price_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "show_currency", "hide_if_null", "label"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["list_price", "promo_price", "hide", "inquiry"]
+        },
+        "show_currency": { "type": "boolean" },
+        "hide_if_null": { "type": "boolean" },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "include_sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cover",
+        "toc",
+        "brand_intro",
+        "product_pages",
+        "packaging",
+        "contact"
+      ],
+      "properties": {
+        "cover": { "type": "boolean" },
+        "toc": { "type": "boolean" },
+        "brand_intro": { "type": "boolean" },
+        "product_pages": { "type": "boolean" },
+        "packaging": { "type": "boolean" },
+        "contact": { "type": "boolean" }
+      }
+    },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "tagline", "logo_path", "contact_lines"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tagline": { "type": ["string", "null"] },
+        "logo_path": { "type": ["string", "null"] },
+        "contact_lines": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_ready",
+        "require_include_in_external",
+        "require_images",
+        "max_selling_points",
+        "image_slots_on_page"
+      ],
+      "properties": {
+        "require_ready": { "type": "boolean" },
+        "require_include_in_external": { "type": "boolean" },
+        "require_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["near", "wear", "detail"]
+          }
+        },
+        "max_selling_points": { "type": "integer" },
+        "image_slots_on_page": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["near", "wear", "detail"]
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

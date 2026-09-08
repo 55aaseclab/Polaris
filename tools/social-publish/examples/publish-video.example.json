@@ -1,0 +1,31 @@
+{
+  "schema_version": "clue.social-publish.input.v1",
+  "publish_id": "demo-douyin-video-001",
+  "platform": "douyin",
+  "account_id": "main",
+  "content_kind": "video",
+  "title": "示例标题",
+  "body": "示例简介 #demo",
+  "tags": ["demo"],
+  "media": [
+    {
+      "path": "videos/demo.mp4",
+      "media_kind": "video",
+      "mime_type": "video/mp4",
+      "cover_path": null
+    }
+  ],
+  "publish": {
+    "mode": "immediate",
+    "schedule_at": null,
+    "visibility": "platform_default",
+    "dry_run": true
+  },
+  "platform_options": {},
+  "workspace_id": null,
+  "client": {
+    "name": "example",
+    "version": "0.0.0",
+    "request_id": "req-demo-001"
+  }
+}

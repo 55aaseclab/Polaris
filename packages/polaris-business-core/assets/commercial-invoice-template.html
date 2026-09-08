@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Commercial Invoice</title>
+  <style>
+    {{DOC_FONT_FACE}}
+    @page { size: A4; margin: 8mm; }
+    body {
+      margin: 0;
+      font-family: "WanghaiDocSans", sans-serif;
+      color: #000;
+      font-size: 12px;
+    }
+    .sheet { width: calc(100% - 2px); padding-right: 2px; box-sizing: border-box; }
+    .header-block { margin-bottom: 2px; white-space: pre-line; text-align: left; font-weight: 700; line-height: 1.35; min-height: 83px; }
+    .title { margin: 4px 0 10px; font-size: 24px; font-weight: 700; letter-spacing: 0; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #000; }
+    td, th { border: 1px solid #000; padding: 5px 6px; vertical-align: middle; }
+    th { font-weight: 700; text-align: center; background: #fff; }
+    .label { font-weight: 700; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .no-border { border: none !important; }
+    .meta-table td { padding-top: 7px; padding-bottom: 7px; }
+    .goods-table th { padding-top: 10px; padding-bottom: 10px; }
+    .goods-table .trade-term-row td { padding-top: 6px; padding-bottom: 6px; }
+    .goods-table .item-row td { padding-top: 10px; padding-bottom: 10px; }
+    .goods-table .blank-item-row td { padding-top: 10px; padding-bottom: 10px; }
+    .goods-table .total-row td { padding-top: 8px; padding-bottom: 8px; }
+    table td:last-child, table th:last-child { border-right: 1px solid #000; }
+    .note-row td { border-top: none; border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: 1px solid #000; }
+    .bank-row td { border-top: none; border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: 1px solid #000; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header-block">{{SELLER_HEADER}}</div>
+    <div class="title">COMMERCIAL   INVOICE</div>
+
+    <table class="meta-table">
+      <tr>
+        <td colspan="4" class="label"> CUSTOMER:</td>
+        <td colspan="3" class="label">INVOICE NO.:</td>
+      </tr>
+      <tr>
+        <td colspan="4" rowspan="3" class="customer-block">{{CUSTOMER}}</td>
+        <td colspan="3">{{DOC_NO}}</td>
+      </tr>
+      <tr>
+        <td colspan="3" class="label">DATE</td>
+      </tr>
+      <tr>
+        <td colspan="3">{{DOC_DATE}}</td>
+      </tr>
+      <tr>
+        <td colspan="4" class="label">PORT OF LOADING: </td>
+        <td colspan="3" class="label">PORT OF DISCHARGE:</td>
+      </tr>
+      <tr>
+        <td colspan="4">{{PORT_LOADING}}</td>
+        <td colspan="3">{{PORT_DISCHARGE}}</td>
+      </tr>
+    </table>
+
+    <table class="goods-table">
+      <thead>
+        <tr class="trade-term-row">
+          <th style="width: 8%;">SR. NO.</th>
+          <th style="width: 38%;">DESCRIPTION OF GOODS    AND PACKAGE</th>
+          <th style="width: 12%;">SIZE</th>
+          <th style="width: 12%;">QUANTITY</th>
+          <th style="width: 12%;">WEIGHT<br>（KGS）</th>
+          <th style="width: 9%;">{{UNIT_PRICE_HEADER}}</th>
+          <th style="width: 9%;">AMOUNT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ITEM_ROWS}}
+        {{SUMMARY_ROWS}}
+      </tbody>
+    </table>
+
+    <table>
+      <tr class="note-row"><td colspan="7" class="label">{{TOTAL_WORDS_LABEL}}: {{TOTAL_WORDS}}</td></tr>
+      {{SHIPPING_NOTE_ROW}}
+      <tr class="bank-row"><td colspan="7" class="label">BANK INFORMATION:</td></tr>
+      <tr class="bank-row"><td colspan="7">BENEFICIARY:    {{BENEFICIARY}}</td></tr>
+      <tr class="bank-row"><td colspan="7">BENEFICIARY ADDRESS: {{BENEFICIARY_ADDRESS}}</td></tr>
+      <tr class="bank-row"><td colspan="7">ACCOUNT NO.:   {{ACCOUNT_NO}}</td></tr>
+      <tr class="bank-row"><td colspan="7">BANK NAME:      {{BANK_NAME}}</td></tr>
+      <tr class="bank-row"><td colspan="7">BANK ADDRESS:    {{BANK_ADDRESS}}</td></tr>
+      <tr class="bank-row"><td colspan="7">SWIFT CODE :   {{SWIFT_CODE}}</td></tr>
+    </table>
+  </div>
+</body>
+</html>

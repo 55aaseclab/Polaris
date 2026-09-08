@@ -1,0 +1,24 @@
+{
+  "schema_version": "clue.tool-backend-lock.v1",
+  "tool": {
+    "name": "clue-outreach",
+    "version": "0.1.0"
+  },
+  "runtime": {
+    "name": "Python standard library",
+    "minimum_version": "3.11",
+    "external_dependencies": []
+  },
+  "channels": {
+    "email": {
+      "send": "SMTP (optional; dry-run default)",
+      "receive": "IMAP sync planned; reply/bounce can be logged manually"
+    },
+    "manual": {
+      "phone": "operator-logged",
+      "linkedin_message": "operator-logged",
+      "instagram_dm": "operator-logged",
+      "contact_form": "operator-logged"
+    }
+  }
+}

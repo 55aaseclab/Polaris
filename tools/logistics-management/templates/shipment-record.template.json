@@ -1,0 +1,17 @@
+{
+  "schema": "wanghai.tools.logistics.shipment-record",
+  "schema_version": 1,
+  "order_no": "",
+  "status": "pending",
+  "ship_date": null,
+  "carrier": "",
+  "channel": "",
+  "tracking_no": "",
+  "destination_country": "",
+  "package_count": 1,
+  "estimated_weight_kg": null,
+  "actual_weight_kg": null,
+  "shipping_cost": null,
+  "documents": [],
+  "notes": []
+}

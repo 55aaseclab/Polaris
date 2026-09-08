@@ -1,0 +1,98 @@
+{
+  "schema": "wanghai.promo.video-input",
+  "schema_version": 1,
+  "video_id": "seedance-pendant-demo",
+  "product_id": 1,
+  "platform": "douyin",
+  "purpose": "seed",
+  "locale": "zh",
+  "mode": "stills_motion",
+  "target": {
+    "aspect_ratio": "9:16",
+    "duration_sec": 8,
+    "width": 720,
+    "height": 1280,
+    "fps": 24,
+    "allow_duration_tolerance_sec": 1
+  },
+  "script": {
+    "hook": "一眼种草这枚吊坠",
+    "cta": "私信色号下单",
+    "beats": [
+      {
+        "role": "hook",
+        "text": "一眼种草这枚吊坠",
+        "duration_sec": 3,
+        "motion": "zoom_in",
+        "image_slot": "near",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      },
+      {
+        "role": "show",
+        "text": "佩戴日常也能发光",
+        "duration_sec": 3,
+        "motion": "pan_right",
+        "image_slot": "wear",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      },
+      {
+        "role": "cta",
+        "text": "私信色号下单",
+        "duration_sec": 2,
+        "motion": "static",
+        "image_slot": "detail",
+        "image_path": null,
+        "asset_ref": null,
+        "trim": null
+      }
+    ]
+  },
+  "compare": null,
+  "captions": {
+    "enabled": true,
+    "burn_in": false,
+    "style": "safe_zone_bottom"
+  },
+  "cover": {
+    "source": "near",
+    "frame_at_sec": null
+  },
+  "audio": {
+    "bgm": {
+      "path": "产品管理/素材库/audio/fixture-bgm.m4a",
+      "volume": 0.7,
+      "license_note": "fixture"
+    },
+    "tts": null,
+    "voiceover": null,
+    "mix": {
+      "require_bgm": true,
+      "loop_bgm": true,
+      "music_duck_db": null
+    }
+  },
+  "render": {
+    "engine": "image_to_video_api",
+    "transition": "fade",
+    "fallback": "ffmpeg_kenburns",
+    "api": {
+      "provider": "jiekou",
+      "model": "seedance-v1.5-pro-i2v",
+      "endpoint_env": "JIEKOU_API_KEY",
+      "per_shot_prompt_template": null
+    }
+  },
+  "options": {
+    "require_ready": false,
+    "require_include_in_external": false,
+    "require_images": ["near"]
+  },
+  "notes": [
+    "JieKou Seedance 1.5 Pro Batch(flex) @ 480p, no audio (~$0.006/s).",
+    "Requires JIEKOU_API_KEY in repo-root .env."
+  ]
+}

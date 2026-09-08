@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schemas/wanghai.content-production.output.v1.schema.json",
+  "title": "wanghai.content-production.output v1",
+  "description": "Umbrella deliverable manifest for a content-production job.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "content_kind",
+    "status",
+    "generated_at",
+    "input_sha256",
+    "locale",
+    "market",
+    "counts",
+    "products_used",
+    "skipped",
+    "phases",
+    "artifacts",
+    "kind_output",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "wanghai.content-production.output.v1"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 2
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["product-catalog", "carousel", "video"]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "awaiting_review",
+        "published",
+        "partial",
+        "failed"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input_sha256": {
+      "type": "string",
+      "minLength": 1
+    },
+    "snapshot_sha256": {
+      "type": ["string", "null"]
+    },
+    "locale": {
+      "type": "string",
+      "enum": ["zh", "en"]
+    },
+    "market": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "included", "skipped"],
+      "properties": {
+        "requested": { "type": "integer" },
+        "included": { "type": "integer" },
+        "skipped": { "type": "integer" }
+      }
+    },
+    "products_used": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "product_id",
+          "slug",
+          "batch",
+          "name",
+          "source_meta_sha256"
+        ],
+        "properties": {
+          "product_id": { "type": "integer" },
+          "slug": { "type": "string" },
+          "batch": { "type": "string" },
+          "name": { "type": "string" },
+          "source_meta_sha256": { "type": "string" },
+          "role": {
+            "type": ["string", "null"],
+            "description": "e.g. primary, page-3, slide-cover."
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product_id", "reason"],
+        "properties": {
+          "product_id": { "type": ["integer", "null"] },
+          "reason": { "type": "string" },
+          "detail": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "description": "Execution log per phase.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "status"],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "validate",
+              "select",
+              "freeze",
+              "plan",
+              "produce",
+              "package",
+              "review",
+              "publish"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "skipped", "failed", "awaiting"]
+          },
+          "started_at": { "type": ["string", "null"] },
+          "finished_at": { "type": ["string", "null"] },
+          "detail": { "type": ["string", "null"] },
+          "artifact_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest", "primary"],
+      "properties": {
+        "manifest": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Workspace-relative path to this output.json."
+        },
+        "primary": {
+          "type": ["string", "null"],
+          "description": "Main deliverable (PDF, zip of slides, or mp4)."
+        },
+        "preview": {
+          "type": ["string", "null"],
+          "description": "Optional HTML/cover preview path."
+        },
+        "snapshot": {
+          "type": ["string", "null"]
+        },
+        "plan": {
+          "type": ["string", "null"],
+          "description": "Storyboard/script plan JSON path."
+        },
+        "extras": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Captions, hashtags, cover stills, etc."
+        }
+      }
+    },
+    "kind_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_catalog", "carousel", "video"],
+      "properties": {
+        "product_catalog": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["template_id", "page_count", "pdf", "html"],
+              "properties": {
+                "template_id": { "type": "string" },
+                "page_count": { "type": "integer" },
+                "pdf": { "type": ["string", "null"] },
+                "html": { "type": ["string", "null"] },
+                "catalog_output_ref": {
+                  "type": ["string", "null"],
+                  "description": "Path to wanghai.promo.catalog-output if delegated."
+                }
+              }
+            }
+          ]
+        },
+        "carousel": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "template_id",
+                "platform",
+                "aspect_ratio",
+                "slide_count",
+                "slides_dir"
+              ],
+              "properties": {
+                "template_id": { "type": "string" },
+                "platform": { "type": "string" },
+                "aspect_ratio": { "type": "string" },
+                "slide_count": { "type": "integer" },
+                "slides_dir": { "type": "string" },
+                "zip": { "type": ["string", "null"] },
+                "caption": { "type": ["string", "null"] }
+              }
+            }
+          ]
+        },
+        "video": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "template_id",
+                "platform",
+                "aspect_ratio",
+                "duration_sec",
+                "mp4"
+              ],
+              "properties": {
+                "template_id": { "type": "string" },
+                "platform": { "type": "string" },
+                "aspect_ratio": { "type": "string" },
+                "duration_sec": { "type": ["number", "null"] },
+                "mp4": { "type": ["string", "null"] },
+                "cover": { "type": ["string", "null"] },
+                "captions_vtt": { "type": ["string", "null"] },
+                "script_ref": { "type": ["string", "null"] }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

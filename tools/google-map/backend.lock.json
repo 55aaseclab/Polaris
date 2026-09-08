@@ -1,0 +1,19 @@
+{
+  "lock_version": 1,
+  "cli": {
+    "name": "clue-gogole-map-cli",
+    "version": "0.4.1"
+  },
+  "backend": {
+    "name": "gosom/google-maps-scraper",
+    "repository": "https://github.com/gosom/google-maps-scraper.git",
+    "ref": "v1.9.2",
+    "commit": "27f774576996a45be662b6265dd4d45364d401ac",
+    "license": "MIT",
+    "path": "backend/gosom-google-maps-scraper",
+    "runtime_image": "gosom/google-maps-scraper@sha256:54aa343710e851b172fc4715990de68cc8c98f376d1637efcf07f4640ae36654",
+    "runtime_image_tag": "gosom/google-maps-scraper:v1.9.2",
+    "playwright_driver_path": "/opt/ms-playwright-go/1.52.0",
+    "local_image": "clue-gogole-map-backend:gosom-v1.9.2"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "wanghai.tools.logistics.reconciliation",
+  "schema_version": 1,
+  "order_no": "",
+  "status": "pending",
+  "checked_at": null,
+  "sales_amount": null,
+  "received_amount": null,
+  "invoice_amount": null,
+  "logistics_cost": null,
+  "supplier_payable": null,
+  "difference": null,
+  "documents": [],
+  "notes": []
+}
