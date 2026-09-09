@@ -143,7 +143,8 @@ interface PortalStore extends PortalVaultState, WorkflowMockState {
   startWorkflowRun: (input: {
     packId: string;
     flowId: string;
-    vaultId: string;
+    vaultId?: string;
+    driver?: "none" | "vault";
     values: Record<string, string>;
     scenario?: WorkflowMockScenario;
   }) => Promise<MockWorkflowRun>;
@@ -152,7 +153,7 @@ interface PortalStore extends PortalVaultState, WorkflowMockState {
   retryWorkflowRun: (runId: string) => Promise<MockWorkflowRun | null>;
   completeProvisioning: (input: {
     domainPackId: string;
-    vaultId: string;
+    vaultId?: string | null;
     enabledWorkflowKeys: string[];
   }) => Promise<void>;
   toggleWorkflow: (packId: string, flowId: string, enabled: boolean) => Promise<void>;
@@ -249,14 +250,14 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       }
       set({ session, bootstrapped: true });
       if (session.polarisUserId) {
+        // The work desk and host execution do not depend on a Vault. Load only
+        // the critical Polaris projections here; Vault inventory and live
+        // status are fetched lazily by the pages that need them.
         await Promise.all([
-          get().refreshHosts(),
-          get().refreshWorkflowVaults(),
           get().refreshDomainPacks(),
           get().refreshWorkflowSetup(),
           get().refreshWorkflowRuns(),
         ]);
-        get().connectLiveStream(session.polarisUserId);
         startWorkflowPolling();
       }
     } catch (error) {
@@ -401,11 +402,12 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     }
   },
 
-  startWorkflowRun: async ({ packId, flowId, vaultId, values, scenario }) => {
+  startWorkflowRun: async ({ packId, flowId, vaultId, driver, values, scenario }) => {
     const response = await createWorkflowRun({
       packId,
       flowId,
-      vaultId,
+      ...(vaultId ? { vaultId } : {}),
+      ...(driver ? { driver } : {}),
       values,
       ...(scenario ? { scenario } : {}),
     });
@@ -433,7 +435,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     const optimistic: WorkflowSetupRequest = {
       completed: true,
       domainPackId,
-      vaultId,
+      vaultId: vaultId ?? null,
       enabledWorkflowKeys,
       completedAt: new Date().toISOString(),
     };

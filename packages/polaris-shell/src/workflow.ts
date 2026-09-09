@@ -108,6 +108,12 @@ export type WorkflowMockScenario =
 
 export type WorkflowExecutionClass = "pure" | "workspace" | "ai";
 
+/**
+ * Where Polaris executes a workflow. `none` is the explicit host path; a
+ * concrete Vault is represented by `vault` and remains server-resolved.
+ */
+export type WorkflowExecutionDriver = "none" | "vault";
+
 export type WorkflowEffectReceipt = {
   id: string;
   requestId: string;
@@ -125,8 +131,10 @@ export type WorkflowRunProjection = {
   flowId: string;
   packVersion: string;
   packDigest: string;
-  vaultId: string;
+  /** Null for host execution (`driver: "none"`). */
+  vaultId: string | null;
   vaultName: string;
+  driver?: WorkflowExecutionDriver;
   status: WorkflowStatus;
   priority: WorkflowPriority;
   title: string;
@@ -142,7 +150,7 @@ export type WorkflowRunProjection = {
   capabilityLeaseExpiresAt: string;
   policy: {
     decision: "allow" | "deny";
-    mode: "mock" | "live";
+    mode: "mock" | "host" | "live";
     reasons: string[];
   };
   events: WorkflowEvent[];
@@ -170,7 +178,10 @@ export type WorkflowWorkCard = {
 export type WorkflowRunRequest = {
   packId: string;
   flowId: string;
-  vaultId: string;
+  /** Omit this for host execution. */
+  vaultId?: string | null;
+  /** Defaults to `none` when no Vault is supplied. */
+  driver?: WorkflowExecutionDriver;
   values: Record<string, string>;
   scenario?: WorkflowMockScenario;
 };
@@ -189,6 +200,7 @@ export type WorkflowEventsResponse = {
 export type WorkflowSetupProjection = {
   completed: boolean;
   domainPackId: string | null;
+  /** Null selects the Polaris host as the default execution location. */
   vaultId: string | null;
   enabledWorkflowKeys: string[];
   completedAt: string | null;

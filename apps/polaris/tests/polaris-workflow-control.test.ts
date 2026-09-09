@@ -15,6 +15,7 @@ import {
   WorkflowControlError,
   WorkflowControlService,
 } from "../scripts/portal/workflow-control.js";
+import type { HostLiteratureReviewExecutor } from "../scripts/portal/literature-review-host.js";
 import {
   WORKFLOW_LIVE_ADAPTER_FLAG,
   WORKFLOW_LIVE_WORKER_BINDING_FLAG,
@@ -129,6 +130,24 @@ flow ReadMetadata title "Read metadata" create {
 }
 `;
 
+const HOST_LITERATURE_PACK_SOURCE = `
+domain SysSecResearch version "0.1.3"
+title "Systems Security Research"
+description "Synthetic host Literature Review pack"
+
+flow LiteratureReview title "文献综述" create {
+  input { brief: String required }
+  steps {
+    intake "Research intake" {
+      uses { brief }
+      output { result: String }
+    }
+  }
+  output { result: String from result }
+  ui { layout form primary "开始综述" }
+}
+`;
+
 function syntheticVault(id = "vault-synthetic"): WorkflowVaultProjection {
   return {
     id,
@@ -201,16 +220,260 @@ function serviceFor(
   options: {
     autoStart?: boolean;
     liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
+    vaults?: WorkflowVaultProjection[];
+    listVaults?: (tenantId: string) => Promise<WorkflowVaultProjection[]>;
+    hostLiteratureReview?: HostLiteratureReviewExecutor;
   } = {},
 ): WorkflowControlService {
   return new WorkflowControlService({
     importMetaUrl: import.meta.url,
     listPacks: () => [pack],
-    listVaults: async () => [syntheticVault()],
+    listVaults: options.listVaults ?? (async () => options.vaults ?? [syntheticVault()]),
     autoStart: options.autoStart ?? false,
     liveMetadataReader: options.liveMetadataReader,
+    hostLiteratureReview: options.hostLiteratureReview,
   });
 }
+
+test("driver=none executes a durable workflow on the Polaris host without a Vault", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack, { vaults: [] });
+    const admitted = await service.createRun("tenant-host", {
+      packId: pack.id,
+      flowId: "Summarize",
+      driver: "none",
+      values: { subject: "host execution" },
+    });
+
+    assert.equal(admitted.driver, "none");
+    assert.equal(admitted.vaultId, null);
+    assert.equal(admitted.vaultName, "Polaris host");
+
+    const listed = await service.listRuns("tenant-host");
+    const completed = listed.runs.find((run) => run.id === admitted.id);
+    assert.equal(completed?.status, "succeeded");
+    assert.equal(completed?.driver, "none");
+    assert.equal(completed?.vaultId, null);
+    assert.equal(completed?.policy.reasons.includes("host-execution"), true);
+    assert.equal(completed?.artifacts.length, 1);
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("driver=none rejects an accidental Vault target", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack);
+    await assert.rejects(
+      () => service!.createRun("tenant-host", {
+        packId: pack.id,
+        flowId: "Summarize",
+        driver: "none",
+        vaultId: "vault-synthetic",
+        values: { subject: "conflict" },
+      }),
+      (error: unknown) => error instanceof WorkflowControlError && error.code === "host-driver-vault-conflict",
+    );
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("SysSec LiteratureReview uses the real host adapter without consulting Vaults", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const sourcePath = path.join(fixture.root, "host-literature-pack.ord");
+    fs.writeFileSync(sourcePath, HOST_LITERATURE_PACK_SOURCE, "utf8");
+    const pack = await installPack(sourcePath);
+    let receivedBrief = "";
+    const hostLiteratureReview: HostLiteratureReviewExecutor = async ({ run, onProgress }) => {
+      receivedBrief = run.input.brief ?? "";
+      onProgress?.({ progress: 40, stage: "collection", detail: "synthetic collection" });
+      return {
+        status: "succeeded",
+        output: { execution: "host", status: "succeeded" },
+        artifacts: [{
+          id: "artifact-host-literature",
+          name: "report.md",
+          kind: "report",
+          size: "1 B",
+          summary: "real host adapter result",
+          content: "# Real host report",
+          digest: "sha256:synthetic",
+          redacted: false,
+        }],
+        receipts: [{
+          id: "receipt-host-literature",
+          requestId: "host-request",
+          port: "LiteratureReviewHost",
+          version: "1.0.0",
+          effect: "ffi",
+          status: "completed",
+          input: {},
+          output: {},
+          createdAt: "2026-01-01T00:00:00.000Z",
+          completedAt: "2026-01-01T00:00:00.000Z",
+        }],
+      };
+    };
+    service = serviceFor(pack, { vaults: [], hostLiteratureReview });
+    const admitted = await service.createRun("tenant-host-literature", {
+      packId: pack.id,
+      flowId: "LiteratureReview",
+      driver: "none",
+      values: { brief: "bounded workflow evidence" },
+    });
+    assert.equal(admitted.policy.mode, "host");
+    assert.equal(admitted.approvalRequired, false);
+    const deadline = Date.now() + 2_000;
+    let completed: Awaited<ReturnType<typeof service.getRun>> | undefined;
+    while (Date.now() < deadline) {
+      const candidate = (await service.listRuns("tenant-host-literature")).runs.find(
+        (run) => run.id === admitted.id,
+      );
+      if (!candidate) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        continue;
+      }
+      if (candidate.status === "succeeded") {
+        completed = candidate;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(completed?.status, "succeeded");
+    assert.equal(completed?.policy.mode, "host");
+    assert.equal(completed?.artifacts[0]?.content, "# Real host report");
+    assert.equal(receivedBrief, "bounded workflow evidence");
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("host run listing remains available when an optional Vault projection fails", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    let vaultReads = 0;
+    service = serviceFor(pack, {
+      listVaults: async () => {
+        vaultReads += 1;
+        throw new Error("synthetic Vault observer failure");
+      },
+    });
+    const admitted = await service.createRun("tenant-host-resilient", {
+      packId: pack.id,
+      flowId: "Summarize",
+      driver: "none",
+      values: { subject: "host remains available" },
+    });
+    const listed = await service.listRuns("tenant-host-resilient");
+    const completed = listed.runs.find((run) => run.id === admitted.id);
+    assert.equal(completed?.status, "succeeded");
+    assert.equal(vaultReads, 0);
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("host run reads return while native Literature Review work is still running", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  let releaseExecution = () => undefined;
+  try {
+    const sourcePath = path.join(fixture.root, "host-literature-long-pack.ord");
+    fs.writeFileSync(sourcePath, HOST_LITERATURE_PACK_SOURCE, "utf8");
+    const pack = await installPack(sourcePath);
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    let fallbackRelease: NodeJS.Timeout | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      fallbackRelease = setTimeout(resolve, 5_000);
+      releaseExecution = () => {
+        if (fallbackRelease) clearTimeout(fallbackRelease);
+        resolve();
+      };
+    });
+    service = serviceFor(pack, {
+      vaults: [],
+      autoStart: true,
+      hostLiteratureReview: async ({ onProgress }) => {
+        onProgress?.({ progress: 24, stage: "collection", detail: "synthetic long-running collection" });
+        resolveStarted();
+        await blocked;
+        return { status: "succeeded", output: { execution: "host" }, artifacts: [], receipts: [] };
+      },
+    });
+    const admitted = await service.createRun("tenant-host-long", {
+      packId: pack.id,
+      flowId: "LiteratureReview",
+      driver: "none",
+      values: { brief: "bounded long-running host review" },
+    });
+    await started;
+
+    let timeout: NodeJS.Timeout | undefined;
+    const listed = await Promise.race([
+      service.listRuns("tenant-host-long"),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("host run listing waited for execution")), 500);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    assert.equal(listed.runs.find((run) => run.id === admitted.id)?.status, "running");
+    releaseExecution();
+
+    const deadline = Date.now() + 2_000;
+    let completed = false;
+    while (Date.now() < deadline) {
+      if ((await service.getRun("tenant-host-long", admitted.id)).status === "succeeded") {
+        completed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(completed, true);
+    if (fallbackRelease) clearTimeout(fallbackRelease);
+  } finally {
+    releaseExecution();
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("workflow setup can be completed for host execution without a Vault", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack, { vaults: [] });
+    const setup = await service.saveSetup("tenant-host-setup", {
+      completed: true,
+      domainPackId: pack.id,
+      vaultId: null,
+      enabledWorkflowKeys: [`${pack.id}:Summarize`],
+      completedAt: null,
+    });
+    assert.equal(setup.completed, true);
+    assert.equal(setup.vaultId, null);
+    assert.equal((await service.listRuns("tenant-host-setup")).runs.length, 0);
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
 
 function createLiveMetadataRun(pack: WorkflowDomainPackProjection): string {
   const runId = `run-live-metadata-${Date.now()}`;

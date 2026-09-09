@@ -235,6 +235,16 @@ function workflowVaultStatusLabel(vault: { canRun: boolean }): string {
   return vault.canRun ? "运行中" : "不可用";
 }
 
+function workflowExecutionTargetLabel(run: { driver?: "none" | "vault"; vaultName: string }): string {
+  return run.driver === "none" ? "Polaris host" : run.vaultName;
+}
+
+function workflowExecutionModeLabel(run: { driver?: "none" | "vault"; policy: { mode: "mock" | "host" | "live" } }): string {
+  if (run.policy.mode === "host") return "Polaris host · Literature Review";
+  if (run.policy.mode === "live") return "Polaris live adapter";
+  return run.driver === "none" ? "Polaris host · synthetic" : "Vault · synthetic";
+}
+
 type WorkflowGroup = {
   id: string;
   title: string;
@@ -263,6 +273,7 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
   const packs = usePortalStore((state) => state.packs);
   const [filter, setFilter] = useState<"all" | "attention" | "running" | "done">("all");
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
   const visibleCards = useMemo(() => cards
     .filter((card) => {
       if (filter === "attention") return card.status === "waiting";
@@ -315,6 +326,9 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
             </button>
           ))}
         </div>
+        <Button type="button" className="work-new-button" onClick={() => setComposerOpen(true)}>
+          <Plus className="h-4 w-4" />新建工作
+        </Button>
       </div>
 
       <div className="work-grid-view" aria-live="polite">
@@ -346,6 +360,7 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
           </section>
         </div>
       </div>
+      {composerOpen && <WorkflowComposer navigate={navigate} onClose={() => setComposerOpen(false)} />}
     </div>
   );
 }
@@ -512,8 +527,8 @@ function DeckPreview({
 
 function WorkflowFocus({ run }: { run: MockWorkflowRun }) {
   const focus = {
-    queued: { label: "已排入队列", detail: `即将在 ${run.vaultName} 中开始`, icon: Clock3, tone: "blue" },
-    running: { label: "正在 Vault 中工作", detail: "执行状态会持续更新", icon: Loader2, tone: "green" },
+    queued: { label: "已排入队列", detail: `即将在 ${workflowExecutionTargetLabel(run)} 中开始`, icon: Clock3, tone: "blue" },
+    running: { label: `正在 ${workflowExecutionTargetLabel(run)} 中工作`, detail: "执行状态会持续更新", icon: Loader2, tone: "green" },
     waiting: { label: "等你确认", detail: "确认后继续生成最终产物", icon: CircleAlert, tone: "amber" },
     succeeded: { label: "结果已准备好", detail: `${run.artifacts.length || 1} 个产物可以查看`, icon: CheckCircle2, tone: "green" },
     failed: { label: "运行失败", detail: "可以用原输入重新提交", icon: CircleAlert, tone: "red" },
@@ -632,21 +647,34 @@ function WorkflowComposer({
   const vaults = usePortalStore((state) => state.vaults);
   const setup = usePortalStore((state) => state.setup);
   const startWorkflowRun = usePortalStore((state) => state.startWorkflowRun);
+  const refreshWorkflowVaults = usePortalStore((state) => state.refreshWorkflowVaults);
   const enabledWorkflowKeys = new Set(setup.enabledWorkflowKeys);
-  const enabledPacks = packs.filter((pack) => pack.flows.some((flow) => enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))));
+  const configuredPacks = packs.filter((pack) => pack.flows.some((flow) => enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))));
+  // Host execution is intentionally usable before Vault setup. Once a user
+  // has configured a work scene, retain that scene as the compact catalog.
+  const enabledPacks = configuredPacks.length > 0 ? configuredPacks : packs;
+  const setupCatalogActive = configuredPacks.length > 0;
   const defaultPackId = enabledPacks.find((pack) => pack.id === initialPackId)?.id
     || enabledPacks.find((pack) => pack.id === setup.domainPackId)?.id
     || enabledPacks[0]?.id
     || "";
   const [packId, setPackId] = useState(defaultPackId);
   const selectedPack = enabledPacks.find((pack) => pack.id === packId) || enabledPacks[0];
-  const enabledFlows = selectedPack?.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(selectedPack.id, flow.id))) || [];
+  const enabledFlows = setupCatalogActive
+    ? selectedPack?.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(selectedPack.id, flow.id))) || []
+    : selectedPack?.flows || [];
   const [flowId, setFlowId] = useState(enabledFlows[0]?.id || "");
   const selectedFlow = enabledFlows.find((flow) => flow.id === flowId) || enabledFlows[0];
   const [vaultId, setVaultId] = useState(setup.vaultId || vaults.find((vault) => vault.canRun)?.id || vaults[0]?.id || "");
+  const [driver, setDriver] = useState<"none" | "vault">("none");
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (driver !== "vault") return;
+    void refreshWorkflowVaults().catch(() => undefined);
+  }, [driver, refreshWorkflowVaults]);
 
   useEffect(() => {
     if (packId || !defaultPackId) return;
@@ -656,7 +684,9 @@ function WorkflowComposer({
   const handlePackChange = (nextPackId: string) => {
     setPackId(nextPackId);
     const nextPack = enabledPacks.find((pack) => pack.id === nextPackId);
-    const nextFlow = nextPack?.flows.find((flow) => enabledWorkflowKeys.has(workflowKey(nextPack.id, flow.id)));
+    const nextFlow = setupCatalogActive
+      ? nextPack?.flows.find((flow) => enabledWorkflowKeys.has(workflowKey(nextPack.id, flow.id)))
+      : nextPack?.flows[0];
     setFlowId(nextFlow?.id || "");
     setValues({});
   };
@@ -665,7 +695,13 @@ function WorkflowComposer({
     if (!selectedPack || !selectedFlow) return;
     setBusy(true); setError(null);
     try {
-      const run = await startWorkflowRun({ packId: selectedPack.id, flowId: selectedFlow.id, vaultId, values });
+      const run = await startWorkflowRun({
+        packId: selectedPack.id,
+        flowId: selectedFlow.id,
+        driver,
+        ...(driver === "vault" ? { vaultId } : {}),
+        values,
+      });
       onClose();
       navigate(`/work/runs/${encodeURIComponent(run.id)}`);
     } catch (reason) {
@@ -678,7 +714,7 @@ function WorkflowComposer({
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section className="modal workflow-composer" role="dialog" aria-modal="true" aria-labelledby="workflow-composer-title" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div><p className="eyebrow">NEW WORK</p><h2 id="workflow-composer-title">开始一项工作</h2><p>选择能力、输入目标，再把运行交给一个 Vault。</p></div>
+          <div><p className="eyebrow">NEW WORK</p><h2 id="workflow-composer-title">开始一项工作</h2><p>选择能力、输入目标，执行位置由 Polaris 处理。</p></div>
           <Button variant="ghost" size="icon" aria-label="关闭" title="关闭" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
         <form className="form-stack" onSubmit={submit}>
@@ -689,7 +725,7 @@ function WorkflowComposer({
                 {enabledPacks.map((pack) => <option key={pack.id} value={pack.id}>{pack.title} · {pack.category}</option>)}
               </select>
               {selectedPack && <div className="composer-context"><span className={cn("pack-dot", `pack-dot-${selectedPack.accent}`)} /><span><strong>{selectedPack.title}</strong><small>{selectedPack.description}</small></span></div>}
-              {enabledPacks.length === 0 && <p className="form-error">还没有启用工作流，请先去设置页开启。</p>}
+              {enabledPacks.length === 0 && <p className="form-error">还没有可用工作流，请先安装 Domain Pack。</p>}
             </div>
             <div>
               <label className="field-label" htmlFor="workflow-flow">2 · 选择工作流</label>
@@ -710,14 +746,21 @@ function WorkflowComposer({
             </div>
           ))}
           <div>
-            <label className="field-label" htmlFor="workflow-vault">3 · 选择执行 Vault</label>
-            <select id="workflow-vault" className="select" value={vaultId} onChange={(event) => setVaultId(event.target.value)}>
-              {vaults.map((vault) => <option key={vault.id} value={vault.id} disabled={!vault.canRun}>{vault.name} · {vault.profile} · {workflowVaultStatusLabel(vault)}{vault.kind === "disposable" ? " · 一次性" : ""}</option>)}
+            <label className="field-label" htmlFor="workflow-driver">3 · 执行位置</label>
+            <select id="workflow-driver" className="select" value={driver} onChange={(event) => setDriver(event.target.value as "none" | "vault")}>
+              <option value="none">Polaris host（无 Vault）</option>
+              <option value="vault">Vault（使用已运行的 Vault）</option>
             </select>
-            <p className="field-hint"><ShieldCheck className="h-3.5 w-3.5" />输入和执行产物会留在选定的 Vault 中。</p>
+            {driver === "vault" ? <>
+              <label className="field-label" htmlFor="workflow-vault">选择执行 Vault</label>
+              <select id="workflow-vault" className="select" value={vaultId} onChange={(event) => setVaultId(event.target.value)}>
+                {vaults.map((vault) => <option key={vault.id} value={vault.id} disabled={!vault.canRun}>{vault.name} · {vault.profile} · {workflowVaultStatusLabel(vault)}{vault.kind === "disposable" ? " · 一次性" : ""}</option>)}
+              </select>
+              <p className="field-hint"><ShieldCheck className="h-3.5 w-3.5" />输入和执行产物会留在选定的 Vault 中。</p>
+            </> : <p className="field-hint"><ShieldCheck className="h-3.5 w-3.5" />输入和执行产物由 Polaris host 管理。</p>}
           </div>
           {error && <p className="form-error">{error}</p>}
-          <div className="composer-footer"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />确定性 mock host</span><div className="card-actions"><Button type="button" variant="ghost" onClick={onClose}>取消</Button><Button type="submit" disabled={busy || !selectedFlow || !vaultId}>{busy ? <><Loader2 className="h-4 w-4 animate-spin" />提交中</> : <><Play className="h-4 w-4" />提交运行</>}</Button></div></div>
+          <div className="composer-footer"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />{driver === "none" ? "Polaris host executor" : "Vault executor"}</span><div className="card-actions"><Button type="button" variant="ghost" onClick={onClose}>取消</Button><Button type="submit" disabled={busy || !selectedFlow || (driver === "vault" && !vaultId)}>{busy ? <><Loader2 className="h-4 w-4 animate-spin" />提交中</> : <><Play className="h-4 w-4" />提交运行</>}</Button></div></div>
         </form>
       </section>
     </div>
@@ -729,15 +772,22 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
   const packs = usePortalStore((state) => state.packs);
   const vaults = usePortalStore((state) => state.vaults);
   const completeProvisioning = usePortalStore((state) => state.completeProvisioning);
+  const refreshWorkflowVaults = usePortalStore((state) => state.refreshWorkflowVaults);
   const [step, setStep] = useState(0);
   const [domainPackId, setDomainPackId] = useState(setup.domainPackId || packs[0]?.id || "");
-  const [vaultId, setVaultId] = useState(setup.vaultId || vaults[0]?.id || "");
+  const [vaultId, setVaultId] = useState(setup.vaultId || "");
   const [enabledWorkflowKeys, setEnabledWorkflowKeys] = useState(setup.enabledWorkflowKeys);
   const [error, setError] = useState<string | null>(null);
   const [flowsInitialized, setFlowsInitialized] = useState(setup.enabledWorkflowKeys.length > 0);
   const selectedPack = packs.find((pack) => pack.id === domainPackId);
   const selectedPackFlowKeys = selectedPack?.flows.map((flow) => workflowKey(selectedPack.id, flow.id)) || [];
   const selectedPackEnabledFlowKeys = enabledWorkflowKeys.filter((key) => selectedPackFlowKeys.includes(key));
+
+  useEffect(() => {
+    // Host setup is immediately usable; Vault inventory is loaded only for
+    // this page and cannot block the host path in `/work`.
+    void refreshWorkflowVaults().catch(() => undefined);
+  }, [refreshWorkflowVaults]);
 
   useEffect(() => {
     if (domainPackId && packs.some((pack) => pack.id === domainPackId)) return;
@@ -784,10 +834,6 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
       setError("请选择一个 Domain Pack 作为工作场景");
       return;
     }
-    if (step === 1 && !vaultId) {
-      setError("请选择一个执行 Vault");
-      return;
-    }
     if (step === 1 && selectedVault && !selectedVault.canRun) {
       setError("请选择一个正在运行的 Vault");
       return;
@@ -798,16 +844,16 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
   const previous = () => setStep((current) => Math.max(0, current - 1));
   const finish = async () => {
     const selectedVault = vaults.find((vault) => vault.id === vaultId);
-    if (!selectedPack || !selectedVault || selectedPackEnabledFlowKeys.length === 0) {
-      setError("请选择一个 Domain Pack、执行 Vault 和至少一个工作流");
+    if (!selectedPack || selectedPackEnabledFlowKeys.length === 0) {
+      setError("请选择一个 Domain Pack 和至少一个工作流");
       return;
     }
-    if (!selectedVault.canRun) {
+    if (selectedVault && !selectedVault.canRun) {
       setError("请选择一个正在运行的 Vault");
       return;
     }
     try {
-      await completeProvisioning({ domainPackId: selectedPack.id, vaultId, enabledWorkflowKeys });
+      await completeProvisioning({ domainPackId: selectedPack.id, vaultId: vaultId || null, enabledWorkflowKeys });
       navigate("/work", true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -815,17 +861,25 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
   };
   return (
     <div className="page-stack setup-page">
-      <div className="setup-progress" aria-label="设置进度">{["工作场景", "执行 Vault", "启用工作流"].map((label, index) => <div key={label} className={cn("setup-progress-step", index <= step && "is-active", index < step && "is-complete")}><span>{index < step ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><small>{label}</small></div>)}</div>
+      <div className="setup-progress" aria-label="设置进度">{["工作场景", "执行位置", "启用工作流"].map((label, index) => <div key={label} className={cn("setup-progress-step", index <= step && "is-active", index < step && "is-complete")}><span>{index < step ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><small>{label}</small></div>)}</div>
       <Card className="setup-card">
         <CardHeader><CardTitle>{step === 0 ? "选择一个 Domain Pack 作为工作场景" : step === 1 ? "任务应该在哪里运行？" : `${selectedPack?.title || "这个 Domain Pack"} · 启用工作流`}</CardTitle></CardHeader>
         <CardContent>
           {step === 0 && <div className="setup-pack-list">{packs.map((pack) => <button type="button" key={pack.id} className={cn("setup-pack-option", domainPackId === pack.id && "is-selected")} onClick={() => chooseDomainPack(pack.id)}><span className={cn("pack-dot", `pack-dot-${pack.accent}`)} /><span><strong>{pack.title}</strong><small>{pack.category} · v{pack.version}</small><em>{pack.flows.length} 个工作流 · {pack.description}</em></span>{domainPackId === pack.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>)}</div>}
-          {step === 1 && <div className="setup-vault-list">{vaults.map((vault) => { const selectable = vault.canRun; return <button type="button" key={vault.id} disabled={!selectable} className={cn("setup-vault-option", vaultId === vault.id && "is-selected")} onClick={() => setVaultId(vault.id)}><span className="vault-option-icon"><Server className="h-4 w-4" /></span><span><strong>{vault.name}</strong><small>{vault.description}</small><em>{vault.profile} · {vault.capacity}</em></span><span className="vault-option-status">{vault.kind === "disposable" ? "一次性" : workflowVaultStatusLabel(vault)}</span>{vaultId === vault.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>; })}</div>}
+          {step === 1 && <div className="setup-vault-list">
+            <button type="button" className={cn("setup-vault-option", !vaultId && "is-selected")} onClick={() => setVaultId("")}>
+              <span className="vault-option-icon"><MonitorPlay className="h-4 w-4" /></span>
+              <span><strong>Polaris host</strong><small>不依赖 Vault，直接在 Polaris 主机执行</small><em>driver=none · 适合先验证工作流</em></span>
+              <span className="vault-option-status">可用</span>
+              {!vaultId && <CheckCircle2 className="setup-choice-check h-5 w-5" />}
+            </button>
+            {vaults.map((vault) => { const selectable = vault.canRun; return <button type="button" key={vault.id} disabled={!selectable} className={cn("setup-vault-option", vaultId === vault.id && "is-selected")} onClick={() => setVaultId(vault.id)}><span className="vault-option-icon"><Server className="h-4 w-4" /></span><span><strong>{vault.name}</strong><small>{vault.description}</small><em>{vault.profile} · {vault.capacity}</em></span><span className="vault-option-status">{vault.kind === "disposable" ? "一次性" : workflowVaultStatusLabel(vault)}</span>{vaultId === vault.id && <CheckCircle2 className="setup-choice-check h-5 w-5" />}</button>; })}
+          </div>}
           {step === 2 && selectedPack && <div className="setup-flow-list">{groupWorkflowFlows(selectedPack.flows).map((group) => <section className="workflow-group" key={group.id}>{group.id !== "other" && <WorkflowGroupHeading group={group} />}{group.flows.map((flow) => { const enabled = enabledWorkflowKeys.includes(workflowKey(selectedPack.id, flow.id)); return <button type="button" key={flow.id} className={cn("setup-pack-option", enabled && "is-selected")} aria-pressed={enabled} onClick={() => toggleFlow(flow.id)}><span className={cn("pack-dot", `pack-dot-${selectedPack.accent}`)} /><span><strong>{flow.title}</strong><small>{flow.summary}</small><em>{flow.estimate}{flow.approvalRequired ? " · 完成前需确认" : ""}</em></span><span className={cn("toggle-pill", enabled && "is-on")}>{enabled ? "已启用" : "启用"}</span></button>; })}</section>)}</div>}
           {step === 0 && packs.length === 0 && <div className="empty-state">暂无已安装 Domain Pack</div>}
           {step === 2 && !selectedPack && <div className="empty-state">请先选择 Domain Pack</div>}
           {error && <p className="form-error setup-error">{error}</p>}
-          <div className="setup-summary"><span><strong>{selectedPack?.title || "未选择 Domain Pack"}</strong><small>{vaults.find((vault) => vault.id === vaultId)?.name || "未选择 Vault"} · {selectedPackEnabledFlowKeys.length} / {selectedPack?.flows.length || 0} 个工作流</small></span><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />可随时修改</span></div>
+          <div className="setup-summary"><span><strong>{selectedPack?.title || "未选择 Domain Pack"}</strong><small>{vaultId ? vaults.find((vault) => vault.id === vaultId)?.name : "Polaris host"} · {selectedPackEnabledFlowKeys.length} / {selectedPack?.flows.length || 0} 个工作流</small></span><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />可随时修改</span></div>
           <div className="setup-footer"><Button variant="ghost" onClick={() => navigate("/work")}>稍后设置</Button><div className="card-actions">{step > 0 && <Button variant="outline" onClick={previous}><ArrowLeft className="h-4 w-4" />上一步</Button>}{step < 2 ? <Button onClick={next}>下一步<ArrowRight className="h-4 w-4" /></Button> : <Button onClick={() => void finish()}><Check className="h-4 w-4" />完成设置</Button>}</div></div>
         </CardContent>
       </Card>
@@ -911,15 +965,15 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     <div className="page-stack run-detail-page">
       <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />返回工作台</a>
       <section className="run-detail-heading"><div><p className="eyebrow">WORKFLOW RUN · {run.id}</p><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
-      <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />确定性 mock host</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
+      <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />{workflowExecutionModeLabel(run)}</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
       <div className="run-detail-layout">
         <div className="run-detail-main">
-          <Card><CardHeader><CardTitle>运行进度</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{run.progress}% 完成</span><span>{run.vaultName}</span></div></CardContent></Card>
+          <Card><CardHeader><CardTitle>运行进度</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{run.progress}% 完成</span><span>{workflowExecutionTargetLabel(run)}</span></div></CardContent></Card>
           <Card><CardHeader><CardTitle>运行轨迹</CardTitle><CardDescription>每个状态都来自同一个 run projection。</CardDescription></CardHeader><CardContent><div className="run-timeline">{run.events.map((event) => <div className="timeline-item" key={event.id}><span className={cn("timeline-dot", `timeline-dot-${event.tone}`)} /><div><div className="timeline-title"><strong>{event.title}</strong><time>{event.timestamp.slice(11, 16)}</time></div><p>{event.detail}</p></div></div>)}</div></CardContent></Card>
           {run.error && <Card className="run-error-card"><CardHeader><CardTitle>需要处理</CardTitle></CardHeader><CardContent><p>{run.error.message}</p><code>{run.error.code}</code></CardContent></Card>}
-          {run.artifacts.length > 0 && <Card><CardHeader><CardTitle>产物</CardTitle><CardDescription>结果仍属于目标 Vault，Portal 只展示受控投影。</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <button type="button" className="artifact-row" key={item.id} onClick={() => setArtifact(item)}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></button>)}</div></CardContent></Card>}
+          {run.artifacts.length > 0 && <Card><CardHeader><CardTitle>产物</CardTitle><CardDescription>{run.driver === "none" ? "结果由 Polaris host 管理，Portal 只展示受控投影。" : "结果仍属于目标 Vault，Portal 只展示受控投影。"}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <button type="button" className="artifact-row" key={item.id} onClick={() => setArtifact(item)}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></button>)}</div></CardContent></Card>}
         </div>
-        <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>目标 Vault</dt><dd>{run.vaultName}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{run.createdAt.slice(11, 16)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>
+          <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? "执行位置" : "目标 Vault"}</dt><dd>{workflowExecutionTargetLabel(run)}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{run.createdAt.slice(11, 16)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>
       </div>
       {artifact && <ArtifactPreview artifact={artifact} onClose={() => setArtifact(null)} />}
     </div>

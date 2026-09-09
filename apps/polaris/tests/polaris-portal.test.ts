@@ -95,6 +95,20 @@ const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.join(
   "domain-packs",
   "vault-knowledge-health",
 );
+const FIRST_PARTY_SYSSEC_PACK = path.join(
+  REPO_ROOT,
+  "third_party",
+  "syssec-research-skills",
+  "polaris-domain-pack",
+);
+const POLARIS_LITERATURE_FAKE_CODEX = path.join(
+  REPO_ROOT,
+  "apps",
+  "polaris",
+  "tests",
+  "fixtures",
+  "polaris-literature-fake-codex.py",
+);
 
 function repoRelative(filePath: string): string {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/") || ".";
@@ -2826,6 +2840,188 @@ flow Review title "Review" create {
     if (previousDataRoot === undefined) delete process.env.POLARIS_DATA_ROOT;
     else process.env.POLARIS_DATA_ROOT = previousDataRoot;
     fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal workflow API admits driver=none without a Vault", { concurrency: false }, async () => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-portal-host-workflow-"));
+  const controlStorePath = path.join(dataRoot, "control.sqlite");
+  const previousDataRoot = process.env.POLARIS_DATA_ROOT;
+  const previousControlStorePath = process.env.POLARIS_CONTROL_STORE_PATH;
+  process.env.POLARIS_DATA_ROOT = dataRoot;
+  process.env.POLARIS_CONTROL_STORE_PATH = controlStorePath;
+  try {
+    const sourcePath = path.join(dataRoot, "host-workflow-test.ord");
+    fs.writeFileSync(sourcePath, `domain HostWorkflowTest version "1.0.0"
+title "Host Workflow Test"
+port SummarizeValue version "1.0.0" {
+  in { subject: String }
+  out { summary: String }
+  effect pure
+}
+flow Summarize title "Summarize" create {
+  input { subject: String required }
+  steps {
+    summarize "Summarize" {
+      uses { subject }
+      output { summary: String }
+    }
+  }
+  output { summary: String from summary }
+  ui { layout form primary "Run" }
+}
+`, "utf8");
+    await addDomainPack(import.meta.url, sourcePath);
+
+    await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+      await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", uniqueName("host-workflow-user"), async () => {
+        const server = createPortalServer(0);
+        await once(server, "listening");
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          throw new Error("Portal server did not expose a TCP address");
+        }
+        try {
+          const response = await fetch(`http://127.0.0.1:${address.port}/api/workflow-runs`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              packId: "HostWorkflowTest",
+              flowId: "Summarize",
+              driver: "none",
+              values: { subject: "synthetic host request" },
+            }),
+          });
+          assert.equal(response.status, 202);
+          const payload = await response.json() as {
+            run: {
+              driver?: string;
+              vaultId: string | null;
+              vaultName: string;
+            };
+          };
+          assert.equal(payload.run.driver, "none");
+          assert.equal(payload.run.vaultId, null);
+          assert.equal(payload.run.vaultName, "Polaris host");
+        } finally {
+          server.close();
+          await once(server, "close");
+        }
+      });
+    });
+  } finally {
+    closePolarisControlStore();
+    if (previousDataRoot === undefined) delete process.env.POLARIS_DATA_ROOT;
+    else process.env.POLARIS_DATA_ROOT = previousDataRoot;
+    if (previousControlStorePath === undefined) delete process.env.POLARIS_CONTROL_STORE_PATH;
+    else process.env.POLARIS_CONTROL_STORE_PATH = previousControlStorePath;
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("portal runs SysSec LiteratureReview on the host and returns real artifacts", { concurrency: false }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-portal-host-literature-"));
+  const previous = Object.fromEntries([
+    "POLARIS_DATA_ROOT",
+    "POLARIS_CONTROL_STORE_PATH",
+    "POLARIS_LITERATURE_WORKSPACES_ROOT",
+    "POLARIS_LITERATURE_CACHE_ROOT",
+    "POLARIS_LITERATURE_CODEX_BIN",
+    "POLARIS_LITERATURE_HOST_NETWORK",
+  ].map((key) => [key, process.env[key]]));
+  process.env.POLARIS_DATA_ROOT = path.join(root, "data");
+  process.env.POLARIS_CONTROL_STORE_PATH = path.join(root, "control.sqlite");
+  process.env.POLARIS_LITERATURE_WORKSPACES_ROOT = path.join(root, "workspaces");
+  process.env.POLARIS_LITERATURE_CACHE_ROOT = path.join(root, "cache");
+  process.env.POLARIS_LITERATURE_CODEX_BIN = POLARIS_LITERATURE_FAKE_CODEX;
+  process.env.POLARIS_LITERATURE_HOST_NETWORK = "deny";
+  try {
+    await addDomainPack(import.meta.url, FIRST_PARTY_SYSSEC_PACK);
+    const input = {
+      schema_version: "clue.data-collection.input.v2",
+      collection_id: "portal-host-literature",
+      collection_kind: "literature",
+      question: "Which bounded behavior is supported by this synthetic corpus?",
+      decision_context: "Verify the Portal host execution path.",
+      audience: "research engineering",
+      scope: { time_range: "2024..2026", include: ["bounded behavior"] },
+      evidence_policy: { required_fields: ["source_url", "quote", "observed_at", "content_hash"] },
+      source_tasks: [{ task_id: "synthetic-source", source_type: "crossref-search", config: { query: "bounded behavior" } }],
+      payload: { literature_scope: { enabled: true }, pdf_links: { enabled: true } },
+      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+    };
+    const output = {
+      schema_version: "clue.data-collection.output.v2",
+      collection_id: "portal-host-literature",
+      collection_kind: "literature",
+      status: "final",
+      records: [{
+        record_id: "synthetic-paper",
+        record_kind: "literature-candidate",
+        source_url: "https://source.example/portal-host",
+        observed_at: "2026-01-01T00:00:00Z",
+        content_hash: "sha256:portal-host",
+        evidence: [{ quote: "The corpus supports bounded behavior.", locator: "abstract" }],
+        payload: { title: "Synthetic portal host study", author: [{ given: "P", family: "Author" }], year: 2025 },
+      }],
+      rejected_records: [],
+      run_artifacts: [],
+      information_gaps: [],
+      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+    };
+    await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+      await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", uniqueName("portal-host-literature-user"), async () => {
+        const server = createPortalServer(0);
+        await once(server, "listening");
+        const address = server.address();
+        if (!address || typeof address === "string") throw new Error("Portal server did not expose a TCP address");
+        try {
+          const createdResponse = await fetch(`http://127.0.0.1:${address.port}/api/workflow-runs`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              packId: "SysSecResearch",
+              flowId: "LiteratureReview",
+              driver: "none",
+              values: {
+                brief: input.question,
+                collectionInput: JSON.stringify(input),
+                collectionOutput: JSON.stringify(output),
+                skipAugmentation: "true",
+              },
+            }),
+          });
+          assert.equal(createdResponse.status, 202);
+          const created = await createdResponse.json() as { run: { id: string; driver?: string; policy: { mode: string } } };
+          assert.equal(created.run.driver, "none");
+          assert.equal(created.run.policy.mode, "host");
+          const deadline = Date.now() + 15_000;
+          let completed: { status: string; artifacts: Array<{ name: string; content: string }> } | undefined;
+          while (Date.now() < deadline) {
+            const listedResponse = await fetch(`http://127.0.0.1:${address.port}/api/workflow-runs`);
+            const listed = await listedResponse.json() as { runs: Array<typeof completed & { id: string }> };
+            const candidate = listed.runs.find((run) => run.id === created.run.id);
+            if (candidate?.status === "succeeded") {
+              completed = candidate;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          assert.equal(completed?.status, "succeeded");
+          assert.ok(completed?.artifacts.some((artifact) => artifact.name === "report.md"));
+        } finally {
+          server.close();
+          await once(server, "close");
+        }
+      });
+    });
+  } finally {
+    closePolarisControlStore();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

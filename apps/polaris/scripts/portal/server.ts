@@ -152,6 +152,7 @@ import {
   registerWorkflowProvisionHook,
 } from "./workflow-control.js";
 import type {
+  WorkflowExecutionDriver,
   WorkflowMockScenario,
   WorkflowRunRequest,
   WorkflowSetupRequest,
@@ -427,14 +428,26 @@ function parseWorkflowRunRequest(body: ParsedBody): WorkflowRunRequest {
   const packId = body.packId?.trim() || "";
   const flowId = body.flowId?.trim() || "";
   const vaultId = body.vaultId?.trim() || "";
-  if (!packId || !flowId || !vaultId) {
-    throw new PortalRequestError("packId, flowId, and vaultId are required", 400);
+  const rawDriver = body.driver?.trim() || "";
+  if (rawDriver && rawDriver !== "none" && rawDriver !== "vault") {
+    throw new PortalRequestError("Workflow driver must be 'none' or 'vault'", 400);
+  }
+  const driver = rawDriver ? rawDriver as WorkflowExecutionDriver : undefined;
+  if (driver === "none" && vaultId) {
+    throw new PortalRequestError("driver=none cannot be combined with vaultId", 400);
+  }
+  if (driver === "vault" && !vaultId) {
+    throw new PortalRequestError("driver=vault requires vaultId", 400);
+  }
+  if (!packId || !flowId) {
+    throw new PortalRequestError("packId and flowId are required", 400);
   }
   const scenario = parseWorkflowScenario(body.scenario);
   return {
     packId,
     flowId,
-    vaultId,
+    ...(vaultId ? { vaultId } : {}),
+    ...(driver ? { driver } : {}),
     values: parseWorkflowValues(body.values ?? ""),
     ...(scenario ? { scenario } : {}),
   };

@@ -28,7 +28,7 @@ test("Portal declares and owns a light color scheme", () => {
   assert.match(cssSource, /--portal-surface-0:\s*#f7faf8;/u);
 });
 
-test("Portal exposes the complete mock-first work journey", () => {
+test("Portal exposes the host-first work journey", () => {
   for (const route of ["/work", "/setup", "/settings/workflows", "/work/runs/"]) {
     assert.match(appSource, new RegExp(route.replace("/", "\\/"), "u"));
   }
@@ -40,7 +40,8 @@ test("Portal exposes the complete mock-first work journey", () => {
       assert.match(appSource, new RegExp(action, "u"));
     }
   }
-  assert.match(appSource, /确定性 mock host/u);
+  assert.match(appSource, /workflowExecutionModeLabel/u);
+  assert.match(appSource, /Polaris host · synthetic/u);
   assert.doesNotMatch(appSource, /VAULT DIRECTORY/u);
   assert.doesNotMatch(appSource, /<h1>主机<\/h1>/u);
   assert.doesNotMatch(appSource, /管理当前账户拥有的隔离运行时，并进入已授权的工作面。/u);
@@ -67,11 +68,11 @@ test("Portal exposes the complete mock-first work journey", () => {
   assert.match(appSource, /className="settings-provision-button"/u);
   assert.match(appSource, /navigate\("\/setup"\)/u);
   assert.doesNotMatch(appSource, /activeTab === "runtime"/u);
-  assert.doesNotMatch(appSource, /执行位置/u);
+  assert.match(appSource, /执行位置/u);
   assert.doesNotMatch(appSource, /FIRST-TIME SETUP/u);
   assert.doesNotMatch(appSource, /设置只需要一次/u);
   assert.doesNotMatch(appSource, /STEP \{step \+ 1\} \/ 3/u);
-  assert.doesNotMatch(appSource, /aria-label="新建工作"/u);
+  assert.match(appSource, /新建工作/u);
   assert.doesNotMatch(appSource, /aria-label="回到工作台"/u);
 });
 

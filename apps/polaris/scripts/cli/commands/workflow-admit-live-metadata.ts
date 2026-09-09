@@ -189,6 +189,9 @@ export async function runWorkflowAdmitLiveMetadata(
     const run = options.wait
       ? await waitForTerminalRun(service, tenantId, admitted.id)
       : admitted;
+    if (!run.vaultId) {
+      throw new Error("Live metadata admission unexpectedly returned a host run");
+    }
     const store = getPolarisControlStore(import.meta.url);
     const auditEvents = store.listAuditEvents().filter((event) =>
       event.tenantId === tenantId

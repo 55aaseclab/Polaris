@@ -81,6 +81,7 @@ export type WorkflowRunStatus =
 
 export type WorkflowRunSource = "manual" | "provisioning" | "retry" | "suggestion";
 export type WorkflowExecutionClass = "pure" | "workspace" | "ai";
+export type WorkflowExecutionDriver = "none" | "vault";
 
 export interface WorkflowSetupRecord {
   tenantId: string;
@@ -165,6 +166,7 @@ export interface WorkflowRunRecord {
   progress: number;
   approvalRequired: boolean;
   executionClass: WorkflowExecutionClass;
+  executionDriver: WorkflowExecutionDriver;
   scenario: string;
   capabilityLeaseId: string;
   capabilityLeaseExpiresAt: string;
@@ -197,6 +199,7 @@ export interface CreateWorkflowRunInput {
   input: Record<string, string>;
   approvalRequired: boolean;
   executionClass: WorkflowExecutionClass;
+  executionDriver?: WorkflowExecutionDriver;
   scenario?: string;
   capabilityLease: {
     id?: string;
@@ -523,6 +526,7 @@ function rowToWorkflowRun(
   const source = String(row.source);
   const priority = String(row.priority);
   const executionClass = String(row.execution_class);
+  const executionDriver = String(row.execution_driver ?? "vault");
   if (!['queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled'].includes(status)) {
     throw new Error('Workflow run has an invalid status');
   }
@@ -534,6 +538,9 @@ function rowToWorkflowRun(
   }
   if (!['pure', 'workspace', 'ai'].includes(executionClass)) {
     throw new Error('Workflow run has an invalid execution class');
+  }
+  if (!['none', 'vault'].includes(executionDriver)) {
+    throw new Error('Workflow run has an invalid execution driver');
   }
   return {
     id: String(row.id),
@@ -554,6 +561,7 @@ function rowToWorkflowRun(
     progress: Number(row.progress),
     approvalRequired: Number(row.approval_required ?? 0) === 1,
     executionClass: executionClass as WorkflowExecutionClass,
+    executionDriver: executionDriver as WorkflowExecutionDriver,
     scenario: String(row.scenario),
     capabilityLeaseId: String(row.capability_lease_id),
     capabilityLeaseExpiresAt: String(row.capability_lease_expires_at),
@@ -699,6 +707,9 @@ function ensureIdempotencyResponseColumns(db: DatabaseSync): void {
 
 function ensureWorkflowRunColumns(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(workflow_runs)").all() as SqlRow[];
+  if (columns.length > 0 && !columns.some((column) => String(column.name) === "execution_driver")) {
+    db.exec("ALTER TABLE workflow_runs ADD COLUMN execution_driver TEXT NOT NULL DEFAULT 'vault'");
+  }
   if (columns.length > 0 && !columns.some((column) => String(column.name) === "available_at")) {
     db.exec("ALTER TABLE workflow_runs ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0");
   }
@@ -814,11 +825,12 @@ export class PolarisControlStore {
         source TEXT NOT NULL CHECK (source IN ('manual', 'provisioning', 'retry', 'suggestion')),
         status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')),
         priority TEXT NOT NULL CHECK (priority IN ('urgent', 'normal', 'low')),
-        input_json TEXT NOT NULL,
-        progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
-        approval_required INTEGER NOT NULL DEFAULT 0,
-        execution_class TEXT NOT NULL CHECK (execution_class IN ('pure', 'workspace', 'ai')),
-        scenario TEXT NOT NULL DEFAULT 'normal',
+          input_json TEXT NOT NULL,
+          progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+          approval_required INTEGER NOT NULL DEFAULT 0,
+          execution_class TEXT NOT NULL CHECK (execution_class IN ('pure', 'workspace', 'ai')),
+          execution_driver TEXT NOT NULL DEFAULT 'vault' CHECK (execution_driver IN ('none', 'vault')),
+          scenario TEXT NOT NULL DEFAULT 'normal',
         capability_lease_id TEXT NOT NULL,
         capability_lease_expires_at TEXT NOT NULL,
         policy_json TEXT NOT NULL DEFAULT '{}',
@@ -1144,10 +1156,10 @@ export class PolarisControlStore {
         INSERT INTO workflow_runs (
           id, envelope_id, tenant_id, vault_id, vault_name, pack_id,
           pack_version, pack_digest, flow_id, source, status, priority,
-          input_json, progress, approval_required, execution_class, scenario,
+          input_json, progress, approval_required, execution_class, execution_driver, scenario,
           capability_lease_id, capability_lease_expires_at, policy_json,
           output_json, available_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)
       `).run(
         runId,
         envelopeId,
@@ -1163,6 +1175,7 @@ export class PolarisControlStore {
         inputJson,
         input.approvalRequired ? 1 : 0,
         input.executionClass,
+        input.executionDriver ?? "vault",
         input.scenario ?? "normal",
         leaseId,
         input.capabilityLease.expiresAt,

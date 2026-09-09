@@ -44,6 +44,7 @@ import type {
   WorkflowEvent,
   WorkflowEventsResponse,
   WorkflowExecutionClass,
+  WorkflowExecutionDriver,
   WorkflowMockScenario,
   WorkflowRunProjection,
   WorkflowRunRequest,
@@ -56,6 +57,12 @@ import type {
 import {
   loadVerifiedDomainPackRuntime,
 } from "../config/domain-packs.js";
+import {
+  executeHostLiteratureReview,
+  HostLiteratureReviewCancelled,
+  isHostLiteratureReviewRun,
+  type HostLiteratureReviewExecutor,
+} from "./literature-review-host.js";
 import {
   getPolarisControlStore,
   type PolarisControlStore,
@@ -82,10 +89,42 @@ type WorkflowControlOptions = {
   pollMs?: number;
   autoStart?: boolean;
   liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
+  hostLiteratureReview?: HostLiteratureReviewExecutor;
 };
 
 type ProvisionHook = (tenantId: string, vaultId: string) => void;
 const provisionHooks = new Set<ProvisionHook>();
+
+// The durable workflow tables historically require a scope ID. Host runs use
+// this internal scope only for lease/idempotency bookkeeping; it is never
+// returned as a Vault to the browser.
+const HOST_EXECUTION_SCOPE_ID = "__polaris_host__";
+const HOST_EXECUTION_SCOPE_NAME = "Polaris host";
+
+function executionDriverForRun(
+  run: Pick<WorkflowRunRecord, "executionDriver" | "policy">,
+): WorkflowExecutionDriver {
+  return run.executionDriver ?? (run.policy.executionDriver === "none" ? "none" : "vault");
+}
+
+function requestedExecutionDriver(input: WorkflowRunRequest): WorkflowExecutionDriver {
+  const explicit = input.driver;
+  if (explicit === "none" && input.vaultId?.trim()) {
+    throw new WorkflowControlError(
+      "driver=none cannot be combined with a Vault",
+      400,
+      "host-driver-vault-conflict",
+    );
+  }
+  if (explicit === "vault" && !input.vaultId?.trim()) {
+    throw new WorkflowControlError(
+      "driver=vault requires a Vault",
+      400,
+      "vault-driver-required",
+    );
+  }
+  return explicit ?? (input.vaultId?.trim() ? "vault" : "none");
+}
 
 export type WorkflowLiveMetadataAdmissionRequest = {
   operatorId: string;
@@ -184,6 +223,7 @@ function projectionForRun(
   run: WorkflowRunRecord,
   packs: WorkflowDomainPackProjection[],
 ): WorkflowRunProjection {
+  const driver = executionDriverForRun(run);
   const pack = packs.find((candidate) => candidate.id === run.packId);
   const flow = pack?.flows.find((candidate) => candidate.id === run.flowId);
   const artifacts: WorkflowArtifact[] = run.artifacts.map((artifact) => ({
@@ -221,8 +261,9 @@ function projectionForRun(
     flowId: run.flowId,
     packVersion: run.packVersion,
     packDigest: run.packDigest,
-    vaultId: run.vaultId,
-    vaultName: run.vaultName,
+    vaultId: driver === "none" ? null : run.vaultId,
+    vaultName: driver === "none" ? HOST_EXECUTION_SCOPE_NAME : run.vaultName,
+    driver,
     status: run.status,
     priority: run.priority,
     title: flow?.title ?? run.flowId,
@@ -238,7 +279,11 @@ function projectionForRun(
     capabilityLeaseExpiresAt: run.capabilityLeaseExpiresAt,
     policy: {
       decision: run.policy.decision === "deny" ? "deny" : "allow",
-      mode: run.policy.mode === "live" ? "live" : "mock",
+      mode: run.policy.mode === "live"
+        ? "live"
+        : run.policy.mode === "host"
+          ? "host"
+          : "mock",
       reasons: Array.isArray(run.policy.reasons)
         ? run.policy.reasons.map((reason) => String(reason))
         : [],
@@ -593,7 +638,12 @@ function executionClassForProgram(program: Program, flowId: string): WorkflowExe
 
 function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): WorkflowArtifact {
   const live = run.policy.mode === "live";
-  const source = live ? "Polaris live workflow adapter" : "Polaris mock Vault Host";
+  const driver = executionDriverForRun(run);
+  const source = live
+    ? "Polaris live workflow adapter"
+    : driver === "none"
+      ? "Polaris host executor"
+      : "Polaris mock Vault Host";
   const content = [
     `# ${run.flowId}`,
     "",
@@ -601,7 +651,7 @@ function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): 
     `run: ${run.id}`,
     `pack: ${run.packId}@${run.packVersion}`,
     `pack-digest: ${run.packDigest}`,
-    `vault: ${run.vaultName}`,
+    `${driver === "none" ? "execution-driver: none" : `vault: ${run.vaultName}`}`,
     `output: ${JSON.stringify(output)}`,
   ].join("\n");
   return {
@@ -611,7 +661,9 @@ function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): 
     size: `${Buffer.byteLength(content, "utf8")} B`,
     summary: live
       ? "Polaris live workflow adapter 生成的 synthetic artifact"
-      : "mock Vault Host 生成的 synthetic artifact",
+      : driver === "none"
+        ? "Polaris host executor 生成的 synthetic artifact"
+        : "mock Vault Host 生成的 synthetic artifact",
     content,
     digest: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
     redacted: false,
@@ -626,6 +678,7 @@ export class WorkflowControlService {
   private readonly autoStart: boolean;
   private timer: NodeJS.Timeout | null = null;
   private drainPromise: Promise<void> | null = null;
+  private readonly activeHostExecutions = new Map<string, AbortController>();
   private closed = false;
 
   constructor(private readonly options: WorkflowControlOptions) {
@@ -644,6 +697,8 @@ export class WorkflowControlService {
     this.closed = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const controller of this.activeHostExecutions.values()) controller.abort();
+    this.activeHostExecutions.clear();
   }
 
   getSetup(tenantId: string): WorkflowSetupProjection {
@@ -671,17 +726,19 @@ export class WorkflowControlService {
     const enabledWorkflowKeys = [...new Set(
       input.enabledWorkflowKeys.map((key) => String(key).trim()).filter(Boolean),
     )];
-    if (input.completed && (!pack || !input.vaultId || enabledWorkflowKeys.length === 0)) {
-      throw new WorkflowControlError("首次设置需要域包、Vault 和至少一个工作流", 400, "workflow-setup-incomplete");
+    if (input.completed && (!pack || enabledWorkflowKeys.length === 0)) {
+      throw new WorkflowControlError("首次设置需要域包和至少一个工作流", 400, "workflow-setup-incomplete");
     }
     if (input.completed) {
       if (!pack) {
         throw new WorkflowControlError("设置使用的域包不存在", 404, "workflow-pack-not-found");
       }
-      const vaults = await this.options.listVaults(tenantId);
-      const vault = vaults.find((candidate) => candidate.id === input.vaultId);
-      if (!vault || !vault.canRun) {
-        throw new WorkflowControlError("设置使用的 Vault 当前不可运行", 409, "vault-unavailable");
+      if (input.vaultId?.trim()) {
+        const vaults = await this.options.listVaults(tenantId);
+        const vault = vaults.find((candidate) => candidate.id === input.vaultId);
+        if (!vault || !vault.canRun) {
+          throw new WorkflowControlError("设置使用的 Vault 当前不可运行", 409, "vault-unavailable");
+        }
       }
       const invalid = enabledWorkflowKeys.some((key) => {
         const [packId, flowId] = key.split(":");
@@ -717,8 +774,29 @@ export class WorkflowControlService {
   }
 
   async listRuns(tenantId: string): Promise<WorkflowRunsResponse> {
-    await this.enqueueEnabledWorkflows(tenantId);
-    await this.drain();
+    // The production worker is already driven by its timer. Keep this read
+    // path non-blocking so neither a native Literature Review run nor an
+    // optional Vault observer can hold an HTTP response open.
+    const pendingNativeHostRun = this.store.listWorkflowRuns(tenantId).some((run) =>
+      (run.status === "queued" || run.status === "running") && isHostLiteratureReviewRun(run)
+    );
+    if (this.autoStart) {
+      if (pendingNativeHostRun) {
+        void this.drain().catch(() => undefined);
+      } else {
+        void this.enqueueEnabledWorkflows(tenantId)
+          .then(() => this.drain())
+          .catch(() => undefined);
+      }
+    } else {
+      if (!pendingNativeHostRun) {
+        await this.enqueueEnabledWorkflows(tenantId);
+      }
+      const drain = this.drain();
+      if (!pendingNativeHostRun) {
+        await drain;
+      }
+    }
     const runs = this.store.listWorkflowRuns(tenantId).map((run) => projectionForRun(run, this.options.listPacks()));
     const events = this.store.listWorkflowRuns(tenantId).flatMap((run) => run.events);
     return {
@@ -838,6 +916,7 @@ export class WorkflowControlService {
       input: values,
       approvalRequired: false,
       executionClass,
+      executionDriver: "vault",
       capabilityLease: {
         capabilities: [WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID],
         expiresAt: leaseExpiresAt,
@@ -894,31 +973,52 @@ export class WorkflowControlService {
     const packs = this.options.listPacks();
     const selected = flowFromPack(packs, input.packId, input.flowId);
     if (!selected) throw new WorkflowControlError("工作流或流程不存在", 404, "workflow-not-found");
-    const vaults = await this.options.listVaults(tenantId);
-    const vault = vaults.find((candidate) => candidate.id === input.vaultId);
-    if (!vault) throw new WorkflowControlError("目标 Vault 不属于当前用户", 404, "vault-not-found");
-    if (input.scenario === "quota-denied") {
-      throw new WorkflowControlError("当前 Vault 的工作流配额已用尽", 429, "quota-denied");
+    const driver = requestedExecutionDriver(input);
+    let vaultId = HOST_EXECUTION_SCOPE_ID;
+    let vaultName = HOST_EXECUTION_SCOPE_NAME;
+    if (driver === "vault") {
+      const requestedVaultId = input.vaultId?.trim() || "";
+      const vaults = await this.options.listVaults(tenantId);
+      const vault = vaults.find((candidate) => candidate.id === requestedVaultId);
+      if (!vault) throw new WorkflowControlError("目标 Vault 不属于当前用户", 404, "vault-not-found");
+      if (input.scenario === "vault-unavailable" || !vault.canRun) {
+        throw new WorkflowControlError("目标 Vault 当前不可用", 409, "vault-unavailable");
+      }
+      vaultId = vault.id;
+      vaultName = vault.name;
     }
-    if (input.scenario === "vault-unavailable" || !vault.canRun) {
-      throw new WorkflowControlError("目标 Vault 当前不可用", 409, "vault-unavailable");
+    if (input.scenario === "quota-denied") {
+      throw new WorkflowControlError(
+        driver === "none" ? "当前 host 工作流配额已用尽" : "当前 Vault 的工作流配额已用尽",
+        429,
+        "quota-denied",
+      );
     }
     const runtime = this.loadPinnedRuntime(selected.pack.id, selected.pack.version, selected.pack.digest);
     const executionClass = executionClassForProgram(runtime.pipeline.program!, selected.flow.id);
+    const nativeHostLiteratureReview = isHostLiteratureReviewRun({
+      packId: selected.pack.id,
+      flowId: selected.flow.id,
+      executionDriver: driver,
+    });
     const now = this.now();
     const leaseExpiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
     const run = this.store.createWorkflowRun({
       tenantId,
-      vaultId: vault.id,
-      vaultName: vault.name,
+      vaultId,
+      vaultName,
       packId: selected.pack.id,
       packVersion: selected.pack.version,
       packDigest: selected.pack.digest,
       flowId: selected.flow.id,
       source,
       input: safeInput(input.values),
-      approvalRequired: selected.flow.approvalRequired,
+      // The migrated Literature Review runner owns its collection/analysis
+      // review gates. Do not add the legacy SysSec synthetic ReviewPlan gate
+      // on top of that host execution.
+      approvalRequired: nativeHostLiteratureReview ? false : selected.flow.approvalRequired,
       executionClass,
+      executionDriver: driver,
       scenario: input.scenario ?? "normal",
       capabilityLease: {
         capabilities: selected.pack.capabilities,
@@ -926,14 +1026,23 @@ export class WorkflowControlService {
       },
       policy: {
         decision: "allow",
-        mode: "mock",
-        reasons: ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
+        mode: nativeHostLiteratureReview ? "host" : "mock",
+        executionDriver: driver,
+        reasons: driver === "none"
+          ? [
+              "pack-digest-pinned",
+              "host-execution",
+              ...(nativeHostLiteratureReview ? ["native-literature-review"] : ["mock-host-only"]),
+            ]
+          : ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
       },
       dedupeKey: `workflow-manual:${tenantId}:${randomUUID()}`,
       event: {
         kind: "submitted",
         title: "已提交到执行队列",
-        detail: `已固定 ${selected.pack.title}@${selected.pack.version} · ${vault.name}`,
+        detail: driver === "none"
+          ? `已固定 ${selected.pack.title}@${selected.pack.version} · Polaris host`
+          : `已固定 ${selected.pack.title}@${selected.pack.version} · ${vaultName}`,
         tone: "neutral",
       },
     });
@@ -971,6 +1080,7 @@ export class WorkflowControlService {
       if (!existing) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
       throw new WorkflowControlError("当前运行不可取消", 409, "cancel-not-available");
     }
+    this.activeHostExecutions.get(runId)?.abort();
     return projectionForRun(updated, this.options.listPacks());
   }
 
@@ -980,10 +1090,11 @@ export class WorkflowControlService {
     if (previous.status !== "failed" && previous.status !== "cancelled") {
       throw new WorkflowControlError("只有失败或取消的运行可以重试", 409, "retry-not-available");
     }
+    const driver = executionDriverForRun(previous);
     const next = await this.createAdmittedRun(tenantId, {
       packId: previous.packId,
       flowId: previous.flowId,
-      vaultId: previous.vaultId,
+      ...(driver === "vault" ? { vaultId: previous.vaultId, driver } : { driver }),
       values: previous.input,
       scenario,
     }, "retry");
@@ -1080,7 +1191,15 @@ export class WorkflowControlService {
     const packs = this.options.listPacks();
     const pack = packs.find((candidate) => candidate.id === setup.domainPackId);
     if (!pack) return;
-    const vault = (await this.options.listVaults(tenantId)).find((candidate) => candidate.id === setup.vaultId);
+    let vault: WorkflowVaultProjection | undefined;
+    try {
+      vault = (await this.options.listVaults(tenantId)).find((candidate) => candidate.id === setup.vaultId);
+    } catch {
+      // Provisioning is an optional side effect of a previously configured
+      // Vault. It must not make the host-first work desk unavailable while
+      // that Vault is stopped, being repaired, or temporarily unobservable.
+      return;
+    }
     if (!vault?.canRun) return;
     const existing = this.store.listWorkflowRuns(tenantId);
     for (const key of setup.enabledWorkflowKeys) {
@@ -1106,6 +1225,7 @@ export class WorkflowControlService {
         input: defaultFlowInput(flow),
         approvalRequired: flow.approvalRequired,
         executionClass,
+        executionDriver: "vault",
         capabilityLease: {
           capabilities: pack.capabilities,
           expiresAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
@@ -1151,19 +1271,118 @@ export class WorkflowControlService {
     return this.drainPromise;
   }
 
+  private async executeNativeHostLiteratureReview(run: WorkflowRunRecord): Promise<void> {
+    const controller = new AbortController();
+    this.activeHostExecutions.set(run.id, controller);
+    const heartbeat = setInterval(() => {
+      if (!this.store.heartbeatWorkflowRun(run.id, this.workerId, 60_000)) {
+        controller.abort();
+      }
+    }, 15_000);
+    heartbeat.unref();
+    const executor = this.options.hostLiteratureReview ?? executeHostLiteratureReview;
+    let lastProgress = -1;
+    let lastStage = "";
+    const onProgress = (update: { progress: number; stage: string; detail: string }): void => {
+      if (update.progress === lastProgress && update.stage === lastStage) return;
+      lastProgress = update.progress;
+      lastStage = update.stage;
+      try {
+        const current = this.store.getWorkflowRun(run.tenantId, run.id);
+        if (!current || current.status === "cancelled") return;
+        this.store.updateWorkflowRun({
+          tenantId: run.tenantId,
+          runId: run.id,
+          status: "running",
+          progress: update.progress,
+          workerId: this.workerId,
+          event: {
+            kind: "progress",
+            title: update.stage === "complete" ? "Literature Review 阶段完成" : "Literature Review 正在运行",
+            detail: update.detail,
+            tone: "accent",
+          },
+        });
+      } catch {
+        // A concurrent cancellation or lease transition owns the terminal
+        // state; it must not turn into a second worker error.
+      }
+    };
+    try {
+      const result = await executor({
+        importMetaUrl: this.options.importMetaUrl,
+        run,
+        signal: controller.signal,
+        onProgress,
+      });
+      const current = this.store.getWorkflowRun(run.tenantId, run.id);
+      if (!current || current.status === "cancelled" || controller.signal.aborted) return;
+      for (const receipt of result.receipts) {
+        this.store.recordWorkflowEffectReceipt({
+          ...receipt,
+          runId: run.id,
+          tenantId: run.tenantId,
+        });
+      }
+      for (const artifact of result.artifacts) {
+        this.store.addWorkflowArtifact({
+          ...artifact,
+          runId: run.id,
+          tenantId: run.tenantId,
+          createdAt: this.now().toISOString(),
+        });
+      }
+      const waiting = result.status === "waiting";
+      this.store.updateWorkflowRun({
+        tenantId: run.tenantId,
+        runId: run.id,
+        status: waiting ? "waiting" : "succeeded",
+        progress: waiting ? 96 : 100,
+        workerId: this.workerId,
+        output: result.output,
+        event: {
+          kind: waiting ? "approval-required" : "succeeded",
+          title: waiting ? "等待 Literature Review 审查" : "Literature Review 已完成",
+          detail: waiting
+            ? "Polaris host 已生成审查清单，完成审查后继续。"
+            : "Polaris host 已生成真实 Literature Review 产物。",
+          tone: waiting ? "warning" : "success",
+        },
+      });
+    } catch (error) {
+      if (error instanceof HostLiteratureReviewCancelled || controller.signal.aborted) return;
+      throw error;
+    } finally {
+      clearInterval(heartbeat);
+      this.activeHostExecutions.delete(run.id);
+    }
+  }
+
   private async execute(run: WorkflowRunRecord): Promise<void> {
+    const driver = executionDriverForRun(run);
     const lease = this.store.getWorkflowCapabilityLease(run.tenantId, run.capabilityLeaseId);
     if (!lease || lease.status !== "active" || lease.packDigest !== run.packDigest || lease.vaultId !== run.vaultId) {
-      this.fail(run, "capability-lease-invalid", "运行没有有效的 Vault capability lease");
+      this.fail(
+        run,
+        "capability-lease-invalid",
+        driver === "none" ? "运行没有有效的 host capability lease" : "运行没有有效的 Vault capability lease",
+      );
       return;
     }
-    const vault = (await this.options.listVaults(run.tenantId)).find((candidate) => candidate.id === run.vaultId);
-    if (!vault?.canRun) {
-      this.fail(run, "vault-unavailable", "执行前 Vault admission recheck 失败");
-      return;
+    if (driver === "vault") {
+      const vault = (await this.options.listVaults(run.tenantId)).find((candidate) => candidate.id === run.vaultId);
+      if (!vault?.canRun) {
+        this.fail(run, "vault-unavailable", "执行前 Vault admission recheck 失败");
+        return;
+      }
     }
     if (run.scenario === "executor-failure") {
       this.fail(run, "executor-failure", "mock Vault Host 报告了一个可重试错误");
+      return;
+    }
+    if (this.store.getWorkflowRun(run.tenantId, run.id)?.status === "cancelled") return;
+    if (driver === "none" && isHostLiteratureReviewRun(run)) {
+      await this.executeNativeHostLiteratureReview(run);
       return;
     }
     let runtime;
@@ -1247,7 +1466,9 @@ export class WorkflowControlService {
       event: {
         kind: "succeeded",
         title: "最终产物已生成",
-        detail: "mock Vault Host 已生成 synthetic artifact。",
+      detail: executionDriverForRun(run) === "none"
+        ? "Polaris host executor 已生成 synthetic artifact。"
+        : "mock Vault Host 已生成 synthetic artifact。",
         tone: "success",
       },
     });
@@ -1255,6 +1476,8 @@ export class WorkflowControlService {
 
   private fail(run: WorkflowRunRecord, code: string, message: string): void {
     try {
+      const current = this.store.getWorkflowRun(run.tenantId, run.id);
+      if (!current || current.status === "cancelled") return;
       this.store.updateWorkflowRun({
         tenantId: run.tenantId,
         runId: run.id,

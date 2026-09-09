@@ -4,6 +4,7 @@ import type {
   WorkflowDomainPackProjection,
   WorkflowEvent,
   WorkflowEventTone,
+  WorkflowExecutionDriver,
   WorkflowMockScenario,
   WorkflowPriority,
   WorkflowRunProjection,
@@ -80,6 +81,7 @@ type WorkflowRunRecord = {
 
 const DEFAULT_START_DELAY_MS = 350;
 const DEFAULT_COMPLETION_DELAY_MS = 900;
+const HOST_EXECUTION_NAME = "Polaris host";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -96,7 +98,8 @@ function packFlows(packs: WorkflowDomainPackProjection[]) {
 }
 
 function artifactFor(run: WorkflowRunProjection): WorkflowArtifact {
-  const content = `# ${run.title}\n\n这是由 Polaris Phase 1 mock executor 生成的 synthetic artifact。\n\n运行：${run.id}\nVault：${run.vaultName}`;
+  const target = run.driver === "none" ? HOST_EXECUTION_NAME : `Vault：${run.vaultName}`;
+  const content = `# ${run.title}\n\n这是由 Polaris Phase 1 mock executor 生成的 synthetic artifact。\n\n运行：${run.id}\n${target}`;
   return {
     id: `artifact-${run.id}`,
     name: `${run.flowId}-result.md`,
@@ -149,16 +152,31 @@ export class WorkflowMockService {
     if (!pack || !flow) {
       throw new WorkflowMockError("工作流或流程不存在", 404, "workflow-not-found");
     }
-    const vaults = await this.options.listVaults(userId);
-    const vault = vaults.find((candidate) => candidate.id === input.vaultId);
-    if (!vault) {
+    const driver: WorkflowExecutionDriver = input.driver
+      ?? (input.vaultId?.trim() ? "vault" : "none");
+    if (driver === "none" && input.vaultId?.trim()) {
+      throw new WorkflowMockError(
+        "driver=none cannot be combined with vaultId",
+        400,
+        "host-driver-vault-conflict",
+      );
+    }
+    const vaults = driver === "vault" ? await this.options.listVaults(userId) : [];
+    const vault = driver === "vault"
+      ? vaults.find((candidate) => candidate.id === input.vaultId)
+      : undefined;
+    if (driver === "vault" && !vault) {
       throw new WorkflowMockError("目标 Vault 不属于当前用户", 404, "vault-not-found");
     }
     const scenario = input.scenario ?? "normal";
     if (scenario === "quota-denied") {
-      throw new WorkflowMockError("当前 Vault 的工作流配额已用尽", 429, "quota-denied");
+      throw new WorkflowMockError(
+        driver === "none" ? "当前 host 工作流配额已用尽" : "当前 Vault 的工作流配额已用尽",
+        429,
+        "quota-denied",
+      );
     }
-    if (scenario === "vault-unavailable" || !vault.canRun) {
+    if (driver === "vault" && (scenario === "vault-unavailable" || !vault!.canRun)) {
       throw new WorkflowMockError("目标 Vault 当前不可用", 409, "vault-unavailable");
     }
 
@@ -169,8 +187,9 @@ export class WorkflowMockService {
       flowId: flow.id,
       packVersion: pack.version,
       packDigest: pack.digest,
-      vaultId: vault.id,
-      vaultName: vault.name,
+      vaultId: driver === "none" ? null : vault!.id,
+      vaultName: driver === "none" ? HOST_EXECUTION_NAME : vault!.name,
+      driver,
       status: "queued",
       priority: "normal",
       title: flow.title,
@@ -187,7 +206,9 @@ export class WorkflowMockService {
       policy: {
         decision: "allow",
         mode: "mock",
-        reasons: ["synthetic-fixture"],
+        reasons: driver === "none"
+          ? ["synthetic-fixture", "host-execution"]
+          : ["synthetic-fixture"],
       },
       events: [],
       receipts: [],
@@ -195,7 +216,16 @@ export class WorkflowMockService {
     };
     const record: WorkflowRunRecord = { run, scenario, timer: null };
     this.userRuns(userId).set(run.id, record);
-    this.appendEvent(userId, record, "submitted", "已提交到执行队列", `已绑定 ${pack.title}@${pack.version} · ${vault.name}`, "neutral");
+    this.appendEvent(
+      userId,
+      record,
+      "submitted",
+      "已提交到执行队列",
+      driver === "none"
+        ? `已绑定 ${pack.title}@${pack.version} · ${HOST_EXECUTION_NAME}`
+        : `已绑定 ${pack.title}@${pack.version} · ${vault!.name}`,
+      "neutral",
+    );
     this.schedule(record, userId, this.startDelayMs, () => this.startRun(userId, record));
     return clone(run);
   }
@@ -237,7 +267,9 @@ export class WorkflowMockService {
     return this.createRun(userId, {
       packId: record.run.packId,
       flowId: record.run.flowId,
-      vaultId: record.run.vaultId,
+      ...(record.run.driver === "none"
+        ? { driver: "none" as const }
+        : { driver: "vault" as const, vaultId: record.run.vaultId ?? undefined }),
       values: record.run.input,
       scenario,
     });
