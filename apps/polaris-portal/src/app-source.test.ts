@@ -72,8 +72,20 @@ test("Portal exposes the host-first work journey", () => {
   assert.doesNotMatch(appSource, /FIRST-TIME SETUP/u);
   assert.doesNotMatch(appSource, /设置只需要一次/u);
   assert.doesNotMatch(appSource, /STEP \{step \+ 1\} \/ 3/u);
-  assert.match(appSource, /新建工作/u);
+  assert.match(appSource, /aria-label="新建工作"/u);
   assert.doesNotMatch(appSource, /aria-label="回到工作台"/u);
+});
+
+test("work filters keep the new-work action beside the tabs", () => {
+  assert.match(appSource, /className="work-filter-toolbar"/u);
+  assert.match(appSource, /className="filter-tabs work-filter-tabs"/u);
+  assert.match(appSource, /className="work-new-button"/u);
+  assert.match(appSource, /className="work-new-button"[\s\S]*size="icon"/u);
+  assert.match(cssSource, /\.work-filter-toolbar\s*\{[\s\S]*display:\s*flex;[\s\S]*justify-content:\s*space-between;/u);
+  assert.match(cssSource, /\.work-filter-tabs\s*\{[\s\S]*flex:\s*1;/u);
+  assert.match(cssSource, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.work-filter-toolbar\s*\{[\s\S]*align-items:\s*flex-start;[\s\S]*gap:\s*\.4rem;/u);
+  assert.doesNotMatch(cssSource, /\.work-filter-toolbar\s*\{[\s\S]*flex-direction:\s*column-reverse;/u);
+  assert.match(cssSource, /\.work-new-button\s*\{[\s\S]*width:\s*2rem;[\s\S]*height:\s*2rem;/u);
 });
 
 test("debug tab exposes the server run projection as a live inspector", () => {

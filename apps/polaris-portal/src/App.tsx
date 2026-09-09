@@ -305,8 +305,8 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
 
   return (
     <div className="page-stack card-work-page">
-      <div className="card-deck-toolbar">
-        <div className="filter-tabs" role="tablist" aria-label="卡片筛选">
+      <div className="work-filter-toolbar">
+        <div className="filter-tabs work-filter-tabs" role="tablist" aria-label="卡片筛选">
           {([
             ["all", "全部"],
             ["attention", "待确认"],
@@ -326,8 +326,15 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
             </button>
           ))}
         </div>
-        <Button type="button" className="work-new-button" onClick={() => setComposerOpen(true)}>
-          <Plus className="h-4 w-4" />新建工作
+        <Button
+          type="button"
+          className="work-new-button"
+          size="icon"
+          aria-label="新建工作"
+          title="新建工作"
+          onClick={() => setComposerOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
         </Button>
       </div>
 
