@@ -16,6 +16,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  GitBranch,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -36,6 +37,10 @@ import {
   Wifi,
   Workflow,
   X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Download,
 } from "lucide-react";
 import {
   DEFAULT_POLARIS_VAULT_PATH,
@@ -47,6 +52,7 @@ import {
   type PolarisVaultLine,
   type ShellHostSummary,
   type ShellSession,
+  type WorkflowGraphProjection,
 } from "@polaris/polaris-shell";
 import { Button, buttonVariants } from "./components/ui/button.js";
 import { Badge } from "./components/ui/badge.js";
@@ -61,6 +67,7 @@ import {
   isRequestError,
   logout,
   request,
+  workflowGraph,
   resolvePaseoUrl,
   type AuthingConfig,
   type PortalCredential,
@@ -152,6 +159,12 @@ export default function App() {
   }
   if (path === "/settings" || path === "/settings/workflows" || path === "/settings/workflows/") {
     return <PortalLayout active="workflows" session={session} navigate={navigate}><WorkflowSettingsPage navigate={navigate} /></PortalLayout>;
+  }
+  const graphMatch = path.match(/^\/settings\/workflows\/([^/]+)\/([^/]+)\/graph$/u);
+  if (graphMatch) {
+    return <PortalLayout active="workflows" session={session} navigate={navigate}>
+      <WorkflowGraphPage packId={decodeURIComponent(graphMatch[1])} flowId={decodeURIComponent(graphMatch[2])} navigate={navigate} />
+    </PortalLayout>;
   }
   if (path === "/settings/user") {
     return <PortalLayout active="user" session={session} navigate={navigate}><UserPage session={session} /></PortalLayout>;
@@ -1047,7 +1060,7 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
           <p className="settings-pack-description">{activePack.description}</p>
           <div className="settings-flow-list">{groupWorkflowFlows(visibleFlows).map((group) => <section className="workflow-group" key={group.id}>{group.id !== "other" && <WorkflowGroupHeading group={group} />}{group.flows.map((flow) => {
             const enabled = enabledWorkflowKeys.has(workflowKey(activePack.id, flow.id));
-            return <div className="settings-flow-row" key={flow.id}><span><strong>{flow.title}</strong><small>{flow.summary}</small></span><span className="settings-flow-actions"><span>{flow.estimate}{flow.approvalRequired ? " · 需确认" : ""}</span><button type="button" className={cn("pack-toggle", enabled && "is-enabled")} aria-pressed={enabled} aria-label={enabled ? `停用 ${flow.title}` : `启用 ${flow.title}`} onClick={() => toggleWorkflow(activePack.id, flow.id, !enabled)}>{enabled ? <><Check className="h-3.5 w-3.5" />已启用</> : <><Plus className="h-3.5 w-3.5" />启用</>}</button></span></div>;
+            return <div className="settings-flow-row" key={flow.id}><span><strong>{flow.title}</strong><small>{flow.summary}</small></span><span className="settings-flow-actions"><span>{flow.estimate}{flow.approvalRequired ? " · 需确认" : ""}</span><Button variant="ghost" size="icon" aria-label={`查看 ${flow.title} 流程图`} title="查看流程图" onClick={() => navigate(`/settings/workflows/${encodeURIComponent(activePack.id)}/${encodeURIComponent(flow.id)}/graph`)}><GitBranch className="h-4 w-4" /></Button><button type="button" className={cn("pack-toggle", enabled && "is-enabled")} aria-pressed={enabled} aria-label={enabled ? `停用 ${flow.title}` : `启用 ${flow.title}`} onClick={() => toggleWorkflow(activePack.id, flow.id, !enabled)}>{enabled ? <><Check className="h-3.5 w-3.5" />已启用</> : <><Plus className="h-3.5 w-3.5" />启用</>}</button></span></div>;
           })}</section>)}</div>
           {visibleFlows.length === 0 && <div className="empty-state settings-flow-empty">此 Domain Pack 暂无符合当前筛选的工作流</div>}
           <div className="capability-list">{activePack.capabilities.map((capability) => <Badge key={capability} variant="outline">{capability}</Badge>)}</div>
@@ -1056,6 +1069,227 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
       {visiblePacks.length === 0 && <div className="empty-state">当前筛选没有匹配的 Domain Pack</div>}
     </div>
   );
+}
+
+function WorkflowGraphPage({
+  packId,
+  flowId,
+  navigate,
+}: {
+  packId: string;
+  flowId: string;
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  const packs = usePortalStore((state) => state.packs);
+  const pack = packs.find((candidate) => candidate.id === packId);
+  const flow = pack?.flows.find((candidate) => candidate.id === flowId);
+  const [graph, setGraph] = useState<WorkflowGraphProjection | null>(null);
+  const [mode, setMode] = useState<"flow" | "trial">("flow");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void workflowGraph(packId, flowId, pack?.version)
+      .then((payload) => { if (active) setGraph(payload.graph); })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); });
+    return () => { active = false; };
+  }, [flowId, pack?.version, packId]);
+  if (!pack || !flow) {
+    return <div className="center-state"><ErrorBanner message="找不到工作流定义" /><Button variant="outline" onClick={() => navigate("/settings/workflows")}>返回工作流设置</Button></div>;
+  }
+  return (
+    <div className="page-stack workflow-graph-page">
+      <a href="/settings/workflows" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/settings/workflows"); }}><ArrowLeft className="h-4 w-4" />返回工作流设置</a>
+      <section className="workflow-graph-heading"><div><p className="eyebrow">{pack.title} · v{pack.version}</p><h1>{flow.title}</h1><p className="page-subtitle">{flow.summary}</p></div><Badge variant="outline">{graph?.trial ? "DSL graph" : "Flow graph"}</Badge></section>
+      {error && <ErrorBanner message={error} />}
+      {!graph && !error && <LoadingView label="正在加载 DSL graph" />}
+      {graph && <WorkflowGraphViewer graph={graph} mode={mode} setMode={setMode} selectedNodeId={selectedNodeId} setSelectedNodeId={setSelectedNodeId} />}
+    </div>
+  );
+}
+
+function WorkflowGraphViewer({
+  graph,
+  mode,
+  setMode,
+  selectedNodeId,
+  setSelectedNodeId,
+}: {
+  graph: WorkflowGraphProjection;
+  mode: "flow" | "trial";
+  setMode: (mode: "flow" | "trial") => void;
+  selectedNodeId: string | null;
+  setSelectedNodeId: (id: string | null) => void;
+}) {
+  const [scale, setScale] = useState(1);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasWidth, setCanvasWidth] = useState(0);
+  const selected = (mode === "flow" ? graph.flow.nodes : graph.trial?.nodes ?? [])
+    .find((node) => node.id === selectedNodeId);
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return;
+    const updateWidth = () => setCanvasWidth(element.clientWidth - 32);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const download = () => {
+    const payload = JSON.stringify(mode === "flow" ? graph.flow : graph.trial, null, 2);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+    link.download = `${graph.packId}-${graph.flowId}-${mode}-graph.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+  return <div className="workflow-graph-surface">
+    <div className="workflow-graph-toolbar">
+      <div className="filter-tabs" role="tablist" aria-label="DSL graph 类型">
+        <button type="button" className={cn("filter-tab", mode === "flow" && "is-active")} aria-selected={mode === "flow"} onClick={() => { setMode("flow"); setSelectedNodeId(null); }}>流程步骤</button>
+        <button type="button" className={cn("filter-tab", mode === "trial" && "is-active")} aria-selected={mode === "trial"} disabled={!graph.trial} onClick={() => { setMode("trial"); setSelectedNodeId(null); }}>执行图</button>
+      </div>
+      <div className="workflow-graph-tools">
+        <Button variant="outline" size="icon" aria-label="缩小" title="缩小" onClick={() => setScale((value) => Math.max(.55, value - .1))}><ZoomOut className="h-4 w-4" /></Button>
+        <Button variant="outline" size="icon" aria-label="放大" title="放大" onClick={() => setScale((value) => Math.min(1.8, value + .1))}><ZoomIn className="h-4 w-4" /></Button>
+        <Button variant="outline" size="icon" aria-label="重置缩放" title="重置缩放" onClick={() => setScale(1)}><Maximize2 className="h-4 w-4" /></Button>
+        <Button variant="outline" size="icon" aria-label="下载 graph JSON" title="下载 graph JSON" onClick={download}><Download className="h-4 w-4" /></Button>
+      </div>
+    </div>
+    <div className="workflow-graph-canvas" ref={canvasRef}><WorkflowGraphSvg graph={graph} mode={mode} scale={scale} canvasWidth={canvasWidth} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} /></div>
+    <div className="workflow-graph-footer">
+      <div><strong>{mode === "flow" ? graph.flow.nodes.length - 1 : graph.trial?.nodes.length ?? 0}</strong> 个节点 · <strong>{mode === "flow" ? graph.flow.edges.length : graph.trial?.edges.length ?? 0}</strong> 条边</div>
+      <div className={cn("workflow-node-detail", !selected && "is-empty")} aria-live="polite">
+        <strong>{selected?.label ?? "未选择节点"}</strong>
+        <span>{selected ? `${selected.call || "internal step"}${selected.effect ? ` · ${selected.effect}` : ""}` : "点击图中节点查看详情"}</span>
+        <span>{selected ? `输入：${selected.uses.join("、") || "—"}` : "输入：—"}</span>
+        <span>{selected ? `输出：${selected.outputs.join("、") || "—"}` : "输出：—"}</span>
+      </div>
+    </div>
+  </div>;
+}
+
+function WorkflowGraphSvg({
+  graph,
+  mode,
+  scale,
+  canvasWidth,
+  selectedNodeId,
+  onSelect,
+}: {
+  graph: WorkflowGraphProjection;
+  mode: "flow" | "trial";
+  scale: number;
+  canvasWidth: number;
+  selectedNodeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const data = mode === "flow" ? graph.flow : graph.trial;
+  if (!data) return null;
+  const nodes = data.nodes;
+  const edges = data.edges;
+  // Feedback/retry edges are rendered as return paths. They must not affect
+  // the forward layering or a loop would keep pushing nodes into new ranks.
+  const forwardEdges = edges.filter((edge) => !edge.feedback && !edge.resetAttempts);
+  const ranks = new Map<string, number>();
+  const start = mode === "trial" ? graph.trial?.start : data.nodes.find((node) => node.kind === "input")?.id;
+  if (start) ranks.set(start, 0);
+  for (let pass = 0; pass < nodes.length; pass += 1) {
+    let changed = false;
+    for (const edge of forwardEdges) {
+      const from = ranks.get(edge.from);
+      if (from !== undefined && (ranks.get(edge.to) ?? 0) < from + 1) {
+        ranks.set(edge.to, from + 1);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const maxRank = Math.max(0, ...ranks.values());
+  for (const node of nodes) {
+    if (!ranks.has(node.id)) ranks.set(node.id, maxRank + 1);
+  }
+  const rows = new Map<number, typeof nodes>();
+  for (const node of nodes) {
+    const rank = ranks.get(node.id) ?? 0;
+    rows.set(rank, [...(rows.get(rank) ?? []), node]);
+  }
+  // Order each layer around its incoming neighbors so split/merge paths stay
+  // visually close instead of crossing through unrelated nodes.
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const [rank, row] of [...rows.entries()].sort(([left], [right]) => left - right)) {
+      if (rank === 0) continue;
+      const previous = rows.get(rank - 1) ?? [];
+      const previousIndex = new Map(previous.map((node, index) => [node.id, index]));
+      row.sort((left, right) => {
+        const position = (node: typeof left) => {
+          const neighbors = forwardEdges
+            .filter((edge) => edge.to === node.id)
+            .map((edge) => previousIndex.get(edge.from))
+            .filter((index): index is number => index !== undefined);
+          return neighbors.length > 0
+            ? neighbors.reduce((sum, index) => sum + index, 0) / neighbors.length
+            : Number.MAX_SAFE_INTEGER;
+        };
+        return position(left) - position(right);
+      });
+    }
+  }
+  const orderedNodes = [...rows.values()].flat();
+  const nodeWidth = 208;
+  const nodeHeight = 96;
+  const columnGap = 72;
+  const rowGap = 30;
+  const availableWidth = canvasWidth > 0 ? canvasWidth : 960;
+  const maxRowSize = Math.max(1, ...[...rows.values()].map((row) => row.length));
+  const fittedGap = maxRowSize > 1
+    ? Math.floor((availableWidth - 68 - maxRowSize * nodeWidth) / (maxRowSize - 1))
+    : columnGap;
+  const actualGap = Math.max(24, Math.min(columnGap, fittedGap));
+  const width = Math.max(760, 68 + maxRowSize * nodeWidth + Math.max(0, maxRowSize - 1) * actualGap);
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const [rank, row] of rows) {
+    const rowWidth = row.length * nodeWidth + Math.max(0, row.length - 1) * actualGap;
+    const left = Math.max(34, (width - rowWidth) / 2);
+    row.forEach((node, index) => positions.set(node.id, {
+      x: left + index * (nodeWidth + actualGap),
+      y: 38 + rank * (nodeHeight + rowGap),
+    }));
+  }
+  const height = Math.max(220, ...[...positions.values()].map((position) => position.y + nodeHeight + 38));
+  const pos = (id: string) => positions.get(id);
+  return <svg className="workflow-graph-svg" width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ transform: `scale(${scale})`, transformOrigin: "top left" }} role="img" aria-label={`${graph.flowTitle} DSL graph`}>
+    <defs><marker id="workflow-graph-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker></defs>
+    {edges.map((edge) => {
+      const from = pos(edge.from);
+      const to = pos(edge.to);
+      if (!from || !to) return null;
+      const fromRank = ranks.get(edge.from) ?? 0;
+      const toRank = ranks.get(edge.to) ?? 0;
+      const returnEdge = Boolean(edge.feedback || edge.resetAttempts || toRank <= fromRank);
+      const x1 = from.x + nodeWidth / 2;
+      const x2 = to.x + nodeWidth / 2;
+      const y1 = from.y + nodeHeight;
+      const y2 = to.y;
+      const bend = Math.max(34, Math.abs(y2 - y1) / 2);
+      const path = returnEdge
+        ? `M ${x1} ${y1} C ${x1 + nodeWidth} ${y1 + bend}, ${x2 + nodeWidth} ${y2 - bend}, ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
+      return <g key={`${edge.from}-${edge.to}-${edge.when || ""}`} className={returnEdge ? "workflow-graph-feedback" : ""}><path d={path} markerEnd="url(#workflow-graph-arrow)" /><title>{[edge.when, edge.feedback && `feedback ${edge.feedback}`, edge.resetAttempts && "reset attempts"].filter(Boolean).join(" · ") || "data dependency"}</title></g>;
+    })}
+    {nodes.map((node) => {
+      const position = pos(node.id);
+      if (!position) return null;
+      return <g key={node.id} className={cn("workflow-graph-node", `workflow-graph-node-${node.role || node.kind}`, node.terminal && "is-terminal", selectedNodeId === node.id && "is-selected")} transform={`translate(${position.x} ${position.y})`} onClick={() => onSelect(node.id)} tabIndex={0} role="button" aria-label={node.label}>
+        <rect width={nodeWidth} height={nodeHeight} rx="6" />
+        <text x="14" y="25" className="workflow-graph-node-label">{node.label}</text>
+        <text x="14" y="47" className="workflow-graph-node-meta">{node.call || (node.kind === "input" ? "workflow input" : node.kind)}</text>
+        <text x="14" y="69" className="workflow-graph-node-meta">{node.effect || (node.role ? `role: ${node.role}` : "")}</text>
+        <text x="14" y="87" className="workflow-graph-node-meta">{node.terminal ? "terminal" : `${node.outputs.length} outputs`}</text>
+      </g>;
+    })}
+  </svg>;
 }
 
 function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: string, replace?: boolean) => void }) {
@@ -1086,7 +1320,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
   return (
     <div className="page-stack run-detail-page">
       <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />返回工作台</a>
-      <section className="run-detail-heading"><div><div className="run-id-row"><code className="run-id">{run.id}</code><Button variant="ghost" size="icon" className="run-id-copy" aria-label="复制 run-id" title={copyStatus === "copied" ? "已复制" : "复制 run-id"} onClick={() => void copyRunId()}><Copy className="h-4 w-4" /></Button>{copyStatus !== "idle" && <span className={cn("run-id-copy-status", copyStatus === "error" && "is-error")} role="status">{copyStatus === "copied" ? "已复制" : "复制失败"}</span>}</div><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
+      <section className="run-detail-heading"><div><div className="run-id-row"><code className="run-id">{run.id}</code><Button variant="ghost" size="icon" className="run-id-copy" aria-label="复制 run-id" title={copyStatus === "copied" ? "已复制" : "复制 run-id"} onClick={() => void copyRunId()}><Copy className="h-4 w-4" /></Button>{copyStatus !== "idle" && <span className={cn("run-id-copy-status", copyStatus === "error" && "is-error")} role="status">{copyStatus === "copied" ? "已复制" : "复制失败"}</span>}</div><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><div className="run-detail-heading-actions"><Button variant="outline" size="sm" onClick={() => navigate(`/settings/workflows/${encodeURIComponent(run.packId)}/${encodeURIComponent(run.flowId)}/graph`)}><GitBranch className="h-4 w-4" />查看 DSL 图</Button><WorkflowStatusBadge status={run.status} /></div></section>
       {(canCancel || canRetry) && <div className="run-detail-actions"><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>}
       <div className="run-detail-layout">
         <div className="run-detail-main">

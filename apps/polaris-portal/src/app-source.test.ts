@@ -226,6 +226,22 @@ test("workflow settings tabs show catalog summary counts", () => {
   assert.match(appSource, /可添加<span className="filter-tab-count">\{availableWorkflowCount\}<\/span>/u);
 });
 
+test("workflow definitions expose a DSL graph entry from settings and run detail", () => {
+  assert.match(appSource, /查看流程图/u);
+  assert.match(appSource, /查看 DSL 图/u);
+  assert.match(appSource, /function WorkflowGraphPage/u);
+  assert.match(appSource, /流程步骤/u);
+  assert.match(appSource, /执行图/u);
+});
+
+test("workflow graph footer keeps a stable detail area without a selection", () => {
+  assert.match(appSource, /className=\{cn\("workflow-node-detail", !selected && "is-empty"\)\}/u);
+  assert.match(appSource, /未选择节点/u);
+  assert.match(cssSource, /\.workflow-graph-footer \{[\s\S]*?min-height:\s*5rem/u);
+  assert.match(cssSource, /\.workflow-node-detail \{[\s\S]*?min-height:\s*3rem/u);
+  assert.match(cssSource, /\.workflow-node-detail\.is-empty/u);
+});
+
 test("workflow settings can disable the last enabled workflow", () => {
   assert.match(storeSource, /const nextEnabledWorkflowKeys =\s*enabled\s*\?/u);
   assert.match(storeSource, /completed: current\.completed && nextEnabledWorkflowKeys\.length > 0/u);

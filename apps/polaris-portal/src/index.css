@@ -186,6 +186,17 @@
   padding: 2rem 1.5rem 4rem;
 }
 
+.portal-root:has(.workflow-graph-page) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.portal-root:has(.workflow-graph-page) .portal-main {
+  height: calc(100dvh - 4rem);
+  overflow: hidden;
+  padding-bottom: 1rem;
+}
+
 .page-stack {
   display: flex;
   flex-direction: column;
@@ -2455,6 +2466,168 @@
   flex-wrap: wrap;
 }
 
+.workflow-graph-page {
+  height: calc(100dvh - 10rem);
+  gap: 1rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workflow-graph-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.workflow-graph-heading h1 {
+  margin: .15rem 0 .35rem;
+}
+
+.run-detail-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+}
+
+.workflow-graph-surface {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--portal-border);
+  background: var(--portal-surface);
+}
+
+.workflow-graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  border-bottom: 1px solid var(--portal-border);
+  padding: .65rem .8rem;
+}
+
+.workflow-graph-tools {
+  display: flex;
+  gap: .35rem;
+}
+
+.workflow-graph-canvas {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  overflow: auto;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.workflow-graph-svg {
+  display: block;
+  width: auto;
+  max-width: none;
+  color: #475569;
+  transition: transform .15s ease;
+}
+
+.workflow-graph-svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.workflow-graph-feedback path {
+  stroke: #b45309;
+  stroke-dasharray: 6 4;
+}
+
+.workflow-graph-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.workflow-graph-node rect {
+  fill: #fff;
+  stroke: #94a3b8;
+  stroke-width: 1.4;
+}
+
+.workflow-graph-node:hover rect,
+.workflow-graph-node:focus rect {
+  stroke: #2563eb;
+  stroke-width: 2;
+}
+
+.workflow-graph-node.is-selected rect {
+  stroke: #0f766e;
+  stroke-width: 2.5;
+}
+
+.workflow-graph-node.is-terminal rect {
+  stroke: #0f766e;
+  stroke-width: 2;
+}
+
+.workflow-graph-node-validator rect { fill: #fff8e7; }
+.workflow-graph-node-processor rect { fill: #eef6ff; }
+.workflow-graph-node-developer rect { fill: #fff4df; }
+.workflow-graph-node-critic rect { fill: #f4efff; }
+.workflow-graph-node-sink rect { fill: #fff0ee; }
+.workflow-graph-node-input rect {
+  fill: #ecfdf5;
+  stroke: #0f766e;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-label {
+  fill: #0f172a;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.workflow-graph-node-meta {
+  fill: #64748b;
+  font-size: 10px;
+}
+
+.workflow-graph-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--portal-border);
+  padding: .75rem .9rem;
+  min-height: 5rem;
+  box-sizing: border-box;
+  color: var(--portal-muted);
+  font-size: .78rem;
+}
+
+.workflow-graph-footer strong { color: var(--portal-foreground); }
+
+.workflow-node-detail {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  grid-auto-rows: minmax(1rem, auto);
+  align-items: start;
+  justify-content: flex-end;
+  gap: .25rem .8rem;
+  max-width: 70%;
+  min-width: 0;
+  min-height: 3rem;
+  overflow: hidden;
+}
+
+.workflow-node-detail strong {
+  grid-column: 1 / -1;
+  text-align: right;
+}
+
+.workflow-node-detail.is-empty {
+  color: var(--portal-muted);
+}
+
 .work-grid-view > .empty-state {
   min-height: 20rem;
 }
@@ -2809,6 +2982,56 @@
 @media (max-width: 760px) {
   .portal-main {
     padding: 1.1rem .75rem 3rem;
+  }
+
+  .portal-root:has(.workflow-graph-page) .portal-main {
+    height: calc(100dvh - 7rem);
+    padding-bottom: .75rem;
+  }
+
+  .workflow-graph-heading,
+  .workflow-graph-toolbar,
+  .workflow-graph-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workflow-graph-footer {
+    min-height: 8rem;
+  }
+
+  .run-detail-heading-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workflow-graph-toolbar .filter-tabs {
+    width: 100%;
+  }
+
+  .workflow-graph-tools {
+    align-self: flex-end;
+  }
+
+  .workflow-graph-canvas {
+    height: auto;
+  }
+
+  .workflow-graph-page {
+    height: calc(100dvh - 8.2rem);
+  }
+
+  .workflow-node-detail {
+    grid-template-columns: 1fr;
+    max-width: none;
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 6rem;
+  }
+
+  .workflow-node-detail strong {
+    grid-column: auto;
+    text-align: left;
   }
 
   .portal-topbar-inner {
