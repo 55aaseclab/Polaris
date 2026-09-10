@@ -1158,7 +1158,7 @@
 }
 
 .setup-card {
-  max-width: 840px;
+  width: 100%;
   border-color: var(--portal-border-accent);
 }
 
