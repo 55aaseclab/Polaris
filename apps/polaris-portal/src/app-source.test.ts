@@ -66,7 +66,7 @@ test("Portal exposes the host-first work journey", () => {
   assert.match(appSource, /activeTab === "enabled"/u);
   assert.match(appSource, /activeTab === "available"/u);
   assert.match(appSource, /className="settings-provision-button"/u);
-  assert.match(appSource, /navigate\("\/setup"\)/u);
+  assert.match(appSource, /navigate\("\/setup\?returnTo=\/settings\/workflows"\)/u);
   assert.doesNotMatch(appSource, /activeTab === "runtime"/u);
   assert.match(appSource, /执行位置/u);
   assert.doesNotMatch(appSource, /FIRST-TIME SETUP/u);
@@ -193,4 +193,12 @@ test("workflow setup scopes enabled keys to the selected Domain Pack", () => {
   assert.match(appSource, /const existingKeys = enabledWorkflowKeys\.filter\(\(key\) => selectedPackFlowKeys\.includes\(key\)\)/u);
   assert.match(appSource, /const existingNextKeys = current\.filter\(\(key\) => nextKeys\.includes\(key\)\)/u);
   assert.match(appSource, /enabledWorkflowKeys: selectedPackEnabledFlowKeys/u);
+});
+
+test("workflow setup returns to its entry surface", () => {
+  assert.match(appSource, /function setupReturnPath\(\): "\/work" \| "\/settings\/workflows"/u);
+  assert.match(appSource, /get\("returnTo"\) === "\/settings\/workflows"/u);
+  assert.match(appSource, /ProvisioningPage navigate=\{navigate\} returnPath=\{setupReturnPath\(\)\}/u);
+  assert.match(appSource, /navigate\("\/setup\?returnTo=\/settings\/workflows"\)/u);
+  assert.match(appSource, /navigate\(returnPath, true\)/u);
 });

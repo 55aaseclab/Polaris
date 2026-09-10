@@ -103,6 +103,12 @@ function usePortalNavigation(): { path: string; navigate: (path: string, replace
   return { path, navigate };
 }
 
+function setupReturnPath(): "/work" | "/settings/workflows" {
+  return new URLSearchParams(window.location.search).get("returnTo") === "/settings/workflows"
+    ? "/settings/workflows"
+    : "/work";
+}
+
 export default function App() {
   const { path, navigate } = usePortalNavigation();
   const session = usePortalStore((state) => state.session);
@@ -129,7 +135,7 @@ export default function App() {
     return <LoadingView label="正在打开工作台" />;
   }
   if (path === "/setup" || path === "/setup/") {
-    return <PortalLayout active="workflows" session={session} navigate={navigate}><ProvisioningPage navigate={navigate} /></PortalLayout>;
+    return <PortalLayout active="workflows" session={session} navigate={navigate}><ProvisioningPage navigate={navigate} returnPath={setupReturnPath()} /></PortalLayout>;
   }
   if (path === "/work" || path === "/work/") {
     return <PortalLayout active="work" session={session} navigate={navigate}><WorkPage navigate={navigate} /></PortalLayout>;
@@ -799,7 +805,13 @@ function WorkflowComposer({
   );
 }
 
-function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boolean) => void }) {
+function ProvisioningPage({
+  navigate,
+  returnPath,
+}: {
+  navigate: (path: string, replace?: boolean) => void;
+  returnPath: "/work" | "/settings/workflows";
+}) {
   const setup = usePortalStore((state) => state.setup);
   const packs = usePortalStore((state) => state.packs);
   const vaults = usePortalStore((state) => state.vaults);
@@ -891,7 +903,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
         vaultId: vaultId || null,
         enabledWorkflowKeys: selectedPackEnabledFlowKeys,
       });
-      navigate("/work", true);
+      navigate(returnPath, true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -917,7 +929,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
           {step === 2 && !selectedPack && <div className="empty-state">请先选择 Domain Pack</div>}
           {error && <p className="form-error setup-error">{error}</p>}
           <div className="setup-summary"><span><strong>{selectedPack?.title || "未选择 Domain Pack"}</strong><small>{vaultId ? vaults.find((vault) => vault.id === vaultId)?.name : "Polaris host"} · {selectedPackEnabledFlowKeys.length} / {selectedPack?.flows.length || 0} 个工作流</small></span><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />可随时修改</span></div>
-          <div className="setup-footer"><Button variant="ghost" onClick={() => navigate("/work")}>稍后设置</Button><div className="card-actions">{step > 0 && <Button variant="outline" onClick={previous}><ArrowLeft className="h-4 w-4" />上一步</Button>}{step < 2 ? <Button onClick={next}>下一步<ArrowRight className="h-4 w-4" /></Button> : <Button onClick={() => void finish()}><Check className="h-4 w-4" />完成设置</Button>}</div></div>
+          <div className="setup-footer"><Button variant="ghost" onClick={() => navigate(returnPath)}>稍后设置</Button><div className="card-actions">{step > 0 && <Button variant="outline" onClick={previous}><ArrowLeft className="h-4 w-4" />上一步</Button>}{step < 2 ? <Button onClick={next}>下一步<ArrowRight className="h-4 w-4" /></Button> : <Button onClick={() => void finish()}><Check className="h-4 w-4" />完成设置</Button>}</div></div>
         </CardContent>
       </Card>
     </div>
@@ -948,14 +960,14 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
   const enabledFlowCount = activePack?.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(activePack.id, flow.id))).length || 0;
   return (
     <div className="page-stack settings-page">
-      {!setup.completed && <Card className="inline-notice settings-task-card"><CardContent><Sparkles className="h-5 w-5" /><span><strong>完成首次设置</strong></span><Button variant="outline" size="icon" aria-label="完成首次设置" title="完成首次设置" onClick={() => navigate("/setup")}><ArrowRight className="h-4 w-4" /></Button></CardContent></Card>}
+      {!setup.completed && <Card className="inline-notice settings-task-card"><CardContent><Sparkles className="h-5 w-5" /><span><strong>完成首次设置</strong></span><Button variant="outline" size="icon" aria-label="完成首次设置" title="完成首次设置" onClick={() => navigate("/setup?returnTo=/settings/workflows")}><ArrowRight className="h-4 w-4" /></Button></CardContent></Card>}
       <div className="settings-toolbar">
         <div className="filter-tabs settings-tabs" role="tablist" aria-label="工作流设置">
           <button type="button" role="tab" aria-selected={activeTab === "all"} className={cn("filter-tab", activeTab === "all" && "is-active")} onClick={() => setActiveTab("all")}>全部</button>
           <button type="button" role="tab" aria-selected={activeTab === "enabled"} className={cn("filter-tab", activeTab === "enabled" && "is-active")} onClick={() => setActiveTab("enabled")}>已启用</button>
           <button type="button" role="tab" aria-selected={activeTab === "available"} className={cn("filter-tab", activeTab === "available" && "is-active")} onClick={() => setActiveTab("available")}>可添加</button>
         </div>
-        <Button className="settings-provision-button" variant="outline" size="icon" aria-label={setup.completed ? "调整工作舱设置" : "完成首次设置"} title={setup.completed ? "调整工作舱设置" : "完成首次设置"} onClick={() => navigate("/setup")}><Settings2 className="h-4 w-4" /></Button>
+        <Button className="settings-provision-button" variant="outline" size="icon" aria-label={setup.completed ? "调整工作舱设置" : "完成首次设置"} title={setup.completed ? "调整工作舱设置" : "完成首次设置"} onClick={() => navigate("/setup?returnTo=/settings/workflows")}><Settings2 className="h-4 w-4" /></Button>
       </div>
       <div className="filter-tabs settings-pack-tabs" role="tablist" aria-label="Domain Pack">
         {visiblePacks.map((pack) => {
