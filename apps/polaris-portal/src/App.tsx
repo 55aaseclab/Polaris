@@ -246,12 +246,6 @@ function workflowExecutionTargetLabel(run: { driver?: "none" | "vault"; vaultNam
   return run.driver === "none" ? "Polaris host" : run.vaultName;
 }
 
-function workflowExecutionModeLabel(run: { driver?: "none" | "vault"; policy: { mode: "mock" | "host" | "live" } }): string {
-  if (run.policy.mode === "host") return "Polaris host · Literature Review";
-  if (run.policy.mode === "live") return "Polaris live adapter";
-  return run.driver === "none" ? "Polaris host · synthetic" : "Vault · synthetic";
-}
-
 async function copyTextToClipboard(value: string): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -1011,7 +1005,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     <div className="page-stack run-detail-page">
       <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />返回工作台</a>
       <section className="run-detail-heading"><div><div className="run-id-row"><code className="run-id">{run.id}</code><Button variant="ghost" size="icon" className="run-id-copy" aria-label="复制 run-id" title={copyStatus === "copied" ? "已复制" : "复制 run-id"} onClick={() => void copyRunId()}><Copy className="h-4 w-4" /></Button>{copyStatus !== "idle" && <span className={cn("run-id-copy-status", copyStatus === "error" && "is-error")} role="status">{copyStatus === "copied" ? "已复制" : "复制失败"}</span>}</div><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
-      <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />{workflowExecutionModeLabel(run)}</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
+      <div className="run-detail-actions"><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
       <div className="run-detail-layout">
         <div className="run-detail-main">
           <Card><CardHeader><CardTitle>运行进度</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{run.progress}% 完成</span><span>{workflowExecutionTargetLabel(run)}</span></div></CardContent></Card>

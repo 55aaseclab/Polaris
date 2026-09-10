@@ -40,8 +40,8 @@ test("Portal exposes the host-first work journey", () => {
       assert.match(appSource, new RegExp(action, "u"));
     }
   }
-  assert.match(appSource, /workflowExecutionModeLabel/u);
-  assert.match(appSource, /Polaris host · synthetic/u);
+  assert.doesNotMatch(appSource, /workflowExecutionModeLabel/u);
+  assert.doesNotMatch(appSource, /Polaris host · Literature Review/u);
   assert.doesNotMatch(appSource, /VAULT DIRECTORY/u);
   assert.doesNotMatch(appSource, /<h1>主机<\/h1>/u);
   assert.doesNotMatch(appSource, /管理当前账户拥有的隔离运行时，并进入已授权的工作面。/u);
