@@ -10,6 +10,7 @@ import {
   CircleUserRound,
   CircleAlert,
   Code2,
+  Copy,
   Clock3,
   ExternalLink,
   Eye,
@@ -243,6 +244,29 @@ function workflowExecutionModeLabel(run: { driver?: "none" | "vault"; policy: { 
   if (run.policy.mode === "host") return "Polaris host · Literature Review";
   if (run.policy.mode === "live") return "Polaris live adapter";
   return run.driver === "none" ? "Polaris host · synthetic" : "Vault · synthetic";
+}
+
+async function copyTextToClipboard(value: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch {
+    // Public HTTP deployments may expose no usable Clipboard API. Try the
+    // browser's same-origin fallback before reporting a copy failure.
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("clipboard copy failed");
 }
 
 type WorkflowGroup = {
@@ -959,11 +983,20 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
   const cancel = usePortalStore((state) => state.cancelWorkflowRun);
   const retry = usePortalStore((state) => state.retryWorkflowRun);
   const [artifact, setArtifact] = useState<MockWorkflowRun["artifacts"][number] | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
   if (!run) return <div className="center-state"><ErrorBanner message="找不到这次工作运行" /><Button variant="outline" onClick={() => navigate("/work")}>返回工作台</Button></div>;
   const pack = packForRun(packs, run);
   const flow = flowForRun(packs, run);
   const canCancel = ["queued", "running", "waiting"].includes(run.status);
   const canRetry = ["failed", "cancelled"].includes(run.status);
+  const copyRunId = async () => {
+    try {
+      await copyTextToClipboard(run.id);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+  };
   const retryAndOpen = async () => {
     const nextRun = await retry(run.id);
     if (nextRun) navigate(`/work/runs/${encodeURIComponent(nextRun.id)}`);
@@ -971,7 +1004,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
   return (
     <div className="page-stack run-detail-page">
       <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />返回工作台</a>
-      <section className="run-detail-heading"><div><p className="eyebrow">WORKFLOW RUN · {run.id}</p><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
+      <section className="run-detail-heading"><div><div className="run-id-row"><code className="run-id">{run.id}</code><Button variant="ghost" size="icon" className="run-id-copy" aria-label="复制 run-id" title={copyStatus === "copied" ? "已复制" : "复制 run-id"} onClick={() => void copyRunId()}><Copy className="h-4 w-4" /></Button>{copyStatus !== "idle" && <span className={cn("run-id-copy-status", copyStatus === "error" && "is-error")} role="status">{copyStatus === "copied" ? "已复制" : "复制失败"}</span>}</div><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><WorkflowStatusBadge status={run.status} /></section>
       <div className="run-detail-actions"><span className="mock-note"><Sparkles className="h-3.5 w-3.5" />{workflowExecutionModeLabel(run)}</span><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />取消运行</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />重试</Button>}</div></div>
       <div className="run-detail-layout">
         <div className="run-detail-main">

@@ -1463,6 +1463,42 @@
   gap: 1rem;
 }
 
+.run-id-row {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  min-width: 0;
+}
+
+.run-id {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--portal-muted);
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-id-copy {
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  flex: 0 0 auto;
+  border-radius: .4rem;
+}
+
+.run-id-copy-status {
+  flex: 0 0 auto;
+  color: var(--portal-accent);
+  font-size: .7rem;
+}
+
+.run-id-copy-status.is-error {
+  color: var(--portal-danger);
+}
+
 .run-detail-heading h1 {
   margin: .25rem 0 .45rem;
   color: var(--portal-foreground);

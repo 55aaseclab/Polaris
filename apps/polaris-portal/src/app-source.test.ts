@@ -88,6 +88,17 @@ test("work filters keep the new-work action beside the tabs", () => {
   assert.match(cssSource, /\.work-new-button\s*\{[\s\S]*width:\s*2rem;[\s\S]*height:\s*2rem;/u);
 });
 
+test("run detail presents a copyable run id without a workflow prefix", () => {
+  assert.doesNotMatch(appSource, /WORKFLOW RUN · \{run\.id\}/u);
+  assert.match(appSource, /className="run-id-row"/u);
+  assert.match(appSource, /className="run-id"/u);
+  assert.match(appSource, /aria-label="复制 run-id"/u);
+  assert.match(appSource, /copyTextToClipboard\(run\.id\)/u);
+  assert.match(appSource, /role="status"/u);
+  assert.match(cssSource, /\.run-id-row\s*\{[\s\S]*display:\s*flex;[\s\S]*align-items:\s*center;/u);
+  assert.match(cssSource, /\.run-id-copy\s*\{[\s\S]*width:\s*2rem;[\s\S]*height:\s*2rem;/u);
+});
+
 test("run detail shows the creation date and time", () => {
   assert.match(appSource, /formatRunDateTime\(run\.createdAt\)/u);
   assert.doesNotMatch(appSource, /<dt>创建时间<\/dt><dd>\{run\.createdAt\.slice\(11, 16\)\}<\/dd>/u);
