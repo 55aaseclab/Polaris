@@ -28,7 +28,7 @@ function runFixture(input: Record<string, string>): HostRun {
     id: "run-host-literature-test",
     tenantId: "tenant-host-literature-test",
     packId: "AutoResearch",
-    packVersion: "1.0.0",
+    packVersion: "0.1.0",
     packDigest: "sha256:synthetic-pack",
     flowId: "LiteratureReview",
     input,

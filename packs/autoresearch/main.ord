@@ -1,7 +1,7 @@
 // Polaris-owned literature-review workflow definition.
 // Shared implementations are repository-level common tools under tools/.
 dsl version "0.4-trial"
-domain AutoResearch version "1.0.0"
+domain AutoResearch version "0.1.0"
 title "Literature Review"
 description "Evidence-bound literature collection, claim analysis, review, and report production."
 category "Research"

@@ -49,6 +49,7 @@
 
   html {
     background: var(--portal-surface-0);
+    scrollbar-gutter: stable;
   }
 
   body {

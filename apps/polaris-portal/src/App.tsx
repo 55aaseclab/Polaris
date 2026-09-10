@@ -955,12 +955,12 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
       <div className="filter-tabs settings-pack-tabs" role="tablist" aria-label="Domain Pack">
         {visiblePacks.map((pack) => {
           const count = pack.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))).length;
-          return <button type="button" role="tab" aria-selected={activePack?.id === pack.id} key={pack.id} className={cn("filter-tab settings-pack-tab", activePack?.id === pack.id && "is-active")} onClick={() => setActivePackId(pack.id)}><span className={cn("pack-dot", `pack-dot-${pack.accent}`)} />{pack.title}<span className="filter-tab-count">{count}/{pack.flows.length}</span></button>;
+          return <button type="button" role="tab" aria-selected={activePack?.id === pack.id} key={pack.id} className={cn("filter-tab settings-pack-tab", activePack?.id === pack.id && "is-active")} onClick={() => setActivePackId(pack.id)}>{pack.title}<span className="filter-tab-count">{count}/{pack.flows.length}</span></button>;
         })}
       </div>
       {activePack && <Card className="settings-pack-browser">
         <CardHeader>
-          <div className="settings-pack-heading"><span className={cn("pack-dot", `pack-dot-${activePack.accent}`)} /><div><CardTitle>{activePack.title}</CardTitle><CardDescription>{activePack.category} · v{activePack.version} · {enabledFlowCount} / {activePack.flows.length} 个工作流已启用</CardDescription></div></div>
+          <div className="settings-pack-heading"><div><CardTitle>{activePack.title}</CardTitle><CardDescription>{activePack.category} · v{activePack.version} · {enabledFlowCount} / {activePack.flows.length} 个工作流已启用</CardDescription></div></div>
         </CardHeader>
         <CardContent>
           <p className="settings-pack-description">{activePack.description}</p>
