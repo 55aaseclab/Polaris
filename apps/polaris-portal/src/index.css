@@ -2355,51 +2355,108 @@
   }
 }
 
-/* Card-first work surface. The deck is the primary navigation model. */
+/* Desktop uses a scan-friendly list; the touch deck below is mobile-only. */
 .card-work-page {
   gap: 1.1rem;
 }
 
 .work-grid-view {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
-  align-items: stretch;
-  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--portal-border);
 }
 
 .work-deck-view {
   display: none;
 }
 
-.grid-work-card {
+.work-list-row {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.6fr) minmax(15rem, 1.15fr) auto minmax(14rem, auto);
+  align-items: center;
+  gap: 1.25rem;
+  border-bottom: 1px solid var(--portal-border);
+  padding: 1rem 0;
+}
+
+.work-list-row:hover {
+  background: var(--portal-surface-1);
+}
+
+.work-list-row-attention {
+  border-left: 3px solid #e5c875;
+  padding-left: .85rem;
+}
+
+.work-list-main,
+.work-list-meta,
+.work-list-status,
+.work-list-actions {
+  min-width: 0;
+}
+
+.work-list-main {
   display: flex;
-  height: calc(100svh - 13rem);
-  height: calc(100dvh - 13rem);
-  min-height: 0;
   flex-direction: column;
+  gap: .25rem;
+}
+
+.work-list-main strong {
   overflow: hidden;
+  color: var(--portal-foreground);
+  font-size: .95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.grid-work-card > .card-header {
-  flex: 0 0 auto;
+.work-list-main > span {
+  overflow: hidden;
+  color: var(--portal-muted);
+  font-size: .78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.grid-work-card > .work-card-content {
+.work-list-kind {
   display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  overflow: auto;
+  align-items: center;
+  gap: .35rem;
+  color: var(--portal-muted);
+  font-size: .7rem;
+  text-transform: uppercase;
 }
 
-.grid-work-card .work-card-actions {
-  margin-top: auto;
+.work-list-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  color: var(--portal-muted);
+  font-size: .75rem;
+}
+
+.work-list-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  white-space: nowrap;
+}
+
+.work-list-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .55rem;
+}
+
+.work-list-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .45rem;
+  flex-wrap: wrap;
 }
 
 .work-grid-view > .empty-state {
-  min-height: calc(100svh - 13rem);
-  min-height: calc(100dvh - 13rem);
-  grid-column: 1 / -1;
+  min-height: 20rem;
 }
 
 .card-work-header {

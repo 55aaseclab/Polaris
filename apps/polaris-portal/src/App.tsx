@@ -313,7 +313,12 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
       return true;
     })
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)), [cards, filter]);
-  const attentionCount = cards.filter((card) => card.status === "waiting").length;
+  const counts = useMemo(() => ({
+    all: cards.length,
+    attention: cards.filter((card) => card.status === "waiting").length,
+    running: cards.filter((card) => ["queued", "running"].includes(card.status)).length,
+    done: cards.filter((card) => ["succeeded", "failed", "cancelled"].includes(card.status)).length,
+  }), [cards]);
   const activeIndex = Math.max(0, visibleCards.findIndex((card) => card.id === activeCardId));
   const activeCard = visibleCards[activeIndex];
   const activeRun = activeCard ? runs[activeCard.runId] : undefined;
@@ -353,7 +358,7 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
               onClick={() => { setFilter(value); setActiveCardId(null); }}
             >
               {label}
-              {value === "attention" && <span className="filter-tab-count">{attentionCount}</span>}
+              <span className="filter-tab-count">{counts[value]}</span>
             </button>
           ))}
         </div>
@@ -372,7 +377,7 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
       <div className="work-grid-view" aria-live="polite">
         {visibleCards.map((card) => {
           const run = runs[card.runId];
-          return run ? <WorkCardView key={card.id} card={card} run={run} packs={packs} navigate={navigate} layout="grid" /> : null;
+          return run ? <WorkListRow key={card.id} card={card} run={run} packs={packs} navigate={navigate} /> : null;
         })}
         {!visibleCards.length && <div className="empty-state"><FolderOpen className="h-7 w-7" /><strong>这里暂时没有工作</strong><span>换一个筛选，或从工作流库开始新任务。</span></div>}
       </div>
@@ -399,6 +404,59 @@ function WorkPage({ navigate }: { navigate: (path: string, replace?: boolean) =>
         </div>
       </div>
       {composerOpen && <WorkflowComposer navigate={navigate} onClose={() => setComposerOpen(false)} />}
+    </div>
+  );
+}
+
+function WorkListRow({
+  card,
+  run,
+  packs,
+  navigate,
+}: {
+  card: { priority: WorkflowPriority; status: WorkflowStatus; title: string; summary: string; vaultName: string; updatedAt: string };
+  run: MockWorkflowRun;
+  packs: MockDomainPack[];
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  const approve = usePortalStore((state) => state.approveWorkflowRun);
+  const cancel = usePortalStore((state) => state.cancelWorkflowRun);
+  const retry = usePortalStore((state) => state.retryWorkflowRun);
+  const [busy, setBusy] = useState(false);
+  const pack = packForRun(packs, run);
+  const flow = flowForRun(packs, run);
+  const runAction = async (action: () => Promise<MockWorkflowRun | void | null>) => {
+    setBusy(true);
+    try {
+      const nextRun = await action();
+      if (nextRun) navigate(`/work/runs/${encodeURIComponent(nextRun.id)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={cn("work-list-row", card.status === "waiting" && "work-list-row-attention")}>
+      <div className="work-list-main">
+        <div className="work-list-kind">{pack?.category || "Workflow"}<span className="work-card-separator">·</span>{flow?.title || run.flowId}</div>
+        <strong>{card.title}</strong>
+        <span>{card.summary}</span>
+      </div>
+      <div className="work-list-meta">
+        <span><Server className="h-3.5 w-3.5" />{card.vaultName}</span>
+        <span><Clock3 className="h-3.5 w-3.5" />更新于 {formatRunDateTime(card.updatedAt)}</span>
+      </div>
+      <div className="work-list-status">
+        <WorkflowStatusBadge status={card.status} />
+        {run.status === "running" && <span className="progress-label">{run.progress}%</span>}
+      </div>
+      <div className="work-list-actions">
+        {card.status === "waiting" && <Button size="sm" onClick={() => void runAction(() => approve(run.id))} disabled={busy}><CheckCircle2 className="h-4 w-4" />批准继续</Button>}
+        {["queued", "running"].includes(card.status) && <Button size="sm" variant="outline" onClick={() => void runAction(() => cancel(run.id))} disabled={busy}><Square className="h-4 w-4" />取消运行</Button>}
+        {["failed", "cancelled"].includes(card.status) && <Button size="sm" onClick={() => void runAction(() => retry(run.id))} disabled={busy}><RotateCcw className="h-4 w-4" />重试</Button>}
+        <Button size="sm" variant={card.status === "waiting" ? "ghost" : "outline"} onClick={() => navigate(`/work/runs/${encodeURIComponent(run.id)}`)}>
+          {card.status === "succeeded" ? <><FileText className="h-4 w-4" />打开结果</> : <>查看详情<ChevronRight className="h-4 w-4" /></>}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -656,7 +714,7 @@ function WorkCardView({
         <CardDescription>{card.summary}</CardDescription>
       </CardHeader>
       <CardContent className="work-card-content">
-        <div className="work-card-meta"><span><Server className="h-3.5 w-3.5" />{card.vaultName}</span><span><Clock3 className="h-3.5 w-3.5" />更新于 {card.updatedAt.slice(11, 16)}</span>{run.progress > 0 && run.status === "running" && <span className="progress-label">{run.progress}%</span>}</div>
+        <div className="work-card-meta"><span><Server className="h-3.5 w-3.5" />{card.vaultName}</span><span><Clock3 className="h-3.5 w-3.5" />更新于 {formatRunDateTime(card.updatedAt)}</span>{run.progress > 0 && run.status === "running" && <span className="progress-label">{run.progress}%</span>}</div>
         {run.status === "running" && <div className="run-progress"><span style={{ width: `${run.progress}%` }} /></div>}
         <WorkflowFocus run={run} />
         <div className="card-actions work-card-actions">

@@ -136,11 +136,12 @@ test("debug tab exposes the server run projection as a live inspector", () => {
   assert.match(cssSource, /\.debug-log-list\s*\{[\s\S]*overflow:\s*auto/u);
 });
 
-test("daily work surface is card-first and touch-aware", () => {
+test("daily work surface uses a desktop list and a mobile touch deck", () => {
   assert.match(appSource, /className="card-first-layout"/u);
   assert.match(appSource, /function DeckPreview/u);
   assert.match(appSource, /className="work-grid-view"/u);
-  assert.match(appSource, /layout="grid"/u);
+  assert.match(appSource, /function WorkListRow/u);
+  assert.match(appSource, /<WorkListRow key=\{card\.id\}/u);
   assert.match(appSource, /className="work-deck-view"/u);
   assert.match(appSource, /onPointerDown=\{isDeck \? handlePointerDown : undefined\}/u);
   assert.doesNotMatch(appSource, /className="deck-control deck-control-(skip|heart|accept)"/u);
@@ -166,11 +167,13 @@ test("daily work surface is card-first and touch-aware", () => {
   assert.doesNotMatch(cssSource, /\.card-deck-toolbar\s*\{[\s\S]*padding-bottom:\s*\.35rem;/u);
   assert.match(cssSource, /\.card-deck\s*\{[\s\S]*height:\s*calc\(100svh\s*-/u);
   assert.doesNotMatch(cssSource, /\.card-deck\s*\{[\s\S]*min-height:\s*(?:26|30)rem/u);
-  assert.match(cssSource, /\.work-grid-view\s*\{[\s\S]*display:\s*grid;/u);
+  assert.match(cssSource, /\.work-grid-view\s*\{[\s\S]*display:\s*flex;/u);
   assert.match(cssSource, /\.work-deck-view\s*\{[\s\S]*display:\s*none;/u);
-  assert.match(cssSource, /\.grid-work-card\s*\{[\s\S]*height:\s*calc\(100svh\s*-\s*13rem\);[\s\S]*height:\s*calc\(100dvh\s*-\s*13rem\);/u);
+  assert.match(cssSource, /\.work-list-row\s*\{[\s\S]*display:\s*grid;/u);
+  assert.match(cssSource, /\.work-list-row\s*\{[\s\S]*border-bottom:\s*1px solid/u);
   assert.match(appSource, /<CardContent className="work-card-content">/u);
-  assert.match(cssSource, /\.grid-work-card\s*>\s*\.work-card-content\s*\{[\s\S]*overflow:\s*auto;/u);
+  assert.match(appSource, /formatRunDateTime\(card\.updatedAt\)/u);
+  assert.match(appSource, /counts\[value\]/u);
   assert.match(cssSource, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.work-grid-view\s*\{[\s\S]*display:\s*none;/u);
   assert.match(cssSource, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.work-deck-view\s*\{[\s\S]*display:\s*block;/u);
 });
@@ -187,6 +190,16 @@ test("workflow setup keeps Domain Pack and internal flow selection separate", ()
   assert.match(appSource, /const visibleFlows/u);
   assert.doesNotMatch(appSource, /toggleWorkflowPack/u);
   assert.doesNotMatch(appSource, /settings-pack-grid/u);
+});
+
+test("workflow composer renders and submits inputs declared by the selected flow", () => {
+  assert.match(appSource, /selectedFlow\?\.fields\.map\(\(field\) =>/u);
+  assert.match(appSource, /field\.type === "textarea"/u);
+  assert.match(appSource, /field\.label/u);
+  assert.match(appSource, /required=\{field\.required\}/u);
+  assert.match(appSource, /values\[field\.id\]/u);
+  assert.match(appSource, /values,\s*\n/u);
+  assert.doesNotMatch(appSource, /LiteratureReview requires|Research brief.*setValues/u);
 });
 
 test("workflow setup scopes enabled keys to the selected Domain Pack", () => {
