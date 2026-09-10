@@ -473,20 +473,21 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     const key = workflowKey(packId, flowId);
     const current = get().setup;
     const nextDomainPackId = enabled ? packId : current.domainPackId;
+    const nextEnabledWorkflowKeys = enabled
+      ? [
+          ...(current.domainPackId === packId
+            ? current.enabledWorkflowKeys.filter((currentKey) => currentKey.startsWith(`${packId}:`))
+            : []),
+          key,
+        ].filter((currentKey, index, keys) => keys.indexOf(currentKey) === index)
+      : current.enabledWorkflowKeys.filter((currentKey) => currentKey !== key);
     const next: WorkflowSetupRequest = {
       ...current,
+      completed: current.completed && nextEnabledWorkflowKeys.length > 0,
       domainPackId: nextDomainPackId,
-      enabledWorkflowKeys: enabled
-        ? [
-            ...(current.domainPackId === packId
-              ? current.enabledWorkflowKeys.filter((currentKey) => currentKey.startsWith(`${packId}:`))
-              : []),
-            key,
-          ].filter((currentKey, index, keys) => keys.indexOf(currentKey) === index)
-        : current.enabledWorkflowKeys.filter((currentKey) => currentKey !== key),
+      enabledWorkflowKeys: nextEnabledWorkflowKeys,
     };
     set({ setup: next, error: null });
-    if (!current.completed) return;
     try {
       const response = await persistWorkflowSetup(next);
       set({ setup: response.setup });

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const storeSource = readFileSync(new URL("./portal-store.ts", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./index.css", import.meta.url), "utf8");
 
@@ -210,4 +211,11 @@ test("workflow settings tabs show catalog summary counts", () => {
   assert.match(appSource, /全部<span className="filter-tab-count">\{allWorkflowCount\}<\/span>/u);
   assert.match(appSource, /已启用<span className="filter-tab-count">\{enabledWorkflowCount\}<\/span>/u);
   assert.match(appSource, /可添加<span className="filter-tab-count">\{availableWorkflowCount\}<\/span>/u);
+});
+
+test("workflow settings can disable the last enabled workflow", () => {
+  assert.match(storeSource, /const nextEnabledWorkflowKeys =\s*enabled\s*\?/u);
+  assert.match(storeSource, /completed: current\.completed && nextEnabledWorkflowKeys\.length > 0/u);
+  assert.match(storeSource, /enabledWorkflowKeys: nextEnabledWorkflowKeys/u);
+  assert.match(storeSource, /toggleWorkflow: async[\s\S]*?persistWorkflowSetup\(next\)/u);
 });
