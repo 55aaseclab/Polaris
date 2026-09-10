@@ -9,6 +9,7 @@ import {
   packForRun,
   type MockDomainPack,
   updateCardFromRun,
+  workflowKeysForPack,
 } from "./workflow-mocks.js";
 
 const SYNTHETIC_PACKS: MockDomainPack[] = [
@@ -107,4 +108,17 @@ test("pack, flow, and work-card projections stay linked to a run", () => {
   const card = updated.find((item) => item.runId === run.id);
   assert.equal(card?.status, "succeeded");
   assert.equal(card?.updatedAt, "2026-08-11T09:30:00.000Z");
+});
+
+test("enabled workflow keys are limited to the selected pack", () => {
+  assert.deepEqual(
+    workflowKeysForPack(SYNTHETIC_PACKS, "pack-alpha", [
+      "pack-alpha:flow-alpha",
+      "pack-beta:flow-beta",
+      "pack-alpha:removed-flow",
+      "pack-alpha:flow-alpha",
+    ]),
+    ["pack-alpha:flow-alpha"],
+  );
+  assert.deepEqual(workflowKeysForPack(SYNTHETIC_PACKS, "missing-pack", ["pack-alpha:flow-alpha"]), []);
 });

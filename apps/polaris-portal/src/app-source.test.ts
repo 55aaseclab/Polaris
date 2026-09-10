@@ -187,3 +187,10 @@ test("workflow setup keeps Domain Pack and internal flow selection separate", ()
   assert.doesNotMatch(appSource, /toggleWorkflowPack/u);
   assert.doesNotMatch(appSource, /settings-pack-grid/u);
 });
+
+test("workflow setup scopes enabled keys to the selected Domain Pack", () => {
+  assert.match(appSource, /const \[flowsInitialized, setFlowsInitialized\] = useState\(false\)/u);
+  assert.match(appSource, /const existingKeys = enabledWorkflowKeys\.filter\(\(key\) => selectedPackFlowKeys\.includes\(key\)\)/u);
+  assert.match(appSource, /const existingNextKeys = current\.filter\(\(key\) => nextKeys\.includes\(key\)\)/u);
+  assert.match(appSource, /enabledWorkflowKeys: selectedPackEnabledFlowKeys/u);
+});

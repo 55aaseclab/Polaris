@@ -25,6 +25,7 @@ import {
   createInitialWorkflowState,
   cardsFromRuns,
   workflowKey,
+  workflowKeysForPack,
   type MockWorkflowRun,
   type WorkflowMockState,
 } from "./workflow-mocks.js";
@@ -253,11 +254,9 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
         // The work desk and host execution do not depend on a Vault. Load only
         // the critical Polaris projections here; Vault inventory and live
         // status are fetched lazily by the pages that need them.
-        await Promise.all([
-          get().refreshDomainPacks(),
-          get().refreshWorkflowSetup(),
-          get().refreshWorkflowRuns(),
-        ]);
+        await get().refreshDomainPacks();
+        await get().refreshWorkflowSetup();
+        await get().refreshWorkflowRuns();
         startWorkflowPolling();
       }
     } catch (error) {
@@ -281,9 +280,6 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
   refreshDomainPacks: async () => {
     const payload = await domainPacks();
     const availablePackIds = new Set(payload.packs.map((pack) => pack.id));
-    const availableWorkflowKeys = new Set(
-      payload.packs.flatMap((pack) => pack.flows.map((flow) => workflowKey(pack.id, flow.id))),
-    );
     set((state) => ({
         packs: payload.packs,
         setup: {
@@ -291,7 +287,13 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
           domainPackId: state.setup.domainPackId && availablePackIds.has(state.setup.domainPackId)
             ? state.setup.domainPackId
             : null,
-          enabledWorkflowKeys: state.setup.enabledWorkflowKeys.filter((key) => availableWorkflowKeys.has(key)),
+          enabledWorkflowKeys: workflowKeysForPack(
+            payload.packs,
+            state.setup.domainPackId && availablePackIds.has(state.setup.domainPackId)
+              ? state.setup.domainPackId
+              : null,
+            state.setup.enabledWorkflowKeys,
+          ),
         },
         error: null,
       }));
@@ -299,7 +301,18 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
 
   refreshWorkflowSetup: async () => {
     const setup = await workflowSetup();
-    set({ setup, error: null });
+    const packs = get().packs;
+    const domainPackId = setup.domainPackId && packs.some((pack) => pack.id === setup.domainPackId)
+      ? setup.domainPackId
+      : null;
+    set({
+      setup: {
+        ...setup,
+        domainPackId,
+        enabledWorkflowKeys: workflowKeysForPack(packs, domainPackId, setup.enabledWorkflowKeys),
+      },
+      error: null,
+    });
   },
 
   refreshWorkflowRuns: async () => {
@@ -432,11 +445,12 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
   },
 
   completeProvisioning: async ({ domainPackId, vaultId, enabledWorkflowKeys }) => {
+    const normalizedWorkflowKeys = workflowKeysForPack(get().packs, domainPackId, enabledWorkflowKeys);
     const optimistic: WorkflowSetupRequest = {
       completed: true,
       domainPackId,
       vaultId: vaultId ?? null,
-      enabledWorkflowKeys,
+      enabledWorkflowKeys: normalizedWorkflowKeys,
       completedAt: new Date().toISOString(),
     };
     set({ setup: optimistic, error: null });
@@ -458,10 +472,17 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
   toggleWorkflow: async (packId, flowId, enabled) => {
     const key = workflowKey(packId, flowId);
     const current = get().setup;
+    const nextDomainPackId = enabled ? packId : current.domainPackId;
     const next: WorkflowSetupRequest = {
       ...current,
+      domainPackId: nextDomainPackId,
       enabledWorkflowKeys: enabled
-        ? [...new Set([...current.enabledWorkflowKeys, key])]
+        ? [
+            ...(current.domainPackId === packId
+              ? current.enabledWorkflowKeys.filter((currentKey) => currentKey.startsWith(`${packId}:`))
+              : []),
+            key,
+          ].filter((currentKey, index, keys) => keys.indexOf(currentKey) === index)
         : current.enabledWorkflowKeys.filter((currentKey) => currentKey !== key),
     };
     set({ setup: next, error: null });

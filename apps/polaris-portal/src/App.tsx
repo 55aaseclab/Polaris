@@ -810,7 +810,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
   const [vaultId, setVaultId] = useState(setup.vaultId || "");
   const [enabledWorkflowKeys, setEnabledWorkflowKeys] = useState(setup.enabledWorkflowKeys);
   const [error, setError] = useState<string | null>(null);
-  const [flowsInitialized, setFlowsInitialized] = useState(setup.enabledWorkflowKeys.length > 0);
+  const [flowsInitialized, setFlowsInitialized] = useState(false);
   const selectedPack = packs.find((pack) => pack.id === domainPackId);
   const selectedPackFlowKeys = selectedPack?.flows.map((flow) => workflowKey(selectedPack.id, flow.id)) || [];
   const selectedPackEnabledFlowKeys = enabledWorkflowKeys.filter((key) => selectedPackFlowKeys.includes(key));
@@ -834,9 +834,7 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
     if (flowsInitialized || !selectedPack) return;
     const existingKeys = enabledWorkflowKeys.filter((key) => selectedPackFlowKeys.includes(key));
     const firstFlowKey = selectedPack.flows[0] ? workflowKey(selectedPack.id, selectedPack.flows[0].id) : null;
-    setEnabledWorkflowKeys(existingKeys.length || !firstFlowKey
-      ? enabledWorkflowKeys
-      : [...enabledWorkflowKeys, firstFlowKey]);
+    setEnabledWorkflowKeys(existingKeys.length || !firstFlowKey ? existingKeys : [firstFlowKey]);
     setFlowsInitialized(true);
   }, [enabledWorkflowKeys, flowsInitialized, selectedPack, selectedPackFlowKeys]);
 
@@ -846,9 +844,12 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
     setFlowsInitialized(true);
     if (!nextPack) return;
     const nextKeys = nextPack.flows.map((flow) => workflowKey(nextPack.id, flow.id));
-    setEnabledWorkflowKeys((current) => current.some((key) => nextKeys.includes(key))
-      ? current
-      : nextKeys[0] ? [...current, nextKeys[0]] : current);
+    setEnabledWorkflowKeys((current) => {
+      const existingNextKeys = current.filter((key) => nextKeys.includes(key));
+      return existingNextKeys.length > 0
+        ? existingNextKeys
+        : nextKeys[0] ? [nextKeys[0]] : [];
+    });
     setError(null);
   };
 
@@ -885,7 +886,11 @@ function ProvisioningPage({ navigate }: { navigate: (path: string, replace?: boo
       return;
     }
     try {
-      await completeProvisioning({ domainPackId: selectedPack.id, vaultId: vaultId || null, enabledWorkflowKeys });
+      await completeProvisioning({
+        domainPackId: selectedPack.id,
+        vaultId: vaultId || null,
+        enabledWorkflowKeys: selectedPackEnabledFlowKeys,
+      });
       navigate("/work", true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

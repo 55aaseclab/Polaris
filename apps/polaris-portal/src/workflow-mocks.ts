@@ -55,6 +55,17 @@ export function workflowKey(packId: string, flowId: string): string {
   return `${packId}:${flowId}`;
 }
 
+export function workflowKeysForPack(
+  packs: MockDomainPack[],
+  domainPackId: string | null,
+  keys: string[],
+): string[] {
+  const pack = domainPackId ? packs.find((candidate) => candidate.id === domainPackId) : null;
+  if (!pack) return [];
+  const available = new Set(pack.flows.map((flow) => workflowKey(pack.id, flow.id)));
+  return [...new Set(keys.filter((key) => available.has(key)))];
+}
+
 const INITIAL_TIMESTAMP = "2026-08-11T08:30:00.000Z";
 
 export const MOCK_WORKFLOW_VAULTS: MockWorkflowVault[] = [
