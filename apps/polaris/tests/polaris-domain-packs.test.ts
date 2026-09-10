@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { runCli } from "../scripts/cli/main.js";
 import {
+  getDomainPackFlowGraphProjection,
   listDomainPackProjections,
   listDomainPacks,
 } from "../scripts/config/domain-packs.js";
@@ -15,6 +16,47 @@ const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.resolve(
   "domain-packs",
   "vault-knowledge-health",
 );
+
+test("DSL flow projection exposes every declared step and only data dependencies", () => {
+  const graph = getDomainPackFlowGraphProjection(
+    import.meta.url,
+    "AutoResearch",
+    "LiteratureReview",
+  );
+  assert.equal(graph.flow.nodes.length, 15);
+  assert.equal(graph.flow.nodes.filter((node) => node.kind === "input").length, 1);
+  assert.equal(graph.flow.nodes.filter((node) => node.id.startsWith("__")).length, 2);
+  assert.equal(graph.flow.nodes.filter((node) => node.kind === "step").length, 13);
+  assert.deepEqual(
+    graph.flow.edges
+      .filter((edge) => edge.to === "prepareCollection")
+      .map((edge) => edge.field)
+      .sort(),
+    ["audience", "decisionContext", "keywordPlanRef", "question"],
+  );
+  assert.doesNotMatch(
+    graph.flow.edges.map((edge) => `${edge.from}->${edge.to}`).join("\n"),
+    /reviseReport->reviewReport/u,
+  );
+  assert.deepEqual(
+    graph.flow.nodes.map((node) => node.call).filter(Boolean),
+    [
+      "literature.codex",
+      "literature.collection",
+      "literature.collection",
+      "literature.collection",
+      "literature.analysis",
+      "literature.analysis",
+      "literature.analysis",
+      "literature.report",
+      "literature.report",
+      "literature.report",
+      "literature.report",
+      "literature.report",
+      "literature.report",
+    ],
+  );
+});
 function packSource(version: string, body: string): string {
   return `domain SamplePack version "${version}"
 title "Sample Pack"
@@ -312,7 +354,7 @@ test("first-party Vault Knowledge Health pack projects the ArtifactMetadata read
   });
 });
 
-test("pack projection exposes v0.4-trial graph metadata", { concurrency: false }, async () => {
+test("pack projection omits legacy trial metadata from the Portal catalog", { concurrency: false }, async () => {
   await withDataRoot(async (dataRoot) => {
     const sourcePath = path.join(dataRoot, "trial-pack.ord");
     fs.writeFileSync(sourcePath, `dsl version "0.4-trial"
@@ -359,34 +401,17 @@ trial Main title "Synthetic trial" {
     const projection = listDomainPackProjections(import.meta.url)
       .find((pack) => pack.id === "TrialPack");
     assert.ok(projection);
-    assert.deepEqual(projection.trials, [{
-      id: "Main",
-      title: "Synthetic trial",
-      nodeCount: 1,
-      edgeCount: 0,
-      terminalNodes: ["work"],
-      capabilities: [],
-      budget: {
-        timeoutMs: 10_000,
-        maxCost: 1,
-        maxTransitions: 4,
-      },
-      execution: {
-        class: "ai",
-        isolation: "disposable",
-        network: "deny",
-      },
-    }]);
+    assert.deepEqual(projection.flows, []);
   });
 });
 
-test("built-in AutoResearch pack exposes one three-step flow and its trial graph", { concurrency: false }, async () => {
+test("built-in AutoResearch pack exposes one v0.3 flow", { concurrency: false }, async () => {
   await withDataRoot(async () => {
     const projection = listDomainPackProjections(import.meta.url)
       .find((candidate) => candidate.id === "AutoResearch");
     assert.ok(projection);
     assert.equal(projection.title, "autoresearch");
-    assert.equal(projection.languageVersion, "0.4-trial");
+    assert.equal(projection.languageVersion, "0.3");
     assert.deepEqual(
       projection.flows.map((flow) => ({
         id: flow.id,
@@ -396,28 +421,32 @@ test("built-in AutoResearch pack exposes one three-step flow and its trial graph
       [{
         id: "LiteratureReview",
         title: "Literature Review",
-        estimate: "3 个阶段",
+        estimate: "13 个阶段",
       }],
     );
-    const trial = projection.trials.find(
-      (candidate) => candidate.id === "LiteratureReviewExecution",
-    );
-    assert.ok(trial);
-    assert.equal(trial.nodeCount, 18);
-    assert.equal(trial.edgeCount, 22);
-    assert.deepEqual(trial.terminalNodes, ["renderPdf"]);
-    assert.equal(trial.budget.timeoutMs, 7_200_000);
-    assert.equal(trial.execution.network, "allow");
-    assert.ok(trial.capabilities.includes("literature.codex.invoke"));
+    assert.equal(projection.flows.length, 1);
   });
 });
 
-test("third-party domain packs are discoverable without installing them", { concurrency: false }, async () => {
+test("third-party domain pack sources remain discoverable without installing them", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    const summaries = listDomainPacks(import.meta.url);
+    const sourceIds = ["AfaDtc", "CourseworkVaults", "SysSecResearch"]
+      .filter((id) => summaries.some((pack) => pack.id === id));
+    assert.ok(sourceIds.length > 0);
+    assert.ok(sourceIds.every((id) => summaries.some((pack) => pack.id === id)));
+  });
+});
+
+test("third-party packs remain visible in the workflow catalog even without local tools", { concurrency: false }, async () => {
   await withDataRoot(async () => {
     const projections = listDomainPackProjections(import.meta.url);
-    assert.ok(projections.some((pack) => pack.id === "AfaDtc"));
-    assert.ok(projections.some((pack) => pack.id === "CourseworkVaults"));
-    assert.ok(projections.some((pack) => pack.id === "SysSecResearch"));
+    const thirdPartyIds = ["AfaDtc", "CourseworkVaults", "SysSecResearch"];
+    const visibleIds = projections.map((pack) => pack.id);
+    assert.ok(thirdPartyIds.some((id) => visibleIds.includes(id)));
+    const extensible = projections.find((pack) => thirdPartyIds.includes(pack.id));
+    assert.ok(extensible);
+    assert.ok((extensible.warnings?.length ?? 0) > 0);
   });
 });
 

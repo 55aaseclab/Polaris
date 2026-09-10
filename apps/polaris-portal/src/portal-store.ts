@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   createWorkflowRun,
+  deleteWorkflowRun,
   domainPacks,
   ensureCurrentUser,
   isRequestError,
@@ -152,6 +153,7 @@ interface PortalStore extends PortalVaultState, WorkflowMockState {
   approveWorkflowRun: (runId: string) => Promise<void>;
   cancelWorkflowRun: (runId: string) => Promise<void>;
   retryWorkflowRun: (runId: string) => Promise<MockWorkflowRun | null>;
+  deleteWorkflowRun: (runId: string) => Promise<void>;
   completeProvisioning: (input: {
     domainPackId: string;
     vaultId?: string | null;
@@ -442,6 +444,11 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
     const response = await workflowRunAction(runId, "retry");
     await get().refreshWorkflowRuns();
     return response.run;
+  },
+
+  deleteWorkflowRun: async (runId) => {
+    await deleteWorkflowRun(runId);
+    await get().refreshWorkflowRuns();
   },
 
   completeProvisioning: async ({ domainPackId, vaultId, enabledWorkflowKeys }) => {

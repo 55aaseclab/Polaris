@@ -127,6 +127,17 @@ def analysis_response(prompt: str) -> dict[str, Any] | None:
     return None
 
 
+def keyword_response(prompt: str) -> dict[str, Any] | None:
+    if "# Plan literature search keywords v1" not in prompt:
+        return None
+    return {
+        "keywords": ["synthetic corpus", "bounded behavior"],
+        "queries": ["synthetic corpus bounded behavior"],
+        "year_from": 2020,
+        "year_to": 2026,
+    }
+
+
 def report_response(prompt: str, arguments: list[str]) -> dict[str, Any] | None:
     if "# Compress claims → local main arguments" in prompt:
         cards = attachment(arguments, "cards.json")
@@ -239,7 +250,7 @@ def main() -> int:
         print("missing response path", file=sys.stderr)
         return 2
     prompt = prompt_text(arguments)
-    response = analysis_response(prompt) or report_response(prompt, arguments)
+    response = keyword_response(prompt) or analysis_response(prompt) or report_response(prompt, arguments)
     if response is None:
         print("unsupported synthetic prompt", file=sys.stderr)
         return 3

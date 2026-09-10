@@ -29,6 +29,7 @@
     "report": "tools/report-writing/clue-report-writing"
   },
   "port_bindings": {
+    "PlanLiteratureSearchKeywords": "literature.codex",
     "ValidateLiteratureInput": "literature.collection",
     "CollectLiteratureSources": "literature.collection",
     "AugmentLiteratureCollection": "literature.collection",

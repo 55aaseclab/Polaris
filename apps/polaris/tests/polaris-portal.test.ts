@@ -3011,7 +3011,7 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
           assert.equal(completed?.status, "succeeded");
-          const pdf = completed?.artifacts.find((artifact) => artifact.name === "report.pdf");
+          const pdf = completed?.artifacts.find((artifact) => artifact.name === "pdfRef");
           assert.ok(pdf);
           const preview = await fetch(
             `http://127.0.0.1:${address.port}/api/workflow-runs/${encodeURIComponent(completed!.id)}/artifacts/${encodeURIComponent(pdf!.id)}`,
@@ -3020,7 +3020,8 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
           assert.equal(preview.headers.get("content-type"), "application/pdf");
           assert.equal(preview.headers.get("content-disposition")?.startsWith("inline;"), true);
           assert.equal(preview.headers.get("x-content-type-options"), "nosniff");
-          assert.equal((await preview.arrayBuffer()).byteLength > 0, true);
+          const bytes = Buffer.from(await preview.arrayBuffer());
+          assert.equal(bytes.subarray(0, 5).toString("ascii"), "%PDF-");
         } finally {
           server.close();
           await once(server, "close");

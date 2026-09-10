@@ -2473,15 +2473,16 @@
   overflow: hidden;
 }
 
-.workflow-graph-heading {
+.settings-pack-warning {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.workflow-graph-heading h1 {
-  margin: .15rem 0 .35rem;
+  gap: .5rem;
+  margin: 0 0 1rem;
+  border: 1px solid #f0c36d;
+  padding: .65rem .75rem;
+  color: #7a4b00;
+  background: #fff8e7;
+  font-size: .8rem;
 }
 
 .run-detail-heading-actions {
@@ -2498,20 +2499,6 @@
   overflow: hidden;
   border: 1px solid var(--portal-border);
   background: var(--portal-surface);
-}
-
-.workflow-graph-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  border-bottom: 1px solid var(--portal-border);
-  padding: .65rem .8rem;
-}
-
-.workflow-graph-tools {
-  display: flex;
-  gap: .35rem;
 }
 
 .workflow-graph-canvas {
@@ -2535,7 +2522,8 @@
 .workflow-graph-svg path {
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: 1.35;
+  stroke-linejoin: round;
 }
 
 .workflow-graph-feedback path {
@@ -2578,6 +2566,11 @@
 .workflow-graph-node-input rect {
   fill: #ecfdf5;
   stroke: #0f766e;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-output rect {
+  fill: #eff6ff;
+  stroke: #2563eb;
   stroke-width: 1.8;
 }
 .workflow-graph-node-label {

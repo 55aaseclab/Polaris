@@ -124,6 +124,7 @@ export interface StepSpec {
   call?: string
   /** port 版本钉扎 */
   callVersion?: string
+  command?: string
 }
 
 export interface StepExecOptions {
@@ -134,7 +135,13 @@ export interface StepExecOptions {
       port: string
       version?: string
       input: StepContext
-      meta?: { stepId?: string; flowName?: string; mode?: 'interpret' | 'compile' }
+      meta?: {
+        stepId?: string
+        flowName?: string
+        mode?: 'interpret' | 'compile'
+        command?: string
+        outputFields?: string[]
+      }
     }) => {
       ok: boolean
       output: StepContext
@@ -282,7 +289,13 @@ export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
       port: step.call,
       version: step.callVersion,
       input: { ...used },
-      meta: { stepId: step.id, flowName, mode },
+      meta: {
+        stepId: step.id,
+        flowName,
+        mode,
+        ...(step.command ? { command: step.command } : {}),
+        outputFields: step.outputs.map((output) => output.name),
+      },
     })
     if (!res.ok) return ffiFailureLog(step, used, res.error)
     return ffiSuccessLog(step, ctx, used, res)
@@ -340,7 +353,13 @@ export async function execStepWithIOAsync(
     port: step.call,
     version: step.callVersion,
     input: { ...used },
-    meta: { stepId: step.id, flowName, mode },
+    meta: {
+      stepId: step.id,
+      flowName,
+      mode,
+      ...(step.command ? { command: step.command } : {}),
+      outputFields: step.outputs.map((output) => output.name),
+    },
   })
   if (!res.ok) return ffiFailureLog(step, used, res.error)
   return ffiSuccessLog(step, ctx, used, res)

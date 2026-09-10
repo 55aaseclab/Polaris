@@ -37,7 +37,8 @@ export interface ParseResult {
 }
 
 /** Unicode-aware identifier (e.g. ReserveStock, 任务单, 分拣臂) */
-const ID = String.raw`[\p{L}_][\p{L}\p{N}_]*`
+const ID = String.raw`[\p{L}_][\p{L}\p{N}_-]*`
+const PORT_ID = String.raw`${ID}(?:\.${ID})*`
 function re(source: string, flags = ''): RegExp {
   const f = flags.includes('u') ? flags : flags + 'u'
   return new RegExp(source, f)
@@ -273,7 +274,7 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
 }
 
 function parsePort(header: string, body: string): PortAst | ParseError {
-  const nm = header.match(re(`^port\\s+(${ID})`, 'i'))
+  const nm = header.match(re(`^port\\s+(${PORT_ID})`, 'i'))
   if (!nm) return { message: `Invalid port header: ${header}` }
   const name = nm[1]
   const verM = header.match(/\bversion\s+("([^"]*)"|'([^']*)'|([\d.^]+))/i)
@@ -282,6 +283,7 @@ function parsePort(header: string, body: string): PortAst | ParseError {
   let outFields: FieldAst[] = []
   let effect: PortEffect = 'ffi'
   let builtin: string | undefined
+  let binding: PortAst['binding']
 
   let i = 0
   while (i < body.length) {
@@ -300,6 +302,34 @@ function parsePort(header: string, body: string): PortAst | ParseError {
     if (builtinM) {
       builtin = builtinM[1]
       i += builtinM[0].length
+      continue
+    }
+
+    const bindingM = slice.match(/^binding\s*\{([\s\S]*?)\}/i)
+    if (bindingM) {
+      const bindingBody = bindingM[1] ?? ''
+      const toolM = bindingBody.match(
+        /\btool\s+("([^"]*)"|'([^']*)'|([^\s}]+))/i,
+      )
+      const commandM = bindingBody.match(
+        /\bcommand\s+("([^"]*)"|'([^']*)'|([^\s}]+))/i,
+      )
+      const tool = toolM?.[2] ?? toolM?.[3] ?? toolM?.[4] ?? ''
+      const command = commandM?.[2] ?? commandM?.[3] ?? commandM?.[4] ?? ''
+      const aliases: Record<string, string> = {}
+      const aliasRe = /alias\s+([A-Za-z_][\w]*)\s+as\s+([A-Za-z_][\w]*)/g
+      let alias: RegExpExecArray | null
+      while ((alias = aliasRe.exec(bindingBody)) !== null) {
+        aliases[alias[1]] = alias[2]
+      }
+      if (tool) {
+        binding = {
+          tool,
+          ...(command ? { command } : {}),
+          ...(Object.keys(aliases).length ? { aliases } : {}),
+        }
+      }
+      i += bindingM[0].length
       continue
     }
 
@@ -324,12 +354,21 @@ function parsePort(header: string, body: string): PortAst | ParseError {
     i = blk.end
   }
 
-  return { kind: 'Port', name, version, inFields, outFields, effect, ...(builtin ? { builtin } : {}) }
+  return {
+    kind: 'Port',
+    name,
+    version,
+    inFields,
+    outFields,
+    effect,
+    ...(builtin ? { builtin } : {}),
+    ...(binding ? { binding } : {}),
+  }
 }
 
 /** call Foo | call Foo@1.2.0 | call Inv.Foo@2 */
 function parseCallRef(text: string): PortRef | null {
-  const m = text.match(re(`^call\\s+(${ID}(?:\\.${ID})?)(?:@([\\d.]+))?`, 'i'))
+  const m = text.match(re(`^call\\s+(${PORT_ID})(?:@([\\d.]+))?`, 'i'))
   if (!m) return null
   const name = m[1]
   const version = m[2] ? normalizeVersion(m[2]) : undefined
@@ -458,6 +497,7 @@ function parseStepsBlock(body: string): StepAst[] | string {
     let uses: string[] = []
     let outputs: StepOutputAst[] = []
     let call: PortRef | undefined
+    let command: string | undefined
 
     // 块形式
     if (body[i] === '{') {
@@ -475,6 +515,13 @@ function parseStepsBlock(body: string): StepAst[] | string {
           call = callRef
           const eaten = part.match(re(`^call\\s+(${ID}(?:\\.${ID})?)(?:@[\\d.]+)?`, 'i'))
           j += eaten?.[0].length ?? callRef.raw.length + 5
+          continue
+        }
+
+        const commandM = part.match(/^command\s+("([^"]*)"|'([^']*)'|([^\s}]+))/i)
+        if (commandM) {
+          command = commandM[2] ?? commandM[3] ?? commandM[4]
+          j += commandM[0].length
           continue
         }
 
@@ -516,7 +563,7 @@ function parseStepsBlock(body: string): StepAst[] | string {
       }
     }
 
-    steps.push({ id, label, uses, outputs, call })
+    steps.push({ id, label, uses, outputs, call, ...(command ? { command } : {}) })
   }
   return steps
 }

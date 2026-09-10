@@ -17,11 +17,7 @@ import {
   mockRpcResponse,
   parsePortRef,
   resolvePort,
-  trialHostFromFfi,
-  InMemoryTrialStateStore,
   type Program,
-  type StepContext,
-  type TrialRunState,
 } from "polaris-workflow";
 import type {
   WorkflowLiveVaultArtifactMetadataReader,
@@ -29,6 +25,7 @@ import type {
 import {
   invokeWorkflowLiveVaultArtifactMetadataFromWorker,
 } from "./workflow-live-worker-binding.js";
+import { WorkflowToolDispatcher } from "./workflow-tool-dispatcher.js";
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
@@ -123,16 +120,6 @@ function requestedExecutionDriver(input: WorkflowRunRequest): WorkflowExecutionD
   return explicit ?? (input.vaultId?.trim() ? "vault" : "none");
 }
 
-function trialForFlow(
-  runtime: ReturnType<typeof loadVerifiedDomainPackRuntime>,
-  flowId: string,
-) {
-  const expectedName = `${flowId}Execution`;
-  return runtime.pipeline.trialPrograms?.find(
-    (candidate) => candidate.ast.name === expectedName,
-  );
-}
-
 export type WorkflowLiveMetadataAdmissionRequest = {
   operatorId: string;
   vaultId: string;
@@ -182,6 +169,7 @@ function portAstFromProgramPort(port: Program["ports"][number]): PortAst {
     qualifiedName: port.qualifiedName,
     effect: port.effect as PortAst["effect"],
     ...(port.builtin ? { builtin: port.builtin } : {}),
+    ...(port.binding ? { binding: port.binding } : {}),
     inFields: port.inFields.map((field) => {
       const [name, ...typeParts] = field.split(":");
       return { name: name ?? field, type: typeParts.join(":") || "String" };
@@ -312,6 +300,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
     evidenceRecorded?: boolean;
   }> = [];
   private readonly ports: PortAst[];
+  private readonly toolDispatcher?: WorkflowToolDispatcher;
   private callSequence = 0;
 
   constructor(
@@ -321,10 +310,17 @@ class WorkflowRpcHost implements AsyncFfiHost {
       store: PolarisControlStore;
       environment: Record<string, string | undefined>;
       now: () => Date;
+      importMetaUrl: string;
       liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
     },
   ) {
     this.ports = programPortsAsAst(program);
+    if (run.policy.mode === "host") {
+      this.toolDispatcher = new WorkflowToolDispatcher(run, this.ports, {
+        importMetaUrl: options.importMetaUrl,
+        environment: options.environment,
+      });
+    }
   }
 
   private policyMode(): "mock" | "live" {
@@ -601,6 +597,34 @@ class WorkflowRpcHost implements AsyncFfiHost {
       };
     }
     if (!this.liveRequestedFor(port)) {
+      if (this.toolDispatcher?.has(port.name)) {
+        const request = this.createRpcRequest(port, req, "mock");
+        const result = await this.toolDispatcher.invoke(req, port);
+        const completedAt = this.options.now().toISOString();
+        const response: FfiRpcResponse = {
+          protocolVersion: FFI_RPC_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          status: result.ok ? "completed" : "failed",
+          output: result.output,
+          receipt: {
+            id: `receipt-${request.requestId}`,
+            requestId: request.requestId,
+            status: result.ok ? "completed" : "failed",
+            call: request.call,
+            startedAt: completedAt,
+            completedAt,
+          },
+          ...(result.error
+            ? { error: { code: "common-tool-failed", message: result.error } }
+            : {}),
+        };
+        return this.logRpcInvocation({
+          req,
+          request,
+          response,
+          evidenceRecorded: result.ok,
+        });
+      }
       return this.invokeMock(req, port);
     }
     const request = this.createRpcRequest(port, req, "live");
@@ -654,53 +678,6 @@ class WorkflowRpcHost implements AsyncFfiHost {
     }
     return this.logRpcInvocation({ req, request, response });
   }
-}
-
-function trialInput(run: WorkflowRunRecord): StepContext {
-  const input = run.input;
-  const brief = String(input.brief ?? input.question ?? "Literature Review");
-  const value = (key: string, fallback: string): string => {
-    const candidate = input[key];
-    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : fallback;
-  };
-  const numberValue = (key: string, fallback: number): number => {
-    const candidate = Number(input[key]);
-    return Number.isFinite(candidate) ? candidate : fallback;
-  };
-  return {
-    inputRef: typeof input.collectionInput === "string"
-      ? input.collectionInput
-      : `brief:${brief}`,
-    workspaceId: "polaris-host",
-    runPrefix: run.id,
-    analysisId: `${run.id}-analysis`,
-    reportId: `${run.id}-report`,
-    question: brief,
-    decisionContext: value("decisionContext", "Polaris Literature Review"),
-    audience: value("audience", "research and engineering"),
-    reviewMode: value("reviewMode", "auto-pass"),
-    literatureMethod: value("literatureMethod", "iterate"),
-    reportReviewMode: value("reportMode", "fixed"),
-    reportTemplate: value("reportTemplate", "auto"),
-    seedIds: typeof input.seedIds === "string" ? input.seedIds : undefined,
-    batchSize: numberValue("batchSize", 10),
-    claimFilterRef: typeof input.claimFilterRef === "string" ? input.claimFilterRef : undefined,
-  };
-}
-
-function trialArtifact(run: WorkflowRunRecord, artifact: TrialRunState["artifacts"][number]): WorkflowArtifact {
-  const content = artifact.content
-    || `# ${artifact.name}\n\nDSL trial artifact reference: ${artifact.ref ?? "unavailable"}\n`;
-  return {
-    id: `artifact-${run.id}-${artifact.name}`,
-    name: artifact.name,
-    kind: artifact.kind === "snapshot" || artifact.kind === "script" ? "data" : artifact.kind,
-    size: `${Buffer.byteLength(content, "utf8")} B`,
-    summary: `DSL trial ${artifact.nodeId} 生成的产物`,
-    content,
-    ...(artifact.digest ? { digest: artifact.digest } : {}),
-    redacted: artifact.redacted,
-  };
 }
 
 function executionClassForProgram(program: Program, flowId: string): WorkflowExecutionClass {
@@ -1065,9 +1042,19 @@ export class WorkflowControlService {
         "quota-denied",
       );
     }
+    const values = safeInput(input.values);
+    const missingInput = selected.flow.fields.find((field) =>
+      field.required && !values[field.id]?.trim()
+    );
+    if (missingInput) {
+      throw new WorkflowControlError(
+        `工作流缺少必填输入：${missingInput.id}`,
+        400,
+        "workflow-input-required",
+      );
+    }
     const runtime = this.loadPinnedRuntime(selected.pack.id, selected.pack.version, selected.pack.digest);
     const executionClass = executionClassForProgram(runtime.pipeline.program!, selected.flow.id);
-    const executionTrial = trialForFlow(runtime, selected.flow.id);
     const now = this.now();
     const leaseExpiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
     const run = this.store.createWorkflowRun({
@@ -1079,10 +1066,8 @@ export class WorkflowControlService {
       packDigest: selected.pack.digest,
       flowId: selected.flow.id,
       source,
-      input: safeInput(input.values),
-      // The AutoResearch trial owns its collection/analysis review gates.
-      // Do not add the generic flow approval gate on top of that trial.
-      approvalRequired: executionTrial ? false : selected.flow.approvalRequired,
+      input: values,
+      approvalRequired: selected.flow.approvalRequired,
       executionClass,
       executionDriver: driver,
       scenario: input.scenario ?? "normal",
@@ -1092,13 +1077,13 @@ export class WorkflowControlService {
       },
       policy: {
         decision: "allow",
-        mode: executionTrial ? "host" : "mock",
+        mode: driver === "none" ? "host" : "mock",
         executionDriver: driver,
         reasons: driver === "none"
           ? [
               "pack-digest-pinned",
               "host-execution",
-              ...(executionTrial ? ["dsl-trial"] : ["mock-host-only"]),
+              "flow-program",
             ]
           : ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
       },
@@ -1147,6 +1132,16 @@ export class WorkflowControlService {
       throw new WorkflowControlError("当前运行不可取消", 409, "cancel-not-available");
     }
     return projectionForRun(updated, this.options.listPacks());
+  }
+
+  async deleteRun(tenantId: string, runId: string): Promise<void> {
+    const result = this.store.deleteWorkflowRun(tenantId, runId);
+    if (result === "missing") {
+      throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    }
+    if (result === "active") {
+      throw new WorkflowControlError("运行完成后才可以删除", 409, "delete-not-available");
+    }
   }
 
   async retry(tenantId: string, runId: string, scenario: WorkflowMockScenario = "normal"): Promise<WorkflowRunProjection> {
@@ -1336,89 +1331,6 @@ export class WorkflowControlService {
     return this.drainPromise;
   }
 
-  private async executeTrial(
-    run: WorkflowRunRecord,
-    runtime: ReturnType<WorkflowControlService["loadPinnedRuntime"]>,
-  ): Promise<void> {
-    const trial = trialForFlow(runtime, run.flowId);
-    if (!trial) {
-      this.fail(run, "trial-not-found", `Pack does not declare an execution trial for ${run.flowId}`);
-      return;
-    }
-    const program = runtime.pipeline.program;
-    if (!program) {
-      this.fail(run, "pack-program-unavailable", "AutoResearch pack program is unavailable");
-      return;
-    }
-    const host = new WorkflowRpcHost(run, program, {
-      store: this.store,
-      environment: process.env,
-      now: this.now,
-      liveMetadataReader: this.options.liveMetadataReader,
-    });
-    const state = await trial.run(
-      trialInput(run),
-      trialHostFromFfi(host, () => true),
-      {
-        runId: run.id,
-        store: new InMemoryTrialStateStore(),
-        allowNetwork: true,
-      },
-    );
-    const current = this.store.getWorkflowRun(run.tenantId, run.id);
-    if (!current || current.status === "cancelled") return;
-    for (const entry of host.rpcLog) {
-      const receipt = entry.response.receipt;
-      this.store.recordWorkflowEffectReceipt({
-        id: receipt.id,
-        runId: run.id,
-        tenantId: run.tenantId,
-        requestId: receipt.requestId,
-        port: receipt.call.port,
-        version: receipt.call.version,
-        effect: receipt.call.effect,
-        status: receipt.status,
-        input: entry.request.input,
-        output: entry.response.output,
-        ...(entry.response.error
-          ? { errorCode: entry.response.error.code, errorMessage: entry.response.error.message }
-          : {}),
-        createdAt: receipt.startedAt,
-        completedAt: receipt.completedAt,
-      });
-    }
-    for (const artifact of state.artifacts) {
-      this.store.addWorkflowArtifact({
-        ...trialArtifact(run, artifact),
-        redacted: artifact.redacted,
-        runId: run.id,
-        tenantId: run.tenantId,
-        createdAt: this.now().toISOString(),
-      });
-    }
-    if (state.status === "failed") {
-      this.fail(run, state.error?.code ?? "trial-failed", state.error?.message ?? "Literature trial failed");
-      return;
-    }
-    const waiting = state.status === "waiting";
-    this.store.updateWorkflowRun({
-      tenantId: run.tenantId,
-      runId: run.id,
-      status: waiting ? "waiting" : "succeeded",
-      progress: waiting ? 76 : 100,
-      workerId: this.workerId,
-      output: state.context,
-      event: {
-        kind: waiting ? "approval-required" : "succeeded",
-        title: waiting ? "等待 Literature Review 审查" : "Literature Review 已完成",
-        detail: waiting
-          ? "DSL trial 已暂停，等待审查继续。"
-          : "DSL trial 已完成并生成执行产物。",
-        tone: waiting ? "warning" : "success",
-      },
-    });
-  }
-
   private async execute(run: WorkflowRunRecord): Promise<void> {
     const driver = executionDriverForRun(run);
     const lease = this.store.getWorkflowCapabilityLease(run.tenantId, run.capabilityLeaseId);
@@ -1453,15 +1365,12 @@ export class WorkflowControlService {
       );
       return;
     }
-    if (driver === "none" && trialForFlow(runtime, run.flowId)) {
-      await this.executeTrial(run, runtime);
-      return;
-    }
     const program = runtime.pipeline.program!;
     const host = new WorkflowRpcHost(run, program, {
       store: this.store,
       environment: process.env,
       now: this.now,
+      importMetaUrl: this.options.importMetaUrl,
       liveMetadataReader: this.options.liveMetadataReader,
     });
     const docStore = new DocStore();

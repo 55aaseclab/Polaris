@@ -15,6 +15,10 @@ export interface ValidateResult {
   issues: ValidationIssue[]
 }
 
+export interface ToolResolver {
+  resolve(toolId: string): { commands: readonly string[] } | null
+}
+
 function push(
   issues: ValidationIssue[],
   level: ValidationIssue['level'],
@@ -59,7 +63,7 @@ function findPort(ports: PortAst[], ref: PortRef): PortAst | null {
   return resolvePort(ports, ref.name, ref.version)
 }
 
-export function validate(ast: DomainAst): ValidateResult {
+export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateResult {
   const issues: ValidationIssue[] = []
   if (!ast.name) push(issues, 'error', 'E_DOMAIN_NAME', 'Domain name is required')
   const languageVersion = ast.languageVersion ?? '0.3'
@@ -191,6 +195,47 @@ export function validate(ast: DomainAst): ValidateResult {
             `flow.${flow.name}.${step.id}`,
           )
         } else {
+          if (port.effect === 'ffi') {
+            if (!port.binding?.tool) {
+              push(
+                issues,
+                'error',
+                'E_FFI_BINDING',
+                `call ${step.call.raw} has no external tool binding`,
+                `flow.${flow.name}.${step.id}`,
+              )
+            } else if (toolResolver) {
+              const tool = toolResolver.resolve(port.binding.tool)
+              if (!tool) {
+                push(
+                  issues,
+                  'error',
+                  'E_FFI_TOOL',
+                  `call ${step.call.raw} references unavailable tool ${port.binding.tool}`,
+                  `flow.${flow.name}.${step.id}`,
+                )
+              } else {
+                const command = step.command ?? port.binding.command
+                if (!command) {
+                  push(
+                    issues,
+                    'error',
+                    'E_FFI_COMMAND',
+                    `call ${step.call.raw} has no external tool command`,
+                    `flow.${flow.name}.${step.id}`,
+                  )
+                } else if (!tool.commands.includes(command)) {
+                push(
+                  issues,
+                  'error',
+                  'E_FFI_COMMAND',
+                  `call ${step.call.raw} references unavailable command ${command}`,
+                  `flow.${flow.name}.${step.id}`,
+                )
+                }
+              }
+            }
+          }
           for (const f of port.inFields) {
             if (!f.optional && !step.uses.includes(f.name) && !available.has(f.name)) {
               push(

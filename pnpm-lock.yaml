@@ -171,6 +171,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      dagre-d3-es:
+        specifier: 7.0.14
+        version: 7.0.14
       lucide-react:
         specifier: ^1.29.0
         version: 1.30.0(react@19.2.8)

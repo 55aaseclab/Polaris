@@ -244,6 +244,30 @@ test("driver=none executes a durable workflow on the Polaris host without a Vaul
   }
 });
 
+test("workflow admission validates required inputs from the flow projection", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack, { vaults: [] });
+    await assert.rejects(
+      () => service!.createRun("tenant-required-input", {
+        packId: pack.id,
+        flowId: "Summarize",
+        driver: "none",
+        values: {},
+      }),
+      (error: unknown) =>
+        error instanceof WorkflowControlError
+        && error.code === "workflow-input-required"
+        && error.statusCode === 400,
+    );
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
 test("driver=none rejects an accidental Vault target", { concurrency: false }, async () => {
   const fixture = testEnvironment();
   let service: WorkflowControlService | undefined;
@@ -457,6 +481,41 @@ test("workflow cancellation, retry, tenant isolation, and lease denial are durab
     const deniedRun = denied.runs.find((run) => run.id === retried.id);
     assert.equal(deniedRun?.status, "failed");
     assert.equal(deniedRun?.error?.code, "capability-lease-invalid");
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("terminal workflow runs can be deleted while active runs are protected", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack);
+    const active = await service.createRun("tenant-a", {
+      packId: pack.id,
+      flowId: "Summarize",
+      driver: "none",
+      values: { subject: "synthetic active" },
+    });
+    await assert.rejects(
+      () => service!.deleteRun("tenant-a", active.id),
+      (error: unknown) => error instanceof WorkflowControlError
+        && error.code === "delete-not-available"
+        && error.statusCode === 409,
+    );
+
+    const completed = await service.listRuns("tenant-a");
+    const terminal = completed.runs.find((run) => run.id === active.id);
+    assert.equal(terminal?.status, "succeeded");
+    await service.deleteRun("tenant-a", active.id);
+    await assert.rejects(
+      () => service!.getRun("tenant-a", active.id),
+      (error: unknown) => error instanceof WorkflowControlError
+        && error.code === "run-not-found"
+        && error.statusCode === 404,
+    );
   } finally {
     service?.close();
     restoreEnvironment(fixture);

@@ -100,6 +100,12 @@ export interface PortAst {
   effect: PortEffect
   /** Optional Polaris built-in binding, for example manual.review. */
   builtin?: string
+  /** External tool binding resolved by the host tool inventory. */
+  binding?: {
+    tool: string
+    command?: string
+    aliases?: Record<string, string>
+  }
   module?: string
   originDomain?: string
   originDomainVersion?: string
@@ -139,6 +145,7 @@ export interface StepAst {
   outputs: StepOutputAst[]
   /** 调用的 port（可带 @version） */
   call?: PortRef
+  command?: string
 }
 
 export interface RequireAst {

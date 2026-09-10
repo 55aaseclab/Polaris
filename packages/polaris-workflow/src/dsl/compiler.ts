@@ -47,6 +47,11 @@ export interface ProgramPortMeta {
   originDomain?: string
   effect: string
   builtin?: string
+  binding?: {
+    tool: string
+    command?: string
+    aliases?: Record<string, string>
+  }
   inFields: string[]
   outFields: string[]
 }
@@ -154,6 +159,7 @@ export function toMeta(flow: FlowAst): ProgramFlowMeta {
       uses: [...s.uses],
       outputs: s.outputs.map((o) => ({ name: o.name, type: o.type, label: o.label })),
       call: s.call?.raw,
+      command: s.command,
     })),
     requireExpr: flow.require?.expr,
     transitionTo: flow.transition?.to,
@@ -196,6 +202,7 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
     outputs: s.outputs.map((o) => ({ name: o.name, type: o.type })),
     call: s.call?.name,
     callVersion: s.call?.version,
+    command: s.command,
   }))
   const inputs = flow.inputs.map((i) => ({ ...i, label: labelOf(i) }))
   const flowOutSpecs = flow.outputs.map((o) => ({ name: o.name, from: o.from }))
@@ -421,6 +428,7 @@ function portMeta(p: PortAst): ProgramPortMeta {
     originDomain: p.originDomain,
     effect: p.effect,
     ...(p.builtin ? { builtin: p.builtin } : {}),
+    ...(p.binding ? { binding: p.binding } : {}),
     inFields: p.inFields.map((f) => `${f.name}:${f.type}`),
     outFields: p.outFields.map((f) => `${f.name}:${f.type}`),
   }

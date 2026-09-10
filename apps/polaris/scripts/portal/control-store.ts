@@ -1269,6 +1269,44 @@ export class PolarisControlStore {
     return row ? this.readWorkflowRun(row) : null;
   }
 
+  deleteWorkflowRun(tenantId: string, runId: string): "deleted" | "missing" | "active" {
+    const tenant = tenantId.trim();
+    const id = runId.trim();
+    if (!tenant || !id) return "missing";
+    let result: "deleted" | "missing" | "active" = "missing";
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT status FROM workflow_runs WHERE tenant_id = ? AND id = ?
+      `).get(tenant, id) as SqlRow | undefined;
+      if (!row) return;
+      if (!["succeeded", "failed", "cancelled"].includes(String(row.status))) {
+        result = "active";
+        return;
+      }
+      const identifiers = this.db.prepare(`
+        SELECT envelope_id, capability_lease_id
+        FROM workflow_runs
+        WHERE tenant_id = ? AND id = ?
+      `).get(tenant, id) as SqlRow;
+      this.db.prepare("DELETE FROM workflow_events WHERE tenant_id = ? AND run_id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_effect_receipts WHERE tenant_id = ? AND run_id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_artifacts WHERE tenant_id = ? AND run_id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_suggestions WHERE tenant_id = ? AND source_run_id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_runs WHERE tenant_id = ? AND id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_capability_leases WHERE id = ?")
+        .run(identifiers.capability_lease_id);
+      this.db.prepare("DELETE FROM workflow_envelopes WHERE id = ?")
+        .run(identifiers.envelope_id);
+      result = "deleted";
+    });
+    return result;
+  }
+
   private getWorkflowRunById(runId: string): WorkflowRunRecord | null {
     const row = this.db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) as SqlRow | undefined;
     return row ? this.readWorkflowRun(row) : null;

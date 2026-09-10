@@ -13,8 +13,10 @@ import {
   type PipelineResult,
   type PortAst,
   type InputFieldAst,
-  type TrialAst,
+  type ToolResolver,
+  type FlowAst,
 } from "polaris-workflow";
+import type { WorkflowGraphProjection, WorkflowGraphNode } from "@polaris/polaris-shell";
 import { withControlMutationLock } from "../utils/control-mutation-lock.js";
 import {
   polarisDataRoot,
@@ -28,6 +30,22 @@ const DOMAIN_PACK_SOURCE_FILE = "main.ord";
 const DOMAIN_PACK_MANIFEST_FILE = "manifest.json";
 const DOMAIN_ID_PATTERN = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+
+function toolResolver(importMetaUrl: string): ToolResolver {
+  const file = path.join(repoRoot(importMetaUrl), "tools", "tool-inventory.json");
+  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as {
+    tools?: Array<{ id?: unknown; commands?: unknown }>;
+  };
+  const tools = new Map<string, readonly string[]>();
+  for (const item of parsed.tools ?? []) {
+    if (typeof item.id !== "string" || !Array.isArray(item.commands)) continue;
+    tools.set(item.id, item.commands.filter((command): command is string => typeof command === "string"));
+  }
+  return { resolve: (toolId) => {
+    const commands = tools.get(toolId);
+    return commands ? { commands } : null;
+  } };
+}
 
 export interface DomainPackManifest {
   kind: typeof DOMAIN_PACK_KIND;
@@ -83,17 +101,6 @@ export interface DomainPackFlowProjection {
   }>;
 }
 
-export interface DomainPackTrialProjection {
-  id: string;
-  title: string;
-  nodeCount: number;
-  edgeCount: number;
-  terminalNodes: string[];
-  capabilities: string[];
-  budget: TrialAst["budget"];
-  execution: TrialAst["execution"];
-}
-
 export interface DomainPackProjection {
   id: string;
   title: string;
@@ -104,8 +111,8 @@ export interface DomainPackProjection {
   digest: string;
   capabilities: string[];
   accent: DomainAccent;
+  warnings: string[];
   flows: DomainPackFlowProjection[];
-  trials: DomainPackTrialProjection[];
 }
 
 interface StoredDomainPack extends DomainPackSummary {
@@ -501,15 +508,20 @@ export function listDomainPackProjections(
 ): DomainPackProjection[] {
   const installed = availableDomainPacks(importMetaUrl, environment);
   const loader = packLoader(installed);
+  const tools = toolResolver(importMetaUrl);
   const projections: DomainPackProjection[] = [];
   for (const pack of installed) {
     if (pack.status !== "verified") continue;
-    const pipeline = runPipeline(pack.source, { loader });
-    if (!pipeline.ok || !pipeline.ast) continue;
-    const flattened = flattenDomain(pipeline.ast);
+    const checkedPipeline = runPipeline(pack.source, { loader, toolResolver: tools });
+    // A catalog projection must still show extensible packs whose tools are not
+    // installed locally. Execution remains gated by the strict checked runtime.
+    const pipeline = checkedPipeline.ok ? checkedPipeline : runPipeline(pack.source, { loader });
+    const ast = pipeline.ast ?? parse(pack.source).ast;
+    if (!ast) continue;
+    const flattened = flattenDomain(ast);
     const ports = flattened.ports;
     const flows = flattened.flows.map((flow) => {
-      const module = pipeline.ast?.modules.find((candidate) => candidate.name === flow.module);
+      const module = ast.modules.find((candidate) => candidate.name === flow.module);
       const groupId = module?.code || module?.name;
       return {
         id: flow.name,
@@ -528,28 +540,22 @@ export function listDomainPackProjections(
         })),
       };
     });
-    const trials = (pipeline.ast.trials ?? []).map((trial) => ({
-      id: trial.name,
-      title: trial.title,
-      nodeCount: trial.nodes.length,
-      edgeCount: trial.edges.length,
-      terminalNodes: [...trial.terminal],
-      capabilities: [...new Set(trial.nodes.flatMap((node) => node.capabilities))],
-      budget: { ...trial.budget },
-      execution: { ...trial.execution },
-    }));
     projections.push({
       id: pack.id,
-      title: pipeline.ast.title ?? pack.title ?? pack.id,
-      category: pipeline.ast.category ?? "Workflow",
-      description: pipeline.ast.description ?? pack.description ?? "",
+      title: ast.title ?? pack.title ?? pack.id,
+      category: ast.category ?? "Workflow",
+      description: ast.description ?? pack.description ?? "",
       version: pack.version,
-      languageVersion: pipeline.ast.languageVersion ?? "0.3",
+      languageVersion: ast.languageVersion ?? "0.3",
       digest: `sha256:${pack.sha256}`,
       capabilities: [...new Set(ports.map((port) => capabilityLabel(port.name)))],
-      accent: pipeline.ast.accent ?? accentFromDigest(pack.sha256),
+      accent: ast.accent ?? accentFromDigest(pack.sha256),
+      warnings: checkedPipeline.ok
+        ? []
+        : checkedPipeline.issues
+          .filter((issue) => issue.level === "error")
+          .map((issue) => issue.message),
       flows,
-      trials,
     });
   }
   return projections.sort((a, b) => a.title.localeCompare(b.title));
@@ -559,6 +565,90 @@ export interface VerifiedDomainPackRuntime {
   summary: DomainPackSummary;
   source: string;
   pipeline: PipelineResult;
+}
+
+function flowGraph(
+  pack: StoredDomainPack,
+  flow: FlowAst,
+  ports: PortAst[],
+): WorkflowGraphProjection {
+  const inputId = "__input__";
+  const outputId = "__output__";
+  const nodes: WorkflowGraphNode[] = [{
+    id: inputId,
+    label: "输入",
+    kind: "input",
+    uses: [],
+    outputs: flow.inputs.map((field) => field.name),
+  }];
+  for (const step of flow.steps) {
+    const port = portForStep(ports, step);
+    nodes.push({
+      id: step.id,
+      label: step.label,
+      kind: "step",
+      ...(step.call ? { call: port?.qualifiedName ?? port?.name ?? step.call.raw } : {}),
+      ...(port?.effect ? { effect: port.effect } : {}),
+      uses: [...step.uses],
+      outputs: step.outputs.map((output) => output.name),
+    });
+  }
+  nodes.push({
+    id: outputId,
+    label: "输出",
+    kind: "output",
+    uses: flow.outputs.map((output) => output.from ?? output.name),
+    outputs: flow.outputs.map((output) => output.name),
+  });
+
+  const edges: WorkflowGraphProjection["flow"]["edges"] = [];
+  const producer = new Map<string, string>(flow.inputs.map((field) => [field.name, inputId]));
+  const edgeKeys = new Set<string>();
+  const addEdge = (from: string, to: string, field: string) => {
+    const key = `${from}->${to}:${field}`;
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push({ from, to, field });
+  };
+  for (const step of flow.steps) {
+    for (const field of step.uses) {
+      const from = producer.get(field);
+      if (from && from !== step.id) addEdge(from, step.id, field);
+    }
+    for (const output of step.outputs) producer.set(output.name, step.id);
+  }
+  for (const output of flow.outputs) {
+    const field = output.from ?? output.name;
+    const from = producer.get(field);
+    if (from) addEdge(from, outputId, field);
+  }
+  return {
+    packId: pack.id,
+    packVersion: pack.version,
+    packDigest: `sha256:${pack.sha256}`,
+    flowId: flow.name,
+    flowTitle: flow.title,
+    flow: { nodes, edges },
+  };
+}
+
+export function getDomainPackFlowGraphProjection(
+  importMetaUrl: string,
+  packId: string,
+  flowId: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): WorkflowGraphProjection {
+  const installed = availableDomainPacks(importMetaUrl, environment);
+  const pack = installed.find((candidate) => candidate.id === packId && candidate.status === "verified");
+  if (!pack) throw new Error(`Verified Domain Pack is unavailable: ${packId}`);
+  const pipeline = runPipeline(pack.source, {
+    loader: packLoader(installed),
+    toolResolver: toolResolver(importMetaUrl),
+  });
+  if (!pipeline.ok || !pipeline.ast) throw new Error(`Domain Pack cannot be projected: ${packId}`);
+  const flow = flattenDomain(pipeline.ast).flows.find((candidate) => candidate.name === flowId);
+  if (!flow) throw new Error(`Workflow is unavailable: ${packId}/${flowId}`);
+  return flowGraph(pack, flow, flattenDomain(pipeline.ast).ports);
 }
 
 /** Load exactly the installed bytes named by a run's immutable pack pin. */
@@ -582,7 +672,10 @@ export function loadVerifiedDomainPackRuntime(
   if (!pack) {
     throw new Error(`Verified Domain Pack pin is unavailable: ${id}@${version} sha256:${digest}`);
   }
-  const pipeline = runPipeline(pack.source, { loader: packLoader(installed) });
+  const pipeline = runPipeline(pack.source, {
+    loader: packLoader(installed),
+    toolResolver: toolResolver(importMetaUrl),
+  });
   if (!pipeline.ok || !pipeline.program || !pipeline.ast) {
     throw new Error(`Pinned Domain Pack cannot be executed: ${id}@${version}`);
   }
@@ -601,7 +694,10 @@ export async function addDomainPack(
   return withControlMutationLock(importMetaUrl, "domain-packs", async () => {
     const input = resolveInputSource(inputPath);
     const installed = availableDomainPacks(importMetaUrl, environment);
-    const pipeline = runPipeline(input.source, { loader: packLoader(installed) });
+    const pipeline = runPipeline(input.source, {
+      loader: packLoader(installed),
+      toolResolver: toolResolver(importMetaUrl),
+    });
     if (!pipeline.ok || !pipeline.rawAst) {
       throw new Error(`Domain Pack validation failed for '${input.path}': ${formatPipelineFailure(pipeline)}`);
     }

@@ -3,11 +3,14 @@ import { validate } from './validator.js'
 import { compile, type Program } from './compiler.js'
 import { resolveImports, type PackLoader } from './resolve.js'
 import type { DomainAst, ParseError, ValidationIssue } from './ast.js'
+import type { ToolResolver } from './validator.js'
 import type { TrialProgram } from './trial.js'
 
 export interface PipelineOptions {
   /** 跨域包 import 加载器；无 import 时可省略 */
   loader?: PackLoader
+  /** Host-provided tool inventory; kept outside the DSL package. */
+  toolResolver?: ToolResolver
 }
 
 export interface PipelineResult {
@@ -83,7 +86,7 @@ export function runPipeline(source: string, options: PipelineOptions = {}): Pipe
     ast = resolved.ast
   }
 
-  const validated = validate(ast)
+  const validated = validate(ast, options.toolResolver)
   const issues = [...resolveIssues, ...validated.issues]
   if (!validated.ok) {
     return {

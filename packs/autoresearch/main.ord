@@ -1,705 +1,193 @@
-// Polaris-owned literature-review workflow definition.
-// Shared implementations are repository-level common tools under tools/.
-dsl version "0.4-trial"
+dsl version "0.3"
 domain AutoResearch version "0.1.0"
 title "autoresearch"
-description "Evidence-bound literature collection, claim analysis, review, and report production."
+description "Evidence-bound literature collection, analysis, and report production."
 category "Research"
-accent blue
 
-enum ReviewMode {
-  AutoPass,
-  AutoApprove,
-  ManualReview
+port literature.codex version "1.0.0" {
+  in { question: String }
+  out { keywordPlanRef: String, keywordCount: Number, keywordStatus: String }
+  effect ffi
+  binding { tool "literature.codex" }
 }
 
-enum LiteratureMethod {
-  Iterate,
-  Batches,
-  Propose
-}
-
-enum ReportRunMode {
-  Fixed,
-  Reviewed
-}
-
-enum ReviewStatus {
-  Candidate,
-  Final,
-  Pending,
-  Failed
-}
-
-entity LiteratureReviewCase {
-  id : ID
-  workspaceId : ID
-  workflowId : ID
-  analysisId : ID
-  reportId : ID
-  status : ReviewStatus
-  collectionOutputRef : String?
-  snapshotRef : String?
-  analysisOutputRef : String?
-  reportInputRef : String?
-  draftRef : String?
-  markdownRef : String?
-  pdfRef : String?
-  collectionCount : Number?
-  judgmentCount : Number?
-}
-
-port ValidateLiteratureInput version "1.0.0" {
-  in { inputRef : String }
-  out {
-    validatedInputRef : String
-    collectionId : ID
-    inputValid : Boolean
-  }
-  effect pure
-}
-
-port CollectLiteratureSources version "1.0.0" {
+port literature.collection version "1.0.0" {
   in {
-    validatedInputRef : String
-    workspaceId : ID
-    runPrefix : ID
+    question: String
+    keywordPlanRef: String
+    collectionInputRef: String
+    collectionOutputRef: String
+    workspaceId: ID
+    runPrefix: ID
+    decisionContext: String
+    audience: String
+    reviewMode: String
   }
   out {
-    collectionOutputRef : String
-    collectionId : ID
-    collectionCount : Number
-    collectionStatus : String
+    collectionInputRef: String
+    inputValid: Boolean
+    collectionOutputRef: String
+    collectionId: ID
+    collectionCount: Number
+    collectionStatus: String
   }
   effect ffi
+  binding { tool "literature.collection" }
 }
 
-port AugmentLiteratureCollection version "1.0.0" {
+port literature.analysis version "1.0.0" {
   in {
-    collectionOutputRef : String
-    workspaceId : ID
-    runPrefix : ID
+    collectionOutputRef: String
+    analysisInputRef: String
+    analysisOutputRef: String
+    analysisRoot: String
+    analysisId: ID
+    question: String
+    decisionContext: String
+    audience: String
   }
   out {
-    augmentedOutputRef : String
-    pdfCaptureStatus : String
-    pdfCount : Number
+    snapshotRef: String
+    analysisInputRef: String
+    clueCount: Number
+    analysisOutputRef: String
+    claimCount: Number
+    analysisStatus: String
+    analysisValid: Boolean
   }
   effect ffi
+  binding { tool "literature.analysis" }
 }
 
-port ResolveCollectionReview version "1.0.0" {
+port literature.report version "1.0.0" {
   in {
-    augmentedOutputRef : String
-    reviewMode : String
+    analysisOutputRef: String
+    reportInputRef: String
+    draftRef: String
+    reviewsRef: String
+    markdownRef: String
+    reportId: ID
+    reportTemplate: String
+    draftOutputRef: String
+    reviewOutputRef: String
+    revisedDraftRef: String
+    reportRunDir: String
+    pdfRef: String
   }
   out {
-    finalCollectionRef : String
-    collectionReviewPending : Boolean
-    collectionReviewListRef : String?
-    collectionReviewResultRef : String?
-  }
-  effect human
-}
-
-port FreezeLiteratureSnapshot version "1.0.0" {
-  in {
-    finalCollectionRef : String
-    analysisId : ID
-    question : String
-    decisionContext : String
-    audience : String
-  }
-  out {
-    snapshotRef : String
-    analysisInputRef : String
-    clueCount : Number
-  }
-  effect read
-}
-
-port IterateLiteratureClaims version "1.0.0" {
-  in {
-    analysisInputRef : String
-    seedIds : String?
-  }
-  out {
-    iterationCorpusRef : String
-    candidatesRef : String
-    claimCount : Number
-    analysisMethod : String
+    reportInputRef: String
+    selectedTemplate: String
+    draftRef: String
+    draftValid: Boolean
+    reviewsRef: String
+    reportPassed: Boolean
+    reviewCount: Number
+    markdownRef: String
+    manifestRef: String
+    pdfRef: String
   }
   effect ffi
+  binding { tool "literature.report" }
 }
 
-port ProposeLiteratureBatches version "1.0.0" {
-  in {
-    analysisInputRef : String
-    batchSize : Number
-  }
-  out {
-    batchCacheRef : String
-    candidatesRef : String
-    claimCount : Number
-    analysisMethod : String
-  }
-  effect ffi
-}
-
-port MergeLiteratureBatches version "1.0.0" {
-  in {
-    analysisInputRef : String
-    batchCacheRef : String
-  }
-  out {
-    candidatesRef : String
-    claimCount : Number
-    analysisMethod : String
-  }
-  effect pure
-}
-
-port ProposeLiteratureClaims version "1.0.0" {
-  in { analysisInputRef : String }
-  out {
-    candidatesRef : String
-    claimCount : Number
-    analysisMethod : String
-  }
-  effect ffi
-}
-
-port ValidateLiteratureClaims version "1.0.0" {
-  in {
-    analysisInputRef : String
-    candidatesRef : String
-  }
-  out {
-    validatedClaimsRef : String
-    reviewCount : Number
-    claimsValid : Boolean
-  }
-  effect pure
-}
-
-port ResolveAnalysisReview version "1.0.0" {
-  in {
-    analysisInputRef : String
-    validatedClaimsRef : String
-    reviewMode : String
-  }
-  out {
-    analysisReviewResultRef : String
-    analysisReviewPending : Boolean
-    analysisReviewListRef : String?
-  }
-  effect human
-}
-
-port FinalizeLiteratureAnalysis version "1.0.0" {
-  in {
-    analysisInputRef : String
-    validatedClaimsRef : String
-    analysisReviewResultRef : String
-    analysisId : ID
-  }
-  out {
-    analysisOutputRef : String
-    literatureReportRef : String
-    judgmentCount : Number
-  }
-  effect write
-}
-
-port PrepareLiteratureReport version "1.0.0" {
-  in {
-    analysisOutputRef : String
-    reportId : ID
-    reportTemplate : String
-    claimFilterRef : String?
-  }
-  out {
-    reportInputRef : String
-    selectedTemplate : String
-  }
-  effect read
-}
-
-port DraftLiteratureReport version "1.0.0" {
-  in {
-    reportInputRef : String
-    reportId : ID
-  }
-  out {
-    draftRef : String
-    pipelineRef : String
-    draftValid : Boolean
-  }
-  effect ffi
-}
-
-port ReviewLiteratureReport version "1.0.0" {
-  in {
-    reportInputRef : String
-    draftRef : String
-  }
-  out {
-    reviewsRef : String
-    reportPassed : Boolean
-    reviewCount : Number
-  }
-  effect ffi
-}
-
-port ReviseLiteratureReport version "1.0.0" {
-  in {
-    reportInputRef : String
-    draftRef : String
-    reviewsRef : String
-  }
-  out {
-    draftRef : String
-    revisionCount : Number
-    reportPassed : Boolean
-  }
-  effect ffi
-}
-
-port PublishLiteratureMarkdown version "1.0.0" {
-  in {
-    reportInputRef : String
-    draftRef : String
-    reviewsRef : String
-    reportId : ID
-  }
-  out {
-    markdownRef : String
-    manifestRef : String
-  }
-  effect write
-}
-
-port RenderLiteraturePdf version "1.0.0" {
-  in {
-    reportInputRef : String
-    draftRef : String
-    reportId : ID
-  }
-  out {
-    texRef : String
-    bibRef : String
-    pdfRef : String
-  }
-  effect write
-}
-
-port CollectLiterature version "1.0.0" {
-  in { brief : String }
-  out { collectionRef : String }
-  effect ffi
-}
-
-port AnalyzeLiterature version "1.0.0" {
-  in { collectionRef : String }
-  out { analysisRef : String }
-  effect ffi
-}
-
-port WriteLiteratureReport version "1.0.0" {
-  in { analysisRef : String }
-  out { reportRef : String }
-  effect write
-}
-
-flow LiteratureReview title "Literature Review" {
-  description "Collect evidence, analyze claims, and write the literature report."
-  needs {
-    CollectLiterature
-    AnalyzeLiterature
-    WriteLiteratureReport
-  }
+flow LiteratureReview title "Literature Review" create {
+  description "Collect evidence, analyze claims, and publish a PDF report."
   input {
-    brief : String required control textarea label "Research brief"
+    question: String required control textarea label "Research brief"
+    decisionContext: String required label "Decision context"
+    audience: String required label "Audience"
+    reviewMode: String required label "Collection review mode"
+    reportTemplate: String required label "Report template"
   }
   steps {
-    collect "Collect literature" {
-      uses { brief }
-      call CollectLiterature
+    planKeywords "Plan search keywords" {
+      uses { question }
+      call literature.codex
+      command "plan-search-keywords"
+      output { keywordPlanRef: String, keywordCount: Number, keywordStatus: String }
+    }
+    prepareCollection "Prepare collection input" {
+      uses { question, keywordPlanRef, decisionContext, audience }
+      call literature.collection
+      command "prepare-literature-input"
+      output { collectionInputRef: String, inputValid: Boolean }
+    }
+    validateCollection "Validate collection input" {
+      uses { collectionInputRef }
+      call literature.collection
+      command "validate-input"
+      output { inputValid: Boolean }
+    }
+    collectSources "Collect literature sources" {
+      uses { collectionInputRef, reviewMode }
+      call literature.collection
+      command "run"
       output {
-        collectionRef : String
+        collectionOutputRef: String
+        collectionId: ID
+        collectionCount: Number
+        collectionStatus: String
       }
     }
-    analyze "Analyze literature" {
-      uses { collectionRef }
-      call AnalyzeLiterature
-      output {
-        analysisRef : String
-      }
+    prepareAnalysis "Prepare analysis snapshot" {
+      uses { collectionOutputRef, question, decisionContext, audience }
+      call literature.analysis
+      command "prepare"
+      output { snapshotRef: String, analysisInputRef: String, clueCount: Number }
     }
-    report "Write literature report" {
-      uses { analysisRef }
-      call WriteLiteratureReport
-      output {
-        reportRef : String
-      }
+    runAnalysis "Run claim analysis" {
+      uses { analysisInputRef }
+      call literature.analysis
+      command "run"
+      output { analysisOutputRef: String, claimCount: Number, analysisStatus: String }
+    }
+    validateAnalysis "Validate analysis output" {
+      uses { analysisOutputRef }
+      call literature.analysis
+      command "validate-output"
+      output { analysisValid: Boolean }
+    }
+    prepareReport "Prepare report input" {
+      uses { analysisOutputRef, reportTemplate }
+      call literature.report
+      command "prepare"
+      output { reportInputRef: String, selectedTemplate: String }
+    }
+    draftReport "Draft report" {
+      uses { reportInputRef }
+      call literature.report
+      command "draft"
+      output { draftRef: String, draftValid: Boolean }
+    }
+    reviewReport "Review report" {
+      uses { reportInputRef, draftRef }
+      call literature.report
+      command "review"
+      output { reviewsRef: String, reportPassed: Boolean, reviewCount: Number }
+    }
+    reviseReport "Revise report" {
+      uses { reportInputRef, draftRef, reviewsRef }
+      call literature.report
+      command "revise"
+      output { draftRef: String, reportPassed: Boolean }
+    }
+    publishReport "Publish Markdown report" {
+      uses { reportInputRef, draftRef, reviewsRef }
+      call literature.report
+      command "publish"
+      output { markdownRef: String, manifestRef: String }
+    }
+    renderPdf "Render PDF report" {
+      uses { markdownRef }
+      call literature.report
+      command "pdf"
+      output { pdfRef: String }
     }
   }
   output {
-    reportRef : String from reportRef
+    pdfRef: String from pdfRef
+    markdownRef: String from markdownRef
+    manifestRef: String from manifestRef
   }
   ui { layout wizard primary "Review" icon "book-open" }
-}
-
-trial LiteratureReviewExecution title "Polaris literature-review execution" {
-  input {
-    inputRef : String required label "Collection input"
-    workspaceId : ID required label "Workspace"
-    runPrefix : ID required label "Run prefix"
-    analysisId : ID required label "Analysis id"
-    reportId : ID required label "Report id"
-    question : String required label "Research question"
-    decisionContext : String required label "Decision context"
-    audience : String required label "Audience"
-    reviewMode : String required label "Review mode"
-    literatureMethod : String required label "Literature method"
-    reportReviewMode : String required label "Report review mode"
-    reportTemplate : String required label "Report template"
-    seedIds : String? label "Seed paper ids"
-    batchSize : Number required label "Batch size"
-    claimFilterRef : String? label "Claim filter"
-  }
-
-  budget {
-    timeout 7200s
-    cost 20
-    maxTransitions 128
-  }
-
-  execution {
-    class ai
-    isolation disposable
-    network allow
-  }
-
-  start validateInput
-  terminal { renderPdf }
-
-  artifacts {
-    collectionOutputRef : String kind data
-    augmentedOutputRef : String kind data
-    snapshotRef : String kind snapshot
-    iterationCorpusRef : String kind data redacted
-    candidatesRef : String kind data redacted
-    batchCacheRef : String kind data redacted
-    validatedClaimsRef : String kind data redacted
-    analysisOutputRef : String kind report
-    literatureReportRef : String kind report
-    reportInputRef : String kind data redacted
-    draftRef : String kind report redacted
-    reviewsRef : String kind data redacted
-    markdownRef : String kind report
-    manifestRef : String kind data
-    texRef : String kind script redacted
-    bibRef : String kind data redacted
-    pdfRef : String kind report
-  }
-
-  nodes {
-    validateInput "Validate collection input" {
-      role validator
-      uses { inputRef }
-      call ValidateLiteratureInput
-      output {
-        validatedInputRef : String
-        collectionId : ID
-        inputValid : Boolean
-      }
-      capabilities { literature.input.validate }
-      retry { max 1 }
-      timeout 60s
-      maxActions 10
-    }
-
-    collectSources "Collect literature sources" {
-      role processor
-      uses { validatedInputRef, workspaceId, runPrefix }
-      call CollectLiteratureSources
-      output {
-        collectionOutputRef : String
-        collectionId : ID
-        collectionCount : Number
-        collectionStatus : String
-      }
-      capabilities { literature.source.read literature.workspace.write }
-      retry { max 2 backoff 2s }
-      timeout 1800s
-      maxActions 200
-    }
-
-    augmentCollection "Augment literature collection" {
-      role processor
-      uses { collectionOutputRef, workspaceId, runPrefix }
-      call AugmentLiteratureCollection
-      output {
-        augmentedOutputRef : String
-        pdfCaptureStatus : String
-        pdfCount : Number
-      }
-      capabilities { literature.source.read literature.pdf.capture literature.workspace.write }
-      retry { max 2 backoff 2s }
-      timeout 1800s
-      maxActions 200
-    }
-
-    collectionReview "Resolve collection review" {
-      role validator
-      uses { augmentedOutputRef, reviewMode }
-      call ResolveCollectionReview
-      output {
-        finalCollectionRef : String
-        collectionReviewPending : Boolean
-        collectionReviewListRef : String?
-        collectionReviewResultRef : String?
-      }
-      capabilities { literature.review.resolve }
-      retry { max 1 }
-      timeout 900s
-      maxActions 20
-    }
-
-    freezeSnapshot "Freeze analysis snapshot" {
-      role processor
-      uses { finalCollectionRef, analysisId, question, decisionContext, audience }
-      call FreezeLiteratureSnapshot
-      output {
-        snapshotRef : String
-        analysisInputRef : String
-        clueCount : Number
-      }
-      capabilities { literature.snapshot.write }
-      retry { max 1 }
-      timeout 120s
-      maxActions 20
-    }
-
-    iterateClaims "Iterate claim graph" {
-      role processor
-      uses { analysisInputRef, seedIds }
-      call IterateLiteratureClaims
-      output {
-        iterationCorpusRef : String
-        candidatesRef : String
-        claimCount : Number
-        analysisMethod : String
-      }
-      capabilities { literature.codex.invoke literature.analysis.write }
-      retry { max 3 backoff 5s }
-      timeout 3600s
-      maxActions 512
-    }
-
-    proposeBatches "Propose claim batches" {
-      role processor
-      uses { analysisInputRef, batchSize }
-      call ProposeLiteratureBatches
-      output {
-        batchCacheRef : String
-        candidatesRef : String
-        claimCount : Number
-        analysisMethod : String
-      }
-      capabilities { literature.codex.invoke literature.analysis.write }
-      retry { max 3 backoff 5s }
-      timeout 3600s
-      maxActions 512
-    }
-
-    mergeBatches "Merge claim batches" {
-      role processor
-      uses { analysisInputRef, batchCacheRef }
-      call MergeLiteratureBatches
-      output {
-        candidatesRef : String
-        claimCount : Number
-        analysisMethod : String
-      }
-      capabilities { literature.analysis.read }
-      retry { max 1 }
-      timeout 300s
-      maxActions 64
-    }
-
-    proposeClaims "Propose claims" {
-      role processor
-      uses { analysisInputRef }
-      call ProposeLiteratureClaims
-      output {
-        candidatesRef : String
-        claimCount : Number
-        analysisMethod : String
-      }
-      capabilities { literature.codex.invoke literature.analysis.write }
-      retry { max 3 backoff 5s }
-      timeout 1800s
-      maxActions 128
-    }
-
-    validateClaims "Validate evidence-bound claims" {
-      role validator
-      uses { analysisInputRef, candidatesRef }
-      call ValidateLiteratureClaims
-      output {
-        validatedClaimsRef : String
-        reviewCount : Number
-        claimsValid : Boolean
-      }
-      capabilities { literature.analysis.read }
-      retry { max 1 }
-      timeout 300s
-      maxActions 128
-    }
-
-    analysisReview "Resolve analysis review" {
-      role validator
-      uses { analysisInputRef, validatedClaimsRef, reviewMode }
-      call ResolveAnalysisReview
-      output {
-        analysisReviewResultRef : String
-        analysisReviewPending : Boolean
-        analysisReviewListRef : String?
-      }
-      capabilities { literature.review.resolve }
-      retry { max 1 }
-      timeout 900s
-      maxActions 32
-    }
-
-    finalizeAnalysis "Finalize analysis" {
-      role sink
-      uses { analysisInputRef, validatedClaimsRef, analysisReviewResultRef, analysisId }
-      call FinalizeLiteratureAnalysis
-      output {
-        analysisOutputRef : String
-        literatureReportRef : String
-        judgmentCount : Number
-      }
-      capabilities { literature.analysis.write }
-      retry { max 1 }
-      timeout 300s
-      maxActions 64
-    }
-
-    prepareReport "Prepare report input" {
-      role processor
-      uses { analysisOutputRef, reportId, reportTemplate, claimFilterRef }
-      call PrepareLiteratureReport
-      output {
-        reportInputRef : String
-        selectedTemplate : String
-      }
-      capabilities { literature.report.read }
-      retry { max 1 }
-      timeout 300s
-      maxActions 32
-    }
-
-    draftReport "Draft report" {
-      role developer
-      uses { reportInputRef, reportId }
-      call DraftLiteratureReport
-      output {
-        draftRef : String
-        pipelineRef : String
-        draftValid : Boolean
-      }
-      capabilities { literature.codex.invoke literature.report.write }
-      retry { max 3 backoff 5s }
-      timeout 3600s
-      maxActions 1024
-    }
-
-    reviewReport "Review report" {
-      role critic
-      uses { reportInputRef, draftRef }
-      call ReviewLiteratureReport
-      output {
-        reviewsRef : String
-        reportPassed : Boolean
-        reviewCount : Number
-      }
-      capabilities { literature.codex.invoke literature.report.read }
-      retry { max 2 backoff 5s }
-      timeout 1800s
-      maxActions 64
-    }
-
-    reviseReport "Revise report" {
-      role developer
-      uses { reportInputRef, draftRef, reviewsRef }
-      call ReviseLiteratureReport
-      output {
-        draftRef : String
-        revisionCount : Number
-        reportPassed : Boolean
-      }
-      capabilities { literature.codex.invoke literature.report.write }
-      retry { max 3 backoff 5s }
-      timeout 3600s
-      maxActions 1024
-    }
-
-    publishMarkdown "Publish Markdown report" {
-      role sink
-      uses { reportInputRef, draftRef, reviewsRef, reportId }
-      call PublishLiteratureMarkdown
-      output {
-        markdownRef : String
-        manifestRef : String
-      }
-      capabilities { literature.report.publish }
-      retry { max 1 }
-      timeout 300s
-      maxActions 64
-    }
-
-    renderPdf "Render LaTeX and PDF" {
-      role sink
-      uses { reportInputRef, draftRef, reportId }
-      call RenderLiteraturePdf
-      output {
-        texRef : String
-        bibRef : String
-        pdfRef : String
-      }
-      capabilities { literature.report.publish }
-      retry { max 2 backoff 2s }
-      timeout 900s
-      maxActions 128
-    }
-  }
-
-  edges {
-    edge validateInput -> collectSources when "inputValid == true"
-    edge collectSources -> augmentCollection
-    edge augmentCollection -> collectionReview
-    edge collectionReview -> freezeSnapshot when "collectionReviewPending == false"
-    edge freezeSnapshot -> iterateClaims when "literatureMethod == 'iterate'"
-    edge freezeSnapshot -> proposeBatches when "literatureMethod == 'batches'"
-    edge freezeSnapshot -> proposeClaims when "literatureMethod == 'propose'"
-    edge proposeBatches -> mergeBatches
-    edge iterateClaims -> validateClaims
-    edge mergeBatches -> validateClaims
-    edge proposeClaims -> validateClaims
-    edge validateClaims -> analysisReview when "claimsValid == true"
-    edge analysisReview -> finalizeAnalysis when "analysisReviewPending == false"
-    edge finalizeAnalysis -> prepareReport
-    edge prepareReport -> draftReport
-    edge draftReport -> renderPdf when "reportReviewMode == 'fixed'"
-    edge draftReport -> reviewReport when "reportReviewMode == 'reviewed'"
-    edge reviewReport -> publishMarkdown when "reportPassed == true"
-    edge reviewReport -> reviseReport when "reportPassed == false && attempt < 4" feedback reviewsRef as reviewsRef reset
-    edge reviseReport -> reviewReport when "reportPassed == false && attempt < 4" feedback draftRef as draftRef reset
-    edge reviseReport -> publishMarkdown when "reportPassed == true"
-    edge publishMarkdown -> renderPdf
-  }
 }

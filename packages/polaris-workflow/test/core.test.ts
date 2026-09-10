@@ -82,6 +82,64 @@ flow ReadContext title "Read context" create {
   );
 });
 
+const toolResolver = {
+  resolve(toolId: string) {
+    return toolId === "synthetic.tool"
+      ? { commands: ["run"] }
+      : null;
+  },
+};
+
+const boundToolSource = `
+domain SyntheticPack version "0.1.0"
+port external.tool version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+flow Run title "Run" create {
+  input { value: String required }
+  steps {
+    invoke "Invoke" {
+      uses { value }
+      call external.tool
+      command "run"
+      output { result: String }
+    }
+  }
+  output { result: String from result }
+  ui { layout form primary "Run" }
+}
+`;
+
+test("DSL validation accepts an FFI call when its tool and command exist", () => {
+  const result = runPipeline(boundToolSource, { toolResolver });
+  assert.equal(result.ok, true, result.issues.map((issue) => issue.message).join("; "));
+});
+
+test("DSL validation rejects an FFI call whose tool is absent from inventory", () => {
+  const result = runPipeline(boundToolSource, {
+    toolResolver: { resolve: () => null },
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.code === "E_FFI_TOOL"));
+});
+
+test("DSL validation rejects an FFI call whose command is absent from inventory", () => {
+  const result = runPipeline(boundToolSource.replace('command "run"', 'command "missing"'), {
+    toolResolver,
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.code === "E_FFI_COMMAND"));
+});
+
+test("DSL validation rejects an FFI port without a binding", () => {
+  const result = runPipeline(boundToolSource.replace('binding { tool "synthetic.tool" }', ""));
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.code === "E_FFI_BINDING"));
+});
+
 const asyncSource = `
 domain AsyncPack version "1.0.0"
 port ReadThing version "1.0.0" {

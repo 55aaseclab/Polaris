@@ -6,6 +6,10 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const storeSource = readFileSync(new URL("./portal-store.ts", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./index.css", import.meta.url), "utf8");
+const workListRowSource = appSource.slice(
+  appSource.indexOf("function WorkListRow"),
+  appSource.indexOf("function WorkCardView"),
+);
 
 test("user page keeps session as a peer section beside profile and credentials", () => {
   assert.match(appSource, /account-tabs/u);
@@ -34,7 +38,7 @@ test("Portal exposes the host-first work journey", () => {
     assert.match(appSource, new RegExp(route.replace("/", "\\/"), "u"));
   }
   assert.match(appSource, /PortalLayout active="workflows" session=\{session\} navigate=\{navigate\}><ProvisioningPage/u);
-  for (const action of ["discover", "批准继续", "取消运行", "重试", "打开结果"]) {
+  for (const action of ["discover", "批准继续", "取消运行", "重试", "查看详情"]) {
     if (action === "discover") {
       assert.match(appSource, /settings-tabs/u);
     } else {
@@ -106,7 +110,7 @@ test("run detail shows the creation date and time", () => {
 });
 
 test("run detail does not render an empty action divider", () => {
-  assert.match(appSource, /\(canCancel \|\| canRetry\) && <div className="run-detail-actions"/u);
+  assert.match(appSource, /\(canCancel \|\| canRetry \|\| \["succeeded", "failed", "cancelled"\]\.includes\(run\.status\)\) && <div className="run-detail-actions"/u);
 });
 
 test("artifact preview supports text, structured data, and media files", () => {
@@ -142,6 +146,9 @@ test("daily work surface uses a desktop list and a mobile touch deck", () => {
   assert.match(appSource, /className="work-grid-view"/u);
   assert.match(appSource, /function WorkListRow/u);
   assert.match(appSource, /<WorkListRow key=\{card\.id\}/u);
+  assert.match(workListRowSource, /查看详情\s*<ChevronRight/u);
+  assert.doesNotMatch(workListRowSource, /card\.status === "succeeded" \? <>/u);
+  assert.doesNotMatch(workListRowSource, />打开结果</u);
   assert.match(appSource, /className="work-deck-view"/u);
   assert.match(appSource, /onPointerDown=\{isDeck \? handlePointerDown : undefined\}/u);
   assert.doesNotMatch(appSource, /className="deck-control deck-control-(skip|heart|accept)"/u);
@@ -192,6 +199,19 @@ test("workflow setup keeps Domain Pack and internal flow selection separate", ()
   assert.doesNotMatch(appSource, /settings-pack-grid/u);
 });
 
+test("workflow settings keeps only the DSL visualization action", () => {
+  assert.doesNotMatch(appSource, /title="打开工作流"/u);
+  assert.match(appSource, /title="查看 DSL"/u);
+  assert.match(appSource, /输入 \{node\.uses\.length\} · 输出 \{node\.outputs\.length\}/u);
+  assert.doesNotMatch(appSource, /输入 → 步骤 → 输出/u);
+  assert.match(readFileSync(new URL("./workflow-graph-layout.ts", import.meta.url), "utf8"), /dagreLayout\(dag, \{\}\)/u);
+});
+
+test("workflow settings surfaces unavailable pack tools", () => {
+  assert.match(appSource, /activePack\.warnings\?\.length/u);
+  assert.match(appSource, /settings-pack-warning/u);
+});
+
 test("workflow composer renders and submits inputs declared by the selected flow", () => {
   assert.match(appSource, /selectedFlow\?\.fields\.map\(\(field\) =>/u);
   assert.match(appSource, /field\.type === "textarea"/u);
@@ -226,20 +246,14 @@ test("workflow settings tabs show catalog summary counts", () => {
   assert.match(appSource, /可添加<span className="filter-tab-count">\{availableWorkflowCount\}<\/span>/u);
 });
 
-test("workflow definitions expose a DSL graph entry from settings and run detail", () => {
-  assert.match(appSource, /查看流程图/u);
-  assert.match(appSource, /查看 DSL 图/u);
+test("workflow settings exposes the workflow entry and DSL snapshot", () => {
+  assert.doesNotMatch(appSource, /title="打开工作流"/u);
+  assert.doesNotMatch(appSource, /navigate\(`\/work\?pack=/u);
+  assert.match(appSource, /title="查看 DSL"/u);
   assert.match(appSource, /function WorkflowGraphPage/u);
-  assert.match(appSource, /流程步骤/u);
-  assert.match(appSource, /执行图/u);
-});
-
-test("workflow graph footer keeps a stable detail area without a selection", () => {
-  assert.match(appSource, /className=\{cn\("workflow-node-detail", !selected && "is-empty"\)\}/u);
-  assert.match(appSource, /未选择节点/u);
-  assert.match(cssSource, /\.workflow-graph-footer \{[\s\S]*?min-height:\s*5rem/u);
-  assert.match(cssSource, /\.workflow-node-detail \{[\s\S]*?min-height:\s*3rem/u);
-  assert.match(cssSource, /\.workflow-node-detail\.is-empty/u);
+  assert.match(appSource, /graphMatch/u);
+  assert.match(appSource, /\/graph/u);
+  assert.doesNotMatch(appSource, /执行图/u);
 });
 
 test("workflow settings can disable the last enabled workflow", () => {

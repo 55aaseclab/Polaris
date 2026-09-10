@@ -5,6 +5,7 @@ import {
 } from "@polaris/polaris-shell";
 import type {
   WorkflowDomainPackProjection,
+  WorkflowGraphProjection,
   WorkflowEventsResponse,
   WorkflowMockScenario,
   WorkflowRunProjection,
@@ -148,6 +149,15 @@ export async function domainPacks(): Promise<{ packs: WorkflowDomainPackProjecti
   return request<{ packs: WorkflowDomainPackProjection[] }>("/domain-packs");
 }
 
+export async function workflowGraph(
+  packId: string,
+  flowId: string,
+): Promise<{ graph: WorkflowGraphProjection }> {
+  return request<{ graph: WorkflowGraphProjection }>(
+    `/domain-packs/${encodeURIComponent(packId)}/${encodeURIComponent(flowId)}/graph`,
+  );
+}
+
 export async function workflowVaults(): Promise<{ vaults: WorkflowVaultProjection[] }> {
   return request<{ vaults: WorkflowVaultProjection[] }>("/workflow-vaults");
 }
@@ -203,6 +213,12 @@ export async function workflowRunAction(
       ...(scenario ? { body: JSON.stringify({ scenario }) } : {}),
     },
   );
+}
+
+export async function deleteWorkflowRun(runId: string): Promise<void> {
+  await request<void>(`/workflow-runs/${encodeURIComponent(runId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function workflowRunEvents(

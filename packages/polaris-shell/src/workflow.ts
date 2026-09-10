@@ -27,22 +27,40 @@ export type WorkflowFlowProjection = {
   fields: WorkflowField[];
 };
 
-export type WorkflowTrialProjection = {
+export type WorkflowGraphNode = {
   id: string;
-  title: string;
-  nodeCount: number;
-  edgeCount: number;
-  terminalNodes: string[];
-  capabilities: string[];
-  budget: {
-    timeoutMs: number;
-    maxCost: number;
-    maxTransitions: number;
-  };
-  execution: {
-    class: "pure" | "workspace" | "ai";
-    isolation: "disposable" | "scoped" | "none";
-    network: "deny" | "allow";
+  label: string;
+  kind: "input" | "step" | "output";
+  role?: string;
+  call?: string;
+  effect?: string;
+  uses: string[];
+  outputs: string[];
+  capabilities?: string[];
+  retry?: { maxAttempts: number; backoffMs: number };
+  timeoutMs?: number;
+  terminal?: boolean;
+};
+
+export type WorkflowGraphEdge = {
+  from: string;
+  to: string;
+  field?: string;
+  when?: string;
+  feedback?: string;
+  feedbackAs?: string;
+  resetAttempts?: boolean;
+};
+
+export type WorkflowGraphProjection = {
+  packId: string;
+  packVersion: string;
+  packDigest: string;
+  flowId: string;
+  flowTitle: string;
+  flow: {
+    nodes: WorkflowGraphNode[];
+    edges: WorkflowGraphEdge[];
   };
 };
 
@@ -56,8 +74,8 @@ export type WorkflowDomainPackProjection = {
   digest: string;
   capabilities: string[];
   accent: "green" | "blue" | "amber";
+  warnings?: string[];
   flows: WorkflowFlowProjection[];
-  trials?: WorkflowTrialProjection[];
 };
 
 export type WorkflowVaultProjection = {

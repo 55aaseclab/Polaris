@@ -7,7 +7,7 @@
       "id": "literature.collection",
       "entrypoint": "data-collection/clue-data-collection",
       "version_file": "data-collection/VERSION",
-      "commands": ["version", "validate-input", "validate-output", "list-sources", "run"],
+      "commands": ["version", "validate-input", "prepare-literature-input", "validate-output", "list-sources", "run", "workflow"],
       "capabilities": ["source-discovery", "normalization", "scope-filter", "pdf-link-inventory", "three-phase-review"]
     },
     {
@@ -63,7 +63,7 @@
       "id": "literature.analysis",
       "entrypoint": "intelligence-analysis/clue-intelligence-analysis",
       "version_file": "intelligence-analysis/VERSION",
-      "commands": ["version", "validate-input", "validate-output", "prepare", "run", "complete-review"],
+      "commands": ["version", "validate-input", "validate-output", "prepare", "run", "complete-review", "workflow"],
       "capabilities": ["snapshot-freeze", "iterate", "batches", "propose", "claim-validation", "review-gate", "finalize"]
     },
     {
@@ -77,14 +77,14 @@
       "id": "literature.codex",
       "entrypoint": "codex/clue-codex-cli",
       "version_file": "codex/VERSION",
-      "commands": ["version", "exec", "topic-judge"],
+      "commands": ["version", "exec", "plan-search-keywords", "topic-judge", "workflow"],
       "capabilities": ["persistent-session", "structured-json", "read-only-attachment"]
     },
     {
       "id": "literature.report",
       "entrypoint": "report-writing/clue-report-writing",
       "version_file": "report-writing/VERSION",
-      "commands": ["version", "templates", "prepare", "draft", "review", "revise", "publish", "preview", "pdf", "latex", "run"],
+      "commands": ["version", "templates", "prepare", "draft", "review", "revise", "publish", "preview", "pdf", "latex", "run", "workflow"],
       "capabilities": ["compress-outline-expand", "coverage", "four-reviewers", "markdown", "bibtex", "xelatex"]
     }
   ],

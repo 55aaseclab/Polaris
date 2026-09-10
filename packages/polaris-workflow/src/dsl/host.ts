@@ -15,6 +15,8 @@ export interface FfiInvokeRequest {
   meta?: {
     stepId?: string
     flowName?: string
+    command?: string
+    outputFields?: string[]
     mode?: 'interpret' | 'compile'
     runId?: string
     nodeId?: string

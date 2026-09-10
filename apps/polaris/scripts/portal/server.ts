@@ -153,6 +153,7 @@ import {
   WorkflowControlService,
   registerWorkflowProvisionHook,
 } from "./workflow-control.js";
+import { getDomainPackFlowGraphProjection } from "../config/domain-packs.js";
 import type {
   WorkflowExecutionDriver,
   WorkflowMockScenario,
@@ -352,6 +353,33 @@ function sendWorkflowArtifact(
   const { artifact } = workflowControl.getArtifact(userId, runId, artifactId);
   if (artifact.redacted) {
     throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  if (artifact.sourcePath) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(artifact.sourcePath);
+    } catch {
+      throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+    }
+    if (!stat.isFile()) {
+      throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+    }
+    const filename = path.basename(artifact.sourcePath);
+    res.writeHead(200, {
+      "cache-control": "private, no-store",
+      "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      "content-length": stat.size,
+      "content-type": artifactContentType(filename),
+      "x-content-type-options": "nosniff",
+    });
+    if (method === "HEAD") {
+      res.end();
+      return;
+    }
+    const stream = fs.createReadStream(artifact.sourcePath);
+    stream.on("error", () => res.destroy());
+    stream.pipe(res);
+    return;
   }
   if (typeof artifact.content !== "string") {
     throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
@@ -2606,6 +2634,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/vaults/:vaultName/restore-activations/:activationJobId/rollback",
             "/api/users/:userId/credentials",
             "/api/domain-packs",
+            "/api/domain-packs/:packId/:flowId/graph",
             "/api/workflow-vaults",
             "/api/workflow-setup",
             "/api/workflow-runs",
@@ -2854,6 +2883,31 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           sendJson(res, 200, { packs: listPortalDomainPacks() });
           return;
         }
+        if (
+          segments.length === 5
+          && segments[1] === "domain-packs"
+          && segments[4] === "graph"
+          && req.method === "GET"
+        ) {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) return;
+          try {
+            sendJson(res, 200, {
+              graph: getDomainPackFlowGraphProjection(
+                import.meta.url,
+                decodeURIComponent(segments[2] ?? ""),
+                decodeURIComponent(segments[3] ?? ""),
+              ),
+            });
+          } catch (error) {
+            throw new WorkflowControlError(
+              error instanceof Error ? error.message : String(error),
+              404,
+              "workflow-graph-not-found",
+            );
+          }
+          return;
+        }
         if (segments.length >= 2 && segments[1] === "workflow-vaults") {
           const session = await requirePortalSession(req, res);
           if (!session || !requireMappedPortalSession(res, session)) {
@@ -2904,6 +2958,12 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             sendJson(res, 200, {
               run: await workflowControl.getRun(userId, decodeURIComponent(segments[2] ?? "")),
             });
+            return;
+          }
+          if (segments.length === 3 && req.method === "DELETE") {
+            await workflowControl.deleteRun(userId, decodeURIComponent(segments[2] ?? ""));
+            res.writeHead(204);
+            res.end();
             return;
           }
           if (segments.length === 5 && (req.method === "GET" || req.method === "HEAD") && segments[3] === "artifacts") {
