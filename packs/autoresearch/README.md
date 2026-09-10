@@ -1,16 +1,15 @@
 # Polaris literature-review workflow
 
-This directory contains the Polaris literature-review workflow runner, DSL
-declaration, examples, skills, and environment setup. Canonical wire schemas
-live in the repository-level `schemas/` directory. The implementation calls
-the common tools in `tools/`; it does not import, execute, or read
-configuration from Wanghai.
+This directory contains only the declarative Polaris literature-review pack:
+the DSL declaration, metadata, examples, and skills. Runtime code lives in
+the repository-level `tools/` directory. Canonical wire schemas live in the
+repository-level `schemas/` directory.
 
 The canonical workflow declaration is
 `packs/autoresearch/main.ord`.
 The workflow preserves the existing `clue.*.v2` wire contracts so existing
-research inputs remain compatible while the runtime boundary is owned by
-Polaris.
+research inputs remain compatible. Polaris loads and executes `main.ord`
+through its DSL runtime.
 
 ## Exact behavior retained
 
@@ -35,12 +34,8 @@ Polaris.
   reviewer-gated Markdown publication, TeX/BibTeX generation, and two-pass
   XeLaTeX PDF rendering.
 
-The fixed `run` path matches the fixed workflow operation:
-collection and analysis are followed by report `prepare -> draft -> publish ->
-LaTeX`. It publishes Markdown and a report manifest without claiming that the
-four reviewer passes ran. The optional `--report-mode reviewed` path exposes
-the lower-level review, revision, publication, and LaTeX operations as one
-Polaris command.
+The execution trial declares the complete collection, review, analysis, and
+report graph. Its port bindings point to the common tools that Polaris owns.
 
 ## Environment
 
@@ -75,90 +70,16 @@ Optional provider settings:
   `BROWSER_PROXY_USERNAME`, `BROWSER_PROXY_PASSWORD`
 - `DISPLAY` when headed PDF capture is enabled
 
-## CLI
+## Execution
 
-Prepare a local execution environment (locked search backends, the social
-adapter venv, and browser dependencies):
+There is no pack-local runner or workflow-specific CLI. Polaris loads
+`main.ord`, validates the declaration, and executes the
+`LiteratureReviewExecution` trial as a durable job. The trial resolves its
+port bindings through the common tool inventory and persists its run state in
+Polaris.
 
-```sh
-bash packs/autoresearch/install-dependencies.sh
-```
-
-Use `--skip-browser` or `--skip-external-backends` for a narrower setup. The
-script checks out the exact commits in each `backend.lock.json`; it does not
-read or write Wanghai configuration.
-
-Inspect the migrated versions and definition:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review version
-pnpm --dir apps/polaris run polaris -- literature-review tools
-pnpm --dir apps/polaris run polaris -- literature-review plan
-```
-
-Visualize the complete `LiteratureReviewExecution` trial. The graph includes
-all 18 execution nodes, conditional and feedback edges, node retry/action
-limits, capabilities, execution policy, budgets, and artifact contracts:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review visualize \
-  --format png --output literature-review-workflow.png
-
-pnpm --dir apps/polaris run polaris -- literature-review visualize \
-  --format pdf --output literature-review-workflow.pdf
-```
-
-The output format can also be inferred from a `.png` or `.pdf` output name.
-This command is a static definition projection: it does not run the workflow or
-call a provider. It requires Graphviz's `dot` executable on `PATH`; set
-`POLARIS_LITERATURE_GRAPHVIZ_BIN` when `dot` is installed elsewhere. The
-visualizer has no required literature workspace, cache, Codex, browser, or
-provider environment variables. `POLARIS_LITERATURE_GRAPHVIZ_BIN` may be
-exported directly or supplied in the selected env file; the command also
-accepts `--env-file <path>` for an explicit one-off file.
-
-Validate a collection input:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review validate \
-  --input collection-input.json
-```
-
-Run the fixed workflow:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input collection-input.json \
-  --workspace research-demo \
-  --run-id review-001 \
-  --network allow \
-  --review-mode auto-pass \
-  --literature-method iterate \
-  --report-mode fixed
-```
-
-Use `--report-mode reviewed` to run all four report reviewers and bounded
-revision passes before publishing Markdown and rendering PDF.
-`--collection-output` resumes from a previously validated collection output
-without making source requests. `--dry-run` validates paths and writes only a
-planned manifest.
-
-`--env-file <path>` can be supplied on the `run`, `collection-review`,
-`complete-collection-review`, and `complete-analysis-review` commands; the
-shell loader applies it before the workspace and run identity checks.
-
-The run writes durable local state below:
-
-```text
-<workspace>/literature-review/<run-id>/
-  intelligence-analysis/
-  report-writing/
-  runs/
-  run.json
-
-<workspace>/data-collections/<collection-id>/
-  inputs/  work/  outputs/  runs/
-```
+For local development, submit the `AutoResearch/LiteratureReview` flow through
+the Polaris workflow API. The pack itself remains declaration-only.
 
 ## Historical Wanghai import
 

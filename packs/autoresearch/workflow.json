@@ -26,9 +26,7 @@
     "collection_review": "tools/collection-review/clue-collection-review",
     "analysis_review": "tools/analysis-review/clue-analysis-review",
     "analysis": "tools/intelligence-analysis/clue-intelligence-analysis",
-    "report": "tools/report-writing/clue-report-writing",
-    "workflow": "packs/autoresearch/workflow.py",
-    "setup": "packs/autoresearch/install-dependencies.sh"
+    "report": "tools/report-writing/clue-report-writing"
   },
   "port_bindings": {
     "ValidateLiteratureInput": "literature.collection",

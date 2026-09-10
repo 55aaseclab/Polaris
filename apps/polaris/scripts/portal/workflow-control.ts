@@ -17,7 +17,11 @@ import {
   mockRpcResponse,
   parsePortRef,
   resolvePort,
+  trialHostFromFfi,
+  InMemoryTrialStateStore,
   type Program,
+  type StepContext,
+  type TrialRunState,
 } from "polaris-workflow";
 import type {
   WorkflowLiveVaultArtifactMetadataReader,
@@ -58,12 +62,6 @@ import {
   loadVerifiedDomainPackRuntime,
 } from "../config/domain-packs.js";
 import {
-  executeHostLiteratureReview,
-  HostLiteratureReviewCancelled,
-  isHostLiteratureReviewRun,
-  type HostLiteratureReviewExecutor,
-} from "./literature-review-host.js";
-import {
   getPolarisControlStore,
   type PolarisControlStore,
   type WorkflowRunRecord,
@@ -89,7 +87,6 @@ type WorkflowControlOptions = {
   pollMs?: number;
   autoStart?: boolean;
   liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
-  hostLiteratureReview?: HostLiteratureReviewExecutor;
 };
 
 type ProvisionHook = (tenantId: string, vaultId: string) => void;
@@ -124,6 +121,16 @@ function requestedExecutionDriver(input: WorkflowRunRequest): WorkflowExecutionD
     );
   }
   return explicit ?? (input.vaultId?.trim() ? "vault" : "none");
+}
+
+function trialForFlow(
+  runtime: ReturnType<typeof loadVerifiedDomainPackRuntime>,
+  flowId: string,
+) {
+  const expectedName = `${flowId}Execution`;
+  return runtime.pipeline.trialPrograms?.find(
+    (candidate) => candidate.ast.name === expectedName,
+  );
 }
 
 export type WorkflowLiveMetadataAdmissionRequest = {
@@ -620,7 +627,26 @@ class WorkflowRpcHost implements AsyncFfiHost {
   private invokeMock(req: FfiInvokeRequest, port: PortAst): FfiInvokeResult {
     const request = this.createRpcRequest(port, req, "mock");
     const response = mockRpcResponse(request);
-    if (port.effect === "human") {
+    response.output = Object.fromEntries(port.outFields.map((field) => {
+      if (field.type === "Boolean") {
+        return [field.name, /pending/iu.test(field.name) ? false : true];
+      }
+      if (field.type === "Number" || field.type === "Money") return [field.name, 0];
+      if (field.type === "ID" || /Id$/u.test(field.name)) {
+        return [field.name, `${field.name}-${request.requestId}`];
+      }
+      return [field.name, `ffi:${port.name}@${port.version}/${field.name}`];
+    }));
+    if (this.run.executionDriver === "none" && port.effect === "human") {
+      response.status = "completed";
+      response.receipt.status = "completed";
+      for (const field of port.outFields) {
+        if (field.type === "Boolean" && /pending|passed|valid/iu.test(field.name)) {
+          response.output[field.name] = !/pending/iu.test(field.name);
+        }
+      }
+    }
+    if (port.effect === "human" && this.run.executionDriver !== "none") {
       response.output.approved = true;
       response.output.reviewId = response.output.reviewId ?? `review-${request.requestId}`;
       response.status = "waiting";
@@ -628,6 +654,53 @@ class WorkflowRpcHost implements AsyncFfiHost {
     }
     return this.logRpcInvocation({ req, request, response });
   }
+}
+
+function trialInput(run: WorkflowRunRecord): StepContext {
+  const input = run.input;
+  const brief = String(input.brief ?? input.question ?? "Literature Review");
+  const value = (key: string, fallback: string): string => {
+    const candidate = input[key];
+    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : fallback;
+  };
+  const numberValue = (key: string, fallback: number): number => {
+    const candidate = Number(input[key]);
+    return Number.isFinite(candidate) ? candidate : fallback;
+  };
+  return {
+    inputRef: typeof input.collectionInput === "string"
+      ? input.collectionInput
+      : `brief:${brief}`,
+    workspaceId: "polaris-host",
+    runPrefix: run.id,
+    analysisId: `${run.id}-analysis`,
+    reportId: `${run.id}-report`,
+    question: brief,
+    decisionContext: value("decisionContext", "Polaris Literature Review"),
+    audience: value("audience", "research and engineering"),
+    reviewMode: value("reviewMode", "auto-pass"),
+    literatureMethod: value("literatureMethod", "iterate"),
+    reportReviewMode: value("reportMode", "fixed"),
+    reportTemplate: value("reportTemplate", "auto"),
+    seedIds: typeof input.seedIds === "string" ? input.seedIds : undefined,
+    batchSize: numberValue("batchSize", 10),
+    claimFilterRef: typeof input.claimFilterRef === "string" ? input.claimFilterRef : undefined,
+  };
+}
+
+function trialArtifact(run: WorkflowRunRecord, artifact: TrialRunState["artifacts"][number]): WorkflowArtifact {
+  const content = artifact.content
+    || `# ${artifact.name}\n\nDSL trial artifact reference: ${artifact.ref ?? "unavailable"}\n`;
+  return {
+    id: `artifact-${run.id}-${artifact.name}`,
+    name: artifact.name,
+    kind: artifact.kind === "snapshot" || artifact.kind === "script" ? "data" : artifact.kind,
+    size: `${Buffer.byteLength(content, "utf8")} B`,
+    summary: `DSL trial ${artifact.nodeId} 生成的产物`,
+    content,
+    ...(artifact.digest ? { digest: artifact.digest } : {}),
+    redacted: artifact.redacted,
+  };
 }
 
 function executionClassForProgram(program: Program, flowId: string): WorkflowExecutionClass {
@@ -678,7 +751,6 @@ export class WorkflowControlService {
   private readonly autoStart: boolean;
   private timer: NodeJS.Timeout | null = null;
   private drainPromise: Promise<void> | null = null;
-  private readonly activeHostExecutions = new Map<string, AbortController>();
   private closed = false;
 
   constructor(private readonly options: WorkflowControlOptions) {
@@ -697,8 +769,6 @@ export class WorkflowControlService {
     this.closed = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    for (const controller of this.activeHostExecutions.values()) controller.abort();
-    this.activeHostExecutions.clear();
   }
 
   getSetup(tenantId: string): WorkflowSetupProjection {
@@ -774,28 +844,16 @@ export class WorkflowControlService {
   }
 
   async listRuns(tenantId: string): Promise<WorkflowRunsResponse> {
-    // The production worker is already driven by its timer. Keep this read
-    // path non-blocking so neither a native Literature Review run nor an
-    // optional Vault observer can hold an HTTP response open.
-    const pendingNativeHostRun = this.store.listWorkflowRuns(tenantId).some((run) =>
-      (run.status === "queued" || run.status === "running") && isHostLiteratureReviewRun(run)
-    );
+    // The production worker is driven by its timer in server mode. In
+    // synchronous test or maintenance mode, drain the queue before returning
+    // the projection so callers observe the same state transition.
     if (this.autoStart) {
-      if (pendingNativeHostRun) {
-        void this.drain().catch(() => undefined);
-      } else {
-        void this.enqueueEnabledWorkflows(tenantId)
-          .then(() => this.drain())
-          .catch(() => undefined);
-      }
+      void this.enqueueEnabledWorkflows(tenantId)
+        .then(() => this.drain())
+        .catch(() => undefined);
     } else {
-      if (!pendingNativeHostRun) {
-        await this.enqueueEnabledWorkflows(tenantId);
-      }
-      const drain = this.drain();
-      if (!pendingNativeHostRun) {
-        await drain;
-      }
+      await this.enqueueEnabledWorkflows(tenantId);
+      await this.drain();
     }
     const runs = this.store.listWorkflowRuns(tenantId).map((run) => projectionForRun(run, this.options.listPacks()));
     const events = this.store.listWorkflowRuns(tenantId).flatMap((run) => run.events);
@@ -1009,11 +1067,7 @@ export class WorkflowControlService {
     }
     const runtime = this.loadPinnedRuntime(selected.pack.id, selected.pack.version, selected.pack.digest);
     const executionClass = executionClassForProgram(runtime.pipeline.program!, selected.flow.id);
-    const nativeHostLiteratureReview = isHostLiteratureReviewRun({
-      packId: selected.pack.id,
-      flowId: selected.flow.id,
-      executionDriver: driver,
-    });
+    const executionTrial = trialForFlow(runtime, selected.flow.id);
     const now = this.now();
     const leaseExpiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
     const run = this.store.createWorkflowRun({
@@ -1026,10 +1080,9 @@ export class WorkflowControlService {
       flowId: selected.flow.id,
       source,
       input: safeInput(input.values),
-      // The migrated Literature Review runner owns its collection/analysis
-      // review gates. Do not add the legacy SysSec synthetic ReviewPlan gate
-      // on top of that host execution.
-      approvalRequired: nativeHostLiteratureReview ? false : selected.flow.approvalRequired,
+      // The AutoResearch trial owns its collection/analysis review gates.
+      // Do not add the generic flow approval gate on top of that trial.
+      approvalRequired: executionTrial ? false : selected.flow.approvalRequired,
       executionClass,
       executionDriver: driver,
       scenario: input.scenario ?? "normal",
@@ -1039,13 +1092,13 @@ export class WorkflowControlService {
       },
       policy: {
         decision: "allow",
-        mode: nativeHostLiteratureReview ? "host" : "mock",
+        mode: executionTrial ? "host" : "mock",
         executionDriver: driver,
         reasons: driver === "none"
           ? [
               "pack-digest-pinned",
               "host-execution",
-              ...(nativeHostLiteratureReview ? ["native-literature-review"] : ["mock-host-only"]),
+              ...(executionTrial ? ["dsl-trial"] : ["mock-host-only"]),
             ]
           : ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
       },
@@ -1093,7 +1146,6 @@ export class WorkflowControlService {
       if (!existing) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
       throw new WorkflowControlError("当前运行不可取消", 409, "cancel-not-available");
     }
-    this.activeHostExecutions.get(runId)?.abort();
     return projectionForRun(updated, this.options.listPacks());
   }
 
@@ -1284,91 +1336,87 @@ export class WorkflowControlService {
     return this.drainPromise;
   }
 
-  private async executeNativeHostLiteratureReview(run: WorkflowRunRecord): Promise<void> {
-    const controller = new AbortController();
-    this.activeHostExecutions.set(run.id, controller);
-    const heartbeat = setInterval(() => {
-      if (!this.store.heartbeatWorkflowRun(run.id, this.workerId, 60_000)) {
-        controller.abort();
-      }
-    }, 15_000);
-    heartbeat.unref();
-    const executor = this.options.hostLiteratureReview ?? executeHostLiteratureReview;
-    let lastProgress = -1;
-    let lastStage = "";
-    const onProgress = (update: { progress: number; stage: string; detail: string }): void => {
-      if (update.progress === lastProgress && update.stage === lastStage) return;
-      lastProgress = update.progress;
-      lastStage = update.stage;
-      try {
-        const current = this.store.getWorkflowRun(run.tenantId, run.id);
-        if (!current || current.status === "cancelled") return;
-        this.store.updateWorkflowRun({
-          tenantId: run.tenantId,
-          runId: run.id,
-          status: "running",
-          progress: update.progress,
-          workerId: this.workerId,
-          event: {
-            kind: "progress",
-            title: update.stage === "complete" ? "Literature Review 阶段完成" : "Literature Review 正在运行",
-            detail: update.detail,
-            tone: "accent",
-          },
-        });
-      } catch {
-        // A concurrent cancellation or lease transition owns the terminal
-        // state; it must not turn into a second worker error.
-      }
-    };
-    try {
-      const result = await executor({
-        importMetaUrl: this.options.importMetaUrl,
-        run,
-        signal: controller.signal,
-        onProgress,
-      });
-      const current = this.store.getWorkflowRun(run.tenantId, run.id);
-      if (!current || current.status === "cancelled" || controller.signal.aborted) return;
-      for (const receipt of result.receipts) {
-        this.store.recordWorkflowEffectReceipt({
-          ...receipt,
-          runId: run.id,
-          tenantId: run.tenantId,
-        });
-      }
-      for (const artifact of result.artifacts) {
-        this.store.addWorkflowArtifact({
-          ...artifact,
-          runId: run.id,
-          tenantId: run.tenantId,
-          createdAt: this.now().toISOString(),
-        });
-      }
-      const waiting = result.status === "waiting";
-      this.store.updateWorkflowRun({
-        tenantId: run.tenantId,
-        runId: run.id,
-        status: waiting ? "waiting" : "succeeded",
-        progress: waiting ? 96 : 100,
-        workerId: this.workerId,
-        output: result.output,
-        event: {
-          kind: waiting ? "approval-required" : "succeeded",
-          title: waiting ? "等待 Literature Review 审查" : "Literature Review 已完成",
-          detail: waiting
-            ? "Polaris host 已生成审查清单，完成审查后继续。"
-            : "Polaris host 已生成真实 Literature Review 产物。",
-          tone: waiting ? "warning" : "success",
-        },
-      });
-    } catch (error) {
-      if (error instanceof HostLiteratureReviewCancelled || controller.signal.aborted) return;
-      throw error;
-    } finally {
-      clearInterval(heartbeat);
-      this.activeHostExecutions.delete(run.id);
+  private async executeTrial(
+    run: WorkflowRunRecord,
+    runtime: ReturnType<WorkflowControlService["loadPinnedRuntime"]>,
+  ): Promise<void> {
+    const trial = trialForFlow(runtime, run.flowId);
+    if (!trial) {
+      this.fail(run, "trial-not-found", `Pack does not declare an execution trial for ${run.flowId}`);
+      return;
     }
+    const program = runtime.pipeline.program;
+    if (!program) {
+      this.fail(run, "pack-program-unavailable", "AutoResearch pack program is unavailable");
+      return;
+    }
+    const host = new WorkflowRpcHost(run, program, {
+      store: this.store,
+      environment: process.env,
+      now: this.now,
+      liveMetadataReader: this.options.liveMetadataReader,
+    });
+    const state = await trial.run(
+      trialInput(run),
+      trialHostFromFfi(host, () => true),
+      {
+        runId: run.id,
+        store: new InMemoryTrialStateStore(),
+        allowNetwork: true,
+      },
+    );
+    const current = this.store.getWorkflowRun(run.tenantId, run.id);
+    if (!current || current.status === "cancelled") return;
+    for (const entry of host.rpcLog) {
+      const receipt = entry.response.receipt;
+      this.store.recordWorkflowEffectReceipt({
+        id: receipt.id,
+        runId: run.id,
+        tenantId: run.tenantId,
+        requestId: receipt.requestId,
+        port: receipt.call.port,
+        version: receipt.call.version,
+        effect: receipt.call.effect,
+        status: receipt.status,
+        input: entry.request.input,
+        output: entry.response.output,
+        ...(entry.response.error
+          ? { errorCode: entry.response.error.code, errorMessage: entry.response.error.message }
+          : {}),
+        createdAt: receipt.startedAt,
+        completedAt: receipt.completedAt,
+      });
+    }
+    for (const artifact of state.artifacts) {
+      this.store.addWorkflowArtifact({
+        ...trialArtifact(run, artifact),
+        redacted: artifact.redacted,
+        runId: run.id,
+        tenantId: run.tenantId,
+        createdAt: this.now().toISOString(),
+      });
+    }
+    if (state.status === "failed") {
+      this.fail(run, state.error?.code ?? "trial-failed", state.error?.message ?? "Literature trial failed");
+      return;
+    }
+    const waiting = state.status === "waiting";
+    this.store.updateWorkflowRun({
+      tenantId: run.tenantId,
+      runId: run.id,
+      status: waiting ? "waiting" : "succeeded",
+      progress: waiting ? 76 : 100,
+      workerId: this.workerId,
+      output: state.context,
+      event: {
+        kind: waiting ? "approval-required" : "succeeded",
+        title: waiting ? "等待 Literature Review 审查" : "Literature Review 已完成",
+        detail: waiting
+          ? "DSL trial 已暂停，等待审查继续。"
+          : "DSL trial 已完成并生成执行产物。",
+        tone: waiting ? "warning" : "success",
+      },
+    });
   }
 
   private async execute(run: WorkflowRunRecord): Promise<void> {
@@ -1394,10 +1442,6 @@ export class WorkflowControlService {
       return;
     }
     if (this.store.getWorkflowRun(run.tenantId, run.id)?.status === "cancelled") return;
-    if (driver === "none" && isHostLiteratureReviewRun(run)) {
-      await this.executeNativeHostLiteratureReview(run);
-      return;
-    }
     let runtime;
     try {
       runtime = this.loadPinnedRuntime(run.packId, run.packVersion, run.packDigest);
@@ -1407,6 +1451,10 @@ export class WorkflowControlService {
         "pack-pin-unavailable",
         error instanceof Error ? error.message : "固定的 Domain Pack 不可用",
       );
+      return;
+    }
+    if (driver === "none" && trialForFlow(runtime, run.flowId)) {
+      await this.executeTrial(run, runtime);
       return;
     }
     const program = runtime.pipeline.program!;

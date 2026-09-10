@@ -83,7 +83,7 @@
     "collection": ["data-collection", "data-collection/literature", "data-collection/ad_content"],
     "collection_review": ["collection-review/review.py", "collection-review/clue-collection-review"],
     "analysis_review": ["analysis-review/review.py", "analysis-review/clue-analysis-review"],
-    "shared_support": ["paths.py", "load-env.sh"],
+    "shared_support": ["tools/paths.py"],
     "source_adapters": ["crossref", "semantic-scholar", "deepsec", "web-search"],
     "pdf_and_media": ["browser", "image-review", "video-review"],
     "analysis": ["intelligence-analysis", "intelligence-analysis/literature-review", "codex"],
@@ -94,7 +94,7 @@
       "skills/polaris-literature-analysis",
       "skills/polaris-literature-report"
     ],
-    "setup": ["install-dependencies.sh"]
+    "setup": []
   },
   "omitted_generated_state": [
     "**/__pycache__",
@@ -110,11 +110,11 @@
   "polaris_adaptations": [
     {
       "area": "orchestration",
-      "detail": "The Polaris runner owns collection, analysis, report, resume, status, and review continuation; no source-application orchestrator is called."
+      "detail": "Polaris loads main.ord and executes LiteratureReviewExecution through the v0.4-trial runtime; no pack-local orchestrator is called."
     },
     {
       "area": "environment",
-      "detail": "The shared Polaris tool loader translates canonical POLARIS_LITERATURE_* settings, removes WANGHAI_* settings before execution, and is reused by the workflow adapter."
+      "detail": "Polaris resolves tool bindings and runtime environment before invoking each declared port; no pack-local environment loader is used."
     },
     {
       "area": "tool-binding",
@@ -134,7 +134,7 @@
     },
     {
       "area": "integrated-mode",
-      "detail": "Direct execution and review continuation fail closed when POLARIS_LITERATURE_RUNTIME_MODE=polaris; the durable Polaris job remains the integration point."
+      "detail": "The durable Polaris job is the only execution entry point for the trial."
     }
   ],
   "polaris_verification": [

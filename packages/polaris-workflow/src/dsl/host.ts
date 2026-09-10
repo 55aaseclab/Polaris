@@ -164,7 +164,7 @@ function mockProduce(
     const base = name.replace(/Id$/i, '').slice(0, 3).toUpperCase() || port.slice(0, 3).toUpperCase()
     return genId(base)
   }
-  if (type === 'Boolean' || name.endsWith('Ok') || name.startsWith('valid')) return true
+  if (type === 'Boolean' || name.endsWith('Ok')) return true
   if (type === 'Number' || type === 'Money') {
     const n = Number(input.qty ?? input.amount ?? input.paidAmount ?? 0)
     return Number.isFinite(n) ? n : 0

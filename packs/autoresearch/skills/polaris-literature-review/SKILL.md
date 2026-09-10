@@ -7,12 +7,8 @@ description: >
 
 # Polaris literature review
 
-Use this skill as the routing layer for the Polaris-owned literature-review
-Domain Pack. The public entry point is:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review
-```
+Use this skill as the routing layer for the Polaris-owned AutoResearch Domain
+Pack. The public entry point is the Polaris workflow API.
 
 ## Mapping
 
@@ -21,10 +17,9 @@ pnpm --dir apps/polaris run polaris -- literature-review
 - `write` → `WriteLiteratureReport` → `polaris-literature-report`
 - human gates → Polaris durable review continuation
 
-The canonical declaration is
-`packs/autoresearch/main.ord` and explicitly uses
-`dsl version "0.4-trial"`. The v0.3 flow surface remains available for
-validation and portal projection.
+The canonical declaration is `packs/autoresearch/main.ord` and explicitly uses
+`dsl version "0.4-trial"`. Polaris loads the declaration and runs its
+`LiteratureReviewExecution` trial.
 
 ## Standard lifecycle
 

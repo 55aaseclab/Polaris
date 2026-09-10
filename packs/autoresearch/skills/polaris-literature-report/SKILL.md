@@ -26,18 +26,11 @@ All published claims retain inline `[@claim-id]` evidence markers and the
 report manifest retains input, draft, review, and artifact hashes. The four
 review dimensions must pass before Markdown publication.
 
-## Commands
+## Execution
 
-The public fixed path is:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <collection-input.json> --workspace <workspace-id> \
-  --run-id <run-id> --report-mode fixed --network allow
-```
-
-Use `--report-mode reviewed` to execute all reviewer and revision stages. The
-runner stores report artifacts below the run's `report-writing` directory.
+Submit the `AutoResearch/LiteratureReview` flow through the Polaris workflow
+API. The `LiteratureReviewExecution` trial routes report preparation, review,
+publication, and PDF rendering through its declared ports.
 
 ## Rules
 

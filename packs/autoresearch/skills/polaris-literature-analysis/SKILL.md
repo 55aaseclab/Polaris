@@ -7,9 +7,8 @@ description: >
 
 # Polaris literature analysis
 
-The product path is the Polaris shell and workflow runner. Low-level
-`tools/intelligence-analysis/literature-review` commands are implementation
-bindings and are not a replacement for the shell.
+The product path is the Polaris shell and workflow API. The common analysis
+tools are implementation bindings and are not a replacement for the shell.
 
 ## Handoff
 
@@ -39,14 +38,9 @@ hashes.
 - `auto-approve` retains the queue as an automatic audit artifact;
 - `manual-review` writes a pending review list until Polaris completes it.
 
-Use the public runner:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <collection-input.json> --workspace <workspace-id> \
-  --run-id <run-id> --literature-method iterate \
-  --review-mode auto-pass --network allow
-```
+Submit the `AutoResearch/LiteratureReview` flow through the Polaris workflow
+API. The trial selects `iterate`, `batches`, or `propose` from its declared
+input and routes analysis through the corresponding port.
 
 For a pending analysis review, use `analysis-review bootstrap/save/export` to
 create a validated `clue.manual-review.result.v2`, then supply it to

@@ -153,7 +153,6 @@ import {
   WorkflowControlService,
   registerWorkflowProvisionHook,
 } from "./workflow-control.js";
-import { resolveHostLiteratureArtifactSource } from "./literature-review-host.js";
 import type {
   WorkflowExecutionDriver,
   WorkflowMockScenario,
@@ -345,31 +344,19 @@ function artifactContentType(name: string): string {
 function sendWorkflowArtifact(
   res: ServerResponse,
   workflowControl: WorkflowControlService,
-  importMetaUrl: string,
   userId: string,
   runId: string,
   artifactId: string,
   method: string,
 ): void {
-  const { run, artifact } = workflowControl.getArtifact(userId, runId, artifactId);
+  const { artifact } = workflowControl.getArtifact(userId, runId, artifactId);
   if (artifact.redacted) {
     throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
   }
-  const sourcePath = resolveHostLiteratureArtifactSource(importMetaUrl, run, artifact);
-  if (!sourcePath) {
+  if (typeof artifact.content !== "string") {
     throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
   }
-  let stat: fs.Stats;
-  let body: Buffer;
-  try {
-    stat = fs.lstatSync(sourcePath);
-    body = fs.readFileSync(sourcePath);
-  } catch {
-    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
-  }
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
-  }
+  const body = Buffer.from(artifact.content, "utf8");
   res.writeHead(200, {
     "cache-control": "private, no-store",
     "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(artifact.name)}`,
@@ -2923,7 +2910,6 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             sendWorkflowArtifact(
               res,
               workflowControl,
-              import.meta.url,
               userId,
               decodeURIComponent(segments[2] ?? ""),
               decodeURIComponent(segments[4] ?? ""),

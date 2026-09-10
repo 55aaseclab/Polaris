@@ -1,8 +1,9 @@
 # Polaris literature-review skills
 
-These instruction-layer companions belong to the migrated Polaris workflow. They
+These instruction-layer companions belong to the migrated Polaris pack. They
 contain no Wanghai imports, paths, commands, or credentials. The executable
-source of truth remains the Domain Pack and the tools beside this directory.
+source of truth remains the Domain Pack and the common tools beside this
+directory.
 
 | Skill | Responsibility |
 | --- | --- |
@@ -11,6 +12,5 @@ source of truth remains the Domain Pack and the tools beside this directory.
 | `polaris-literature-analysis` | Freeze evidence, build, validate, finalize |
 | `polaris-literature-report` | Draft, review, revise, publish, render |
 
-For local execution, use the public `polaris literature-review` CLI. In
-integrated mode, direct tool and review completion commands remain fail-closed
-until Polaris supplies a durable disposable execution cell.
+Execution is submitted through the Polaris workflow API. In integrated mode,
+the durable job owns tool dispatch and review continuation.

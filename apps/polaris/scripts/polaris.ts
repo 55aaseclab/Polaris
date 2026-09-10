@@ -6,16 +6,6 @@ import {
 } from "./telemetry/client.js";
 
 async function dispatch(argv: string[]): Promise<void> {
-  if (argv[0] === "literature-review") {
-    const { literatureReviewCommand } = await import("./cli/commands/literature-review.js");
-    await literatureReviewCommand(argv.slice(1));
-    return;
-  }
-  if (argv[0] === "workflow" && argv[1] === "literature-review") {
-    const { literatureReviewCommand } = await import("./cli/commands/literature-review.js");
-    await literatureReviewCommand(argv.slice(2));
-    return;
-  }
   const { runCli } = await import("./cli/main.js");
   await runCli(argv);
 }

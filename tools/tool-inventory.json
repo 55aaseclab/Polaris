@@ -1,7 +1,7 @@
 {
   "schema_version": "polaris.common-tool-inventory.v1",
   "catalog_id": "polaris-common-tools",
-  "workflow_consumers": ["literature-review"],
+  "workflow_consumers": ["AutoResearch"],
   "tools": [
     {
       "id": "literature.collection",
@@ -90,7 +90,7 @@
   ],
   "policy": {
     "implementation_owner": "polaris",
-    "public_entrypoint": "polaris literature-review",
+    "public_entrypoint": "Polaris workflow API",
     "direct_wanghai_dependency": false,
     "live_enabled_by_default": false
   }
