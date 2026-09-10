@@ -103,7 +103,8 @@ async function run(
   });
   const [status] = await once(child, "close") as [number | null];
   if (status !== 0) {
-    throw new Error(`${path.basename(executable)} failed: ${stderr.trim()}`);
+    const detail = stderr.trim() || "no stderr output";
+    throw new Error(`${path.basename(executable)} failed with exit code ${status}: ${detail}`);
   }
 }
 
@@ -172,6 +173,9 @@ export class WorkflowToolDispatcher {
         runId: this.runRecord.id,
         tenantId: this.runRecord.tenantId,
         flowId: this.runRecord.flowId,
+        stepId: req.meta?.stepId,
+        outputFields: req.meta?.outputFields ?? [],
+        workspaceRoot: root,
         input: mapInput(req.input, port.binding.aliases),
       });
       const executable = path.join(repoRoot(this.options.importMetaUrl), "tools", tool.entrypoint);

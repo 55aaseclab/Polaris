@@ -104,6 +104,41 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIsNone(err)
         self.assertEqual(items, [])
 
+    def test_failed_codex_result_preserves_process_diagnostics(self) -> None:
+        completed = __import__("subprocess").CompletedProcess(
+            args=["codex"],
+            returncode=1,
+            stdout="",
+            stderr="service unavailable",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "plan.json"
+            last_message = Path(directory) / "last-message.txt"
+            with mock.patch.object(
+                runner,
+                "_run_topic_codex",
+                return_value=(completed, "", "freeform"),
+            ):
+                status = runner.command_plan_search_keywords(
+                    __import__("argparse").Namespace(
+                        question="synthetic question",
+                        scope=None,
+                        output=str(output),
+                        last_message=str(last_message),
+                        model="synthetic-model",
+                        sandbox="read-only",
+                        cd=None,
+                        full_auto=False,
+                        timeout=10,
+                        config=[],
+                    ),
+                    TOOL_ROOT,
+                )
+            self.assertEqual(status, 2)
+            wrapper = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(wrapper["exit_code"], 1)
+            self.assertEqual(wrapper["stderr"], "service unavailable")
+            self.assertIsNone(wrapper["plan"])
 
 if __name__ == "__main__":
     unittest.main()

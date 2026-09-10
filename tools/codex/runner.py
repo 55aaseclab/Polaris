@@ -204,6 +204,177 @@ def command_exec(args: argparse.Namespace, root: Path) -> int:
     return 0 if completed.returncode == 0 else 2
 
 
+def search_keyword_prompt(
+    question: str,
+    include: list[str],
+    exclude: list[str],
+) -> str:
+    return f"""# Plan literature search keywords v1
+
+You are planning a broad scholarly literature search.
+Turn the research question into concise search terms for Crossref and
+Semantic Scholar.
+
+Research question:
+{question}
+
+Existing in-scope terms:
+{json.dumps(include, ensure_ascii=False)}
+
+Existing out-of-scope terms:
+{json.dumps(exclude, ensure_ascii=False)}
+
+Return JSON only with exactly these fields:
+{{
+  "keywords": ["short title or abstract terms"],
+  "queries": ["short bibliographic search queries"],
+  "year_from": 1900,
+  "year_to": 2026
+}}
+
+Use only terminology justified by the question. Include spelling, spacing,
+acronym, and close terminology variants only when justified. Do not copy a
+full sentence as a keyword or query. Choose a broad historical range when the
+question concerns development or history. Return 2-8 keywords and 1-5
+queries. Do not return markdown, explanations, or extra fields."""
+
+
+def parse_search_keyword_plan(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise CliError("search keyword plan must be a JSON object")
+    required = {"keywords", "queries", "year_from", "year_to"}
+    if set(value) != required:
+        raise CliError("search keyword plan has unexpected or missing fields")
+    keywords = value["keywords"]
+    queries = value["queries"]
+    if (
+        not isinstance(keywords, list)
+        or not 2 <= len(keywords) <= 8
+        or not all(isinstance(item, str) and item.strip() for item in keywords)
+    ):
+        raise CliError("search keyword plan keywords must contain 2-8 non-empty strings")
+    if (
+        not isinstance(queries, list)
+        or not 1 <= len(queries) <= 5
+        or not all(isinstance(item, str) and item.strip() for item in queries)
+    ):
+        raise CliError("search keyword plan queries must contain 1-5 non-empty strings")
+    year_from, year_to = value["year_from"], value["year_to"]
+    if (
+        not isinstance(year_from, int)
+        or not isinstance(year_to, int)
+        or year_from < 1800
+        or year_to < year_from
+        or year_to > 2200
+    ):
+        raise CliError("search keyword plan has an invalid year range")
+    return {
+        "keywords": [item.strip() for item in keywords],
+        "queries": [item.strip() for item in queries],
+        "year_from": year_from,
+        "year_to": year_to,
+    }
+
+
+def command_plan_search_keywords(args: argparse.Namespace, root: Path) -> int:
+    question = args.question.strip()
+    scope_doc = read_json(Path(args.scope), "scope file") if args.scope else {}
+    scope = scope_doc.get("scope") if isinstance(scope_doc.get("scope"), dict) else {}
+    include = [item for item in scope.get("include", []) if isinstance(item, str) and item.strip()]
+    exclude = [item for item in scope.get("exclude", []) if isinstance(item, str) and item.strip()]
+    model = args.model or default_model()
+    output = Path(args.output).expanduser().resolve()
+    last_message = (
+        Path(args.last_message).expanduser().resolve()
+        if args.last_message
+        else output.with_suffix(output.suffix + ".last-message.txt")
+    )
+    completed, last_text, _ = _run_topic_codex(
+        prompt=search_keyword_prompt(question, include, exclude),
+        last_message=last_message,
+        model=model,
+        sandbox=args.sandbox,
+        schema_path=None,
+        cd=args.cd,
+        full_auto=args.full_auto,
+        timeout_s=args.timeout,
+        root=root,
+        config=args.config,
+    )
+    try:
+        plan = parse_search_keyword_plan(json.loads(last_text))
+        parse_error = None
+    except (json.JSONDecodeError, CliError) as error:
+        plan = None
+        parse_error = str(error)
+    wrapper: dict[str, Any] = {
+        "schema_version": "clue.codex.search-keywords.v1",
+        "tool": {"name": TOOL_NAME, "version": read_version(root)},
+        "generated_at": utc_now(),
+        "model": model,
+        "sandbox": args.sandbox,
+        "exit_code": completed.returncode,
+        "last_message_path": str(last_message),
+        "last_message": last_text,
+        "question": question,
+        "plan": plan,
+        "keyword_count": len(plan["keywords"]) if plan else 0,
+        "parse_error": parse_error,
+        "stdout": completed.stdout or "",
+        "stderr": completed.stderr or "",
+    }
+    write_json(output, wrapper)
+    ok = completed.returncode == 0 and plan is not None
+    print(json.dumps({
+        "status": "succeeded" if ok else "failed",
+        "output": str(output),
+        "model": model,
+        "exit_code": completed.returncode,
+        "parse_error": parse_error,
+    }, ensure_ascii=False, indent=2))
+    if not ok:
+        diagnostics = (completed.stderr or "").strip() or parse_error or "codex returned no diagnostic output"
+        print(f"codex workflow failed: exit_code={completed.returncode}; {diagnostics}", file=sys.stderr)
+    return 0 if ok else 2
+
+
+def command_workflow(args: argparse.Namespace, root: Path) -> int:
+    request = read_json(Path(args.input), "workflow input")
+    data = request.get("input") if isinstance(request.get("input"), dict) else {}
+    output = Path(args.output).expanduser().resolve()
+    if args.step_command != "plan-search-keywords":
+        raise CliError(f"unsupported workflow command: {args.step_command}")
+    question = data.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise CliError("workflow plan-search-keywords requires input.question")
+    plan_path = output.with_suffix(output.suffix + ".plan.json")
+    status = command_plan_search_keywords(
+        argparse.Namespace(
+            question=question,
+            scope=None,
+            output=str(plan_path),
+            last_message=None,
+            model=None,
+            sandbox="read-only",
+            cd=None,
+            full_auto=False,
+            config=[],
+            timeout=900,
+        ),
+        root,
+    )
+    if status != 0:
+        return status
+    plan_doc = read_json(plan_path, "search keyword plan")
+    plan = plan_doc.get("plan") if isinstance(plan_doc.get("plan"), dict) else None
+    write_json(output, {
+        "keywordPlanRef": str(plan_path),
+        "keywordCount": len(plan.get("keywords", [])) if isinstance(plan, dict) else 0,
+        "keywordStatus": "planned" if isinstance(plan, dict) else "failed",
+    })
+    return 0
+
+
 def _paper_fields(record: dict[str, Any]) -> dict[str, str]:
     payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
     title = payload.get("title") or payload.get("display_name") or ""
@@ -375,6 +546,7 @@ def _run_topic_codex(
     full_auto: bool,
     timeout_s: int | None,
     root: Path,
+    config: list[str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
     if last_message.is_file():
         last_message.unlink()
@@ -399,6 +571,8 @@ def _run_topic_codex(
         cmd[1:1] = ["-C", str(Path(cd).expanduser().resolve())]
     if full_auto:
         cmd.append("--full-auto")
+    for item in config or []:
+        cmd.extend(["-c", item])
     cmd.append(prompt)
     completed = run_codex(
         cmd,
@@ -468,8 +642,9 @@ def command_topic_judge(args: argparse.Namespace, root: Path) -> int:
             schema_path=schema_path if use_schema else None,
             cd=args.cd,
             full_auto=bool(args.full_auto),
-            timeout_s=args.timeout,
-            root=root,
+        timeout_s=args.timeout,
+        root=root,
+        config=args.config,
         )
         # One automatic freeform retry if structured mode failed.
         if use_schema and (completed.returncode != 0 or not last_text.strip()):
@@ -590,6 +765,25 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--config", action="append", default=[], help="codex -c key=value (repeatable).")
     ex.add_argument("--timeout", type=int, default=600, help="Seconds (default 600).")
 
+    sk = sub.add_parser(
+        "plan-search-keywords",
+        help="Plan literature search keywords from a user research question.",
+    )
+    sk.add_argument("--question", required=True, help="User research question.")
+    sk.add_argument("--scope", help="Optional collection scope JSON.")
+    sk.add_argument("--output", required=True, help="Wrapper JSON output path.")
+    sk.add_argument("--last-message", help="Path for codex final JSON.")
+    sk.add_argument("--model", default=None, help=f"Model (default {DEFAULT_MODEL}).")
+    sk.add_argument(
+        "--sandbox",
+        default="read-only",
+        choices=["read-only", "workspace-write", "danger-full-access"],
+    )
+    sk.add_argument("--cd", help="Working directory for codex.")
+    sk.add_argument("--full-auto", action="store_true")
+    sk.add_argument("--config", action="append", default=[], help="codex -c key=value (repeatable).")
+    sk.add_argument("--timeout", type=int, default=900, help="Seconds (default 900).")
+
     tj = sub.add_parser(
         "topic-judge",
         help="Judge paper title/abstract against collection scope (codex + schema).",
@@ -617,12 +811,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tj.add_argument("--cd", help="Working directory for codex.")
     tj.add_argument("--full-auto", action="store_true")
+    tj.add_argument("--config", action="append", default=[], help="codex -c key=value (repeatable).")
     tj.add_argument(
         "--use-output-schema",
         action="store_true",
         help="Pass codex --output-schema (some providers 429/503; freeform is default).",
     )
     tj.add_argument("--timeout", type=int, default=900, help="Seconds (default 900).")
+    workflow = sub.add_parser("workflow", help="Polaris workflow adapter.")
+    workflow.add_argument("step_command")
+    workflow.add_argument("--input", required=True)
+    workflow.add_argument("--output", required=True)
     return parser
 
 
@@ -634,8 +833,12 @@ def main(argv: list[str] | None = None) -> int:
             return command_version(root)
         if args.command == "exec":
             return command_exec(args, root)
+        if args.command == "plan-search-keywords":
+            return command_plan_search_keywords(args, root)
         if args.command == "topic-judge":
             return command_topic_judge(args, root)
+        if args.command == "workflow":
+            return command_workflow(args, root)
         raise CliError(f"unsupported command: {args.command}")
     except CliError as error:
         print(f"error: {error}", file=sys.stderr)
