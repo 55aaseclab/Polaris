@@ -2996,7 +2996,11 @@ test("portal runs SysSec LiteratureReview on the host and returns real artifacts
           assert.equal(created.run.driver, "none");
           assert.equal(created.run.policy.mode, "host");
           const deadline = Date.now() + 15_000;
-          let completed: { status: string; artifacts: Array<{ name: string; content: string }> } | undefined;
+          let completed: {
+            id: string;
+            status: string;
+            artifacts: Array<{ id: string; name: string; content: string }>;
+          } | undefined;
           while (Date.now() < deadline) {
             const listedResponse = await fetch(`http://127.0.0.1:${address.port}/api/workflow-runs`);
             const listed = await listedResponse.json() as { runs: Array<typeof completed & { id: string }> };
@@ -3008,7 +3012,16 @@ test("portal runs SysSec LiteratureReview on the host and returns real artifacts
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
           assert.equal(completed?.status, "succeeded");
-          assert.ok(completed?.artifacts.some((artifact) => artifact.name === "report.md"));
+          const pdf = completed?.artifacts.find((artifact) => artifact.name === "report.pdf");
+          assert.ok(pdf);
+          const preview = await fetch(
+            `http://127.0.0.1:${address.port}/api/workflow-runs/${encodeURIComponent(completed!.id)}/artifacts/${encodeURIComponent(pdf!.id)}`,
+          );
+          assert.equal(preview.status, 200);
+          assert.equal(preview.headers.get("content-type"), "application/pdf");
+          assert.equal(preview.headers.get("content-disposition")?.startsWith("inline;"), true);
+          assert.equal(preview.headers.get("x-content-type-options"), "nosniff");
+          assert.equal((await preview.arrayBuffer()).byteLength > 0, true);
         } finally {
           server.close();
           await once(server, "close");

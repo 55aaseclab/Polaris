@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import path from "node:path";
 import { URL } from "node:url";
 import {
   listPolarisDomainPackToolPortalCatalogRows,
@@ -151,6 +153,7 @@ import {
   WorkflowControlService,
   registerWorkflowProvisionHook,
 } from "./workflow-control.js";
+import { resolveHostLiteratureArtifactSource } from "./literature-review-host.js";
 import type {
   WorkflowExecutionDriver,
   WorkflowMockScenario,
@@ -312,6 +315,70 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+function artifactContentType(name: string): string {
+  const extension = path.extname(name).toLocaleLowerCase();
+  const types: Record<string, string> = {
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".gif": "image/gif",
+    ".html": "text/html; charset=utf-8",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".json": "application/json; charset=utf-8",
+    ".m4a": "audio/mp4",
+    ".md": "text/markdown; charset=utf-8",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".txt": "text/plain; charset=utf-8",
+    ".wav": "audio/wav",
+    ".webm": "video/webm",
+    ".webp": "image/webp",
+  };
+  return types[extension] ?? "application/octet-stream";
+}
+
+function sendWorkflowArtifact(
+  res: ServerResponse,
+  workflowControl: WorkflowControlService,
+  importMetaUrl: string,
+  userId: string,
+  runId: string,
+  artifactId: string,
+  method: string,
+): void {
+  const { run, artifact } = workflowControl.getArtifact(userId, runId, artifactId);
+  if (artifact.redacted) {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  const sourcePath = resolveHostLiteratureArtifactSource(importMetaUrl, run, artifact);
+  if (!sourcePath) {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  let stat: fs.Stats;
+  let body: Buffer;
+  try {
+    stat = fs.lstatSync(sourcePath);
+    body = fs.readFileSync(sourcePath);
+  } catch {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  res.writeHead(200, {
+    "cache-control": "private, no-store",
+    "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(artifact.name)}`,
+    "content-length": body.byteLength,
+    "content-type": artifactContentType(artifact.name),
+    "x-content-type-options": "nosniff",
+  });
+  if (method !== "HEAD") res.end(body);
+  else res.end();
 }
 
 function sendProcessProbe(
@@ -2850,6 +2917,18 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             sendJson(res, 200, {
               run: await workflowControl.getRun(userId, decodeURIComponent(segments[2] ?? "")),
             });
+            return;
+          }
+          if (segments.length === 5 && (req.method === "GET" || req.method === "HEAD") && segments[3] === "artifacts") {
+            sendWorkflowArtifact(
+              res,
+              workflowControl,
+              import.meta.url,
+              userId,
+              decodeURIComponent(segments[2] ?? ""),
+              decodeURIComponent(segments[4] ?? ""),
+              req.method,
+            );
             return;
           }
           if (segments.length === 4 && req.method === "GET" && segments[3] === "events") {

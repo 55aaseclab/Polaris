@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import {
   compileHostLiteratureInput,
   executeHostLiteratureReview,
   filterHostLiteratureEnvironment,
+  resolveHostLiteratureArtifactSource,
 } from "../scripts/portal/literature-review-host.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -87,6 +89,47 @@ test("host child environment forwards reviewed runtime settings only", () => {
     POLARIS_LITERATURE_CACHE_ROOT: "/tmp/cache",
     OPENAI_API_KEY: "synthetic-provider-key",
   });
+});
+
+test("host artifact source resolution stays inside the run root", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-host-literature-source-"));
+  const restore = withEnvironment(root);
+  try {
+    const run = runFixture({ brief: "bounded workflow evidence" });
+    const workspaceId = `tenant-${createHash("sha256").update(run.tenantId, "utf8").digest("hex").slice(0, 32)}`;
+    const runRoot = path.join(root, "workspaces", workspaceId, "literature-review", run.id);
+    fs.mkdirSync(runRoot, { recursive: true });
+    const pdfPath = path.join(runRoot, "report.pdf");
+    fs.writeFileSync(pdfPath, "%PDF-1.7\nsynthetic\n", "utf8");
+    assert.equal(
+      resolveHostLiteratureArtifactSource(import.meta.url, { ...run, executionDriver: "none" }, {
+        name: "report.pdf",
+      }),
+      pdfPath,
+    );
+
+    const outsidePath = path.join(root, "outside.pdf");
+    fs.writeFileSync(outsidePath, "%PDF-1.7\noutside\n", "utf8");
+    const linkPath = path.join(runRoot, "link.pdf");
+    fs.symlinkSync(outsidePath, linkPath);
+    assert.equal(
+      resolveHostLiteratureArtifactSource(import.meta.url, { ...run, executionDriver: "none" }, {
+        name: "link.pdf",
+        sourcePath: linkPath,
+      }),
+      null,
+    );
+    assert.equal(
+      resolveHostLiteratureArtifactSource(import.meta.url, { ...run, executionDriver: "none" }, {
+        name: "outside.pdf",
+        sourcePath: outsidePath,
+      }),
+      null,
+    );
+  } finally {
+    restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("host adapter runs the migrated lifecycle and projects real report artifacts", async () => {

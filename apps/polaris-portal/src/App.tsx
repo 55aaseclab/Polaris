@@ -72,6 +72,7 @@ import { cn } from "./lib/utils.js";
 import {
   artifactPreviewKind,
   artifactPreviewSource,
+  artifactPreviewUrl,
   formatJsonArtifact,
   type ArtifactPreviewKind,
 } from "./artifact-preview.js";
@@ -1015,14 +1016,17 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
         </div>
           <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? "执行位置" : "目标 Vault"}</dt><dd>{workflowExecutionTargetLabel(run)}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>
       </div>
-      {artifact && <ArtifactPreview artifact={artifact} onClose={() => setArtifact(null)} />}
+      {artifact && <ArtifactPreview runId={run.id} artifact={artifact} onClose={() => setArtifact(null)} />}
     </div>
   );
 }
 
-function ArtifactPreview({ artifact, onClose }: { artifact: MockWorkflowRun["artifacts"][number]; onClose: () => void }) {
+function ArtifactPreview({ runId, artifact, onClose }: { runId: string; artifact: MockWorkflowRun["artifacts"][number]; onClose: () => void }) {
   const previewKind = artifactPreviewKind(artifact.name);
-  const source = artifactPreviewSource(artifact.content);
+  const source = artifactPreviewSource(artifact.content)
+    ?? (!artifact.redacted && ["image", "video", "audio", "pdf"].includes(previewKind)
+      ? artifactPreviewUrl(runId, artifact.id)
+      : null);
   return <div className="modal-backdrop" role="presentation" onClick={onClose}><section className="modal artifact-modal" role="dialog" aria-modal="true" aria-label={artifact.name} onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">ARTIFACT PREVIEW</p><h2>{artifact.name}</h2><p>{artifact.summary} · {artifact.size}</p></div><Button variant="ghost" size="icon" aria-label="关闭" title="关闭" onClick={onClose}><X className="h-4 w-4" /></Button></div><ArtifactPreviewContent kind={previewKind} content={artifact.content} source={source} redacted={artifact.redacted} /></section></div>;
 }
 

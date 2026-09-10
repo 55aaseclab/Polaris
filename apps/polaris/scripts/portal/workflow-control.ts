@@ -811,6 +811,19 @@ export class WorkflowControlService {
     return projectionForRun(run, this.options.listPacks());
   }
 
+  getArtifact(tenantId: string, runId: string, artifactId: string): {
+    run: WorkflowRunRecord;
+    artifact: WorkflowRunRecord["artifacts"][number];
+  } {
+    const run = this.store.getWorkflowRun(tenantId, runId);
+    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    const artifact = run.artifacts.find((candidate) => candidate.id === artifactId);
+    if (!artifact) {
+      throw new WorkflowControlError("产物不存在", 404, "artifact-not-found");
+    }
+    return { run, artifact };
+  }
+
   async createRun(tenantId: string, input: WorkflowRunRequest): Promise<WorkflowRunProjection> {
     return this.createAdmittedRun(tenantId, input, "manual");
   }

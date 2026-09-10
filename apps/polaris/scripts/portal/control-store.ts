@@ -131,6 +131,8 @@ export interface WorkflowArtifactRecord {
   size: string;
   summary: string;
   content: string;
+  /** Internal host-owned source path; never included in the public projection. */
+  sourcePath?: string;
   digest?: string;
   redacted: boolean;
   createdAt: string;
@@ -510,6 +512,7 @@ function rowToWorkflowArtifact(row: SqlRow): WorkflowArtifactRecord {
     size: String(row.size),
     summary: String(row.summary),
     content: String(row.content),
+    ...(row.source_path ? { sourcePath: String(row.source_path) } : {}),
     digest: asOptionalString(row.digest),
     redacted: Number(row.redacted ?? 0) === 1,
     createdAt: String(row.created_at),
@@ -715,6 +718,13 @@ function ensureWorkflowRunColumns(db: DatabaseSync): void {
   }
 }
 
+function ensureWorkflowArtifactColumns(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(workflow_artifacts)").all() as SqlRow[];
+  if (columns.length > 0 && !columns.some((column) => String(column.name) === "source_path")) {
+    db.exec("ALTER TABLE workflow_artifacts ADD COLUMN source_path TEXT");
+  }
+}
+
 /**
  * Durable control-plane state for one Polaris installation.
  *
@@ -913,6 +923,7 @@ export class PolarisControlStore {
         size TEXT NOT NULL,
         summary TEXT NOT NULL,
         content TEXT NOT NULL,
+        source_path TEXT,
         digest TEXT,
         redacted INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
@@ -1036,6 +1047,7 @@ export class PolarisControlStore {
     ensureJobResultColumn(db);
     ensureIdempotencyResponseColumns(db);
     ensureWorkflowRunColumns(db);
+    ensureWorkflowArtifactColumns(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
   }
@@ -1452,9 +1464,9 @@ export class PolarisControlStore {
   addWorkflowArtifact(artifact: WorkflowArtifactRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO workflow_artifacts (
-        id, run_id, tenant_id, name, kind, size, summary, content, digest,
-        redacted, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, run_id, tenant_id, name, kind, size, summary, content, source_path,
+        digest, redacted, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       artifact.id,
       artifact.runId,
@@ -1464,6 +1476,7 @@ export class PolarisControlStore {
       artifact.size,
       artifact.summary,
       artifact.content,
+      artifact.sourcePath ?? null,
       artifact.digest ?? null,
       artifact.redacted ? 1 : 0,
       artifact.createdAt,

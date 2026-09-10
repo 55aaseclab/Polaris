@@ -2065,6 +2065,7 @@
 
 .artifact-modal {
   width: min(100%, 52rem);
+  max-height: min(80vh, 42rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;

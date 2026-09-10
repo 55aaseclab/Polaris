@@ -60,6 +60,10 @@ export function artifactPreviewSource(content: string): string | null {
   return null;
 }
 
+export function artifactPreviewUrl(runId: string, artifactId: string): string {
+  return `/api/workflow-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`;
+}
+
 export function formatJsonArtifact(content: string): string {
   try {
     return JSON.stringify(JSON.parse(content), null, 2);

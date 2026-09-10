@@ -486,6 +486,56 @@ function fileWithin(root: string, candidate: string): string | null {
   return resolved;
 }
 
+function hostLiteratureRunRoot(
+  importMetaUrl: string,
+  run: Pick<WorkflowRunRecord, "id" | "tenantId">,
+): string {
+  const workspacesRoot = configuredDirectory(
+    importMetaUrl,
+    "POLARIS_LITERATURE_WORKSPACES_ROOT",
+    HOST_WORKSPACE_DIRECTORY,
+  );
+  const workspaceId = tenantWorkspaceId(run.tenantId);
+  const runId = safeId(run.id, "run ID");
+  return path.join(workspacesRoot, workspaceId, "literature-review", runId);
+}
+
+/**
+ * Resolve a persisted host artifact source without exposing the path to the
+ * browser. Older rows did not persist source_path, so known published files
+ * are also reconstructed for those runs.
+ */
+export function resolveHostLiteratureArtifactSource(
+  importMetaUrl: string,
+  run: Pick<WorkflowRunRecord, "id" | "tenantId" | "packId" | "flowId" | "executionDriver">,
+  artifact: Pick<WorkflowArtifactRecord, "name" | "sourcePath">,
+): string | null {
+  if (!isHostLiteratureReviewRun(run)) return null;
+  const runRoot = hostLiteratureRunRoot(importMetaUrl, run);
+  const fallbackNames = new Set([
+    "report.md",
+    "report.pdf",
+    "report.json",
+    "collection-output.json",
+    "analysis-output.json",
+  ]);
+  const candidate = artifact.sourcePath
+    ? path.resolve(runRoot, artifact.sourcePath)
+    : fallbackNames.has(artifact.name)
+      ? path.join(runRoot, artifact.name)
+      : null;
+  if (!candidate) return null;
+  try {
+    const candidateStat = fs.lstatSync(candidate);
+    if (!candidateStat.isFile() || candidateStat.isSymbolicLink()) return null;
+    const realRoot = fs.realpathSync(runRoot);
+    const realCandidate = fs.realpathSync(candidate);
+    return fileWithin(realRoot, realCandidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
@@ -519,6 +569,9 @@ function artifactFromFile(
   if (!safePath || !fs.existsSync(safePath)) return null;
   const stat = fs.lstatSync(safePath);
   if (!stat.isFile() || stat.isSymbolicLink()) return null;
+  const realRoot = fs.realpathSync(runRoot);
+  const realPath = fs.realpathSync(safePath);
+  if (!fileWithin(realRoot, realPath)) return null;
   const bytes = fs.readFileSync(safePath);
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   let content: string;
@@ -541,6 +594,7 @@ function artifactFromFile(
     size: formatBytes(bytes.length),
     summary,
     content,
+    sourcePath: path.relative(runRoot, realPath),
     digest,
     redacted,
   };

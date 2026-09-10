@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   artifactPreviewKind,
   artifactPreviewSource,
+  artifactPreviewUrl,
   formatJsonArtifact,
 } from "./artifact-preview.js";
 
@@ -21,6 +22,13 @@ test("only treats safe URL-like content as a media preview source", () => {
   assert.equal(artifactPreviewSource("https://example.invalid/report.pdf"), "https://example.invalid/report.pdf");
   assert.equal(artifactPreviewSource("data:image/png;base64,fixture"), "data:image/png;base64,fixture");
   assert.equal(artifactPreviewSource("Binary artifact\nname: report.pdf"), null);
+});
+
+test("builds a protected artifact preview URL", () => {
+  assert.equal(
+    artifactPreviewUrl("run/example", "artifact/report.pdf"),
+    "/api/workflow-runs/run%2Fexample/artifacts/artifact%2Freport.pdf",
+  );
 });
 
 test("pretty prints valid JSON without changing invalid text", () => {
