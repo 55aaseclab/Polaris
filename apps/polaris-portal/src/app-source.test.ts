@@ -88,6 +88,11 @@ test("work filters keep the new-work action beside the tabs", () => {
   assert.match(cssSource, /\.work-new-button\s*\{[\s\S]*width:\s*2rem;[\s\S]*height:\s*2rem;/u);
 });
 
+test("run detail shows the creation date and time", () => {
+  assert.match(appSource, /formatRunDateTime\(run\.createdAt\)/u);
+  assert.doesNotMatch(appSource, /<dt>创建时间<\/dt><dd>\{run\.createdAt\.slice\(11, 16\)\}<\/dd>/u);
+});
+
 test("debug tab exposes the server run projection as a live inspector", () => {
   assert.match(appSource, /path === "\/debug"/u);
   assert.match(appSource, /link\("\/debug", "Debug", Bug, "debug"\)/u);

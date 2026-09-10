@@ -10,7 +10,6 @@ import {
   CircleUserRound,
   CircleAlert,
   Code2,
-  Copy,
   Clock3,
   ExternalLink,
   Eye,
@@ -69,6 +68,7 @@ import {
 } from "./portal-client.js";
 import { usePortalStore } from "./portal-store.js";
 import { cn } from "./lib/utils.js";
+import { formatRunDateTime } from "./formatters.js";
 import {
   flowForRun,
   packForRun,
@@ -980,7 +980,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
           {run.error && <Card className="run-error-card"><CardHeader><CardTitle>需要处理</CardTitle></CardHeader><CardContent><p>{run.error.message}</p><code>{run.error.code}</code></CardContent></Card>}
           {run.artifacts.length > 0 && <Card><CardHeader><CardTitle>产物</CardTitle><CardDescription>{run.driver === "none" ? "结果由 Polaris host 管理，Portal 只展示受控投影。" : "结果仍属于目标 Vault，Portal 只展示受控投影。"}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <button type="button" className="artifact-row" key={item.id} onClick={() => setArtifact(item)}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></button>)}</div></CardContent></Card>}
         </div>
-          <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? "执行位置" : "目标 Vault"}</dt><dd>{workflowExecutionTargetLabel(run)}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{run.createdAt.slice(11, 16)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>
+          <aside className="run-detail-side"><Card><CardHeader><CardTitle>执行上下文</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>Domain Pack</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>版本</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? "执行位置" : "目标 Vault"}</dt><dd>{workflowExecutionTargetLabel(run)}</dd></div><div className="data-row"><dt>运行策略</dt><dd>{run.approvalRequired ? "需要确认" : "自动完成"}</dd></div><div className="data-row"><dt>创建时间</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>输入快照</CardTitle><CardDescription>提交时固定，不跟随设置变化。</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></CardContent></Card></aside>
       </div>
       {artifact && <ArtifactPreview artifact={artifact} onClose={() => setArtifact(null)} />}
     </div>
