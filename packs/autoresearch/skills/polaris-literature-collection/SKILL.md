@@ -29,7 +29,7 @@ literature package. Google Scholar and OpenAlex are not implicit sources.
 ## Commands
 
 ```sh
-WORKFLOW=workflows/literature-review
+WORKFLOW=packs/autoresearch
 
 $WORKFLOW/polaris-literature-review validate --input <input.json>
 $WORKFLOW/polaris-literature-review run \

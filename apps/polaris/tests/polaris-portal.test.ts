@@ -95,11 +95,10 @@ const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.join(
   "domain-packs",
   "vault-knowledge-health",
 );
-const FIRST_PARTY_SYSSEC_PACK = path.join(
+const BUILT_IN_AUTORESEARCH_PACK = path.join(
   REPO_ROOT,
-  "third_party",
-  "syssec-research-skills",
-  "polaris-domain-pack",
+  "packs",
+  "autoresearch",
 );
 const POLARIS_LITERATURE_FAKE_CODEX = path.join(
   REPO_ROOT,
@@ -2826,10 +2825,10 @@ flow Review title "Review" create {
           const payload = await response.json() as {
             packs: Array<{ id: string; flows: Array<{ id: string; fields: Array<{ required: boolean }> }> }>;
           };
-          assert.equal(payload.packs.length, 1);
-          assert.equal(payload.packs[0]?.id, "PortalCatalogTest");
-          assert.equal(payload.packs[0]?.flows[0]?.id, "Review");
-          assert.equal(payload.packs[0]?.flows[0]?.fields[0]?.required, true);
+          const pack = payload.packs.find((candidate) => candidate.id === "PortalCatalogTest");
+          assert.ok(pack);
+          assert.equal(pack.flows[0]?.id, "Review");
+          assert.equal(pack.flows[0]?.fields[0]?.required, true);
         } finally {
           server.close();
           await once(server, "close");
@@ -2919,7 +2918,7 @@ flow Summarize title "Summarize" create {
   }
 });
 
-test("portal runs SysSec LiteratureReview on the host and returns real artifacts", { concurrency: false }, async () => {
+test("portal runs AutoResearch LiteratureReview on the host and returns real artifacts", { concurrency: false }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-portal-host-literature-"));
   const previous = Object.fromEntries([
     "POLARIS_DATA_ROOT",
@@ -2936,7 +2935,7 @@ test("portal runs SysSec LiteratureReview on the host and returns real artifacts
   process.env.POLARIS_LITERATURE_CODEX_BIN = POLARIS_LITERATURE_FAKE_CODEX;
   process.env.POLARIS_LITERATURE_HOST_NETWORK = "deny";
   try {
-    await addDomainPack(import.meta.url, FIRST_PARTY_SYSSEC_PACK);
+    await addDomainPack(import.meta.url, BUILT_IN_AUTORESEARCH_PACK);
     const input = {
       schema_version: "clue.data-collection.input.v2",
       collection_id: "portal-host-literature",
@@ -2980,7 +2979,7 @@ test("portal runs SysSec LiteratureReview on the host and returns real artifacts
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              packId: "SysSecResearch",
+              packId: "AutoResearch",
               flowId: "LiteratureReview",
               driver: "none",
               values: {

@@ -22,7 +22,7 @@ pnpm --dir apps/polaris run polaris -- literature-review
 - human gates → Polaris durable review continuation
 
 The canonical declaration is
-`workflows/literature-review/main.ord` and explicitly uses
+`packs/autoresearch/main.ord` and explicitly uses
 `dsl version "0.4-trial"`. The v0.3 flow surface remains available for
 validation and portal projection.
 

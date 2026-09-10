@@ -3171,7 +3171,7 @@ const WORKFLOW_STAGE_LABELS: Record<string, string> = {
 };
 
 const LITERATURE_REVIEW_WORKFLOW_SKILL_PATH =
-  "workflows/literature-review/skills/polaris-literature-review/SKILL.md";
+  "packs/autoresearch/skills/polaris-literature-review/SKILL.md";
 
 function workflowStageChainStep(templateId: string | null | undefined, stageId: string): string | null {
   if (!templateId) return null;

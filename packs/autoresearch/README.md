@@ -7,7 +7,7 @@ the common tools in `tools/`; it does not import, execute, or read
 configuration from Wanghai.
 
 The canonical workflow declaration is
-`workflows/literature-review/main.ord`.
+`packs/autoresearch/main.ord`.
 The workflow preserves the existing `clue.*.v2` wire contracts so existing
 research inputs remain compatible while the runtime boundary is owned by
 Polaris.
@@ -36,9 +36,11 @@ Polaris.
   XeLaTeX PDF rendering.
 
 The fixed `run` path matches the fixed workflow operation:
-collection and analysis are followed by report `prepare -> draft -> LaTeX`.
-The optional `--report-mode reviewed` path exposes the lower-level review,
-revision, publication, and LaTeX operations as one Polaris command.
+collection and analysis are followed by report `prepare -> draft -> publish ->
+LaTeX`. It publishes Markdown and a report manifest without claiming that the
+four reviewer passes ran. The optional `--report-mode reviewed` path exposes
+the lower-level review, revision, publication, and LaTeX operations as one
+Polaris command.
 
 ## Environment
 
@@ -79,7 +81,7 @@ Prepare a local execution environment (locked search backends, the social
 adapter venv, and browser dependencies):
 
 ```sh
-bash workflows/literature-review/install-dependencies.sh
+bash packs/autoresearch/install-dependencies.sh
 ```
 
 Use `--skip-browser` or `--skip-external-backends` for a narrower setup. The

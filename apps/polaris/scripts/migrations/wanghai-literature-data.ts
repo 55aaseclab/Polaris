@@ -541,7 +541,7 @@ function generatedIndex(report: LiteratureDataMigrationReport): Record<string, u
     scope: report.scope,
     source_workspace: "literature-review",
     polaris_workspace: report.scope.workspaceId,
-    polaris_workflow_definition: "workflows/literature-review/main.ord",
+    polaris_workflow_definition: "packs/autoresearch/main.ord",
     legacy_workflow_ids: report.workflowIds,
     mappings: report.mappings.map(({ source, target, purpose }) => ({ source, target, purpose })),
     excluded_runtime_material: {

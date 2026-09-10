@@ -27,8 +27,8 @@ function runFixture(input: Record<string, string>): HostRun {
   return {
     id: "run-host-literature-test",
     tenantId: "tenant-host-literature-test",
-    packId: "SysSecResearch",
-    packVersion: "0.1.3",
+    packId: "AutoResearch",
+    packVersion: "1.0.0",
     packDigest: "sha256:synthetic-pack",
     flowId: "LiteratureReview",
     input,
@@ -57,7 +57,7 @@ function withEnvironment(root: string): () => void {
   };
 }
 
-test("host compiler maps a SysSec literature brief to the canonical collection contract", () => {
+test("host compiler maps an AutoResearch literature brief to the canonical collection contract", () => {
   const request = { importMetaUrl: import.meta.url, run: runFixture({ brief: "bounded workflow evidence" }), signal: new AbortController().signal };
   const input = compileHostLiteratureInput(request);
   assert.equal(input.schema_version, "clue.data-collection.input.v2");
@@ -106,6 +106,16 @@ test("host artifact source resolution stays inside the run root", () => {
         name: "report.pdf",
       }),
       pdfPath,
+    );
+    const legacyOutputPath = path.join(runRoot, "report-writing", "outputs", "report.pdf");
+    fs.rmSync(pdfPath);
+    fs.mkdirSync(path.dirname(legacyOutputPath), { recursive: true });
+    fs.writeFileSync(legacyOutputPath, "%PDF-1.7\nlegacy synthetic\n", "utf8");
+    assert.equal(
+      resolveHostLiteratureArtifactSource(import.meta.url, { ...run, executionDriver: "none" }, {
+        name: "report.pdf",
+      }),
+      legacyOutputPath,
     );
 
     const outsidePath = path.join(root, "outside.pdf");
@@ -221,6 +231,73 @@ test("host adapter runs the migrated lifecycle and projects real report artifact
     assert.equal(result.receipts[0]?.port, "LiteratureReviewHost");
     assert.ok(progress.includes("admission"));
     assert.ok(progress.includes("complete"));
+  } finally {
+    restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("host adapter publishes a report when collection has no references", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-host-literature-empty-"));
+  const restore = withEnvironment(root);
+  try {
+    const collectionInput = {
+      schema_version: "clue.data-collection.input.v2",
+      collection_id: "host-empty-collection",
+      collection_kind: "literature",
+      question: "Which findings exist for a topic with no returned records?",
+      decision_context: "Verify the zero-result Literature Review path.",
+      audience: "research engineering",
+      scope: { time_range: "2024..2026", include: ["zero-result topic"] },
+      evidence_policy: {
+        required_fields: ["source_url", "quote", "observed_at", "content_hash"],
+      },
+      source_tasks: [
+        {
+          task_id: "empty-source",
+          source_type: "crossref-search",
+          config: { query: "zero-result topic" },
+        },
+      ],
+      payload: {
+        literature_scope: { enabled: true },
+        pdf_links: { enabled: true },
+      },
+      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+    };
+    const collectionOutput = {
+      schema_version: "clue.data-collection.output.v2",
+      collection_id: "host-empty-collection",
+      collection_kind: "literature",
+      status: "final",
+      records: [],
+      rejected_records: [],
+      run_artifacts: [],
+      information_gaps: ["No bibliographic records were returned."],
+      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+    };
+    const run = runFixture({
+      brief: collectionInput.question,
+      collectionInput: JSON.stringify(collectionInput),
+      collectionOutput: JSON.stringify(collectionOutput),
+      skipAugmentation: "true",
+      reportMode: "fixed",
+      literatureMethod: "iterate",
+      reviewMode: "auto-pass",
+    });
+
+    const result = await executeHostLiteratureReview({
+      importMetaUrl: import.meta.url,
+      run,
+      signal: new AbortController().signal,
+    });
+
+    assert.equal(result.status, "succeeded");
+    const markdown = result.artifacts.find((artifact) => artifact.name === "report.md");
+    assert.ok(markdown);
+    assert.match(markdown.content, /No evidence-bound findings are asserted\./u);
+    assert.ok(result.artifacts.some((artifact) => artifact.name === "report.pdf"));
+    assert.doesNotMatch(markdown.content, /at least one reference/u);
   } finally {
     restore();
     fs.rmSync(root, { recursive: true, force: true });

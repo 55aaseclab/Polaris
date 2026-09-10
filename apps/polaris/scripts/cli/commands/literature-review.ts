@@ -6,13 +6,13 @@ import { repoRoot } from "../../utils/paths.js";
 import { runPipeline, trialToDot, type DomainAst, type TrialAst } from "polaris-workflow";
 
 const WORKFLOW_RELATIVE_PATH = path.join(
-  "workflows",
-  "literature-review",
+  "packs",
+  "autoresearch",
   "main.ord",
 );
 const WORKFLOW_RUNTIME_RELATIVE_PATH = path.join(
-  "workflows",
-  "literature-review",
+  "packs",
+  "autoresearch",
 );
 const COMMON_TOOLS_RELATIVE_PATH = "tools";
 const PYTHON_ENTRY = "polaris-literature-review";

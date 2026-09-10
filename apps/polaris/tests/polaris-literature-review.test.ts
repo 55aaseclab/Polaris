@@ -12,14 +12,14 @@ const REPO_ROOT = path.resolve(
 );
 const DEFINITION = path.join(
   REPO_ROOT,
-  "workflows",
-  "literature-review",
+  "packs",
+  "autoresearch",
   "main.ord",
 );
 const WORKFLOW_ROOT = path.join(
   REPO_ROOT,
-  "workflows",
-  "literature-review",
+  "packs",
+  "autoresearch",
 );
 const EXAMPLE_INPUT = path.join(
   WORKFLOW_ROOT,

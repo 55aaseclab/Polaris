@@ -97,7 +97,7 @@ pnpm --dir apps/polaris run polaris --
 ```
 
 The Polaris-owned literature-review workflow definition and runtime live in
-`workflows/literature-review`; its reusable implementations live once under
+`packs/autoresearch`; its reusable implementations live once under
 `tools/`. They are independent of Wanghai:
 
 ```bash
@@ -111,7 +111,7 @@ pnpm --dir apps/polaris run polaris -- literature-review test
 Set `POLARIS_LITERATURE_WORKSPACES_ROOT`,
 `POLARIS_LITERATURE_CACHE_ROOT`, and
 `POLARIS_LITERATURE_RUNTIME_MODE=local` for a local run. See the workflow
-README at `workflows/literature-review/README.md` for the PDF visualization
+README at `packs/autoresearch/README.md` for the PDF visualization
 command, provider settings, review modes, collection-review continuation, and
 the full run command. The visualizer is a static Graphviz projection and does
 not need the literature workspace or cache. Integrated mode is intentionally

@@ -27,10 +27,10 @@ test("business portal uses Polaris-owned packages and workflow templates", () =>
   ) as { dependencies?: Record<string, string> };
   assert.equal(packageJson.dependencies?.["@polaris/business-core"], "workspace:*");
   assert.equal(packageJson.dependencies?.["polaris-workflow"], "workspace:*");
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, "workflows/business/templates.yaml")), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, "packs/business/templates.yaml")), true);
 
   const config = YAML.parse(
-    fs.readFileSync(path.join(REPO_ROOT, "workflows/business/templates.yaml"), "utf8"),
+    fs.readFileSync(path.join(REPO_ROOT, "packs/business/templates.yaml"), "utf8"),
   ) as Record<string, unknown>;
   assert.equal(config.schema_version, "clue.polaris.business.config.v1");
   assert.equal(

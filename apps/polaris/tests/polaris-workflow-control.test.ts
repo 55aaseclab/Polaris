@@ -131,8 +131,8 @@ flow ReadMetadata title "Read metadata" create {
 `;
 
 const HOST_LITERATURE_PACK_SOURCE = `
-domain SysSecResearch version "0.1.3"
-title "Systems Security Research"
+domain AutoResearch version "1.0.0"
+title "Literature Review"
 description "Synthetic host Literature Review pack"
 
 flow LiteratureReview title "文献综述" create {
@@ -287,7 +287,7 @@ test("driver=none rejects an accidental Vault target", { concurrency: false }, a
   }
 });
 
-test("SysSec LiteratureReview uses the real host adapter without consulting Vaults", { concurrency: false }, async () => {
+test("AutoResearch LiteratureReview uses the real host adapter without consulting Vaults", { concurrency: false }, async () => {
   const fixture = testEnvironment();
   let service: WorkflowControlService | undefined;
   try {

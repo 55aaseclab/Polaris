@@ -11,9 +11,9 @@ import type {
 } from "./control-store.js";
 import { polarisDataRoot, repoRoot } from "../utils/paths.js";
 
-/** The migrated SysSec pack remains the user-facing entry point for reviews. */
-export const SYSSEC_RESEARCH_PACK_ID = "SysSecResearch";
-export const SYSSEC_LITERATURE_REVIEW_FLOW_ID = "LiteratureReview";
+/** The built-in AutoResearch pack is the user-facing entry point for reviews. */
+export const AUTORESEARCH_PACK_ID = "AutoResearch";
+export const AUTORESEARCH_LITERATURE_REVIEW_FLOW_ID = "LiteratureReview";
 
 const WORKSPACE_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}$/u;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -393,8 +393,8 @@ function childEnvironment(
   environment.POLARIS_LITERATURE_RUNTIME_MODE = "local";
   environment.POLARIS_LITERATURE_WORKFLOW_ROOT = path.join(
     repoRoot(request.importMetaUrl),
-    "workflows",
-    "literature-review",
+    "packs",
+    "autoresearch",
   );
   return environment;
 }
@@ -519,21 +519,36 @@ export function resolveHostLiteratureArtifactSource(
     "collection-output.json",
     "analysis-output.json",
   ]);
-  const candidate = artifact.sourcePath
-    ? path.resolve(runRoot, artifact.sourcePath)
+  const candidates = artifact.sourcePath
+    ? [path.resolve(runRoot, artifact.sourcePath)]
     : fallbackNames.has(artifact.name)
-      ? path.join(runRoot, artifact.name)
-      : null;
-  if (!candidate) return null;
-  try {
-    const candidateStat = fs.lstatSync(candidate);
-    if (!candidateStat.isFile() || candidateStat.isSymbolicLink()) return null;
-    const realRoot = fs.realpathSync(runRoot);
-    const realCandidate = fs.realpathSync(candidate);
-    return fileWithin(realRoot, realCandidate) ? candidate : null;
-  } catch {
-    return null;
+      ? [
+        // Older host runs stored only the artifact name. Keep both layouts
+        // readable while new runs persist sourcePath explicitly.
+        path.join(runRoot, artifact.name),
+        path.join(runRoot, "report-writing", "outputs", artifact.name),
+      ]
+      : [];
+  if (candidates.length === 0) return null;
+  const realRoot = (() => {
+    try {
+      return fs.realpathSync(runRoot);
+    } catch {
+      return null;
+    }
+  })();
+  if (!realRoot) return null;
+  for (const candidate of candidates) {
+    try {
+      const candidateStat = fs.lstatSync(candidate);
+      if (!candidateStat.isFile() || candidateStat.isSymbolicLink()) continue;
+      const realCandidate = fs.realpathSync(candidate);
+      if (fileWithin(realRoot, realCandidate)) return candidate;
+    } catch {
+      // Try the next legacy layout.
+    }
   }
+  return null;
 }
 
 function formatBytes(bytes: number): string {
@@ -608,30 +623,6 @@ function manifestPaths(manifest: Record<string, unknown>): Record<string, string
   );
 }
 
-function findFilesByName(root: string, names: ReadonlySet<string>): string[] {
-  const found: string[] = [];
-  const pending = [root];
-  while (pending.length > 0 && found.length < 64) {
-    const current = pending.pop()!;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const candidate = path.join(current, entry.name);
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) {
-        pending.push(candidate);
-      } else if (entry.isFile() && names.has(entry.name)) {
-        found.push(candidate);
-      }
-    }
-  }
-  return found;
-}
-
 function resultFromManifest(
   request: HostLiteratureReviewRequest,
   roots: ReturnType<typeof hostRoots>,
@@ -663,11 +654,10 @@ function resultFromManifest(
   for (const entry of runArtifacts) {
     const sourcePath = typeof entry.path === "string" ? entry.path : undefined;
     const basename = sourcePath ? path.basename(sourcePath) : "";
-    if (!sourcePath || !basename || knownNames.has(basename)) continue;
-    // The fixed report operation writes its reviewed Markdown during the
-    // analysis/report pipeline and records it as a run artifact rather than
-    // under report_markdown. Present it under the stable Portal name.
-    const name = basename === "literature-report.md" ? "report.md" : basename;
+    // This is an intelligence-analysis checkpoint, not the published report.
+    // The report-writing stage must publish through the declared report path.
+    if (!sourcePath || !basename || basename === "literature-report.md" || knownNames.has(basename)) continue;
+    const name = basename;
     if (knownNames.has(name)) continue;
     const kind: WorkflowArtifactRecord["kind"] = name.endsWith(".md") || name.endsWith(".pdf")
       ? "report"
@@ -685,24 +675,8 @@ function resultFromManifest(
       knownNames.add(name);
     }
   }
-  // The fixed report writer stores the Markdown alongside the analysis
-  // checkpoint (`literature-report.md`), so it is not always listed in the
-  // top-level workflow manifest. Discover only these fixed names below the
-  // already-created run root; symlinks are ignored by the scanner and the
-  // artifact reader applies the same containment check.
-  for (const sourcePath of findFilesByName(roots.runRoot, new Set(["literature-report.md"]))) {
-    if (knownNames.has("report.md")) continue;
-    const artifact = artifactFromFile(
-      roots.runRoot,
-      sourcePath,
-      "report.md",
-      "report",
-      "Polaris Literature Review Markdown report",
-    );
-    if (artifact) {
-      artifacts.push(artifact);
-      knownNames.add("report.md");
-    }
+  if (manifest.status === "succeeded" && !knownNames.has("report.md")) {
+    throw new Error("Polaris host Literature Review completed without a published report.md");
   }
   if (status === "waiting") {
     const reviewPath = paths.collection_review_list || paths.analysis_review_list;
@@ -806,8 +780,8 @@ function manifestPathFor(roots: ReturnType<typeof hostRoots>, runId: string): st
 /** Execute the real migrated workflow directly on the Polaris host. */
 export const executeHostLiteratureReview: HostLiteratureReviewExecutor = async (request) => {
   if (
-    request.run.packId !== SYSSEC_RESEARCH_PACK_ID
-    || request.run.flowId !== SYSSEC_LITERATURE_REVIEW_FLOW_ID
+    request.run.packId !== AUTORESEARCH_PACK_ID
+    || request.run.flowId !== AUTORESEARCH_LITERATURE_REVIEW_FLOW_ID
   ) {
     throw new Error("host Literature Review adapter received an unsupported workflow");
   }
@@ -828,8 +802,8 @@ export const executeHostLiteratureReview: HostLiteratureReviewExecutor = async (
 
   const workflowExecutable = path.join(
     repoRoot(request.importMetaUrl),
-    "workflows",
-    "literature-review",
+    "packs",
+    "autoresearch",
     "polaris-literature-review",
   );
   if (!fs.existsSync(workflowExecutable)) {
@@ -872,6 +846,6 @@ export function isHostLiteratureReviewRun(
   run: Pick<WorkflowRunRecord, "packId" | "flowId" | "executionDriver">,
 ): boolean {
   return run.executionDriver === "none"
-    && run.packId === SYSSEC_RESEARCH_PACK_ID
-    && run.flowId === SYSSEC_LITERATURE_REVIEW_FLOW_ID;
+    && run.packId === AUTORESEARCH_PACK_ID
+    && run.flowId === AUTORESEARCH_LITERATURE_REVIEW_FLOW_ID;
 }

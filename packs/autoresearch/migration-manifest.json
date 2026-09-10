@@ -57,9 +57,9 @@
       "reason": "Not called by the literature-review workflow."
     }
   ],
-  "workflow_root": "workflows/literature-review",
+  "workflow_root": "packs/autoresearch",
   "common_tools_root": "tools",
-  "definition": "workflows/literature-review/main.ord",
+  "definition": "packs/autoresearch/main.ord",
   "environment_namespace": "POLARIS_LITERATURE_*",
   "wire_contracts": [
     "clue.data-collection.input.v2",

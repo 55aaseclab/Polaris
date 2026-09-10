@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   flattenDomain,
   normalizeVersion,
+  parse,
   resolvePort,
   runPipeline,
   satisfies,
@@ -18,6 +19,7 @@ import { withControlMutationLock } from "../utils/control-mutation-lock.js";
 import {
   polarisDataRoot,
   polarisDomainPacksRoot,
+  repoRoot,
 } from "../utils/paths.js";
 
 const DOMAIN_PACK_KIND = "polaris-domain-pack";
@@ -314,6 +316,101 @@ function readStoredDomainPacks(
     a.id.localeCompare(b.id) || compareVersions(b.version, a.version));
 }
 
+function repositoryRelativePath(repositoryRoot: string, target: string): string {
+  return path.relative(repositoryRoot, target).split(path.sep).join("/");
+}
+
+function repositoryPack(
+  repositoryRoot: string,
+  sourcePathAbsolute: string,
+): StoredDomainPack | null {
+  assertNotSymlink(sourcePathAbsolute, "repository source");
+  if (!fs.statSync(sourcePathAbsolute).isFile()) {
+    return null;
+  }
+  const source = fs.readFileSync(sourcePathAbsolute, "utf8");
+  const parsed = parse(source);
+  if (!parsed.ok || !parsed.ast) {
+    return null;
+  }
+  const id = assertDomainPackId(parsed.ast.name);
+  const version = canonicalPackVersion(parsed.ast.version);
+  const packRoot = path.dirname(sourcePathAbsolute);
+  return {
+    id,
+    version,
+    ...(parsed.ast.title ? { title: parsed.ast.title } : {}),
+    ...(parsed.ast.description ? { description: parsed.ast.description } : {}),
+    sha256: sha256(source),
+    installedAt: "built-in",
+    status: "verified",
+    storagePath: repositoryRelativePath(repositoryRoot, packRoot),
+    sourcePath: repositoryRelativePath(repositoryRoot, sourcePathAbsolute),
+    source,
+    sourcePathAbsolute,
+  };
+}
+
+function repositoryPackSources(repositoryRoot: string): string[] {
+  const sources: string[] = [];
+  const addSource = (sourcePath: string) => {
+    if (fs.existsSync(sourcePath)) {
+      assertNotSymlink(sourcePath, "repository source");
+      sources.push(sourcePath);
+    }
+  };
+
+  const builtInRoot = path.join(repositoryRoot, "packs");
+  if (fs.existsSync(builtInRoot)) {
+    assertNotSymlink(builtInRoot, "built-in pack root");
+    for (const entry of fs.readdirSync(builtInRoot, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || !entry.isDirectory()) continue;
+      const packRoot = path.join(builtInRoot, entry.name);
+      assertNotSymlink(packRoot, "built-in pack directory");
+      addSource(path.join(packRoot, DOMAIN_PACK_SOURCE_FILE));
+    }
+  }
+
+  const thirdPartyRoot = path.join(repositoryRoot, "third_party");
+  if (fs.existsSync(thirdPartyRoot)) {
+    assertNotSymlink(thirdPartyRoot, "third-party root");
+    for (const project of fs.readdirSync(thirdPartyRoot, { withFileTypes: true })) {
+      if (project.name.startsWith(".") || !project.isDirectory()) continue;
+      const projectRoot = path.join(thirdPartyRoot, project.name);
+      assertNotSymlink(projectRoot, "third-party project directory");
+      for (const directoryName of ["polaris-domain-pack", "pack", "packs"]) {
+        addSource(path.join(projectRoot, directoryName, DOMAIN_PACK_SOURCE_FILE));
+      }
+      addSource(path.join(projectRoot, DOMAIN_PACK_SOURCE_FILE));
+    }
+  }
+  return [...new Set(sources)].sort((left, right) => left.localeCompare(right));
+}
+
+function readRepositoryDomainPacks(importMetaUrl: string): StoredDomainPack[] {
+  const root = repoRoot(importMetaUrl);
+  return repositoryPackSources(root)
+    .map((sourcePath) => repositoryPack(root, sourcePath))
+    .filter((pack): pack is StoredDomainPack => pack !== null)
+    .sort((a, b) =>
+      a.id.localeCompare(b.id) || compareVersions(b.version, a.version));
+}
+
+function availableDomainPacks(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv,
+): StoredDomainPack[] {
+  const byPin = new Map<string, StoredDomainPack>();
+  for (const pack of readRepositoryDomainPacks(importMetaUrl)) {
+    byPin.set(`${pack.id}@${pack.version}`, pack);
+  }
+  for (const pack of readStoredDomainPacks(importMetaUrl, environment)) {
+    byPin.set(`${pack.id}@${pack.version}`, pack);
+  }
+  return [...byPin.values()].sort((a, b) =>
+    a.id.localeCompare(b.id) || compareVersions(b.version, a.version));
+}
+
 function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number);
   const b = right.split(".").map(Number);
@@ -395,14 +492,14 @@ export function listDomainPacks(
   importMetaUrl: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): DomainPackSummary[] {
-  return readStoredDomainPacks(importMetaUrl, environment).map(summaryFromStored);
+  return availableDomainPacks(importMetaUrl, environment).map(summaryFromStored);
 }
 
 export function listDomainPackProjections(
   importMetaUrl: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): DomainPackProjection[] {
-  const installed = readStoredDomainPacks(importMetaUrl, environment);
+  const installed = availableDomainPacks(importMetaUrl, environment);
   const loader = packLoader(installed);
   const projections: DomainPackProjection[] = [];
   for (const pack of installed) {
@@ -475,7 +572,7 @@ export function loadVerifiedDomainPackRuntime(
   const id = assertDomainPackId(idInput);
   const version = canonicalPackVersion(versionInput);
   const digest = digestInput.trim().replace(/^sha256:/u, "");
-  const installed = readStoredDomainPacks(importMetaUrl, environment);
+  const installed = availableDomainPacks(importMetaUrl, environment);
   const pack = installed.find((candidate) =>
     candidate.id === id
     && candidate.version === version
@@ -503,7 +600,7 @@ export async function addDomainPack(
 ): Promise<DomainPackInstallResult> {
   return withControlMutationLock(importMetaUrl, "domain-packs", async () => {
     const input = resolveInputSource(inputPath);
-    const installed = readStoredDomainPacks(importMetaUrl, environment);
+    const installed = availableDomainPacks(importMetaUrl, environment);
     const pipeline = runPipeline(input.source, { loader: packLoader(installed) });
     if (!pipeline.ok || !pipeline.rawAst) {
       throw new Error(`Domain Pack validation failed for '${input.path}': ${formatPipelineFailure(pipeline)}`);
@@ -560,7 +657,7 @@ export async function addDomainPack(
       throw error;
     }
 
-    const pack = readStoredDomainPacks(importMetaUrl, environment)
+    const pack = availableDomainPacks(importMetaUrl, environment)
       .find((candidate) => candidate.id === id && candidate.version === version);
     if (!pack) {
       throw new Error(`Domain Pack '${id}@${version}' was not visible after installation`);

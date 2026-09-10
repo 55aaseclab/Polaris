@@ -1,7 +1,7 @@
 // Polaris-owned literature-review workflow definition.
 // Shared implementations are repository-level common tools under tools/.
 dsl version "0.4-trial"
-domain PolarisLiteratureReview version "1.0.0"
+domain AutoResearch version "1.0.0"
 title "Literature Review"
 description "Evidence-bound literature collection, claim analysis, review, and report production."
 category "Research"
@@ -293,7 +293,7 @@ port RenderLiteraturePdf version "1.0.0" {
   effect write
 }
 
-flow LiteratureReviewPlan title "Literature review plan" {
+flow LiteratureReview title "Literature review plan" {
   description "The v0.3-compatible validation entry point for the migrated pack."
   needs { ValidateLiteratureInput }
   input {

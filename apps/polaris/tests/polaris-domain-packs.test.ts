@@ -15,13 +15,6 @@ const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.resolve(
   "domain-packs",
   "vault-knowledge-health",
 );
-const FIRST_PARTY_LITERATURE_REVIEW_PACK = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../../..",
-  "workflows",
-  "literature-review",
-);
-
 function packSource(version: string, body: string): string {
   return `domain SamplePack version "${version}"
 title "Sample Pack"
@@ -85,9 +78,9 @@ flow Read title "Read value" create {
 
     await runCli(["pack", "list"]);
     fs.appendFileSync(path.join(installedRoot, "main.ord"), "\n", "utf8");
-    const drifted = listDomainPacks(import.meta.url);
-    assert.equal(drifted.length, 1);
-    assert.equal(drifted[0]?.status, "drifted");
+    const drifted = listDomainPacks(import.meta.url)
+      .find((pack) => pack.id === "SamplePack");
+    assert.equal(drifted?.status, "drifted");
 
     await runCli(["pack", "remove", "SamplePack", "--version", "1.0.0"]);
     assert.equal(fs.existsSync(installedRoot), false);
@@ -195,13 +188,14 @@ flow Review title "Review evidence" create {
     await runCli(["pack", "add", sourcePath]);
 
     const projections = listDomainPackProjections(import.meta.url);
-    assert.equal(projections.length, 1);
-    assert.equal(projections[0]?.flows[0]?.id, "Review");
-    assert.equal(projections[0]?.flows[0]?.fields[0]?.required, true);
-    assert.equal(projections[0]?.flows[0]?.fields[0]?.type, "textarea");
-    assert.equal(projections[0]?.flows[0]?.approvalRequired, true);
+    const projection = projections.find((pack) => pack.id === "SamplePack");
+    assert.ok(projection);
+    assert.equal(projection.flows[0]?.id, "Review");
+    assert.equal(projection.flows[0]?.fields[0]?.required, true);
+    assert.equal(projection.flows[0]?.fields[0]?.type, "textarea");
+    assert.equal(projection.flows[0]?.approvalRequired, true);
     assert.deepEqual(
-      projections[0]?.flows[0]?.toolCalls.map((call) => ({
+      projection.flows[0]?.toolCalls.map((call) => ({
         id: call.id,
         port: call.port,
         effect: call.effect,
@@ -225,7 +219,7 @@ flow Review title "Review evidence" create {
         },
       ],
     );
-    assert.match(projections[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/u);
+    assert.match(projection.digest, /^sha256:[a-f0-9]{64}$/u);
   });
 });
 
@@ -268,7 +262,8 @@ module Student title "Student workflows" code "student" {
 
     await runCli(["pack", "add", sourcePath]);
 
-    const projection = listDomainPackProjections(import.meta.url)[0];
+    const projection = listDomainPackProjections(import.meta.url)
+      .find((pack) => pack.id === "SamplePack");
     assert.ok(projection);
     assert.equal(projection.category, "Synthetic");
     assert.equal(projection.accent, "blue");
@@ -361,7 +356,8 @@ trial Main title "Synthetic trial" {
 
     await runCli(["pack", "add", sourcePath]);
 
-    const projection = listDomainPackProjections(import.meta.url)[0];
+    const projection = listDomainPackProjections(import.meta.url)
+      .find((pack) => pack.id === "TrialPack");
     assert.ok(projection);
     assert.deepEqual(projection.trials, [{
       id: "Main",
@@ -384,12 +380,10 @@ trial Main title "Synthetic trial" {
   });
 });
 
-test("first-party literature-review pack is independently parseable and projects its complete graph", { concurrency: false }, async () => {
+test("built-in AutoResearch pack is discoverable and projects its complete graph", { concurrency: false }, async () => {
   await withDataRoot(async () => {
-    await runCli(["pack", "add", FIRST_PARTY_LITERATURE_REVIEW_PACK]);
-
     const projection = listDomainPackProjections(import.meta.url)
-      .find((candidate) => candidate.id === "PolarisLiteratureReview");
+      .find((candidate) => candidate.id === "AutoResearch");
     assert.ok(projection);
     assert.equal(projection.languageVersion, "0.4-trial");
     assert.equal(projection.flows.length, 4);
@@ -403,6 +397,15 @@ test("first-party literature-review pack is independently parseable and projects
     assert.equal(trial.budget.timeoutMs, 7_200_000);
     assert.equal(trial.execution.network, "allow");
     assert.ok(trial.capabilities.includes("literature.codex.invoke"));
+  });
+});
+
+test("third-party domain packs are discoverable without installing them", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    const projections = listDomainPackProjections(import.meta.url);
+    assert.ok(projections.some((pack) => pack.id === "AfaDtc"));
+    assert.ok(projections.some((pack) => pack.id === "CourseworkVaults"));
+    assert.ok(projections.some((pack) => pack.id === "SysSecResearch"));
   });
 });
 
