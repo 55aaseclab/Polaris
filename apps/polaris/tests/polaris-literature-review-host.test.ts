@@ -161,6 +161,17 @@ test("host adapter runs the migrated lifecycle and projects real report artifact
     assert.equal(result.status, "succeeded");
     assert.ok(result.artifacts.some((artifact) => artifact.name === "report.md"));
     assert.ok(result.artifacts.some((artifact) => artifact.name === "report.pdf"));
+    const reportManifest = result.artifacts.find((artifact) => artifact.name === "report.json");
+    assert.ok(reportManifest);
+    assert.equal(reportManifest.redacted, false);
+    const reportManifestContent = JSON.parse(reportManifest.content) as {
+      status: string;
+      report_path?: string;
+    };
+    assert.equal(reportManifestContent.status, "published");
+    assert.equal(reportManifestContent.report_path, "report.md");
+    assert.doesNotMatch(reportManifest.content, /Redacted host artifact/u);
+    assert.doesNotMatch(reportManifest.content, /literature-host-workspaces/u);
     const markdown = result.artifacts.find((artifact) => artifact.name === "report.md")?.content || "";
     assert.ok(markdown.length > 100);
     assert.doesNotMatch(markdown, /Synthetic artifact from/u);

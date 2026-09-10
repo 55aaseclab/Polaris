@@ -2065,6 +2065,9 @@
 
 .artifact-modal {
   width: min(100%, 52rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .artifact-modal .modal-header h2 {
@@ -2075,7 +2078,9 @@
 
 .artifact-content {
   overflow: auto;
+  min-height: 0;
   max-height: 60vh;
+  flex: 1 1 auto;
   margin: 0;
   border: 1px solid var(--portal-border);
   border-radius: .5rem;
@@ -2086,6 +2091,66 @@
   font-size: .78rem;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.artifact-media-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 14rem;
+  background: #101614;
+}
+
+.artifact-media-content img,
+.artifact-media-content video {
+  display: block;
+  max-width: 100%;
+  max-height: 56vh;
+  object-fit: contain;
+}
+
+.artifact-audio-content {
+  justify-content: flex-start;
+  padding: 2rem 1rem;
+}
+
+.artifact-audio-content audio {
+  width: min(100%, 32rem);
+}
+
+.artifact-pdf-content {
+  height: 60vh;
+  padding: 0;
+}
+
+.artifact-pdf-content iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.artifact-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  color: var(--portal-muted);
+}
+
+.artifact-unavailable strong {
+  color: var(--portal-foreground);
+}
+
+.artifact-unavailable code {
+  overflow: auto;
+  max-height: 12rem;
+  color: var(--portal-foreground);
+  white-space: pre-wrap;
+}
+
+.artifact-content-json,
+.artifact-content-code {
+  white-space: pre;
 }
 
 @media (max-width: 720px) {

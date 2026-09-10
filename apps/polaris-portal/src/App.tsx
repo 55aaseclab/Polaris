@@ -69,6 +69,12 @@ import {
 } from "./portal-client.js";
 import { usePortalStore } from "./portal-store.js";
 import { cn } from "./lib/utils.js";
+import {
+  artifactPreviewKind,
+  artifactPreviewSource,
+  formatJsonArtifact,
+  type ArtifactPreviewKind,
+} from "./artifact-preview.js";
 import { formatRunDateTime } from "./formatters.js";
 import {
   flowForRun,
@@ -1021,7 +1027,42 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
 }
 
 function ArtifactPreview({ artifact, onClose }: { artifact: MockWorkflowRun["artifacts"][number]; onClose: () => void }) {
-  return <div className="modal-backdrop" role="presentation" onClick={onClose}><section className="modal artifact-modal" role="dialog" aria-modal="true" aria-label={artifact.name} onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">ARTIFACT PREVIEW</p><h2>{artifact.name}</h2><p>{artifact.summary} · {artifact.size}</p></div><Button variant="ghost" size="icon" aria-label="关闭" title="关闭" onClick={onClose}><X className="h-4 w-4" /></Button></div><pre className="artifact-content"><code>{artifact.content}</code></pre></section></div>;
+  const previewKind = artifactPreviewKind(artifact.name);
+  const source = artifactPreviewSource(artifact.content);
+  return <div className="modal-backdrop" role="presentation" onClick={onClose}><section className="modal artifact-modal" role="dialog" aria-modal="true" aria-label={artifact.name} onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">ARTIFACT PREVIEW</p><h2>{artifact.name}</h2><p>{artifact.summary} · {artifact.size}</p></div><Button variant="ghost" size="icon" aria-label="关闭" title="关闭" onClick={onClose}><X className="h-4 w-4" /></Button></div><ArtifactPreviewContent kind={previewKind} content={artifact.content} source={source} redacted={artifact.redacted} /></section></div>;
+}
+
+function ArtifactPreviewContent({
+  kind,
+  content,
+  source,
+  redacted,
+}: {
+  kind: ArtifactPreviewKind;
+  content: string;
+  source: string | null;
+  redacted?: boolean;
+}) {
+  if (redacted) {
+    return <div className="artifact-content artifact-unavailable"><strong>此文件已脱敏</strong><span>当前仅提供文件元数据，原始内容不会在 Portal 中展示。</span><code>{content}</code></div>;
+  }
+  if (kind === "image" && source) {
+    return <div className="artifact-content artifact-media-content"><img src={source} alt="产物预览" /></div>;
+  }
+  if (kind === "video" && source) {
+    return <div className="artifact-content artifact-media-content"><video controls preload="metadata" src={source}>当前浏览器不支持视频预览。</video></div>;
+  }
+  if (kind === "audio" && source) {
+    return <div className="artifact-content artifact-media-content artifact-audio-content"><audio controls preload="metadata" src={source}>当前浏览器不支持音频预览。</audio></div>;
+  }
+  if (kind === "pdf" && source) {
+    return <div className="artifact-content artifact-pdf-content"><iframe src={source} title="PDF 产物预览" /></div>;
+  }
+  if (kind === "image" || kind === "video" || kind === "audio" || kind === "pdf" || kind === "binary") {
+    return <div className="artifact-content artifact-unavailable"><strong>暂时无法直接预览此文件</strong><span>当前投影只包含文件元数据，没有可渲染的文件源。</span><code>{content}</code></div>;
+  }
+  const displayContent = kind === "json" ? formatJsonArtifact(content) : content;
+  return <pre className={cn("artifact-content", `artifact-content-${kind}`)}><code>{displayContent}</code></pre>;
 }
 
 function HostsPage({ session, navigate }: { session: ShellSession; navigate: (path: string, replace?: boolean) => void }) {

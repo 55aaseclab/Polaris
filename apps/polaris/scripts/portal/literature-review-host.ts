@@ -492,6 +492,20 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+function publicReportManifest(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!isRecord(parsed)) return content;
+    const projected = { ...parsed };
+    if (typeof projected.report_path === "string") {
+      projected.report_path = path.basename(projected.report_path);
+    }
+    return `${JSON.stringify(projected, null, 2)}\n`;
+  } catch {
+    return content;
+  }
+}
+
 function artifactFromFile(
   runRoot: string,
   filePath: string | undefined,
@@ -512,7 +526,9 @@ function artifactFromFile(
     content = `Binary artifact\nname: ${name}\nsize: ${formatBytes(bytes.length)}\ndigest: ${digest}`;
   } else {
     const text = bytes.toString("utf8");
-    content = redacted
+    content = name === "report.json"
+      ? publicReportManifest(text)
+      : redacted
       ? `Redacted host artifact\nname: ${name}\nsize: ${formatBytes(bytes.length)}\ndigest: ${digest}`
       : text.length > MAX_TEXT_ARTIFACT_BYTES
         ? `${text.slice(0, MAX_TEXT_ARTIFACT_BYTES)}\n… [preview truncated]`
@@ -578,7 +594,7 @@ function resultFromManifest(
   ]> = [
     ["report_markdown", "report.md", "report", "Polaris Literature Review Markdown report"],
     ["report_pdf", "report.pdf", "report", "Polaris Literature Review PDF"],
-    ["report_manifest", "report.json", "data", "Published report manifest", true],
+    ["report_manifest", "report.json", "data", "Published report manifest"],
     ["collection_output", "collection-output.json", "data", "Validated literature collection", true],
     ["analysis_output", "analysis-output.json", "data", "Evidence-bound analysis output", true],
   ];

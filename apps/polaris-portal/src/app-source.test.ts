@@ -104,6 +104,20 @@ test("run detail shows the creation date and time", () => {
   assert.doesNotMatch(appSource, /<dt>创建时间<\/dt><dd>\{run\.createdAt\.slice\(11, 16\)\}<\/dd>/u);
 });
 
+test("artifact preview supports text, structured data, and media files", () => {
+  assert.match(appSource, /function ArtifactPreviewContent/u);
+  assert.match(appSource, /kind === "image" && source/u);
+  assert.match(appSource, /kind === "video" && source/u);
+  assert.match(appSource, /kind === "audio" && source/u);
+  assert.match(appSource, /kind === "pdf" && source/u);
+  assert.match(appSource, /formatJsonArtifact\(content\)/u);
+  assert.match(appSource, /artifactPreviewKind\(artifact\.name\)/u);
+  assert.match(appSource, /if \(redacted\)/u);
+  assert.match(cssSource, /\.artifact-modal\s*\{[\s\S]*overflow:\s*hidden;/u);
+  assert.match(cssSource, /\.artifact-content\s*\{[\s\S]*overflow:\s*auto;/u);
+  assert.match(cssSource, /\.artifact-pdf-content iframe\s*\{/u);
+});
+
 test("debug tab exposes the server run projection as a live inspector", () => {
   assert.match(appSource, /path === "\/debug"/u);
   assert.match(appSource, /link\("\/debug", "Debug", Bug, "debug"\)/u);
