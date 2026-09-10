@@ -380,13 +380,25 @@ trial Main title "Synthetic trial" {
   });
 });
 
-test("built-in AutoResearch pack is discoverable and projects its complete graph", { concurrency: false }, async () => {
+test("built-in AutoResearch pack exposes one three-step flow and its trial graph", { concurrency: false }, async () => {
   await withDataRoot(async () => {
     const projection = listDomainPackProjections(import.meta.url)
       .find((candidate) => candidate.id === "AutoResearch");
     assert.ok(projection);
+    assert.equal(projection.title, "autoresearch");
     assert.equal(projection.languageVersion, "0.4-trial");
-    assert.equal(projection.flows.length, 4);
+    assert.deepEqual(
+      projection.flows.map((flow) => ({
+        id: flow.id,
+        title: flow.title,
+        estimate: flow.estimate,
+      })),
+      [{
+        id: "LiteratureReview",
+        title: "Literature Review",
+        estimate: "3 个阶段",
+      }],
+    );
     const trial = projection.trials.find(
       (candidate) => candidate.id === "LiteratureReviewExecution",
     );

@@ -51,6 +51,9 @@ test("the literature workflow binds every node to one shared root tool", () => {
   const result = runPipeline(source);
   assert.equal(result.ok, true, result.issues.map((issue) => issue.message).join("; "));
   assert.equal(result.ast?.languageVersion, "0.4-trial");
+  assert.deepEqual(result.ast?.pipelines, []);
+  assert.deepEqual(result.ast?.flows.map((flow) => flow.name), ["LiteratureReview"]);
+  assert.equal(result.ast?.flows[0]?.steps.length, 3);
   const trial = result.ast?.trials?.find(
     (candidate) => candidate.name === "LiteratureReviewExecution",
   );
