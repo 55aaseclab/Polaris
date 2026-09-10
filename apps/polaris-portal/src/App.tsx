@@ -943,6 +943,12 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
   const [activeTab, setActiveTab] = useState<"all" | "enabled" | "available">("all");
   const [activePackId, setActivePackId] = useState(setup.domainPackId || packs[0]?.id || "");
   const enabledWorkflowKeys = new Set(setup.enabledWorkflowKeys);
+  const allWorkflowCount = packs.reduce((total, pack) => total + pack.flows.length, 0);
+  const enabledWorkflowCount = packs.reduce(
+    (total, pack) => total + pack.flows.filter((flow) => enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))).length,
+    0,
+  );
+  const availableWorkflowCount = allWorkflowCount - enabledWorkflowCount;
   const packMatchesTab = (pack: typeof packs[number]) => activeTab === "all"
     || (activeTab === "enabled" && pack.flows.some((flow) => enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))))
     || (activeTab === "available" && pack.flows.some((flow) => !enabledWorkflowKeys.has(workflowKey(pack.id, flow.id))));
@@ -963,9 +969,9 @@ function WorkflowSettingsPage({ navigate }: { navigate: (path: string, replace?:
       {!setup.completed && <Card className="inline-notice settings-task-card"><CardContent><Sparkles className="h-5 w-5" /><span><strong>完成首次设置</strong></span><Button variant="outline" size="icon" aria-label="完成首次设置" title="完成首次设置" onClick={() => navigate("/setup?returnTo=/settings/workflows")}><ArrowRight className="h-4 w-4" /></Button></CardContent></Card>}
       <div className="settings-toolbar">
         <div className="filter-tabs settings-tabs" role="tablist" aria-label="工作流设置">
-          <button type="button" role="tab" aria-selected={activeTab === "all"} className={cn("filter-tab", activeTab === "all" && "is-active")} onClick={() => setActiveTab("all")}>全部</button>
-          <button type="button" role="tab" aria-selected={activeTab === "enabled"} className={cn("filter-tab", activeTab === "enabled" && "is-active")} onClick={() => setActiveTab("enabled")}>已启用</button>
-          <button type="button" role="tab" aria-selected={activeTab === "available"} className={cn("filter-tab", activeTab === "available" && "is-active")} onClick={() => setActiveTab("available")}>可添加</button>
+          <button type="button" role="tab" aria-selected={activeTab === "all"} className={cn("filter-tab", activeTab === "all" && "is-active")} onClick={() => setActiveTab("all")}>全部<span className="filter-tab-count">{allWorkflowCount}</span></button>
+          <button type="button" role="tab" aria-selected={activeTab === "enabled"} className={cn("filter-tab", activeTab === "enabled" && "is-active")} onClick={() => setActiveTab("enabled")}>已启用<span className="filter-tab-count">{enabledWorkflowCount}</span></button>
+          <button type="button" role="tab" aria-selected={activeTab === "available"} className={cn("filter-tab", activeTab === "available" && "is-active")} onClick={() => setActiveTab("available")}>可添加<span className="filter-tab-count">{availableWorkflowCount}</span></button>
         </div>
         <Button className="settings-provision-button" variant="outline" size="icon" aria-label={setup.completed ? "调整工作舱设置" : "完成首次设置"} title={setup.completed ? "调整工作舱设置" : "完成首次设置"} onClick={() => navigate("/setup?returnTo=/settings/workflows")}><Settings2 className="h-4 w-4" /></Button>
       </div>

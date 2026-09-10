@@ -202,3 +202,12 @@ test("workflow setup returns to its entry surface", () => {
   assert.match(appSource, /navigate\("\/setup\?returnTo=\/settings\/workflows"\)/u);
   assert.match(appSource, /navigate\(returnPath, true\)/u);
 });
+
+test("workflow settings tabs show catalog summary counts", () => {
+  assert.match(appSource, /const allWorkflowCount = packs\.reduce/u);
+  assert.match(appSource, /const enabledWorkflowCount = packs\.reduce/u);
+  assert.match(appSource, /const availableWorkflowCount = allWorkflowCount - enabledWorkflowCount/u);
+  assert.match(appSource, /全部<span className="filter-tab-count">\{allWorkflowCount\}<\/span>/u);
+  assert.match(appSource, /已启用<span className="filter-tab-count">\{enabledWorkflowCount\}<\/span>/u);
+  assert.match(appSource, /可添加<span className="filter-tab-count">\{availableWorkflowCount\}<\/span>/u);
+});
