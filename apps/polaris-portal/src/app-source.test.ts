@@ -104,6 +104,10 @@ test("run detail shows the creation date and time", () => {
   assert.doesNotMatch(appSource, /<dt>创建时间<\/dt><dd>\{run\.createdAt\.slice\(11, 16\)\}<\/dd>/u);
 });
 
+test("run detail does not render an empty action divider", () => {
+  assert.match(appSource, /\(canCancel \|\| canRetry\) && <div className="run-detail-actions"/u);
+});
+
 test("artifact preview supports text, structured data, and media files", () => {
   assert.match(appSource, /function ArtifactPreviewContent/u);
   assert.match(appSource, /kind === "image" && source/u);
