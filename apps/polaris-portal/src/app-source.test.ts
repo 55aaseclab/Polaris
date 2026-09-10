@@ -110,7 +110,13 @@ test("run detail shows the creation date and time", () => {
 });
 
 test("run detail does not render an empty action divider", () => {
-  assert.match(appSource, /\(canCancel \|\| canRetry \|\| \["succeeded", "failed", "cancelled"\]\.includes\(run\.status\)\) && <div className="run-detail-actions"/u);
+  assert.match(appSource, /\(canCancel \|\| canRetry\) && <div className="run-detail-actions"/u);
+});
+
+test("run detail keeps deletion in the work list only", () => {
+  const runDetailSource = appSource.slice(appSource.indexOf("function RunDetailPage"));
+  assert.doesNotMatch(runDetailSource, /删除记录|deleteAndReturn|deleteWorkflowRun/u);
+  assert.match(workListRowSource, /删除运行记录/u);
 });
 
 test("artifact preview supports text, structured data, and media files", () => {
