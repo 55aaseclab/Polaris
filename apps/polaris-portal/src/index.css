@@ -641,7 +641,7 @@
 .settings-pack-heading > div,
 .setup-choice > span:nth-child(2),
 .setup-vault-option > span:nth-child(2),
-.setup-pack-option > span:nth-child(2) {
+.setup-pack-option > span:first-child {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1273,7 +1273,7 @@
 }
 
 .setup-vault-option > span:nth-child(2),
-.setup-pack-option > span:nth-child(2) {
+.setup-pack-option > span:first-child {
   flex: 1;
 }
 
