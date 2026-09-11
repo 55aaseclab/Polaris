@@ -85,8 +85,7 @@ v0.4-trial pack 只投影 trial 的图元数据；不会被 v0.3 Portal flow wor
 被引用的 pack 必须已经安装。多版本同时存在时，删除必须明确版本；
 删除不影响任何 Vault 数据。
 
-第一方业务域包从 Polaris 仓库发布，安装后会出现在 Workflow 设置和
-`/tools` 的 Domain Pack flow 视图里：
+第一方业务域包从 Polaris 仓库发布，安装后会出现在 Workflow 设置里：
 
 ```bash
 pnpm --dir apps/polaris run polaris -- pack add \

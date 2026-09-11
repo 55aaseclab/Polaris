@@ -133,9 +133,8 @@ syntax, `manual.review`, and the RPC wire contract live on
 
 Official tool publication metadata lives in `packages/polaris-tools`. That
 package is the single source for first-party tool manifests, disabled live
-gates, mock receipts, the Polaris live action catalog projection, and the
-standalone Polaris tool portal projection. private surface does not maintain a
-duplicate tool list.
+gates, mock receipts, and the Polaris live action catalog projection. Private
+surface does not maintain a duplicate tool list.
 
 The protocol validator rejects an empty digest, missing lease, digest
 mismatch, Vault mismatch, or expired lease. The current host only accepts
@@ -268,8 +267,6 @@ Implemented here:
 - deterministic queue and recovery;
 - generic RPC and `manual.review` interface;
 - first-party `polaris-tools` catalog owned by Polaris;
-- standalone Polaris `/tools` registry with Common tools and Domain Pack
-  flow-tool calls;
 - automatic provisioning enqueue;
 - repeatable mocked workflow smoke command;
 - mock-only host and synthetic artifacts; and

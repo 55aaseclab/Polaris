@@ -19,7 +19,6 @@ const directoryOrder: Record<string, string[]> = {
     "usage.md",
     "user-management.md",
     "polaris-portal.md",
-    "tool-portal.md",
     "dsl.md",
     "vault-management.md",
     "gateway.md",

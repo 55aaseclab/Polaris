@@ -88,11 +88,6 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const USER_ROOT = polarisUsersRoot(import.meta.url);
 const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
-const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.join(
-  REPO_ROOT,
-  "packs",
-  "vault-knowledge-health",
-);
 const BUILT_IN_AUTORESEARCH_PACK = path.join(
   REPO_ROOT,
   "packs",
@@ -2579,6 +2574,32 @@ test("portal API metadata is served from /api without a default user fallback", 
     assert.equal(payload.service, "polaris-portal-api");
     assert.equal(payload.authMode, "authing-browser-session");
     assert.ok(payload.endpoints.includes("/api/users/:userId/vaults"));
+    assert.equal(payload.endpoints.includes("/api/tool-portal/catalog"), false);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("portal no longer serves Tool Portal routes or assets", async () => {
+  const server = createPortalServer(0);
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Portal server did not expose a TCP address");
+  }
+  try {
+    for (const pathname of [
+      "/api/tool-portal/catalog",
+      "/api/tool-portal/console",
+      "/api/tool-portal/publisher",
+      "/tools",
+      "/tools/manual-review",
+      "/tools/console",
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${pathname}`);
+      assert.equal(response.status, 404);
+    }
   } finally {
     server.close();
     await once(server, "close");
@@ -3540,114 +3561,5 @@ test("portal user deletion rollback restores the lock-consistent user snapshot",
     fs.rmSync = originalRmSync;
     fs.rmSync(profilePath, { force: true });
     fs.rmSync(userRoot, { recursive: true, force: true });
-  }
-});
-
-test("tool portal serves a public catalog without a Polaris session", async () => {
-  const server = createPortalServer(0);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Portal server did not expose a TCP address");
-  }
-  try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/tool-portal/catalog`);
-    assert.equal(response.status, 200);
-    const payload = await response.json() as {
-      tools: Array<{ href: string; liveState: string; toolCalls: unknown[] }>;
-    };
-    assert.ok(payload.tools.length > 0);
-    assert.ok(payload.tools.every((tool) => tool.href.startsWith("/tools/")));
-    assert.ok(payload.tools.every((tool) => !tool.href.includes("wanghai")));
-    assert.ok(payload.tools.every((tool) => Array.isArray(tool.toolCalls)));
-    assert.ok(payload.tools.every((tool) => tool.liveState === "mock-only" || tool.liveState === "disabled-live-boundary"));
-  } finally {
-    server.close();
-    await once(server, "close");
-  }
-});
-
-test("tool portal catalog includes Domain Pack flow tools without live execution material", async () => {
-  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-tool-portal-pack-"));
-  const previousDataRoot = process.env.POLARIS_DATA_ROOT;
-  process.env.POLARIS_DATA_ROOT = dataRoot;
-  try {
-    await addDomainPack(import.meta.url, FIRST_PARTY_VAULT_KNOWLEDGE_PACK);
-
-    const server = createPortalServer(0);
-    await once(server, "listening");
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Portal server did not expose a TCP address");
-    }
-    try {
-      const catalogResponse = await fetch(`http://127.0.0.1:${address.port}/api/tool-portal/catalog`);
-      assert.equal(catalogResponse.status, 200);
-      const catalogPayload = await catalogResponse.json() as {
-        tools: Array<Record<string, unknown>>;
-      };
-      const domainTool = catalogPayload.tools.find((tool) =>
-        tool.id === "domain-pack:VaultKnowledgeHealth:ReviewKnowledgeHealth"
-      );
-      assert.equal(domainTool?.scope, "domain-pack");
-      assert.equal(domainTool?.scopeLabel, "Vault Knowledge Health");
-      assert.equal((domainTool?.domainPack as { id?: string } | undefined)?.id, "VaultKnowledgeHealth");
-      assert.equal(domainTool?.liveState, "mock-only");
-      assert.equal((domainTool?.toolCalls as Array<{ mappedToolId?: string; port?: string }> | undefined)?.[0]?.port, "ArtifactMetadata");
-      assert.equal(
-        (domainTool?.toolCalls as Array<{ mappedToolId?: string; port?: string }> | undefined)?.[0]?.mappedToolId,
-        "vault.artifact.metadata.read",
-      );
-      assert.equal(domainTool?.href, "/tools/packs/VaultKnowledgeHealth/vault-knowledge-health-review-knowledge-health");
-      assert.ok(catalogPayload.tools.some((tool) => tool.scope === "common"));
-      assert.ok(catalogPayload.tools.some((tool) => tool.id === "domain-pack:VaultKnowledgeHealth:ReviewKnowledgeHealth"));
-      assert.ok(catalogPayload.tools.every((tool) => !("executionUrl" in tool)));
-      assert.ok(catalogPayload.tools.every((tool) => !("credentialValue" in tool)));
-    } finally {
-      server.close();
-      await once(server, "close");
-    }
-  } finally {
-    if (previousDataRoot === undefined) delete process.env.POLARIS_DATA_ROOT;
-    else process.env.POLARIS_DATA_ROOT = previousDataRoot;
-    fs.rmSync(dataRoot, { recursive: true, force: true });
-  }
-});
-
-test("tool portal exposes no console or publisher API", async () => {
-  const server = createPortalServer(0);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Portal server did not expose a TCP address");
-  }
-  try {
-    for (const pathname of ["/api/tool-portal/console", "/api/tool-portal/publisher"]) {
-      const response = await fetch(`http://127.0.0.1:${address.port}${pathname}`);
-      assert.equal(response.status, 404);
-    }
-  } finally {
-    server.close();
-    await once(server, "close");
-  }
-});
-
-test("tool portal document fallback is served from Polaris /tools routes", async () => {
-  const server = createPortalServer(0);
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Portal server did not expose a TCP address");
-  }
-  try {
-    for (const pathname of ["/tools", "/tools/manual-review", "/tools/console"]) {
-      const response = await fetch(`http://127.0.0.1:${address.port}${pathname}`);
-      assert.equal(response.status, 200);
-      assert.match(response.headers.get("content-type") ?? "", /text\/html/u);
-      assert.match(await response.text(), /Polaris Tool Portal/u);
-    }
-  } finally {
-    server.close();
-    await once(server, "close");
   }
 });

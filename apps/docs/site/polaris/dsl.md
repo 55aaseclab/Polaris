@@ -318,7 +318,7 @@ not used as an import. Install, list, and remove commands live on the
 | Pack installation and digest pin | Polaris app | Accept a mutable `latest` fallback |
 | Built-in registry and mock Host | Polaris app | Implement pack-specific business policy |
 | Workflow queue and state | Polaris app / control store | Move authority to Portal or a private surface |
-| Surface presentation | Portal, Tool Portal, Paseo | Publish direct ports or schedule runs |
+| Surface presentation | Portal, Paseo | Publish direct ports or schedule runs |
 | Live execution adapter | Future Polaris / Vault boundary | Bypass pack pin or capability lease |
 
 The current Polaris execution path uses a deterministic
@@ -596,7 +596,6 @@ This page is the product reference.
 ## Related
 
 - [Polaris Portal](./polaris-portal.md)
-- [Polaris Tool Portal](./tool-portal.md)
 - [Polaris CLI](./cli.md)
 - [Polaris 0.4.0](../operations/polaris-0.4.0/)
 - [WorkEnvelope and workflow plan][work-envelope]

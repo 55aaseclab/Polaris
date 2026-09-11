@@ -4,8 +4,7 @@ Status: the Phase 3-6 deterministic control slice is implemented. The Portal
 is the work console, Domain Packs and workflow definitions live outside every
 Vault, and each run is bound to one selected Vault. Execution remains a
 Polaris-owned mock host: no real Agent, registry adapter, external tool, or
-private surface action is enabled by this slice. The first-party Polaris tool portal
-is implemented as one public inspect-only registry. An isolated operator drill
+private surface action is enabled by this slice. An isolated operator drill
 exists for the disabled read-only Vault metadata pilot. The minimum
 first-party business domain, `VaultKnowledgeHealth@1.0.0`, is implemented and
 maps `ArtifactMetadata@1.0.0` to `vault.artifact.metadata.read`, but ordinary
@@ -25,12 +24,7 @@ Done:
   leases, durable queue state, worker recovery, manual approval, cancellation,
   retry, event replay, receipts, artifacts, and non-executable suggestions.
 - `packages/polaris-tools` is the canonical first-party tool catalog. Polaris
-  derives the disabled live action catalog, mock receipts, and public `/tools`
-  rows from that package.
-- The standalone Polaris tool portal is implemented as an inspect-only public
-  registry. It shows Common tools and Domain Pack flow-tool calls, including
-  pack, flow, call, and mapped tool detail. It has no console, publisher API,
-  credential view, execution URL, or run button.
+  derives the disabled live action catalog and mock receipts from that package.
 - `VaultKnowledgeHealth@1.0.0` is the minimum first-party business domain. Its
   `ReviewKnowledgeHealth` flow declares `ArtifactMetadata@1.0.0`; Polaris maps
   that call to the Common tool `vault.artifact.metadata.read`.
@@ -59,8 +53,7 @@ TODO before live tools:
 
 - Validate the ordinary user experience in the target environment: install the
   first-party pack, select `VaultKnowledgeHealth`, choose a user-owned runnable
-  Vault, run `ReviewKnowledgeHealth` through the normal Portal flow, and inspect
-  `/tools/packs/VaultKnowledgeHealth/vault-knowledge-health-review-knowledge-health`.
+  Vault, and run `ReviewKnowledgeHealth` through the normal Portal flow.
 - Keep ordinary UI-created setup, provisioning, manual, and retry runs
   `mode: "mock"` until a separate live-admission decision is made.
 - If live `vault.artifact.metadata.read` is needed, admit it only through the
@@ -68,7 +61,7 @@ TODO before live tools:
   reviewed candidate acknowledgement, and a current user-owned runnable Vault.
 - Add future live tools by extending small executor families behind the same
   live tool gateway. Do not add one adapter per tool and do not expose live
-  execution from private surface, `/tools`, setup provisioning, or ordinary UI-created
+  execution from private surface, setup provisioning, or ordinary UI-created
   runs.
 - AI-assisted workflow generation remains later work. A model may not publish,
   enable, or execute workflow definitions in this release.
@@ -102,8 +95,8 @@ must preserve that envelope; it must not move workflow authority into a
 Vault, private surface, or the browser.
 
 The official tool catalog lives in `packages/polaris-tools`. Polaris derives
-the disabled live action catalog and the standalone `/tools` portal from that
-package. There is no second tool registry or private surface-owned tool list.
+the disabled live action catalog from that package. There is no second tool
+registry or private surface-owned tool list.
 
 ## User Stories
 
@@ -223,7 +216,7 @@ The implementation locations are fixed:
 | `packages/polaris-tools` | Official first-party tool manifests, portal rows, mock receipts, and disabled live gates |
 | `packages/polaris-workflow` | AST, parser, compiler, built-in interfaces, RPC wire types, and admission validation |
 | Polaris app | verified pack storage, policy, leases, queue, mock host, receipts, artifacts, and Portal API |
-| private surface | private Vault-scoped surface adapter only; no tool portal, scheduler, pack registry, or run authority |
+| private surface | private Vault-scoped surface adapter only; no scheduler, pack registry, or run authority |
 | Vault | selected execution cell; receives a capability-limited envelope when a live adapter exists |
 
 `manual.review` is an interface, not domain logic. A pack instantiates it by
@@ -261,9 +254,6 @@ pnpm --filter polaris-workflow run typecheck
 pnpm --filter polaris-workflow test
 pnpm --filter polaris-tools run typecheck
 pnpm --filter polaris-tools test
-pnpm --filter polaris-tool-portal run typecheck
-pnpm --filter polaris-tool-portal test
-pnpm --filter polaris-tool-portal run build
 pnpm --filter polaris exec tsc --noEmit
 pnpm --filter polaris exec tsx --test tests/polaris-control-store.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-control.test.ts
@@ -321,12 +311,12 @@ synthetic fixtures and do not call private surface or external providers.
 | `ceb8d20` | Source-level worker-binding precondition evaluator for the disabled metadata pilot. It requires reviewed read-only action metadata, the current `0.3.0-single-host` profile, timeout and retry bounds, one-worker budget accounting, fail-closed kill-switch checks, durable evidence, rollback, and focused deployment checks. It does not wire the worker. | Polaris TypeScript; `polaris-workflow-live-boundary` and `polaris-workflow-live-vault-adapter`; `git diff --check` |
 | `6b06ea4` | Disabled worker-binding helper for the metadata pilot. It remains outside the production workflow worker, requires separate adapter and worker flags, requires a candidate action catalog, enforces one in-process live read, bounds attempts with abortable timeouts, retries only admitted read failures, reconciles one final receipt/audit result, and models rollback by disabling the worker flag without deleting evidence. | Polaris TypeScript; `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, and `polaris-workflow-live-worker-binding`; `git diff --check` |
 | `b239520` | Mocked workflow smoke runner. `ops workflow-smoke` installs a synthetic pack into an isolated temp data root, drives setup, approval, receipts, artifacts, and suggestion creation, and exits with a machine-readable summary that proves only mocked FFI/tools ran. | `pnpm --filter polaris run smoke:workflow`; `polaris-workflow-smoke.test.ts`; `git diff --check` |
-| `b239520` | First-party Polaris tool portal and shared catalog. `packages/polaris-tools` is the canonical Common tool manifest source; Polaris derives the disabled live action catalog and public `/tools` registry with Common tools plus Domain Pack flow-tool calls, without credential values, execution URLs, console state, publisher APIs, or live tool runners. | `polaris-tools` typecheck/test; `polaris-tool-portal` typecheck/test/build; `polaris-workflow-live-boundary`; `polaris-portal` tests; `git diff --check` |
+| `b239520` | First-party shared catalog. `packages/polaris-tools` is the canonical Common tool manifest source; Polaris derives the disabled live action catalog with Common tools plus Domain Pack flow-tool calls, without credential values, execution URLs, console state, publisher APIs, or live tool runners. | `polaris-tools` typecheck/test; `polaris-workflow-live-boundary`; `polaris-portal` tests; `git diff --check` |
 | `4393989` | Isolated operator drill for the disabled metadata pilot. `ops workflow-live-metadata-drill` requires both live flags and `--candidate-live-enabled`, creates a synthetic Polaris run, invokes the candidate worker helper, reads bounded Polaris-owned Vault status metadata, records receipt/audit evidence, and closes the drill run. It does not wire ordinary workflows to the live adapter. | `pnpm --filter polaris run check`; `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `65b58d5` | Candidate ordinary-worker wiring for `vault.artifact.metadata.read`. The workflow runtime now has an async FFI path, the Polaris worker routes only durable live-policy `ArtifactMetadata@1.0.0` read calls through the candidate helper, requires both live flags and focused deployment evidence, writes no duplicate receipts, and fails closed without calling the reader when flags are unset. UI-created manual and provisioning runs remain mock-policy runs. | `polaris-workflow` typecheck/test; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run check`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `9270f27` | Operator admission path for the metadata pilot. `ops workflow-admit-live-metadata` requires operator identity, release id, both live flags, explicit candidate acknowledgement, a current user-owned runnable Vault, required flow inputs, an immutable installed pack digest, and exactly one compiled `ArtifactMetadata@1.0.0` read call before creating a durable `mode: "live"` run and `workflow.live.admit` audit event. The tool portal, private surface, setup provisioning, and ordinary UI-created workflow runs remain non-execution surfaces. | `pnpm --filter polaris run check`; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `9a1ad1c` | Generic live tool gateway for the metadata pilot. `workflow-live-tool-gateway` owns common admission dispatch, executor-family matching, abort-signal propagation, receipt output, audit metadata, and failed admitted evidence recording. `vault.artifact.metadata.read` is now the first `polaris.projection` tool definition; the public portal shows executor family wording, and no additional live executable surface was added. | `pnpm --filter polaris run check`; `polaris-workflow-live-tool-gateway`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, `polaris-workflow-live-metadata-drill`, `polaris-workflow-control`, and `polaris-portal`; `pnpm --filter polaris-tools test`; `pnpm --filter polaris-tool-portal run build`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `2b5ec6c` | Minimum first-party business domain and pack-flow portal UX. Adds `VaultKnowledgeHealth@1.0.0`, projects `ReviewKnowledgeHealth`, maps `ArtifactMetadata@1.0.0` to `vault.artifact.metadata.read`, and keeps `/tools` inspect-only with no execution material. | `pnpm --filter polaris-tools test`; `pnpm --filter polaris-tool-portal test`; `pnpm --filter polaris-tool-portal run typecheck`; `pnpm --filter polaris-tool-portal run build`; `pnpm --filter polaris run check`; `pnpm --filter polaris run test:domain-packs`; `pnpm --filter polaris run smoke:workflow`; `git diff --check`; screenshot/API smoke for `/tools` |
+| `9270f27` | Operator admission path for the metadata pilot. `ops workflow-admit-live-metadata` requires operator identity, release id, both live flags, explicit candidate acknowledgement, a current user-owned runnable Vault, required flow inputs, an immutable installed pack digest, and exactly one compiled `ArtifactMetadata@1.0.0` read call before creating a durable `mode: "live"` run and `workflow.live.admit` audit event. Private surface, setup provisioning, and ordinary UI-created workflow runs remain non-execution surfaces. | `pnpm --filter polaris run check`; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
+| `9a1ad1c` | Generic live tool gateway for the metadata pilot. `workflow-live-tool-gateway` owns common admission dispatch, executor-family matching, abort-signal propagation, receipt output, audit metadata, and failed admitted evidence recording. `vault.artifact.metadata.read` is now the first `polaris.projection` tool definition; the public portal shows executor family wording, and no additional live executable surface was added. | `pnpm --filter polaris run check`; `polaris-workflow-live-tool-gateway`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, `polaris-workflow-live-metadata-drill`, `polaris-workflow-control`, and `polaris-portal`; `pnpm --filter polaris-tools test`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
+| `2b5ec6c` | Minimum first-party business domain and pack-flow portal UX. Adds `VaultKnowledgeHealth@1.0.0`, projects `ReviewKnowledgeHealth`, maps `ArtifactMetadata@1.0.0` to `vault.artifact.metadata.read`, and keeps the catalog inspect-only with no execution material. | `pnpm --filter polaris-tools test`; `pnpm --filter polaris run check`; `pnpm --filter polaris run test:domain-packs`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `f284e9f` | Adds the separately versioned `v0.4-trial` AST/parser/compiler/runtime, bounded CVE-Genie graph, and the Polaris-owned literature-review workflow. Literature Review now owns its DSL, runner, skills, and environment contract in `workflows/literature-review/`; reusable implementations live once under `tools/`, and every trial node binds through `workflow.json`. v0.3 remains the default, and no trial or literature execution is wired to ordinary Portal live tools. | `polaris-workflow` typecheck/test; `polaris-tools` typecheck/test; `polaris` check; `polaris` test:smoke; `polaris` test:domain-packs; `polaris` test:literature-review; workflow smoke; final Docker image static-plan smoke; `git diff --check`; docs check |
 | `1b05212` | Imports private surface Literature Review history into a tenant/vault-scoped Polaris historical archive. The copy is byte/hash verified, marked historical-only, and does not create a new durable run. | Polaris Literature Review `18/18`; migration tests `3/3`; receipt verification `valid=true` |
 | `2922a4e` | Moves private surface business tools, contracts, and business-core implementation into Polaris-owned tool and business-core locations. | Business tool contract checks `5/5`; business-core typecheck/tests; focused path and schema checks |
@@ -344,7 +334,6 @@ production approval, or proof of external side effects.
 - [WorkEnvelope and workflow plan](./work-envelope-and-workflow-plan.md)
 - [Dynamic workflow runtime](./dynamic-workflow-runtime.md)
 - [Polaris DSL](../../polaris/dsl.md)
-- [Polaris Tool Portal](../../polaris/tool-portal.md)
 - [Polaris Portal](../../polaris/polaris-portal.md)
 - [Vault Management](../../polaris/vault-management.md)
 - [Polaris Gateway](../../polaris/gateway.md)

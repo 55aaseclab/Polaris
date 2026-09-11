@@ -237,9 +237,9 @@ The following are explicitly not part of this implementation:
 
 The source tree now includes a disabled live-boundary evaluator and action
 catalog in `apps/polaris/scripts/portal/workflow-live-boundary.ts`. The
-catalog is derived from the official `packages/polaris-tools` manifests, which
-also feed the standalone Polaris tool portal. The default catalog remains
-disabled for live execution. It repeats FFI admission and fails closed unless
+catalog is derived from the official `packages/polaris-tools` manifests. The
+default catalog remains disabled for live execution. It repeats FFI admission
+and fails closed unless
 the deployment flag, receipt reconciliation, budget, kill switch, audit,
 rollback, deployment evidence, and action enablement are all present.
 

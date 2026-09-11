@@ -12,7 +12,6 @@ boundary and the cross-repository references that are useful after setup.
 - [Usage](./usage.md)
 - [Literature Review live design](./literature-review-live-design.md)
 - [Polaris Portal](./polaris-portal.md)
-- [Tool Portal](./tool-portal.md)
 - [Polaris DSL](./dsl.md)
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)
