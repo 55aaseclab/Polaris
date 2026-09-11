@@ -3540,7 +3540,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
       const message = error instanceof Error ? error.message : String(error);
       const isApiRequest = (req.url ?? "").startsWith("/api/");
       if (isApiRequest) {
-        sendJson(res, statusCode, { error: message });
+        sendJson(res, statusCode, {
+          error: message,
+          ...(error instanceof WorkflowControlError ? { errorCode: error.code } : {}),
+        });
         return;
       }
       sendText(res, statusCode, message);

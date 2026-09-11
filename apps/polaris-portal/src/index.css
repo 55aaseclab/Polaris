@@ -471,11 +471,18 @@
 
 .welcome-page,
 .center-state {
+  position: relative;
   display: flex;
   min-height: 100vh;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+}
+
+.welcome-language-toggle {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
 }
 
 .welcome-panel {
@@ -1584,6 +1591,7 @@
 .timeline-dot-success { background: #2f9d68; }
 
 .timeline-title time {
+  margin-left: auto;
   color: var(--portal-muted);
   font-size: .7rem;
   font-variant-numeric: tabular-nums;
@@ -1598,6 +1606,39 @@
   margin: .25rem 0 0;
   color: var(--portal-muted);
   font-size: .75rem;
+  line-height: 1.45;
+}
+
+.timeline-outputs {
+  display: grid;
+  gap: .35rem;
+  margin: .65rem 0 0;
+}
+
+.timeline-outputs div {
+  display: grid;
+  grid-template-columns: minmax(7rem, .35fr) minmax(0, 1fr);
+  gap: .75rem;
+  align-items: start;
+  padding: .45rem .55rem;
+  border: 1px solid var(--portal-border);
+  border-radius: 6px;
+  background: var(--portal-surface-2);
+}
+
+.timeline-outputs dt {
+  color: var(--portal-muted);
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+.timeline-outputs dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--portal-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: .72rem;
   line-height: 1.45;
 }
 

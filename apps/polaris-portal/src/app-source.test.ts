@@ -6,10 +6,26 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const storeSource = readFileSync(new URL("./portal-store.ts", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./index.css", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
 const workListRowSource = appSource.slice(
   appSource.indexOf("function WorkListRow"),
   appSource.indexOf("function WorkCardView"),
 );
+
+test("Portal mounts the centralized i18n provider", () => {
+  assert.match(mainSource, /I18nProvider/u);
+  assert.match(appSource, /useI18n/u);
+  assert.match(appSource, /toggleLanguage/u);
+  assert.match(appSource, /<Languages className="h-4 w-4" \/>/u);
+  assert.match(appSource, /aria-label=\{t\("nav\.language"\)\}[\s\S]*onClick=\{toggleLanguage\}[\s\S]*<Languages/u);
+  assert.match(appSource, /<Languages[\s\S]*<span className="user-chip"/u);
+  assert.doesNotMatch(appSource, /t\("nav\.languageName"\)/u);
+  assert.match(appSource, /function workflowExecutionTargetLabel\([\s\S]*t\("common\.host"\)/u);
+  assert.match(appSource, /function hostDriverStatusLabel\([\s\S]*t\("common\.notSelected"\)/u);
+  assert.doesNotMatch(appSource, /workflowExecutionTargetLabel\(run\)/u);
+  assert.doesNotMatch(appSource, /\{host\.status\?\.driver\?\.status \|\| t\("common\.notSelected"\)\}/u);
+  assert.match(appSource, /function WelcomePage[\s\S]*toggleLanguage[\s\S]*welcome-language-toggle/u);
+});
 
 test("user page keeps session as a peer section beside profile and credentials", () => {
   assert.match(appSource, /account-tabs/u);
@@ -38,12 +54,10 @@ test("Portal exposes the host-first work journey", () => {
     assert.match(appSource, new RegExp(route.replace("/", "\\/"), "u"));
   }
   assert.match(appSource, /PortalLayout active="workflows" session=\{session\} navigate=\{navigate\}><ProvisioningPage/u);
-  for (const action of ["discover", "批准继续", "取消运行", "重试", "查看详情"]) {
+  for (const action of ["discover", 't("work.approve")', 't("work.cancel")', 't("common.retry")', 't("work.viewDetails")']) {
     if (action === "discover") {
       assert.match(appSource, /settings-tabs/u);
-    } else {
-      assert.match(appSource, new RegExp(action, "u"));
-    }
+    } else assert.match(appSource, new RegExp(action.replace(/[().]/gu, "\\$&"), "u"));
   }
   assert.doesNotMatch(appSource, /workflowExecutionModeLabel/u);
   assert.doesNotMatch(appSource, /Polaris host · Literature Review/u);
@@ -54,11 +68,11 @@ test("Portal exposes the host-first work journey", () => {
   assert.doesNotMatch(appSource, /<h1>工作流设置<\/h1>/u);
   assert.doesNotMatch(appSource, /工作流定义在 Vault 外部管理；每次运行时再选择执行 Vault。/u);
   assert.match(appSource, /vault-filter-tabs/u);
-  assert.match(appSource, /处理中/u);
-  assert.match(appSource, /未运行/u);
+  assert.match(appSource, /t\("hosts\.observing"\)/u);
+  assert.match(appSource, /t\("hosts\.inactive"\)/u);
   assert.doesNotMatch(appSource, /metric-strip/u);
   assert.match(appSource, /onClick=\{\(\) => setCreateOpen\(true\)\}/u);
-  assert.match(appSource, /aria-label="新建 Vault"/u);
+  assert.match(appSource, /aria-label=\{t\("hosts\.new"\)\}/u);
   assert.match(appSource, /className="vault-toolbar-button"/u);
   assert.doesNotMatch(appSource, /刷新 Vaults/u);
   assert.doesNotMatch(appSource, /handleRefresh/u);
@@ -67,17 +81,17 @@ test("Portal exposes the host-first work journey", () => {
   assert.match(appSource, /onClose\(\);/u);
   assert.doesNotMatch(appSource, /const \[loading, setLoading\]/u);
   assert.match(appSource, /settings-tabs/u);
-  assert.match(appSource, /完成首次设置/u);
+  assert.match(appSource, /t\("settings\.complete"\)/u);
   assert.match(appSource, /activeTab === "enabled"/u);
   assert.match(appSource, /activeTab === "available"/u);
   assert.match(appSource, /className="settings-provision-button"/u);
   assert.match(appSource, /navigate\("\/setup\?returnTo=\/settings\/workflows"\)/u);
   assert.doesNotMatch(appSource, /activeTab === "runtime"/u);
-  assert.match(appSource, /执行位置/u);
+  assert.match(appSource, /t\("run\.executionLocation"\)/u);
   assert.doesNotMatch(appSource, /FIRST-TIME SETUP/u);
   assert.doesNotMatch(appSource, /设置只需要一次/u);
   assert.doesNotMatch(appSource, /STEP \{step \+ 1\} \/ 3/u);
-  assert.match(appSource, /aria-label="新建工作"/u);
+  assert.match(appSource, /aria-label=\{t\("work\.new"\)\}/u);
   assert.doesNotMatch(appSource, /aria-label="回到工作台"/u);
 });
 
@@ -97,7 +111,7 @@ test("run detail presents a copyable run id without a workflow prefix", () => {
   assert.doesNotMatch(appSource, /WORKFLOW RUN · \{run\.id\}/u);
   assert.match(appSource, /className="run-id-row"/u);
   assert.match(appSource, /className="run-id"/u);
-  assert.match(appSource, /aria-label="复制 run-id"/u);
+  assert.match(appSource, /aria-label=\{t\("run\.copyId"\)\}/u);
   assert.match(appSource, /copyTextToClipboard\(run\.id\)/u);
   assert.match(appSource, /role="status"/u);
   assert.match(cssSource, /\.run-id-row\s*\{[\s\S]*display:\s*flex;[\s\S]*align-items:\s*center;/u);
@@ -116,7 +130,28 @@ test("run detail does not render an empty action divider", () => {
 test("run detail keeps deletion in the work list only", () => {
   const runDetailSource = appSource.slice(appSource.indexOf("function RunDetailPage"));
   assert.doesNotMatch(runDetailSource, /删除记录|deleteAndReturn|deleteWorkflowRun/u);
-  assert.match(workListRowSource, /删除运行记录/u);
+  assert.match(workListRowSource, /t\("work\.deleteLabel"/u);
+});
+
+test("run detail keeps only final artifacts viewable", () => {
+  assert.match(appSource, /run\.steps\.map/u);
+  assert.doesNotMatch(appSource, /中间产物/u);
+  assert.match(appSource, /t\("run\.timelineDescription"\)/u);
+  assert.match(appSource, /right\.timestamp\.localeCompare\(left\.timestamp\)/u);
+  assert.match(appSource, /title: step\.stepLabel/u);
+  assert.match(appSource, /workflowStepOutputEntries\(step\)/u);
+  assert.match(appSource, /item\.outputs\.map/u);
+  assert.match(appSource, /previewWorkflowValue\(value\)/u);
+  const runDetailMain = appSource.slice(
+    appSource.indexOf('<div className="run-detail-main">'),
+    appSource.indexOf('<aside className="run-detail-side">'),
+  );
+  const runDetailSide = appSource.slice(appSource.indexOf('<aside className="run-detail-side">'));
+  assert.doesNotMatch(runDetailMain, /run\.artifacts\.length > 0/u);
+  assert.match(runDetailSide, /t\("run\.inputSnapshot"\)[\s\S]*run\.artifacts\.length > 0/u);
+  assert.doesNotMatch(runDetailSide, /run\.receipts/u);
+  assert.match(appSource, /formatInputSnapshotValue\(value\)/u);
+  assert.match(cssSource, /\.timeline-outputs\s*\{/u);
 });
 
 test("artifact preview supports text, structured data, and media files", () => {
@@ -135,15 +170,17 @@ test("artifact preview supports text, structured data, and media files", () => {
 
 test("debug tab exposes the server run projection as a live inspector", () => {
   assert.match(appSource, /path === "\/debug"/u);
-  assert.match(appSource, /link\("\/debug", "Debug", Bug, "debug"\)/u);
+  assert.match(appSource, /link\("\/debug", t\("nav\.debug"\), Bug, "debug"\)/u);
   assert.match(appSource, /function DebugPage/u);
   assert.match(appSource, /function DebugInspector/u);
-  assert.match(appSource, /事件日志/u);
-  assert.match(appSource, /运行事件轨道/u);
+  assert.match(appSource, /t\("run\.eventLog"\)/u);
+  assert.match(appSource, /t\("debug\.eventRail"\)/u);
   assert.match(appSource, /refreshWorkflowRuns/u);
   assert.match(cssSource, /\.debug-layout\s*\{[\s\S]*grid-template-columns/u);
   assert.match(cssSource, /\.debug-flow-rail\s*\{/u);
   assert.match(cssSource, /\.debug-log-list\s*\{[\s\S]*overflow:\s*auto/u);
+  assert.match(appSource, /localizedWorkflowEvent\(event, t\)/u);
+  assert.match(appSource, /localizedWorkflowError\(run\.error, t\)/u);
 });
 
 test("daily work surface uses a desktop list and a mobile touch deck", () => {
@@ -152,7 +189,7 @@ test("daily work surface uses a desktop list and a mobile touch deck", () => {
   assert.match(appSource, /className="work-grid-view"/u);
   assert.match(appSource, /function WorkListRow/u);
   assert.match(appSource, /<WorkListRow key=\{card\.id\}/u);
-  assert.match(workListRowSource, /查看详情\s*<ChevronRight/u);
+  assert.match(workListRowSource, /t\("work\.viewDetails"\)[\s\S]*<ChevronRight/u);
   assert.doesNotMatch(workListRowSource, /card\.status === "succeeded" \? <>/u);
   assert.doesNotMatch(workListRowSource, />打开结果</u);
   assert.match(appSource, /className="work-deck-view"/u);
@@ -161,8 +198,8 @@ test("daily work surface uses a desktop list and a mobile touch deck", () => {
   assert.match(appSource, /cn\("swipe-hint"/u);
   assert.match(appSource, /swipe-hint-skip/u);
   assert.match(appSource, /swipe-hint-detail/u);
-  assert.match(appSource, />跳过</u);
-  assert.match(appSource, />详情</u);
+  assert.match(appSource, /t\("work\.swipeSkip"\)/u);
+  assert.match(appSource, /t\("work\.swipeDetails"\)/u);
   assert.match(cssSource, /\.swipe-hint\s*\{[\s\S]*top:\s*50%;[\s\S]*left:\s*50%;[\s\S]*transform:\s*translate\(-50%,\s*-50%\)/u);
   assert.match(cssSource, /\.deck-card\.is-dragging::before/u);
   assert.match(cssSource, /filter:\s*grayscale\(1\)/u);
@@ -194,7 +231,7 @@ test("daily work surface uses a desktop list and a mobile touch deck", () => {
 test("workflow setup keeps Domain Pack and internal flow selection separate", () => {
   assert.match(appSource, /domainPackId/u);
   assert.match(appSource, /enabledWorkflowKeys/u);
-  assert.match(appSource, /选择一个 Domain Pack 作为工作场景/u);
+  assert.match(appSource, /t\("settings\.choosePackTitle"\)/u);
   assert.match(appSource, /groupWorkflowFlows\(selectedPack\.flows\)/u);
   assert.match(appSource, /groupTitle/u);
   assert.match(appSource, /groupWorkflowFlows/u);
@@ -207,8 +244,8 @@ test("workflow setup keeps Domain Pack and internal flow selection separate", ()
 
 test("workflow settings keeps only the DSL visualization action", () => {
   assert.doesNotMatch(appSource, /title="打开工作流"/u);
-  assert.match(appSource, /title="查看 DSL"/u);
-  assert.match(appSource, /输入 \{node\.uses\.length\} · 输出 \{node\.outputs\.length\}/u);
+  assert.match(appSource, /title=\{t\("settings\.viewDsl"\)\}/u);
+  assert.match(appSource, /t\("run\.graphInputs"\)/u);
   assert.doesNotMatch(appSource, /输入 → 步骤 → 输出/u);
   assert.match(readFileSync(new URL("./workflow-graph-layout.ts", import.meta.url), "utf8"), /dagreLayout\(dag, \{\}\)/u);
 });
@@ -247,15 +284,15 @@ test("workflow settings tabs show catalog summary counts", () => {
   assert.match(appSource, /const allWorkflowCount = packs\.reduce/u);
   assert.match(appSource, /const enabledWorkflowCount = packs\.reduce/u);
   assert.match(appSource, /const availableWorkflowCount = allWorkflowCount - enabledWorkflowCount/u);
-  assert.match(appSource, /全部<span className="filter-tab-count">\{allWorkflowCount\}<\/span>/u);
-  assert.match(appSource, /已启用<span className="filter-tab-count">\{enabledWorkflowCount\}<\/span>/u);
-  assert.match(appSource, /可添加<span className="filter-tab-count">\{availableWorkflowCount\}<\/span>/u);
+  assert.match(appSource, /t\("settings\.all"\)[\s\S]*filter-tab-count.*allWorkflowCount/u);
+  assert.match(appSource, /t\("settings\.enabled"\)[\s\S]*filter-tab-count.*enabledWorkflowCount/u);
+  assert.match(appSource, /t\("settings\.available"\)[\s\S]*filter-tab-count.*availableWorkflowCount/u);
 });
 
 test("workflow settings exposes the workflow entry and DSL snapshot", () => {
   assert.doesNotMatch(appSource, /title="打开工作流"/u);
   assert.doesNotMatch(appSource, /navigate\(`\/work\?pack=/u);
-  assert.match(appSource, /title="查看 DSL"/u);
+  assert.match(appSource, /t\("settings\.viewDsl"\)/u);
   assert.match(appSource, /function WorkflowGraphPage/u);
   assert.match(appSource, /graphMatch/u);
   assert.match(appSource, /\/graph/u);

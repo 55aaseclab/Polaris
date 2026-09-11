@@ -16,6 +16,7 @@ import type {
   WorkflowSuggestionProjection,
   WorkflowVaultProjection,
 } from "@polaris/polaris-shell";
+import { localizedError } from "./i18n/messages.js";
 
 const SESSION_TOKEN_KEY = "polaris_authing_session";
 const ID_TOKEN_KEY = "polaris_authing_id_token";
@@ -57,6 +58,7 @@ export interface PortalCredentialRecord {
 
 export interface PortalRequestError extends Error {
   status: number;
+  code?: string;
 }
 
 function cookieValue(key: string): string | null {
@@ -92,10 +94,15 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers, credentials: "same-origin" });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(
-      typeof body.error === "string" ? body.error : `Request failed (${response.status})`,
-    ) as PortalRequestError;
-    error.status = response.status;
+    const bodyError = typeof body.error === "object" && body.error !== null ? body.error : null;
+    const message = typeof body.error === "string" ? body.error : bodyError?.message;
+    const code = typeof body.errorCode === "string" ? body.errorCode : bodyError?.code;
+    const error: PortalRequestError = typeof message === "string"
+      ? Object.assign(new Error(message), { status: response.status, ...(code ? { code } : {}) })
+      : Object.assign(
+        localizedError("common.requestFailed", { status: response.status }),
+        { status: response.status },
+      );
     throw error;
   }
   return body as T;
@@ -245,7 +252,7 @@ export async function beginSignIn(config: AuthingConfig, returnPath: string): Pr
     location.assign(url.toString());
     return;
   }
-  if (!config.appId || !config.authorizationUrl) throw new Error("Authing 配置不完整");
+  if (!config.appId || !config.authorizationUrl) throw localizedError("error.authConfigIncomplete");
   const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)));
   const state = base64Url(crypto.getRandomValues(new Uint8Array(24)));
   setTransientValue(PKCE_VERIFIER_KEY, verifier);
@@ -271,7 +278,7 @@ export async function completeSignIn(): Promise<string> {
   if (config.authMode === "oauth2-proxy" && !code) return transientValue(RETURN_PATH_KEY) || "/work";
   const verifier = transientValue(PKCE_VERIFIER_KEY);
   const state = transientValue(PKCE_STATE_KEY);
-  if (!code || !verifier || params.get("state") !== state) throw new Error("登录状态无效，请重新登录");
+  if (!code || !verifier || params.get("state") !== state) throw localizedError("error.signInInvalid");
   const result = await request<{ token?: string; idToken?: string }>("/auth/callback", {
     method: "POST",
     body: JSON.stringify({
@@ -280,7 +287,7 @@ export async function completeSignIn(): Promise<string> {
       redirectUri: transientValue(REDIRECT_URI_KEY) || `${location.origin}/auth/callback`,
     }),
   });
-  if (!result.token?.trim()) throw new Error("登录状态无效，请重新登录");
+  if (!result.token?.trim()) throw localizedError("error.signInInvalid");
   sessionStorage.setItem(SESSION_TOKEN_KEY, result.token.trim());
   setCookie(SESSION_TOKEN_KEY, result.token.trim());
   if (result.idToken?.trim()) {
@@ -295,7 +302,7 @@ export async function completeSignIn(): Promise<string> {
 
 export async function ensureCurrentUser(session: ShellSession): Promise<void> {
   const userProfileId = session.authingUsername?.trim();
-  if (!userProfileId) throw new Error("Authing 用户信息未补全，请先完成用户名补全");
+  if (!userProfileId) throw localizedError("error.userIncomplete");
   await request("/users", {
     method: "POST",
     body: JSON.stringify({ userProfileId, authingUsername: session.authingUsername, authingUserId: session.authingUserId }),

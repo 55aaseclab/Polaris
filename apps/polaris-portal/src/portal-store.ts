@@ -16,6 +16,7 @@ import {
   type PortalCredentialRecord,
   type PortalUserResponse,
 } from "./portal-client.js";
+import { localizedError } from "./i18n/messages.js";
 import type {
   ShellHostSummary,
   ShellSession,
@@ -127,7 +128,7 @@ interface PortalStore extends PortalVaultState, WorkflowMockState {
   user: PortalUserResponse | null;
   bootstrapped: boolean;
   loading: boolean;
-  error: string | null;
+  error: unknown | null;
   streamStatus: "idle" | "connecting" | "connected" | "reconnecting";
   lastHeartbeatAt: number | null;
   pendingHosts: Record<string, boolean>;
@@ -262,7 +263,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
         startWorkflowPolling();
       }
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error), bootstrapped: true });
+      set({ error, bootstrapped: true });
     } finally {
       set({ loading: false });
     }
@@ -390,7 +391,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       if (line === "vertical" ? host?.wanghaiId : host?.serverId) return host;
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
-    throw new Error("主机仍在准备中，请稍后刷新主机列表");
+    throw localizedError("error.hostPreparing");
   },
 
   hostAction: async (name, action) => {
@@ -466,7 +467,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       set({ setup: response.setup });
       await get().refreshWorkflowRuns();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) });
+      set({ error });
       try {
         set({ setup: await workflowSetup() });
       } catch {
@@ -500,7 +501,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       set({ setup: response.setup });
       await get().refreshWorkflowRuns();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) });
+      set({ error });
       try {
         set({ setup: await workflowSetup() });
       } catch {
@@ -519,7 +520,7 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       set({ setup: response.setup });
       await get().refreshWorkflowRuns();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) });
+      set({ error });
       try {
         set({ setup: await workflowSetup() });
       } catch {
