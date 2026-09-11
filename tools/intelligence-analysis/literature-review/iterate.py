@@ -1017,13 +1017,13 @@ CodexCaller = Callable[..., str]
 """(system_prompt, user_payload, work_dir, model=...) -> raw model text"""
 
 
-# Match report-writing defaults: full gpt-5.4 with medium reasoning effort.
-DEFAULT_ITERATE_MODEL = "gpt-5.4"
-DEFAULT_ITERATE_REASONING_EFFORT = "medium"
+# Match report-writing defaults for unattended workflow runs.
+DEFAULT_ITERATE_MODEL = "gpt-5.5"
+DEFAULT_ITERATE_REASONING_EFFORT = "low"
 
 
 def resolve_iterate_model(explicit: str | None = None) -> str:
-    """Model for iterate LLM calls: CLI/env override, else gpt-5.4."""
+    """Model for iterate LLM calls: CLI/env override, else gpt-5.5."""
     import os
 
     for value in (
@@ -1039,7 +1039,7 @@ def resolve_iterate_model(explicit: str | None = None) -> str:
 
 
 def resolve_iterate_reasoning_effort(explicit: str | None = None) -> str:
-    """Reasoning effort for iterate Codex calls (default medium)."""
+    """Reasoning effort for iterate Codex calls (default low)."""
     import os
 
     for value in (
@@ -1075,7 +1075,7 @@ def default_codex_caller(
     model: str | None = None,
     reasoning_effort: str | None = None,
 ) -> str:
-    """One-shot call via tools/codex (clue-codex-cli exec), default gpt-5.4 medium."""
+    """One-shot call via tools/codex (clue-codex-cli exec), default gpt-5.5 low."""
     import subprocess
 
     work_dir.mkdir(parents=True, exist_ok=True)

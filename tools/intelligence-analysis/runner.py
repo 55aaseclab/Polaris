@@ -26,7 +26,7 @@ from typing import Any
 
 INPUT_SCHEMA = "clue.intelligence-analysis.input.v2"
 OUTPUT_SCHEMA = "clue.intelligence-analysis.output.v2"
-POLARIS_SAFE_COMMANDS = {"version", "validate-input", "validate-output"}
+POLARIS_SAFE_COMMANDS = {"version", "validate-input", "validate-output", "workflow"}
 
 
 def repo_root() -> Path:
@@ -751,9 +751,9 @@ def run(doc: dict[str, Any], root: Path, propose: bool) -> dict[str, Any]:
                 "--export-candidates",
                 str(candidates),
                 "--model",
-                str(doc.get("model") or "gpt-5.4"),
+                str(doc.get("model") or "gpt-5.5"),
                 "--reasoning-effort",
-                str(doc.get("model_reasoning_effort") or doc.get("reasoning_effort") or "medium"),
+                str(doc.get("model_reasoning_effort") or doc.get("reasoning_effort") or "low"),
             ]
             if isinstance(seed_ids, list) and seed_ids:
                 iterate_args.extend(
@@ -995,6 +995,110 @@ def complete_manual_review(root: Path, review_result: Path | None = None) -> dic
     }
 
 
+def workflow_request(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    request = read(args.input)
+    values = request.get("input")
+    if not isinstance(values, dict):
+        raise CliError("workflow input requires an input object")
+    workspace_root = request.get("workspaceRoot")
+    if not isinstance(workspace_root, str) or not workspace_root.strip():
+        raise CliError("workflow input requires workspaceRoot")
+    return request, values, Path(workspace_root).expanduser().resolve()
+
+
+def workflow_string(values: dict[str, Any], key: str, command: str) -> str:
+    value = values.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise CliError(f"workflow {command} requires input.{key}")
+    return value.strip()
+
+
+def workflow_document(
+    request: dict[str, Any],
+    values: dict[str, Any],
+    collection_output: Path,
+) -> dict[str, Any]:
+    run_id = workflow_string(request, "runId", "adapter")
+    collection = read(str(collection_output))
+    collection_id = collection.get("collection_id")
+    if not isinstance(collection_id, str) or not collection_id.strip():
+        raise CliError("collection output has no collection_id")
+    return {
+        "schema_version": INPUT_SCHEMA,
+        "analysis_id": f"analysis-{run_id}",
+        "analysis_kind": "literature-review",
+        "question": workflow_string(values, "question", "prepare"),
+        "decision_context": workflow_string(values, "decisionContext", "prepare"),
+        "audience": workflow_string(values, "audience", "prepare"),
+        "collection_ref": {
+            "collection_id": collection_id,
+            "collection_output_sha256": digest(collection_output),
+            "collection_output_path": str(collection_output),
+        },
+        "review_policy": {"mode": "auto-pass"},
+    }
+
+
+def command_workflow(args: argparse.Namespace) -> int:
+    request, values, workspace_root = workflow_request(args)
+    output = Path(args.output).expanduser().resolve()
+    analysis_root = workspace_root / "analysis"
+    metadata_path = analysis_root / "inputs" / "workflow-request.json"
+
+    if args.step_command == "prepare":
+        collection_output = Path(
+            workflow_string(values, "collectionOutputRef", args.step_command)
+        ).expanduser().resolve()
+        document = workflow_document(request, values, collection_output)
+        validate_input(document)
+        result = run(document, analysis_root, False)
+        write(metadata_path, document)
+        write(
+            output,
+            {
+                "snapshotRef": result["snapshot"],
+                "analysisInputRef": result["analysis_input"],
+                "clueCount": result["clue_count"],
+            },
+        )
+        return 0
+
+    if args.step_command == "run":
+        analysis_input = Path(
+            workflow_string(values, "analysisInputRef", args.step_command)
+        ).expanduser().resolve()
+        if not analysis_input.is_file():
+            raise CliError(f"analysis input does not exist: {analysis_input}")
+        document = read(str(metadata_path))
+        validate_input(document)
+        result = run(document, analysis_root, True)
+        result_status = result.get("status")
+        if result_status != "final":
+            raise CliError(f"analysis did not finish successfully: {result_status}")
+        analysis_output = Path(str(result["output"])).expanduser().resolve()
+        published = read(str(analysis_output))
+        validate_output(published)
+        write(
+            output,
+            {
+                "analysisOutputRef": str(analysis_output),
+                "claimCount": len(published["judgments"]),
+                "analysisStatus": str(published["status"]),
+            },
+        )
+        return 0
+
+    if args.step_command == "validate-output":
+        analysis_output = Path(
+            workflow_string(values, "analysisOutputRef", args.step_command)
+        ).expanduser().resolve()
+        validate_output(read(str(analysis_output)))
+        write(output, {"analysisValid": True})
+        return 0
+
+    raise CliError(f"unsupported workflow command: {args.step_command}")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="clue-intelligence-analysis",
@@ -1030,6 +1134,10 @@ def main(argv: list[str]) -> int:
     prep = sub.add_parser("prepare", help="Freeze snapshot/task/analysis-input only.")
     prep.add_argument("--input", required=True)
     prep.add_argument("--analysis-root", required=True)
+    workflow = sub.add_parser("workflow", help="Polaris workflow adapter.")
+    workflow.add_argument("step_command")
+    workflow.add_argument("--input", required=True)
+    workflow.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     try:
         assert_polaris_command_is_safe(args.cmd)
@@ -1079,6 +1187,8 @@ def main(argv: list[str]) -> int:
             doc = read(args.input)
             validate_input(doc)
             value = run(doc, Path(args.analysis_root).expanduser().resolve(), False)
+        elif args.cmd == "workflow":
+            return command_workflow(args)
         else:
             doc = read(args.input)
             validate_input(doc)

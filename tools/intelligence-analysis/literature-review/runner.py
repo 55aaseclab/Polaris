@@ -1646,12 +1646,12 @@ def build_parser() -> argparse.ArgumentParser:
     iterate.add_argument(
         "--model",
         default=None,
-        help="Codex model via tools/codex (default gpt-5.4; or LITERATURE_REVIEW_MODEL / CODEX_MODEL).",
+        help="Codex model via tools/codex (default gpt-5.5; or LITERATURE_REVIEW_MODEL / CODEX_MODEL).",
     )
     iterate.add_argument(
         "--reasoning-effort",
         default=None,
-        help='Codex model_reasoning_effort (default medium; or LITERATURE_REVIEW_REASONING_EFFORT).',
+        help='Codex model_reasoning_effort (default low; or LITERATURE_REVIEW_REASONING_EFFORT).',
     )
     iterate.add_argument(
         "--export-candidates",

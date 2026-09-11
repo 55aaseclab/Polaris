@@ -89,9 +89,9 @@ $IA run --input "$INPUT" --analysis-root "$ROOT"
 
 终态 output 可交给 `polaris-report-writing` 写报告。
 
-## 固定 workflow（`workflows/literature-review`）
+## 固定 workflow（`packs/autoresearch`）
 
-文献类案例优先走根目录 `workflows/literature-review` 的 `literature-review` 模板三阶段：
+文献类案例优先走根目录 `packs/autoresearch` 的 `literature-review` 模板三阶段：
 
 ```text
 data-collection → intelligence-analysis → report-writing

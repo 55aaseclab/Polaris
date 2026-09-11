@@ -14,6 +14,124 @@ import runner
 
 
 class Tests(unittest.TestCase):
+    def test_workflow_prepare_uses_the_real_collection_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            collection_path = root / "collection.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            collection_path.write_text(
+                json.dumps(
+                    {
+                        "collection_id": "collection-synthetic",
+                        "collection_kind": "literature",
+                        "status": "final",
+                        "records": [],
+                        "rejected_records": [],
+                        "run_artifacts": [],
+                        "information_gaps": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "runId": "run-synthetic",
+                        "workspaceRoot": str(root / "workspace"),
+                        "input": {
+                            "collectionOutputRef": str(collection_path),
+                            "question": "Synthetic question",
+                            "decisionContext": "Synthetic decision",
+                            "audience": "Synthetic audience",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            prepared = {
+                "status": "prepared",
+                "snapshot": str(root / "workspace" / "analysis" / "work" / "snapshot.json"),
+                "analysis_input": str(
+                    root / "workspace" / "analysis" / "work" / "analysis-input.json"
+                ),
+                "clue_count": 0,
+            }
+
+            with patch.object(runner, "run", return_value=prepared) as run_mock:
+                result = runner.command_workflow(
+                    type(
+                        "Args",
+                        (),
+                        {
+                            "input": str(request_path),
+                            "output": str(output_path),
+                            "step_command": "prepare",
+                        },
+                    )()
+                )
+
+            self.assertEqual(result, 0)
+            document = run_mock.call_args.args[0]
+            self.assertEqual(
+                document["collection_ref"]["collection_output_path"],
+                str(collection_path),
+            )
+            self.assertEqual(
+                document["collection_ref"]["collection_output_sha256"],
+                runner.digest(collection_path),
+            )
+            output = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(output["clueCount"], 0)
+
+    def test_workflow_validate_output_uses_the_published_document(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            analysis_path = root / "analysis.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            analysis_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": runner.OUTPUT_SCHEMA,
+                        "analysis_id": "analysis-synthetic",
+                        "analysis_kind": "literature-review",
+                        "status": "final",
+                        "judgments": [],
+                        "unresolved": [],
+                        "run_artifacts": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "workspaceRoot": str(root / "workspace"),
+                        "input": {"analysisOutputRef": str(analysis_path)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = runner.command_workflow(
+                type(
+                    "Args",
+                    (),
+                    {
+                        "input": str(request_path),
+                        "output": str(output_path),
+                        "step_command": "validate-output",
+                    },
+                )()
+            )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                json.loads(output_path.read_text(encoding="utf-8")),
+                {"analysisValid": True},
+            )
+
     def test_polaris_mode_allows_only_validation_commands(self):
         with patch.dict(os.environ, {"POLARIS_LITERATURE_RUNTIME_MODE": "polaris"}):
             for command in runner.POLARIS_SAFE_COMMANDS:

@@ -54,11 +54,11 @@ Optional input field `literature_method` (default **`iterate`**):
 Optional: `seed_paper_ids` / `seed_record_ids`, `max_papers` (dry runs),
 `batch_size` (batches only).
 
-Optional model (iterate default **`gpt-5.4`** with **`medium`** reasoning):
+Optional model (iterate default **`gpt-5.5`** with **`low`** reasoning):
 
 - `model` — Codex model id (override env: `INTELLIGENCE_ANALYSIS_MODEL` /
   `LITERATURE_REVIEW_MODEL` / `CODEX_MODEL`)
-- `model_reasoning_effort` — e.g. `medium` (override env:
+- `model_reasoning_effort` — e.g. `low` (override env:
   `INTELLIGENCE_ANALYSIS_REASONING_EFFORT` /
   `LITERATURE_REVIEW_REASONING_EFFORT`)
 
@@ -73,8 +73,8 @@ Optional model (iterate default **`gpt-5.4`** with **`medium`** reasoning):
   "decision_context": "…",
   "audience": "…",
   "literature_method": "iterate",
-  "model": "gpt-5.4",
-  "model_reasoning_effort": "medium",
+  "model": "gpt-5.5",
+  "model_reasoning_effort": "low",
   "collection_ref": {
     "collection_id": "…",
     "collection_output_sha256": "sha256:…",
