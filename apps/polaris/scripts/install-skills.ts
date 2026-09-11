@@ -14,7 +14,7 @@ export interface InstallOptions {
   force?: boolean;
   mode?: InstallMode;
   skillNames: string[];
-  sourceRoot: string;
+  sourceRoot?: string;
 }
 
 export interface CliOptions {
@@ -27,7 +27,62 @@ export interface CliOptions {
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../../..");
-const SOURCE_ROOT = path.join(REPO_ROOT, "skills");
+const DEFAULT_SKILL_OWNER_ROOTS = [
+  path.join(REPO_ROOT, "tools"),
+  path.join(REPO_ROOT, "packs"),
+];
+
+export interface SkillSource {
+  name: string;
+  sourceDir: string;
+}
+
+function isDirectory(filePath: string): boolean {
+  return fs.existsSync(filePath) && fs.statSync(filePath).isDirectory();
+}
+
+function scanOwnedSkills(ownerRoot: string): SkillSource[] {
+  if (!isDirectory(ownerRoot)) {
+    return [];
+  }
+  return fs
+    .readdirSync(ownerRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((owner) => {
+      const skillsRoot = path.join(ownerRoot, owner.name, "skills");
+      if (!isDirectory(skillsRoot)) {
+        return [];
+      }
+      return fs
+        .readdirSync(skillsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({
+          name: entry.name,
+          sourceDir: path.join(skillsRoot, entry.name),
+        }))
+        .filter((skill) => fs.existsSync(path.join(skill.sourceDir, "SKILL.md")));
+    });
+}
+
+export function listSkillSources(sourceRoot?: string): SkillSource[] {
+  if (sourceRoot) {
+    if (!isDirectory(sourceRoot)) {
+      throw new Error(`Skills source directory not found: ${sourceRoot}`);
+    }
+    return fs
+      .readdirSync(sourceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        sourceDir: path.join(sourceRoot, entry.name),
+      }))
+      .filter((skill) => fs.existsSync(path.join(skill.sourceDir, "SKILL.md")))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+  return DEFAULT_SKILL_OWNER_ROOTS
+    .flatMap((ownerRoot) => scanOwnedSkills(ownerRoot))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 function usage(): string {
   return [
@@ -61,20 +116,8 @@ function isInstallScope(value: string): value is InstallScope {
   return value === "user" || value === "project";
 }
 
-export function listAvailableSkills(sourceRoot = SOURCE_ROOT): string[] {
-  if (!fs.existsSync(sourceRoot)) {
-    throw new Error(`Skills source directory not found: ${sourceRoot}`);
-  }
-
-  return fs
-    .readdirSync(sourceRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter((name) => {
-      const skillFile = path.join(sourceRoot, name, "SKILL.md");
-      return fs.existsSync(skillFile);
-    })
-    .sort();
+export function listAvailableSkills(sourceRoot?: string): string[] {
+  return listSkillSources(sourceRoot).map((skill) => skill.name);
 }
 
 export function resolveInstallRoot(
@@ -105,8 +148,10 @@ export function installSkills({
 
   const installed: string[] = [];
 
+  const catalog = new Map(listSkillSources(sourceRoot).map((skill) => [skill.name, skill]));
   for (const skillName of skillNames) {
-    const sourceDir = path.join(sourceRoot, skillName);
+    const sourceDir = catalog.get(skillName)?.sourceDir
+      ?? (sourceRoot ? path.join(sourceRoot, skillName) : "");
     const skillFile = path.join(sourceDir, "SKILL.md");
     const destinationDir = path.join(destinationRoot, skillName);
 
@@ -225,7 +270,6 @@ export function main(argv: string[]): number {
       force: options.force,
       mode: options.mode,
       skillNames,
-      sourceRoot: SOURCE_ROOT,
     });
 
     console.log(`Installed ${skillNames.length} skill(s) to ${destinationRoot}`);

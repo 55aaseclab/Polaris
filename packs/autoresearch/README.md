@@ -113,65 +113,21 @@ records those omissions in the report. Imported history is evidence only;
 the old Wanghai run state is never presented as a Polaris durable run, and the
 source is not removed by the importer.
 
-Use `literature-review status --run-manifest <path>` to inspect that manifest.
+Inspect a historical import with the migration verifier, not a
+`literature-review` CLI. There is no `polaris -- literature-review` command.
 
-For a pending analysis review, submit the Polaris-owned review result and
-continue the same run:
+For a pending analysis or collection review, continue the same durable
+Polaris run from the Portal work desk or workflow API. Local tool adapters
+under `tools/` remain available for cell-level diagnostics:
 
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review \
-  complete-analysis-review \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json \
-  --review-result <review-result.json>
-```
+- `tools/analysis-review/clue-analysis-review`
+- `tools/collection-review/clue-collection-review`
 
-This command is local-only. In integrated mode review completion and the
-following report stages are submitted as Polaris durable jobs.
-
-To build that result from the generated review list, use the Polaris analysis
-review state adapter:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review \
-  analysis-review bootstrap \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json
-
-pnpm --dir apps/polaris run polaris -- literature-review \
-  analysis-review save \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json \
-  --record-id <claim-id> --status approved --note "Reviewed."
-
-pnpm --dir apps/polaris run polaris -- literature-review \
-  analysis-review export \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json
-```
-
-The export is `clue.manual-review.result.v2`, bound to each claim's
-`review_key` and `revision_hash`; pass its recorded result path to
-`complete-analysis-review`.
-
-For a pending collection review, inspect and update the Polaris-owned queue:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review \
-  collection-review bootstrap \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json
-
-pnpm --dir apps/polaris run polaris -- literature-review \
-  collection-review save \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json \
-  --record-id <record-id> --status approved --note "Reviewed."
-
-pnpm --dir apps/polaris run polaris -- literature-review \
-  complete-collection-review \
-  --run-manifest <workspace>/literature-review/<run-id>/run.json
-```
-
-The collection continuation writes an auditable
-`outputs/review-output.json`, atomically replaces the pending collection with
-`clue.data-collection.output.v2` status `final`, and resumes analysis. The
-standalone `tools/collection-review/clue-collection-review` entrypoint exposes
-the same state machine for cell-level diagnostics.
+The analysis-review export is `clue.manual-review.result.v2`, bound to each
+claim's `review_key` and `revision_hash`. Collection continuation writes an
+auditable `outputs/review-output.json`, atomically replaces the pending
+collection with `clue.data-collection.output.v2` status `final`, and
+resumes analysis.
 
 The lower-level migrated CLIs remain available under `tools/` for debugging:
 

@@ -89,10 +89,10 @@
     "analysis": ["intelligence-analysis", "intelligence-analysis/literature-review", "codex"],
     "report": ["report-writing"],
     "skills": [
-      "skills/polaris-literature-review",
-      "skills/polaris-literature-collection",
-      "skills/polaris-literature-analysis",
-      "skills/polaris-literature-report"
+      "packs/autoresearch/skills/polaris-literature-review",
+      "packs/autoresearch/skills/polaris-literature-collection",
+      "packs/autoresearch/skills/polaris-literature-analysis",
+      "packs/autoresearch/skills/polaris-literature-report"
     ],
     "setup": []
   },

@@ -35,15 +35,12 @@ template to introduce a new conclusion.
 
 ## Fixed literature workflows (`packs/autoresearch`)
 
-When the case is registered as a `literature-review` workflow, prefer:
-
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <input.json> --workspace <workspace-id> --run-id <run-id>
-```
+When the case is registered as `AutoResearch` / `LiteratureReview`, submit
+it from the Portal work desk or the workflow API. There is no
+`polaris -- literature-review` command.
 
 Report stage bindings live under `stages.report-writing` (`report_id`,
-`root_path`, `template`, `steps`). The workflow runner invokes
+`root_path`, `template`, `steps`). The Domain Pack invokes
 `clue-report-writing run` with `{{analysis_output}}`, `{{report_*}}`, and
 stable case session at `<report-root>/runs/codex-session.json`.
 

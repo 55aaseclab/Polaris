@@ -7,7 +7,7 @@ import {
   installSkills,
   listAvailableSkills,
   resolveInstallRoot,
-} from "../scripts/install-skills.js";
+} from "../apps/polaris/scripts/install-skills.js";
 
 function withTempDir<T>(run: (dir: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-skills-"));

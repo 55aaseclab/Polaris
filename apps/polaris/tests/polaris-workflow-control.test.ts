@@ -493,6 +493,67 @@ test("setup atomically enqueues every enabled flow and completes manual review",
   }
 });
 
+test("host retry requeues the same run id and keeps completed steps", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack, { vaults: [] });
+    const created = await service.createRun("tenant-host-retry", {
+      packId: pack.id,
+      flowId: "Summarize",
+      driver: "none",
+      values: { subject: "retry-same-run" },
+    });
+    const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
+    store.recordWorkflowStepResult({
+      id: `step-${created.id}-1`,
+      sequence: 1,
+      runId: created.id,
+      tenantId: "tenant-host-retry",
+      stepId: "summarize",
+      stepLabel: "Summarize",
+      status: "completed",
+      detail: "completed before failure",
+      input: { subject: "retry-same-run" },
+      output: { summary: "keep this step" },
+      outputFields: ["summary"],
+      createdAt: "2026-09-11T00:00:00.000Z",
+      completedAt: "2026-09-11T00:00:00.000Z",
+    });
+    store.updateWorkflowRun({
+      tenantId: "tenant-host-retry",
+      runId: created.id,
+      status: "failed",
+      progress: 40,
+      errorCode: "workflow-execution-failed",
+      errorMessage: "synthetic host failure",
+      event: {
+        kind: "failed",
+        title: "工作流执行失败",
+        detail: "synthetic host failure",
+        tone: "warning",
+      },
+    });
+    const before = store.getWorkflowRun("tenant-host-retry", created.id);
+    assert.equal(before?.steps.length, 1);
+    assert.equal(before?.steps[0]?.status, "completed");
+    assert.equal(before?.steps[0]?.output.summary, "keep this step");
+    store.close();
+    const retried = await service.retry("tenant-host-retry", created.id);
+    assert.equal(retried.id, created.id);
+    assert.equal(retried.source, "retry");
+    assert.equal(retried.status, "queued");
+    assert.equal(retried.steps.length, 1);
+    assert.equal(retried.steps[0]?.stepId, "summarize");
+    assert.equal(retried.steps[0]?.status, "completed");
+    assert.equal(retried.steps[0]?.output.summary, "keep this step");
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
 test("workflow cancellation, retry, tenant isolation, and lease denial are durable", { concurrency: false }, async () => {
   const fixture = testEnvironment();
   let service: WorkflowControlService | undefined;
@@ -515,6 +576,7 @@ test("workflow cancellation, retry, tenant isolation, and lease denial are durab
 
     const retried = await service.retry("tenant-a", queued.id);
     assert.equal(retried.source, "retry");
+    assert.equal(retried.id, queued.id);
     const store = PolarisControlStore.open(process.env.POLARIS_CONTROL_STORE_PATH!);
     assert.equal(store.revokeWorkflowCapabilityLease("tenant-a", retried.capabilityLeaseId), true);
     store.close();

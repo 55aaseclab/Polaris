@@ -13,12 +13,12 @@ You are a thin router over `tools/data-collection`. **Do not restate the full
 tool design.** For contracts, pipeline phases, source types, logging, and
 layout, read:
 
-- [`tools/data-collection/README.md`](../../tools/data-collection/README.md)
+- [`tools/data-collection/README.md`](../../README.md)
 
 Schemas (when editing `input.json` / checking outputs) — **repo root**:
 
-- [`schemas/clue.data-collection.input.v2.schema.json`](../../schemas/clue.data-collection.input.v2.schema.json)
-- [`schemas/clue.data-collection.output.v2.schema.json`](../../schemas/clue.data-collection.output.v2.schema.json)
+- [`schemas/clue.data-collection.input.v2.schema.json`](../../../../schemas/clue.data-collection.input.v2.schema.json)
+- [`schemas/clue.data-collection.output.v2.schema.json`](../../../../schemas/clue.data-collection.output.v2.schema.json)
 
 `collection_kind`: `literature` | `customer-leads` | **`ad-content-intel`**.
 
@@ -143,15 +143,9 @@ data-collection → intelligence-analysis
 # analysis_kind: ad-content-review (IA shell; executor empty for now)
 ```
 
-For literature cases, use the Polaris literature-review CLI:
-
-```sh
-set -a && source .env.dev && set +a
-pnpm --dir apps/polaris run polaris -- literature-review plan
-pnpm --dir apps/polaris run polaris -- literature-review validate --input <input.json>
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <input.json> --workspace <workspace-id> --run-id <run-id>
-```
+For literature cases, submit `AutoResearch` / `LiteratureReview` from the
+Portal work desk or the workflow API. There is no
+`polaris -- literature-review` command.
 
 When a stage has non-empty `steps`, do not bypass with a one-off
 `./clue-data-collection run` unless asked. Empty `steps` = reuse prepared
@@ -162,5 +156,6 @@ artifacts only.
 - Prefer real paths under `POLARIS_LITERATURE_WORKSPACES_ROOT`; never invent evidence.
 - Do not invent unsupported `source_type` / `collection_kind`.
 - Collection yields **candidates**, not conclusions.
-- Prefer the Polaris literature-review command for registered literature runs.
+- Prefer the `AutoResearch` / `LiteratureReview` Domain Pack for registered
+  literature runs.
 - Deep design, flags, catalog, logging → **`tools/data-collection/README.md`**.

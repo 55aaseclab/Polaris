@@ -12,10 +12,12 @@ not a second execution engine.
 The default execution target is the Polaris host. No Vault is required for a
 host run: `driver=none` sends the admitted workflow to the host worker.
 
-A Vault is an optional execution backend. When a concrete Vault driver is
-selected, Polaris performs the normal ownership and readiness checks and runs
-the workflow there. The Portal does not require users to understand this
-distinction for ordinary work.
+A Vault is an optional target in 0.4.0, not a real executor. When a concrete
+Vault is selected, Polaris still performs ownership and readiness checks,
+then runs the compatibility mock host and persists `mode: "mock"`. A real
+`mode: "vault"` executor is [Polaris 0.5.0](/operations/polaris-0.5.0/)
+work. The Portal does not require users to understand this distinction for
+ordinary work.
 
 ## Optional Vault setup
 
@@ -56,75 +58,45 @@ reconstructs its state from Polaris rather than from browser memory.
 
 ## Literature Review from `/work`
 
-The Literature Review host path is a real Polaris workflow, not a synthetic
-Portal card. To run it:
+Literature Review is the first-party `AutoResearch` pack in
+`packs/autoresearch/`. It is a durable Polaris workflow, not a synthetic
+Portal card and not a separate CLI. To run it:
 
 1. Open `/work` and select **新建工作**.
-2. Choose **Systems Security Research** and **文献综述**
-   (`LiteratureReview`).
-3. Leave the execution target as **Polaris host（无 Vault）**.
+2. Choose **autoresearch** and **Literature Review**.
+3. Leave the execution target as **Polaris host（无 Vault）** for a host run.
 4. Enter the research question and submit the work.
 5. Open the resulting card. It returns immediately with a queued or running
    projection while Polaris executes collection, analysis, and report writing.
-6. When the run completes, open `report.md` or `report.pdf` from the run-detail
-   page. `/debug` shows the same durable run and stage events.
+6. When the run completes, open the projected Markdown or PDF artifact from
+   the run-detail page. `/debug` shows the same durable run and stage events.
 
-No Vault is needed for this path. To test the optional Vault branch, choose
-**Vault（使用已运行的 Vault）** in step 3 and select a Vault reported as
-`running`.
+No Vault is needed for the host path. To test the optional Vault branch,
+choose **Vault（使用已运行的 Vault）** in step 3 and select a Vault reported
+as `running`.
 
-This verifies Domain Pack discovery, host admission, immutable pack pinning,
-durable leasing, asynchronous queue processing, replayable events, and real
-Literature Review artifact projection. A Vault target additionally verifies
-Vault ownership and readiness admission.
+This verifies Domain Pack discovery from `packs/`, host admission, immutable
+pack pinning, durable leasing, asynchronous queue processing, replayable
+events, and Literature Review artifact projection. A Vault target
+additionally verifies Vault ownership and readiness admission.
 
 ## Current execution boundary
 
-For `SysSecResearch/LiteratureReview` with `driver=none`, Polaris runs the
-versioned host adapter in
-`workflows/literature-review/polaris-literature-review`. Its collection,
-analysis, Markdown, TeX/BibTeX, and PDF outputs are projected from the scoped
-host workspace into the durable run.
+`AutoResearch/LiteratureReview` with `driver=none` is a host run. Polaris
+persists `mode: "host"` and executes the compiled pack through the host
+tool dispatcher. Collection, analysis, and report adapters live under
+`tools/`. There is no `workflows/literature-review` tree and no
+`polaris -- literature-review` command.
 
-Other Domain Pack flows still use the deterministic workflow FFI path, and the
-current Vault Literature Review branch remains the compatibility mock path.
-Those runs are labeled `mode: "mock"` and must not be interpreted as real
-external execution.
+A Vault-target Literature Review run remains the compatibility mock path.
+Those runs persist `mode: "mock"` and must not be interpreted as real
+Vault execution. Real `mode: "vault"` is postponed to
+[Polaris 0.5.0](/operations/polaris-0.5.0/). Live
+`vault.artifact.metadata.read` exists only on the operator admission path.
 
-## Real Polaris Literature Review
-
-The same 18-node Literature Review implementation used by the host adapter
-lives in `workflows/literature-review/`. Its local execution path is documented
-in that directory's `README.md` and uses a versioned
-`clue.data-collection.input.v2` file.
-
-The quality-oriented local path is:
-
-```bash
-export POLARIS_LITERATURE_WORKSPACES_ROOT=.runtime/literature-workspaces
-export POLARIS_LITERATURE_CACHE_ROOT=.runtime/literature-cache
-export POLARIS_LITERATURE_RUNTIME_MODE=local
-
-pnpm --dir apps/polaris run polaris -- literature-review validate \
-  --input <collection-input.json>
-
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <collection-input.json> \
-  --workspace <workspace-id> \
-  --run-id <run-id> \
-  --network allow \
-  --review-mode manual-review \
-  --literature-method iterate \
-  --report-mode reviewed
-```
-
-That path performs collection, citation/reference expansion, PDF augmentation,
-collection review, evidence-bound claim analysis, analysis review, report
-review, Markdown publication, TeX/BibTeX generation, and PDF rendering.
-
-`POLARIS_LITERATURE_RUNTIME_MODE=polaris` is intentionally fail-closed for
-direct CLI execution. An integrated live run must eventually be submitted as
-a Polaris durable job backed by a reviewed disposable execution cell.
+Retry of a failed or cancelled run requeues the same run id and skips
+completed steps. It does not create a new run for host or Vault-target
+paths.
 
 ## Conversation boundary
 

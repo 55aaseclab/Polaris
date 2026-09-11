@@ -13,9 +13,11 @@ Polaris/private surface boundary.
 ## Why 0.5.0 Exists
 
 0.3.x proved a single-host control plane and a **20 active vault** package.
-0.4.0 plans work/workflow surfaces. Real buyers in the 10–20 isolation band
-still hit product gaps before they will run a semester lab, a delivery pod, or
-a pure **local deployment** without Authing.
+0.4.0 owns the host workflow path and keeps Vault-target runs
+`mode: "mock"`. Real buyers in the 10–20 isolation band still hit product
+gaps before they will run a semester lab, a delivery pod, or a pure
+**local deployment** without Authing. Real `mode: "vault"` execution is
+also 0.5.0 work.
 
 The sharpest example:
 
@@ -127,8 +129,8 @@ Suggested build order:
 | Release | Focus |
 | --- | --- |
 | 0.3.x | Control plane, perimeter, **20-seat capacity identity** |
-| 0.4.0 | WorkEnvelope, workflow IR, activity → workflow |
-| **0.5.0** | **Local identity, cohort lifecycle, scenario packaging, local deploy** |
+| 0.4.0 | WorkEnvelope, host workflow path, mock Vault-target runs |
+| **0.5.0** | **Local identity, cohort lifecycle, scenario packaging, `mode: "vault"`, Vault-target `ops workflow-smoke`** |
 
 0.5.0 should consume 0.3.3 limits and may call 0.4.0 work items later (for
 example exam “submit” as a work envelope). It must not block 0.4.0, and must

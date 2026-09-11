@@ -18,7 +18,7 @@ Use this skill as the local mapping layer for `ads-system-setup`.
 
 ## Skill files
 
-- `creative` -> `skills/polaris-content-production/SKILL.md`
+- `creative` -> `tools/content-production/skills/polaris-content-production/SKILL.md`
 
 ## Source
 

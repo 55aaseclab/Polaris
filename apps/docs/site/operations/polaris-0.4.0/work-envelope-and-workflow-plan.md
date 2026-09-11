@@ -86,8 +86,10 @@ run source. The run stores the same immutable pin rather than a mutable
 catalog reference. If the exact source is missing or drifted, admission
 returns `pack-pin-unavailable`; it does not fall back to another version.
 
-The policy decision is persisted on the run. Current decisions are always
-`allow` with `mode: mock` and explicit reasons such as:
+The policy decision is persisted on the run. Vault-target and provisioning
+runs are `allow` with `mode: mock`. Host runs (`driver=none`) persist
+`mode: host`. Live mode exists only on the operator metadata-admission
+path. Typical Vault reasons are:
 
 ```text
 pack-digest-pinned
@@ -118,8 +120,9 @@ next worker recovers an expired claim.
 When a run reaches `waiting`, Polaris clears the worker owner and expiry. A
 human approval changes the run to `running` with an approval marker, and the
 next deterministic worker pass resumes it. Cancellation clears ownership and
-is terminal. Retry always creates a new run with source `retry`; the old run
-and its evidence remain immutable.
+is terminal until retry. Retry requeues the same run id with source
+`retry` and skips completed steps. It does not create a new run. Event
+history on that run stays immutable.
 
 The current worker is deterministic. It does not ask a model to choose a
 flow, invent a port, change a plan, or select a Vault. AI-assisted workflow
@@ -191,15 +194,16 @@ GET  /api/domain-packs
 GET  /api/workflow-vaults
 GET  /api/workflow-setup
 PUT  /api/workflow-setup
-GET  /api/workflow-runs
-POST /api/workflow-runs
-GET  /api/workflow-runs/:runId
-GET  /api/workflow-runs/:runId/events?after=<cursor>
-POST /api/workflow-runs/:runId/approve
-POST /api/workflow-runs/:runId/cancel
-POST /api/workflow-runs/:runId/retry
-GET  /api/workflow-suggestions
-POST /api/workflow-suggestions
+GET    /api/workflow-runs
+POST   /api/workflow-runs
+GET    /api/workflow-runs/:runId
+DELETE /api/workflow-runs/:runId
+GET    /api/workflow-runs/:runId/events?after=<cursor>
+POST   /api/workflow-runs/:runId/approve
+POST   /api/workflow-runs/:runId/cancel
+POST   /api/workflow-runs/:runId/retry
+GET    /api/workflow-suggestions
+POST   /api/workflow-suggestions
 ```
 
 All routes require the mapped Portal session and use the current tenant ID.
@@ -246,8 +250,6 @@ pnpm --filter polaris-tools test
 pnpm --filter polaris exec tsc --noEmit
 pnpm --filter polaris exec tsx --test tests/polaris-control-store.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-control.test.ts
-pnpm --filter polaris exec tsx --test tests/polaris-workflow-smoke.test.ts
-pnpm --filter polaris run smoke:workflow
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-live-boundary.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-portal.test.ts
 pnpm --filter polaris-portal test
@@ -268,12 +270,16 @@ Implemented here:
 - generic RPC and `manual.review` interface;
 - first-party `polaris-tools` catalog owned by Polaris;
 - automatic provisioning enqueue;
-- repeatable mocked workflow smoke command;
-- mock-only host and synthetic artifacts; and
+- mock-only Vault-target host and synthetic artifacts; and
 - non-executable deterministic suggestions.
+
+`ops workflow-smoke` is postponed to [Polaris 0.5.0](../polaris-0.5.0/)
+with the real `mode: "vault"` executor.
 
 Not enabled here:
 
+- real `mode: "vault"` execution inside a selected Vault (postponed to
+  [Polaris 0.5.0](../polaris-0.5.0/));
 - live Vault tool adapters or package installation into Vaults;
 - private surface mutation calls from a workflow;
 - external email, outreach, deployment, deletion, or credential effects;

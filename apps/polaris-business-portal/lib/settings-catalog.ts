@@ -172,26 +172,47 @@ function scanTools(repoRoot: string): SettingsTool[] {
     .sort((left, right) => left.title.localeCompare(right.title, "zh-CN"));
 }
 
+function collectSkillDirectories(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((owner) => {
+      const skillsRoot = path.join(root, owner.name, "skills");
+      if (!fs.existsSync(skillsRoot)) return [];
+      return fs
+        .readdirSync(skillsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(skillsRoot, entry.name));
+    });
+}
+
 function scanSkills(repoRoot: string): SettingsSkill[] {
-  const sources: Array<{ path: string; source: SettingsSkill["source"] }> = [
-    { path: path.join(repoRoot, "skills"), source: "repo" },
+  const sources: Array<{ path: string; source: SettingsSkill["source"]; nested?: boolean }> = [
+    { path: path.join(repoRoot, "tools"), source: "repo", nested: true },
+    { path: path.join(repoRoot, "packs"), source: "repo", nested: true },
     { path: path.join(repoRoot, "third_party", "social-auto-upload", "skills"), source: "bundled" },
   ];
   const skills: SettingsSkill[] = [];
 
   for (const source of sources) {
-    if (!fs.existsSync(source.path)) continue;
-    for (const entry of fs.readdirSync(source.path, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const skillPath = path.join(source.path, entry.name, "SKILL.md");
+    const skillDirs = source.nested
+      ? collectSkillDirectories(source.path)
+      : fs.existsSync(source.path)
+        ? fs.readdirSync(source.path, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => path.join(source.path, entry.name))
+        : [];
+    for (const skillDir of skillDirs) {
+      const skillPath = path.join(skillDir, "SKILL.md");
       const skillText = readFileIfPresent(skillPath);
       if (!skillText) continue;
       skills.push({
         description: firstMarkdownParagraph(skillText) || "仓库技能说明。",
-        id: entry.name,
+        id: path.basename(skillDir),
         path: relativeRepoPath(repoRoot, skillPath),
         source: source.source,
-        title: firstMarkdownHeading(skillText) || startCase(entry.name),
+        title: firstMarkdownHeading(skillText) || startCase(path.basename(skillDir)),
       });
     }
   }

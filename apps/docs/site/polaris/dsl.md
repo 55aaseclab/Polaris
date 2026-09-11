@@ -425,58 +425,12 @@ effect.
 A Domain Pack file is one `.ord`, or a directory whose `main.ord` is the
 declaration. First-party packs live in `packs/`.
 
-### Minimum first-party pack
+### First-party research pack
 
-`packs/vault-knowledge-health/main.ord` is the smallest
-installed business domain. It keeps Vault operations in the pack, not in the
-kernel. The flow calls `ArtifactMetadata@1.0.0`. Polaris maps that port to
-the Common tool `vault.artifact.metadata.read`. Ordinary Portal runs still
-use mock policy.
-
-```text
-domain VaultKnowledgeHealth version "1.0.0"
-title "Vault Knowledge Health"
-
-port ArtifactMetadata version "1.0.0" {
-  in { artifactScope: String? }
-  out {
-    artifactCount: Number
-    latestTitles: String
-    pendingMemoryChanges: Number
-  }
-  effect read
-}
-
-flow ReviewKnowledgeHealth title "Review knowledge health" create {
-  needs { ArtifactMetadata }
-  input {
-    artifactScope: String control text label "Artifact scope"
-  }
-  steps {
-    metadata "Read Vault metadata" {
-      uses { artifactScope }
-      call ArtifactMetadata
-      output {
-        artifactCount: Number
-        latestTitles: String
-        pendingMemoryChanges: Number
-      }
-    }
-  }
-  output {
-    artifactCount: Number from artifactCount
-    latestTitles: String from latestTitles
-    pendingMemoryChanges: Number from pendingMemoryChanges
-  }
-  ui { layout form primary "Review" }
-}
-```
-
-### Research pack
-
-`packs/autoresearch/main.ord` is a larger v0.3 pack. Collection, analysis,
-and report production are pack ports, not language features. Bindings such as
-`literature.collection` remain Host symbols.
+`packs/autoresearch/main.ord` is the first-party v0.3 Literature Review
+pack. Polaris discovers it from `packs/` without `pack add`. Collection,
+analysis, and report production are pack ports, not language features.
+Bindings such as `literature.collection` remain Host symbols.
 
 ```text
 dsl version "0.3"

@@ -3,9 +3,39 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [0.4.0] - 2026-09-11
+
+Released the host workflow slice on the shipped `0.3.4` single-host
+baseline. Ordinary Portal work can run `AutoResearch` / `LiteratureReview`
+as a host run. Vault-target runs stay `mode: "mock"`. A real
+`mode: "vault"` executor and `ops workflow-smoke` remain
+[Polaris 0.5.0](apps/docs/site/operations/polaris-0.5.0/) work.
+
+### Added
+
+- Durable host workflow admission for `driver=none`, persisted as
+  `mode: "host"`.
+- Same-run retry: failed or cancelled runs requeue the same run id and
+  skip completed steps.
+
+### Changed
+
+- First-party Literature Review is the `AutoResearch` pack at
+  `packs/autoresearch/`. Skills live next to their tool or pack under
+  `<owner>/skills/`; the repository-level `skills/` tree is gone.
+- Removed `packs/vault-knowledge-health`.
+
+### Deferred
+
+- Real `mode: "vault"` execution and Vault-target `ops workflow-smoke`.
+- Additional live executor families beyond the operator-only
+  `vault.artifact.metadata.read` pilot.
+- A new designated-host candidate. This source tag does not require a
+  new m00 promotion.
+
 ## [0.3.4] - 2026-09-11
 
-Released the current single-host working baseline after the archived 0.3.3
+Released the single-host working baseline after the archived 0.3.3
 capacity ship. This release keeps the reviewed envelope at 20 active vaults
 and consolidates the control/vault-data, Portal, Paseo, and Wanghai-migration
 state. Workflow live tools remain out of this release.

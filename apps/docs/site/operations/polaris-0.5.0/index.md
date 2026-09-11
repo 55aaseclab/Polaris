@@ -27,6 +27,16 @@ cohorts are short-lived (class, exam, hackathon, PoC).
    the 20-seat baseline.
 5. **Evidence for buyers** — isolation and audit exports good enough for a
    pilot security questionnaire.
+6. **Real Vault workflow execution** — persist and implement `mode: "vault"`
+   so a selected running Vault is the executor, not the 0.4.0 mock host.
+   Keep the same WorkEnvelope, pack pin, capability lease, receipt, and
+   audit contract. Do not invent a second scheduler in private surface.
+7. **Vault-target workflow smoke** — keep `ops workflow-smoke` as the
+   operator-facing proof for the Vault-target path. Today it installs a
+   synthetic pack into a temp data root and drives mocked setup,
+   approval, receipts, artifacts, and a suggestion. After `mode: "vault"`
+   exists, that command should prove a selected running Vault, not the
+   0.4.0 mock host.
 
 ## Documents
 
@@ -36,7 +46,9 @@ cohorts are short-lived (class, exam, hackathon, PoC).
 
 - 0.3.3 capacity identity (`maxActiveVaults=20`) and resource baseline remain
   the package size.
-- 0.4.0 WorkEnvelope/workflow work can proceed in parallel; 0.5.0 must not
-  make private surface a second identity or lifecycle control plane.
+- 0.4.0 ships the host workflow path and keeps Vault-target runs
+  `mode: "mock"`. 0.5.0 owns the real `mode: "vault"` executor and the
+  Vault-target `ops workflow-smoke` proof. 0.5.0 must not make private
+  surface a second identity, lifecycle, or workflow control plane.
 - Formal Authing mode stays supported; local auth is an additional mode for
   air-gapped and campus-local installs, not a removal of enterprise IdP.

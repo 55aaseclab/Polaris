@@ -12,9 +12,20 @@ find "$target_dir" -mindepth 1 -maxdepth 1 \
   -exec rm -rf {} +
 mkdir -p "$target_dir/skills"
 find "$target_dir/skills" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-cp -R skills/. "$target_dir/skills/"
+
+copy_owned_skills() {
+  local owner_root="$1"
+  [ -d "$owner_root" ] || return 0
+  for owner in "$owner_root"/*; do
+    [ -d "$owner/skills" ] || continue
+    find "$owner/skills" -mindepth 1 -maxdepth 1 -type d -exec cp -R {} "$target_dir/skills/" \;
+  done
+}
+
+copy_owned_skills tools
+copy_owned_skills packs
 
 find "$target_dir/skills" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$target_dir/skills" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
-echo "copied skills/ to $target_dir/skills"
+echo "copied tool/pack skills to $target_dir/skills"

@@ -132,21 +132,24 @@ Vault implicitly.
 
 ### 1.4 Domain Pack Catalog
 
-Polaris installs each Domain Pack through `pack add` after the
-[Polaris DSL](./dsl.md) pipeline: parse, import resolution, validation, and
-compilation. The immutable source and manifest remain under the control data
-root, outside every Vault. The Portal API reads that store on each
-authenticated catalog request and exposes only verified installations. A
-source whose digest no longer matches its manifest is omitted from the
-catalog.
+Polaris discovers first-party packs from `packs/` and extra versions from
+the control-store install root after the [Polaris DSL](./dsl.md) pipeline:
+parse, import resolution, validation, and compilation. Extra versions
+installed with `pack add` keep an immutable source and manifest under the
+control data root, outside every Vault. The Portal API reads that combined
+catalog on each authenticated request and exposes only verified
+installations. A source whose digest no longer matches its manifest is
+omitted from the catalog.
 
 The projection is descriptive. It carries the pack version and digest, flow
 titles and summaries, input controls, capabilities, and whether a flow reaches
 a human approval port. It carries no prompt, command, path, credential, or
 execution binding. The current Portal binds the selected projection to a
-durable Polaris run. `driver=none` uses the Polaris host adapter for
-`SysSecResearch/LiteratureReview`; other flows use the deterministic FFI host,
-and a concrete Vault target uses the compatibility Vault path.
+durable Polaris run. `driver=none` uses the Polaris host adapter and persists
+`mode: "host"`. The first-party Literature Review flow is
+`AutoResearch/LiteratureReview`. A concrete Vault target uses the
+compatibility mock path and persists `mode: "mock"`. Real `mode: "vault"`
+execution is postponed to [Polaris 0.5.0](/operations/polaris-0.5.0/).
 
 The browser keeps the hierarchy explicit: `domainPackId` is the selected work
 scene, while `enabledWorkflowKeys` contains individual `packId:flowId` entries.
@@ -350,9 +353,10 @@ The run keeps `packVersion`, `packDigest`, optional `vaultId`, execution driver,
 and the submitted input snapshot. Approval, cancellation, retry, and failure
 are durable server transitions. The Debug page only selects a run and
 displays replayable events; it cannot mutate run state by editing browser
-data. `driver=none` on `SysSecResearch/LiteratureReview` runs the migrated
-collection-to-report workflow on a tenant-scoped Polaris host workspace. Other
-flows retain the deterministic compatibility executor. All run control state
+data. `driver=none` on `AutoResearch/LiteratureReview` runs the compiled
+collection-to-report workflow on a tenant-scoped Polaris host workspace.
+Retry requeues that same run id and skips completed steps. Vault-target
+runs retain the deterministic compatibility executor. All run control state
 survives a Portal process restart in the existing control store.
 
 ## 4. Security, Resilience, And Concurrency

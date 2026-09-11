@@ -1,16 +1,15 @@
 # Polaris 0.4.0
 
-Status: **in progress on the shipped `0.3.4` baseline**. The Phase 3-6
+Status: **shipped as source tag `0.4.0` on 2026-09-11**. The Phase 3-6
 deterministic control slice is in the tree. The Portal is the work console,
 Domain Packs and workflow definitions live outside every Vault, and each run
 is bound to one selected Vault or the Polaris host. Execution remains a
 Polaris-owned host or mock host: no real Agent, registry adapter, external
 tool, or private surface action is enabled by this slice. An isolated
 operator drill exists for the disabled read-only Vault metadata pilot. The
-minimum first-party business domain, `VaultKnowledgeHealth@1.0.0`, is
-implemented and maps `ArtifactMetadata@1.0.0` to
-`vault.artifact.metadata.read`. Ordinary Vault-target workflow runs still
-use the mock host.
+first-party Literature Review pack is `AutoResearch` /
+`LiteratureReview`. Ordinary Vault-target workflow runs still use the mock
+host.
 
 This page is the authoritative summary of the 0.4.0 implementation state.
 It separates the product contract, the current mock boundary, and later live
@@ -19,11 +18,11 @@ external side effect.
 
 ## Remaining Work
 
-Code is the ground truth. 0.4.0 is an in-progress workflow slice on the
-shipped `0.3.4` baseline. It is not a released version: `CHANGELOG.md`,
-`deploy/release-manifest.json`, and `POLARIS_RELEASE_ID` still say `0.3.4`.
+Code is the ground truth. 0.4.0 is the host-workflow source tag on the
+shipped `0.3.4` single-host baseline. `CHANGELOG.md`,
+`deploy/release-manifest.json`, and `POLARIS_RELEASE_ID` now say `0.4.0`.
 
-### Already in the tree
+### Already in this tag
 
 - Durable mock workflow control: verified packs, WorkEnvelope admission,
   immutable pack pins, Vault capability leases, queue, worker recovery,
@@ -31,74 +30,74 @@ shipped `0.3.4` baseline. It is not a released version: `CHANGELOG.md`,
   non-executable suggestions.
 - `packages/polaris-tools` is the first-party catalog. Polaris derives the
   disabled live action catalog from it.
-- `packs/vault-knowledge-health/main.ord` is `VaultKnowledgeHealth@1.0.0`.
-  `ReviewKnowledgeHealth` declares `ArtifactMetadata@1.0.0`; Polaris maps
-  that call to `vault.artifact.metadata.read`.
 - Repository packs under `packs/` are discovered as built-in. `pack add`
   installs extra versions under `$POLARIS_DATA_ROOT/control/domain-packs/`.
+- `packs/vault-knowledge-health/` is removed. The first-party Portal pack
+  is `AutoResearch`.
 - `polaris-workflow` has a separately gated `v0.4-trial` surface. It is not
   wired into the ordinary Portal worker.
 - Literature Review is the `AutoResearch` / `LiteratureReview` pack at
   `packs/autoresearch/`, with reusable adapters under `tools/`. There is no
   `workflows/literature-review` tree and no `polaris -- literature-review`
   CLI command.
-- Ordinary Portal vault runs persist `mode: "mock"`. Host runs
-  (`driver=none`) persist `mode: "host"`. Live mode exists only on the
-  operator metadata-admission path.
+- Ordinary Portal vault-target runs persist `mode: "mock"` and
+  `executionDriver: "vault"`. That is the compatibility mock path, not a
+  real Vault executor. Host runs (`driver=none`) persist `mode: "host"`.
+  Live mode exists only on the operator metadata-admission path.
+- Retry requeues the same run id with source `retry` and skips completed
+  steps. It does not create a new run for host or Vault-target paths.
 - The live tool gateway, metadata executor family, candidate worker route,
   operator admission command, receipt reconciliation, and isolated drill
   exist for `vault.artifact.metadata.read` only.
 
+### Accepted into this tag
+
+- Retry requeues the same run id and skips completed steps for host and
+  Vault-target paths. `requeueWorkflowRun` is the only retry path.
+- `packs/vault-knowledge-health/` is deleted. `AutoResearch` is the
+  first-party Portal pack.
+- Skills live next to their tool or pack. The repository-level `skills/`
+  tree is gone.
+- Ordinary Portal host path: `AutoResearch` / `LiteratureReview` completed
+  with the target left as Polaris host.
+
+Leftover `tools/codex` and `tools/report-writing` runner diffs stay out of
+this tag.
+
+### Explicitly not 0.4.0
+
+These are later authority boundaries. They do not block the 0.4.0 tag:
+
+- Real `mode: "vault"` execution inside a selected Vault. Postponed to
+  [Polaris 0.5.0](../polaris-0.5.0/).
+- Additional live executor families beyond the operator-only
+  `vault.artifact.metadata.read` pilot.
+- AI-assisted workflow generation, a real Vault Host, private-surface
+  mutation, or autonomous Agent execution.
+- Wiring `v0.4-trial` into the ordinary Portal worker.
+- `ops workflow-smoke` as operator-facing proof that a Vault-target path
+  is mock-only. That command installs a synthetic pack into a temp data
+  root and drives mocked setup, approval, receipts, artifacts, and a
+  suggestion. Postpone it to [Polaris 0.5.0](../polaris-0.5.0/) with the
+  real `mode: "vault"` executor.
+
 ### Must stay true while finishing 0.4.0
 
-- [ ] Do not bump `POLARIS_RELEASE_ID`, the release manifest, or a `0.4.0`
-  tag until the items below are accepted.
-- [ ] Keep ordinary UI-created setup, provisioning, and Vault-target manual
+- Keep ordinary UI-created setup, provisioning, and Vault-target manual
   or retry runs `mode: "mock"`.
-- [ ] Admit live `vault.artifact.metadata.read` only through
+- Keep host runs `mode: "host"`.
+- Admit live `vault.artifact.metadata.read` only through
   `ops workflow-admit-live-metadata` with both live flags, release evidence,
   candidate acknowledgement, and a current user-owned runnable Vault.
-- [ ] Add later live tools as executor families behind the same gateway. Do
-  not add one adapter per tool and do not expose live execution from private
-  surface, setup provisioning, or ordinary UI-created runs.
-- [ ] Keep `v0.4-trial` out of the ordinary Portal worker.
-- [ ] Do not enable a real Vault Host, private-surface mutation, external
-  Agent, or AI-assisted workflow generation in this slice.
+- Do not add `mode: "vault"` or one adapter per tool in this slice.
 
-### Docs that no longer match the code
+### After this tag
 
-- [ ] Rewrite claims that Literature Review lives at
-  `workflows/literature-review` or is launched by
-  `pnpm --dir apps/polaris run polaris -- literature-review`. The current
-  CLI workflow commands are `pack`, `ops workflow-smoke`,
-  `ops workflow-admit-live-metadata`, and `ops workflow-live-metadata-drill`.
-- [ ] Rewrite [Polaris usage](/polaris/usage) host-adapter and
-  `SysSecResearch` paths so they match `packs/autoresearch` and the Portal
-  host / Vault drivers.
-- [ ] Say that built-in packs are discovered from `packs/`. `pack add` is
-  for extra or overridden versions, not the only way to see first-party
-  packs.
-- [ ] Document that host runs use `mode: "host"` and Vault runs use
-  `mode: "mock"`. Do not call every ordinary UI run mock-only.
-- [ ] Add `DELETE /api/workflow-runs/:runId` to the Portal API contract if
-  that route stays.
-
-### Product checks still missing
-
-- [ ] Run the ordinary Portal path in the target environment: select
-  `VaultKnowledgeHealth`, choose host or a user-owned runnable Vault, and
-  complete `ReviewKnowledgeHealth`.
-- [ ] Decide whether host retry should requeue the same run id and skip
-  completed steps. Uncommitted `requeueWorkflowRun` work is not in `0.3.4`
-  and is not accepted 0.4.0 behavior yet.
-- [ ] Keep `ops workflow-smoke` as the operator-facing proof that the
-  default path is mock-only.
-
-### When this slice is accepted
-
-- [ ] Date `CHANGELOG.md` as `[0.4.0]`.
+- [x] Date `CHANGELOG.md` as `[0.4.0]`.
+- [x] Bump `POLARIS_RELEASE_ID` and `deploy/release-manifest.json`.
+- [x] Tag `0.4.0`, not `v0.4.0`.
 - [ ] Cut a reviewed designated-host candidate only if operators need one.
-- [ ] Tag `0.4.0`, not `v0.4.0`.
+  A source tag does not require a new m00 promotion.
 
 ## Product Boundary
 
@@ -124,9 +123,9 @@ Domain Pack outside Vault
 
 The current mock host runs in the Polaris process and simulates a
 Vault-scoped host. It still carries tenant ID, Vault ID, pack digest, and
-lease identity in every RPC request. Replacing it with a real Vault adapter
-must preserve that envelope; it must not move workflow authority into a
-Vault, private surface, or the browser.
+lease identity in every RPC request. A real `mode: "vault"` adapter is
+0.5.0 work. When it arrives, it must preserve that envelope and must not
+move workflow authority into a Vault, private surface, or the browser.
 
 The official tool catalog lives in `packages/polaris-tools`. Polaris derives
 the disabled live action catalog from that package. There is no second tool
@@ -176,7 +175,8 @@ After setup or successful Vault provisioning, each enabled flow gets one
 deduplicated provisioning run. A run can be `queued`, `running`, `waiting`,
 `succeeded`, `failed`, or `cancelled`. A waiting run releases its worker
 lease, so approval can be claimed by the next worker pass. A cancelled run
-cannot be claimed again; retry creates a new run with source `retry`.
+cannot be claimed again; retry requeues the same run with source `retry`
+and skips completed steps.
 
 ## Phase Status
 
@@ -298,7 +298,6 @@ pnpm --filter polaris exec tsx --test tests/polaris-workflow-live-metadata-drill
 pnpm --filter polaris run test:domain-packs
 pnpm --filter polaris exec tsx --test tests/polaris-portal.test.ts
 pnpm --filter polaris-portal test
-pnpm --filter polaris run smoke:workflow
 git diff --check
 ```
 
@@ -315,11 +314,9 @@ port, private surface listener, or second scheduler is introduced.
 The migrated implementation preserves the existing versioned `clue.*` input
 and output contracts. Its local durable layout keeps collection artifacts under
 `<workspace>/data-collections/<collection-id>/` and run artifacts under
-`<workspace>/literature-review/<run-id>/`. The public entry point is:
-
-```text
-pnpm --dir apps/polaris run polaris -- literature-review
-```
+`<workspace>/literature-review/<run-id>/`. The public entry point is the
+`AutoResearch` / `LiteratureReview` Domain Pack from the Portal work desk
+or the workflow API. There is no `polaris -- literature-review` command.
 
 The collection path retains the fixed phases collection → citation/reference
 expansion → augmentation/PDF capture → review. A manual collection review is
@@ -350,8 +347,8 @@ synthetic fixtures and do not call private surface or external providers.
 | `65b58d5` | Candidate ordinary-worker wiring for `vault.artifact.metadata.read`. The workflow runtime now has an async FFI path, the Polaris worker routes only durable live-policy `ArtifactMetadata@1.0.0` read calls through the candidate helper, requires both live flags and focused deployment evidence, writes no duplicate receipts, and fails closed without calling the reader when flags are unset. UI-created manual and provisioning runs remain mock-policy runs. | `polaris-workflow` typecheck/test; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run check`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `9270f27` | Operator admission path for the metadata pilot. `ops workflow-admit-live-metadata` requires operator identity, release id, both live flags, explicit candidate acknowledgement, a current user-owned runnable Vault, required flow inputs, an immutable installed pack digest, and exactly one compiled `ArtifactMetadata@1.0.0` read call before creating a durable `mode: "live"` run and `workflow.live.admit` audit event. Private surface, setup provisioning, and ordinary UI-created workflow runs remain non-execution surfaces. | `pnpm --filter polaris run check`; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `9a1ad1c` | Generic live tool gateway for the metadata pilot. `workflow-live-tool-gateway` owns common admission dispatch, executor-family matching, abort-signal propagation, receipt output, audit metadata, and failed admitted evidence recording. `vault.artifact.metadata.read` is now the first `polaris.projection` tool definition; the public portal shows executor family wording, and no additional live executable surface was added. | `pnpm --filter polaris run check`; `polaris-workflow-live-tool-gateway`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, `polaris-workflow-live-metadata-drill`, `polaris-workflow-control`, and `polaris-portal`; `pnpm --filter polaris-tools test`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `2b5ec6c` | Minimum first-party business domain and pack-flow portal UX. Adds `VaultKnowledgeHealth@1.0.0`, projects `ReviewKnowledgeHealth`, maps `ArtifactMetadata@1.0.0` to `vault.artifact.metadata.read`, and keeps the catalog inspect-only with no execution material. | `pnpm --filter polaris-tools test`; `pnpm --filter polaris run check`; `pnpm --filter polaris run test:domain-packs`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `f284e9f` | Adds the separately versioned `v0.4-trial` AST/parser/compiler/runtime, bounded CVE-Genie graph, and the Polaris-owned literature-review workflow. Literature Review now owns its DSL, runner, skills, and environment contract in `workflows/literature-review/`; reusable implementations live once under `tools/`, and every trial node binds through `workflow.json`. v0.3 remains the default, and no trial or literature execution is wired to ordinary Portal live tools. | `polaris-workflow` typecheck/test; `polaris-tools` typecheck/test; `polaris` check; `polaris` test:smoke; `polaris` test:domain-packs; `polaris` test:literature-review; workflow smoke; final Docker image static-plan smoke; `git diff --check`; docs check |
+| `2b5ec6c` | Historical pack-flow portal UX for a later-removed Vault Knowledge Health pack. The current first-party business pack is `AutoResearch`. | `pnpm --filter polaris-tools test`; `pnpm --filter polaris run check`; `pnpm --filter polaris run test:domain-packs`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
+| `f284e9f` | Adds the separately versioned `v0.4-trial` AST/parser/compiler/runtime, bounded CVE-Genie graph, and the Polaris-owned literature-review workflow. Literature Review now lives in `packs/autoresearch/`; reusable implementations live once under `tools/`. v0.3 remains the default, and no trial or literature execution is wired to ordinary Portal live tools. | `polaris-workflow` typecheck/test; `polaris-tools` typecheck/test; `polaris` check; `polaris` test:smoke; `polaris` test:domain-packs; `polaris` test:literature-review; workflow smoke; final Docker image static-plan smoke; `git diff --check`; docs check |
 | `1b05212` | Imports private surface Literature Review history into a tenant/vault-scoped Polaris historical archive. The copy is byte/hash verified, marked historical-only, and does not create a new durable run. | Polaris Literature Review `18/18`; migration tests `3/3`; receipt verification `valid=true` |
 | `2922a4e` | Moves private surface business tools, contracts, and business-core implementation into Polaris-owned tool and business-core locations. | Business tool contract checks `5/5`; business-core typecheck/tests; focused path and schema checks |
 | `044cfac` | Moves the private surface business Portal surface into the Polaris business Portal while retaining the private surface gateway boundary. | Business Portal typecheck/tests; gateway and mutation-policy checks |
@@ -376,11 +373,10 @@ production approval, or proof of external side effects.
 ## Release Boundary
 
 The Phase 3-6 slice is source-complete when the focused checks above pass
-and the Portal contract remains unchanged. 0.4.0 is not a released version
-and is not a live Agent execution release. The ordinary Portal path can run
-`VaultKnowledgeHealth` as a host run or a mock Vault run. Live
+and the Portal contract remains unchanged. 0.4.0 is a host-workflow
+release, not a live Agent release and not a real Vault-executor release.
+The ordinary Portal path can run `AutoResearch` / `LiteratureReview` as a
+host run. A selected Vault target remains `mode: "mock"` until 0.5.0. Live
 `vault.artifact.metadata.read` remains behind the operator admission path
-and both deployment flags. The next boundary is live executor-family
-implementations behind the same Polaris gateway, admission, async host,
-receipt, and audit contract, without one adapter per tool. AI-assisted
-workflow generation remains an open later capability.
+and both deployment flags. AI-assisted workflow generation remains later
+work.

@@ -2,12 +2,13 @@
 
 ## Mission
 
-Maintain the shipped Polaris 0.3.4 source baseline on the inherited
+Maintain the shipped Polaris 0.4.0 source baseline on the inherited
 single-host 20-vault profile without a tenant-boundary failure,
 unauthenticated access to the retained private surface, data loss, or an
-unrepeatable release. Polaris 0.3.3 is archived. The source tag is `0.3.4`.
-Formal production promotion remains separate. New workflow and live-tool work
-belongs on the 0.4.0 page.
+unrepeatable release. Polaris 0.3.4 is archived as the previous single-host
+baseline. The source tag is `0.4.0`. Formal production promotion remains
+separate. Real Vault execution and Vault-target smoke belong on the 0.5.0
+page.
 
 ## Restore Context
 
@@ -30,7 +31,8 @@ The Polaris runtime boundary, backup recovery, resource envelope, restart
 drill, 20-vault capacity baseline, control/vault-data migration, and
 Portal/Paseo surface extraction have source or isolated-host evidence. The
 0.3.3 capacity and migration records are archived; 0.3.4 inherits the same
-20-vault profile and is the shipped source baseline.
+20-vault profile and is the previous single-host baseline. 0.4.0 is the
+current shipped source tag.
 
 Open 0.3.4 carry-forward work is the external authenticated tenant matrix,
 failed-restart committed-write proof, signed promotion evidence, security

@@ -13,7 +13,7 @@ You are a thin router over `tools/outreach`. **Do not restate the full
 system design.** For state model, phases P1–P5, task kinds, safety, and
 portal UI, read:
 
-- [`tools/outreach/README.md`](../../tools/outreach/README.md)
+- [`tools/outreach/README.md`](../../README.md)
 
 Email SMTP/IMAP hosts and env vars are managed by Polaris policy:
 

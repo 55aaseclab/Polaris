@@ -18,9 +18,10 @@ repository-specific command instructions. Executable skills, schemas, and tool
 contracts remain beside their implementations. This site contains the
 cross-repository material that needs a stable, shared view.
 
-The [Polaris 0.3.4 page](/operations/polaris-0.3.4/) is the current shipped
-source baseline. The [Polaris 0.3 release section](/operations/polaris-release/)
-remains the original gate record, not a release certificate. The archived
+The [Polaris 0.4.0 page](/operations/polaris-0.4.0/) is the current shipped
+source baseline. The [Polaris 0.3.4 page](/operations/polaris-0.3.4/) and
+[Polaris 0.3 release section](/operations/polaris-release/) remain the
+previous single-host baseline and original gate record. The archived
 [0.3.3 section](/operations/polaris-0.3.3/) preserves its capacity and
-migration evidence. [Polaris 0.4.0](/operations/polaris-0.4.0/) is the next
-workflow implementation slice.
+migration evidence. [Polaris 0.5.0](/operations/polaris-0.5.0/) is the next
+local-cell and real Vault-executor slice.

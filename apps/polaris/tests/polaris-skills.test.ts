@@ -49,8 +49,18 @@ test("migrated skill bundle and coursework pack are Polaris-owned", () => {
     "polaris-report-writing",
     "polaris-ads-system-setup",
   ];
+  const skillRoots: Record<string, string> = {
+    "polaris-business": path.join(REPO_ROOT, "packs", "business", "skills", "polaris-business"),
+    "polaris-content-production": path.join(REPO_ROOT, "tools", "content-production", "skills", "polaris-content-production"),
+    "polaris-data-collection": path.join(REPO_ROOT, "tools", "data-collection", "skills", "polaris-data-collection"),
+    "polaris-intelligence-analysis": path.join(REPO_ROOT, "tools", "intelligence-analysis", "skills", "polaris-intelligence-analysis"),
+    "polaris-order-ops": path.join(REPO_ROOT, "tools", "logistics-management", "skills", "polaris-order-ops"),
+    "polaris-outreach": path.join(REPO_ROOT, "tools", "outreach", "skills", "polaris-outreach"),
+    "polaris-report-writing": path.join(REPO_ROOT, "tools", "report-writing", "skills", "polaris-report-writing"),
+    "polaris-ads-system-setup": path.join(REPO_ROOT, "packs", "business", "skills", "polaris-ads-system-setup"),
+  };
   for (const skill of migratedSkills) {
-    const skillPath = path.join(REPO_ROOT, "skills", skill, "SKILL.md");
+    const skillPath = path.join(skillRoots[skill]!, "SKILL.md");
     assert.equal(fs.existsSync(skillPath), true, skillPath);
     const source = fs.readFileSync(skillPath, "utf8");
     assert.doesNotMatch(source, /@wanghai\/|apps\/wanghai|skills\/wanghai|pnpm wanghai/u, skillPath);

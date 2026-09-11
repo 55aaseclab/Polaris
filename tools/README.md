@@ -8,10 +8,11 @@ copy of them.
 versions, commands, and capability summaries. It contains no credentials,
 tenant state, endpoint publication, or scheduler state.
 
-The literature-review workflow uses the collection, source, review,
-intelligence-analysis, Codex, browser, and report-writing tools from this
-directory. Its orchestration, DSL declaration, skills, and local CLI live in
-`packs/autoresearch/`.
+Each tool owns its instruction-layer skill under `<tool>/skills/` when it
+has one. There is no repository-level `skills/` tree. The literature-review
+workflow uses the collection, source, review, intelligence-analysis, Codex,
+browser, and report-writing tools from this directory. Its orchestration and
+DSL declaration live in `packs/autoresearch/`.
 
 Common tools are implementation code, not a second control plane. Integrated
 execution remains admitted, leased, budgeted, auditable, and recoverable only

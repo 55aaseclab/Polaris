@@ -18,16 +18,16 @@ Costs never enter deliverables.
 
 ## Contracts (repo root)
 
-- [`schemas/wanghai.content-production.input.v1.schema.json`](../../schemas/wanghai.content-production.input.v1.schema.json)
-- [`schemas/wanghai.content-production.output.v1.schema.json`](../../schemas/wanghai.content-production.output.v1.schema.json)
+- [`schemas/wanghai.content-production.input.v1.schema.json`](../../../../schemas/wanghai.content-production.input.v1.schema.json)
+- [`schemas/wanghai.content-production.output.v1.schema.json`](../../../../schemas/wanghai.content-production.output.v1.schema.json)
 
 Internal catalog projection (freeze/render only):
 
-- [`schemas/wanghai.promo.catalog-input.v1.schema.json`](../../schemas/wanghai.promo.catalog-input.v1.schema.json)
-- [`schemas/wanghai.promo.catalog-snapshot.v1.schema.json`](../../schemas/wanghai.promo.catalog-snapshot.v1.schema.json)
-- [`schemas/wanghai.promo.catalog-output.v1.schema.json`](../../schemas/wanghai.promo.catalog-output.v1.schema.json)
+- [`schemas/wanghai.promo.catalog-input.v1.schema.json`](../../../../schemas/wanghai.promo.catalog-input.v1.schema.json)
+- [`schemas/wanghai.promo.catalog-snapshot.v1.schema.json`](../../../../schemas/wanghai.promo.catalog-snapshot.v1.schema.json)
+- [`schemas/wanghai.promo.catalog-output.v1.schema.json`](../../../../schemas/wanghai.promo.catalog-output.v1.schema.json)
 
-Tool README: [`tools/content-production/README.md`](../../tools/content-production/README.md)
+Tool README: [`tools/content-production/README.md`](../../README.md)
 
 `content_kind`: **`product-catalog`** | **`carousel`** | **`video`**.
 

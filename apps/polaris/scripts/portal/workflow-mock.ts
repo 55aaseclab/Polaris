@@ -265,15 +265,24 @@ export class WorkflowMockService {
     if (!["failed", "cancelled"].includes(record.run.status)) {
       throw new WorkflowMockError("只有失败或取消的运行可以重试", 409, "retry-not-available");
     }
-    return this.createRun(userId, {
-      packId: record.run.packId,
-      flowId: record.run.flowId,
-      ...(record.run.driver === "none"
-        ? { driver: "none" as const }
-        : { driver: "vault" as const, vaultId: record.run.vaultId ?? undefined }),
-      values: record.run.input,
-      scenario,
-    });
+    this.clearTimer(record);
+    const now = this.now().toISOString();
+    record.scenario = scenario;
+    record.run.status = "queued";
+    record.run.source = "retry";
+    record.run.progress = 0;
+    record.run.error = undefined;
+    record.run.updatedAt = now;
+    this.appendEvent(
+      userId,
+      record,
+      "submitted",
+      "已重新排队",
+      "重试会跳过已完成步骤，从失败点继续。",
+      "neutral",
+    );
+    this.schedule(record, userId, this.startDelayMs, () => this.startRun(userId, record));
+    return clone(record.run);
   }
 
   async events(userId: string, runId: string, after = 0): Promise<WorkflowEventsResponse> {

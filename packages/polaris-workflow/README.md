@@ -42,8 +42,7 @@ Polaris 0.4.0 的可嵌入 Polaris DSL / workflow IR Node.js 包。
 
 第一方域包位于仓库根目录 `packs/`：
 
-- `packs/vault-knowledge-health/main.ord` — 最小业务域
-- `packs/autoresearch/main.ord` — 文献研究
+- `packs/autoresearch/main.ord` — 第一方文献研究
 - `packs/cve-genie-trial/main.ord` — 有界 CVE-Genie trial
 - `packs/vision-kernel/main.ord` — 内核素描
 

@@ -160,8 +160,9 @@ test("Phase 1 mock models quota denial, unavailable Vaults, and executor failure
     assert.equal(failedProjection?.status, "failed");
     assert.equal(failedProjection?.error?.code, "executor-failure");
 
-    const retry = await service.retry("tenant-a", failed.id);
-    assert.notEqual(retry.id, failed.id);
+    const retry = await service.retry("tenant-a", failed.id, "normal");
+    assert.equal(retry.id, failed.id);
+    assert.equal(retry.source, "retry");
     await wait(20);
     const retryProjection = (await service.listRuns("tenant-a")).runs.find((run) => run.id === retry.id);
     assert.equal(retryProjection?.status, "succeeded");

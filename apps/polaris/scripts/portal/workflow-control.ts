@@ -641,6 +641,26 @@ class WorkflowRpcHost implements AsyncFfiHost {
     }
     if (!this.liveRequestedFor(port)) {
       if (this.toolDispatcher?.has(port.name)) {
+        const completed = this.run.steps.find((step) =>
+          step.stepId === req.meta?.stepId && step.status === "completed"
+        );
+        if (completed) {
+          return {
+            ok: true,
+            output: Object.fromEntries(
+              Object.entries(completed.output).flatMap(([key, value]) => (
+                typeof value === "string"
+                  || typeof value === "number"
+                  || typeof value === "boolean"
+                  || value === undefined
+                  ? [[key, value]]
+                  : []
+              )),
+            ),
+            detail: `resumed ${req.meta?.stepId}`,
+            resolvedVersion: port.version,
+          };
+        }
         const request = this.createRpcRequest(port, req, "mock");
         const result = await this.toolDispatcher.invoke(req, port);
         const completedAt = this.options.now().toISOString();
@@ -1059,7 +1079,7 @@ export class WorkflowControlService {
   private async createAdmittedRun(
     tenantId: string,
     input: WorkflowRunRequest,
-    source: "manual" | "retry",
+    source: "manual",
   ): Promise<WorkflowRunProjection> {
     const packs = this.options.listPacks();
     const selected = flowFromPack(packs, input.packId, input.flowId);
@@ -1193,15 +1213,22 @@ export class WorkflowControlService {
     if (previous.status !== "failed" && previous.status !== "cancelled") {
       throw new WorkflowControlError("只有失败或取消的运行可以重试", 409, "retry-not-available");
     }
-    const driver = executionDriverForRun(previous);
-    const next = await this.createAdmittedRun(tenantId, {
-      packId: previous.packId,
-      flowId: previous.flowId,
-      ...(driver === "vault" ? { vaultId: previous.vaultId, driver } : { driver }),
-      values: previous.input,
+    const leaseExpiresAt = new Date(this.now().getTime() + 30 * 60_000).toISOString();
+    const updated = this.store.requeueWorkflowRun({
+      tenantId,
+      runId,
+      source: "retry",
       scenario,
-    }, "retry");
-    return next;
+      leaseExpiresAt,
+      event: {
+        kind: "submitted",
+        title: "已重新排队",
+        detail: "重试会跳过已完成步骤，从失败点继续。",
+        tone: "neutral",
+      },
+    });
+    if (this.autoStart) void this.drain();
+    return projectionForRun(updated, this.options.listPacks());
   }
 
   async events(tenantId: string, runId: string, after = 0): Promise<WorkflowEventsResponse> {
@@ -1417,7 +1444,16 @@ export class WorkflowControlService {
       liveMetadataReader: this.options.liveMetadataReader,
     });
     const docStore = new DocStore();
-    const result = await program.runAsync(run.flowId, run.input, docStore, host);
+    const heartbeat = setInterval(() => {
+      this.store.heartbeatWorkflowRun(run.id, this.workerId);
+    }, 15_000);
+    heartbeat.unref();
+    let result;
+    try {
+      result = await program.runAsync(run.flowId, run.input, docStore, host);
+    } finally {
+      clearInterval(heartbeat);
+    }
     const completedAt = this.now().toISOString();
     for (const [index, step] of result.stepLog.entries()) {
       this.store.recordWorkflowStepResult({

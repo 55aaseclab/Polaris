@@ -48,9 +48,9 @@ record.
 
 Use one small change batch, one canonical owner, and one verification result.
 For the routine and release status, read
-[Polaris 0.3.4 shipped baseline](site/operations/polaris-0.3.4/index.md) and
-[archived Polaris 0.3 Release](site/operations/polaris-release/index.md) for
-the original gate record.
+[Polaris 0.4.0 shipped baseline](site/operations/polaris-0.4.0/index.md) and
+[archived Polaris 0.3.4](site/operations/polaris-0.3.4/index.md) for the
+previous single-host baseline.
 
 Do not commit customer data, credentials, cookies, signed assertions,
 unredacted host output, or deployment secrets here. Keep failed or missing

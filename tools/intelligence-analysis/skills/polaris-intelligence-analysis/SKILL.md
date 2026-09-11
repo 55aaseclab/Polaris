@@ -16,8 +16,8 @@ description: >
 
 Schemas（仓库根 `schemas/`）：
 
-- [`schemas/clue.intelligence-analysis.input.v2.schema.json`](../../schemas/clue.intelligence-analysis.input.v2.schema.json)
-- [`schemas/clue.intelligence-analysis.output.v2.schema.json`](../../schemas/clue.intelligence-analysis.output.v2.schema.json)
+- [`schemas/clue.intelligence-analysis.input.v2.schema.json`](../../../../schemas/clue.intelligence-analysis.input.v2.schema.json)
+- [`schemas/clue.intelligence-analysis.output.v2.schema.json`](../../../../schemas/clue.intelligence-analysis.output.v2.schema.json)
 
 ```text
 data-collections/<collection-id>/outputs/output.json (v2)
@@ -97,16 +97,11 @@ $IA run --input "$INPUT" --analysis-root "$ROOT"
 data-collection → intelligence-analysis → report-writing
 ```
 
-用 Polaris literature-review CLI 编排（workflow `run` 在 data-collection
-成功后会写入 analysis `inputs/input.json` 的 `collection_ref`）：
+用 Portal 或 workflow API 提交 `AutoResearch` / `LiteratureReview`。
+没有 `polaris -- literature-review` 命令。workflow `run` 在 data-collection
+成功后会写入 analysis `inputs/input.json` 的 `collection_ref`。
 
-```sh
-pnpm --dir apps/polaris run polaris -- literature-review plan
-pnpm --dir apps/polaris run polaris -- literature-review run \
-  --input <input.json> --workspace <workspace-id> --run-id <run-id>
-```
-
-- IA 入口仍是 `clue-intelligence-analysis`；workflow 只是编排层。
+- IA 入口仍是 `clue-intelligence-analysis`；Domain Pack 只是编排层。
 - 默认 `literature_method=iterate`（论点图）。
 - 示例可跑 workflow：`pkvm-security-20260723`。
 - 若该 stage 的 `steps: []`，表示复用已有 `outputs/output.json`，不要重复

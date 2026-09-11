@@ -21,7 +21,7 @@ immutable pack digest + flow
              v
 queued -> running -> succeeded
                  \\-> waiting --human approve--> running
-                 \\-> failed  --retry----------> new queued run
+                 \\-> failed  --retry---------> same queued run
 queued/running/waiting --cancel----------------> cancelled
 ```
 
@@ -32,7 +32,8 @@ functionality only: it does not widen the current Polaris worker, does not
 enable live Agent execution, and does not create a private surface route.
 
 The run retains its original pack version and digest across every transition.
-Retry creates a new run rather than mutating completed history.
+Retry requeues the same run id with source `retry` and keeps completed
+step results. It does not create a new run.
 
 ## Runtime Topology
 
@@ -74,7 +75,7 @@ or direct private surface route. The interval is only a wake-up mechanism. SQLit
 5. A waiting run releases its worker owner before human approval.
 6. Every transition appends an event and outbox item transactionally.
 7. Effect receipts are idempotent by request ID.
-8. A cancelled run is terminal; retry creates a new run.
+8. A cancelled run is terminal until retry requeues the same run.
 9. Artifacts are bounded projections with digest and redaction metadata.
 10. Suggestions are durable but `suggested` and non-executable.
 11. No mock call has an external side effect.
@@ -108,8 +109,10 @@ lease.vaultId == request.vaultId
 lease.expiresAt > now
 ```
 
-This is the gate for a future live or AI Host as well. The current policy
-always sends `mode: mock`.
+This is the gate for a future live or AI Host as well. Ordinary
+Vault-target and provisioning policy still sends `mode: mock`. Host runs
+persist `mode: host`. Live mode exists only on the operator
+metadata-admission path.
 
 ## Deterministic Worker And Concurrency
 
@@ -288,10 +291,10 @@ POLARIS_WORKFLOW_LIVE_WORKER_BINDING=enabled
 ```
 
 If either flag is unset, the worker fails closed before the reader is called
-and writes no metadata receipt or audit event. Public/manual/provisioning UI
-admission still creates `mode: "mock"` runs, so ordinary UI-created workflow
-runs remain mock-only until a separate operator path can admit live-policy
-runs deliberately.
+and writes no metadata receipt or audit event. Public Vault-target and
+provisioning UI admission still creates `mode: "mock"` runs. Host UI
+admission creates `mode: "host"` runs. Ordinary UI-created workflow runs
+are not live until a separate operator path admits a live-policy run.
 
 That operator path now exists for the metadata pilot only:
 
@@ -345,8 +348,6 @@ Portal or adding a direct Vault/private surface URL.
 pnpm --filter polaris-workflow test
 pnpm --filter polaris exec tsx --test tests/polaris-control-store.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-control.test.ts
-pnpm --filter polaris exec tsx --test tests/polaris-workflow-smoke.test.ts
-pnpm --filter polaris run smoke:workflow
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-live-tool-gateway.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-live-boundary.test.ts
 pnpm --filter polaris exec tsx --test tests/polaris-workflow-live-vault-adapter.test.ts

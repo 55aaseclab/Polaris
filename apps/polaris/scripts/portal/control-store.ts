@@ -1544,6 +1544,61 @@ export class PolarisControlStore {
     return run;
   }
 
+  requeueWorkflowRun(input: {
+    tenantId: string;
+    runId: string;
+    source?: WorkflowRunSource;
+    scenario?: string;
+    event: Omit<WorkflowEventRecord, "id" | "cursor" | "runId" | "tenantId" | "sequence" | "timestamp"> & { timestamp?: string };
+    leaseExpiresAt?: string;
+  }): WorkflowRunRecord {
+    const tenant = input.tenantId.trim();
+    const runId = input.runId.trim();
+    if (!tenant || !runId) throw new Error("Workflow run identity is incomplete");
+    const now = nowIso();
+    const leaseExpiresAt = input.leaseExpiresAt ?? new Date(Date.now() + 30 * 60_000).toISOString();
+    this.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT status, capability_lease_id FROM workflow_runs WHERE tenant_id = ? AND id = ?
+      `).get(tenant, runId) as SqlRow | undefined;
+      if (!row) throw new Error("Workflow run not found");
+      if (!["failed", "cancelled"].includes(String(row.status))) {
+        throw new Error("Only failed or cancelled workflow runs can be requeued");
+      }
+      this.db.prepare(`
+        UPDATE workflow_capability_leases
+        SET status = 'active', expires_at = ?, updated_at = ?
+        WHERE tenant_id = ? AND id = ?
+      `).run(leaseExpiresAt, now, tenant, String(row.capability_lease_id));
+      this.db.prepare(`
+        UPDATE workflow_runs
+        SET status = 'queued', source = COALESCE(?, source),
+            scenario = COALESCE(?, scenario), progress = 0,
+            error_code = NULL, error_message = NULL, output_json = '{}',
+            worker_owner = NULL, worker_expires_at = NULL, completed_at = NULL,
+            capability_lease_expires_at = ?, available_at = ?, updated_at = ?
+        WHERE tenant_id = ? AND id = ?
+      `).run(
+        input.source ?? null,
+        input.scenario ?? null,
+        leaseExpiresAt,
+        Date.now(),
+        now,
+        tenant,
+        runId,
+      );
+      this.appendWorkflowEventWithinTransaction({
+        runId,
+        tenantId: tenant,
+        event: input.event,
+        timestamp: input.event.timestamp ?? now,
+      });
+    });
+    const run = this.getWorkflowRun(tenant, runId);
+    if (!run) throw new Error("Workflow run disappeared after requeue");
+    return run;
+  }
+
   requestWorkflowCancellation(tenantId: string, runId: string): WorkflowRunRecord | null {
     const tenant = tenantId.trim();
     const id = runId.trim();

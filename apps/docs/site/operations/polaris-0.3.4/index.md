@@ -1,9 +1,9 @@
 # Polaris 0.3.4
 
-Status: **shipped as source tag `0.3.4` on 2026-09-11**. Polaris 0.3.3 is
+Status: **archived as source tag `0.3.4` on 2026-09-11**. Polaris 0.3.3 is
 archived; its capacity, migration, and deployment records remain the
-historical baseline. This page is the current shipped-state summary. The next
-product slice is [Polaris 0.4.0](../polaris-0.4.0/).
+historical baseline. The current shipped source baseline is
+[Polaris 0.4.0](../polaris-0.4.0/).
 
 References below to private surface are retained only as historical deployment
 evidence. private surface documentation and source are archived; current product

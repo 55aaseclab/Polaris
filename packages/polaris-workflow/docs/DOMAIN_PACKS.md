@@ -85,17 +85,17 @@ v0.4-trial pack 只投影 trial 的图元数据；不会被 v0.3 Portal flow wor
 被引用的 pack 必须已经安装。多版本同时存在时，删除必须明确版本；
 删除不影响任何 Vault 数据。
 
-第一方业务域包从 Polaris 仓库发布，安装后会出现在 Workflow 设置里：
+第一方业务域包从仓库根目录 `packs/` 自动发现，不必先 `pack add` 才会出现在
+Workflow 设置里。`pack add` 只用于额外版本或覆盖安装：
 
 ```bash
-pnpm --dir apps/polaris run polaris -- pack add \
-  packs/vault-knowledge-health
+pnpm --dir apps/polaris run polaris -- pack list
+pnpm --dir apps/polaris run polaris -- pack add <file.ord|pack-directory>
 ```
 
 | 域包 | 路径 | 作用 |
 |------|------|------|
-| Vault Knowledge Health | `packs/vault-knowledge-health/main.ord` | 最小业务域，调用 `ArtifactMetadata@1.0.0` 并映射到 `vault.artifact.metadata.read` |
-| AutoResearch | `packs/autoresearch/main.ord` | 文献收集、分析和报告 |
+| AutoResearch | `packs/autoresearch/main.ord` | 第一方文献收集、分析和报告 |
 | CVE-Genie trial | `packs/cve-genie-trial/main.ord` | 有界 v0.4-trial 控制图 |
 | Vision kernel | `packs/vision-kernel/main.ord` | 内核素描，非全部已被 parser 实现 |
 
