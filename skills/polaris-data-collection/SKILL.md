@@ -26,7 +26,7 @@ For **ad-content-intel** records use content `record_kind` values such as
 `xhs_note`, `xhs_video`, `xhs_comment`, `social_post`, `ad_creative`; put title,
 text, author, engagement, tags, `is_ad_like`, and optional comments in
 `payload` (see README). Workflow template: `ad-content-intel` in
-`workflows/business/templates.yaml` (first stage is always data-collection).
+`packs/business/templates.yaml` (first stage is always data-collection).
 
 **`run` supports ad-content-intel** with phase-1 source types `web-search`,
 `curated-web-search`, and `social_media`. Xiaohongshu is enabled via
@@ -134,7 +134,7 @@ $POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace>/data-collections/<collection_id>
 data-collection → intelligence-analysis → report-writing
 ```
 
-**Ad / content intel** — `workflows/business/templates.yaml`, template
+**Ad / content intel** — `packs/business/templates.yaml`, template
 `ad-content-intel`:
 
 ```text

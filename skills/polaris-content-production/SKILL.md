@@ -86,7 +86,7 @@ set -a && source .env.dev && set +a
 ./tools/content-production/polaris-content-production run ... --strict
 ```
 
-Fixed gallery workflow (`workflows/business/templates.yaml` template `product-gallery`):
+Fixed gallery workflow (`packs/business/templates.yaml` template `product-gallery`):
 
 Use the business portal's `product-gallery` template. Any write or external
 publish must be submitted through a Polaris durable action; the local tool is
