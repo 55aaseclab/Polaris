@@ -1,4 +1,4 @@
-# Business DSL v0.4-trial
+# Polaris DSL v0.4-trial
 
 `v0.4-trial` 是 v0.3 之外的实验语言表面。v0.3 的 `domain`、`flow`、
 `port` 和 `pipeline` 语义不变；只有写入
@@ -155,5 +155,6 @@ transition budget 兜底。
   action admission；
 - 不能把 v0.4-trial 自动接入现有 v0.3 Portal flow worker。
 
-相关 Polaris 控制面设计见文档站的 Business DSL as workflow IR、Dynamic
-Workflow Runtime 和 WorkEnvelope/Workflow Plan 文档。
+相关 Polaris 产品与控制面设计见文档站的
+[Polaris DSL](../../../apps/docs/site/polaris/dsl.md)、
+Dynamic Workflow Runtime 和 WorkEnvelope/Workflow Plan 文档。

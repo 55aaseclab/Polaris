@@ -1,10 +1,10 @@
-# Business DSL × Polaris 0.4.0
+# Polaris DSL × Polaris 0.4.0
 
 完整对接设计（任务推送 / 学习 / 控制面边界）写在文档站：
 
-**[Polaris 0.4.0 · Business DSL as workflow IR](../../www.jianxiaoyitech.com/docs/site/operations/polaris-0.4.0/business-dsl-as-workflow-ir.md)**
+**[Polaris DSL](../../../apps/docs/site/polaris/dsl.md)**
 
-（站点路径：`/operations/polaris-0.4.0/business-dsl-as-workflow-ir`）
+（站点路径：`/polaris/dsl`）
 
 ## 本地一句话
 

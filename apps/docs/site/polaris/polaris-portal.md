@@ -53,7 +53,7 @@ flowchart LR
 | `apps/polaris-portal` | React pages, cards, navigation, Zustand state, SSE client, browser actions | Identity, ownership, capability authority, durable state |
 | `@polaris/polaris-shell` | Route, product-line, host-action, and user contracts | Portal UI, session authority, authorization |
 | `apps/polaris/scripts/portal` | Authenticated API, verified Domain Pack and workflow projections, durable workflow control, host Literature Review adapter, compatibility FFI host, SSE endpoint, lifecycle adapters, Gateway transport, static-artifact serving | Browser rendering |
-| Polaris Domain Pack store | CLI-managed verified DSL installations and manifests outside Vaults | Flow execution, scheduling, Agent adapters |
+| Polaris Domain Pack store | CLI-managed verified [Polaris DSL](./dsl.md) installations and manifests outside Vaults | Flow execution, scheduling, Agent adapters |
 | `vault-live-hub.ts` | Per-user filesystem observation, reconciliation, and scoped events | Durable authorization or audit authority |
 | User Management | Authing mapping, ownership, roles, and product-line access | Portal layout |
 | Vault Management | Runtime, data, status, jobs, recovery, and capacity | Browser state |
@@ -132,12 +132,13 @@ Vault implicitly.
 
 ### 1.4 Domain Pack Catalog
 
-Polaris installs each Domain Pack through `pack add` after DSL parse, import
-resolution, validation, and compilation. The immutable source and manifest
-remain under the control data root, outside every Vault. The Portal API reads
-that store on each authenticated catalog request and exposes only verified
-installations. A source whose digest no longer matches its manifest is omitted
-from the catalog.
+Polaris installs each Domain Pack through `pack add` after the
+[Polaris DSL](./dsl.md) pipeline: parse, import resolution, validation, and
+compilation. The immutable source and manifest remain under the control data
+root, outside every Vault. The Portal API reads that store on each
+authenticated catalog request and exposes only verified installations. A
+source whose digest no longer matches its manifest is omitted from the
+catalog.
 
 The projection is descriptive. It carries the pack version and digest, flow
 titles and summaries, input controls, capabilities, and whether a flow reaches
@@ -504,6 +505,7 @@ records, cookies, or private runtime paths.
 ## Related Docs
 
 - [Polaris overview](./index.md)
+- [Polaris DSL](./dsl.md)
 - [User Management](./user-management.md)
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)

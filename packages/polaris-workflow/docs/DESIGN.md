@@ -1,4 +1,4 @@
-# Business DSL · 设计认知（v0.3）
+# Polaris DSL · 设计认知（v0.3）
 
 > 目标：一门**与行业无关**的业务描述语言。  
 > 电商、ERP、科研流水线、制造执行——都是**业务包**，不是语言本身。  
@@ -429,7 +429,7 @@ Polaris 负责 **WorkEnvelope、事件账本、策略、WorkflowRun**；
 
 对接专文：
 
-- 文档站：`operations/polaris-0.4.0/business-dsl-as-workflow-ir.md`
+- 文档站：`apps/docs/site/polaris/dsl.md`
 - 本地索引：`docs/POLARIS-0.4-BRIDGE.md`
 
 原则不变：学习只吃 server-confirmed 事件；执行只经 `port@ver` Host；  

@@ -1,6 +1,6 @@
 # polaris-workflow
 
-Polaris 0.4.0 的可嵌入 Business DSL / workflow IR Node.js 包。
+Polaris 0.4.0 的可嵌入 Polaris DSL / workflow IR Node.js 包。
 
 本包没有 Web 服务，也不拥有 UI、租户、Vault 或调度控制面。它提供
 `parse → resolve → validate → compile/interpret` 以及 Host/FFI 边界，
@@ -14,7 +14,8 @@ Polaris 0.4.0 的可嵌入 Business DSL / workflow IR Node.js 包。
 
 ## 设计立场（先读）
 
-完整认知见 **[docs/DESIGN.md](./docs/DESIGN.md)**。
+产品参考见文档站 **[Polaris DSL](../../apps/docs/site/polaris/dsl.md)**。
+完整设计认知见 **[docs/DESIGN.md](./docs/DESIGN.md)**。
 
 三句话：
 

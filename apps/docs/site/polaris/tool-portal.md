@@ -26,7 +26,8 @@ console or publisher endpoints.
 `/tools` is public and shows all tools Polaris can currently inspect:
 
 - Common tools from `packages/polaris-tools`;
-- Domain Pack flow tools from verified installed `.ord` packs;
+- Domain Pack flow tools from verified installed [Polaris DSL](./dsl.md)
+  `.ord` packs;
 - the pack, version, digest, and flow identity for Domain Pack rows;
 - every tool call used by each row; and
 - the current live state, with live execution still blocked or mocked.

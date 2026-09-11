@@ -80,7 +80,8 @@ Vault references are parsed as:
 
 Domain Packs are Polaris control-plane objects. They are stored outside every
 Vault under `$POLARIS_DATA_ROOT/control/domain-packs/<domain>/<version>/`.
-Each installation contains the DSL source and a SHA-256 manifest.
+Each installation contains the [Polaris DSL](./dsl.md) source and a SHA-256
+manifest. Language, import, and validation rules live on that page.
 
 ```bash
 pnpm --dir apps/polaris run polaris -- pack add <file.ord|pack-directory>

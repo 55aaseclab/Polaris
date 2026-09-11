@@ -20,6 +20,7 @@ const directoryOrder: Record<string, string[]> = {
     "user-management.md",
     "polaris-portal.md",
     "tool-portal.md",
+    "dsl.md",
     "vault-management.md",
     "gateway.md",
     "paseo.md",
@@ -78,7 +79,7 @@ const directoryOrder: Record<string, string[]> = {
     "index.md",
     "work-envelope-and-workflow-plan.md",
     "dynamic-workflow-runtime.md",
-    "business-dsl-as-workflow-ir.md",
+    "polaris-dsl-as-workflow-ir.md",
   ],
   "operations/polaris-0.5.0": ["index.md", "scenario-driven-improvements.md"],
   "business-model": [
@@ -91,7 +92,6 @@ const directoryOrder: Record<string, string[]> = {
     "target-customers-and-roadmap.md",
     "non-target-customers.md",
   ],
-  "documentation-system": ["index.md"],
 };
 
 const directoryLabels: Record<string, string> = {
@@ -108,13 +108,11 @@ const sectionLabels: Record<string, string> = {
   polaris: "Polaris",
   operations: "Operations",
   "business-model": "Business Model",
-  "documentation-system": "Documentation System",
 };
 
 const sectionOrder = [
   "polaris",
   "operations",
-  "documentation-system",
   "business-model",
 ];
 
@@ -215,7 +213,7 @@ function sectionSidebar(section: string): SidebarItem[] {
 }
 
 const sectionNames = [...sectionOrder];
-const primaryNavSections = ["polaris", "operations", "documentation-system"];
+const primaryNavSections = ["polaris", "operations"];
 const primarySections = sectionNames.filter((section) => primaryNavSections.includes(section));
 const referenceSections = sectionNames.filter((section) => !primaryNavSections.includes(section));
 const nav = [

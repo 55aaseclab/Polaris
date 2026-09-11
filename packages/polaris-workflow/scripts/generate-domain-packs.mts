@@ -346,7 +346,7 @@ writeFileSync(
 
 - count: **${COUNT}**
 - generated: ${new Date().toISOString()}
-- purpose: stress-test Business DSL parser / validator / compiler / interpreter + MockHost
+- purpose: stress-test Polaris DSL parser / validator / compiler / interpreter + MockHost
 
 Each \`.ord\` is an independent **域包** (domain pack): vocabulary + ports + flows.
 Industry words are pack content only — not language keywords.

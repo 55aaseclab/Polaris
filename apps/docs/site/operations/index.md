@@ -22,6 +22,7 @@ surface boundaries.
    [archived Polaris 0.3.3](./polaris-0.3.3/) for user-count growth, storage
    capacity, migration, and scale evidence. Read [Polaris 0.4.0](./polaris-0.4.0/)
    for the WorkEnvelope, auditable work feed, and behavior-to-workflow plan.
+   The Domain Pack language itself is on [Polaris DSL](/polaris/dsl).
    Read [Polaris 0.5.0](./polaris-0.5.0/) for local identity, cohort
    lifecycle, and scenario packaging on the 20-seat cell.
 The release records are deliberately separate from product reference pages.

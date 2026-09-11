@@ -1,4 +1,4 @@
-// 通用业务 DSL · 销售记录业务包
+// Polaris DSL · 销售记录业务包
 // P1：port = FFI；step.call 只点名；Host(mock) 负责实现
 
 domain SalesRecord version "0.3"

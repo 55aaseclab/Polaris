@@ -25,12 +25,11 @@ queued -> running -> succeeded
 queued/running/waiting --cancel----------------> cancelled
 ```
 
-The package-level `v0.4-trial` extension adds a separate bounded graph runner
-for experiments such as CVE-Genie. It persists node attempts, inflight calls,
-feedback context, receipts, artifacts, and budget counters through a
-`TrialStateStore` interface. It is source-level trial functionality only: it
-does not widen the current Polaris worker, does not enable live Agent
-execution, and does not create a private surface route.
+The package-level `v0.4-trial` extension adds a separate bounded graph
+runner. Its language and `TrialStateStore` contract live on
+[Polaris DSL](../../polaris/dsl.md). It is source-level trial
+functionality only: it does not widen the current Polaris worker, does not
+enable live Agent execution, and does not create a private surface route.
 
 The run retains its original pack version and digest across every transition.
 Retry creates a new run rather than mutating completed history.
@@ -169,7 +168,8 @@ two reads.
 
 ## FFI And Receipts
 
-The compiled DSL Program retains versioned port symbols. The mock Host turns a
+The compiled [Polaris DSL](../../polaris/dsl.md) Program retains versioned
+port symbols. The mock Host turns a
 call into an RPC request containing protocol, request/idempotency IDs, tenant,
 Vault, run, pack digest, capability lease, port/version, effect, optional
 built-in, input, mode, and trace. The response contains status, output, error,
@@ -205,10 +205,10 @@ evidence: source run and event IDs
 ```
 
 The record is not a `WorkflowDefinition`. It cannot be enabled, scheduled, or
-executed. AI generation is later work. A future proposer may write a DSL
-fragment or AST, but Polaris must validate it, dry-run it without effects,
-require human publication, and issue a new immutable version before any run
-can reference it.
+executed. AI generation is later work. A future proposer may write a
+[Polaris DSL](../../polaris/dsl.md) fragment or AST, but Polaris must
+validate it, dry-run it without effects, require human publication, and issue
+a new immutable version before any run can reference it.
 
 ## Security And Recovery
 

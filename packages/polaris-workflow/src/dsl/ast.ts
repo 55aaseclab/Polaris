@@ -1,5 +1,5 @@
 /**
- * 通用业务 DSL — AST
+ * Polaris DSL — AST
  * 意义 · 计算 · FFI(port) 三世界；行业 = 域包；跨包 import + port 版本。
  */
 

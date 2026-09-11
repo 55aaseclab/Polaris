@@ -623,4 +623,3 @@ identity, or read an old path opportunistically.
 - [0.3.4 current state](/operations/polaris-0.3.4/)
 - [0.3.3 archived control/vault-data record](/operations/polaris-0.3.3/post-release-control-vault-data-2026-08-10)
 - [Remote Deploy](/operations/remote-deploy)
-- [Documentation System](/documentation-system/)

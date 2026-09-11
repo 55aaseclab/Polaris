@@ -10,11 +10,10 @@ repository and it is not a release certificate.
 ## Start Here
 
 - [Polaris product docs](site/polaris/index.md) cover the workflow execution
-  platform, control plane, and cross-repository architecture.
+  platform, control plane, and cross-repository architecture. The Domain Pack
+  language lives on [Polaris DSL](site/polaris/dsl.md).
 - [Operations](site/operations/index.md) is the path for deployment, gateway,
   incidents, and release evidence.
-- [Documentation System](site/documentation-system/index.md) defines
-  where future documentation changes belong.
 
 ## Local Commands
 
@@ -49,8 +48,7 @@ record.
 
 Use one small change batch, one canonical owner, and one verification result.
 For the routine and release status, read
-[Documentation System](site/documentation-system/index.md),
-[Polaris 0.3.4 current state](site/operations/polaris-0.3.4/index.md), and
+[Polaris 0.3.4 current state](site/operations/polaris-0.3.4/index.md) and
 [archived Polaris 0.3 Release](site/operations/polaris-release/index.md) for
 the original gate record.
 

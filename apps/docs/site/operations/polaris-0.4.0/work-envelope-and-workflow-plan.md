@@ -41,7 +41,7 @@ decision locally.
 | Result projection | Polaris | `workflow_artifacts` |
 | Draft suggestion | Polaris | `workflow_suggestions`, status `suggested` only |
 | First-party tool catalog | Polaris | `packages/polaris-tools` manifests |
-| Business declaration | Domain Pack repository | `.ord` source; no runtime authority |
+| Business declaration | Domain Pack repository | [Polaris DSL](../../polaris/dsl.md) `.ord` source; no runtime authority |
 | Domain surface | private surface or another private surface | Adapter only; no run scheduler |
 | Execution cell | Vault | The selected target; live adapter is not enabled in this slice |
 
@@ -127,35 +127,15 @@ generation and dynamic plan patching are deliberately outside this phase.
 
 ## FFI, Built-ins, And Mock Host
 
-FFI is part of the workflow definition, not an out-of-band tool list. A pack
-declares a versioned port and calls it from a step:
-
-```text
-port ReviewPlan version "1.0.0" {
-  builtin manual.review
-  in { title: String, instructions: String }
-  out { approved: Boolean, reviewId: ID }
-  effect human
-}
-```
-
-`manual.review` is a built-in interface in `packages/polaris-workflow`. It
-defines input/output schema, human effect, approval requirement, and risk. It
-does not contain a domain-specific review implementation. A Domain Pack
-instantiates it by binding a port and declaring the flow call.
+FFI is part of the workflow definition, not an out-of-band tool list. Port
+syntax, `manual.review`, and the RPC wire contract live on
+[Polaris DSL](../../polaris/dsl.md).
 
 Official tool publication metadata lives in `packages/polaris-tools`. That
 package is the single source for first-party tool manifests, disabled live
 gates, mock receipts, the Polaris live action catalog projection, and the
 standalone Polaris tool portal projection. private surface does not maintain a
 duplicate tool list.
-
-The generic RPC request includes:
-
-- protocol version, request ID, idempotency key, run ID, tenant ID, and Vault;
-- pack ID, version, and immutable digest;
-- capability lease ID, lease digest, lease Vault, and expiry;
-- port name/version, effect, optional built-in ID, input, mode, and trace ID.
 
 The protocol validator rejects an empty digest, missing lease, digest
 mismatch, Vault mismatch, or expired lease. The current host only accepts
@@ -249,7 +229,8 @@ responses into Zustand and refreshes after mutations.
 ## Developer And Operator Workflow
 
 Domain Pack development happens in the pack repository or a local pack source:
-write `.ord`, run DSL validation, and install through the Polaris CLI. Domain
+write `.ord`, run [Polaris DSL](../../polaris/dsl.md) validation, and install
+through the Polaris CLI. Domain
 Pack code must not import Polaris control-store internals or hardcode a Portal
 route. Polaris owns the parser, registry, policy, leases, queue, RPC host,
 and API. `packages/polaris-tools` owns first-party publication metadata.

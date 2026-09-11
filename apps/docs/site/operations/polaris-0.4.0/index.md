@@ -35,12 +35,13 @@ Done:
   `ReviewKnowledgeHealth` flow declares `ArtifactMetadata@1.0.0`; Polaris maps
   that call to the Common tool `vault.artifact.metadata.read`.
 - `polaris-workflow` now has a separately gated `v0.4-trial` language surface.
-  Its CVE-Genie fixture models bounded Agent nodes, critic feedback edges,
-  attempts, checkpoints, receipts, artifacts, and budgets. It remains a
-  package-level deterministic trial and is not wired into the ordinary Portal
-  worker or any live external action.
+  Its syntax, budgets, and CVE-Genie fixture are documented on
+  [Polaris DSL](/polaris/dsl). It remains a package-level deterministic
+  trial and is not wired into the ordinary Portal worker or any live
+  external action.
 - The private surface literature-review implementation is migrated into the Polaris
-  workflow at `workflows/literature-review`. It owns the DSL declaration,
+  workflow at `workflows/literature-review`. It owns the
+  [Polaris DSL](/polaris/dsl) declaration,
   orchestration, CLI, skills, environment contract, and review continuation;
   it binds each node to reusable implementations under the one root `tools/`
   directory. No application-local tool bundle, private surface package, or private surface
@@ -80,16 +81,16 @@ state, event replay, artifacts, policy, and audit. The Portal is a projection
 and command surface for those Polaris decisions. Zustand stores browser
 projections and optimistic UI state; it is not an authority.
 
-A Domain Pack is a reusable library outside a Vault. Its workflows contain the
-Business DSL definition, including their FFI ports and calls. A run is the
-unit that enters a Vault:
+A Domain Pack is a reusable library outside a Vault. Its workflows use the
+[Polaris DSL](/polaris/dsl) for entities, typed dataflow, and FFI ports. A
+run is the unit that enters a Vault:
 
 ```text
 Domain Pack outside Vault
   -> Portal selects pack, flow, and Vault
   -> Polaris stores WorkEnvelope + pack digest + capability lease
   -> deterministic queue claims the run
-  -> mock Vault Host executes the pinned DSL program
+  -> mock Vault Host executes the pinned Polaris DSL program
   -> receipts, events, and artifact projections return to Polaris
   -> Portal renders cards, approval, debug, and results
 ```
@@ -132,11 +133,12 @@ Verified packs are installed by the Polaris CLI at:
 $POLARIS_DATA_ROOT/control/domain-packs/<domain>/<version>/
 ```
 
-Each installation contains immutable DSL source and a manifest with a SHA-256
-digest. `pack add` validates source and imports before the atomic write;
-`pack list` detects drift; `pack remove` removes only the requested version.
-The authenticated `GET /api/domain-packs` projection exposes verified packs,
-flows, capabilities, and approval metadata.
+Each installation contains immutable [Polaris DSL](/polaris/dsl) source and
+a manifest with a SHA-256 digest. `pack add` validates source and imports
+before the atomic write; `pack list` detects drift; `pack remove` removes
+only the requested version. The authenticated `GET /api/domain-packs`
+projection exposes verified packs, flows, capabilities, and approval
+metadata. Language and pack IR live on the Polaris DSL page.
 
 The control store persists setup, envelopes, capability leases, runs, events,
 outbox items, effect receipts, artifacts, and non-executable suggestions in
@@ -167,10 +169,10 @@ mock is no longer an in-memory source of run truth.
 
 ### Phase 2: Real Pack And Vault Projections
 
-Implemented. Packs come from the verified CLI-managed DSL store. Vaults come
-from the current user-owned Polaris Vault projection. `status`, `canRun`, and
-`availabilityReason` remain server-derived; the Portal does not invent a
-second Vault lifecycle.
+Implemented. Packs come from the verified CLI-managed
+[Polaris DSL](/polaris/dsl) store. Vaults come from the current user-owned
+Polaris Vault projection. `status`, `canRun`, and `availabilityReason` remain
+server-derived; the Portal does not invent a second Vault lifecycle.
 
 ### Phase 3: Durable Admission And Run State
 
@@ -184,10 +186,11 @@ envelope, its lease, and its initial event commit in one SQLite transaction.
 
 Implemented as a mock-only boundary. The versioned RPC envelope carries the
 run, tenant, Vault, pack pin, capability lease, call, input, mode, and trace
-identity. The DSL parser supports explicit `builtin manual.review`; the
-generic built-in registry defines the interface, while a Domain Pack port
-declares where it is used. The mock host records deterministic receipts and
-produces synthetic artifacts. No real tool package is installed into a Vault.
+identity. The [Polaris DSL](/polaris/dsl) parser supports explicit
+`builtin manual.review`; the generic built-in registry defines the
+interface, while a Domain Pack port declares where it is used. The mock host
+records deterministic receipts and produces synthetic artifacts. No real
+tool package is installed into a Vault.
 
 ### Phase 5: Deterministic Guarded Automation
 
@@ -208,16 +211,9 @@ the current draft is deterministic metadata derived from a confirmed run.
 
 ## FFI And Ownership
 
-FFI calls are declared inside workflow definitions. A Domain Pack may declare:
-
-```text
-port ReviewPlan version "1.0.0" {
-  builtin manual.review
-  in { title: String, instructions: String }
-  out { approved: Boolean, reviewId: ID }
-  effect human
-}
-```
+FFI calls are declared inside [Polaris DSL](/polaris/dsl) workflow
+definitions. Port syntax, built-in interfaces, and the RPC wire contract
+live on that page.
 
 The implementation locations are fixed:
 
@@ -347,7 +343,7 @@ production approval, or proof of external side effects.
 
 - [WorkEnvelope and workflow plan](./work-envelope-and-workflow-plan.md)
 - [Dynamic workflow runtime](./dynamic-workflow-runtime.md)
-- [Business DSL as workflow IR](./business-dsl-as-workflow-ir.md)
+- [Polaris DSL](../../polaris/dsl.md)
 - [Polaris Tool Portal](../../polaris/tool-portal.md)
 - [Polaris Portal](../../polaris/polaris-portal.md)
 - [Vault Management](../../polaris/vault-management.md)
