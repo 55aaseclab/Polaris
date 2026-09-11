@@ -23,10 +23,6 @@ runbooks, and release evidence live on the
   Portal, Vaults, Gateway, Paseo, DSL, and CLI
 - [Operations](https://www.jianxiaoyitech.com/docs/operations/) — deploy,
   gateway, incidents, and release records
-- [Polaris 0.3.4](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.4/)
-  — current release state
-- [0.3.3 capacity records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.3/)
-  — 20-vault baseline
 - [CHANGELOG.md](CHANGELOG.md) — release history
 
 ## Local Development
@@ -43,26 +39,16 @@ cp .env.dev.example .env.dev
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
-Keep `POLARIS_AUTH_MODE=disabled`. Authing vars are unused. Use one
-`POLARIS_DATA_ROOT` in every process.
+Keep `POLARIS_AUTH_MODE=disabled` and `POLARIS_VAULT_MODE=host`. Authing
+and Vault env are unused. Use one `POLARIS_DATA_ROOT` in every process.
 
 Minimum `.env.dev`:
 
 ```bash
 POLARIS_AUTH_MODE=disabled
 POLARIS_AUTH_DEFAULT_USER_ID=100000000000000001
+POLARIS_VAULT_MODE=host
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/vault-data
-POLARIS_SERVER_BIND_HOST=0.0.0.0
-POLARIS_SERVER_PORT=8787
-POLARIS_PUBLIC_BASE_URL=http://127.0.0.1:8787
-POLARIS_PASEO_APP_BIND_HOST=0.0.0.0
-POLARIS_PASEO_APP_PORT=8082
-POLARIS_PASEO_APP_BASE_URL=http://127.0.0.1:8082
-POLARIS_PORTAL_ALLOWED_ORIGINS=http://127.0.0.1:8787,http://127.0.0.1:8082
-POLARIS_WANGHAI_GATEWAY_ORIGIN=http://127.0.0.1:8787
-POLARIS_WANGHAI_GATEWAY_MASTER_SECRET=replace-with-at-least-32-random-characters
-POLARIS_WANGHAI_DOCKER_GATEWAY_HOST=127.0.0.1
 ```
 
 ## Polaris CLI

@@ -87,6 +87,7 @@ import {
   writePortalCredentialFile,
 } from "./service.js";
 import { ActiveVaultCapacityError } from "../control-plane/capacity.js";
+import { resolvePolarisVaultMode, VaultModeError } from "../config/vault-mode.js";
 import { WanghaiBackupError } from "../control-plane/jobs/wanghai-backup.js";
 import { WanghaiRestoreError } from "../control-plane/jobs/wanghai-restore.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
@@ -2616,6 +2617,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
         sendJson(res, 200, {
           service: "polaris-portal-api",
           authMode: resolvePortalAuthMode(),
+          vaultMode: resolvePolarisVaultMode(),
           endpoints: [
             "/api/users",
             "/api/users/:userId",
@@ -2647,6 +2649,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           const authMode = resolvePortalAuthMode();
           sendJson(res, 200, {
             authMode,
+            vaultMode: resolvePolarisVaultMode(),
             appId: String(process.env.POLARIS_AUTHING_APP_ID ?? "").trim(),
             authorizationUrl: String(process.env.POLARIS_AUTHING_AUTHORIZATION_URL ?? "").trim(),
             redirectUri: String(process.env.POLARIS_AUTHING_REDIRECT_URI ?? "").trim(),
@@ -2749,6 +2752,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           }
           sendJson(res, 200, {
             authMode: session.authMode,
+            vaultMode: resolvePolarisVaultMode(),
             authenticated: true,
             authingUserId: session.authingUserId,
             authingUsername: session.authingUsername,
@@ -3494,6 +3498,8 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
           : error instanceof WorkflowControlError
             ? error.statusCode
           : error instanceof ActiveVaultCapacityError
+            ? error.statusCode
+          : error instanceof VaultModeError
             ? error.statusCode
           : 500;
       const message = error instanceof Error ? error.message : String(error);

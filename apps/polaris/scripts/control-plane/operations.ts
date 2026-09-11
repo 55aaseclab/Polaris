@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { ensureCanonicalVaultImage, ensureVaultConfig } from "../config/provision.js";
 import { assertProjectNameAvailableForUser } from "../config/project-ownership.js";
 import { userProfileExists, vaultConfigExists, vaultConfigPath } from "../config/scaffold.js";
+import { assertVaultCreationAllowed } from "../config/vault-mode.js";
 import { readManagedCredentialRecord } from "../config/credentials.js";
 import {
   supportsLiveCredentialSwitch,
@@ -1566,6 +1567,7 @@ export async function queueProvisionVault(
   vault: string,
   options?: ProvisionJobOptions,
 ): Promise<{ queued: true; vault: string }> {
+  assertVaultCreationAllowed();
   return withUserMutationLock(import.meta.url, userId, async () => {
     if (!userProfileExists(userId)) {
       throw new Error(`User profile '${userId}' was not found. Create it first with user create.`);

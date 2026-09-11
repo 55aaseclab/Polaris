@@ -1016,6 +1016,43 @@ test("runCli vault create scaffolds a vault through the namespaced command", asy
   }
 });
 
+test("runCli vault create is rejected when POLARIS_VAULT_MODE=host", async () => {
+  const vault = uniqueProjectName("cli-host-mode-vault");
+  const userProfileId = uniqueProjectName("cli-host-mode-user");
+  const profilePath = path.join(USER_ROOT, "profiles", `${userProfileId}.yaml`);
+  const userRoot = path.join(USER_ROOT, userProfileId);
+  const previousMode = process.env.POLARIS_VAULT_MODE;
+
+  try {
+    await runCli([
+      "user",
+      "create",
+      userProfileId,
+      "--name",
+      "CLI Host Mode User",
+      "--email",
+      `${userProfileId}@polaris.local`,
+    ]);
+    process.env.POLARIS_VAULT_MODE = "host";
+    await assert.rejects(
+      () => runCli(["vault", "create", vault, "--user", userProfileId]),
+      /POLARIS_VAULT_MODE=host disables vault creation/,
+    );
+    assert.equal(
+      fs.existsSync(path.join(userRoot, "vaults", vault, "docker.agent.yaml")),
+      false,
+    );
+  } finally {
+    if (previousMode === undefined) delete process.env.POLARIS_VAULT_MODE;
+    else process.env.POLARIS_VAULT_MODE = previousMode;
+    await cleanupCliTestUser({
+      userId: userProfileId,
+      profilePath,
+      userRoot,
+    });
+  }
+});
+
 test("runCli create ignores a retired user default docker base image when scaffolding a vault", async () => {
   const vault = uniqueProjectName("cli-default-base-vault");
   const userProfileId = uniqueProjectName("cli-default-base-user");

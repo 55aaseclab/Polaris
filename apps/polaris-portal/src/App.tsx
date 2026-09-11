@@ -155,6 +155,10 @@ export default function App() {
     return <PortalLayout active="work" session={session} navigate={navigate}><RunDetailPage runId={decodeURIComponent(runMatch[1])} navigate={navigate} /></PortalLayout>;
   }
   if (path === "/hosts" || path === "/hosts/") {
+    if (session.vaultMode === "host") {
+      queueMicrotask(() => navigate("/work", true));
+      return <LoadingView label={t("common.openingWorkspace")} />;
+    }
     return <PortalLayout active="hosts" session={session} navigate={navigate}><HostsPage session={session} navigate={navigate} /></PortalLayout>;
   }
   if (path === "/settings" || path === "/settings/workflows" || path === "/settings/workflows/") {
@@ -214,7 +218,7 @@ function PortalLayout({
           </a>
           <nav className="portal-nav" aria-label={t("nav.workflows")}>
             {link("/work", t("nav.work"), LayoutDashboard, "work")}
-            {link("/hosts", t("nav.hosts"), Server, "hosts")}
+            {session.vaultMode !== "host" && link("/hosts", t("nav.hosts"), Server, "hosts")}
             {link("/settings/workflows", t("nav.workflows"), Workflow, "workflows")}
             {link("/debug", t("nav.debug"), Bug, "debug")}
             {link("/settings/user", t("nav.account"), CircleUserRound, "user")}

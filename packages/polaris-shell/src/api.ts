@@ -7,6 +7,7 @@ import {
 /** Session shape returned by Polaris `/api/session`. */
 export interface ShellSession {
   authMode: "authing-browser-session" | "oauth2-proxy" | "disabled";
+  vaultMode?: "host" | "vault";
   authenticated: boolean;
   authingUserId: string;
   authingUsername: string | null;

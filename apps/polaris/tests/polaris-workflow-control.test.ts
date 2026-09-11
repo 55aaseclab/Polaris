@@ -294,6 +294,32 @@ test("driver=none rejects an accidental Vault target", { concurrency: false }, a
   }
 });
 
+test("POLARIS_VAULT_MODE=host rejects Vault execution", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  const previousMode = process.env.POLARIS_VAULT_MODE;
+  let service: WorkflowControlService | undefined;
+  try {
+    process.env.POLARIS_VAULT_MODE = "host";
+    const pack = await installSyntheticPack(fixture.root);
+    service = serviceFor(pack);
+    await assert.rejects(
+      () => service!.createRun("tenant-host-mode", {
+        packId: pack.id,
+        flowId: "Summarize",
+        driver: "vault",
+        vaultId: "vault-synthetic",
+        values: { subject: "blocked" },
+      }),
+      (error: unknown) => error instanceof WorkflowControlError && error.code === "host-vault-mode",
+    );
+  } finally {
+    if (previousMode === undefined) delete process.env.POLARIS_VAULT_MODE;
+    else process.env.POLARIS_VAULT_MODE = previousMode;
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
 test("host run listing remains available when an optional Vault projection fails", { concurrency: false }, async () => {
   const fixture = testEnvironment();
   let service: WorkflowControlService | undefined;

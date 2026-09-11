@@ -2569,10 +2569,12 @@ test("portal API metadata is served from /api without a default user fallback", 
     const payload = await response.json() as {
       service: string;
       authMode: string;
+      vaultMode: string;
       endpoints: string[];
     };
     assert.equal(payload.service, "polaris-portal-api");
     assert.equal(payload.authMode, "authing-browser-session");
+    assert.equal(payload.vaultMode, "vault");
     assert.ok(payload.endpoints.includes("/api/users/:userId/vaults"));
     assert.equal(payload.endpoints.includes("/api/tool-portal/catalog"), false);
   } finally {

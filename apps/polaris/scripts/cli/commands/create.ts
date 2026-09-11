@@ -13,6 +13,7 @@ import { ensureVaultConfig } from "../../config/provision.js";
 import { logInfo } from "../../utils/log.js";
 import { polarisUsersRoot, repoRelativePath, repoRoot } from "../../utils/paths.js";
 import { withVaultMutationLock } from "../../utils/vault-lifecycle-lock.js";
+import { assertVaultCreationAllowed } from "../../config/vault-mode.js";
 import { loadVaultForProjectRef } from "./shared.js";
 
 const REPO_ROOT = repoRoot(import.meta.url);
@@ -54,6 +55,7 @@ export async function createVaultForUser(
     testWanghaiOnly?: boolean;
   },
 ): Promise<void> {
+  assertVaultCreationAllowed();
   const { project, backendHint, profileHint } = parseVaultReference(projectRef);
   assertProjectNameAvailableForUser(project, userProfileId);
   if (!userProfileExists(userProfileId)) {

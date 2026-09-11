@@ -27,6 +27,7 @@ const REDIRECT_URI_KEY = "polaris_authing_redirect_uri";
 
 export interface AuthingConfig {
   authMode: ShellSession["authMode"];
+  vaultMode?: ShellSession["vaultMode"];
   appId?: string;
   authorizationUrl?: string;
   redirectUri?: string;

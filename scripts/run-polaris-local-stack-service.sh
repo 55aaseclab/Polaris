@@ -22,8 +22,10 @@ set +a
 # Product flavor (coding vs vertical) is per-user, not a deploy env — one stack serves all.
 POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE:-disabled}"
 POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID:-100000000000000001}"
+POLARIS_VAULT_MODE="${POLARIS_VAULT_MODE:-vault}"
 export POLARIS_AUTH_MODE
 export POLARIS_AUTH_DEFAULT_USER_ID
+export POLARIS_VAULT_MODE
 
 SERVER_HOST="${POLARIS_SERVER_BIND_HOST:-0.0.0.0}"
 SERVER_PORT="${POLARIS_SERVER_PORT:-8787}"
@@ -57,19 +59,25 @@ pnpm --filter @polaris/polaris-auth-server run build
 # Build the shell bundle and the two surface packages before starting the stack.
 pnpm run build:surfaces
 
-paseo_local_ensure_source
-if [ ! -d "packages/paseo/source/node_modules" ]; then
-  (cd packages/paseo/source && npm ci --ignore-scripts)
-fi
-if [ ! -f "packages/paseo/source/packages/highlight/dist/index.js" ] \
-  || [ ! -f "packages/paseo/source/packages/protocol/dist/messages.js" ] \
-  || [ ! -f "packages/paseo/source/packages/client/dist/daemon-client.js" ]; then
-  (cd packages/paseo/source && npm run build:app-deps)
+if [ "${POLARIS_VAULT_MODE}" != "host" ]; then
+  paseo_local_ensure_source
+  if [ ! -d "packages/paseo/source/node_modules" ]; then
+    (cd packages/paseo/source && npm ci --ignore-scripts)
+  fi
+  if [ ! -f "packages/paseo/source/packages/highlight/dist/index.js" ] \
+    || [ ! -f "packages/paseo/source/packages/protocol/dist/messages.js" ] \
+    || [ ! -f "packages/paseo/source/packages/client/dist/daemon-client.js" ]; then
+    (cd packages/paseo/source && npm run build:app-deps)
+  fi
 fi
 
-echo "[polaris-local-stack] auth_mode=${POLARIS_AUTH_MODE}" >&2
-echo "[polaris-local-stack] outer: polaris API :${SERVER_PORT}, paseo-web :${PASEO_PORT}" >&2
-echo "[polaris-local-stack] in-container (per vault): paseo daemon :6767; vertical vaults also wanghai portal :9090" >&2
+echo "[polaris-local-stack] auth_mode=${POLARIS_AUTH_MODE} vault_mode=${POLARIS_VAULT_MODE}" >&2
+if [ "${POLARIS_VAULT_MODE}" = "host" ]; then
+  echo "[polaris-local-stack] outer: polaris API :${SERVER_PORT}" >&2
+else
+  echo "[polaris-local-stack] outer: polaris API :${SERVER_PORT}, paseo-web :${PASEO_PORT}" >&2
+  echo "[polaris-local-stack] in-container (per vault): paseo daemon :6767; vertical vaults also wanghai portal :9090" >&2
+fi
 
 POLARIS_API_PROXY_TARGET="http://${SERVER_HOST}:${SERVER_PORT}" \
 pnpm --filter polaris exec tsx watch scripts/polaris.ts server "${SERVER_PORT}" "${SERVER_HOST}" \
@@ -77,24 +85,26 @@ pnpm --filter polaris exec tsx watch scripts/polaris.ts server "${SERVER_PORT}" 
   2> >(tee "${LOG_DIR}/stack.server.err.log" >&2) &
 server_pid=$!
 
-# Outer shared coding UI. It owns /h/... only; polaris-shell is served by the
-# Polaris control plane on the outer shell routes.
-(
-  cd packages/paseo/source/packages/app
-  EXPO_NO_TELEMETRY=1 \
-  EXPO_PUBLIC_POLARIS_API_PORT="${SERVER_PORT}" \
-  EXPO_PUBLIC_POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE}" \
-  EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID}" \
-  npx expo start --web --host lan --port "${PASEO_PORT}"
-) \
-  > >(tee "${LOG_DIR}/stack.paseo.log") \
-  2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
-paseo_pid=$!
-
 pids=(
   "${server_pid}"
-  "${paseo_pid}"
 )
+
+if [ "${POLARIS_VAULT_MODE}" != "host" ]; then
+  # Outer shared coding UI. It owns /h/... only; polaris-shell is served by the
+  # Polaris control plane on the outer shell routes.
+  (
+    cd packages/paseo/source/packages/app
+    EXPO_NO_TELEMETRY=1 \
+    EXPO_PUBLIC_POLARIS_API_PORT="${SERVER_PORT}" \
+    EXPO_PUBLIC_POLARIS_AUTH_MODE="${POLARIS_AUTH_MODE}" \
+    EXPO_PUBLIC_POLARIS_AUTH_DEFAULT_USER_ID="${POLARIS_AUTH_DEFAULT_USER_ID}" \
+    npx expo start --web --host lan --port "${PASEO_PORT}"
+  ) \
+    > >(tee "${LOG_DIR}/stack.paseo.log") \
+    2> >(tee "${LOG_DIR}/stack.paseo.err.log" >&2) &
+  paseo_pid=$!
+  pids+=("${paseo_pid}")
+fi
 
 wait -n "${pids[@]}"
 exit 1

@@ -64,6 +64,7 @@ import {
   type PolarisControlStore,
   type WorkflowRunRecord,
 } from "./control-store.js";
+import { isHostVaultMode } from "../config/vault-mode.js";
 import { repoRoot } from "../utils/paths.js";
 
 export class WorkflowControlError extends Error {
@@ -118,7 +119,15 @@ function requestedExecutionDriver(input: WorkflowRunRequest): WorkflowExecutionD
       "vault-driver-required",
     );
   }
-  return explicit ?? (input.vaultId?.trim() ? "vault" : "none");
+  const driver = explicit ?? (input.vaultId?.trim() ? "vault" : "none");
+  if (driver === "vault" && isHostVaultMode()) {
+    throw new WorkflowControlError(
+      "POLARIS_VAULT_MODE=host disables Vault execution",
+      403,
+      "host-vault-mode",
+    );
+  }
+  return driver;
 }
 
 export type WorkflowLiveMetadataAdmissionRequest = {

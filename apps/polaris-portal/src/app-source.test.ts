@@ -71,6 +71,8 @@ test("Portal exposes the host-first work journey", () => {
   assert.match(appSource, /t\("hosts\.observing"\)/u);
   assert.match(appSource, /t\("hosts\.inactive"\)/u);
   assert.doesNotMatch(appSource, /metric-strip/u);
+  assert.match(appSource, /session\.vaultMode !== "host" && link\("\/hosts"/u);
+  assert.match(appSource, /if \(session\.vaultMode === "host"\) \{\s*queueMicrotask\(\(\) => navigate\("\/work", true\)\);/u);
   assert.match(appSource, /onClick=\{\(\) => setCreateOpen\(true\)\}/u);
   assert.match(appSource, /aria-label=\{t\("hosts\.new"\)\}/u);
   assert.match(appSource, /className="vault-toolbar-button"/u);
