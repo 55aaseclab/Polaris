@@ -54,6 +54,63 @@ def literature_output(count: int = 1) -> dict:
 
 
 class ContractTests(unittest.TestCase):
+    def test_workflow_prepare_builds_a_valid_collection_input_from_the_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_path = root / "plan.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "plan": {
+                            "keywords": ["synthetic alpha", "synthetic beta"],
+                            "queries": ["synthetic alpha synthetic beta"],
+                            "year_from": 2020,
+                            "year_to": 2026,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "runId": "run-synthetic",
+                        "workspaceRoot": str(root / "workspace"),
+                        "input": {
+                            "question": "Synthetic research question",
+                            "keywordPlanRef": str(plan_path),
+                            "decisionContext": "Synthetic decision",
+                            "audience": "Synthetic audience",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = runner.command_workflow(
+                type(
+                    "Args",
+                    (),
+                    {
+                        "input": str(request_path),
+                        "output": str(output_path),
+                        "step_command": "prepare-literature-input",
+                    },
+                )()
+            )
+
+            self.assertEqual(result, 0)
+            output = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertTrue(output["inputValid"])
+            prepared = runner.read_json(Path(output["collectionInputRef"]), "prepared input")
+            runner.validate_v2_input(prepared)
+            self.assertEqual(
+                prepared["payload"]["literature_scope"]["topic_keywords"],
+                ["synthetic alpha", "synthetic beta"],
+            )
+
     def test_pipeline_uses_a_three_state_review_mode(self):
         self.assertEqual(
             runner.pipeline_options(V2_INPUT, None)["review_mode"],
@@ -216,6 +273,64 @@ class ContractTests(unittest.TestCase):
         filtered = runner.apply_seed_literature_scope(collection, input_value)
         self.assertEqual(len(filtered["records"]), 2)
         self.assertNotIn("literature_scope", filtered)
+
+    def test_search_plan_does_not_imply_ccf_only_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_path = root / "plan.json"
+            output_path = root / "input.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "keywords": ["synthetic topic", "synthetic model"],
+                        "queries": ["synthetic topic model"],
+                        "year_from": 2015,
+                        "year_to": 2025,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = type(
+                "Args",
+                (),
+                {
+                    "input": None,
+                    "plan": str(plan_path),
+                    "question": "Review synthetic topic models.",
+                    "collection_id": "synthetic",
+                    "decision_context": "test",
+                    "audience": "test",
+                    "output": str(output_path),
+                },
+            )()
+            runner.prepare_literature_input(args)
+            prepared = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertFalse(
+                prepared["payload"]["literature_scope"]["require_ccf_venue"]
+            )
+            self.assertFalse(
+                prepared["payload"]["citation_expansion"]["enabled"]
+            )
+
+            record = literature_output(1)["records"][0]
+            record["payload"].update(
+                {
+                    "title": "Synthetic topic model",
+                    "abstract": "A synthetic model for the topic.",
+                    "year": 2024,
+                }
+            )
+            filtered = runner.apply_seed_literature_scope(
+                {**literature_output(0), "records": [record]},
+                prepared,
+            )
+            self.assertEqual(len(filtered["records"]), 1)
+
+    def test_source_timeout_is_bounded_and_configurable(self):
+        self.assertEqual(runner.source_timeout_seconds({}), 90.0)
+        self.assertEqual(runner.source_timeout_seconds({"timeout_seconds": 30}), 30.0)
+        self.assertEqual(runner.source_timeout_seconds({"timeout_seconds": 1}), 5.0)
+        self.assertEqual(runner.source_timeout_seconds({"timeout_seconds": 900}), 600.0)
 
     def test_accepts_v2_literature_input(self):
         self.assertEqual(runner.input_version(V2_INPUT), "v2")

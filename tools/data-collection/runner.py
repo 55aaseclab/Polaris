@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -259,6 +260,224 @@ def validate_v2_input(value: dict[str, Any]) -> None:
     pipeline_options(value, None)
 
 
+def parse_search_plan(value: Any) -> dict[str, Any]:
+    """Read the versioned plan emitted by the shared Codex tool."""
+    if isinstance(value, dict) and isinstance(value.get("plan"), dict):
+        value = value["plan"]
+    if not isinstance(value, dict):
+        raise CliError("search keyword plan must be an object")
+    required = {"keywords", "queries", "year_from", "year_to"}
+    if set(value) != required:
+        raise CliError("search keyword plan has unexpected or missing fields")
+    keywords = value["keywords"]
+    queries = value["queries"]
+    if (
+        not isinstance(keywords, list)
+        or not 2 <= len(keywords) <= 8
+        or not all(isinstance(item, str) and item.strip() for item in keywords)
+    ):
+        raise CliError("search keyword plan keywords must contain 2-8 non-empty strings")
+    if (
+        not isinstance(queries, list)
+        or not 1 <= len(queries) <= 5
+        or not all(isinstance(item, str) and item.strip() for item in queries)
+    ):
+        raise CliError("search keyword plan queries must contain 1-5 non-empty strings")
+    year_from, year_to = value["year_from"], value["year_to"]
+    if (
+        not isinstance(year_from, int)
+        or not isinstance(year_to, int)
+        or year_from < 1800
+        or year_to < year_from
+        or year_to > 2200
+    ):
+        raise CliError("search keyword plan has an invalid year range")
+    return {
+        "keywords": [item.strip() for item in keywords],
+        "queries": [item.strip() for item in queries],
+        "year_from": year_from,
+        "year_to": year_to,
+    }
+
+
+def prepare_literature_input(args: argparse.Namespace) -> int:
+    base = read_json(Path(args.input), "collection input") if args.input else {}
+    if base and base.get("collection_kind") != "literature":
+        raise CliError("collection input must be a literature collection")
+    plan = parse_search_plan(read_json(Path(args.plan), "search keyword plan"))
+    values = dict(base)
+    values.setdefault("schema_version", INPUT_V2)
+    values.setdefault("collection_id", args.collection_id)
+    values.setdefault("collection_kind", "literature")
+    values.setdefault("question", args.question.strip())
+    values.setdefault("decision_context", args.decision_context)
+    values.setdefault("audience", args.audience)
+    scope = dict(values.get("scope") or {})
+    explicit_keywords = [
+        item for item in scope.get("include", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    explicit_range = (
+        isinstance(scope.get("time_range"), str)
+        and bool(re.fullmatch(r"\d{4}\.\.\d{4}", scope["time_range"]))
+    )
+    if not explicit_keywords:
+        scope["include"] = plan["keywords"]
+    if not explicit_range:
+        scope["time_range"] = f'{plan["year_from"]}..{plan["year_to"]}'
+    values["scope"] = scope
+    payload = dict(values.get("payload") or {})
+    literature_scope = dict(payload.get("literature_scope") or {})
+    literature_scope["topic_keywords"] = explicit_keywords or plan["keywords"]
+    literature_scope.setdefault("from_year", plan["year_from"])
+    literature_scope.setdefault("to_year", plan["year_to"])
+    literature_scope.setdefault("enabled", True)
+    # A search plan does not imply a CCF-only corpus. Keep the venue gate
+    # opt-in for callers that explicitly request it in their input contract.
+    literature_scope.setdefault("require_ccf_venue", False)
+    literature_scope.setdefault("max_records", 20)
+    payload["literature_scope"] = literature_scope
+    # The generic search-plan contract covers seed discovery. Citation
+    # expansion is an explicit opt-in because it can add a large, external
+    # frontier unrelated to the user's requested search window.
+    payload.setdefault("citation_expansion", {"enabled": False})
+    payload.setdefault("pdf_links", {"enabled": True})
+    values["payload"] = payload
+    tasks = list(values.get("source_tasks") or [
+        {"task_id": "brief-crossref", "source_type": "crossref-search",
+         "config": {"query": args.question, "rows": 20}},
+        {"task_id": "brief-semantic-scholar", "source_type": "semantic-scholar-search",
+         "config": {"query": args.question, "limit": 20}},
+    ])
+    expanded = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            expanded.append(task)
+            continue
+        source_type = task.get("source_type")
+        if source_type not in {"crossref-search", "semantic-scholar-search"}:
+            expanded.append(task)
+            continue
+        config = dict(task.get("config") or {})
+        for index, query in enumerate(plan["queries"], start=1):
+            next_task = dict(task)
+            next_task["task_id"] = f'{task.get("task_id") or source_type}-{index}'
+            next_task["config"] = {**config, "query": query}
+            if source_type == "crossref-search":
+                next_task["config"].update({
+                    "from_pub_date": f'{plan["year_from"]}-01-01',
+                    "until_pub_date": f'{plan["year_to"]}-12-31',
+                })
+            expanded.append(next_task)
+    values["source_tasks"] = expanded
+    values.setdefault("evidence_policy", {
+        "required_fields": ["source_url", "quote", "observed_at", "content_hash"],
+    })
+    values.setdefault("pipeline", {
+        "review_mode": "auto-pass",
+        "skip_augmentation": True,
+    })
+    write_json(Path(args.output), values)
+    emit({"status": "valid", "output": str(Path(args.output).resolve()),
+          "collection_id": values["collection_id"], "collection_kind": "literature"})
+    return 0
+
+
+def workflow_request(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    request = read_json(Path(args.input), "workflow input")
+    values = request.get("input")
+    if not isinstance(values, dict):
+        raise CliError("workflow input requires an input object")
+    root_value = request.get("workspaceRoot")
+    if not isinstance(root_value, str) or not root_value.strip():
+        raise CliError("workflow input requires workspaceRoot")
+    return request, values, Path(root_value).expanduser().resolve()
+
+
+def workflow_string(values: dict[str, Any], key: str, command: str) -> str:
+    value = values.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise CliError(f"workflow {command} requires input.{key}")
+    return value.strip()
+
+
+def command_workflow(args: argparse.Namespace) -> int:
+    request, values, workspace_root = workflow_request(args)
+    run_id = workflow_string(request, "runId", "adapter")
+    output = Path(args.output).expanduser().resolve()
+    collection_id = f"collection-{run_id}"
+    collection_root = workspace_root / "collection"
+    input_path = collection_root / "inputs" / "input.json"
+
+    if args.step_command == "prepare-literature-input":
+        keyword_plan = workflow_string(values, "keywordPlanRef", args.step_command)
+        prepare_literature_input(
+            argparse.Namespace(
+                input=None,
+                plan=keyword_plan,
+                question=workflow_string(values, "question", args.step_command),
+                collection_id=collection_id,
+                decision_context=workflow_string(values, "decisionContext", args.step_command),
+                audience=workflow_string(values, "audience", args.step_command),
+                output=str(input_path),
+            )
+        )
+        write_json(output, {
+            "collectionInputRef": str(input_path),
+            "inputValid": True,
+        })
+        return 0
+
+    if args.step_command == "validate-input":
+        collection_input = Path(
+            workflow_string(values, "collectionInputRef", args.step_command)
+        ).expanduser().resolve()
+        input_version(read_json(collection_input, "collection input"))
+        write_json(output, {"inputValid": True})
+        return 0
+
+    if args.step_command == "run":
+        collection_input = Path(
+            workflow_string(values, "collectionInputRef", args.step_command)
+        ).expanduser().resolve()
+        input_value = read_json(collection_input, "collection input")
+        input_version(input_value)
+        workspace_id = run_id
+        workspace_parent = workspace_root.parent
+        previous_root = os.environ.get("POLARIS_LITERATURE_WORKSPACES_ROOT")
+        os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(workspace_parent)
+        try:
+            destination = (
+                workspace_parent / workspace_id / "data-collections"
+                / input_value["collection_id"]
+            )
+            (destination / "inputs").mkdir(parents=True, exist_ok=True)
+            write_json(destination / "inputs" / "input.json", input_value)
+            final = run_three_phase_pipeline(
+                input_value,
+                workspace_id,
+                run_id,
+                review_mode=workflow_string(values, "reviewMode", args.step_command),
+            )
+            collection_output = destination / "outputs" / "output.json"
+            write_json(collection_output, final)
+            validate_v2_output(final)
+        finally:
+            if previous_root is None:
+                os.environ.pop("POLARIS_LITERATURE_WORKSPACES_ROOT", None)
+            else:
+                os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = previous_root
+        write_json(output, {
+            "collectionOutputRef": str(collection_output),
+            "collectionId": str(final["collection_id"]),
+            "collectionCount": len(final["records"]),
+            "collectionStatus": str(final["status"]),
+        })
+        return 0
+
+    raise CliError(f"unsupported workflow command: {args.step_command}")
+
+
 def input_version(value: dict[str, Any]) -> str:
     if value.get("schema_version") == INPUT_V2:
         validate_v2_input(value)
@@ -325,6 +544,21 @@ def validate_pdf_links(value: Any, label: str) -> None:
 
 def emit(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2), flush=True)
+
+
+def write_json(path: Path, value: dict[str, Any]) -> None:
+    path = path.expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def source_timeout_seconds(config: dict[str, Any]) -> float:
+    """Return the bounded timeout for one external source task."""
+    raw = config.get("timeout_seconds", 90)
+    try:
+        return max(5.0, min(600.0, float(raw)))
+    except (TypeError, ValueError):
+        return 90.0
 
 
 def log(message: str, **fields: Any) -> None:
@@ -1114,6 +1348,18 @@ def run_phase1_sources(
     collection_root = collection_base / "runs"
     results = []
     sources: list[tuple[str, str, dict[str, dict[str, Any]]]] = []
+    scope = input_value.get("scope")
+    time_range = scope.get("time_range") if isinstance(scope, dict) else None
+    scope_from_year: int | None = None
+    scope_to_year: int | None = None
+    if isinstance(time_range, str) and ".." in time_range:
+        start, end = time_range.split("..", 1)
+        try:
+            scope_from_year = int(start.strip()[:4])
+            scope_to_year = int(end.strip()[:4])
+        except ValueError:
+            scope_from_year = None
+            scope_to_year = None
     tasks = list(input_value["source_tasks"])
     log(
         "phase1_collection_start",
@@ -1268,14 +1514,27 @@ def run_phase1_sources(
                 "--output",
                 str(output),
             ]
-            completed = subprocess.run(command, text=True, capture_output=True, check=False)
-            status = "succeeded" if completed.returncode == 0 else "failed"
+            try:
+                completed = subprocess.run(
+                    command,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=source_timeout_seconds(config),
+                )
+            except subprocess.TimeoutExpired:
+                completed = None
+            status = "succeeded" if completed is not None and completed.returncode == 0 else "failed"
             results.append(
                 {
                     "task_id": task_id,
                     "status": status,
                     "output": str(output),
-                    "detail": completed.stderr.strip(),
+                    "detail": (
+                        completed.stderr.strip()
+                        if completed is not None
+                        else f"source timed out after {source_timeout_seconds(config)}s"
+                    ),
                 }
             )
             log(
@@ -1287,9 +1546,9 @@ def run_phase1_sources(
                 task_id=task_id,
                 source_type=source_type,
                 status=status,
-                exit_code=completed.returncode,
+                exit_code=completed.returncode if completed is not None else None,
             )
-            if completed.returncode == 0:
+            if completed is not None and completed.returncode == 0:
                 sources.append(("crossref-doi", str(output), {}))
             continue
         if source_type == "crossref-search":
@@ -1319,18 +1578,31 @@ def run_phase1_sources(
                 if isinstance(value, str) and value.strip():
                     command.extend((flag, value.strip()))
             # Default year window aligned with literature bounds when unset
-            if not config.get("from_pub_date"):
-                command.extend(("--from-pub-date", "2022-01-01"))
-            if not config.get("until_pub_date"):
-                command.extend(("--until-pub-date", "2026-12-31"))
-            completed = subprocess.run(command, text=True, capture_output=True, check=False)
-            status = "succeeded" if completed.returncode == 0 else "failed"
+            if not config.get("from_pub_date") and scope_from_year is not None:
+                command.extend(("--from-pub-date", f"{scope_from_year}-01-01"))
+            if not config.get("until_pub_date") and scope_to_year is not None:
+                command.extend(("--until-pub-date", f"{scope_to_year}-12-31"))
+            try:
+                completed = subprocess.run(
+                    command,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=source_timeout_seconds(config),
+                )
+            except subprocess.TimeoutExpired:
+                completed = None
+            status = "succeeded" if completed is not None and completed.returncode == 0 else "failed"
             results.append(
                 {
                     "task_id": task_id,
                     "status": status,
                     "output": str(output),
-                    "detail": completed.stderr.strip(),
+                    "detail": (
+                        completed.stderr.strip()
+                        if completed is not None
+                        else f"source timed out after {source_timeout_seconds(config)}s"
+                    ),
                 }
             )
             log(
@@ -1342,9 +1614,9 @@ def run_phase1_sources(
                 task_id=task_id,
                 source_type=source_type,
                 status=status,
-                exit_code=completed.returncode,
+                exit_code=completed.returncode if completed is not None else None,
             )
-            if completed.returncode == 0:
+            if completed is not None and completed.returncode == 0:
                 sources.append(("crossref-search", str(output), {}))
             continue
         if source_type == "semantic-scholar-search":
@@ -1371,14 +1643,27 @@ def run_phase1_sources(
             ]
             if use_bulk is not False:
                 command.append("--bulk")
-            completed = subprocess.run(command, text=True, capture_output=True, check=False)
-            status = "succeeded" if completed.returncode == 0 else "failed"
+            try:
+                completed = subprocess.run(
+                    command,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=source_timeout_seconds(config),
+                )
+            except subprocess.TimeoutExpired:
+                completed = None
+            status = "succeeded" if completed is not None and completed.returncode == 0 else "failed"
             results.append(
                 {
                     "task_id": task_id,
                     "status": status,
                     "output": str(output),
-                    "detail": completed.stderr.strip(),
+                    "detail": (
+                        completed.stderr.strip()
+                        if completed is not None
+                        else f"source timed out after {source_timeout_seconds(config)}s"
+                    ),
                 }
             )
             log(
@@ -1390,9 +1675,9 @@ def run_phase1_sources(
                 task_id=task_id,
                 source_type=source_type,
                 status=status,
-                exit_code=completed.returncode,
+                exit_code=completed.returncode if completed is not None else None,
             )
-            if completed.returncode == 0:
+            if completed is not None and completed.returncode == 0:
                 sources.append(("semantic-scholar-search", str(output), {}))
             continue
         elif source_type == "curated-web-search":
@@ -1731,6 +2016,17 @@ def main(argv: list[str]) -> int:
     )
     input_parser = sub.add_parser("validate-input")
     input_parser.add_argument("--input", required=True)
+    prepare_parser = sub.add_parser(
+        "prepare-literature-input",
+        help="Apply a Codex search plan to a generic literature input contract.",
+    )
+    prepare_parser.add_argument("--input")
+    prepare_parser.add_argument("--plan", required=True)
+    prepare_parser.add_argument("--question", required=True)
+    prepare_parser.add_argument("--collection-id", required=True)
+    prepare_parser.add_argument("--decision-context", default="Polaris Literature Review")
+    prepare_parser.add_argument("--audience", default="research and engineering")
+    prepare_parser.add_argument("--output", required=True)
     output_parser = sub.add_parser("validate-output")
     output_parser.add_argument("--output", required=True)
     catalog_parser = sub.add_parser("list-sources")
@@ -1751,6 +2047,10 @@ def main(argv: list[str]) -> int:
         choices=sorted(REVIEW_MODES),
         help="Override pipeline.review_mode for phase 3.",
     )
+    workflow_parser = sub.add_parser("workflow", help="Polaris workflow adapter.")
+    workflow_parser.add_argument("step_command")
+    workflow_parser.add_argument("--input", required=True)
+    workflow_parser.add_argument("--output", required=True)
     # Document phase-2 customer commands (handled above).
     sub.add_parser("preprocess", help="Phase 2 customer-leads: see customer_leads module.")
     sub.add_parser("augment", help="Phase 2 customer-leads: see customer_leads module.")
@@ -1785,6 +2085,10 @@ def main(argv: list[str]) -> int:
         elif args.command == "validate-input":
             value = read_json(args.input, "input")
             emit({"status": "valid", "contract": input_version(value), "collection_kind": value.get("collection_kind")})
+        elif args.command == "prepare-literature-input":
+            return prepare_literature_input(args)
+        elif args.command == "workflow":
+            return command_workflow(args)
         elif args.command == "validate-output":
             value = read_json(args.output, "output")
             if value.get("schema_version") != OUTPUT_V2:

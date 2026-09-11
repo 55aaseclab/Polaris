@@ -71,7 +71,7 @@ polaris_literature_assert_local_command() {
     return 0
   fi
   case "$command" in
-    version|validate-input|validate-output|templates)
+    version|validate-input|validate-output|templates|workflow)
       return 0
       ;;
     *)

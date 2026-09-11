@@ -31,7 +31,7 @@ PDF URLs (no download).
 | Dispatch source CLIs | `../runner.py` → `run_phase1_sources` (crossref, S2, deepsec, curated-web-search, …) |
 | Normalize Crossref / S2 / DeepSec | `phase1.normalize_crossref` / `normalize_semantic_scholar` / `normalize_deepsec` |
 | Merge multi-source outputs | `../runner.py` → `merge_normalized_outputs` |
-| Seed screen (year / CCF·arXiv / topic keywords) | `phase1.apply_seed_literature_scope` → `scope.filter_records` |
+| Seed screen (year / optional CCF·arXiv / topic keywords) | `phase1.apply_seed_literature_scope` → `scope.filter_records` |
 | Optional LLM topic-judge (`stage=seed`) | `topic_judge.apply_topic_judge` (from `runner.phase_collection`) |
 | List PDF candidate URLs only | `phase1.collect_paper_links` → `record_candidate_links` → `pdf_capture.provider_pdf_candidates` |
 | Write intermediate | `runner.phase_collection` → `work/collection-output.json` |

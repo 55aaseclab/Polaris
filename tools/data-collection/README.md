@@ -120,7 +120,9 @@ After source normalize/merge, **seed** literature records are filtered with
 
 1. Year window (default last 5 calendar years; override via `scope.time_range`
    like `2022..2026` or `payload.literature_scope.from_year` / `to_year`)
-2. CCF A/B/C venue match **or** arXiv CoRR / cs.* preprint
+2. CCF A/B/C venue match **or** arXiv CoRR / cs.* preprint when the input
+   explicitly enables the venue gate; generic search-plan inputs keep the
+   venue gate off unless requested
 3. **Topic keywords** on **title + abstract** from Crossref / Semantic Scholar
    payloads (keywords from `scope.include`, or override
    `payload.literature_scope.topic_keywords`)
@@ -130,6 +132,12 @@ Disable only when debugging:
 
 ```json
 "payload": { "literature_scope": { "enabled": false } }
+```
+
+Citation expansion is opt-in for generic search-plan inputs:
+
+```json
+"payload": { "citation_expansion": { "enabled": true } }
 ```
 
 Disable topic filter only (still keep year/venue):
