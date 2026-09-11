@@ -1,6 +1,6 @@
 # Polaris
 
-Self-hosted workspace control plane.
+Self-hosted control plane for agentic workflows.
 
 ## Overview
 
