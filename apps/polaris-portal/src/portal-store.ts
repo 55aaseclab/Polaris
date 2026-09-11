@@ -173,8 +173,6 @@ let streamUserId: string | null = null;
 let streamGeneration = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryAttempt = 0;
-let workflowPollTimer: ReturnType<typeof setTimeout> | null = null;
-let workflowPollGeneration = 0;
 let setupWrite: Promise<unknown> = Promise.resolve();
 
 function persistWorkflowSetup(input: WorkflowSetupRequest) {
@@ -190,30 +188,6 @@ function parseEvent(event: Event): PortalVaultStreamEvent | null {
   } catch {
     return null;
   }
-}
-
-function stopWorkflowPolling(): void {
-  workflowPollGeneration += 1;
-  if (workflowPollTimer) clearTimeout(workflowPollTimer);
-  workflowPollTimer = null;
-}
-
-function startWorkflowPolling(): void {
-  if (workflowPollTimer) return;
-  const generation = ++workflowPollGeneration;
-  const poll = async () => {
-    workflowPollTimer = null;
-    if (generation !== workflowPollGeneration || !usePortalStore.getState().session?.polarisUserId) return;
-    try {
-      await usePortalStore.getState().refreshWorkflowRuns();
-    } catch {
-      // The next poll retries without replacing a good projection with an error.
-    }
-    if (generation === workflowPollGeneration && usePortalStore.getState().session?.polarisUserId) {
-      workflowPollTimer = setTimeout(() => void poll(), 750);
-    }
-  };
-  workflowPollTimer = setTimeout(() => void poll(), 750);
 }
 
 export const usePortalStore = create<PortalStore>((set, get) => ({
@@ -237,14 +211,12 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
       } catch (error) {
         if (isRequestError(error) && (error.status === 401 || error.status === 403)) {
           get().closeLiveStream();
-          stopWorkflowPolling();
           set({ session: null, bootstrapped: true, loading: false });
           return;
         }
         throw error;
       }
       if (!session.authenticated) {
-        stopWorkflowPolling();
         set({ session: null, bootstrapped: true, loading: false });
         return;
       }
@@ -260,7 +232,6 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
         await get().refreshDomainPacks();
         await get().refreshWorkflowSetup();
         await get().refreshWorkflowRuns();
-        startWorkflowPolling();
       }
     } catch (error) {
       set({ error, bootstrapped: true });
@@ -536,7 +507,6 @@ export const usePortalStore = create<PortalStore>((set, get) => ({
   clearError: () => set({ error: null }),
   signOut: async () => {
     get().closeLiveStream();
-    stopWorkflowPolling();
     setupWrite = Promise.resolve();
     set({ ...emptyState, ...createInitialWorkflowState(), session: null, user: null, bootstrapped: true });
     await logout();
