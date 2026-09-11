@@ -12,6 +12,8 @@ import {
 } from "../../output/state-store.js";
 import { getPolarisControlStore } from "../../portal/control-store.js";
 import { logInfo } from "../../utils/log.js";
+import { applyHostToolDefaults } from "../../tools/defaults.js";
+import { evaluateToolPrecheck, formatToolPrecheckLines } from "../../tools/precheck.js";
 import { polarisStateRoot } from "../../utils/paths.js";
 import { workflowAdmitLiveMetadataCommand } from "./workflow-admit-live-metadata.js";
 import { workflowLiveMetadataDrillCommand } from "./workflow-live-metadata-drill.js";
@@ -58,7 +60,7 @@ type AuditOptions = {
 
 function usage(): never {
   throw new Error(
-    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]\n       pnpm --dir apps/polaris run polaris -- ops audit [--limit <1-1000>] [--verify] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-smoke [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-live-metadata-drill --user <userId> --vault <vault> --candidate-live-enabled [--release-id <id>] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-admit-live-metadata --tenant <userId> --vault <vault> --pack <packId> --flow <flowId> --operator <operatorId> --candidate-live-enabled [--value key=value ...] [--release-id <id>] [--dedupe-key <key>] [--wait] [--json]",
+    "Usage: pnpm --dir apps/polaris run polaris -- ops reconcile-vaults [--user <userId>] [--vault <vault>] [--dry-run] [--refresh-status-only] [--json]\n       pnpm --dir apps/polaris run polaris -- ops audit [--limit <1-1000>] [--verify] [--json]\n       pnpm --dir apps/polaris run polaris -- ops tool-precheck [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-smoke [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-live-metadata-drill --user <userId> --vault <vault> --candidate-live-enabled [--release-id <id>] [--json]\n       pnpm --dir apps/polaris run polaris -- ops workflow-admit-live-metadata --tenant <userId> --vault <vault> --pack <packId> --flow <flowId> --operator <operatorId> --candidate-live-enabled [--value key=value ...] [--release-id <id>] [--dedupe-key <key>] [--wait] [--json]",
   );
 }
 
@@ -335,6 +337,39 @@ function auditCommand(argv: string[]): void {
   }
 }
 
+function parseToolPrecheckOptions(argv: string[]): { json: boolean } {
+  const options = { json: false };
+  for (const value of argv) {
+    if (value === "--json") {
+      options.json = true;
+      continue;
+    }
+    usage();
+  }
+  return options;
+}
+
+function toolPrecheckCommand(argv: string[]): void {
+  const options = parseToolPrecheckOptions(argv);
+  applyHostToolDefaults(import.meta.url);
+  const report = evaluateToolPrecheck(import.meta.url);
+  logInfo("cli", "ops-tool-precheck", {
+    ok: report.ok,
+    missingRequired: report.missingRequired.map((item) => `${item.toolId}:${item.key}`),
+    missingRecommended: report.missingRecommended.map((item) => `${item.toolId}:${item.key}`),
+  });
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    for (const line of formatToolPrecheckLines(report)) {
+      process.stdout.write(`${line}\n`);
+    }
+  }
+  if (!report.ok) {
+    throw new Error("tool-precheck failed: required tool prerequisites are missing");
+  }
+}
+
 export async function opsCommand(action: string | undefined, argv: string[]): Promise<void> {
   if (!action) {
     usage();
@@ -345,6 +380,10 @@ export async function opsCommand(action: string | undefined, argv: string[]): Pr
   }
   if (action === "audit") {
     auditCommand(argv);
+    return;
+  }
+  if (action === "tool-precheck") {
+    toolPrecheckCommand(argv);
     return;
   }
   if (action === "workflow-smoke") {

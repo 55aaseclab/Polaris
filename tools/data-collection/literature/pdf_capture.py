@@ -632,6 +632,12 @@ def _download_urls_from_document(document: dict[str, Any], page_url: str) -> lis
     return sorted(found, key=score)
 
 
+def camofox_session_user_id() -> str:
+    """Stable Camofox userId so cookies persist across PDF captures."""
+    value = (os.environ.get("BROWSER_CAMOFOX_USER_ID") or "").strip()
+    return value or "polaris-literature"
+
+
 def _run_browser(url: str, run_id: str, work_dir: Path, timeout_ms: int, actions: list[dict[str, Any]]) -> dict[str, Any]:
     work_dir.mkdir(parents=True, exist_ok=True)
     input_path = work_dir / "browser.input.json"
@@ -639,18 +645,23 @@ def _run_browser(url: str, run_id: str, work_dir: Path, timeout_ms: int, actions
     # clue-browser caps timeout_ms at 120000.
     timeout_ms = max(1, min(int(timeout_ms), 120_000))
     challenge_ms = max(1, min(timeout_ms, 90_000))
+    browser_options: dict[str, Any] = {
+        "backend": "camofox",
+        "session_user_id": camofox_session_user_id(),
+        "humanize": False,
+        "timeout_ms": timeout_ms,
+        "wait_for_challenge": True,
+        "challenge_timeout_ms": challenge_ms,
+        "pacing": {"delay_ms": 0},
+    }
+    cookies_path = (os.environ.get("BROWSER_IMPORT_COOKIES_PATH") or "").strip()
+    if cookies_path:
+        browser_options["import_cookies_path"] = cookies_path
     browser_input = {
         "schema_version": "clue.browser.input.v1",
         "run_id": run_id,
         "start_url": url,
-        "browser": {
-            "backend": "camofox",
-            "humanize": False,
-            "timeout_ms": timeout_ms,
-            "wait_for_challenge": True,
-            "challenge_timeout_ms": challenge_ms,
-            "pacing": {"delay_ms": 0},
-        },
+        "browser": browser_options,
         "actions": actions,
     }
     input_path.write_text(json.dumps(browser_input, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

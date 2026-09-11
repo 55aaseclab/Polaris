@@ -48,5 +48,78 @@
     "challenge": "Camofox handles Cloudflare natively; Playwright path keeps wait/click helpers.",
     "downloads": "Download events stored as artifacts when available.",
     "extract_html": "extract-html action writes full rendered outerHTML as an html artifact for parsers (e.g. Google Scholar)."
+  },
+  "prerequisites": {
+    "env": [
+      {
+        "key": "DISPLAY",
+        "kind": "recommended",
+        "reason": "Headed Camofox / clue-browser uses the host X11 display when starting a local server."
+      },
+      {
+        "key": "BROWSER_CAMOFOX_URL",
+        "kind": "recommended",
+        "reason": "Reuse a running Camofox server instead of starting one per capture."
+      },
+      {
+        "key": "BROWSER_CAMOFOX_USER_ID",
+        "kind": "recommended",
+        "reason": "Stable Camofox userId so cookies persist under ~/.camofox/profiles. Falls back to polaris-literature for PDF capture."
+      },
+      {
+        "key": "BROWSER_IMPORT_COOKIES_PATH",
+        "kind": "recommended",
+        "reason": "Optional Netscape cookies.txt imported into the Camofox session after tab create."
+      },
+      {
+        "key": "CAMOFOX_API_KEY",
+        "kind": "recommended",
+        "reason": "Required for POST /sessions/:userId/cookies when Camofox is not on loopback."
+      },
+      {
+        "key": "BROWSER_PROXY_SERVER",
+        "kind": "recommended",
+        "reason": "Used when input omits browser.proxy; mapped to Camofox PROXY_HOST/PROXY_PORT."
+      },
+      {
+        "key": "BROWSER_PROXY_USERNAME",
+        "kind": "recommended",
+        "reason": "Authenticated ISP/residential proxies used by Camofox when BROWSER_PROXY_SERVER is set."
+      },
+      {
+        "key": "BROWSER_PROXY_PASSWORD",
+        "kind": "recommended",
+        "reason": "Authenticated ISP/residential proxies used by Camofox when BROWSER_PROXY_SERVER is set."
+      },
+      {
+        "key": "BROWSER_PROXY_BYPASS",
+        "kind": "recommended",
+        "reason": "Optional proxy bypass list passed through to the browser session."
+      }
+    ],
+    "commands": [
+      {
+        "name": "node",
+        "kind": "required",
+        "reason": "The browser wrapper is a Node CLI."
+      }
+    ],
+    "files": [
+      {
+        "path": "package.json",
+        "kind": "required",
+        "reason": "Node package manifest for Camofox and Playwright."
+      },
+      {
+        "path": "SETUP-DISPLAY.md",
+        "kind": "required",
+        "reason": "Host DISPLAY / Xvfb and Camofox setup for headed capture."
+      },
+      {
+        "path": "SETUP-CAMOFOX.md",
+        "kind": "required",
+        "reason": "camofox-browser install and Polaristool session (userId + cookies)."
+      }
+    ]
   }
 }

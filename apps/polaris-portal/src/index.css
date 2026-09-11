@@ -1025,8 +1025,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: nowrap;
   gap: 1rem;
   border-bottom: 1px solid var(--portal-border);
+}
+
+.tools-page .settings-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.tools-page .settings-toolbar .filter-tabs {
+  min-width: 0;
 }
 
 .settings-tabs {
@@ -1919,8 +1930,25 @@
   }
 
   .settings-toolbar {
-    align-items: flex-start;
+    align-items: center;
+    flex-wrap: nowrap;
     gap: .45rem;
+  }
+
+  .settings-toolbar .settings-tabs,
+  .tools-page .settings-toolbar .filter-tabs {
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .tools-page .settings-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tools-page .settings-toolbar .settings-provision-button {
+    grid-column: 2;
   }
 
   .settings-tabs {
@@ -2590,12 +2618,104 @@
 .settings-page > .card,
 .settings-page .settings-pack-card,
 .settings-page .settings-pack-browser,
+.settings-page .tool-card,
 .run-detail-page > .card,
 .run-detail-page .run-detail-main > .card,
 .run-detail-page .run-detail-side > .card,
 .hosts-page .host-card,
 .hosts-page .create-card {
   box-shadow: var(--page-card-shadow);
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.tool-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.tool-lock,
+.tool-commands,
+.tool-python {
+  margin: 0 0 .35rem;
+  color: var(--portal-muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.tool-card.is-warning {
+  border-color: #e5c875;
+}
+
+.tool-card.is-blocked {
+  border-color: #e8b4b4;
+}
+
+.tool-check-setup {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin-top: .9rem;
+  border: 1px solid var(--portal-border);
+  padding: .65rem .75rem;
+  background: var(--portal-surface-1);
+  font-size: .8rem;
+}
+
+.tool-check-setup.is-ready {
+  border-color: #b7ddc3;
+  background: #eaf7ee;
+}
+
+.tool-check-setup.is-warning {
+  border-color: #e5c875;
+  background: #fff8e7;
+}
+
+.tool-check-setup.is-blocked {
+  border-color: #e8b4b4;
+  color: #8a1f1f;
+  background: #fff1f1;
+}
+
+.tool-check-setup-complete {
+  margin: 0;
+  color: inherit;
+  font-size: .75rem;
+}
+
+.tool-check-setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-check-setup-item {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+
+.tool-check-setup-item code {
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  overflow-wrap: anywhere;
+}
+
+.tool-check-setup-item span {
+  color: inherit;
+  font-size: .75rem;
+  line-height: 1.45;
 }
 
 @media (max-width: 760px) {

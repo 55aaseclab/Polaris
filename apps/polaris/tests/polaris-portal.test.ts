@@ -2576,11 +2576,55 @@ test("portal API metadata is served from /api without a default user fallback", 
     assert.equal(payload.authMode, "authing-browser-session");
     assert.equal(payload.vaultMode, "vault");
     assert.ok(payload.endpoints.includes("/api/users/:userId/vaults"));
+    assert.ok(payload.endpoints.includes("/api/tools"));
     assert.equal(payload.endpoints.includes("/api/tool-portal/catalog"), false);
   } finally {
     server.close();
     await once(server, "close");
   }
+});
+
+test("portal tools API returns lock-backed readiness for a mapped session", async () => {
+  await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
+    await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", uniqueName("portal-tools-user"), async () => {
+      const server = createPortalServer(0);
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Portal server did not expose a TCP address");
+      }
+      try {
+        const response = await fetch(`http://127.0.0.1:${address.port}/api/tools`);
+        assert.equal(response.status, 200);
+        const payload = await response.json() as {
+          ok: boolean;
+          ready: number;
+          warning: number;
+          blocked: number;
+          tools: Array<{
+            id: string;
+            lockPath: string;
+            checkSetupPath: string;
+            readiness: string;
+            checkSetup: { ok: boolean; lines: string[] };
+            missingRequired: unknown[];
+            missingRecommended: Array<{ key: string }>;
+          }>;
+        };
+        assert.ok(payload.tools.length > 0);
+        assert.equal(payload.ready + payload.warning + payload.blocked, payload.tools.length);
+        const scholar = payload.tools.find((tool) => tool.id === "literature.source.semantic-scholar");
+        assert.ok(scholar);
+        assert.equal(scholar.lockPath, "tools/semantic-scholar/backend.lock.json");
+        assert.equal(scholar.checkSetupPath, "tools/semantic-scholar/check-setup");
+        assert.ok(scholar.checkSetup.lines.length > 0);
+        assert.match(scholar.readiness, /^(ready|warning|blocked)$/u);
+      } finally {
+        server.close();
+        await once(server, "close");
+      }
+    });
+  });
 });
 
 test("portal no longer serves Tool Portal routes or assets", async () => {

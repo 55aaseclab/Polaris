@@ -181,6 +181,8 @@ pnpm --dir apps/polaris run polaris -- ops reconcile-vaults \
 pnpm --dir apps/polaris run polaris -- ops audit \
   [--limit <1-1000>] [--verify] [--json]
 
+pnpm --dir apps/polaris run polaris -- ops tool-precheck [--json]
+
 pnpm --dir apps/polaris run polaris -- ops workflow-admit-live-metadata \
   --tenant <userId> --vault <vault> --pack <packId> --flow <flowId> \
   --operator <operatorId> --candidate-live-enabled \
@@ -207,3 +209,14 @@ never prints stored metadata. `--verify` checks the local durable hash chain
 and exits nonzero when a link or event hash is invalid. It does not establish
 off-host retention or detect all database truncation; treat those as separate
 release requirements.
+
+`ops tool-precheck` applies Polaristool host-cache defaults and runs each
+common tool's `check-setup` script. That script reads the tool's
+`backend.lock.json` and reports missing env, commands, files, Python, and
+live setup (DISPLAY, Camofox, session) with a next step. Required findings
+fail the command. Recommended findings print as warnings. Host tools share
+`$POLARIS_DATA_ROOT/cache`; Polaristool derives
+`POLARIS_LITERATURE_CACHE_ROOT` from that path when it is unset.
+You can also run `./check-setup` in a tool directory. The portal Tools
+page at `/settings/tools` shows the same printed lines and can re-run
+the check.

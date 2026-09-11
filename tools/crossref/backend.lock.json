@@ -1,0 +1,27 @@
+{
+  "schema_version": "clue.tool-backend-lock.v1",
+  "tool": {
+    "name": "clue-crossref-cli",
+    "version": "0.1.1"
+  },
+  "runtime": {
+    "name": "Python standard library",
+    "minimum_version": "3.11",
+    "external_dependencies": []
+  },
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_WORKSPACES_ROOT",
+        "kind": "recommended",
+        "reason": "Standalone Crossref runs write workspace-scoped output under this root."
+      }
+    ],
+    "commands": [],
+    "files": []
+  }
+}

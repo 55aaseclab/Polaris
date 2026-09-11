@@ -5,19 +5,46 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "${ROOT_DIR}"
 
-echo "[1/8] typecheck"
+echo "[1/10] typecheck"
 pnpm run check
 
-echo "[2/8] polaris skill tests"
+echo "[2/10] polaris skill tests"
 pnpm run test:polaris:skills
 
-echo "[3/9] polaris non-infra regression tests"
+echo "[3/10] polaris non-infra regression tests"
 pnpm --filter polaris run test:full-minus-infra
 
-echo "[4/9] build polaris"
+echo "[4/10] build polaris"
 pnpm --filter polaris run build
 
-echo "[5/8] shell syntax checks"
+echo "[5/10] tool env precheck"
+if [ -f ./.env.dev ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env.dev
+  set +a
+fi
+pnpm --filter polaris exec tsx scripts/polaris.ts ops tool-precheck --json
+
+echo "[6/10] common tool unit tests"
+python3 -m unittest discover -s tools/crossref/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/semantic-scholar/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/deepsec/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/codex/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/data-collection/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/collection-review/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/analysis-review/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/intelligence-analysis/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/intelligence-analysis/literature-review/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/report-writing/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/social-media/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/image-review/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/video-review/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/outreach/tests -p 'test_*.py'
+python3 -m unittest discover -s tools/social-publish/tests -p 'test_*.py'
+node --test tools/browser/tests/runner.test.mjs
+
+echo "[7/10] shell syntax checks"
 bash -n scripts/run-polaris-local-stack-service.sh
 bash -n scripts/ci-local.sh
 bash -n scripts/provision-remote.sh
@@ -36,7 +63,7 @@ bash -n scripts/run-polaris-server-host.sh
 bash -n scripts/lib/polaris-bluegreen.sh
 bash -n scripts/lib/paseo-local.sh
 
-echo "[6/8] local stack regression tests"
+echo "[8/10] local stack regression tests"
 node --test scripts/tests/local-stack-service.test.mjs
 node --test scripts/tests/sidecar-removal.test.mjs
 node --test scripts/tests/remote-host-deploy.test.mjs
@@ -49,10 +76,10 @@ node --test scripts/tests/docker-storage-root.test.mjs
 node --test scripts/tests/paseo-local.test.mjs
 node --test scripts/tests/workspace-base-image-workflow.test.mjs
 
-echo "[7/8] docker compose config"
+echo "[9/10] docker compose config"
 docker compose -f deploy/docker-compose.polaris-bluegreen.yml --env-file .env.prod.example config --services >/dev/null
 
-echo "[8/8] paseo artifact verification"
+echo "[10/10] paseo artifact verification"
 bash ./scripts/build-paseo-tool-bundle.sh >/dev/null
 (
   set -a

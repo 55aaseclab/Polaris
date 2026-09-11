@@ -57,9 +57,12 @@ test("Portal declares and owns a light color scheme", () => {
 });
 
 test("Portal exposes the host-first work journey", () => {
-  for (const route of ["/work", "/setup", "/settings/workflows", "/work/runs/"]) {
+  for (const route of ["/work", "/setup", "/settings/workflows", "/settings/tools", "/work/runs/"]) {
     assert.match(appSource, new RegExp(route.replace("/", "\\/"), "u"));
   }
+  assert.match(appSource, /function ToolsPage/u);
+  assert.match(appSource, /t\("nav\.tools"\)/u);
+  assert.match(appSource, /portalTools\(\)/u);
   assert.match(appSource, /PortalLayout active="workflows" session=\{session\} navigate=\{navigate\}><ProvisioningPage/u);
   for (const action of ["discover", 't("work.approve")', 't("work.cancel")', 't("common.retry")', 't("work.viewDetails")']) {
     if (action === "discover") {
@@ -333,6 +336,32 @@ test("workflow settings exposes the workflow entry and DSL snapshot", () => {
   assert.match(appSource, /graphMatch/u);
   assert.match(appSource, /\/graph/u);
   assert.doesNotMatch(appSource, /执行图/u);
+});
+
+test("tools page lists lock-backed readiness without reviving Tool Portal routes", () => {
+  assert.match(appSource, /path === "\/settings\/tools"/u);
+  assert.match(appSource, /function ToolsPage/u);
+  assert.match(appSource, /t\("tools\.filter"\)/u);
+  assert.match(appSource, /t\("tools\.checkSetup"\)/u);
+  assert.match(appSource, /item\.next && item\.next !== item\.reason/u);
+  assert.match(appSource, /t\("tools\.recheck"\)/u);
+  assert.match(appSource, /tool\.checkSetup\.lines/u);
+  assert.match(appSource, /tool-check-setup-list/u);
+  assert.doesNotMatch(appSource, /t\("tools\.missingRequired"\)/u);
+  assert.doesNotMatch(appSource, /t\("tools\.missingRecommended"\)/u);
+  assert.doesNotMatch(appSource, /tool-findings/u);
+  assert.match(appSource, /if \(error && !report\) return <ErrorView/u);
+  assert.match(appSource, /aria-label=\{t\("tools\.recheck"\)\}/u);
+  assert.match(appSource, /className="page-stack settings-page tools-page"/u);
+  assert.match(appSource, /className=\{cn\("tool-card", `is-\$\{tool\.readiness\}`\)\}/u);
+  assert.doesNotMatch(appSource, /path === "\/tools"/u);
+  assert.doesNotMatch(appSource, /\/api\/tool-portal/u);
+  assert.match(cssSource, /\.tools-list\s*\{/u);
+  assert.match(cssSource, /\.tool-card\.is-blocked\s*\{/u);
+  assert.match(cssSource, /\.tool-check-setup\s*\{/u);
+  assert.match(cssSource, /\.tool-check-setup-list\s*\{/u);
+  assert.doesNotMatch(cssSource, /\.tool-findings\s*\{/u);
+  assert.match(cssSource, /\.settings-page \.tool-card/u);
 });
 
 test("workflow settings can disable the last enabled workflow", () => {

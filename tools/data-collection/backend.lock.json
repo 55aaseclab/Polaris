@@ -8,5 +8,71 @@
     "name": "Python standard library",
     "minimum_version": "3.11",
     "external_dependencies": []
+  },
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_CACHE_ROOT",
+        "kind": "required",
+        "reason": "Shared host cache for PDFs, topic judgments, and arXiv metadata."
+      },
+      {
+        "key": "POLARIS_LITERATURE_WORKSPACES_ROOT",
+        "kind": "recommended",
+        "reason": "Standalone collection runs write work under this root."
+      },
+      {
+        "key": "DISPLAY",
+        "kind": "recommended",
+        "reason": "Phase-2 PDF capture starts Camofox on this X11 display."
+      },
+      {
+        "key": "BROWSER_CAMOFOX_URL",
+        "kind": "recommended",
+        "reason": "Phase-2 PDF capture reuses a Camofox server at this URL."
+      },
+      {
+        "key": "BROWSER_CAMOFOX_USER_ID",
+        "kind": "recommended",
+        "reason": "Stable Camofox userId for PDF capture. Defaults to polaris-literature when unset."
+      },
+      {
+        "key": "BROWSER_IMPORT_COOKIES_PATH",
+        "kind": "recommended",
+        "reason": "Optional Netscape cookies.txt imported into the shared PDF-capture session."
+      },
+      {
+        "key": "BROWSER_PROXY_SERVER",
+        "kind": "recommended",
+        "reason": "Shared Camofox startup maps this into PROXY_HOST/PROXY_PORT when capturing PDFs."
+      },
+      {
+        "key": "BROWSER_PROXY_USERNAME",
+        "kind": "recommended",
+        "reason": "Shared Camofox startup maps this into PROXY_USERNAME for PDF capture."
+      },
+      {
+        "key": "BROWSER_PROXY_PASSWORD",
+        "kind": "recommended",
+        "reason": "Shared Camofox startup maps this into PROXY_PASSWORD for PDF capture."
+      }
+    ],
+    "commands": [],
+    "files": [
+      {
+        "path": "../browser/SETUP-DISPLAY.md",
+        "kind": "required",
+        "reason": "Phase-2 PDF capture follows the same DISPLAY / Camofox host setup."
+      },
+      {
+        "path": "../browser/SETUP-CAMOFOX.md",
+        "kind": "required",
+        "reason": "Phase-2 PDF capture uses the Polaristool Camofox session."
+      }
+    ]
   }
 }

@@ -51,6 +51,13 @@ export function polarisDataRoot(
     : path.resolve(root, configured);
 }
 
+export function polarisCacheRoot(
+  importMetaUrl: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return path.join(polarisDataRoot(importMetaUrl, environment), "cache");
+}
+
 export function polarisControlRoot(
   importMetaUrl: string,
   environment: NodeJS.ProcessEnv = process.env,

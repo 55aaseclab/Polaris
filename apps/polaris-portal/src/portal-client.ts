@@ -157,6 +157,49 @@ export async function domainPacks(): Promise<{ packs: WorkflowDomainPackProjecti
   return request<{ packs: WorkflowDomainPackProjection[] }>("/domain-packs");
 }
 
+export type PortalToolFinding = {
+  toolId: string;
+  type: "env" | "command" | "python" | "file" | "lock" | "setup";
+  key: string;
+  kind: "required" | "recommended";
+  reason: string;
+  next?: string;
+};
+
+export type PortalToolStatus = {
+  id: string;
+  entrypoint: string;
+  commands: string[];
+  capabilities: string[];
+  lockPath: string;
+  checkSetupPath: string;
+  readiness: "ready" | "warning" | "blocked";
+  prerequisites: {
+    env: Array<{ key: string; kind: "required" | "recommended"; reason: string }>;
+    commands: Array<{ name: string; kind: "required" | "recommended"; reason: string }>;
+    files: Array<{ path: string; kind: "required" | "recommended"; reason: string }>;
+    python?: { minimum_version: string; requirements: string[] };
+  };
+  checkSetup: {
+    ok: boolean;
+    lines: string[];
+  };
+  missingRequired: PortalToolFinding[];
+  missingRecommended: PortalToolFinding[];
+};
+
+export type PortalToolStatusReport = {
+  ok: boolean;
+  ready: number;
+  warning: number;
+  blocked: number;
+  tools: PortalToolStatus[];
+};
+
+export async function portalTools(): Promise<PortalToolStatusReport> {
+  return request<PortalToolStatusReport>("/tools");
+}
+
 export async function workflowGraph(
   packId: string,
   flowId: string,

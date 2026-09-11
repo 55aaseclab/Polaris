@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Check this tool's backend.lock.json and live setup. Used by ops tool-precheck.
+set -euo pipefail
+# shellcheck source=../check-setup.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../check-setup.sh"

@@ -8,6 +8,17 @@ copy of them.
 versions, commands, and capability summaries. It contains no credentials,
 tenant state, endpoint publication, or scheduler state.
 
+Each tool owns env, commands, files, and Python requirements in its
+`backend.lock.json` under `prerequisites`. Polaristool evaluates those
+locks and does not hardcode per-tool env. Python tools must declare
+`prerequisites.python.requirements`, even when the list is empty.
+
+Each common tool also owns `check-setup`. `ops tool-precheck` and the
+portal Tools page at `/settings/tools` run that script. The page shows
+the same printed lines and a recheck control. Run `./check-setup` in a
+tool directory, or
+`pnpm --dir apps/polaris run polaris -- ops tool-precheck`.
+
 Each tool owns its instruction-layer skill under `<tool>/skills/` when it
 has one. There is no repository-level `skills/` tree. The literature-review
 workflow uses the collection, source, review, intelligence-analysis, Codex,

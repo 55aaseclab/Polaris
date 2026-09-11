@@ -12,5 +12,25 @@
       "GET /paper/search"
     ]
   },
-  "request_policy": "polite rate limiting; prefer API key for batch expand"
+  "request_policy": "polite rate limiting; prefer API key for batch expand",
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_CACHE_ROOT",
+        "kind": "required",
+        "reason": "Semantic Scholar responses are cached under the Polaristool host cache."
+      },
+      {
+        "key": "POLARIS_LITERATURE_SEMANTIC_SCHOLAR_API_KEY",
+        "kind": "recommended",
+        "reason": "Search and citation expansion fail closed without a key."
+      }
+    ],
+    "commands": [],
+    "files": []
+  }
 }

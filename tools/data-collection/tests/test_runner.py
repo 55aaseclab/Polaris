@@ -110,6 +110,7 @@ class ContractTests(unittest.TestCase):
                 prepared["payload"]["literature_scope"]["topic_keywords"],
                 ["synthetic alpha", "synthetic beta"],
             )
+            self.assertEqual(prepared["pipeline"]["skip_augmentation"], False)
 
     def test_pipeline_uses_a_three_state_review_mode(self):
         self.assertEqual(
@@ -1047,6 +1048,21 @@ class ContractTests(unittest.TestCase):
             rec = augmented["records"][0]
             self.assertIn("transcript", rec["payload"])
             self.assertTrue(rec["payload"]["transcript"].get("text"))
+
+    def test_pdf_capture_reuses_a_stable_camofox_session(self):
+        from literature.pdf_capture import camofox_session_user_id
+
+        previous = os.environ.get("BROWSER_CAMOFOX_USER_ID")
+        try:
+            os.environ.pop("BROWSER_CAMOFOX_USER_ID", None)
+            self.assertEqual(camofox_session_user_id(), "polaris-literature")
+            os.environ["BROWSER_CAMOFOX_USER_ID"] = "polaris-host"
+            self.assertEqual(camofox_session_user_id(), "polaris-host")
+        finally:
+            if previous is None:
+                os.environ.pop("BROWSER_CAMOFOX_USER_ID", None)
+            else:
+                os.environ["BROWSER_CAMOFOX_USER_ID"] = previous
 
 
 if __name__ == "__main__":

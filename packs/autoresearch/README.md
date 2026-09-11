@@ -42,16 +42,18 @@ report graph. Its port bindings point to the common tools that Polaris owns.
 Required for a local run:
 
 ```dotenv
+POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_LITERATURE_WORKSPACES_ROOT=/path/to/literature-workspaces
-POLARIS_LITERATURE_CACHE_ROOT=/path/to/literature-cache
 POLARIS_LITERATURE_RUNTIME_MODE=local
 ```
 
-Put these values in a file selected by
-`POLARIS_LITERATURE_ENV_FILE`, or export them in the shell. The loader never
-reads a Wanghai environment file. `POLARIS_LITERATURE_RUNTIME_MODE=polaris`
-is intentionally fail-closed for direct execution; integrated runs must be
-submitted as a Polaris durable job.
+Host tools share Polaristool's general cache at `$POLARIS_DATA_ROOT/cache`.
+`POLARIS_LITERATURE_CACHE_ROOT` is derived from that path when unset. Put
+provider credentials in a file selected by `POLARIS_LITERATURE_ENV_FILE`,
+or export them in the shell. The loader never reads a Wanghai environment
+file. `POLARIS_LITERATURE_RUNTIME_MODE=polaris` is intentionally fail-closed
+for direct execution; integrated runs must be submitted as a Polaris durable
+job.
 
 Optional provider settings:
 

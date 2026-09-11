@@ -46,7 +46,9 @@ bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
 Keep `POLARIS_AUTH_MODE=disabled` and `POLARIS_VAULT_MODE=host`. Authing
-and Vault env are unused. Use one `POLARIS_DATA_ROOT` in every process.
+and Vault env are unused. Use one `POLARIS_DATA_ROOT` in every process. Host tools share the general
+cache at `$POLARIS_DATA_ROOT/cache`. Polaristool derives
+`POLARIS_LITERATURE_CACHE_ROOT` from that path when it is unset.
 
 Minimum `.env.dev`:
 

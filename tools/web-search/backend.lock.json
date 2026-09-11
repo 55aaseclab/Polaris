@@ -27,5 +27,22 @@
       "bing"
     ],
     "result_limit_per_task": 10
+  },
+  "prerequisites": {
+    "env": [],
+    "commands": [
+      {
+        "name": "docker",
+        "kind": "recommended",
+        "reason": "The curated-web backend runs a local SearXNG container."
+      }
+    ],
+    "files": [
+      {
+        "path": "config/settings.yml",
+        "kind": "required",
+        "reason": "SearXNG wrapper settings."
+      }
+    ]
   }
 }

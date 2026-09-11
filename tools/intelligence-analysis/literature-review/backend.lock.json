@@ -11,6 +11,26 @@
     "external_python_dependencies": [],
     "required_executables": ["codex"]
   },
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_CACHE_ROOT",
+        "kind": "required",
+        "reason": "Analysis looks up cached PDFs under the Polaristool host cache."
+      },
+      {
+        "key": "POLARIS_LITERATURE_CODEX_BIN",
+        "kind": "recommended",
+        "reason": "Iterate and propose invoke Codex through this binary."
+      }
+    ],
+    "commands": [],
+    "files": []
+  },
   "safety_boundary": {
     "network_access": "The analysis wrapper does not directly call external model APIs.",
     "evidence_access": "Codex receives only the immutable analysis input.",

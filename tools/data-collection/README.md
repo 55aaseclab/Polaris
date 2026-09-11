@@ -257,7 +257,9 @@ with `LITERATURE_PDF_CACHE` if needed.
 Runs `clue-data-collection init` (optional email backend for customer-leads
 augment) and `tools/browser/clue-browser setup` (Camofox/Playwright for PDF
 capture). Requires repo `.env` with `POLARIS_LITERATURE_WORKSPACES_ROOT`, `DISPLAY` (e.g.
-`:99` under Xvfb), and optional `BROWSER_PROXY_*`.
+`:99` under Xvfb), and optional `BROWSER_PROXY_*`. See
+[`tools/browser/SETUP-DISPLAY.md`](../browser/SETUP-DISPLAY.md) and
+[`tools/browser/SETUP-CAMOFOX.md`](../browser/SETUP-CAMOFOX.md).
 
 ## Contracts
 

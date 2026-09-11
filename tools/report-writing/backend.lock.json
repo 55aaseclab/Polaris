@@ -19,6 +19,27 @@
     "required_executables": ["codex"],
     "formal_report_renderer": "XeLaTeX with xeCJK"
   },
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_CODEX_BIN",
+        "kind": "recommended",
+        "reason": "Draft, review, and revise invoke Codex through this binary."
+      }
+    ],
+    "commands": [
+      {
+        "name": "xelatex",
+        "kind": "recommended",
+        "reason": "Formal PDF rendering uses XeLaTeX."
+      }
+    ],
+    "files": []
+  },
   "safety_boundary": {
     "input": "Only final clue.intelligence-analysis.output.v2 is accepted.",
     "evidence": "Every report section binds to approved judgment claim IDs.",

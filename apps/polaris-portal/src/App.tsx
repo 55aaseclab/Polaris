@@ -31,6 +31,7 @@ import {
   Trash2,
   UserRound,
   Wifi,
+  Wrench,
   Workflow,
   X,
 } from "lucide-react";
@@ -60,8 +61,10 @@ import {
   logout,
   request,
   resolvePaseoUrl,
+  portalTools,
   workflowGraph,
   type AuthingConfig,
+  type PortalToolStatusReport,
   type PortalCredential,
   type PortalCredentialRecord,
   type PortalUserResponse,
@@ -181,6 +184,9 @@ export default function App() {
   if (path === "/settings" || path === "/settings/workflows" || path === "/settings/workflows/") {
     return <PortalLayout active="workflows" session={session} navigate={navigate}><WorkflowSettingsPage navigate={navigate} /></PortalLayout>;
   }
+  if (path === "/settings/tools" || path === "/settings/tools/") {
+    return <PortalLayout active="tools" session={session} navigate={navigate}><ToolsPage /></PortalLayout>;
+  }
   const graphMatch = path.match(/^\/settings\/workflows\/([^/]+)\/([^/]+)\/graph$/u);
   if (graphMatch) {
     return <PortalLayout active="workflows" session={session} navigate={navigate}>
@@ -208,14 +214,14 @@ function PortalLayout({
   navigate,
   children,
 }: {
-  active: "work" | "hosts" | "workflows" | "user";
+  active: "work" | "hosts" | "workflows" | "tools" | "user";
   session: ShellSession;
   navigate: (path: string, replace?: boolean) => void;
   children: React.ReactNode;
 }) {
   const { t, toggleLanguage } = useI18n();
   const signOut = usePortalStore((state) => state.signOut);
-  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "user") => (
+  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "tools" | "user") => (
     <a
       href={path}
       onClick={(event) => { event.preventDefault(); navigate(path); }}
@@ -237,6 +243,7 @@ function PortalLayout({
             {link("/work", t("nav.work"), LayoutDashboard, "work")}
             {session.vaultMode !== "host" && link("/hosts", t("nav.hosts"), Server, "hosts")}
             {link("/settings/workflows", t("nav.workflows"), Workflow, "workflows")}
+            {link("/settings/tools", t("nav.tools"), Wrench, "tools")}
             {link("/settings/user", t("nav.account"), CircleUserRound, "user")}
           </nav>
           <div className="portal-topbar-actions">
@@ -1035,6 +1042,108 @@ function ProvisioningPage({
           <div className="setup-footer"><Button variant="ghost" onClick={() => navigate(returnPath)}>{t("settings.setupLater")}</Button><div className="card-actions">{step > 0 && <Button variant="outline" onClick={previous}><ArrowLeft className="h-4 w-4" />{t("settings.previous")}</Button>}{step < 2 ? <Button onClick={next}>{t("settings.next")}<ArrowRight className="h-4 w-4" /></Button> : <Button onClick={() => void finish()}><Check className="h-4 w-4" />{t("settings.finish")}</Button>}</div></div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ToolsPage() {
+  const { t } = useI18n();
+  const [report, setReport] = useState<PortalToolStatusReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [filter, setFilter] = useState<"all" | "ready" | "warning" | "blocked">("all");
+
+  const loadTools = useCallback((cancelled?: { current: boolean }) => {
+    setRechecking(true);
+    return portalTools()
+      .then((next) => {
+        if (cancelled?.current) return;
+        setReport(next);
+        setError(null);
+      })
+      .catch((reason) => {
+        if (!cancelled?.current) setError(errorMessage(reason, t));
+      })
+      .finally(() => {
+        if (!cancelled?.current) setRechecking(false);
+      });
+  }, [t]);
+
+  useEffect(() => {
+    const cancelled = { current: false };
+    void loadTools(cancelled);
+    return () => {
+      cancelled.current = true;
+    };
+  }, [loadTools]);
+
+  if (error && !report) return <ErrorView message={error} />;
+  if (!report) return <LoadingView label={t("tools.loading")} />;
+  const visible = report.tools.filter((tool) => filter === "all" || tool.readiness === filter);
+  return (
+    <div className="page-stack settings-page tools-page">
+      <div className="settings-toolbar">
+        <div className="filter-tabs settings-tabs" role="tablist" aria-label={t("tools.filter")}>
+          <button type="button" role="tab" aria-selected={filter === "all"} className={cn("filter-tab", filter === "all" && "is-active")} onClick={() => setFilter("all")}>{t("tools.all")}<span className="filter-tab-count">{report.tools.length}</span></button>
+          <button type="button" role="tab" aria-selected={filter === "ready"} className={cn("filter-tab", filter === "ready" && "is-active")} onClick={() => setFilter("ready")}>{t("tools.ready")}<span className="filter-tab-count">{report.ready}</span></button>
+          <button type="button" role="tab" aria-selected={filter === "warning"} className={cn("filter-tab", filter === "warning" && "is-active")} onClick={() => setFilter("warning")}>{t("tools.warning")}<span className="filter-tab-count">{report.warning}</span></button>
+          <button type="button" role="tab" aria-selected={filter === "blocked"} className={cn("filter-tab", filter === "blocked" && "is-active")} onClick={() => setFilter("blocked")}>{t("tools.blocked")}<span className="filter-tab-count">{report.blocked}</span></button>
+        </div>
+        <Button className="settings-provision-button" variant="outline" size="icon" aria-label={t("tools.recheck")} title={t("tools.recheck")} disabled={rechecking} aria-busy={rechecking} onClick={() => void loadTools()}>
+          {rechecking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+        </Button>
+      </div>
+      {error && <p className="form-error setup-error" role="alert">{error}</p>}
+      <div className="tools-list" aria-busy={rechecking}>
+        {visible.map((tool) => (
+          <Card className={cn("tool-card", `is-${tool.readiness}`)} key={tool.id}>
+            <CardHeader>
+              <div className="tool-card-heading">
+                <div>
+                  <CardTitle>{tool.id}</CardTitle>
+                  <CardDescription>{t("tools.entrypoint")} · {tool.entrypoint}</CardDescription>
+                </div>
+                <Badge variant={tool.readiness === "ready" ? "success" : tool.readiness === "warning" ? "warning" : "danger"}>
+                  {tool.readiness === "ready" ? t("tools.ready") : tool.readiness === "warning" ? t("tools.warning") : t("tools.blocked")}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="tool-lock">{t("tools.lock")} · {tool.lockPath}</p>
+              <p className="tool-commands">{t("tools.commands")} · {tool.commands.join(t("common.listSeparator"))}</p>
+              {tool.prerequisites.python && (
+                <p className="tool-python">
+                  {t("tools.python", { version: tool.prerequisites.python.minimum_version })}
+                  {" · "}
+                  {tool.prerequisites.python.requirements.length > 0
+                    ? t("tools.packages", { packages: tool.prerequisites.python.requirements.join(t("common.listSeparator")) })
+                    : t("tools.noPythonPackages")}
+                </p>
+              )}
+              {tool.capabilities.length > 0 && (
+                <div className="capability-list">{tool.capabilities.map((capability) => <Badge key={capability} variant="outline">{capability}</Badge>)}</div>
+              )}
+              <div className={cn("tool-check-setup", `is-${tool.readiness}`)} role="status">
+                <strong>{t("tools.checkSetup")} · {tool.checkSetupPath}</strong>
+                {tool.checkSetup.lines.length === 1 && tool.readiness === "ready" ? (
+                  <p className="tool-check-setup-complete">{t("tools.checkSetupOk")}</p>
+                ) : (
+                  <ul className="tool-check-setup-list">
+                    {[...tool.missingRequired, ...tool.missingRecommended].map((item) => (
+                      <li className="tool-check-setup-item" key={`${item.type}:${item.key}`}>
+                        <code>{item.key}</code>
+                        <span>{item.reason}</span>
+                        {item.next && item.next !== item.reason && <span>{item.next}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      {visible.length === 0 && <div className="empty-state">{t("tools.empty")}</div>}
     </div>
   );
 }

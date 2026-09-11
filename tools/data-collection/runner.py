@@ -375,7 +375,7 @@ def prepare_literature_input(args: argparse.Namespace) -> int:
     })
     values.setdefault("pipeline", {
         "review_mode": "auto-pass",
-        "skip_augmentation": True,
+        "skip_augmentation": False,
     })
     write_json(Path(args.output), values)
     emit({"status": "valid", "output": str(Path(args.output).resolve()),

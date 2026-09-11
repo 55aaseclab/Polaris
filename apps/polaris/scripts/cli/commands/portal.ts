@@ -4,10 +4,19 @@ import {
   startDurableJobRecoveryLoop,
 } from "../../control-plane/operations.js";
 import { captureTelemetryError, trackTelemetryEvent } from "../../telemetry/client.js";
+import { applyHostToolDefaults } from "../../tools/defaults.js";
+import { evaluateToolPrecheck, formatToolPrecheckLines } from "../../tools/precheck.js";
+import { logWarn } from "../../utils/log.js";
 
 export async function portalCommand(portArg?: string, hostArg?: string): Promise<void> {
   const startedAt = Date.now();
   try {
+    applyHostToolDefaults(import.meta.url);
+    const precheck = evaluateToolPrecheck(import.meta.url);
+    for (const line of formatToolPrecheckLines(precheck)) {
+      if (line === "tool prerequisites are complete") continue;
+      logWarn("tool-precheck", line);
+    }
     const port = portArg ? Number(portArg) : 8787;
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error(`Invalid portal port '${portArg ?? ""}'`);

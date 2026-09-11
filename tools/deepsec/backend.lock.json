@@ -13,5 +13,20 @@
     "name": "Python standard library",
     "minimum_version": "3.11",
     "external_dependencies": []
+  },
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_DEEPSEC_API_URL",
+        "kind": "recommended",
+        "reason": "DeepSec search uses this endpoint when the default host is unavailable."
+      }
+    ],
+    "commands": [],
+    "files": []
   }
 }

@@ -10,6 +10,13 @@ than Chromium stealth plugins).
 
 ## Setup
 
+Headed Camofox needs an X11 display. See [SETUP-DISPLAY.md](./SETUP-DISPLAY.md)
+for Xvfb and `DISPLAY=:99`. See [SETUP-CAMOFOX.md](./SETUP-CAMOFOX.md) for
+[camofox-browser](https://github.com/jo-inc/camofox-browser) install and a
+stable Polaristool session (`BROWSER_CAMOFOX_USER_ID`).
+
+## Setup (binaries)
+
 ```sh
 ./clue-browser setup
 ```
@@ -120,11 +127,14 @@ preview in extractions. Omit `selector` to capture the full document; set
 ## Commands
 
 ```sh
+./check-setup
 ./clue-browser version
 ./clue-browser validate-input --input input.json
 ./clue-browser validate-output --output output.json
 ./clue-browser run --input input.json --output output.json
 ```
+
+`./check-setup` is what `ops tool-precheck` runs for this tool.
 
 ## Playwright path (optional)
 

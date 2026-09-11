@@ -12,5 +12,26 @@
       "CODEX_HOME"
     ]
   },
-  "request_policy": "Non-interactive codex exec; prefer --sandbox read-only for judgment tasks; structured JSON via --output-schema"
+  "request_policy": "Non-interactive codex exec; prefer --sandbox read-only for judgment tasks; structured JSON via --output-schema",
+  "prerequisites": {
+    "python": {
+      "minimum_version": "3.11",
+      "requirements": []
+    },
+    "env": [
+      {
+        "key": "POLARIS_LITERATURE_CODEX_BIN",
+        "kind": "recommended",
+        "reason": "Topic-judge, analysis, and report writing invoke Codex through this binary."
+      }
+    ],
+    "commands": [
+      {
+        "name": "python3",
+        "kind": "required",
+        "reason": "The Codex wrapper is a Python CLI."
+      }
+    ],
+    "files": []
+  }
 }

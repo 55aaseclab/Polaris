@@ -9,6 +9,7 @@ export const SHELL_ROUTE_PREFIXES = [
   "/welcome",
   "/auth",
   "/settings/workflows",
+  "/settings/tools",
   "/settings/user",
   "/hosts",
 ] as const;
@@ -74,6 +75,9 @@ export function isShellPath(pathname: string): boolean {
     return true;
   }
   if (path === "/settings/workflows" || path.startsWith("/settings/workflows/")) {
+    return true;
+  }
+  if (path === "/settings/tools" || path.startsWith("/settings/tools/")) {
     return true;
   }
   if (path === "/settings/user" || path.startsWith("/settings/user/")) {

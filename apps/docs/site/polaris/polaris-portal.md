@@ -197,6 +197,8 @@ page tree:
   run detail.
 - `ProvisioningPage` and `WorkflowSettingsPage` render the installed Domain
   Pack and flow catalog returned by Polaris.
+- `ToolsPage` at `/settings/tools` lists lock-backed tool readiness and a
+  formatted `check-setup` result, with a recheck control.
 - `RunDetailPage` renders the durable run event trace, approval and lifecycle
   actions, and controlled artifacts.
 - `UserPage` renders Basic Information, Credentials, and Session as three

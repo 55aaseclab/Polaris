@@ -91,6 +91,7 @@ import { resolvePolarisVaultMode, VaultModeError } from "../config/vault-mode.js
 import { WanghaiBackupError } from "../control-plane/jobs/wanghai-backup.js";
 import { WanghaiRestoreError } from "../control-plane/jobs/wanghai-restore.js";
 import { subscribePortalVaultStream } from "./vault-live-hub.js";
+import { evaluatePortalToolStatus } from "../tools/status.js";
 import type { PortalVaultStreamEvent } from "../core/portal.js";
 import {
   isPortalDocumentPath,
@@ -2650,6 +2651,7 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             "/api/users/:userId/credentials",
             "/api/domain-packs",
             "/api/domain-packs/:packId/:flowId/graph",
+            "/api/tools",
             "/api/workflow-vaults",
             "/api/workflow-setup",
             "/api/workflow-runs",
@@ -2921,6 +2923,14 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           notFound(res);
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "tools" && req.method === "GET") {
+          const session = await requirePortalSession(req, res);
+          if (!session || !requireMappedPortalSession(res, session)) {
+            return;
+          }
+          sendJson(res, 200, evaluatePortalToolStatus(import.meta.url));
           return;
         }
         if (segments.length >= 2 && segments[1] === "workflow-setup") {
