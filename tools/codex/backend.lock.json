@@ -4,7 +4,8 @@
   "runtime": {
     "cli": "codex",
     "commands": ["exec", "exec resume"],
-    "default_model": "gpt-5.4-mini",
+    "default_model": "gpt-5.5",
+    "default_reasoning_effort": "low",
     "env": [
       "CODEX_MODEL",
       "OPENAI_API_KEY",

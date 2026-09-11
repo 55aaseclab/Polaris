@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use `gpt-5.5` with low reasoning effort by default for Codex calls.
+
 ## 0.1.2 - 2026-07-23
 
 - `topic-judge` defaults to freeform JSON (some providers 429/503 on

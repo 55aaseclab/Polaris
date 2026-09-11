@@ -85,7 +85,41 @@ class CodexRunnerTests(unittest.TestCase):
             # ensure fallback
             env = {k: v for k, v in __import__("os").environ.items() if k != "CODEX_MODEL"}
             with mock.patch.dict("os.environ", env, clear=True):
-                self.assertEqual(runner.default_model(), "gpt-5.4-mini")
+                self.assertEqual(runner.default_model(), "gpt-5.5")
+                self.assertEqual(runner.default_reasoning_effort(), "low")
+
+    def test_topic_calls_use_gpt55_low_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            last_message = Path(directory) / "last-message.txt"
+            last_message.write_text("{}", encoding="utf-8")
+            with mock.patch.object(
+                runner,
+                "run_codex",
+                return_value=__import__("subprocess").CompletedProcess(
+                    args=["codex"],
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+            ) as run_codex:
+                runner._run_topic_codex(
+                    prompt="synthetic prompt",
+                    last_message=last_message,
+                    model=runner.default_model(),
+                    sandbox="read-only",
+                    schema_path=None,
+                    cd=None,
+                    full_auto=False,
+                    timeout_s=10,
+                    root=TOOL_ROOT,
+                )
+            args = run_codex.call_args.args[0]
+            self.assertIn("-m", args)
+            self.assertEqual(args[args.index("-m") + 1], "gpt-5.5")
+            self.assertIn(
+                'model_reasoning_effort="low"',
+                args,
+            )
 
     def test_topic_schema_exists(self) -> None:
         schema = TOOL_ROOT / "schemas" / "topic-judgment.schema.json"

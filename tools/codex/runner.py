@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bounded Codex CLI wrapper for non-interactive exec and topic judgment.
 
-Wraps the system `codex` binary (exec / resume). Default model is gpt-5.4-mini
-for long-running literature topic judgments.
+Wraps the system `codex` binary (exec / resume). Literature calls use the
+gpt-5.5 model with low reasoning effort unless explicitly overridden.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from typing import Any
 
 
 TOOL_NAME = "clue-codex-cli"
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_REASONING_EFFORT = "low"
 TOPIC_SCHEMA_NAME = "topic-judgment.schema.json"
 
 
@@ -69,6 +70,14 @@ def default_model() -> str:
         or os.environ.get("CODEX_MODEL")
         or DEFAULT_MODEL
     ).strip() or DEFAULT_MODEL
+
+
+def default_reasoning_effort() -> str:
+    return (
+        os.environ.get("POLARIS_LITERATURE_CODEX_REASONING_EFFORT")
+        or os.environ.get("CODEX_REASONING_EFFORT")
+        or DEFAULT_REASONING_EFFORT
+    ).strip() or DEFAULT_REASONING_EFFORT
 
 
 def find_codex(root: Path) -> list[str]:
@@ -120,6 +129,7 @@ def command_version(root: Path) -> int:
         ),
         "codex_version": codex_version,
         "default_model": default_model(),
+        "default_reasoning_effort": default_reasoning_effort(),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -153,6 +163,8 @@ def command_exec(args: argparse.Namespace, root: Path) -> int:
         args.sandbox,
         "-o",
         str(last_message),
+        "-c",
+        f'model_reasoning_effort="{default_reasoning_effort()}"',
     ]
     if args.cd:
         cmd.extend(["-C", str(Path(args.cd).expanduser().resolve())])
@@ -562,6 +574,8 @@ def _run_topic_codex(
         sandbox,
         "-o",
         str(last_message),
+        "-c",
+        f'model_reasoning_effort="{default_reasoning_effort()}"',
     ]
     mode = "freeform"
     if schema_path is not None:

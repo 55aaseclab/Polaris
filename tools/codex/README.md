@@ -3,7 +3,8 @@
 Bounded wrapper around the system [Codex CLI](https://github.com/openai/codex)
 for non-interactive `codex exec` and literature **topic judgment**.
 
-Default model: **`gpt-5.4-mini`** (override with `--model` or `CODEX_MODEL`).
+Default model: **`gpt-5.5`** with **low** reasoning effort (override with
+`--model` / `CODEX_MODEL` or `CODEX_REASONING_EFFORT`).
 
 ## Install
 
@@ -47,7 +48,7 @@ is **domain-agnostic**: only the supplied research question, `include` /
   --scope /path/to/collection/inputs/input.json \
   --records /path/to/collection/work/collection-output.json \
   --limit 10 \
-  --model gpt-5.4-mini \
+  --model gpt-5.5 \
   --output /tmp/topic-judgments.json
 ```
 
@@ -79,7 +80,8 @@ once on failure).
 | Variable | Meaning |
 |----------|---------|
 | `CODEX_BIN` | Override path to `codex` |
-| `CODEX_MODEL` | Default model (else `gpt-5.4-mini`) |
+| `CODEX_MODEL` | Default model (else `gpt-5.5`) |
+| `CODEX_REASONING_EFFORT` | Reasoning effort (else `low`) |
 | `OPENAI_API_KEY` / Codex auth | As required by local Codex install |
 | `CODEX_HOME` | Codex home (sessions/config) |
 
