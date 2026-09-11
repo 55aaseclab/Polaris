@@ -14,13 +14,7 @@
       "minimum_version": "3.11",
       "requirements": []
     },
-    "env": [
-      {
-        "key": "POLARIS_LITERATURE_WORKSPACES_ROOT",
-        "kind": "recommended",
-        "reason": "Standalone Crossref runs write workspace-scoped output under this root."
-      }
-    ],
+    "env": [],
     "commands": [],
     "files": []
   }

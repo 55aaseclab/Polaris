@@ -162,6 +162,7 @@ export type PortalToolFinding = {
   type: "env" | "command" | "python" | "file" | "lock" | "setup";
   key: string;
   kind: "required" | "recommended";
+  status?: "ok" | "missing";
   reason: string;
   next?: string;
 };
@@ -183,6 +184,7 @@ export type PortalToolStatus = {
   checkSetup: {
     ok: boolean;
     lines: string[];
+    checked?: PortalToolFinding[];
   };
   missingRequired: PortalToolFinding[];
   missingRecommended: PortalToolFinding[];

@@ -2684,12 +2684,6 @@
   background: #fff1f1;
 }
 
-.tool-check-setup-complete {
-  margin: 0;
-  color: inherit;
-  font-size: .75rem;
-}
-
 .tool-check-setup-list {
   display: flex;
   flex-direction: column;
@@ -2716,6 +2710,10 @@
   color: inherit;
   font-size: .75rem;
   line-height: 1.45;
+}
+
+.tool-check-setup-item.is-ok span {
+  color: #2f6b3f;
 }
 
 @media (max-width: 760px) {

@@ -256,7 +256,7 @@ with `LITERATURE_PDF_CACHE` if needed.
 
 Runs `clue-data-collection init` (optional email backend for customer-leads
 augment) and `tools/browser/clue-browser setup` (Camofox/Playwright for PDF
-capture). Requires repo `.env` with `POLARIS_LITERATURE_WORKSPACES_ROOT`, `DISPLAY` (e.g.
+capture). Requires repo `.env` with `DISPLAY` (e.g.
 `:99` under Xvfb), and optional `BROWSER_PROXY_*`. See
 [`tools/browser/SETUP-DISPLAY.md`](../browser/SETUP-DISPLAY.md) and
 [`tools/browser/SETUP-CAMOFOX.md`](../browser/SETUP-CAMOFOX.md).
@@ -322,10 +322,11 @@ Phase/review helpers use the **`clue.data-collection.*`** prefix only
 The editable curated-website registry is `source-catalog.json`. It lets an
 input select a topic or named websites without changing either contract.
 
-V2 runs resolve under:
+Polaristool workflow runs write under the `workspaceRoot` Polaristool
+passes in the adapter input, typically:
 
 ```text
-$POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace>/data-collections/<collection-id>/
+.polaris/workflow-workspaces/<run-id>/collection/data-collections/<collection-id>/
 ```
 
 The dispatcher derives `<collection-id>` from the validated v2 input and

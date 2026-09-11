@@ -1758,8 +1758,8 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("backend-status", help="Verify the locked SDK checkout.")
 
     batch = subcommands.add_parser("batch", help="Run source_type=social_media tasks into a new output directory.")
-    batch.add_argument("--workspace", help="Customer workspace ID. Uses acquisition/customer-data-collection under POLARIS_LITERATURE_WORKSPACES_ROOT.")
-    batch.add_argument("--workspaces-root", help="Override POLARIS_LITERATURE_WORKSPACES_ROOT for --workspace.")
+    batch.add_argument("--workspace", help="Customer workspace ID. Uses acquisition/customer-data-collection under --workspaces-root.")
+    batch.add_argument("--workspaces-root", help="Required with --workspace.")
     batch.add_argument("--run-id", help="When used with --workspace and no --output, create this run directory under runs/.")
     batch.add_argument("--input", help="Collection input JSON.")
     batch.add_argument("--output", help="New output directory.")
@@ -1778,7 +1778,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume = subcommands.add_parser("resume", help="Continue a blocked or failed existing run without redoing successful tasks.")
     resume.add_argument("--workspace", help="Customer workspace ID. Resolves --run-id under acquisition/customer-data-collection/runs/.")
-    resume.add_argument("--workspaces-root", help="Override POLARIS_LITERATURE_WORKSPACES_ROOT for --workspace.")
+    resume.add_argument("--workspaces-root", help="Required with --workspace.")
     resume.add_argument("--run-id", help="Existing run directory ID when --workspace is used.")
     resume.add_argument("--output", help="Existing output directory.")
     resume.add_argument("--token-file", help="Token file; default is the selected Polaris env file. Only its first line is read.")

@@ -3,8 +3,8 @@
 `clue-deepsec-cli` searches the Intelligent Cybersecurity Paper Retrieval
 System HTTP API. It preserves the returned papers without inferring relevance.
 
-The default API URL is `http://128.179.165.148:8123/api/papers/search`. Set
-`DEEPSEC_API_URL` to override it. The public wrapper loads repository `.env`.
+There is no hardcoded DeepSec host. Set `POLARIS_LITERATURE_DEEPSEC_API_URL`
+or `DEEPSEC_API_URL` before search. Polaristool does not invent this URL.
 
 ```sh
 ./clue-deepsec-cli search \

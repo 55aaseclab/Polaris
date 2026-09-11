@@ -27,7 +27,7 @@
       {
         "key": "POLARIS_LITERATURE_SEMANTIC_SCHOLAR_API_KEY",
         "kind": "recommended",
-        "reason": "Search and citation expansion fail closed without a key."
+        "reason": "Search and citation expansion fail closed without a key. SEMANTIC_SCHOLAR_API_KEY is the same value."
       }
     ],
     "commands": [],

@@ -486,7 +486,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="clue-justoneapi-cli enrich")
     parser.add_argument("--root", required=True)
     parser.add_argument("--workspace", help="Customer workspace ID. Resolves --run-id below acquisition/customer-data-collection/runs/.")
-    parser.add_argument("--workspaces-root", help="Override POLARIS_LITERATURE_WORKSPACES_ROOT for --workspace.")
+    parser.add_argument("--workspaces-root", help="Required with --workspace.")
     parser.add_argument("--run-id", help="Existing social-media run ID when --workspace is used.")
     parser.add_argument("--output", help="Existing social-media output directory.")
     parser.add_argument("--token-file")

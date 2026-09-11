@@ -22,7 +22,8 @@
       {
         "key": "POLARIS_LITERATURE_CODEX_BIN",
         "kind": "recommended",
-        "reason": "Topic-judge, analysis, and report writing invoke Codex through this binary."
+        "command": "codex",
+        "reason": "Topic-judge, analysis, and report writing invoke Codex through this binary. CODEX_BIN or a PATH `codex` is the same value."
       }
     ],
     "commands": [

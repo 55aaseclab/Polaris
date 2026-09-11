@@ -18,7 +18,8 @@
       {
         "key": "POLARIS_LITERATURE_CODEX_BIN",
         "kind": "recommended",
-        "reason": "Iterate and propose invoke Codex through this binary."
+        "command": "codex",
+        "reason": "Iterate and propose invoke Codex through this binary. CODEX_BIN or a PATH `codex` is the same value."
       }
     ],
     "commands": [],

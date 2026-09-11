@@ -15,7 +15,6 @@ from urllib.request import Request, urlopen
 
 
 TOOL_NAME = "clue-deepsec-cli"
-DEFAULT_API_URL = "http://128.179.165.148:8123/api/papers/search"
 OUTPUT_SCHEMA = "clue.deepsec.search.v1"
 SEARCH_AREAS = ("title", "abstract", "full_text", "structured")
 
@@ -77,6 +76,23 @@ def request_search(url: str) -> dict[str, Any]:
     return payload
 
 
+def configured_api_url() -> str:
+    return (
+        os.environ.get("POLARIS_LITERATURE_DEEPSEC_API_URL")
+        or os.environ.get("DEEPSEC_API_URL")
+        or ""
+    ).strip().rstrip("?")
+
+
+def resolve_api_url() -> str:
+    url = configured_api_url()
+    if not url:
+        raise CliError(
+            "set POLARIS_LITERATURE_DEEPSEC_API_URL or DEEPSEC_API_URL"
+        )
+    return url
+
+
 def write_json(path: Path, value: dict[str, Any]) -> None:
     path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,11 +103,7 @@ def command_search(args: argparse.Namespace, root: Path) -> int:
     keyword = args.keyword or args.question
     if not keyword:
         raise CliError("one of --keyword or --question is required")
-    api_url = (
-        os.environ.get("POLARIS_LITERATURE_DEEPSEC_API_URL")
-        or os.environ.get("DEEPSEC_API_URL")
-        or DEFAULT_API_URL
-    ).rstrip("?")
+    api_url = resolve_api_url()
     url = search_url(
         api_url,
         keyword,
@@ -159,11 +171,7 @@ def main(argv: list[str]) -> int:
                         "tool": TOOL_NAME,
                         "version": read_version(root),
                         "output_schema": OUTPUT_SCHEMA,
-                        "api_url": (
-                            os.environ.get("POLARIS_LITERATURE_DEEPSEC_API_URL")
-                            or os.environ.get("DEEPSEC_API_URL")
-                            or DEFAULT_API_URL
-                        ),
+                        "api_url": configured_api_url(),
                     },
                     ensure_ascii=False,
                     indent=2,

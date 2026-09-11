@@ -34,8 +34,9 @@ The following command processes every `web_search` task in a customer's input,
 uses Google, DuckDuckGo and Bing through the local SearXNG API, retains at most
 10 results per task, and stops the local server on completion.
 
-Run the following from `tools/web-search`. Set `POLARIS_LITERATURE_WORKSPACES_ROOT` in the
-environment; the repository `.env` is the normal local configuration source.
+Run the following from `tools/web-search`. Polaristool does not set a host
+workspace root. Pass `--workspaces-root` with `--workspace`, or use
+explicit `--input` and `--output`.
 
 ```sh
 set -a

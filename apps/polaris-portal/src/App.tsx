@@ -1125,19 +1125,21 @@ function ToolsPage() {
               )}
               <div className={cn("tool-check-setup", `is-${tool.readiness}`)} role="status">
                 <strong>{t("tools.checkSetup")} · {tool.checkSetupPath}</strong>
-                {tool.checkSetup.lines.length === 1 && tool.readiness === "ready" ? (
-                  <p className="tool-check-setup-complete">{t("tools.checkSetupOk")}</p>
-                ) : (
-                  <ul className="tool-check-setup-list">
-                    {[...tool.missingRequired, ...tool.missingRecommended].map((item) => (
-                      <li className="tool-check-setup-item" key={`${item.type}:${item.key}`}>
+                <ul className="tool-check-setup-list">
+                  {((tool.checkSetup.checked ?? []).length > 0
+                    ? tool.checkSetup.checked
+                    : [...tool.missingRequired, ...tool.missingRecommended]
+                  ).map((item) => {
+                    const ok = item.status === "ok";
+                    return (
+                      <li className={cn("tool-check-setup-item", ok ? "is-ok" : "is-missing")} key={`${item.type}:${item.key}`}>
                         <code>{item.key}</code>
-                        <span>{item.reason}</span>
-                        {item.next && item.next !== item.reason && <span>{item.next}</span>}
+                        <span>{ok ? t("tools.checkSetupOk") : item.reason}</span>
+                        {!ok && item.next && item.next !== item.reason && <span>{item.next}</span>}
                       </li>
-                    ))}
-                  </ul>
-                )}
+                    );
+                  })}
+                </ul>
               </div>
             </CardContent>
           </Card>

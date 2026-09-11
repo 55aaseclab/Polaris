@@ -442,31 +442,18 @@ def command_workflow(args: argparse.Namespace) -> int:
         ).expanduser().resolve()
         input_value = read_json(collection_input, "collection input")
         input_version(input_value)
-        workspace_id = run_id
-        workspace_parent = workspace_root.parent
-        previous_root = os.environ.get("POLARIS_LITERATURE_WORKSPACES_ROOT")
-        os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(workspace_parent)
-        try:
-            destination = (
-                workspace_parent / workspace_id / "data-collections"
-                / input_value["collection_id"]
-            )
-            (destination / "inputs").mkdir(parents=True, exist_ok=True)
-            write_json(destination / "inputs" / "input.json", input_value)
-            final = run_three_phase_pipeline(
-                input_value,
-                workspace_id,
-                run_id,
-                review_mode=workflow_string(values, "reviewMode", args.step_command),
-            )
-            collection_output = destination / "outputs" / "output.json"
-            write_json(collection_output, final)
-            validate_v2_output(final)
-        finally:
-            if previous_root is None:
-                os.environ.pop("POLARIS_LITERATURE_WORKSPACES_ROOT", None)
-            else:
-                os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = previous_root
+        destination = collection_root / "data-collections" / input_value["collection_id"]
+        (destination / "inputs").mkdir(parents=True, exist_ok=True)
+        write_json(destination / "inputs" / "input.json", input_value)
+        final = run_three_phase_pipeline(
+            input_value,
+            destination,
+            run_id,
+            review_mode=workflow_string(values, "reviewMode", args.step_command),
+        )
+        collection_output = destination / "outputs" / "output.json"
+        write_json(collection_output, final)
+        validate_v2_output(final)
         write_json(output, {
             "collectionOutputRef": str(collection_output),
             "collectionId": str(final["collection_id"]),
@@ -627,12 +614,12 @@ def _phase_record(phase_id: int, name: str, status: str, **extra: Any) -> dict[s
 
 def phase_collection(
     input_value: dict[str, Any],
-    workspace: str,
+    collection_base: Path,
     run_prefix: str,
 ) -> tuple[dict[str, Any], list[dict[str, str]], Path]:
     """Phase 1 (collection): source tools + builtin normalize → candidate set."""
     log("phase_start", phase_id=PHASE_COLLECTION, phase="collection")
-    result, sources = run_phase1_sources(input_value, workspace, run_prefix)
+    result, sources = run_phase1_sources(input_value, collection_base, run_prefix)
     log(
         "phase1_normalize_start",
         phase_id=PHASE_COLLECTION,
@@ -679,19 +666,12 @@ def phase_collection(
         try:
             from literature.topic_judge import apply_topic_judge
 
-            root_for_judge = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-            coll_base = (
-                root_for_judge
-                / workspace
-                / "data-collections"
-                / input_value["collection_id"]
-            )
             normalized = apply_topic_judge(
                 normalized,
                 input_value,
-                work_dir=coll_base / "work" / f"{run_prefix}-topic-judge",
+                work_dir=collection_base / "work" / f"{run_prefix}-topic-judge",
                 stage="seed",
-                scope_path=coll_base / "inputs" / "input.json",
+                scope_path=collection_base / "inputs" / "input.json",
             )
         except Exception as error:  # noqa: BLE001
             log(
@@ -711,8 +691,6 @@ def phase_collection(
             records=len(normalized.get("records") or []),
         )
 
-    root = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-    collection_base = root / workspace / "data-collections" / input_value["collection_id"]
     work_dir = collection_base / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
     intermediate = work_dir / "collection-output.json"
@@ -735,7 +713,7 @@ def phase_collection(
 def phase_augmentation(
     input_value: dict[str, Any],
     collection_output: dict[str, Any],
-    workspace: str,
+    collection_base: Path,
     run_prefix: str,
     *,
     skip: bool,
@@ -747,8 +725,6 @@ def phase_augmentation(
     Customer-leads: customer_leads.py (preprocess|augment).
     """
     kind = input_value.get("collection_kind")
-    root = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-    collection_base = root / workspace / "data-collections" / input_value["collection_id"]
     work_dir = collection_base / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
     log(
@@ -840,7 +816,7 @@ def phase_augmentation(
 def phase_manual_review(
     input_value: dict[str, Any],
     augmented_output: dict[str, Any],
-    workspace: str,
+    collection_base: Path,
     *,
     review_mode: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -859,8 +835,6 @@ def phase_manual_review(
         review_mode=review_mode,
         record_count=len(augmented_output.get("records") or []),
     )
-    root = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-    collection_base = root / workspace / "data-collections" / input_value["collection_id"]
     outputs_dir = collection_base / "outputs"
     work_dir = collection_base / "work"
     outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -1023,7 +997,7 @@ def phase_manual_review(
 
 def run_three_phase_pipeline(
     input_value: dict[str, Any],
-    workspace: str,
+    collection_base: Path,
     run_prefix: str,
     *,
     review_mode: str | None = None,
@@ -1033,7 +1007,7 @@ def run_three_phase_pipeline(
     phases: list[dict[str, Any]] = []
     log(
         "pipeline_start",
-        workspace=workspace,
+        collection_base=str(collection_base),
         collection_id=input_value.get("collection_id"),
         collection_kind=input_value.get("collection_kind"),
         run_prefix=run_prefix,
@@ -1042,8 +1016,6 @@ def run_three_phase_pipeline(
         order=[{"phase_id": pid, "phase": name} for pid, name in PIPELINE_PHASES],
     )
 
-    root = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-    collection_base = root / workspace / "data-collections" / input_value["collection_id"]
     expand_dir = collection_base / "work" / f"{run_prefix}-expand"
     expand_path = expand_dir / "expanded-collection.json"
     expand_state_path = expand_dir / "expand-state.json"
@@ -1102,7 +1074,7 @@ def run_three_phase_pipeline(
     if not resume_from_expand:
         # Phase 1 — collection (seed search / DOI tasks)
         collected, task_results, collection_path = phase_collection(
-            input_value, workspace, run_prefix
+            input_value, collection_base, run_prefix
         )
         phases.append(
             _phase_record(
@@ -1173,7 +1145,7 @@ def run_three_phase_pipeline(
     augmented, aug_phase = phase_augmentation(
         input_value,
         collected,
-        workspace,
+        collection_base,
         run_prefix,
         skip=options["skip_augmentation"],
     )
@@ -1183,7 +1155,7 @@ def run_three_phase_pipeline(
     final, review_phase = phase_manual_review(
         input_value,
         augmented,
-        workspace,
+        collection_base,
         review_mode=options["review_mode"],
     )
     phases.append(review_phase)
@@ -1329,7 +1301,7 @@ LITERATURE_SOURCE_TYPES = frozenset(
 
 
 def run_phase1_sources(
-    input_value: dict[str, Any], workspace: str, run_prefix: str
+    input_value: dict[str, Any], collection_base: Path, run_prefix: str
 ) -> tuple[list[dict[str, str]], list[tuple[str, str, dict[str, dict[str, Any]]]]]:
     """Dispatch phase-1 source tools for literature or ad-content-intel."""
     kind = input_value.get("collection_kind")
@@ -1338,11 +1310,7 @@ def run_phase1_sources(
             "run phase 1 supports collection_kind literature or ad-content-intel "
             "(customer-leads uses preprocess/augment subcommands)"
         )
-    root = os.environ.get("POLARIS_LITERATURE_WORKSPACES_ROOT")
-    if not root:
-        raise CliError("POLARIS_LITERATURE_WORKSPACES_ROOT is required for --workspace")
     tools_root = Path(__file__).resolve().parents[1]
-    collection_base = Path(root).resolve() / workspace / "data-collections" / input_value["collection_id"]
     for directory in ("case", "inputs", "work", "runs", "outputs"):
         (collection_base / directory).mkdir(parents=True, exist_ok=True)
     collection_root = collection_base / "runs"
@@ -1366,7 +1334,7 @@ def run_phase1_sources(
         phase_id=PHASE_COLLECTION,
         phase="collection",
         task_count=len(tasks),
-        workspace=workspace,
+        collection_base=str(collection_base),
         collection_id=input_value.get("collection_id"),
         collection_kind=kind,
         run_prefix=run_prefix,
@@ -2039,9 +2007,8 @@ def main(argv: list[str]) -> int:
         ),
     )
     run_parser.add_argument("--input", required=True)
-    run_parser.add_argument("--workspace", required=True)
     run_parser.add_argument("--run-prefix", required=True)
-    run_parser.add_argument("--output")
+    run_parser.add_argument("--output", required=True)
     run_parser.add_argument(
         "--review-mode",
         choices=sorted(REVIEW_MODES),
@@ -2123,21 +2090,13 @@ def main(argv: list[str]) -> int:
                     "ad-content-intel v2 inputs; customer-leads phase 2 uses "
                     "preprocess/augment subcommands (customer_leads.py)"
                 )
+            output = Path(args.output).expanduser().resolve()
+            destination = output.parent.parent
             final = run_three_phase_pipeline(
                 input_value,
-                args.workspace,
+                destination,
                 args.run_prefix,
                 review_mode=getattr(args, "review_mode", None),
-            )
-            root = Path(os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"]).resolve()
-            output = (
-                Path(args.output).expanduser().resolve()
-                if args.output
-                else root
-                / args.workspace
-                / "data-collections"
-                / input_value["collection_id"]
-                / "outputs/output.json"
             )
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(

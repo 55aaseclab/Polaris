@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded Crossref metadata discovery."""
 from __future__ import annotations
-import argparse, json, os, re, sys
+import argparse, json, os, sys
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -29,24 +29,13 @@ def write(path: str, value: dict) -> None:
 def output_path(args: argparse.Namespace, filename: str) -> str:
     if args.output:
         return args.output
-    if not args.workspace or not args.run_id:
-        raise CliError("--output is required unless both --workspace and --run-id are provided")
-    root = os.environ.get("POLARIS_LITERATURE_WORKSPACES_ROOT")
-    if not root:
-        raise CliError("POLARIS_LITERATURE_WORKSPACES_ROOT is required for --workspace")
-    if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", args.workspace):
-        raise CliError("invalid workspace ID")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", args.run_id):
-        raise CliError("invalid run ID")
-    return str(Path(root).resolve() / args.workspace / "acquisition" / "customer-data-collection" / "runs" / args.run_id / filename)
+    raise CliError("--output is required")
 def main(argv: list[str]) -> int:
     p=argparse.ArgumentParser(prog=TOOL_NAME); s=p.add_subparsers(dest="cmd",required=True); s.add_parser("version")
     doi=s.add_parser("doi"); doi.add_argument("--doi",required=True)
     search=s.add_parser("search"); search.add_argument("--query",required=True); search.add_argument("--from-pub-date",default="2021-01-01"); search.add_argument("--until-pub-date",default="2026-12-31"); search.add_argument("--rows",type=int,default=20)
     for command in (doi, search):
-        command.add_argument("--output")
-        command.add_argument("--workspace")
-        command.add_argument("--run-id")
+        command.add_argument("--output", required=True)
     a=p.parse_args(argv)
     try:
         if a.cmd=="version": print(json.dumps({"tool":TOOL_NAME,"version":(Path(__file__).parent/"VERSION").read_text().strip()},indent=2)); return 0

@@ -142,7 +142,7 @@
     },
     "workspace_id": {
       "type": ["string", "null"],
-      "description": "Optional Polaris literature workspace id for path resolution under POLARIS_LITERATURE_WORKSPACES_ROOT."
+      "description": "Optional Polaristool workspace id. Path resolution uses Polaristool workspaceRoot, not a host literature workspace env."
     },
     "client": {
       "type": "object",

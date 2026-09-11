@@ -33,26 +33,37 @@ class DeepSecTests(unittest.TestCase):
         self.assertIn("conference=CCS", url)
         self.assertIn("year=2024", url)
 
+    def test_search_requires_api_url_env(self) -> None:
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+
+            os.environ.pop("POLARIS_LITERATURE_DEEPSEC_API_URL", None)
+            os.environ.pop("DEEPSEC_API_URL", None)
+            with self.assertRaisesRegex(runner.CliError, "POLARIS_LITERATURE_DEEPSEC_API_URL"):
+                runner.resolve_api_url()
+
     def test_search_persists_api_response(self) -> None:
         response = {"total": 1, "papers": [{"title": "Synthetic paper"}]}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "results.json"
-            with patch("runner.request_search", return_value=response):
-                result = runner.command_search(
-                    Namespace(
-                        keyword="agent permissions",
-                        question=None,
-                        search_in=["title"],
-                        conference=None,
-                        year=None,
-                        limit=20,
-                        offset=0,
-                        output=str(output),
-                    ),
-                    TOOL_ROOT,
-                )
+            with patch.dict("os.environ", {"DEEPSEC_API_URL": "http://api.test/search"}):
+                with patch("runner.request_search", return_value=response):
+                    result = runner.command_search(
+                        Namespace(
+                            keyword="agent permissions",
+                            question=None,
+                            search_in=["title"],
+                            conference=None,
+                            year=None,
+                            limit=20,
+                            offset=0,
+                            output=str(output),
+                        ),
+                        TOOL_ROOT,
+                    )
 
             saved = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(saved["request"]["endpoint"], "http://api.test/search")
         self.assertEqual(result, 0)
         self.assertEqual(saved["total"], 1)
         self.assertEqual(saved["papers"][0]["title"], "Synthetic paper")

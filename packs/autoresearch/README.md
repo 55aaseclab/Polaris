@@ -43,7 +43,6 @@ Required for a local run:
 
 ```dotenv
 POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_LITERATURE_WORKSPACES_ROOT=/path/to/literature-workspaces
 POLARIS_LITERATURE_RUNTIME_MODE=local
 ```
 

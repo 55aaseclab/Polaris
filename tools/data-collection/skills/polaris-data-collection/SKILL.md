@@ -42,7 +42,6 @@ Instagram remains available for business-account discovery.
 
 Ensure repo `.env` exists (from `.env.example`), including:
 
-- `POLARIS_LITERATURE_WORKSPACES_ROOT=…`
 - `DISPLAY=:99` (or another usable X display for Camofox PDF capture)
 - `BROWSER_CAMOFOX_USER_ID=polaris-literature` (stable Camofox session)
 - `BROWSER_PROXY_*` when PDF sites need a proxy
@@ -74,7 +73,7 @@ cd tools/data-collection
 | Validate request | `./clue-data-collection validate-input --input <input.json>` |
 | Validate result | `./clue-data-collection validate-output --output <output.json>` |
 | List curated sites | `./clue-data-collection list-sources --topic <topic-id>` |
-| Full literature or ad-content-intel pipeline | `./clue-data-collection run --input <input.json> --workspace <id> --run-prefix <prefix>` |
+| Full literature or ad-content-intel pipeline | Polaristool `workflow run` via `/settings/tools` / the work desk |
 | Choose phase-3 behavior | add `--review-mode auto-pass\|auto-approve\|manual-review` |
 | Skip phase-2 only | `"pipeline": {"skip_augmentation": true}` in input |
 | Customer-leads preprocess | `./clue-data-collection preprocess --workspace <id> --run-id <run> --source-output type=path …` |
@@ -95,25 +94,12 @@ Interactive phase-3 UI: open `manual-review-list.json` in the admin portal.
 5. Set `pipeline.review_mode` to `auto-pass`, `auto-approve`, or `manual-review`.
 6. `validate-input` then `run`.
 
-```sh
-./clue-data-collection validate-input --input "$INPUT"
-./clue-data-collection run \
-  --input "$INPUT" \
-  --workspace "$WORKSPACE_ID" \
-  --run-prefix "$RUN_PREFIX" \
-  --review-mode auto-pass
-  2> >(tee /tmp/data-collection.log >&2)
-```
-
-Default output:
-
-```text
-$POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace>/data-collections/<collection_id>/outputs/output.json
-```
+Submit `AutoResearch` / `LiteratureReview` from the Portal work desk.
+Polaristool writes collection output under the run `workspaceRoot`.
 
 ## Customer-leads: intent → commands
 
-1. Layout: `$POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace>/acquisition/customer-data-collection/`.
+1. Layout: Polaristool `workspaceRoot` / `acquisition/customer-data-collection/`.
 2. Phase 1 sources stay external (`google-map`, `web-search`, …) if new artifacts needed.
 3. Phase 2:
 
@@ -154,7 +140,7 @@ artifacts only.
 
 ## Rules
 
-- Prefer real paths under `POLARIS_LITERATURE_WORKSPACES_ROOT`; never invent evidence.
+- Prefer real Polaristool workspace paths; never invent evidence.
 - Do not invent unsupported `source_type` / `collection_kind`.
 - Collection yields **candidates**, not conclusions.
 - Prefer the `AutoResearch` / `LiteratureReview` Domain Pack for registered

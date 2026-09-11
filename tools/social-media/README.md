@@ -79,9 +79,10 @@ The default is one API page per task. It limits paid API use while producing a
 first discovery set; pass `--max-pages` explicitly when more pagination has
 been approved.
 
-Run the following from `tools/social-media`. Set `POLARIS_LITERATURE_WORKSPACES_ROOT` in
-the environment; the repository `.env` is the normal local configuration
-source and does not expose or replace the separate local JustOneAPI token file.
+Run the following from `tools/social-media`. Polaristool does not set a
+host workspace root. Pass `--workspaces-root` with `--workspace`. The
+repository `.env` is the normal local configuration source and does not
+expose or replace the separate local JustOneAPI token file.
 
 ```sh
 set -a

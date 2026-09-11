@@ -29,7 +29,7 @@ data-collections/<collection-id>/outputs/output.json (v2)
 ## Analysis root
 
 ```text
-$POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace-id>/intelligence-analysis/<analysis-id>/
+<polaris-workspaceRoot>/analysis/intelligence-analysis/<analysis-id>/
 ├── case/
 ├── inputs/input.json
 ├── work/          # snapshot, task, analysis-input, candidates, iteration-corpus, …
@@ -56,7 +56,7 @@ $POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace-id>/intelligence-analysis/<analys
 
 ```sh
 IA=./tools/intelligence-analysis/clue-intelligence-analysis
-ROOT="$POLARIS_LITERATURE_WORKSPACES_ROOT/<workspace>/intelligence-analysis/<analysis-id>"
+ROOT="<polaris-workspaceRoot>/analysis/intelligence-analysis/<analysis-id>"
 INPUT="$ROOT/inputs/input.json"
 
 $IA validate-input --input "$INPUT"

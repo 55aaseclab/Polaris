@@ -12,6 +12,7 @@ export type ToolPrecheckFinding = {
   type: "env" | "command" | "python" | "file" | "lock" | "setup";
   key: string;
   kind: ToolPrerequisiteKind;
+  status?: "ok" | "missing";
   reason: string;
   next?: string;
 };
@@ -93,6 +94,7 @@ function findingFromScript(toolId: string, item: unknown): ToolPrecheckFinding |
     type,
     key: item.key,
     kind: item.kind === "required" ? "required" : "recommended",
+    status: item.status === "ok" ? "ok" : "missing",
     reason: item.reason,
     ...(typeof item.next === "string" && item.next.trim() ? { next: item.next } : {}),
   };
@@ -188,6 +190,12 @@ export function collectToolFindings(
     if (!isRecord(parsed)) {
       throw new Error("check-setup must print a JSON object");
     }
+    const checked = Array.isArray(parsed.checked) ? parsed.checked : [];
+    if (checked.length > 0) {
+      return checked
+        .map((item) => findingFromScript(lock.toolId, item))
+        .filter((item): item is ToolPrecheckFinding => item !== null);
+    }
     const required = Array.isArray(parsed.missingRequired) ? parsed.missingRequired : [];
     const recommended = Array.isArray(parsed.missingRecommended) ? parsed.missingRecommended : [];
     return [...required, ...recommended]
@@ -225,8 +233,8 @@ export function evaluateToolPrecheck(
       reason: error instanceof Error ? error.message : String(error),
     });
   }
-  const missingRequired = findings.filter((item) => item.kind === "required");
-  const missingRecommended = findings.filter((item) => item.kind === "recommended");
+  const missingRequired = findings.filter((item) => item.kind === "required" && item.status !== "ok");
+  const missingRecommended = findings.filter((item) => item.kind === "recommended" && item.status !== "ok");
   return {
     ok: missingRequired.length === 0,
     missingRequired,
@@ -235,13 +243,16 @@ export function evaluateToolPrecheck(
 }
 
 export function formatToolFindingLine(item: ToolPrecheckFinding): string {
+  if (item.status === "ok") {
+    return `ok ${item.type} ${item.toolId} ${item.key}`;
+  }
   const next = item.next && item.next !== item.reason ? ` — ${item.next}` : "";
   return `${item.kind} ${item.type} ${item.toolId} ${item.key}: ${item.reason}${next}`;
 }
 
 export function formatToolSetupLines(toolId: string, findings: ToolPrecheckFinding[]): string[] {
   if (findings.length === 0) {
-    return [`${toolId}: setup is complete`];
+    return [`${toolId}: no lock prerequisites`];
   }
   return findings.map(formatToolFindingLine);
 }

@@ -2606,7 +2606,7 @@ test("portal tools API returns lock-backed readiness for a mapped session", asyn
             lockPath: string;
             checkSetupPath: string;
             readiness: string;
-            checkSetup: { ok: boolean; lines: string[] };
+            checkSetup: { ok: boolean; lines: string[]; checked: Array<{ key: string; status?: string }> };
             missingRequired: unknown[];
             missingRecommended: Array<{ key: string }>;
           }>;
@@ -2617,6 +2617,7 @@ test("portal tools API returns lock-backed readiness for a mapped session", asyn
         assert.ok(scholar);
         assert.equal(scholar.lockPath, "tools/semantic-scholar/backend.lock.json");
         assert.equal(scholar.checkSetupPath, "tools/semantic-scholar/check-setup");
+        assert.ok(scholar.checkSetup.checked.some((item) => item.key === "POLARIS_LITERATURE_SEMANTIC_SCHOLAR_API_KEY"));
         assert.ok(scholar.checkSetup.lines.length > 0);
         assert.match(scholar.readiness, /^(ready|warning|blocked)$/u);
       } finally {
@@ -2988,14 +2989,12 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
   const previous = Object.fromEntries([
     "POLARIS_DATA_ROOT",
     "POLARIS_CONTROL_STORE_PATH",
-    "POLARIS_LITERATURE_WORKSPACES_ROOT",
     "POLARIS_LITERATURE_CACHE_ROOT",
     "POLARIS_LITERATURE_CODEX_BIN",
     "POLARIS_LITERATURE_HOST_NETWORK",
   ].map((key) => [key, process.env[key]]));
   process.env.POLARIS_DATA_ROOT = path.join(root, "data");
   process.env.POLARIS_CONTROL_STORE_PATH = path.join(root, "control.sqlite");
-  process.env.POLARIS_LITERATURE_WORKSPACES_ROOT = path.join(root, "workspaces");
   process.env.POLARIS_LITERATURE_CACHE_ROOT = path.join(root, "cache");
   process.env.POLARIS_LITERATURE_CODEX_BIN = POLARIS_LITERATURE_FAKE_CODEX;
   process.env.POLARIS_LITERATURE_HOST_NETWORK = "deny";

@@ -49,12 +49,9 @@ class CollectionPaths:
 
 
 def workspace_root(value: str | None = None) -> Path:
-    configured = value or os.environ.get("POLARIS_LITERATURE_WORKSPACES_ROOT")
+    configured = value
     if not configured:
-        raise WorkspacePathError(
-            "--workspaces-root is required unless "
-            "POLARIS_LITERATURE_WORKSPACES_ROOT is set"
-        )
+        raise WorkspacePathError("--workspaces-root is required")
     root = Path(configured).expanduser().resolve()
     if not root.is_dir() or root.is_symlink():
         raise WorkspacePathError(f"workspace root does not exist: {root}")

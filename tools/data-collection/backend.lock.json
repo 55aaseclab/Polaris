@@ -21,11 +21,6 @@
         "reason": "Shared host cache for PDFs, topic judgments, and arXiv metadata."
       },
       {
-        "key": "POLARIS_LITERATURE_WORKSPACES_ROOT",
-        "kind": "recommended",
-        "reason": "Standalone collection runs write work under this root."
-      },
-      {
         "key": "DISPLAY",
         "kind": "recommended",
         "reason": "Phase-2 PDF capture starts Camofox on this X11 display."

@@ -345,7 +345,8 @@ test("tools page lists lock-backed readiness without reviving Tool Portal routes
   assert.match(appSource, /t\("tools\.checkSetup"\)/u);
   assert.match(appSource, /item\.next && item\.next !== item\.reason/u);
   assert.match(appSource, /t\("tools\.recheck"\)/u);
-  assert.match(appSource, /tool\.checkSetup\.lines/u);
+  assert.match(appSource, /tool\.checkSetup\.checked/u);
+  assert.match(appSource, /t\("tools\.checkSetupOk"\)/u);
   assert.match(appSource, /tool-check-setup-list/u);
   assert.doesNotMatch(appSource, /t\("tools\.missingRequired"\)/u);
   assert.doesNotMatch(appSource, /t\("tools\.missingRecommended"\)/u);

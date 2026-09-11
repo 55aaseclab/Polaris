@@ -6,7 +6,6 @@
   },
   "backend": {
     "name": "Intelligent Cybersecurity Paper Retrieval System",
-    "default_search_url": "http://128.179.165.148:8123/api/papers/search",
     "protocol": "HTTP GET"
   },
   "runtime": {
@@ -22,8 +21,8 @@
     "env": [
       {
         "key": "POLARIS_LITERATURE_DEEPSEC_API_URL",
-        "kind": "recommended",
-        "reason": "DeepSec search uses this endpoint when the default host is unavailable."
+        "kind": "required",
+        "reason": "DeepSec has no Polaristool-invented host. DEEPSEC_API_URL is the same value."
       }
     ],
     "commands": [],

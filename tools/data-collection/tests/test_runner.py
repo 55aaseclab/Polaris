@@ -550,14 +550,13 @@ class ContractTests(unittest.TestCase):
     def test_pipeline_auto_pass_skips_the_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            workspace = "example-workspace"
-            (root / workspace).mkdir()
-            os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(root)
+            collection_base = root / "example-workspace" / "data-collections" / "example"
+            collection_base.mkdir(parents=True)
             collected = literature_output(2)
             augmented, aug_phase = runner.phase_augmentation(
                 V2_INPUT,
                 collected,
-                workspace,
+                collection_base,
                 "run-prefix",
                 skip=False,
             )
@@ -570,7 +569,7 @@ class ContractTests(unittest.TestCase):
             final, review_phase = runner.phase_manual_review(
                 V2_INPUT,
                 augmented,
-                workspace,
+                collection_base,
                 review_mode="auto-pass",
             )
             self.assertEqual(review_phase["phase"], "manual-review")
@@ -595,11 +594,12 @@ class ContractTests(unittest.TestCase):
             root = Path(directory)
             workspace = "example-workspace"
             (root / workspace).mkdir()
-            os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(root)
+            collection_base = root / workspace / "data-collections" / "example"
+            collection_base.mkdir(parents=True)
             augmented, _ = runner.phase_augmentation(
                 V2_INPUT,
                 literature_output(1),
-                workspace,
+                collection_base,
                 "run-prefix",
                 skip=False,
             )
@@ -607,7 +607,7 @@ class ContractTests(unittest.TestCase):
             final, review_phase = runner.phase_manual_review(
                 V2_INPUT,
                 augmented,
-                workspace,
+                collection_base,
                 review_mode="auto-approve",
             )
 
@@ -632,19 +632,20 @@ class ContractTests(unittest.TestCase):
             root = Path(directory)
             workspace = "example-workspace"
             (root / workspace).mkdir()
-            os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(root)
+            collection_base = root / workspace / "data-collections" / "example"
+            collection_base.mkdir(parents=True)
             collected = literature_output(1)
             augmented, _ = runner.phase_augmentation(
                 V2_INPUT,
                 collected,
-                workspace,
+                collection_base,
                 "run-prefix",
                 skip=False,
             )
             final, review_phase = runner.phase_manual_review(
                 V2_INPUT,
                 augmented,
-                workspace,
+                collection_base,
                 review_mode="manual-review",
             )
             self.assertEqual(review_phase["phase"], "manual-review")
@@ -842,11 +843,12 @@ class ContractTests(unittest.TestCase):
             root = Path(directory)
             workspace = "example-workspace"
             (root / workspace).mkdir()
-            os.environ["POLARIS_LITERATURE_WORKSPACES_ROOT"] = str(root)
+            collection_base = root / workspace / "data-collections" / "example"
+            collection_base.mkdir(parents=True)
             augmented, aug_phase = runner.phase_augmentation(
                 ad_input,
                 collected,
-                workspace,
+                collection_base,
                 "run-prefix",
                 skip=False,
             )
@@ -861,7 +863,7 @@ class ContractTests(unittest.TestCase):
             final, review_phase = runner.phase_manual_review(
                 ad_input,
                 augmented,
-                workspace,
+                collection_base,
                 review_mode="auto-pass",
             )
             self.assertEqual(review_phase["status"], "auto_passed")

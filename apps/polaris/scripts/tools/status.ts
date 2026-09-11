@@ -23,6 +23,7 @@ export type PortalToolStatus = {
   checkSetup: {
     ok: boolean;
     lines: string[];
+    checked: ToolPrecheckFinding[];
   };
   missingRequired: ToolPrecheckFinding[];
   missingRecommended: ToolPrecheckFinding[];
@@ -50,8 +51,8 @@ function statusForEntry(
   try {
     const lock = readToolBackendLock(entry);
     const findings = collectToolFindings(lock, environment);
-    const missingRequired = findings.filter((item) => item.kind === "required");
-    const missingRecommended = findings.filter((item) => item.kind === "recommended");
+    const missingRequired = findings.filter((item) => item.kind === "required" && item.status !== "ok");
+    const missingRecommended = findings.filter((item) => item.kind === "recommended" && item.status !== "ok");
     return {
       id: entry.id,
       entrypoint: entry.entrypoint,
@@ -64,6 +65,7 @@ function statusForEntry(
       checkSetup: {
         ok: missingRequired.length === 0,
         lines: formatToolSetupLines(entry.id, findings),
+        checked: findings,
       },
       missingRequired,
       missingRecommended,
@@ -88,6 +90,7 @@ function statusForEntry(
       checkSetup: {
         ok: false,
         lines: formatToolSetupLines(entry.id, [finding]),
+        checked: [finding],
       },
       missingRequired: [finding],
       missingRecommended: [],

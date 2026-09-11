@@ -74,9 +74,8 @@ validate_run_id() {
 collection_scope_for_workspace() {
   local workspace="$1"
   local configured_root="$2"
-  local workspaces_root="${configured_root:-${POLARIS_LITERATURE_WORKSPACES_ROOT:-}}"
-  [[ -n "$workspaces_root" ]] || die \
-    "--workspaces-root is required unless POLARIS_LITERATURE_WORKSPACES_ROOT is set"
+  local workspaces_root="${configured_root:-}"
+  [[ -n "$workspaces_root" ]] || die "--workspaces-root is required"
   [[ -d "$workspaces_root" ]] || die "workspace root does not exist: $workspaces_root"
   validate_workspace_id "$workspace"
   workspaces_root="$(cd -- "$workspaces_root" && pwd -P)"
@@ -207,7 +206,7 @@ Batch options:
   --input <file>          Collection input JSON containing sources[].
   --output <directory>    New directory for results.json, run.json and logs.
   --workspace <id>        Use <root>/<id>/acquisition/customer-data-collection.
-  --workspaces-root <dir> Override POLARIS_LITERATURE_WORKSPACES_ROOT for --workspace.
+  --workspaces-root <dir> Required with --workspace. Polaristool does not set a host workspace root.
   --run-id <id>           With --workspace and no --output, write runs/<id>/.
   --engines <csv>         SearXNG engines; default: google,duckduckgo,bing.
   --result-limit <count>  Retained results per task; default: 10.
