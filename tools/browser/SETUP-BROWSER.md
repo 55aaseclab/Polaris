@@ -1,41 +1,76 @@
-# Set up DISPLAY and Camofox
+# Browser setup for PDF capture
 
-Polaristool's headed browser capture uses an X11 display and Camofox. This
-guide covers both the host display and the persistent Camofox browser session.
+Polaris literature PDF capture uses `clue-browser`. Remote HTTP(S) targets
+use Camofox by default; localhost targets use the Playwright fallback.
 
-Camofox is provided by
+This guide covers the display, browser runtime, proxy configuration, and
+Camofox session. Camofox is provided by
 [camofox-browser](https://github.com/jo-inc/camofox-browser)
-(`@askjo/camofox-browser`), a Camoufox (Firefox) REST server on port `9377`.
-Do not clone that repository into Polaris. Install it through `clue-browser`.
+(`@askjo/camofox-browser`).
 
-## Host display
+## 1. Prepare the display
 
-Polaristool does not start Xvfb itself. Install it and start a display for
-headed Camofox capture:
+Install Xvfb when the host has no desktop display. Polaristool does not start
+Xvfb itself.
 
 ```sh
 sudo apt-get install -y --no-install-recommends xvfb
 export DISPLAY=:99
 if ! pgrep -af "Xvfb ${DISPLAY}" >/dev/null 2>&1; then
-  Xvfb "${DISPLAY}" -screen 0 1920x1080x24 -nolisten tcp >/tmp/polaris-xvfb.log 2>&1 &
+  Xvfb "${DISPLAY}" -screen 0 1920x1080x24 -nolisten tcp \
+    >/tmp/polaris-xvfb.log 2>&1 &
 fi
 xdpyinfo >/dev/null
 ```
 
-Put `DISPLAY=:99` in `.env.dev` so Polaristool uses the same display after a
-restart.
+Put `DISPLAY=:99` in `.env.dev` when this display should be used after a
+restart. If the host already has a usable desktop display, keep its existing
+`DISPLAY` value.
 
-## Install Camofox
+## 2. Install the browser runtime
+
+Run once from the Polaris repository:
 
 ```sh
 ./tools/browser/clue-browser setup
 ```
 
-This installs Playwright Chromium, `@askjo/camofox-browser`, and fetches the
-Camoufox binary (about 300 MB on first setup). The data-collection dependency
-installer runs the same browser setup.
+This installs Playwright Chromium and `@askjo/camofox-browser`, and fetches
+the Camoufox binary. The data-collection dependency installer runs the same
+setup.
 
-You can run a long-lived local server instead of starting one per capture:
+## 3. Configure the proxy
+
+Set the proxy environment before starting Camofox or running PDF capture:
+
+```sh
+export BROWSER_PROXY_SERVER=http://proxy.example:33335
+export BROWSER_PROXY_USERNAME=proxy-user
+export BROWSER_PROXY_PASSWORD=proxy-password
+export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
+```
+
+`BROWSER_PROXY_SERVER` enables the environment proxy. Username and password
+are passed through for proxy authentication. If the proxy does not require
+authentication, omit those two variables. `BROWSER_PROXY_BYPASS` is optional.
+
+When `browser.proxy` is omitted, the configured `BROWSER_PROXY_*` values are
+mapped to Camofox `PROXY_HOST`, `PROXY_PORT`, `PROXY_USERNAME`, and
+`PROXY_PASSWORD` when Camofox starts. An explicit browser input takes
+precedence:
+
+```json
+{"browser": {"proxy": false}}
+```
+
+The explicit `false` disables the environment proxy for that run. An explicit
+`browser.proxy` object supplies the proxy for that run. If no proxy variables
+are set, no proxy is passed to Camofox.
+
+## 4. Start or reuse Camofox
+
+`BROWSER_CAMOFOX_URL` is optional. Set it when a long-lived Camofox server is
+already running or when you want to run one yourself:
 
 ```sh
 export DISPLAY=:99
@@ -45,101 +80,65 @@ node tools/browser/node_modules/@askjo/camofox-browser/server.js
 curl -fsS "$BROWSER_CAMOFOX_URL/health"
 ```
 
-If `BROWSER_CAMOFOX_URL` is unset or unhealthy, `clue-browser` starts a local
-Camofox for the run. `BROWSER_PROXY_*` is mapped to Camofox
-`PROXY_HOST`/`PROXY_PORT`/`PROXY_USERNAME`/`PROXY_PASSWORD` when input does not
-provide `browser.proxy`.
+When `BROWSER_CAMOFOX_URL` is unset, `clue-browser` uses its local Camofox
+startup path. A configured URL must be reachable and return a healthy
+`/health` response; it is not silently replaced by another remote server.
 
-## Persistent session
+## 5. Configure the Camofox session
 
-Camofox isolates cookies and localStorage per `userId` and stores them under
-`~/.camofox/profiles/<hashed-userId>/storage_state.json`. Keep a stable user
-ID for every literature PDF run:
+Camofox stores cookies and localStorage per `userId`. Use a stable ID for all
+literature PDF runs:
 
 ```sh
-BROWSER_CAMOFOX_USER_ID=polaris-literature
-# Optional Netscape import after the session exists:
-# BROWSER_IMPORT_COOKIES_PATH=publisher.txt
-# Required for cookie POSTs when Camofox is not on loopback:
-# CAMOFOX_API_KEY=...
+export BROWSER_CAMOFOX_USER_ID=polaris-literature
 ```
 
-`literature.pdf.capture` and `clue-browser` read
-`BROWSER_CAMOFOX_USER_ID`. Collection PDF capture also records it as
-`browser.session_user_id`. Camofox then reuses the profile across runs.
-
-The session layout is:
-
-```text
-~/.camofox/
-  cookies/                         Netscape bootstrap files
-    cookies.txt                    auto-loaded once on an empty profile
-    publisher.txt                  optional import via BROWSER_IMPORT_COOKIES_PATH
-  profiles/<hashed-userId>/
-    storage_state.json             cookies + localStorage after first login
-```
-
-## Seed the session
-
-Choose cookie import or one interactive login. After the first successful
-login, later captures reuse the stored state.
+The profile is stored at
+`~/.camofox/profiles/<hashed-userId>/storage_state.json`. A stable ID makes a
+session reusable but does not log in to a publisher.
 
 ### Cookie import
 
-1. Export Netscape `cookies.txt` from a real browser.
-2. Copy it to `~/.camofox/cookies/` (override with `CAMOFOX_COOKIES_DIR`).
-3. Set `BROWSER_IMPORT_COOKIES_PATH` to the file name or an absolute path.
-4. Set `CAMOFOX_API_KEY` when Camofox is not on loopback.
+The source file must use Netscape `cookies.txt` format:
 
 ```sh
 mkdir -p ~/.camofox/cookies
 cp ~/Downloads/publisher_cookies.txt ~/.camofox/cookies/publisher.txt
-export BROWSER_CAMOFOX_USER_ID=polaris-literature
 export BROWSER_IMPORT_COOKIES_PATH=publisher.txt
 ```
 
-Cookie import calls `POST /sessions/:userId/cookies` and returns 403 without
-the API key when the server is not local.
+Relative paths use `CAMOFOX_COOKIES_DIR` (default `~/.camofox/cookies`). An
+absolute path is also accepted. Set `CAMOFOX_API_KEY` when Camofox is not on
+loopback because cookie import calls `POST /sessions/:userId/cookies`.
 
-### Interactive desktop login
+```sh
+export CAMOFOX_API_KEY=your-camofox-api-key
+```
 
-On a machine with a usable display, start Camofox and log in once:
+### Interactive login
+
+With a usable desktop display, open the publisher URL in Camofox and sign in:
 
 ```sh
 export CAMOFOX_INTERACTIVE=desktop
 export BROWSER_CAMOFOX_USER_ID=polaris-literature
-# Open a publisher URL in the session and sign in.
 ```
 
-Camofox writes storage state for that user. Unset `CAMOFOX_INTERACTIVE` (or set
-it to `off`) for later headless capture.
+After login, unset `CAMOFOX_INTERACTIVE` or set it to `off` for normal capture.
+Alternatively, start Camofox with `ENABLE_VNC=1` and `NOVNC_PORT=6080` for a
+VNC login; set `VNC_PASSWORD` when required.
 
-### VNC login
-
-Camofox can expose noVNC with `ENABLE_VNC=1` and `NOVNC_PORT=6080`; set
-`VNC_PASSWORD` when needed. Log in once and reuse the same
-`BROWSER_CAMOFOX_USER_ID`.
-
-## Proxy
-
-When publisher sites require an ISP or residential proxy:
+## 6. Verify the setup
 
 ```sh
-BROWSER_PROXY_SERVER=http://brd.superproxy.io:33335
-BROWSER_PROXY_USERNAME=brd-customer-...
-BROWSER_PROXY_PASSWORD=...
-# Optional comma-separated bypass list:
-BROWSER_PROXY_BYPASS=localhost,127.0.0.1
-```
-
-## Check
-
-```sh
-echo "DISPLAY=$DISPLAY userId=$BROWSER_CAMOFOX_USER_ID"
+./tools/browser/check-setup
 xdpyinfo >/dev/null
 curl -fsS "${BROWSER_CAMOFOX_URL:-http://127.0.0.1:9377}/health"
 ls ~/.camofox/profiles
 ```
+
+These checks verify the display, server health, and profile directory. They do
+not verify that a publisher account is logged in.
 
 Upstream reference:
 <https://github.com/jo-inc/camofox-browser>

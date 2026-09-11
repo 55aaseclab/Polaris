@@ -80,8 +80,10 @@ Relative `import_cookies_path` resolves under `CAMOFOX_COOKIES_DIR`
 (default `~/.camofox/cookies`). Camofox also auto-loads `cookies.txt` once when
 a profile has no persisted `storage-state` yet.
 
-If no Camofox server is healthy, `clue-browser` **starts one** for the run
-(using `BROWSER_PROXY_*` → Camofox `PROXY_*`).
+When `BROWSER_CAMOFOX_URL` is unset, `clue-browser` uses its local Camofox
+startup path. If `browser.proxy` is omitted, a configured `BROWSER_PROXY_*`
+environment is mapped to Camofox `PROXY_*`. No proxy is enabled unless
+`BROWSER_PROXY_SERVER` is set.
 
 ## Proxy via environment
 
@@ -91,8 +93,8 @@ BROWSER_PROXY_USERNAME=brd-customer-...
 BROWSER_PROXY_PASSWORD=...
 ```
 
-Used when `browser.proxy` is omitted. Input `browser.proxy` wins.
-Set `"proxy": false` to disable env proxy.
+Used when `BROWSER_PROXY_SERVER` is set and `browser.proxy` is omitted. Input
+`browser.proxy` wins. Set `"proxy": false` to disable the environment proxy.
 
 ## Input example
 
