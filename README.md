@@ -2,21 +2,32 @@
 
 Self-hosted control plane for agentic workflows.
 
-## Overview
+## Features
 
-`Polaris` manages isolated development environments and external AI coding
-agents across `docker`, `pod`, and `kubevirt-vm` backends.
+Polaris owns identity, Vaults, workflow admission, and the public origin.
 
-This README is the source-owned onboarding guide. Cross-repository architecture,
-operator runbooks, and release evidence live in the
+- Isolated Vaults on `docker`, `pod`, and `kubevirt-vm` backends
+- Authing identity, ownership, sessions, quotas, lifecycle, and audit
+- Portal work desk for Domain Pack runs, approval, and artifacts
+- Polaris DSL packs, Host binding, and host or Vault execution
+- Private-surface Gateway and the Paseo coding surface
+- CLI for users, Vaults, packs, and operators
+
+## Docs
+
+This README is the source-owned onboarding guide. Product pages, operator
+runbooks, and release evidence live on the
 [Jianxiaoyi documentation site](https://www.jianxiaoyitech.com/docs/).
-Start with the [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/)
-for architecture and the
-[Polaris 0.3.4 current state](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.4/)
-for the active release work. The archived
-[0.3.3 capacity records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.3/)
-remain the baseline for the 20-vault profile.
-Release history is maintained in [CHANGELOG.md](CHANGELOG.md).
+
+- [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/) —
+  Portal, Vaults, Gateway, Paseo, DSL, and CLI
+- [Operations](https://www.jianxiaoyitech.com/docs/operations/) — deploy,
+  gateway, incidents, and release records
+- [Polaris 0.3.4](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.4/)
+  — current release state
+- [0.3.3 capacity records](https://www.jianxiaoyitech.com/docs/operations/polaris-0.3.3/)
+  — 20-vault baseline
+- [CHANGELOG.md](CHANGELOG.md) — release history
 
 ## Local Development
 
