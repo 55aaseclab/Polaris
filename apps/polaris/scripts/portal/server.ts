@@ -336,6 +336,37 @@ function artifactContentType(name: string): string {
   return types[extension] ?? "application/octet-stream";
 }
 
+function sendInlineFile(
+  res: ServerResponse,
+  sourcePath: string,
+  method: string,
+): void {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(sourcePath);
+  } catch {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  if (!stat.isFile()) {
+    throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
+  }
+  const filename = path.basename(sourcePath);
+  res.writeHead(200, {
+    "cache-control": "private, no-store",
+    "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    "content-length": stat.size,
+    "content-type": artifactContentType(filename),
+    "x-content-type-options": "nosniff",
+  });
+  if (method === "HEAD") {
+    res.end();
+    return;
+  }
+  const stream = fs.createReadStream(sourcePath);
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
+}
+
 function sendWorkflowArtifact(
   res: ServerResponse,
   workflowControl: WorkflowControlService,
@@ -349,30 +380,7 @@ function sendWorkflowArtifact(
     throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
   }
   if (artifact.sourcePath) {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(artifact.sourcePath);
-    } catch {
-      throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
-    }
-    if (!stat.isFile()) {
-      throw new WorkflowControlError("产物内容不可用", 404, "artifact-content-unavailable");
-    }
-    const filename = path.basename(artifact.sourcePath);
-    res.writeHead(200, {
-      "cache-control": "private, no-store",
-      "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      "content-length": stat.size,
-      "content-type": artifactContentType(filename),
-      "x-content-type-options": "nosniff",
-    });
-    if (method === "HEAD") {
-      res.end();
-      return;
-    }
-    const stream = fs.createReadStream(artifact.sourcePath);
-    stream.on("error", () => res.destroy());
-    stream.pipe(res);
+    sendInlineFile(res, artifact.sourcePath, method);
     return;
   }
   if (typeof artifact.content !== "string") {
@@ -388,6 +396,18 @@ function sendWorkflowArtifact(
   });
   if (method !== "HEAD") res.end(body);
   else res.end();
+}
+
+function sendWorkflowWorkspaceFile(
+  res: ServerResponse,
+  workflowControl: WorkflowControlService,
+  userId: string,
+  runId: string,
+  relativePath: string,
+  method: string,
+): void {
+  const { sourcePath } = workflowControl.getWorkspaceFile(userId, runId, relativePath);
+  sendInlineFile(res, sourcePath, method);
 }
 
 function sendProcessProbe(
@@ -2956,6 +2976,17 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
               userId,
               decodeURIComponent(segments[2] ?? ""),
               decodeURIComponent(segments[4] ?? ""),
+              req.method,
+            );
+            return;
+          }
+          if (segments.length === 4 && (req.method === "GET" || req.method === "HEAD") && segments[3] === "files") {
+            sendWorkflowWorkspaceFile(
+              res,
+              workflowControl,
+              userId,
+              decodeURIComponent(segments[2] ?? ""),
+              url.searchParams.get("path") ?? "",
               req.method,
             );
             return;

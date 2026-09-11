@@ -1740,6 +1740,19 @@ export class PolarisControlStore {
     );
   }
 
+  replaceWorkflowArtifacts(tenantId: string, runId: string, artifacts: WorkflowArtifactRecord[]): void {
+    const tenant = tenantId.trim();
+    const id = runId.trim();
+    if (!tenant || !id) throw new Error("A workflow artifact scope is required");
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM workflow_artifacts WHERE tenant_id = ? AND run_id = ?")
+        .run(tenant, id);
+      for (const artifact of artifacts) {
+        this.addWorkflowArtifact(artifact);
+      }
+    });
+  }
+
   createWorkflowSuggestion(input: Omit<WorkflowSuggestionRecord, "id" | "createdAt" | "updatedAt">): WorkflowSuggestionRecord {
     const id = `suggestion-${randomUUID()}`;
     const now = nowIso();

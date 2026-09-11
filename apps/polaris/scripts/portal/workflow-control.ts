@@ -62,6 +62,7 @@ import {
 import {
   getPolarisControlStore,
   type PolarisControlStore,
+  type WorkflowArtifactRecord,
   type WorkflowRunRecord,
 } from "./control-store.js";
 import { isHostVaultMode } from "../config/vault-mode.js";
@@ -749,7 +750,10 @@ function executionClassForProgram(program: Program, flowId: string): WorkflowExe
   return flow.meta.steps.some((step) => Boolean(step.call)) ? "ai" : "pure";
 }
 
-function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): WorkflowArtifact {
+function mockArtifact(
+  run: WorkflowRunRecord,
+  output: Record<string, unknown>,
+): Omit<WorkflowArtifactRecord, "runId" | "tenantId" | "createdAt"> {
   const live = run.policy.mode === "live";
   const driver = executionDriverForRun(run);
   const source = live
@@ -780,6 +784,167 @@ function mockArtifact(run: WorkflowRunRecord, output: Record<string, unknown>): 
     content,
     digest: `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`,
     redacted: false,
+  };
+}
+
+const PREFERRED_FILE_OUTPUTS = ["pdfRef", "markdownRef", "manifestRef"] as const;
+const ARTIFACT_PREVIEW_BYTES = 32 * 1024;
+
+function formatArtifactSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function artifactKindForFile(filePath: string): WorkflowArtifactRecord["kind"] {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".md" || extension === ".pdf" || extension === ".html") return "report";
+  if (extension === ".log" || extension === ".txt") return "log";
+  return "data";
+}
+
+function previewContentForFile(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".pdf") return `PDF report: ${path.basename(filePath)}`;
+  try {
+    const text = fs.readFileSync(filePath, "utf8");
+    return text.length > ARTIFACT_PREVIEW_BYTES
+      ? `${text.slice(0, ARTIFACT_PREVIEW_BYTES)}\n…`
+      : text;
+  } catch {
+    return path.basename(filePath);
+  }
+}
+
+function existingFilePath(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const candidate = path.isAbsolute(value) ? value : path.resolve(value);
+  try {
+    return fs.statSync(candidate).isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWorkflowRunId(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value)) {
+    throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+  }
+  return value;
+}
+
+function workspaceRootForRun(runId: string): string {
+  return path.join(
+    process.env.POLARIS_WORKFLOW_WORKSPACES_ROOT
+      || path.join(repoRoot(import.meta.url), ".polaris", "workflow-workspaces"),
+    safeWorkflowRunId(runId),
+  );
+}
+
+function normalizeWorkspaceRelativePath(value: string): string | null {
+  const trimmed = value.trim().replace(/^\/+/u, "");
+  if (!trimmed || trimmed.includes("\0")) return null;
+  const parts = trimmed.split(/[\\/]/u).filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) return null;
+  return parts.join(path.sep);
+}
+
+function referencedWorkspaceFiles(run: WorkflowRunRecord): Set<string> {
+  const files = new Set<string>();
+  const collect = (value: unknown) => {
+    const sourcePath = existingFilePath(value);
+    if (sourcePath) files.add(sourcePath);
+  };
+  for (const value of Object.values(run.output)) collect(value);
+  for (const artifact of run.artifacts) {
+    if (artifact.sourcePath) collect(artifact.sourcePath);
+  }
+  for (const step of run.steps) {
+    for (const value of Object.values(step.input)) collect(value);
+    for (const value of Object.values(step.output)) collect(value);
+  }
+  return files;
+}
+
+function resolveWorkspaceFile(run: WorkflowRunRecord, relativePath: string): string | null {
+  const normalized = normalizeWorkspaceRelativePath(relativePath);
+  if (!normalized) return null;
+  const root = workspaceRootForRun(run.id);
+  const candidate = path.resolve(root, normalized);
+  const relative = path.relative(root, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  try {
+    if (!fs.statSync(candidate).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return referencedWorkspaceFiles(run).has(candidate) ? candidate : null;
+}
+
+function artifactsFromOutputs(
+  run: WorkflowRunRecord,
+  output: Record<string, unknown>,
+): Array<Omit<WorkflowArtifactRecord, "runId" | "tenantId" | "createdAt">> {
+  const names = [
+    ...PREFERRED_FILE_OUTPUTS.filter((name) => name in output),
+    ...Object.keys(output).filter((name) =>
+      !PREFERRED_FILE_OUTPUTS.includes(name as typeof PREFERRED_FILE_OUTPUTS[number])
+    ),
+  ];
+  const artifacts: Array<Omit<WorkflowArtifactRecord, "runId" | "tenantId" | "createdAt">> = [];
+  for (const name of names) {
+    const sourcePath = existingFilePath(output[name]);
+    if (!sourcePath) continue;
+    const bytes = fs.readFileSync(sourcePath);
+    artifacts.push({
+      id: `artifact-${run.id}-${name}`,
+      name,
+      kind: artifactKindForFile(sourcePath),
+      size: formatArtifactSize(bytes.byteLength),
+      summary: `${name} → ${path.basename(sourcePath)}`,
+      content: previewContentForFile(sourcePath),
+      sourcePath,
+      digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+      redacted: false,
+    });
+  }
+  return artifacts.length > 0 ? artifacts : [mockArtifact(run, output)];
+}
+
+function isSyntheticStubArtifact(artifact: WorkflowArtifactRecord): boolean {
+  return artifact.name.endsWith("-result.md") && !artifact.sourcePath;
+}
+
+function fileBackedArtifactNames(artifacts: WorkflowArtifactRecord[]): string[] {
+  return artifacts
+    .filter((artifact) => Boolean(artifact.sourcePath))
+    .map((artifact) => artifact.name)
+    .sort();
+}
+
+function hydrateRunArtifacts(run: WorkflowRunRecord): {
+  run: WorkflowRunRecord;
+  persist: boolean;
+} {
+  const fileArtifacts = artifactsFromOutputs(run, run.output)
+    .filter((artifact) => Boolean(artifact.sourcePath))
+    .map((artifact) => ({
+      ...artifact,
+      runId: run.id,
+      tenantId: run.tenantId,
+      createdAt: run.completedAt ?? run.updatedAt,
+    }));
+  if (fileArtifacts.length === 0) return { run, persist: false };
+  const currentNames = fileBackedArtifactNames(run.artifacts);
+  const nextNames = fileBackedArtifactNames(fileArtifacts);
+  const persist = run.artifacts.some(isSyntheticStubArtifact)
+    || currentNames.join("\0") !== nextNames.join("\0");
+  if (!persist && run.artifacts.length === fileArtifacts.length) {
+    return { run, persist: false };
+  }
+  return {
+    run: { ...run, artifacts: fileArtifacts },
+    persist,
   };
 }
 
@@ -883,6 +1048,14 @@ export class WorkflowControlService {
     await this.drain();
   }
 
+  private hydrateStoredRun(run: WorkflowRunRecord): WorkflowRunRecord {
+    const hydrated = hydrateRunArtifacts(run);
+    if (hydrated.persist) {
+      this.store.replaceWorkflowArtifacts(run.tenantId, run.id, hydrated.run.artifacts);
+    }
+    return hydrated.run;
+  }
+
   async listRuns(tenantId: string): Promise<WorkflowRunsResponse> {
     // The production worker is driven by its timer in server mode. In
     // synchronous test or maintenance mode, drain the queue before returning
@@ -895,7 +1068,9 @@ export class WorkflowControlService {
       await this.enqueueEnabledWorkflows(tenantId);
       await this.drain();
     }
-    const runs = this.store.listWorkflowRuns(tenantId).map((run) => projectionForRun(run, this.options.listPacks()));
+    const runs = this.store.listWorkflowRuns(tenantId)
+      .map((run) => this.hydrateStoredRun(run))
+      .map((run) => projectionForRun(run, this.options.listPacks()));
     const events = this.store.listWorkflowRuns(tenantId).flatMap((run) => run.events);
     return {
       runs,
@@ -906,20 +1081,36 @@ export class WorkflowControlService {
   async getRun(tenantId: string, runId: string): Promise<WorkflowRunProjection> {
     const run = this.store.getWorkflowRun(tenantId, runId);
     if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
-    return projectionForRun(run, this.options.listPacks());
+    return projectionForRun(this.hydrateStoredRun(run), this.options.listPacks());
   }
 
   getArtifact(tenantId: string, runId: string, artifactId: string): {
     run: WorkflowRunRecord;
     artifact: WorkflowRunRecord["artifacts"][number];
   } {
-    const run = this.store.getWorkflowRun(tenantId, runId);
-    if (!run) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    const stored = this.store.getWorkflowRun(tenantId, runId);
+    if (!stored) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    const run = this.hydrateStoredRun(stored);
     const artifact = run.artifacts.find((candidate) => candidate.id === artifactId);
     if (!artifact) {
       throw new WorkflowControlError("产物不存在", 404, "artifact-not-found");
     }
     return { run, artifact };
+  }
+
+  getWorkspaceFile(tenantId: string, runId: string, relativePath: string): {
+    run: WorkflowRunRecord;
+    sourcePath: string;
+    relativePath: string;
+  } {
+    const stored = this.store.getWorkflowRun(tenantId, runId);
+    if (!stored) throw new WorkflowControlError("运行不存在", 404, "run-not-found");
+    const run = this.hydrateStoredRun(stored);
+    const sourcePath = resolveWorkspaceFile(run, relativePath);
+    if (!sourcePath) {
+      throw new WorkflowControlError("产物不存在", 404, "artifact-not-found");
+    }
+    return { run, sourcePath, relativePath: path.relative(workspaceRootForRun(run.id), sourcePath) };
   }
 
   async createRun(tenantId: string, input: WorkflowRunRequest): Promise<WorkflowRunProjection> {
@@ -1519,27 +1710,36 @@ export class WorkflowControlService {
       });
       return;
     }
-    const artifact = mockArtifact(run, result.outputs ?? {});
-    this.store.addWorkflowArtifact({
-      ...artifact,
-      runId: run.id,
-      tenantId: run.tenantId,
-      redacted: false,
-      createdAt: this.now().toISOString(),
-    });
+    const outputs = result.outputs ?? {};
+    const artifacts = artifactsFromOutputs(run, outputs);
+    const createdAt = this.now().toISOString();
+    for (const artifact of artifacts) {
+      this.store.addWorkflowArtifact({
+        ...artifact,
+        runId: run.id,
+        tenantId: run.tenantId,
+        redacted: artifact.redacted,
+        createdAt,
+      });
+    }
+    const fileNames = artifacts
+      .filter((artifact) => "sourcePath" in artifact && artifact.sourcePath)
+      .map((artifact) => artifact.name);
     this.store.updateWorkflowRun({
       tenantId: run.tenantId,
       runId: run.id,
       status: "succeeded",
       progress: 100,
       workerId: this.workerId,
-      output: result.outputs ?? {},
+      output: outputs,
       event: {
         kind: "succeeded",
         title: "最终产物已生成",
-      detail: executionDriverForRun(run) === "none"
-        ? "Polaris host executor 已生成 synthetic artifact。"
-        : "mock Vault Host 已生成 synthetic artifact。",
+        detail: fileNames.length > 0
+          ? `已生成 ${fileNames.join("、")}。`
+          : executionDriverForRun(run) === "none"
+            ? "Polaris host executor 已生成 synthetic artifact。"
+            : "mock Vault Host 已生成 synthetic artifact。",
         tone: "success",
       },
     });

@@ -3032,8 +3032,16 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
           assert.equal(completed?.status, "succeeded");
+          assert.deepEqual(
+            completed?.artifacts.map((artifact) => artifact.name).sort(),
+            ["manifestRef", "markdownRef", "pdfRef"],
+          );
           const pdf = completed?.artifacts.find((artifact) => artifact.name === "pdfRef");
+          const markdown = completed?.artifacts.find((artifact) => artifact.name === "markdownRef");
+          const manifest = completed?.artifacts.find((artifact) => artifact.name === "manifestRef");
           assert.ok(pdf);
+          assert.ok(markdown);
+          assert.ok(manifest);
           const preview = await fetch(
             `http://127.0.0.1:${address.port}/api/workflow-runs/${encodeURIComponent(completed!.id)}/artifacts/${encodeURIComponent(pdf!.id)}`,
           );
@@ -3043,6 +3051,16 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
           assert.equal(preview.headers.get("x-content-type-options"), "nosniff");
           const bytes = Buffer.from(await preview.arrayBuffer());
           assert.equal(bytes.subarray(0, 5).toString("ascii"), "%PDF-");
+          const markdownPreview = await fetch(
+            `http://127.0.0.1:${address.port}/api/workflow-runs/${encodeURIComponent(completed!.id)}/artifacts/${encodeURIComponent(markdown!.id)}`,
+          );
+          assert.equal(markdownPreview.status, 200);
+          assert.equal(markdownPreview.headers.get("content-type"), "text/markdown; charset=utf-8");
+          const manifestPreview = await fetch(
+            `http://127.0.0.1:${address.port}/api/workflow-runs/${encodeURIComponent(completed!.id)}/artifacts/${encodeURIComponent(manifest!.id)}`,
+          );
+          assert.equal(manifestPreview.status, 200);
+          assert.equal(manifestPreview.headers.get("content-type"), "application/json; charset=utf-8");
         } finally {
           server.close();
           await once(server, "close");
