@@ -5,6 +5,7 @@ import {
   artifactPreviewSource,
   artifactPreviewUrl,
   formatJsonArtifact,
+  workspaceFilePreviewUrl,
 } from "./artifact-preview.js";
 
 test("classifies common artifact formats for native previews", () => {
@@ -16,6 +17,9 @@ test("classifies common artifact formats for native previews", () => {
   assert.equal(artifactPreviewKind("result.json"), "json");
   assert.equal(artifactPreviewKind("notes.md"), "markdown");
   assert.equal(artifactPreviewKind("unknown.bin"), "binary");
+  assert.equal(artifactPreviewKind("pdfRef"), "pdf");
+  assert.equal(artifactPreviewKind("markdownRef"), "markdown");
+  assert.equal(artifactPreviewKind("manifestRef"), "json");
 });
 
 test("only treats safe URL-like content as a media preview source", () => {
@@ -28,6 +32,10 @@ test("builds a protected artifact preview URL", () => {
   assert.equal(
     artifactPreviewUrl("run/example", "artifact/report.pdf"),
     "/api/workflow-runs/run%2Fexample/artifacts/artifact%2Freport.pdf",
+  );
+  assert.equal(
+    workspaceFilePreviewUrl("run-example", "collection/inputs/input.json"),
+    "/api/workflow-runs/run-example/files?path=collection%2Finputs%2Finput.json",
   );
 });
 

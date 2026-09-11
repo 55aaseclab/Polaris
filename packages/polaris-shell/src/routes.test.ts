@@ -18,6 +18,7 @@ test("shell paths cover Portal work, auth, user, and Vault routes", () => {
   assert.equal(isShellPath("/settings/user"), true);
   assert.equal(isShellPath("/hosts"), true);
   assert.equal(isShellPath("/hosts/demo"), true);
+  assert.equal(isShellPath("/debug"), true);
   assert.equal(isShellPath("/"), true);
   assert.equal(isShellPath("/h/srv_x"), false);
   assert.equal(isShellPath("/h/srv_x/vault/a"), false);

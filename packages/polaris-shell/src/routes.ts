@@ -88,6 +88,9 @@ export function isShellPath(pathname: string): boolean {
   if (path === "/hosts" || path.startsWith("/hosts/")) {
     return true;
   }
+  if (path === "/debug" || path.startsWith("/debug/")) {
+    return true;
+  }
   if (path === "/v" || path.startsWith("/v/")) {
     return true;
   }

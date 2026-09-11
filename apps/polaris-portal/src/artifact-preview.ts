@@ -47,7 +47,15 @@ const EXTENSION_KINDS: Record<string, ArtifactPreviewKind> = {
   ".ts": "code",
 };
 
+const OUTPUT_FIELD_KINDS: Record<string, ArtifactPreviewKind> = {
+  pdfref: "pdf",
+  markdownref: "markdown",
+  manifestref: "json",
+};
+
 export function artifactPreviewKind(name: string): ArtifactPreviewKind {
+  const lower = name.toLocaleLowerCase();
+  if (OUTPUT_FIELD_KINDS[lower]) return OUTPUT_FIELD_KINDS[lower];
   const extension = name.slice(name.lastIndexOf(".")).toLocaleLowerCase();
   return EXTENSION_KINDS[extension] || "binary";
 }
@@ -62,6 +70,10 @@ export function artifactPreviewSource(content: string): string | null {
 
 export function artifactPreviewUrl(runId: string, artifactId: string): string {
   return `/api/workflow-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`;
+}
+
+export function workspaceFilePreviewUrl(runId: string, relativePath: string): string {
+  return `/api/workflow-runs/${encodeURIComponent(runId)}/files?path=${encodeURIComponent(relativePath)}`;
 }
 
 export function formatJsonArtifact(content: string): string {

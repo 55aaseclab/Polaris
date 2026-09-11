@@ -49,9 +49,7 @@ desk shows the server-owned run cards:
 - **失败** or **已取消** — inspect the run and retry when appropriate.
 
 Use `/work/runs/:runId` for the run timeline, pinned Domain Pack and execution
-target, input snapshot, approval/cancel/retry actions, and artifacts. Use
-`/debug` to inspect the same durable run projection and its ordered event
-stream.
+target, input snapshot, approval/cancel/retry actions, and artifacts.
 
 The work desk is safe to leave while a run is active. Returning to the page
 reconstructs its state from Polaris rather than from browser memory.
@@ -69,7 +67,7 @@ Portal card and not a separate CLI. To run it:
 5. Open the resulting card. It returns immediately with a queued or running
    projection while Polaris executes collection, analysis, and report writing.
 6. When the run completes, open the projected Markdown or PDF artifact from
-   the run-detail page. `/debug` shows the same durable run and stage events.
+   the run-detail page.
 
 No Vault is needed for the host path. To test the optional Vault branch,
 choose **Vault（使用已运行的 Vault）** in step 3 and select a Vault reported

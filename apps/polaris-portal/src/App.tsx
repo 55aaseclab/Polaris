@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  Activity,
-  Bug,
   CheckCircle2,
   ChevronRight,
   Check,
@@ -24,7 +22,6 @@ import {
   Orbit,
   Plus,
   Play,
-  RefreshCw,
   RotateCcw,
   Server,
   Sparkles,
@@ -32,7 +29,6 @@ import {
   ShieldCheck,
   Square,
   Trash2,
-  Terminal,
   UserRound,
   Wifi,
   Workflow,
@@ -77,12 +73,23 @@ import {
   artifactPreviewSource,
   artifactPreviewUrl,
   formatJsonArtifact,
+  workspaceFilePreviewUrl,
   type ArtifactPreviewKind,
 } from "./artifact-preview.js";
 import { formatRunDateTime } from "./formatters.js";
+import {
+  artifactPreviewPage,
+  pathLabelParts,
+  timelineCallBlock,
+  workspaceFilePage,
+  type TimelineCallBlock,
+  type TimelineField,
+  type TimelineValue,
+} from "./timeline-call.js";
 import { layoutWorkflowGraph } from "./workflow-graph-layout.js";
 import { useI18n } from "./i18n/index.js";
 import { localizedPackWarning, localizedWorkflowError, localizedWorkflowEvent, LocalizedError } from "./i18n/messages.js";
+import { backTo } from "./portal-navigation.js";
 import {
   flowForRun,
   packForRun,
@@ -102,8 +109,9 @@ function usePortalNavigation(): { path: string; navigate: (path: string, replace
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
   const navigate = useCallback((nextPath: string, replace = false) => {
-    if (replace) window.history.replaceState({}, "", nextPath);
-    else window.history.pushState({}, "", nextPath);
+    const state = { from: `${window.location.pathname}${window.location.search}` };
+    if (replace) window.history.replaceState(state, "", nextPath);
+    else window.history.pushState(state, "", nextPath);
     setPath(window.location.pathname);
   }, []);
   return { path, navigate };
@@ -148,7 +156,16 @@ export default function App() {
     return <PortalLayout active="work" session={session} navigate={navigate}><WorkPage navigate={navigate} /></PortalLayout>;
   }
   if (path === "/debug" || path === "/debug/") {
-    return <PortalLayout active="debug" session={session} navigate={navigate}><DebugPage /></PortalLayout>;
+    queueMicrotask(() => navigate("/work", true));
+    return <LoadingView label={t("common.openingWorkspace")} />;
+  }
+  const artifactMatch = path.match(/^\/work\/runs\/([^/]+)\/artifacts\/([^/]+)$/u);
+  if (artifactMatch) {
+    return <PortalLayout active="work" session={session} navigate={navigate}><RunPreviewPage runId={decodeURIComponent(artifactMatch[1])} kind="artifact" target={decodeURIComponent(artifactMatch[2])} navigate={navigate} /></PortalLayout>;
+  }
+  const fileMatch = path.match(/^\/work\/runs\/([^/]+)\/files\/(.+)$/u);
+  if (fileMatch) {
+    return <PortalLayout active="work" session={session} navigate={navigate}><RunPreviewPage runId={decodeURIComponent(fileMatch[1])} kind="file" target={decodeURIComponent(fileMatch[2])} navigate={navigate} /></PortalLayout>;
   }
   const runMatch = path.match(/^\/work\/runs\/([^/]+)$/u);
   if (runMatch) {
@@ -191,14 +208,14 @@ function PortalLayout({
   navigate,
   children,
 }: {
-  active: "work" | "hosts" | "workflows" | "user" | "debug";
+  active: "work" | "hosts" | "workflows" | "user";
   session: ShellSession;
   navigate: (path: string, replace?: boolean) => void;
   children: React.ReactNode;
 }) {
   const { t, toggleLanguage } = useI18n();
   const signOut = usePortalStore((state) => state.signOut);
-  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "user" | "debug") => (
+  const link = (path: string, label: string, Icon: typeof Server, key: "work" | "hosts" | "workflows" | "user") => (
     <a
       href={path}
       onClick={(event) => { event.preventDefault(); navigate(path); }}
@@ -220,7 +237,6 @@ function PortalLayout({
             {link("/work", t("nav.work"), LayoutDashboard, "work")}
             {session.vaultMode !== "host" && link("/hosts", t("nav.hosts"), Server, "hosts")}
             {link("/settings/workflows", t("nav.workflows"), Workflow, "workflows")}
-            {link("/debug", t("nav.debug"), Bug, "debug")}
             {link("/settings/user", t("nav.account"), CircleUserRound, "user")}
           </nav>
           <div className="portal-topbar-actions">
@@ -305,34 +321,97 @@ function formatInputSnapshotValue(value: string): string {
   }
 }
 
-function previewWorkflowValue(value: unknown): string {
-  if (value === undefined || value === null) return "—";
-  if (typeof value === "string") return value.length > 140 ? `${value.slice(0, 137)}...` : value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    const text = JSON.stringify(value);
-    return text.length > 140 ? `${text.slice(0, 137)}...` : text;
-  } catch {
-    return String(value);
-  }
+function TimelineScalar({ value }: { value: Extract<TimelineValue, { kind: "scalar" }> }) {
+  return <span className={cn("timeline-scalar", `timeline-scalar-${value.tone}`)}>{value.text}</span>;
 }
 
-function workflowStepOutputEntries(
-  step: MockWorkflowRun["steps"][number],
-): Array<[string, unknown]> {
-  const output = step.output ?? {};
-  const declared = step.outputFields?.filter((field) => field.trim()) ?? [];
-  const ordered = declared.length ? declared : Object.keys(output);
-  const emitted = new Set<string>();
-  const entries: Array<[string, unknown]> = [];
-  for (const field of ordered) {
-    emitted.add(field);
-    entries.push([field, output[field]]);
-  }
-  for (const [field, value] of Object.entries(output)) {
-    if (!emitted.has(field)) entries.push([field, value]);
-  }
-  return entries;
+function TimelineFileChip({
+  runId,
+  value,
+  navigate,
+}: {
+  runId: string;
+  value: Extract<TimelineValue, { kind: "file" }>;
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const href = workspaceFilePage(runId, value.path);
+  return (
+    <span className="timeline-file">
+      <code className="timeline-file-path">{pathLabelParts(value.label).map((part, index) => <span key={`${part}-${index}`}>{index > 0 && <>/<wbr /></>}{part}</span>)}</code>
+      <a
+        href={href}
+        className="timeline-file-open"
+        aria-label={t("run.openFile", { name: value.label })}
+        title={t("run.openFile", { name: value.label })}
+        onClick={(event) => { event.preventDefault(); navigate(href); }}
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    </span>
+  );
+}
+
+function TimelineValueView({
+  runId,
+  value,
+  navigate,
+}: {
+  runId: string;
+  value: TimelineValue;
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  return value.kind === "file"
+    ? <TimelineFileChip runId={runId} value={value} navigate={navigate} />
+    : <TimelineScalar value={value} />;
+}
+
+function TimelineFieldList({
+  runId,
+  fields,
+  navigate,
+}: {
+  runId: string;
+  fields: TimelineField[];
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  return (
+    <span className="timeline-field-list">
+      {fields.map((field, index) => (
+        <span className={cn("timeline-field", field.value.kind === "file" && "is-file")} key={field.key}>
+          <span className="timeline-assign">
+            <span className="timeline-key">{field.key}</span>
+            <span className="timeline-eq"> = </span>
+          </span>
+          <TimelineValueView runId={runId} value={field.value} navigate={navigate} />
+          {index < fields.length - 1 && <span className="timeline-sep">, </span>}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function TimelineCallView({
+  runId,
+  block,
+  fallback,
+  navigate,
+}: {
+  runId: string;
+  block: TimelineCallBlock | null;
+  fallback: string;
+  navigate: (path: string, replace?: boolean) => void;
+}) {
+  const { t } = useI18n();
+  if (!block) return <p>{fallback}</p>;
+  return (
+    <p className="timeline-call">
+      {block.call && <span className="timeline-call-lead"><span className="timeline-call-label">call</span> <code className="timeline-call-name">{block.call}</code></span>}
+      {block.uses.length > 0 && <> <span className="timeline-call-section"><span className="timeline-call-label">{t("run.callUses")}</span> <span className="timeline-brace">{"{"}</span><TimelineFieldList runId={runId} fields={block.uses} navigate={navigate} /><span className="timeline-brace">{"}"}</span></span></>}
+      {block.outputs.length > 0 && <> <span className="timeline-call-section"><span className="timeline-arrow">→</span> <span className="timeline-call-label">{t("run.callOut")}</span> <span className="timeline-brace">{"{"}</span><TimelineFieldList runId={runId} fields={block.outputs} navigate={navigate} /><span className="timeline-brace">{"}"}</span></span></>}
+      {block.note && <span className="timeline-note"> · {block.note}</span>}
+    </p>
+  );
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -551,143 +630,6 @@ function WorkListRow({
         </Button>
       </div>
     </div>
-  );
-}
-
-type DebugRunFilter = "all" | "active" | "waiting" | "terminal";
-
-function DebugPage() {
-  const { t } = useI18n();
-  const runs = usePortalStore((state) => state.runs);
-  const packs = usePortalStore((state) => state.packs);
-  const error = usePortalStore((state) => state.error);
-  const replayCursor = usePortalStore((state) => state.replayCursor);
-  const refreshWorkflowRuns = usePortalStore((state) => state.refreshWorkflowRuns);
-  const [filter, setFilter] = useState<DebugRunFilter>("all");
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const orderedRuns = useMemo(() => Object.values(runs).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)), [runs]);
-  const counts = useMemo(() => ({
-    all: orderedRuns.length,
-    active: orderedRuns.filter((run) => ["queued", "running"].includes(run.status)).length,
-    waiting: orderedRuns.filter((run) => run.status === "waiting").length,
-    terminal: orderedRuns.filter((run) => ["succeeded", "failed", "cancelled"].includes(run.status)).length,
-    failed: orderedRuns.filter((run) => run.status === "failed").length,
-  }), [orderedRuns]);
-  const visibleRuns = useMemo(() => orderedRuns.filter((run) => {
-    if (filter === "active") return ["queued", "running"].includes(run.status);
-    if (filter === "waiting") return run.status === "waiting";
-    if (filter === "terminal") return ["succeeded", "failed", "cancelled"].includes(run.status);
-    return true;
-  }), [filter, orderedRuns]);
-  useEffect(() => {
-    if (selectedRunId && visibleRuns.some((run) => run.id === selectedRunId)) return;
-    setSelectedRunId(visibleRuns[0]?.id || null);
-  }, [selectedRunId, visibleRuns]);
-  const selectedRun = visibleRuns.find((run) => run.id === selectedRunId) || visibleRuns[0];
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      await refreshWorkflowRuns();
-    } finally {
-      setRefreshing(false);
-    }
-  };
-  return (
-    <div className="page-stack debug-page">
-      <div className="debug-heading">
-        <div>
-          <p className="eyebrow">{t("debug.title")}</p>
-          <h1>{t("debug.title")}</h1>
-        </div>
-        <div className="debug-heading-actions">
-          <span className="debug-live-indicator"><span />{t("debug.autoRefresh")}</span>
-          <Button variant="ghost" size="icon" aria-label={t("debug.refresh")} title={t("debug.refresh")} onClick={() => void refresh()} disabled={refreshing}>
-            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-          </Button>
-        </div>
-      </div>
-      {Boolean(error) && <ErrorBanner message={errorMessage(error, t)} />}
-      <div className="debug-metrics" aria-label={t("debug.overview")}>
-        <DebugMetric label={t("debug.runs")} value={counts.all} />
-        <DebugMetric label={t("debug.active")} value={counts.active} tone="accent" />
-        <DebugMetric label={t("debug.waiting")} value={counts.waiting} tone="warning" />
-        <DebugMetric label={t("debug.failed")} value={counts.failed} tone="danger" />
-      </div>
-      <div className="debug-filter-row">
-        <div className="filter-tabs debug-tabs" role="tablist" aria-label={t("debug.filter")}>
-          {([
-            ["all", t("work.all"), counts.all],
-            ["active", t("debug.active"), counts.active],
-            ["waiting", t("debug.waiting"), counts.waiting],
-            ["terminal", t("debug.terminal"), counts.terminal],
-          ] as const).map(([value, label, count]) => (
-            <button key={value} type="button" role="tab" aria-selected={filter === value} className={cn("filter-tab", filter === value && "is-active")} onClick={() => setFilter(value)}>
-              {label}<span className="filter-tab-count">{count}</span>
-            </button>
-          ))}
-        </div>
-      <span className="debug-cursor"><Terminal className="h-3.5 w-3.5" />{t("debug.cursor", { cursor: replayCursor })}</span>
-      </div>
-      <div className="debug-layout">
-        <section className="debug-run-list" aria-label={t("debug.runList")}>
-          {visibleRuns.map((run) => {
-            const pack = packForRun(packs, run);
-            return <button type="button" key={run.id} className={cn("debug-run-row", selectedRun?.id === run.id && "is-selected")} onClick={() => setSelectedRunId(run.id)}>
-              <span className={cn("debug-run-dot", `debug-run-dot-${run.status}`)} />
-              <span className="debug-run-copy"><strong>{run.title}</strong><small>{pack?.title || run.packId} · {run.vaultName}</small></span>
-              <span className="debug-run-state"><WorkflowStatusBadge status={run.status} /><small>{run.progress}%</small></span>
-            </button>;
-          })}
-          {visibleRuns.length === 0 && <div className="empty-state debug-empty"><Bug className="h-6 w-6" /><strong>{t("debug.noMatch")}</strong></div>}
-        </section>
-        {selectedRun ? <DebugInspector run={selectedRun} packs={packs} /> : <div className="empty-state debug-inspector-empty"><Activity className="h-7 w-7" /><strong>{t("debug.select")}</strong></div>}
-      </div>
-    </div>
-  );
-}
-
-function DebugMetric({ label, value, tone = "neutral" }: { label: string; value: number; tone?: "neutral" | "accent" | "warning" | "danger" }) {
-  return <div className={cn("debug-metric", `debug-metric-${tone}`)}><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function DebugInspector({ run, packs }: { run: MockWorkflowRun; packs: MockDomainPack[] }) {
-  const { t } = useI18n();
-  const pack = packForRun(packs, run);
-  const flow = flowForRun(packs, run);
-  const events = [...run.events].sort((left, right) => left.sequence - right.sequence);
-  return (
-    <section className="debug-inspector" aria-label={`${run.title} ${t("debug.inspector")}`}>
-      <Card className="debug-focus-card">
-        <CardHeader className="debug-focus-header">
-          <div className="debug-focus-title"><span className="debug-focus-icon"><Activity className="h-4 w-4" /></span><div><CardTitle>{run.title}</CardTitle><CardDescription>{pack?.title || run.packId} · {flow?.title || run.flowId}</CardDescription></div></div>
-          <WorkflowStatusBadge status={run.status} />
-        </CardHeader>
-        <CardContent>
-          <div className="debug-context-line"><span><Server className="h-3.5 w-3.5" />{run.vaultName}</span><span><Clock3 className="h-3.5 w-3.5" />{run.updatedAt.slice(11, 19)}</span><code>{run.id}</code></div>
-          <div className="debug-progress"><div className="debug-progress-bar"><span style={{ width: `${run.progress}%` }} /></div><strong>{run.progress}%</strong></div>
-          <div className="debug-flow-rail" aria-label={t("debug.eventRail")}>
-            {events.length === 0 ? <span className="debug-flow-empty">{t("run.waitingEvents")}</span> : events.map((event, index) => <div className="debug-flow-step" key={event.id}>
-              <span className={cn("debug-flow-node", `timeline-dot-${event.tone}`)}>{index + 1}</span>
-              <small>{localizedWorkflowEvent(event, t).title}</small>
-            </div>)}
-          </div>
-          {run.error && <div className="debug-error"><Bug className="h-4 w-4" /><span><strong>{run.error.code}</strong>{localizedWorkflowError(run.error, t)}</span></div>}
-        </CardContent>
-      </Card>
-      <Card className="debug-log-card">
-        <CardHeader className="debug-log-header"><div><CardTitle>{t("run.eventLog")}</CardTitle><CardDescription>{t("run.sequenceReplay")}</CardDescription></div><Badge variant="outline">{events.length} {t("debug.events")}</Badge></CardHeader>
-        <CardContent>
-          <div className="debug-log-list">
-            {[...events].reverse().map((event) => <div className="debug-log-entry" key={event.id}>
-              <span className={cn("timeline-dot", `timeline-dot-${event.tone}`)} />
-              <div className="debug-log-copy"><div><strong>{localizedWorkflowEvent(event, t).title}</strong><time>{event.timestamp.slice(11, 19)}</time></div><p>{localizedWorkflowEvent(event, t).detail}</p><code>#{event.sequence} · {event.kind}</code></div>
-            </div>)}
-            {events.length === 0 && <p className="empty-copy">{t("debug.noEvents")}</p>}
-          </div>
-        </CardContent>
-      </Card>
-    </section>
   );
 }
 
@@ -1199,11 +1141,11 @@ function WorkflowGraphPage({
   }, [flowId, packId]);
 
   if (!pack || !flow) {
-    return <div className="center-state"><ErrorBanner message={t("settings.graphNotFound")} /><Button variant="outline" onClick={() => navigate(backPath)}>{t("settings.back")}</Button></div>;
+    return <div className="center-state"><ErrorBanner message={t("settings.graphNotFound")} /><Button variant="outline" onClick={() => backTo(backPath, navigate)}>{t("settings.back")}</Button></div>;
   }
   return (
     <div className="page-stack workflow-graph-page">
-      <a href={backPath} className="back-link" onClick={(event) => { event.preventDefault(); navigate(backPath); }}><ArrowLeft className="h-4 w-4" />{t("settings.back")}</a>
+      <a href={backPath} className="back-link" onClick={(event) => { event.preventDefault(); backTo(backPath, navigate); }}><ArrowLeft className="h-4 w-4" />{t("settings.back")}</a>
       {Boolean(error) && <ErrorBanner message={errorMessage(error, t)} />}
       {!graph && !error && <LoadingView label={t("settings.loadingGraph")} />}
       {graph && <WorkflowGraphViewer graph={graph} />}
@@ -1248,9 +1190,8 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
   const approve = usePortalStore((state) => state.approveWorkflowRun);
   const cancel = usePortalStore((state) => state.cancelWorkflowRun);
   const retry = usePortalStore((state) => state.retryWorkflowRun);
-  const [artifact, setArtifact] = useState<MockWorkflowRun["artifacts"][number] | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
-  if (!run) return <div className="center-state"><ErrorBanner message={t("run.notFound")} /><Button variant="outline" onClick={() => navigate("/work")}>{t("common.backToWork")}</Button></div>;
+  if (!run) return <div className="center-state"><ErrorBanner message={t("run.notFound")} /><Button variant="outline" onClick={() => backTo("/work", navigate)}>{t("common.backToWork")}</Button></div>;
   const pack = packForRun(packs, run);
   const flow = flowForRun(packs, run);
   const canCancel = ["queued", "running", "waiting"].includes(run.status);
@@ -1262,7 +1203,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     title: string;
     detail: string;
     tone: "neutral" | "accent" | "warning" | "success";
-    outputs: Array<[string, unknown]>;
+    call: TimelineCallBlock | null;
   }>>(() => [
     ...run.events.map((event) => ({
       id: `event-${event.id}`,
@@ -1271,21 +1212,28 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
       title: localizedWorkflowEvent(event, t).title,
       detail: localizedWorkflowEvent(event, t).detail,
       tone: event.tone,
-      outputs: [],
+      call: null,
     })),
     ...run.steps.map((step) => {
-      const outputs = workflowStepOutputEntries(step);
+      const call = timelineCallBlock({
+        runId: run.id,
+        call: step.call,
+        input: step.input,
+        output: step.output,
+        outputFields: step.outputFields,
+        detail: step.detail,
+      });
       return {
         id: `step-${step.id}`,
         timestamp: step.completedAt || step.createdAt,
         sequence: 10_000 + step.sequence,
         title: step.stepLabel,
-        detail: step.detail || t("run.stepDefaultDetail", { status: t(`status.${step.status}` as const), count: outputs.length }),
+        detail: step.detail || t("run.stepDefaultDetail", { status: t(`status.${step.status}` as const), count: Object.keys(step.output ?? {}).length }),
         tone: step.status === "failed" ? "warning" as const : "accent" as const,
-        outputs,
+        call,
       };
     }),
-  ].sort((left, right) => right.timestamp.localeCompare(left.timestamp) || right.sequence - left.sequence), [run.events, run.steps, t]);
+  ].sort((left, right) => right.timestamp.localeCompare(left.timestamp) || right.sequence - left.sequence), [run.events, run.id, run.steps, t]);
   const copyRunId = async () => {
     try {
       await copyTextToClipboard(run.id);
@@ -1300,30 +1248,95 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
   };
   return (
     <div className="page-stack run-detail-page">
-      <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); navigate("/work"); }}><ArrowLeft className="h-4 w-4" />{t("common.backToWork")}</a>
+      <a href="/work" className="back-link" onClick={(event) => { event.preventDefault(); backTo("/work", navigate); }}><ArrowLeft className="h-4 w-4" />{t("common.backToWork")}</a>
       <section className="run-detail-heading"><div><div className="run-id-row"><code className="run-id">{run.id}</code><Button variant="ghost" size="icon" className="run-id-copy" aria-label={t("run.copyId")} title={copyStatus === "copied" ? t("run.copied") : t("run.copyId")} onClick={() => void copyRunId()}><Copy className="h-4 w-4" /></Button>{copyStatus !== "idle" && <span className={cn("run-id-copy-status", copyStatus === "error" && "is-error")} role="status">{copyStatus === "copied" ? t("run.copied") : t("run.copyFailed")}</span>}</div><h1>{run.title}</h1><p className="page-subtitle">{pack?.title} · {flow?.title} · {pack?.version}</p></div><div className="run-detail-heading-actions"><WorkflowStatusBadge status={run.status} /></div></section>
       {(canCancel || canRetry) && <div className="run-detail-actions"><div className="card-actions">{run.status === "waiting" && <Button onClick={() => void approve(run.id)}><CheckCircle2 className="h-4 w-4" />{t("work.approve")}</Button>}{canCancel && <Button variant="outline" onClick={() => void cancel(run.id)}><Square className="h-4 w-4" />{t("work.cancel")}</Button>}{canRetry && <Button onClick={() => void retryAndOpen()}><RotateCcw className="h-4 w-4" />{t("common.retry")}</Button>}</div></div>}
       <div className="run-detail-layout">
         <div className="run-detail-main">
           <Card><CardHeader><CardTitle>{t("run.progress")}</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{t("run.percentComplete", { percent: run.progress })}</span><span>{workflowExecutionTargetLabel(run, t)}</span></div></CardContent></Card>
-          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong><time>{item.timestamp.slice(11, 16)}</time></div><p>{item.detail}</p>{item.outputs.length > 0 && <dl className="timeline-outputs">{item.outputs.map(([field, value]) => <div key={field}><dt>{field}</dt><dd>{previewWorkflowValue(value)}</dd></div>)}</dl>}</div></div>)}</div></CardContent></Card>
+          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong><time>{item.timestamp.slice(11, 16)}</time></div>{item.call ? <TimelineCallView runId={run.id} block={item.call} fallback={item.detail} navigate={navigate} /> : <p>{item.detail}</p>}</div></div>)}</div></CardContent></Card>
           {run.error && <Card className="run-error-card"><CardHeader><CardTitle>{t("run.needsAction")}</CardTitle></CardHeader><CardContent><p>{localizedWorkflowError(run.error, t)}</p><code>{run.error.code}</code></CardContent></Card>}
         </div>
-          <aside className="run-detail-side"><Card><CardHeader><CardTitle>{t("run.context")}</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>{t("run.pack")}</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>{t("run.version")}</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? t("run.executionLocation") : t("run.targetVault")}</dt><dd>{workflowExecutionTargetLabel(run, t)}</dd></div><div className="data-row"><dt>{t("run.strategy")}</dt><dd>{run.approvalRequired ? t("run.needsConfirmation") : t("run.autoComplete")}</dd></div><div className="data-row"><dt>{t("run.created")}</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>{t("run.inputSnapshot")}</CardTitle><CardDescription>{t("run.inputDescription")}</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{formatInputSnapshotValue(value)}</code></dd></div>)}</dl></CardContent></Card>{run.artifacts.length > 0 && <Card><CardHeader><CardTitle>{t("run.artifacts")}</CardTitle><CardDescription>{run.driver === "none" ? t("run.artifactHost") : t("run.artifactVault")}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <button type="button" className="artifact-row" key={item.id} onClick={() => setArtifact(item)}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></button>)}</div></CardContent></Card>}</aside>
+        <aside className="run-detail-side"><Card><CardHeader><CardTitle>{t("run.context")}</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>{t("run.pack")}</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>{t("run.version")}</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? t("run.executionLocation") : t("run.targetVault")}</dt><dd>{workflowExecutionTargetLabel(run, t)}</dd></div><div className="data-row"><dt>{t("run.strategy")}</dt><dd>{run.approvalRequired ? t("run.needsConfirmation") : t("run.autoComplete")}</dd></div><div className="data-row"><dt>{t("run.created")}</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>{t("run.inputSnapshot")}</CardTitle><CardDescription>{t("run.inputDescription")}</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{formatInputSnapshotValue(value)}</code></dd></div>)}</dl></CardContent></Card>{run.artifacts.length > 0 && <Card><CardHeader><CardTitle>{t("run.artifacts")}</CardTitle><CardDescription>{run.driver === "none" ? t("run.artifactHost") : t("run.artifactVault")}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <a href={artifactPreviewPage(run.id, item.id)} className="artifact-row" key={item.id} onClick={(event) => { event.preventDefault(); navigate(artifactPreviewPage(run.id, item.id)); }}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></a>)}</div></CardContent></Card>}</aside>
       </div>
-      {artifact && <ArtifactPreview runId={run.id} artifact={artifact} onClose={() => setArtifact(null)} />}
     </div>
   );
 }
 
-function ArtifactPreview({ runId, artifact, onClose }: { runId: string; artifact: MockWorkflowRun["artifacts"][number]; onClose: () => void }) {
+function RunPreviewPage({
+  runId,
+  kind,
+  target,
+  navigate,
+}: {
+  runId: string;
+  kind: "artifact" | "file";
+  target: string;
+  navigate: (path: string, replace?: boolean) => void;
+}) {
   const { t } = useI18n();
-  const previewKind = artifactPreviewKind(artifact.name);
-  const source = artifactPreviewSource(artifact.content)
-    ?? (!artifact.redacted && ["image", "video", "audio", "pdf"].includes(previewKind)
-      ? artifactPreviewUrl(runId, artifact.id)
-      : null);
-  return <div className="modal-backdrop" role="presentation" onClick={onClose}><section className="modal artifact-modal" role="dialog" aria-modal="true" aria-label={artifact.name} onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow">{t("artifact.preview")}</p><h2>{artifact.name}</h2><p>{artifact.summary} · {artifact.size}</p></div><Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")} onClick={onClose}><X className="h-4 w-4" /></Button></div><ArtifactPreviewContent kind={previewKind} content={artifact.content} source={source} redacted={artifact.redacted} /></section></div>;
+  const run = usePortalStore((state) => state.runs[runId]);
+  const backHref = `/work/runs/${encodeURIComponent(runId)}`;
+  const artifact = kind === "artifact" ? run?.artifacts.find((item) => item.id === target) : undefined;
+  const previewKind = artifactPreviewKind(kind === "artifact" ? artifact?.name || target : target);
+  const media = ["image", "video", "audio", "pdf"].includes(previewKind);
+  const fileUrl = kind === "file" ? workspaceFilePreviewUrl(runId, target) : artifact ? artifactPreviewUrl(runId, artifact.id) : null;
+  const initialContent = kind === "artifact" ? artifact?.content ?? "" : "";
+  const [text, setText] = useState(initialContent);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!fileUrl || media || artifact?.redacted) return;
+    if (kind === "artifact" && initialContent && !initialContent.startsWith("PDF report:")) {
+      setText(initialContent);
+      return;
+    }
+    let cancelled = false;
+    void fetch(fileUrl, { credentials: "same-origin" }).then(async (response) => {
+      if (!response.ok) throw new Error(t("error.artifactContentUnavailable"));
+      const body = await response.text();
+      if (!cancelled) {
+        setText(body);
+        setLoadError(null);
+      }
+    }).catch((error) => {
+      if (!cancelled) setLoadError(error instanceof Error ? error.message : t("error.artifactContentUnavailable"));
+    });
+    return () => { cancelled = true; };
+  }, [artifact?.redacted, fileUrl, initialContent, kind, media, t]);
+  if (!run) {
+    return <div className="center-state"><ErrorBanner message={t("run.notFound")} /><Button variant="outline" onClick={() => backTo("/work", navigate)}>{t("common.backToWork")}</Button></div>;
+  }
+  if (kind === "artifact" && !artifact) {
+    return <div className="center-state"><ErrorBanner message={t("error.artifactNotFound")} /><Button variant="outline" onClick={() => backTo(backHref, navigate)}>{t("run.backToRun")}</Button></div>;
+  }
+  const title = kind === "artifact" ? artifact!.name : target.split("/").filter(Boolean).at(-1) || target;
+  const summary = kind === "artifact" ? `${artifact!.summary} · ${artifact!.size}` : target;
+  const source = kind === "artifact"
+    ? artifactPreviewSource(artifact!.content) ?? (media && !artifact!.redacted ? fileUrl : null)
+    : (media ? fileUrl : null);
+  return (
+    <div className="page-stack preview-page">
+      <a href={backHref} className="back-link" onClick={(event) => { event.preventDefault(); backTo(backHref, navigate); }}><ArrowLeft className="h-4 w-4" />{t("run.backToRun")}</a>
+      <section className="run-detail-heading">
+        <div>
+          <p className="eyebrow">{t("artifact.preview")}</p>
+          <h1>{title}</h1>
+          <p className="page-subtitle">{summary}</p>
+        </div>
+      </section>
+      {loadError && <ErrorBanner message={loadError} />}
+      <Card className="preview-card">
+        <CardContent className="preview-card-content">
+          <ArtifactPreviewContent
+            kind={previewKind}
+            content={text}
+            source={source}
+            redacted={kind === "artifact" ? artifact!.redacted : false}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function ArtifactPreviewContent({

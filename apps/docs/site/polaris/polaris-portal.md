@@ -76,7 +76,6 @@ same-origin Polaris routes and are admitted by the Gateway.
 | Provisioning | `/setup` | Choose one Domain Pack as the work scene and optionally configure a Vault execution target |
 | Workflow settings | `/settings/workflows` | Select one Domain Pack and show its complete flow list; enable or disable individual flows |
 | Run detail | `/work/runs/:runId` | Observe, approve, cancel, retry, and open controlled artifacts |
-| Debug inspector | `/debug` | Inspect server run projections, progress, replay cursor, and ordered event logs |
 | User page | `/settings/user` | Show Basic Information, Credentials, and Session as peer sections |
 | Coding surface | `/v/:serverId/coding` | Enter the admitted coding surface |
 | Vertical surface | `/v/:surfaceId/vertical` | Enter the admitted vertical surface |
@@ -200,9 +199,6 @@ page tree:
   Pack and flow catalog returned by Polaris.
 - `RunDetailPage` renders the durable run event trace, approval and lifecycle
   actions, and controlled artifacts.
-- `DebugPage` renders the selected run's progress rail, replay cursor, and
-  ordered event log. It is an observability view over the same server
-  projection, not a second run state machine.
 - `UserPage` renders Basic Information, Credentials, and Session as three
   peer sections.
 - `SurfacePage` resolves the selected coding or vertical-surface entry through the
@@ -255,7 +251,7 @@ sequenceDiagram
   participant API as Portal API
   participant Policy as Session and control store
 
-  Browser->>App: open `/work`, `/setup`, `/settings/workflows`, or `/debug`
+  Browser->>App: open `/work`, `/setup`, or `/settings/workflows`
   App->>API: GET `/api/session`
   API->>Policy: validate session and resolve Polaris mapping
   Policy-->>API: scoped session
@@ -346,7 +342,7 @@ Portal form
   -> WorkflowControlService atomically creates the envelope, lease, run, event, and outbox row
   -> host Literature Review adapter or deterministic FFI worker runs the pinned workflow
   -> receipts, artifacts, and replayable events are persisted
-  -> Zustand polls the run list; Work and Debug render the same projection
+  -> Zustand stores the run projection; Work and run detail render that store
 ```
 
 The run keeps `packVersion`, `packDigest`, optional `vaultId`, execution driver, capability lease, policy,
@@ -433,8 +429,8 @@ Paseo daemon `:6767` and selected-surface implementation ports remain private.
 
 | Component | Responsibility |
 | --- | --- |
-| `apps/polaris-portal/src/App.tsx` | React route switch, layouts, work cards, Debug inspector, host cards, user page, and surface entry |
-| `apps/polaris-portal/src/portal-store.ts` | Zustand projections, event reducer, bootstrap, run polling, refresh, and reconnect lifecycle |
+| `apps/polaris-portal/src/App.tsx` | React route switch, layouts, work cards, host cards, user page, and surface entry |
+| `apps/polaris-portal/src/portal-store.ts` | Zustand projections, event reducer, bootstrap, explicit refresh, and reconnect lifecycle |
 | `apps/polaris-portal/src/portal-client.ts` | HTTP transport, Authing callback, workflow requests, logout, and SSE URL/client helpers |
 | `apps/polaris-portal/src/components/ui` | Local shadcn/ui-style primitives |
 | `apps/polaris-portal/src/portal-store.test.ts` | Synthetic static/live reconciliation tests |

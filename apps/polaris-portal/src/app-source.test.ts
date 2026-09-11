@@ -41,6 +41,13 @@ test("user page keeps session as a peer section beside profile and credentials",
   assert.doesNotMatch(appSource, />实时<|>离线</u);
 });
 
+test("work, run detail, and workflow settings share the wide portal column", () => {
+  assert.match(cssSource, /\.portal-main\s*\{[\s\S]*max-width:\s*1280px;/u);
+  assert.doesNotMatch(cssSource, /\.settings-page,\s*\n\.run-detail-page\s*\{[\s\S]*max-width:\s*1100px;/u);
+  assert.doesNotMatch(cssSource, /\.run-detail-page\s*\{[\s\S]*max-width:\s*1100px;/u);
+  assert.doesNotMatch(cssSource, /\.settings-page\s*\{[\s\S]*max-width:\s*1100px;/u);
+});
+
 test("Portal declares and owns a light color scheme", () => {
   assert.match(htmlSource, /<meta name="color-scheme" content="light" \/>/u);
   assert.doesNotMatch(htmlSource, /color-scheme" content="dark"/u);
@@ -109,6 +116,14 @@ test("work filters keep the new-work action beside the tabs", () => {
   assert.match(cssSource, /\.work-new-button\s*\{[\s\S]*width:\s*2rem;[\s\S]*height:\s*2rem;/u);
 });
 
+test("workflow runs live in Zustand and are not background-polled", () => {
+  assert.match(storeSource, /refreshWorkflowRuns: async \(\) => \{/u);
+  assert.match(storeSource, /await get\(\)\.refreshWorkflowRuns\(\);/u);
+  assert.doesNotMatch(storeSource, /startWorkflowPolling/u);
+  assert.doesNotMatch(storeSource, /workflowPollTimer/u);
+  assert.doesNotMatch(storeSource, /setTimeout\(\(\) => void poll\(\), 750\)/u);
+});
+
 test("run detail presents a copyable run id without a workflow prefix", () => {
   assert.doesNotMatch(appSource, /WORKFLOW RUN · \{run\.id\}/u);
   assert.match(appSource, /className="run-id-row"/u);
@@ -129,6 +144,15 @@ test("run detail does not render an empty action divider", () => {
   assert.match(appSource, /\(canCancel \|\| canRetry\) && <div className="run-detail-actions"/u);
 });
 
+test("back links pop to the previous visit when history has it", () => {
+  assert.match(appSource, /pushState\(state, "", nextPath\)/u);
+  assert.match(appSource, /from: `\$\{window\.location\.pathname\}\$\{window\.location\.search\}`/u);
+  assert.match(appSource, /backTo\("\/work", navigate\)/u);
+  assert.match(appSource, /backTo\(backHref, navigate\)/u);
+  assert.match(appSource, /backTo\(backPath, navigate\)/u);
+  assert.doesNotMatch(appSource, /className="back-link"[\s\S]*navigate\("\/work"\)/u);
+});
+
 test("run detail keeps deletion in the work list only", () => {
   const runDetailSource = appSource.slice(appSource.indexOf("function RunDetailPage"));
   assert.doesNotMatch(runDetailSource, /删除记录|deleteAndReturn|deleteWorkflowRun/u);
@@ -141,48 +165,58 @@ test("run detail keeps only final artifacts viewable", () => {
   assert.match(appSource, /t\("run\.timelineDescription"\)/u);
   assert.match(appSource, /right\.timestamp\.localeCompare\(left\.timestamp\)/u);
   assert.match(appSource, /title: step\.stepLabel/u);
-  assert.match(appSource, /workflowStepOutputEntries\(step\)/u);
-  assert.match(appSource, /item\.outputs\.map/u);
-  assert.match(appSource, /previewWorkflowValue\(value\)/u);
+  assert.match(appSource, /timelineCallBlock\(/u);
+  assert.match(appSource, /function TimelineCallView/u);
+  assert.match(appSource, /className="timeline-call-section"/u);
+  assert.match(appSource, /className="timeline-assign"/u);
+  assert.doesNotMatch(appSource, /className="run-timeline-card"/u);
+  assert.doesNotMatch(appSource, /item\.outputs\.map/u);
+  assert.doesNotMatch(appSource, /previewWorkflowValue\(value\)/u);
+  assert.doesNotMatch(appSource, /className="timeline-outputs"/u);
   const runDetailMain = appSource.slice(
     appSource.indexOf('<div className="run-detail-main">'),
     appSource.indexOf('<aside className="run-detail-side">'),
   );
   const runDetailSide = appSource.slice(appSource.indexOf('<aside className="run-detail-side">'));
   assert.doesNotMatch(runDetailMain, /run\.artifacts\.length > 0/u);
+  assert.match(runDetailMain, /t\("run\.timeline"\)/u);
   assert.match(runDetailSide, /t\("run\.inputSnapshot"\)[\s\S]*run\.artifacts\.length > 0/u);
   assert.doesNotMatch(runDetailSide, /run\.receipts/u);
   assert.match(appSource, /formatInputSnapshotValue\(value\)/u);
-  assert.match(cssSource, /\.timeline-outputs\s*\{/u);
+  assert.doesNotMatch(cssSource, /\.run-timeline-card/u);
+  assert.match(appSource, /pathLabelParts\(value\.label\)/u);
+  assert.match(appSource, /<>\/<wbr \/>/u);
+  assert.match(cssSource, /\.timeline-assign\s*\{[\s\S]*white-space:\s*nowrap/u);
+  assert.match(cssSource, /\.timeline-file-path\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
+  assert.doesNotMatch(cssSource, /\.timeline-file\s*\{[^}]*white-space:\s*nowrap/u);
+  assert.doesNotMatch(cssSource, /\.timeline-call\s*\{[^}]*flex-wrap:\s*wrap/u);
+  assert.match(cssSource, /\.timeline-file-open\s*\{/u);
 });
 
 test("artifact preview supports text, structured data, and media files", () => {
+  assert.match(appSource, /function RunPreviewPage/u);
+  assert.match(appSource, /kind="artifact"/u);
+  assert.match(appSource, /kind="file"/u);
   assert.match(appSource, /function ArtifactPreviewContent/u);
+  assert.doesNotMatch(appSource, /function ArtifactPreview\(/u);
+  assert.doesNotMatch(appSource, /className="modal artifact-modal"/u);
   assert.match(appSource, /kind === "image" && source/u);
   assert.match(appSource, /kind === "video" && source/u);
   assert.match(appSource, /kind === "audio" && source/u);
   assert.match(appSource, /kind === "pdf" && source/u);
   assert.match(appSource, /formatJsonArtifact\(content\)/u);
-  assert.match(appSource, /artifactPreviewKind\(artifact\.name\)/u);
+  assert.match(appSource, /artifactPreviewKind\(/u);
   assert.match(appSource, /if \(redacted\)/u);
-  assert.match(cssSource, /\.artifact-modal\s*\{[\s\S]*overflow:\s*hidden;/u);
+  assert.match(cssSource, /\.preview-page\s*\{/u);
   assert.match(cssSource, /\.artifact-content\s*\{[\s\S]*overflow:\s*auto;/u);
   assert.match(cssSource, /\.artifact-pdf-content iframe\s*\{/u);
 });
 
-test("debug tab exposes the server run projection as a live inspector", () => {
-  assert.match(appSource, /path === "\/debug"/u);
-  assert.match(appSource, /link\("\/debug", t\("nav\.debug"\), Bug, "debug"\)/u);
-  assert.match(appSource, /function DebugPage/u);
-  assert.match(appSource, /function DebugInspector/u);
-  assert.match(appSource, /t\("run\.eventLog"\)/u);
-  assert.match(appSource, /t\("debug\.eventRail"\)/u);
-  assert.match(appSource, /refreshWorkflowRuns/u);
-  assert.match(cssSource, /\.debug-layout\s*\{[\s\S]*grid-template-columns/u);
-  assert.match(cssSource, /\.debug-flow-rail\s*\{/u);
-  assert.match(cssSource, /\.debug-log-list\s*\{[\s\S]*overflow:\s*auto/u);
-  assert.match(appSource, /localizedWorkflowEvent\(event, t\)/u);
-  assert.match(appSource, /localizedWorkflowError\(run\.error, t\)/u);
+test("removed debug inspector redirects to the work desk", () => {
+  assert.doesNotMatch(appSource, /function DebugPage/u);
+  assert.doesNotMatch(appSource, /link\("\/debug"/u);
+  assert.match(appSource, /path === "\/debug"[\s\S]*navigate\("\/work", true\)/u);
+  assert.doesNotMatch(cssSource, /\.debug-layout\s*\{/u);
 });
 
 test("daily work surface uses a desktop list and a mobile touch deck", () => {
