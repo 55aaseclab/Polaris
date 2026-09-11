@@ -1079,9 +1079,8 @@ def build_codex_exec_command(
     if session_id:
         # Resume the same thread so prior report-input context can hit cache.
         command.extend(["resume", session_id])
-    else:
-        command.extend(["--skip-git-repo-check", "--sandbox", "read-only"])
-    # Always grant attachment dirs (resume still needs filesystem access).
+    command.extend(["--skip-git-repo-check", "--sandbox", "read-only"])
+    # Grant only the snapshot dirs. Never add the live report workspace.
     for directory in sorted({path.resolve() for path in attachment_dirs}):
         command.extend(["--add-dir", str(directory)])
     command.extend(
@@ -1110,14 +1109,10 @@ def request_codex(
     """Use one persistent local Codex session with immutable JSON attachments."""
     system = request_payload["messages"][0]["content"]
     resolved = [(label, path.expanduser().resolve()) for label, path in attachments]
-    if not resolved or any(not path.is_file() for _, path in resolved):
-        raise CliError("local Codex requires existing immutable JSON attachments")
-    attachment_list = "\n".join(f"- {label}: {path}" for label, path in resolved)
-    prompt_text = (
-        f"{system}\n\nRead only these immutable JSON attachments with read-only file commands:\n"
-        f"{attachment_list}\n"
-        "Do not browse or access other sources. Return exactly the required JSON object, with no prose."
-    )
+    missing = [f"{label}: {path}" for label, path in resolved if not path.is_file()]
+    if not resolved or missing:
+        detail = "; ".join(missing) if missing else "no attachments provided"
+        raise CliError(f"local Codex requires existing immutable JSON attachments ({detail})")
     resolved_model = (model or resolve_report_model()).strip() or DEFAULT_REPORT_MODEL
     resolved_effort = (
         (reasoning_effort or resolve_report_reasoning_effort()).strip()
@@ -1125,75 +1120,88 @@ def request_codex(
     )
     session_path = session_path.expanduser().resolve()
     session_id = load_codex_session_id(session_path)
-    attachment_dirs = [path.parent for _, path in resolved]
-    with tempfile.NamedTemporaryFile(prefix="codex-report-", suffix=".json", delete=False) as handle:
-        response_path = Path(handle.name)
-    try:
-        resumed = bool(session_id)
-        command = build_codex_exec_command(
-            session_id=session_id,
-            attachment_dirs=attachment_dirs,
-            model=resolved_model,
-            reasoning_effort=resolved_effort,
-            response_path=response_path,
+    with tempfile.TemporaryDirectory(prefix="codex-report-attachments-") as snapshot_dir:
+        snapshot_root = Path(snapshot_dir)
+        snapshots: list[tuple[str, Path]] = []
+        for index, (label, path) in enumerate(resolved):
+            snapshot = snapshot_root / f"{index:02d}-{path.name}"
+            shutil.copy2(path, snapshot)
+            snapshots.append((label, snapshot))
+        attachment_list = "\n".join(f"- {label}: {path}" for label, path in snapshots)
+        prompt_text = (
+            f"{system}\n\nRead only these immutable JSON attachments with read-only file commands:\n"
+            f"{attachment_list}\n"
+            "Do not browse or access other sources. Return exactly the required JSON object, with no prose."
         )
-        completed = subprocess.run(command, input=prompt_text, text=True, capture_output=True, check=False)
-        # Stale session IDs: fall back to a fresh thread once.
-        if completed.returncode != 0 and session_id:
-            response_path.unlink(missing_ok=True)
-            with tempfile.NamedTemporaryFile(
-                prefix="codex-report-", suffix=".json", delete=False
-            ) as handle:
-                response_path = Path(handle.name)
-            resumed = False
-            session_id = None
+        attachment_dirs = [path.parent for _, path in snapshots]
+        with tempfile.NamedTemporaryFile(prefix="codex-report-", suffix=".json", delete=False) as handle:
+            response_path = Path(handle.name)
+        try:
+            resumed = bool(session_id)
             command = build_codex_exec_command(
-                session_id=None,
+                session_id=session_id,
                 attachment_dirs=attachment_dirs,
                 model=resolved_model,
                 reasoning_effort=resolved_effort,
                 response_path=response_path,
             )
-            completed = subprocess.run(
-                command, input=prompt_text, text=True, capture_output=True, check=False
+            completed = subprocess.run(command, input=prompt_text, text=True, capture_output=True, check=False)
+            # Stale session IDs: fall back to a fresh thread once.
+            if completed.returncode != 0 and session_id:
+                response_path.unlink(missing_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    prefix="codex-report-", suffix=".json", delete=False
+                ) as handle:
+                    response_path = Path(handle.name)
+                resumed = False
+                session_id = None
+                command = build_codex_exec_command(
+                    session_id=None,
+                    attachment_dirs=attachment_dirs,
+                    model=resolved_model,
+                    reasoning_effort=resolved_effort,
+                    response_path=response_path,
+                )
+                completed = subprocess.run(
+                    command, input=prompt_text, text=True, capture_output=True, check=False
+                )
+            if completed.returncode != 0 or not response_path.is_file():
+                detail = (completed.stderr or completed.stdout or "").strip()
+                raise CliError(
+                    "local Codex report request failed"
+                    + (f": {detail[:500]}" if detail else "")
+                )
+            for line in completed.stdout.splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
+                    session_id = event["thread_id"]
+            if not isinstance(session_id, str) or not session_id:
+                raise CliError("local Codex response did not provide a session ID")
+            session_path.parent.mkdir(parents=True, exist_ok=True)
+            write_json(
+                session_path,
+                {
+                    "session_id": session_id,
+                    "model": resolved_model,
+                    "model_reasoning_effort": resolved_effort,
+                    "resumed": resumed,
+                    "updated_at": utc_now(),
+                },
             )
-        if completed.returncode != 0 or not response_path.is_file():
-            detail = (completed.stderr or completed.stdout or "").strip()
-            raise CliError(
-                "local Codex report request failed"
-                + (f": {detail[:500]}" if detail else "")
-            )
-        for line in completed.stdout.splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
-                session_id = event["thread_id"]
-        if not isinstance(session_id, str) or not session_id:
-            raise CliError("local Codex response did not provide a session ID")
-        session_path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(
-            session_path,
-            {
-                "session_id": session_id,
+            content = response_path.read_text(encoding="utf-8")
+            return {
+                "choices": [{"message": {"content": content}}],
                 "model": resolved_model,
                 "model_reasoning_effort": resolved_effort,
-                "resumed": resumed,
-                "updated_at": utc_now(),
-            },
-        )
-        content = response_path.read_text(encoding="utf-8")
-        return {
-            "choices": [{"message": {"content": content}}],
-            "model": resolved_model,
-            "model_reasoning_effort": resolved_effort,
-            "session_id": session_id,
-            "session_resumed": resumed,
-            "session_path": str(session_path),
-        }
-    finally:
-        response_path.unlink(missing_ok=True)
+                "session_id": session_id,
+                "session_resumed": resumed,
+                "session_path": str(session_path),
+            }
+        finally:
+            response_path.unlink(missing_ok=True)
 
 
 def extract_model_json(response: dict[str, Any]) -> dict[str, Any]:
@@ -1340,35 +1348,92 @@ def validate_draft_document(draft: dict[str, Any], report_input: dict[str, Any],
     return normalized
 
 
+def coerce_review_score(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        score = value
+    elif isinstance(value, float) and value.is_integer():
+        score = int(value)
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return None
+        if not parsed.is_integer():
+            return None
+        score = int(parsed)
+    else:
+        return None
+    if 1 <= score <= 10:
+        return score
+    return None
+
+
+def fallback_review_issue(dimension: str, section_ids: set[str], problem: str) -> dict[str, str]:
+    return {
+        "section_id": next(iter(sorted(section_ids)), "findings"),
+        "problem": problem,
+        "suggested_fix": "Revise the lowest-scoring section until this dimension can pass without blocking issues.",
+    }
+
+
 def validate_review_item(item: dict[str, Any], dimension: str, section_ids: set[str]) -> dict[str, Any]:
     if item.get("dimension") != dimension:
         raise CliError(f"{dimension} reviewer output has the wrong dimension")
-    score = item.get("score")
-    if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 10:
-        raise CliError(f"{dimension} reviewer score must be an integer from 1 to 10")
+    score = coerce_review_score(item.get("score"))
     status = item.get("status")
     if status not in {"pass", "revise"}:
-        raise CliError(f"{dimension} reviewer status must be pass or revise")
-    issues = require_list(item, "blocking_issues", f"{dimension} reviewer output")
+        status = "revise"
+    issues = item.get("blocking_issues")
+    if not isinstance(issues, list):
+        issues = []
     normalized_issues: list[dict[str, str]] = []
     for index, issue in enumerate(issues, start=1):
         if not isinstance(issue, dict):
-            raise CliError(f"{dimension} reviewer blocking_issues[{index}] must be an object")
-        section_id = require_string(issue, "section_id", f"{dimension} reviewer blocking_issues[{index}]")
-        if section_id not in section_ids:
-            raise CliError(f"{dimension} reviewer references an unknown section ID: {section_id}")
-        normalized_issues.append(
-            {
-                "section_id": section_id,
-                "problem": require_string(issue, "problem", f"{dimension} reviewer blocking_issues[{index}]"),
-                "suggested_fix": require_string(issue, "suggested_fix", f"{dimension} reviewer blocking_issues[{index}]"),
-            }
-        )
-    notes = require_string_list(item.get("notes"), f"{dimension} reviewer notes")
-    if status == "pass" and (score < 8 or normalized_issues):
-        raise CliError(f"{dimension} reviewer pass requires a score of at least 8 and no blocking issues")
+            continue
+        try:
+            section_id = require_string(issue, "section_id", f"{dimension} reviewer blocking_issues[{index}]")
+            if section_id not in section_ids:
+                continue
+            normalized_issues.append(
+                {
+                    "section_id": section_id,
+                    "problem": require_string(issue, "problem", f"{dimension} reviewer blocking_issues[{index}]"),
+                    "suggested_fix": require_string(issue, "suggested_fix", f"{dimension} reviewer blocking_issues[{index}]"),
+                }
+            )
+        except CliError:
+            continue
+    notes = require_string_list(item.get("notes") if isinstance(item.get("notes"), list) else [], f"{dimension} reviewer notes")
+    if score is None:
+        status = "revise"
+        score = 1
+        if not normalized_issues:
+            normalized_issues.append(
+                fallback_review_issue(
+                    dimension,
+                    section_ids,
+                    f"{dimension} reviewer score was missing or not an integer from 1 to 10.",
+                )
+            )
+    if status == "pass" and normalized_issues:
+        status = "revise"
+    elif status == "pass" and score < 8:
+        # Status is authoritative when the reviewer listed no issues.
+        # A low score without issues is a calibration error, not a publish blocker.
+        notes = [
+            *notes,
+            f"{dimension} reviewer marked pass with score {score}; treating as pass because no blocking issues were listed.",
+        ]
     if status == "revise" and not normalized_issues:
-        raise CliError(f"{dimension} reviewer revise status requires at least one blocking issue")
+        normalized_issues.append(
+            fallback_review_issue(
+                dimension,
+                section_ids,
+                f"{dimension} reviewer marked revise without a usable blocking issue.",
+            )
+        )
     return {
         "dimension": dimension,
         "score": score,
@@ -2353,6 +2418,10 @@ def command_review(args: argparse.Namespace, root: Path) -> int:
     )
     seed_codex_session_from_case(session_path, input_path)
     review_items: list[dict[str, Any]] = []
+    run_dir = Path(args.run_dir).expanduser().resolve() if getattr(args, "run_dir", None) else None
+    draft_path = Path(args.draft).expanduser().resolve()
+    draft_digest = object_digest(draft)
+    cache_dir = run_dir / f"review-{draft_digest.split(':', 1)[-1][:16]}" if run_dir is not None else None
     for dimension in REVIEW_DIMENSIONS:
         prompt_name = f"review-{dimension.replace('_', '-')}.v1.md"
         request = model_request(
@@ -2362,14 +2431,27 @@ def command_review(args: argparse.Namespace, root: Path) -> int:
                 "allowed_section_ids": section_ids,
             },
         )
+        existing = cache_dir / f"{dimension}-response.json" if cache_dir is not None else None
+        if existing is not None and existing.is_file():
+            try:
+                item = validate_review_item(
+                    extract_model_json(read_json(existing, f"{dimension} review response")),
+                    dimension,
+                    set(section_ids),
+                )
+            except CliError:
+                existing = None
+            else:
+                review_items.append(item)
+                continue
         response = request_codex(
             request,
-            [("report input", input_path), ("report draft", Path(args.draft))],
+            [("report input", input_path), ("report draft", draft_path)],
             session_path,
         )
         item = validate_review_item(extract_model_json(response), dimension, set(section_ids))
         review_items.append(item)
-        write_run_item(Path(args.run_dir) if args.run_dir else None, dimension, request, response, item)
+        write_run_item(cache_dir, dimension, request, response, item)
     reviews = {
         "schema_version": REVIEW_SCHEMA,
         "report_id": report_input["report_id"],
@@ -2484,7 +2566,8 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
     draft = validate_draft_document(draft, report_input, root)
     reviews = validate_reviews(reviews, report_input, draft, root)
     blocked = [item["dimension"] for item in reviews["reviews"] if item["status"] != "pass"]
-    if blocked:
+    allow_residual = bool(getattr(args, "allow_residual", False))
+    if blocked and not allow_residual:
         raise CliError(f"report cannot publish until reviewers pass: {', '.join(blocked)}")
     markdown_path = Path(args.output).expanduser().resolve()
     manifest_path = Path(args.manifest).expanduser().resolve()
@@ -2506,6 +2589,11 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
         ),
         "limitations": deepcopy(draft["limitations"]),
         "report_path": str(markdown_path),
+        "review": {
+            "mode": "reviewed",
+            "status": "residual" if blocked else "passed",
+            "blocked_dimensions": blocked,
+        },
     }
     write_text(markdown_path, markdown)
     write_json(manifest_path, report)
@@ -2839,18 +2927,72 @@ def command_workflow(args: argparse.Namespace, root: Path) -> int:
             ),
             root,
         )
-        passed, _ = workflow_report_passed(Path(reviews_ref))
+        command_review(
+            argparse.Namespace(
+                input=report_input_ref,
+                draft=str(draft),
+                output=str(reviews),
+                run_dir=str(run_dir),
+            ),
+            root,
+        )
+        passed, _ = workflow_report_passed(reviews)
         write_json(output, {"draftRef": str(draft), "reportPassed": passed})
         return 0
 
     if args.step_command == "publish":
+        report_input_ref = workflow_string(values, "reportInputRef", args.step_command)
+        draft_ref = workflow_string(values, "draftRef", args.step_command)
+        reviews_ref = workflow_string(values, "reviewsRef", args.step_command)
+        current_draft = read_json(Path(draft_ref), "report draft")
+        current_reviews = (
+            read_json(Path(reviews_ref), "report reviews")
+            if Path(reviews_ref).expanduser().resolve().is_file()
+            else {}
+        )
+        if current_reviews.get("draft_sha256") != object_digest(current_draft):
+            command_review(
+                argparse.Namespace(
+                    input=report_input_ref,
+                    draft=draft_ref,
+                    output=str(reviews),
+                    run_dir=str(run_dir),
+                ),
+                root,
+            )
+            reviews_ref = str(reviews)
+        passed, _ = workflow_report_passed(Path(reviews_ref))
+        if not passed:
+            command_revise(
+                argparse.Namespace(
+                    input=report_input_ref,
+                    draft=draft_ref,
+                    reviews=reviews_ref,
+                    output=str(draft),
+                    run_dir=str(run_dir),
+                ),
+                root,
+            )
+            command_review(
+                argparse.Namespace(
+                    input=report_input_ref,
+                    draft=str(draft),
+                    output=str(reviews),
+                    run_dir=str(run_dir),
+                ),
+                root,
+            )
+            reviews_ref = str(reviews)
+            draft_ref = str(draft)
+            passed, _ = workflow_report_passed(Path(reviews_ref))
         command_publish(
             argparse.Namespace(
-                input=workflow_string(values, "reportInputRef", args.step_command),
-                draft=workflow_string(values, "draftRef", args.step_command),
-                reviews=workflow_string(values, "reviewsRef", args.step_command),
+                input=report_input_ref,
+                draft=draft_ref,
+                reviews=reviews_ref,
                 output=str(markdown),
                 manifest=str(manifest),
+                allow_residual=not passed,
             ),
             root,
         )

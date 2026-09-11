@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Local Codex review/draft calls now snapshot JSON attachments and keep
+  `resume` sandboxed read-only, so a resumed thread cannot delete the live
+  `draft.json`. Review reuses completed dimension responses only for the
+  same draft hash. Polar `publish` re-reviews a stale `reviews.json`,
+  treats `pass` without issues as pass even if the score is low, and after
+  one extra revise cycle can publish with residual reviewer issues.
 - Zero-result literature collections are now valid report inputs: empty
   `references[]` and evidence registries produce an explicit no-findings
   report and still render Markdown, BibTeX, TeX, and PDF artifacts.

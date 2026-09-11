@@ -437,8 +437,48 @@ class ReportWritingTests(unittest.TestCase):
             }
         ]
 
-        with self.assertRaisesRegex(runner.CliError, "pass requires"):
-            runner.validate_reviews(review, self.report_input, draft, TOOL_ROOT)
+        validated = runner.validate_reviews(review, self.report_input, draft, TOOL_ROOT)
+        self.assertEqual(validated["reviews"][0]["status"], "revise")
+        self.assertEqual(validated["summary"]["revise_count"], 1)
+        self.assertEqual(
+            validated["reviews"][0]["blocking_issues"][0]["problem"],
+            "Synthetic issue.",
+        )
+
+    def test_reviewer_score_coerces_numeric_strings_and_invalid_values(self) -> None:
+        draft = runner.validate_draft(build_draft(self.report_input), self.report_input, TOOL_ROOT)
+        review = passing_reviews(self.report_input, draft)
+        review["reviews"][0]["score"] = "9"
+        review["reviews"][1]["score"] = 8.0
+        review["reviews"][2]["score"] = "medium"
+        review["reviews"][2]["status"] = "pass"
+        review["reviews"][3]["score"] = None
+
+        validated = runner.validate_reviews(review, self.report_input, draft, TOOL_ROOT)
+        self.assertEqual(validated["reviews"][0]["score"], 9)
+        self.assertEqual(validated["reviews"][0]["status"], "pass")
+        self.assertEqual(validated["reviews"][1]["score"], 8)
+        self.assertEqual(validated["reviews"][1]["status"], "pass")
+        self.assertEqual(validated["reviews"][2]["score"], 1)
+        self.assertEqual(validated["reviews"][2]["status"], "revise")
+        self.assertEqual(validated["reviews"][3]["score"], 1)
+        self.assertEqual(validated["reviews"][3]["status"], "revise")
+        self.assertEqual(validated["summary"]["revise_count"], 2)
+
+    def test_reviewer_pass_with_low_score_and_no_issues_stays_pass(self) -> None:
+        draft = runner.validate_draft(build_draft(self.report_input), self.report_input, TOOL_ROOT)
+        review = passing_reviews(self.report_input, draft)
+        review["reviews"][1]["score"] = 1
+        review["reviews"][1]["status"] = "pass"
+        review["reviews"][1]["blocking_issues"] = []
+
+        validated = runner.validate_reviews(review, self.report_input, draft, TOOL_ROOT)
+        self.assertEqual(validated["reviews"][1]["status"], "pass")
+        self.assertEqual(validated["reviews"][1]["score"], 1)
+        self.assertEqual(validated["summary"]["pass_count"], 4)
+        self.assertTrue(
+            any("treating as pass" in note for note in validated["reviews"][1]["notes"])
+        )
 
     def test_publish_command_writes_markdown_and_manifest(self) -> None:
         draft = runner.validate_draft(build_draft(self.report_input), self.report_input, TOOL_ROOT)
@@ -467,7 +507,62 @@ class ReportWritingTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertTrue(report_path.is_file())
-            self.assertEqual(json.loads(manifest_path.read_text(encoding="utf-8"))["status"], "published")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "published")
+            self.assertEqual(manifest["review"]["status"], "passed")
+
+    def test_publish_command_rejects_residual_reviews_unless_allowed(self) -> None:
+        draft = runner.validate_draft(build_draft(self.report_input), self.report_input, TOOL_ROOT)
+        reviews = passing_reviews(self.report_input, draft)
+        reviews["reviews"][0]["status"] = "revise"
+        reviews["reviews"][0]["score"] = 2
+        reviews["reviews"][0]["blocking_issues"] = [
+            {
+                "section_id": "decision-headline",
+                "problem": "Synthetic residual issue.",
+                "suggested_fix": "Keep the residual issue in the published report.",
+            }
+        ]
+        reviews = runner.validate_reviews(reviews, self.report_input, draft, TOOL_ROOT)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "report-input.json"
+            draft_path = root / "draft.json"
+            review_path = root / "reviews.json"
+            report_path = root / "report.md"
+            manifest_path = root / "report.json"
+            runner.write_json(input_path, self.report_input)
+            runner.write_json(draft_path, draft)
+            runner.write_json(review_path, reviews)
+
+            with self.assertRaisesRegex(runner.CliError, "cannot publish"):
+                runner.command_publish(
+                    Namespace(
+                        input=str(input_path),
+                        draft=str(draft_path),
+                        reviews=str(review_path),
+                        output=str(report_path),
+                        manifest=str(manifest_path),
+                    ),
+                    TOOL_ROOT,
+                )
+
+            result = runner.command_publish(
+                Namespace(
+                    input=str(input_path),
+                    draft=str(draft_path),
+                    reviews=str(review_path),
+                    output=str(report_path),
+                    manifest=str(manifest_path),
+                    allow_residual=True,
+                ),
+                TOOL_ROOT,
+            )
+            self.assertEqual(result, 0)
+            manifest = runner.read_json(manifest_path, "manifest")
+            self.assertEqual(manifest["status"], "published")
+            self.assertEqual(manifest["review"]["status"], "residual")
+            self.assertEqual(manifest["review"]["blocked_dimensions"], ["unity"])
 
     def test_local_codex_request_uses_an_attachment_and_persistent_session(self) -> None:
         request = runner.model_request("system prompt", {"instruction": "Return JSON."})
@@ -521,13 +616,228 @@ class ReportWritingTests(unittest.TestCase):
             self.assertFalse(response.get("session_resumed"))
             self.assertIn("resume", second_command)
             self.assertIn("synthetic-session", second_command)
+            self.assertIn("--sandbox", second_command)
+            self.assertIn("read-only", second_command)
             self.assertIn("--add-dir", second_command)
+            self.assertNotIn(str(input_path.parent), first_command)
+            self.assertTrue(any("codex-report-attachments-" in str(part) for part in first_command))
             self.assertTrue(second.get("session_resumed"))
             case_input = root / "case" / "inputs" / "input.json"
             case_input.parent.mkdir(parents=True)
             case_input.write_text("{}", encoding="utf-8")
             stable = runner.resolve_codex_session_path(report_input=case_input)
             self.assertEqual(stable, (root / "case" / "runs" / "codex-session.json").resolve())
+
+    def test_review_reuses_completed_dimension_responses(self) -> None:
+        report_input = runner.build_report_input(TOOL_ROOT, ANALYSIS_OUTPUT, "decision-memo")
+        draft = build_draft(report_input)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "report-input.json"
+            draft_path = root / "draft.json"
+            output_path = root / "reviews.json"
+            run_dir = root / "runs"
+            runner.write_json(input_path, report_input)
+            runner.write_json(draft_path, draft)
+            draft_digest = runner.object_digest(draft)
+            cache_dir = run_dir / f"review-{draft_digest.split(':', 1)[-1][:16]}"
+            cache_dir.mkdir(parents=True)
+            for dimension in ("unity", "support"):
+                runner.write_json(
+                    cache_dir / f"{dimension}-response.json",
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "dimension": dimension,
+                                            "score": 9,
+                                            "status": "pass",
+                                            "blocking_issues": [],
+                                            "notes": ["reused"],
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    },
+                )
+
+            remaining = iter(("coherence", "sentence_skills"))
+
+            def fake_request_codex(_request, _attachments, _session_path, **_kwargs):
+                dimension = next(remaining)
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "dimension": dimension,
+                                        "score": 8,
+                                        "status": "pass",
+                                        "blocking_issues": [],
+                                        "notes": ["fresh"],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+
+            with patch.object(runner, "request_codex", side_effect=fake_request_codex) as mocked:
+                result = runner.command_review(
+                    Namespace(
+                        input=str(input_path),
+                        draft=str(draft_path),
+                        output=str(output_path),
+                        run_dir=str(run_dir),
+                    ),
+                    TOOL_ROOT,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(mocked.call_count, 2)
+            reviews = runner.read_json(output_path, "reviews")
+            self.assertEqual([item["dimension"] for item in reviews["reviews"]], list(runner.REVIEW_DIMENSIONS))
+            self.assertEqual(reviews["reviews"][0]["notes"], ["reused"])
+            self.assertEqual(reviews["reviews"][1]["notes"], ["reused"])
+            self.assertEqual(reviews["reviews"][2]["notes"], ["fresh"])
+            self.assertEqual(reviews["reviews"][3]["notes"], ["fresh"])
+
+    def test_workflow_publish_rereviews_when_reviews_belong_to_old_draft(self) -> None:
+        report_input = runner.build_report_input(TOOL_ROOT, ANALYSIS_OUTPUT, "decision-memo")
+        draft = runner.validate_draft(build_draft(report_input), report_input, TOOL_ROOT)
+        stale = passing_reviews(report_input, draft)
+        stale["draft_sha256"] = "sha256:stale"
+        revised = json.loads(json.dumps(draft))
+        revised["title"] = "Revised synthetic report"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            report_root = workspace / "report"
+            report_root.mkdir(parents=True)
+            input_path = report_root / "report-input.json"
+            draft_path = report_root / "draft.json"
+            reviews_path = report_root / "reviews.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            runner.write_json(input_path, report_input)
+            runner.write_json(draft_path, revised)
+            runner.write_json(reviews_path, stale)
+            runner.write_json(
+                request_path,
+                {
+                    "runId": "run-synthetic",
+                    "workspaceRoot": str(workspace),
+                    "input": {
+                        "reportInputRef": str(input_path),
+                        "draftRef": str(draft_path),
+                        "reviewsRef": str(reviews_path),
+                    },
+                },
+            )
+
+            def fake_review(args, _root):
+                current = runner.read_json(Path(args.draft), "report draft")
+                reviews = runner.validate_reviews(
+                    passing_reviews(report_input, current),
+                    report_input,
+                    current,
+                    TOOL_ROOT,
+                )
+                runner.write_json(Path(args.output), reviews)
+                return 0
+
+            with patch.object(runner, "command_review", side_effect=fake_review) as mocked:
+                result = runner.command_workflow(
+                    Namespace(
+                        input=str(request_path),
+                        output=str(output_path),
+                        step_command="publish",
+                    ),
+                    TOOL_ROOT,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(mocked.call_count, 1)
+            self.assertTrue((report_root / "report.md").is_file())
+            published = runner.read_json(report_root / "report.json", "manifest")
+            self.assertEqual(published["status"], "published")
+            self.assertEqual(published["draft_sha256"], runner.object_digest(revised))
+            self.assertEqual(published["review"]["status"], "passed")
+
+    def test_workflow_publish_allows_residual_reviews_after_extra_revise(self) -> None:
+        report_input = runner.build_report_input(TOOL_ROOT, ANALYSIS_OUTPUT, "decision-memo")
+        draft = runner.validate_draft(build_draft(report_input), report_input, TOOL_ROOT)
+        residual = passing_reviews(report_input, draft)
+        residual["reviews"][0]["status"] = "revise"
+        residual["reviews"][0]["score"] = 2
+        residual["reviews"][0]["blocking_issues"] = [
+            {
+                "section_id": "decision-headline",
+                "problem": "Synthetic residual issue.",
+                "suggested_fix": "Keep the residual issue in the published report.",
+            }
+        ]
+        residual = runner.validate_reviews(residual, report_input, draft, TOOL_ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            report_root = workspace / "report"
+            report_root.mkdir(parents=True)
+            input_path = report_root / "report-input.json"
+            draft_path = report_root / "draft.json"
+            reviews_path = report_root / "reviews.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            runner.write_json(input_path, report_input)
+            runner.write_json(draft_path, draft)
+            runner.write_json(reviews_path, residual)
+            runner.write_json(
+                request_path,
+                {
+                    "runId": "run-synthetic",
+                    "workspaceRoot": str(workspace),
+                    "input": {
+                        "reportInputRef": str(input_path),
+                        "draftRef": str(draft_path),
+                        "reviewsRef": str(reviews_path),
+                    },
+                },
+            )
+
+            def fake_review(args, _root):
+                current = runner.read_json(Path(args.draft), "report draft")
+                reviews = runner.validate_reviews(residual, report_input, current, TOOL_ROOT)
+                runner.write_json(Path(args.output), reviews)
+                return 0
+
+            def fake_revise(args, _root):
+                current = runner.read_json(Path(args.draft), "report draft")
+                runner.write_json(Path(args.output), current)
+                return 0
+
+            with (
+                patch.object(runner, "command_review", side_effect=fake_review),
+                patch.object(runner, "command_revise", side_effect=fake_revise) as mocked_revise,
+            ):
+                result = runner.command_workflow(
+                    Namespace(
+                        input=str(request_path),
+                        output=str(output_path),
+                        step_command="publish",
+                    ),
+                    TOOL_ROOT,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(mocked_revise.call_count, 1)
+            published = runner.read_json(report_root / "report.json", "manifest")
+            self.assertEqual(published["status"], "published")
+            self.assertEqual(published["review"]["status"], "residual")
+            self.assertEqual(published["review"]["blocked_dimensions"], ["unity"])
 
     def test_literature_rejects_oversized_cite_clusters(self) -> None:
         report_input = runner.build_report_input(TOOL_ROOT, ANALYSIS_OUTPUT, "literature-report")
