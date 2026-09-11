@@ -99,22 +99,47 @@ session reusable but does not log in to a publisher.
 
 ### Cookie import
 
-First export the cookies from the already authenticated publisher browser
-session in Netscape `cookies.txt` format. A browser cookie-export extension can
-create this file. The export is an input supplied by you; Polaris does not
-download or create it.
+Use this process when you already have authenticated browser sessions:
 
-Then use the actual path and filename of that export:
+1. Install a browser extension that exports Netscape `cookies.txt` files,
+   such as `Get cookies.txt LOCALLY`.
+2. In the same browser profile, open IEEE Xplore and sign in. Use the
+   extension on the IEEE page and save the export as `ieee.txt`.
+3. Open ACM Digital Library and sign in. Export its cookies as `acm.txt`.
+4. Open SpringerLink and sign in. Export its cookies as `springer.txt`.
+5. If a publisher uses a separate SSO/login domain, export that domain's
+   cookies too. The export must include the domain cookies needed by the
+   publisher session.
+
+The three exports are inputs supplied by you; Polaris does not download or
+create them. The following commands assume the files were saved in
+`~/Downloads`:
+
+`BROWSER_IMPORT_COOKIES_PATH` accepts one file. If the extension exports one
+site at a time, merge the three exports into one file before importing them:
 
 ```sh
 mkdir -p ~/.camofox/cookies
-cp /path/to/your/exported-cookies.txt ~/.camofox/cookies/publisher.txt
-export BROWSER_IMPORT_COOKIES_PATH=publisher.txt
+{
+  cat ~/Downloads/ieee.txt
+  cat ~/Downloads/acm.txt
+  cat ~/Downloads/springer.txt
+} > ~/.camofox/cookies/publishers.txt
+export BROWSER_IMPORT_COOKIES_PATH=publishers.txt
 ```
 
-`/path/to/your/exported-cookies.txt` is a placeholder and must be replaced by
-the file you exported. The destination filename `publisher.txt` is arbitrary;
-it is only the local name used by `BROWSER_IMPORT_COOKIES_PATH`.
+If the downloaded files have different names or locations, replace those three
+paths with the actual exported files. Verify that all three exist before
+running the merge:
+
+```sh
+ls -l ~/Downloads/ieee.txt ~/Downloads/acm.txt ~/Downloads/springer.txt
+test -s ~/.camofox/cookies/publishers.txt
+```
+
+The destination filename is arbitrary; it is only the local name used by
+`BROWSER_IMPORT_COOKIES_PATH`. Keep the same `BROWSER_CAMOFOX_USER_ID` when
+running captures so the imported cookies stay in the same Camofox profile.
 
 Relative paths use `CAMOFOX_COOKIES_DIR` (default `~/.camofox/cookies`). An
 absolute path is also accepted. Set `CAMOFOX_API_KEY` when Camofox is not on
