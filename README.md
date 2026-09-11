@@ -16,13 +16,19 @@ Polaris owns identity, Vaults, workflow admission, and the public origin.
 ## Docs
 
 This README is the source-owned onboarding guide. Product pages, operator
-runbooks, and release evidence live on the
-[Jianxiaoyi documentation site](https://www.jianxiaoyitech.com/docs/).
+runbooks, and release evidence live in `apps/docs/site`.
 
-- [Polaris product docs](https://www.jianxiaoyitech.com/docs/polaris/) —
-  Portal, Vaults, Gateway, Paseo, DSL, and CLI
-- [Operations](https://www.jianxiaoyitech.com/docs/operations/) — deploy,
-  gateway, incidents, and release records
+```bash
+pnpm run docs:dev
+```
+
+Serves VitePress on `http://127.0.0.1:4180`. From the parent workspace, the
+same command is the `docs` service in `paseo.json`.
+
+- [Polaris product docs](apps/docs/site/polaris/index.md) — Portal, Vaults,
+  Gateway, Paseo, DSL, and CLI
+- [Operations](apps/docs/site/operations/index.md) — deploy, gateway,
+  incidents, and release records
 - [CHANGELOG.md](CHANGELOG.md) — release history
 
 ## Local Development
@@ -49,89 +55,6 @@ POLARIS_AUTH_MODE=disabled
 POLARIS_AUTH_DEFAULT_USER_ID=100000000000000001
 POLARIS_VAULT_MODE=host
 POLARIS_DATA_ROOT=/path/to/polaris/data
-```
-
-## Polaris CLI
-
-The repository developer CLI entry point is:
-
-```bash
-pnpm --dir apps/polaris run polaris --
-```
-
-The Polaris-owned literature-review workflow definition and runtime live in
-`packs/autoresearch`; its reusable implementations live once under
-`tools/`. They are independent of Wanghai:
-
-```bash
-pnpm --dir apps/polaris run polaris -- literature-review version
-pnpm --dir apps/polaris run polaris -- literature-review plan
-pnpm --dir apps/polaris run polaris -- literature-review visualize \
-  --format png --output literature-review-workflow.png
-pnpm --dir apps/polaris run polaris -- literature-review test
-```
-
-Set `POLARIS_LITERATURE_WORKSPACES_ROOT`,
-`POLARIS_LITERATURE_CACHE_ROOT`, and
-`POLARIS_LITERATURE_RUNTIME_MODE=local` for a local run. See the workflow
-README at `packs/autoresearch/README.md` for the PDF visualization
-command, provider settings, review modes, collection-review continuation, and
-the full run command. The visualizer is a static Graphviz projection and does
-not need the literature workspace or cache. Integrated mode is intentionally
-fail-closed and requires a Polaris durable job with a disposable execution
-cell.
-
-Use it for workspace, user, credential, skill, and server commands while
-working from the repository.
-
-Telemetry can be enabled with PostHog and Sentry.
-Use `.env.dev.example` for the current environment variables.
-
-## Workspace Skills
-
-Polaris splits skills into two layers:
-
-- user registry: declarative skill descriptors only
-- workspace runtime: materialized installs inside the running workspace
-
-Current CLI surface:
-
-```bash
-pnpm --dir apps/polaris run polaris -- user skill list <user>
-pnpm --dir apps/polaris run polaris -- user skill add <user> --source <repo-or-source> --skill <skillName> [--harness codex|claude]
-pnpm --dir apps/polaris run polaris -- user skill remove <user> <skillId>
-
-pnpm --dir apps/polaris run polaris -- vault skill-list <workspace> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- vault skill-install <workspace> <skillId> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- vault skill-uninstall <workspace> <skillId> --user <user> --harness codex
-pnpm --dir apps/polaris run polaris -- vault skill-sync <workspace> --user <user> --harness codex
-```
-
-Current runtime behavior:
-
-- `codex`: Polaris uses `skills` as a downloader, then copies the installed
-  skill into `/identity/codex/skills`
-- `claude`: Polaris installs directly into `CLAUDE_HOME/skills`
-- runtime skill listing is resolved from the running backend with `docker exec`
-  or `kubectl exec`, not from host-side path inspection
-
-Repository-provided skills are kept under `skills/` and can be installed with
-the same installer.  The migrated business and research routers are:
-
-- `polaris-business`
-- `polaris-content-production`
-- `polaris-data-collection`
-- `polaris-intelligence-analysis`
-- `polaris-order-ops`
-- `polaris-outreach`
-- `polaris-report-writing`
-- `polaris-ads-system-setup`
-
-For example:
-
-```bash
-pnpm --dir apps/polaris exec tsx scripts/install-skills.ts \
-  --target codex polaris-business polaris-data-collection
 ```
 
 ## Local CI
