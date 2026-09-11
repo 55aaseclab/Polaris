@@ -90,9 +90,7 @@ const USER_MAP_PATH = path.join(USER_ROOT, "user-map.json");
 const DEMO_USER_ID = "100000000000000001";
 const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.join(
   REPO_ROOT,
-  "apps",
-  "polaris",
-  "domain-packs",
+  "packs",
   "vault-knowledge-health",
 );
 const BUILT_IN_AUTORESEARCH_PACK = path.join(

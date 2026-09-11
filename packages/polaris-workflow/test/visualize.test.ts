@@ -4,7 +4,7 @@ import test from 'node:test'
 import { runPipeline, trialToDot } from '../src/index.js'
 
 const SOURCE = fs.readFileSync(
-  new URL('../examples/cve-genie-trial.ord', import.meta.url),
+  new URL('../../../packs/cve-genie-trial/main.ord', import.meta.url),
   'utf8',
 )
 

@@ -423,13 +423,11 @@ effect.
 ## Examples
 
 A Domain Pack file is one `.ord`, or a directory whose `main.ord` is the
-declaration. First-party packs live in `apps/polaris/domain-packs/` and
-`packs/`. Development sketches live in `apps/polaris-workflow-demo` and
-`packages/polaris-workflow/examples/`.
+declaration. First-party packs live in `packs/`.
 
 ### Minimum first-party pack
 
-`apps/polaris/domain-packs/vault-knowledge-health/main.ord` is the smallest
+`packs/vault-knowledge-health/main.ord` is the smallest
 installed business domain. It keeps Vault operations in the pack, not in the
 kernel. The flow calls `ArtifactMetadata@1.0.0`. Polaris maps that port to
 the Common tool `vault.artifact.metadata.read`. Ordinary Portal runs still
@@ -545,9 +543,9 @@ flow Place {
 
 ### Bounded trial graph
 
-`packages/polaris-workflow/examples/cve-genie-trial.ord` is the package-level
-CVE-Genie fixture. It does not widen the Portal worker or enable live Agent
-execution. The smaller surface looks like this:
+`packs/cve-genie-trial/main.ord` is the bounded CVE-Genie fixture. It does
+not widen the Portal worker or enable live Agent execution. The smaller
+surface looks like this:
 
 ```text
 dsl version "0.4-trial"
@@ -588,9 +586,9 @@ trial Main title "Bounded trial" {
 }
 ```
 
-`packages/polaris-workflow/examples/vision-kernel.ord` is a design sketch of
-the same kernel with orders and stock ports. It is a target-state drawing,
-not a claim that every form in that file is product-wired.
+`packs/vision-kernel/main.ord` is a design sketch of the same kernel with
+orders and stock ports. It is a target-state drawing, not a claim that
+every form in that file is product-wired.
 
 Source-local design notes remain under `packages/polaris-workflow/docs/`.
 This page is the product reference.

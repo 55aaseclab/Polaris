@@ -90,22 +90,15 @@ v0.4-trial pack 只投影 trial 的图元数据；不会被 v0.3 Portal flow wor
 
 ```bash
 pnpm --dir apps/polaris run polaris -- pack add \
-  apps/polaris/domain-packs/vault-knowledge-health
+  packs/vault-knowledge-health
 ```
 
 | 域包 | 路径 | 作用 |
 |------|------|------|
-| Vault Knowledge Health | `apps/polaris/domain-packs/vault-knowledge-health/main.ord` | 最小业务域，调用 `ArtifactMetadata@1.0.0` 并映射到 `vault.artifact.metadata.read` |
-
-更多 DSL 示例：`apps/polaris-workflow-demo/src/examples/packs/{inventory,notify,sales-fulfillment}.ord`
-
-## 手写样例
-
-| 域包 | 路径 |
-|------|------|
-| 销售记录 | `apps/polaris-workflow-demo/src/examples/sales-record.ord` |
-| 摄影自动化 | `apps/polaris-workflow-demo/src/examples/photo-automation.ord` |
-| ERP 全景素描 | `apps/polaris-workflow-demo/src/examples/erp-panorama.ord` |
+| Vault Knowledge Health | `packs/vault-knowledge-health/main.ord` | 最小业务域，调用 `ArtifactMetadata@1.0.0` 并映射到 `vault.artifact.metadata.read` |
+| AutoResearch | `packs/autoresearch/main.ord` | 文献收集、分析和报告 |
+| CVE-Genie trial | `packs/cve-genie-trial/main.ord` | 有界 v0.4-trial 控制图 |
+| Vision kernel | `packs/vision-kernel/main.ord` | 内核素描，非全部已被 parser 实现 |
 
 ## 压测集
 

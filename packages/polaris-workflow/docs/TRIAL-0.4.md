@@ -116,7 +116,7 @@ response checkpoint，因此恢复时不会再次调用等待节点。
 
 ## CVE-Genie 映射
 
-`examples/cve-genie-trial.ord` 使用 11 个节点表达：
+`packs/cve-genie-trial/main.ord` 使用 11 个节点表达：
 
 ```text
 Data Processor

@@ -12,8 +12,8 @@ import {
 
 const FIRST_PARTY_VAULT_KNOWLEDGE_PACK = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "domain-packs",
+  "../../..",
+  "packs",
   "vault-knowledge-health",
 );
 

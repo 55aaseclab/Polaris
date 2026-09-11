@@ -16,7 +16,7 @@ import {
 } from '../src/index.js'
 
 const TRIAL_SOURCE = fs.readFileSync(
-  new URL('../examples/cve-genie-trial.ord', import.meta.url),
+  new URL('../../../packs/cve-genie-trial/main.ord', import.meta.url),
   'utf8',
 )
 
