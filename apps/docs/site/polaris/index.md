@@ -10,7 +10,6 @@ boundary and the cross-repository references that are useful after setup.
 
 - [User Management](./user-management.md)
 - [Usage](./usage.md)
-- [Literature Review live design](./literature-review-live-design.md)
 - [Polaris Portal](./polaris-portal.md)
 - [Polaris DSL](./dsl.md)
 - [Vault Management](./vault-management.md)

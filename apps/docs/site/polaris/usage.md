@@ -144,6 +144,3 @@ The intended user flow is:
 The current composer collects the brief directly. A future Paseo transcript can
 produce the same validated draft, but it must remain a drafting surface; only
 Polaris durable admission can start the run.
-
-The proposed live boundary is documented in
-[Literature Review: from conversation to an execution run](./literature-review-live-design.md).

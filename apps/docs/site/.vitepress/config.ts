@@ -24,7 +24,6 @@ const directoryOrder: Record<string, string[]> = {
     "gateway.md",
     "paseo.md",
     "cli.md",
-    "literature-review-live-design.md",
   ],
   operations: [
     "index.md",
