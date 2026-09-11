@@ -5,8 +5,8 @@
     "name": "Local Codex",
     "protocol": "Persistent local Codex CLI session",
     "configuration": "Codex CLI user configuration and environment",
-    "default_model": "gpt-5.4",
-    "default_model_reasoning_effort": "medium",
+    "default_model": "gpt-5.5",
+    "default_model_reasoning_effort": "low",
     "environment_overrides": [
       "REPORT_WRITING_MODEL",
       "CODEX_MODEL",

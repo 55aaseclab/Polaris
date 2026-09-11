@@ -33,7 +33,7 @@ analysis prefer **`literature-report`**.
 Select a kind from the final analysis kind and audience; do not use a report
 template to introduce a new conclusion.
 
-## Fixed literature workflows (`workflows/literature-review`)
+## Fixed literature workflows (`packs/autoresearch`)
 
 When the case is registered as a `literature-review` workflow, prefer:
 

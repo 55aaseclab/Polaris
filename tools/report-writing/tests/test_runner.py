@@ -129,6 +129,21 @@ def passing_reviews(report_input: dict[str, object], draft: dict[str, object]) -
     }
 
 
+def empty_literature_analysis_output() -> dict[str, object]:
+    output = json.loads(json.dumps(ANALYSIS_OUTPUT))
+    output["judgments"] = []
+    output["unresolved"] = ["No successful source task produced records."]
+    output["search_scope"] = {
+        "record_count": 0,
+        "source_tasks": [
+            {"task_id": "synthetic-search", "source_type": "bibliographic-search"}
+        ],
+        "scope": {"time_range": "2024..2026", "include": ["synthetic topic"]},
+        "information_gaps": ["No bibliographic records were returned."],
+    }
+    return output
+
+
 class ReportWritingTests(unittest.TestCase):
     def setUp(self) -> None:
         # Default fixture is a management memo draft path, not literature auto-route.
@@ -152,6 +167,113 @@ class ReportWritingTests(unittest.TestCase):
             [section["section_id"] for section in report_input["template"]["sections"]],
             ["question", "search_scope", "findings"],
         )
+
+    def test_workflow_prepare_freezes_the_actual_analysis_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            analysis_path = root / "analysis-output.json"
+            request_path = root / "request.json"
+            output_path = root / "output.json"
+            runner.write_json(analysis_path, ANALYSIS_OUTPUT)
+            runner.write_json(
+                request_path,
+                {
+                    "runId": "run-synthetic",
+                    "workspaceRoot": str(root / "workspace"),
+                    "input": {
+                        "analysisOutputRef": str(analysis_path),
+                        "reportTemplate": "literature-report",
+                    },
+                },
+            )
+
+            result = runner.command_workflow(
+                Namespace(
+                    input=str(request_path),
+                    output=str(output_path),
+                    step_command="prepare",
+                ),
+                TOOL_ROOT,
+            )
+
+            self.assertEqual(result, 0)
+            output = runner.read_json(output_path, "workflow output")
+            self.assertEqual(output["selectedTemplate"], "literature-report")
+            frozen = runner.read_json(Path(output["reportInputRef"]), "report input")
+            self.assertEqual(frozen["source"]["analysis_output_id"], ANALYSIS_OUTPUT["analysis_id"])
+            self.assertEqual(frozen["report_id"], "report-run-synthetic")
+
+    def test_zero_result_literature_input_allows_empty_references(self) -> None:
+        report_input = runner.build_report_input(
+            TOOL_ROOT,
+            empty_literature_analysis_output(),
+            "literature-report",
+        )
+
+        self.assertEqual(report_input["evidence_registry"], [])
+        self.assertEqual(report_input["references"], [])
+        validated_input = runner.validate_report_input(report_input, TOOL_ROOT)
+        draft = runner.validate_draft(
+            runner.build_empty_evidence_draft(validated_input),
+            validated_input,
+            TOOL_ROOT,
+        )
+        markdown = runner.render_markdown(validated_input, draft)
+        self.assertIn("No evidence-bound findings are asserted.", markdown)
+        self.assertNotIn("[@", markdown)
+        self.assertEqual(runner.render_bib([]), "\n")
+        self.assertIn(r"\begin{thebibliography}{99}", runner.render_latex(validated_input, draft))
+
+    def test_zero_result_literature_run_writes_all_report_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            analysis_path = root / "analysis-output.json"
+            report_input_path = root / "report-input.json"
+            draft_path = root / "draft.json"
+            tex_path = root / "report.tex"
+            bib_path = root / "references.bib"
+            pdf_path = root / "report.pdf"
+            markdown_path = root / "report.md"
+            manifest_path = root / "report.json"
+            runner.write_json(analysis_path, empty_literature_analysis_output())
+
+            result = runner.command_run(
+                Namespace(
+                    analysis_output=str(analysis_path),
+                    template="literature-report",
+                    report_input=str(report_input_path),
+                    draft=str(draft_path),
+                    tex=str(tex_path),
+                    bib=str(bib_path),
+                    output=str(pdf_path),
+                    report_markdown=str(markdown_path),
+                    report_manifest=str(manifest_path),
+                    report_id="synthetic-empty-report",
+                    claim_filter=None,
+                    run_dir=None,
+                ),
+                TOOL_ROOT,
+            )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                json.loads(report_input_path.read_text(encoding="utf-8"))["references"],
+                [],
+            )
+            self.assertTrue(draft_path.is_file())
+            self.assertTrue(tex_path.is_file())
+            self.assertTrue(bib_path.is_file())
+            self.assertEqual(bib_path.read_text(encoding="utf-8"), "\n")
+            self.assertTrue(pdf_path.is_file())
+            self.assertGreater(pdf_path.stat().st_size, 0)
+            self.assertTrue(markdown_path.is_file())
+            self.assertIn(
+                "No evidence-bound findings are asserted.",
+                markdown_path.read_text(encoding="utf-8"),
+            )
+            report = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "published")
+            self.assertEqual(report["review"], {"mode": "fixed", "status": "not_run"})
 
     def test_explicit_report_id_is_preserved_in_the_frozen_report_input(self) -> None:
         report_input = runner.build_report_input(
@@ -388,14 +510,14 @@ class ReportWritingTests(unittest.TestCase):
             self.assertIn("--sandbox", first_command)
             self.assertIn("read-only", first_command)
             self.assertIn("-m", first_command)
-            self.assertEqual(first_command[first_command.index("-m") + 1], "gpt-5.4")
+            self.assertEqual(first_command[first_command.index("-m") + 1], "gpt-5.5")
             self.assertIn("-c", first_command)
-            self.assertIn('model_reasoning_effort="medium"', first_command)
+            self.assertIn('model_reasoning_effort="low"', first_command)
             self.assertIn("--add-dir", first_command)
             self.assertTrue(session_path.is_file())
             self.assertEqual(runner.extract_model_json(response), {})
-            self.assertEqual(response.get("model"), "gpt-5.4")
-            self.assertEqual(response.get("model_reasoning_effort"), "medium")
+            self.assertEqual(response.get("model"), "gpt-5.5")
+            self.assertEqual(response.get("model_reasoning_effort"), "low")
             self.assertFalse(response.get("session_resumed"))
             self.assertIn("resume", second_command)
             self.assertIn("synthetic-session", second_command)

@@ -29,7 +29,7 @@ case** at:
 `session_id` so large report-input context can hit the provider cache. Override
 the session file with `REPORT_WRITING_CODEX_SESSION_PATH`.
 
-Default model is **`gpt-5.4`** with **`model_reasoning_effort=medium`**. Override
+Default model is **`gpt-5.5`** with **`model_reasoning_effort=low`**. Override
 with:
 
 - `REPORT_WRITING_MODEL` or `CODEX_MODEL`

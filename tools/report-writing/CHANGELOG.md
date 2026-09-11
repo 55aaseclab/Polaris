@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Zero-result literature collections are now valid report inputs: empty
+  `references[]` and evidence registries produce an explicit no-findings
+  report and still render Markdown, BibTeX, TeX, and PDF artifacts.
 - Outline/expand prompts: if `decision_context` lists exact top-level
   subsection headings or narrative order, follow them; otherwise keep the
   generic survey outline behavior (task-specific structure stays in workflow

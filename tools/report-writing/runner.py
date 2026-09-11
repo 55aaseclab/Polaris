@@ -30,9 +30,9 @@ REPORT_SCHEMA = "clue.report-writing.output.v2"
 LOCAL_EXECUTOR = "local-codex"
 REVIEW_DIMENSIONS = ("unity", "support", "coherence", "sentence_skills")
 MAX_RENDERED_EVIDENCE_CHARS = 480
-# Report drafting uses full gpt-5.4; medium effort is the default for latency.
-DEFAULT_REPORT_MODEL = "gpt-5.4"
-DEFAULT_REPORT_REASONING_EFFORT = "medium"
+# Report drafting defaults are chosen for unattended workflow latency.
+DEFAULT_REPORT_MODEL = "gpt-5.5"
+DEFAULT_REPORT_REASONING_EFFORT = "low"
 # Inline literature citations in draft prose: [@claim-001] or [@claim-001;claim-002]
 INLINE_CLAIM_CITE_RE = re.compile(r"\[@([A-Za-z0-9_.:\-]+(?:\s*;\s*[A-Za-z0-9_.:\-]+)*)\]")
 LITERATURE_TEMPLATE_IDS = frozenset({"literature-report", "research-brief"})
@@ -454,6 +454,54 @@ def references_for_claim_ids(
 def is_literature_template(report_input: dict[str, Any]) -> bool:
     template_id = (report_input.get("template") or {}).get("template_id")
     return template_id in LITERATURE_TEMPLATE_IDS
+
+
+def allows_empty_evidence_report(report_input: dict[str, Any]) -> bool:
+    """Allow a literature report to document a valid zero-result search."""
+    return (
+        is_literature_template(report_input)
+        and not report_input.get("evidence_registry")
+        and not report_input.get("references")
+    )
+
+
+def build_empty_evidence_draft(report_input: dict[str, Any]) -> dict[str, Any]:
+    """Build a truthful report when collection returned no usable evidence."""
+    no_findings = (
+        "The collection produced no bibliographic references for this review. "
+        "No evidence-bound findings are asserted."
+    )
+    sections: list[dict[str, Any]] = []
+    for template_section in report_input["template"]["sections"]:
+        section_id = template_section["section_id"]
+        if section_id == "question":
+            paragraphs = [
+                report_input["question"],
+                f"Decision context: {report_input['decision_context']}",
+            ]
+        elif section_id == "search_scope":
+            paragraphs = [
+                "The search completed without producing a bibliographic record "
+                "that could be carried into evidence analysis.",
+            ]
+        else:
+            paragraphs = [no_findings]
+        sections.append(
+            {
+                "section_id": section_id,
+                "paragraphs": paragraphs,
+                "claim_ids": [],
+                "subsections": [],
+            }
+        )
+    return {
+        "schema_version": DRAFT_SCHEMA,
+        "report_id": report_input["report_id"],
+        "template_id": report_input["template"]["template_id"],
+        "title": "Literature Review",
+        "sections": sections,
+        "limitations": list(report_input["allowed_limitations"]),
+    }
 
 
 def render_prose_with_inline_cites(
@@ -887,8 +935,6 @@ def validate_report_input(document: dict[str, Any], root: Path) -> dict[str, Any
         raise CliError("report input template differs from the installed template")
     registry = require_list(document, "evidence_registry", "report input")
     references = require_list(document, "references", "report input")
-    if not references:
-        raise CliError("report input requires at least one reference")
     for index, reference in enumerate(references, start=1):
         if not isinstance(reference, dict):
             raise CliError(f"report input references[{index}] must be an object")
@@ -1228,8 +1274,13 @@ def validate_draft(draft: dict[str, Any], report_input: dict[str, Any], root: Pa
         normalized_sections.append(normalized_section)
     if actual_ids != expected_ids:
         raise CliError("report draft sections must match the selected template exactly and in order")
+    empty_evidence = allows_empty_evidence_report(report_input)
     for section, template_section in zip(normalized_sections, template_sections, strict=True):
-        if template_section["claims_required"] and not section_claim_ids(section):
+        if (
+            template_section["claims_required"]
+            and not section_claim_ids(section)
+            and not empty_evidence
+        ):
             raise CliError(f"report draft section requires claim IDs: {section['section_id']}")
     if report_input["template"].get("require_full_claim_coverage"):
         missing = available_claims - used_claim_ids
@@ -2222,6 +2273,34 @@ def command_draft(args: argparse.Namespace, root: Path) -> int:
     if getattr(args, "no_resume", False):
         resume = False
 
+    if allows_empty_evidence_report(report_input):
+        draft = validate_draft(
+            build_empty_evidence_draft(report_input),
+            report_input,
+            root,
+        )
+        draft["provenance"] = {
+            "report_input_sha256": object_digest(report_input),
+            "pipeline": "empty-evidence",
+            "unused_claims_remaining": [],
+        }
+        write_json(output, draft)
+        print(
+            json.dumps(
+                {
+                    "status": "succeeded",
+                    "output": str(output),
+                    "section_count": len(draft["sections"]),
+                    "pipeline": "empty-evidence",
+                    "reference_count": 0,
+                    "claim_count": 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
     # Literature / full-coverage templates use compress → outline → expand.
     if is_literature_template(report_input) or report_input["template"].get(
         "require_full_claim_coverage"
@@ -2434,6 +2513,42 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def write_fixed_report(
+    report_input: dict[str, Any],
+    draft: dict[str, Any],
+    markdown_path: Path,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    """Write the fixed-mode report without implying that reviewers ran."""
+    markdown_path = markdown_path.expanduser().resolve()
+    manifest_path = manifest_path.expanduser().resolve()
+    if markdown_path == manifest_path:
+        raise CliError("fixed report Markdown and manifest must be different paths")
+    markdown = render_markdown(report_input, draft)
+    report = {
+        "schema_version": REPORT_SCHEMA,
+        "report_id": report_input["report_id"],
+        "status": "published",
+        "published_at": utc_now(),
+        "template_id": report_input["template"]["template_id"],
+        "title": draft["title"],
+        "source": deepcopy(report_input["source"]),
+        "draft_sha256": object_digest(draft),
+        "used_claim_ids": unique_strings(
+            [claim_id for section in draft["sections"] for claim_id in section_claim_ids(section)]
+        ),
+        "limitations": deepcopy(draft["limitations"]),
+        "report_path": str(markdown_path),
+        "review": {
+            "mode": "fixed",
+            "status": "not_run",
+        },
+    }
+    write_text(markdown_path, markdown)
+    write_json(manifest_path, report)
+    return report
+
+
 def command_preview(args: argparse.Namespace, root: Path) -> int:
     report_input = read_json(Path(args.input), "report input")
     draft = read_json(Path(args.draft), "report draft")
@@ -2531,7 +2646,15 @@ def command_latex(args: argparse.Namespace, root: Path) -> int:
 
 
 def command_run(args: argparse.Namespace, root: Path) -> int:
-    """Run the fixed draft-to-LaTex workflow as one report-writing operation."""
+    """Run the fixed draft-to-report-and-LaTeX workflow as one operation."""
+    pdf_path = Path(args.output).expanduser().resolve()
+    markdown_path = Path(
+        getattr(args, "report_markdown", None) or pdf_path.with_suffix(".md")
+    ).expanduser().resolve()
+    manifest_path = Path(
+        getattr(args, "report_manifest", None) or pdf_path.with_suffix(".json")
+    ).expanduser().resolve()
+    report: dict[str, Any]
     with contextlib.redirect_stdout(io.StringIO()):
         command_prepare(
             argparse.Namespace(
@@ -2561,6 +2684,13 @@ def command_run(args: argparse.Namespace, root: Path) -> int:
             ),
             root,
         )
+        report_input = validate_report_input(read_json(Path(args.report_input), "report input"), root)
+        draft = validate_draft_document(
+            read_json(Path(args.draft), "report draft"),
+            report_input,
+            root,
+        )
+        report = write_fixed_report(report_input, draft, markdown_path, manifest_path)
     print(
         json.dumps(
             {
@@ -2570,12 +2700,181 @@ def command_run(args: argparse.Namespace, root: Path) -> int:
                 "tex": str(Path(args.tex).expanduser().resolve()),
                 "bib": str(Path(args.bib).expanduser().resolve()),
                 "output": str(Path(args.output).expanduser().resolve()),
+                "report_markdown": str(markdown_path),
+                "report_manifest": str(manifest_path),
+                "review": report["review"],
             },
             ensure_ascii=False,
             indent=2,
         )
     )
     return 0
+
+
+def workflow_request(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    request = read_json(Path(args.input), "workflow input")
+    values = request.get("input")
+    if not isinstance(values, dict):
+        raise CliError("workflow input requires an input object")
+    workspace_root = request.get("workspaceRoot")
+    if not isinstance(workspace_root, str) or not workspace_root.strip():
+        raise CliError("workflow input requires workspaceRoot")
+    return request, values, Path(workspace_root).expanduser().resolve()
+
+
+def workflow_string(values: dict[str, Any], key: str, command: str) -> str:
+    value = values.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise CliError(f"workflow {command} requires input.{key}")
+    return value.strip()
+
+
+def workflow_report_root(workspace_root: Path) -> Path:
+    root = workspace_root / "report"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def workflow_report_passed(reviews_path: Path) -> tuple[bool, int]:
+    reviews = read_json(reviews_path, "report reviews")
+    review_items = reviews.get("reviews")
+    if not isinstance(review_items, list):
+        raise CliError("report reviews has no reviews array")
+    passed = all(
+        isinstance(item, dict) and item.get("status") == "pass"
+        for item in review_items
+    )
+    return passed, len(review_items)
+
+
+def command_workflow(args: argparse.Namespace, root: Path) -> int:
+    request, values, workspace_root = workflow_request(args)
+    report_root = workflow_report_root(workspace_root)
+    output = Path(args.output).expanduser().resolve()
+    report_input = report_root / "report-input.json"
+    draft = report_root / "draft.json"
+    reviews = report_root / "reviews.json"
+    markdown = report_root / "report.md"
+    manifest = report_root / "report.json"
+    pdf = report_root / "report.pdf"
+    run_dir = report_root / "runs"
+
+    if args.step_command == "prepare":
+        analysis_output = workflow_string(values, "analysisOutputRef", args.step_command)
+        template = workflow_string(values, "reportTemplate", args.step_command)
+        run_id = workflow_string(request, "runId", "adapter")
+        command_prepare(
+            argparse.Namespace(
+                analysis_output=analysis_output,
+                template=template,
+                output=str(report_input),
+                report_id=f"report-{run_id}",
+                claim_filter=None,
+            ),
+            root,
+        )
+        prepared = validate_report_input(read_json(report_input, "report input"), root)
+        write_json(
+            output,
+            {
+                "reportInputRef": str(report_input),
+                "selectedTemplate": prepared["template"]["template_id"],
+            },
+        )
+        return 0
+
+    if args.step_command == "draft":
+        report_input_ref = workflow_string(values, "reportInputRef", args.step_command)
+        command_draft(
+            argparse.Namespace(
+                input=report_input_ref,
+                output=str(draft),
+                run_dir=str(run_dir),
+                no_resume=False,
+            ),
+            root,
+        )
+        validate_draft_document(
+            read_json(draft, "report draft"),
+            read_json(Path(report_input_ref), "report input"),
+            root,
+        )
+        write_json(output, {"draftRef": str(draft), "draftValid": True})
+        return 0
+
+    if args.step_command == "review":
+        report_input_ref = workflow_string(values, "reportInputRef", args.step_command)
+        draft_ref = workflow_string(values, "draftRef", args.step_command)
+        command_review(
+            argparse.Namespace(
+                input=report_input_ref,
+                draft=draft_ref,
+                output=str(reviews),
+                run_dir=str(run_dir),
+            ),
+            root,
+        )
+        passed, review_count = workflow_report_passed(reviews)
+        write_json(
+            output,
+            {
+                "reviewsRef": str(reviews),
+                "reportPassed": passed,
+                "reviewCount": review_count,
+            },
+        )
+        return 0
+
+    if args.step_command == "revise":
+        report_input_ref = workflow_string(values, "reportInputRef", args.step_command)
+        draft_ref = workflow_string(values, "draftRef", args.step_command)
+        reviews_ref = workflow_string(values, "reviewsRef", args.step_command)
+        command_revise(
+            argparse.Namespace(
+                input=report_input_ref,
+                draft=draft_ref,
+                reviews=reviews_ref,
+                output=str(draft),
+                run_dir=str(run_dir),
+            ),
+            root,
+        )
+        passed, _ = workflow_report_passed(Path(reviews_ref))
+        write_json(output, {"draftRef": str(draft), "reportPassed": passed})
+        return 0
+
+    if args.step_command == "publish":
+        command_publish(
+            argparse.Namespace(
+                input=workflow_string(values, "reportInputRef", args.step_command),
+                draft=workflow_string(values, "draftRef", args.step_command),
+                reviews=workflow_string(values, "reviewsRef", args.step_command),
+                output=str(markdown),
+                manifest=str(manifest),
+            ),
+            root,
+        )
+        write_json(
+            output,
+            {"markdownRef": str(markdown), "manifestRef": str(manifest)},
+        )
+        return 0
+
+    if args.step_command == "pdf":
+        markdown_ref = workflow_string(values, "markdownRef", args.step_command)
+        command_pdf(
+            argparse.Namespace(
+                markdown=markdown_ref,
+                output=str(pdf),
+                html_output=str(report_root / "report.html"),
+                browser=None,
+            ),
+            root,
+        )
+        write_json(output, {"pdfRef": str(pdf)})
+        return 0
+
+    raise CliError(f"unsupported workflow command: {args.step_command}")
 
 
 def add_codex_options(command: argparse.ArgumentParser) -> None:
@@ -2609,6 +2908,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--tex", required=True)
     run.add_argument("--bib", required=True)
     run.add_argument("--output", required=True)
+    run.add_argument(
+        "--report-markdown",
+        help="Published Markdown path (defaults to the PDF path with a .md suffix).",
+    )
+    run.add_argument(
+        "--report-manifest",
+        help="Report manifest path (defaults to the PDF path with a .json suffix).",
+    )
     run.add_argument(
         "--report-id",
         help="Optional stable report identifier; otherwise derive one from the frozen input.",
@@ -2686,6 +2993,10 @@ def build_parser() -> argparse.ArgumentParser:
     latex.add_argument("--tex", required=True)
     latex.add_argument("--bib", required=True)
     latex.add_argument("--output", required=True)
+    workflow = subcommands.add_parser("workflow", help="Polaris workflow adapter.")
+    workflow.add_argument("step_command")
+    workflow.add_argument("--input", required=True)
+    workflow.add_argument("--output", required=True)
     return parser
 
 
@@ -2716,6 +3027,8 @@ def main(argv: list[str]) -> int:
             return command_pdf(args, root)
         if args.command == "latex":
             return command_latex(args, root)
+        if args.command == "workflow":
+            return command_workflow(args, root)
         raise CliError(f"unsupported command: {args.command}")
     except CliError as error:
         print(f"error: {error}", file=sys.stderr)
