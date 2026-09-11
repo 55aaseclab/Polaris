@@ -211,6 +211,7 @@ export class WorkflowMockService {
           : ["synthetic-fixture"],
       },
       events: [],
+      steps: [],
       receipts: [],
       artifacts: [],
     };
@@ -339,6 +340,7 @@ export class WorkflowMockService {
           reasons: ["synthetic-fixture"],
         },
         events: [],
+        steps: [],
         receipts: [],
         artifacts: [],
       };

@@ -48,6 +48,7 @@ import type {
   WorkflowExecutionDriver,
   WorkflowMockScenario,
   WorkflowRunProjection,
+  WorkflowStepResult,
   WorkflowRunRequest,
   WorkflowRunsResponse,
   WorkflowSetupProjection,
@@ -234,12 +235,33 @@ function projectionForRun(
   const receipts: WorkflowEffectReceipt[] = run.receipts.map((receipt) => ({
     id: receipt.id,
     requestId: receipt.requestId,
+    ...(receipt.stepId ? { stepId: receipt.stepId } : {}),
+    ...(receipt.stepLabel ? { stepLabel: receipt.stepLabel } : {}),
+    outputFields: receipt.outputFields ?? [],
     port: receipt.port,
     version: receipt.version,
     effect: receipt.effect,
     status: receipt.status,
+    input: receipt.input,
+    output: receipt.output,
+    ...(receipt.errorCode ? { errorCode: receipt.errorCode } : {}),
+    ...(receipt.errorMessage ? { errorMessage: receipt.errorMessage } : {}),
     createdAt: receipt.createdAt,
     completedAt: receipt.completedAt,
+  }));
+  const steps: WorkflowStepResult[] = run.steps.map((step) => ({
+    id: step.id,
+    sequence: step.sequence,
+    stepId: step.stepId,
+    stepLabel: step.stepLabel,
+    status: step.status,
+    detail: step.detail,
+    ...(step.call ? { call: step.call } : {}),
+    input: step.input,
+    output: step.output,
+    outputFields: step.outputFields,
+    createdAt: step.createdAt,
+    completedAt: step.completedAt,
   }));
   const events: WorkflowEvent[] = run.events.map((event) => ({
     id: event.id,
@@ -284,6 +306,7 @@ function projectionForRun(
         : [],
     },
     events,
+    steps,
     receipts,
     artifacts,
     ...(run.errorCode || run.errorMessage
@@ -479,8 +502,19 @@ class WorkflowRpcHost implements AsyncFfiHost {
       },
       input: { ...req.input },
       mode,
+      ...(req.meta?.stepId ? { stepId: req.meta.stepId } : {}),
+      ...(this.stepLabel(req.meta?.flowName, req.meta?.stepId) ? { stepLabel: this.stepLabel(req.meta?.flowName, req.meta?.stepId) } : {}),
+      outputFields: req.meta?.outputFields ?? [],
       traceId: req.meta?.flowName,
     };
+  }
+
+  private stepLabel(flowName: string | undefined, stepId: string | undefined): string | undefined {
+    if (!flowName || !stepId) return undefined;
+    return this.program.flows
+      .find((flow) => flow.meta.name === flowName)
+      ?.meta.steps.find((step) => step.id === stepId)
+      ?.label;
   }
 
   private logRpcInvocation(input: {
@@ -1375,6 +1409,25 @@ export class WorkflowControlService {
     });
     const docStore = new DocStore();
     const result = await program.runAsync(run.flowId, run.input, docStore, host);
+    const completedAt = this.now().toISOString();
+    for (const [index, step] of result.stepLog.entries()) {
+      this.store.recordWorkflowStepResult({
+        id: `step-${run.id}-${index + 1}`,
+        sequence: index + 1,
+        runId: run.id,
+        tenantId: run.tenantId,
+        stepId: step.id,
+        stepLabel: step.label,
+        status: step.ok ? "completed" : "failed",
+        detail: step.detail ?? "",
+        ...(step.call ? { call: step.call } : {}),
+        input: step.used ?? {},
+        output: step.produced ?? {},
+        outputFields: Object.keys(step.produced ?? {}),
+        createdAt: completedAt,
+        completedAt,
+      });
+    }
     for (const entry of host.rpcLog) {
       if (entry.request.mode === "live") {
         continue;
@@ -1385,6 +1438,9 @@ export class WorkflowControlService {
         runId: run.id,
         tenantId: run.tenantId,
         requestId: receipt.requestId,
+        ...(entry.request.stepId ? { stepId: entry.request.stepId } : {}),
+        ...(entry.request.stepLabel ? { stepLabel: entry.request.stepLabel } : {}),
+        outputFields: entry.request.outputFields ?? [],
         port: receipt.call.port,
         version: receipt.call.version,
         effect: receipt.call.effect,

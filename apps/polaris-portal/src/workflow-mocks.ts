@@ -180,6 +180,23 @@ function seedRun(
       content: `# ${flow.title}\n\n这是由 Portal mock executor 生成的 synthetic artifact。`,
     }]
     : [];
+  const receipts: MockWorkflowRun["receipts"] = status === "succeeded"
+    ? [{
+      id: `mock-receipt-${index + 1}`,
+      requestId: `mock-request-${index + 1}`,
+      stepId: "summarize",
+      stepLabel: "Summarize",
+      outputFields: ["summary", "confidence"],
+      port: "SyntheticTool",
+      version: "1.0.0",
+      effect: "ffi",
+      status: "completed",
+      input: { subject: input.subject ?? "示例输入" },
+      output: { summary: `${flow.title} 已生成`, confidence: 1 },
+      createdAt,
+      completedAt: updatedAt,
+    }]
+    : [];
   return {
     id: `mock-run-${index + 1}`,
     packId: pack.id,
@@ -207,7 +224,21 @@ function seedRun(
       reasons: ["synthetic-fixture"],
     },
     events,
-    receipts: [],
+    steps: receipts.map((receipt) => ({
+      id: `mock-step-${index + 1}`,
+      sequence: 1,
+      stepId: receipt.stepId ?? "summarize",
+      stepLabel: receipt.stepLabel ?? "Summarize",
+      status: receipt.status === "failed" ? "failed" : "completed",
+      detail: "Synthetic step completed",
+      call: receipt.port,
+      input: receipt.input,
+      output: receipt.output,
+      outputFields: receipt.outputFields ?? Object.keys(receipt.output),
+      createdAt: receipt.createdAt,
+      completedAt: receipt.completedAt,
+    })),
+    receipts,
     artifacts,
   };
 }

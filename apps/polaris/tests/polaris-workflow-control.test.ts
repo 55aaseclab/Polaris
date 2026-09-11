@@ -237,6 +237,10 @@ test("driver=none executes a durable workflow on the Polaris host without a Vaul
     assert.equal(completed?.driver, "none");
     assert.equal(completed?.vaultId, null);
     assert.equal(completed?.policy.reasons.includes("host-execution"), true);
+    assert.equal(completed?.steps.length, 1);
+    assert.equal(completed?.steps[0]?.stepId, "summarize");
+    assert.equal(completed?.steps[0]?.stepLabel, "Summarize");
+    assert.deepEqual(completed?.steps[0]?.outputFields, ["summary"]);
     assert.equal(completed?.artifacts.length, 1);
   } finally {
     service?.close();
@@ -412,8 +416,19 @@ test("setup atomically enqueues every enabled flow and completes manual review",
     assert.equal(review?.status, "waiting");
     assert.equal(summary?.status, "succeeded");
     assert.equal(summary?.artifacts.length, 1);
+    assert.equal(summary?.steps.length, 1);
+    assert.equal(summary?.steps[0]?.stepId, "summarize");
+    assert.deepEqual(summary?.steps[0]?.outputFields, ["summary"]);
     assert.match(summary?.artifacts[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/u);
     assert.equal(review?.receipts[0]?.status, "waiting");
+    assert.equal(review?.steps.length, 1);
+    assert.equal(review?.steps[0]?.stepId, "review");
+    assert.deepEqual(review?.steps[0]?.outputFields, ["approved", "reviewId"]);
+    assert.equal(typeof review?.receipts[0]?.input, "object");
+    assert.equal(typeof review?.receipts[0]?.output, "object");
+    assert.equal(review?.receipts[0]?.stepId, "review");
+    assert.equal(review?.receipts[0]?.stepLabel, "Review");
+    assert.deepEqual(review?.receipts[0]?.outputFields, ["approved", "reviewId"]);
     assert.match(review?.capabilityLeaseId ?? "", /^lease-/u);
     assert.equal(review?.policy.mode, "mock");
     const replay = await service.events("tenant-synthetic", review!.id, 0);
@@ -564,6 +579,20 @@ test("a durable live-policy metadata run invokes the candidate worker binding", 
       assert.equal(stored?.output.latestTitles, "Synthetic metadata");
       assert.equal(stored?.output.pendingMemoryChanges, 1);
       assert.equal(stored?.receipts.length, 1);
+      assert.equal(stored?.steps.length, 1);
+      assert.equal(stored?.steps[0]?.stepId, "metadata");
+      assert.deepEqual(stored?.steps[0]?.outputFields, [
+        "artifactCount",
+        "latestTitles",
+        "pendingMemoryChanges",
+      ]);
+      assert.equal(stored?.receipts[0]?.stepId, "metadata");
+      assert.equal(stored?.receipts[0]?.stepLabel, "Read metadata");
+      assert.deepEqual(stored?.receipts[0]?.outputFields, [
+        "artifactCount",
+        "latestTitles",
+        "pendingMemoryChanges",
+      ]);
       assert.equal(stored?.receipts[0]?.output.artifactCount, 2);
       assert.equal(store.listAuditEvents().length, 1);
       assert.deepEqual(store.verifyAuditChain(), { valid: true, checked: 1 });

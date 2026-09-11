@@ -110,6 +110,9 @@ export interface WorkflowEffectReceiptRecord {
   runId: string;
   tenantId: string;
   requestId: string;
+  stepId?: string;
+  stepLabel?: string;
+  outputFields?: string[];
   port: string;
   version: string;
   effect: string;
@@ -118,6 +121,23 @@ export interface WorkflowEffectReceiptRecord {
   output: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  createdAt: string;
+  completedAt: string;
+}
+
+export interface WorkflowStepResultRecord {
+  id: string;
+  sequence: number;
+  runId: string;
+  tenantId: string;
+  stepId: string;
+  stepLabel: string;
+  status: "completed" | "failed";
+  detail: string;
+  call?: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  outputFields: string[];
   createdAt: string;
   completedAt: string;
 }
@@ -182,6 +202,7 @@ export interface WorkflowRunRecord {
   updatedAt: string;
   completedAt?: string;
   events: WorkflowEventRecord[];
+  steps: WorkflowStepResultRecord[];
   receipts: WorkflowEffectReceiptRecord[];
   artifacts: WorkflowArtifactRecord[];
 }
@@ -335,6 +356,14 @@ function boundedJson(value: Record<string, unknown> | undefined): string {
   return encoded;
 }
 
+function boundedJsonArray(value: unknown[] | undefined): string {
+  const payload = JSON.stringify(value ?? []);
+  if (Buffer.byteLength(payload, "utf8") > MAX_METADATA_BYTES) {
+    throw new Error("Durable metadata exceeds the 16 KiB limit");
+  }
+  return payload;
+}
+
 function normalizeClaimJobKinds(kinds: readonly string[] | undefined): string[] | undefined {
   if (kinds === undefined) return undefined;
   const normalized = [...new Set(kinds.map((kind) => String(kind ?? "").trim()))];
@@ -485,6 +514,9 @@ function rowToWorkflowReceipt(row: SqlRow): WorkflowEffectReceiptRecord {
     runId: String(row.run_id),
     tenantId: String(row.tenant_id),
     requestId: String(row.request_id),
+    stepId: asOptionalString(row.step_id),
+    stepLabel: asOptionalString(row.step_label),
+    outputFields: parseStringArray(row.output_fields_json),
     port: String(row.port),
     version: String(row.version),
     effect: String(row.effect),
@@ -493,6 +525,29 @@ function rowToWorkflowReceipt(row: SqlRow): WorkflowEffectReceiptRecord {
     output: parseRecord(row.output_json),
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
+    createdAt: String(row.created_at),
+    completedAt: String(row.completed_at),
+  };
+}
+
+function rowToWorkflowStepResult(row: SqlRow): WorkflowStepResultRecord {
+  const status = String(row.status);
+  if (status !== "completed" && status !== "failed") {
+    throw new Error("Workflow step result has an invalid status");
+  }
+  return {
+    id: String(row.id),
+    sequence: Number(row.sequence),
+    runId: String(row.run_id),
+    tenantId: String(row.tenant_id),
+    stepId: String(row.step_id),
+    stepLabel: String(row.step_label),
+    status,
+    detail: String(row.detail),
+    call: asOptionalString(row.call),
+    input: parseRecord(row.input_json),
+    output: parseRecord(row.output_json),
+    outputFields: parseStringArray(row.output_fields_json),
     createdAt: String(row.created_at),
     completedAt: String(row.completed_at),
   };
@@ -522,6 +577,7 @@ function rowToWorkflowArtifact(row: SqlRow): WorkflowArtifactRecord {
 function rowToWorkflowRun(
   row: SqlRow,
   events: WorkflowEventRecord[],
+  steps: WorkflowStepResultRecord[],
   receipts: WorkflowEffectReceiptRecord[],
   artifacts: WorkflowArtifactRecord[],
 ): WorkflowRunRecord {
@@ -578,6 +634,7 @@ function rowToWorkflowRun(
     updatedAt: String(row.updated_at),
     completedAt: asOptionalString(row.completed_at),
     events,
+    steps,
     receipts,
     artifacts,
   };
@@ -722,6 +779,49 @@ function ensureWorkflowArtifactColumns(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(workflow_artifacts)").all() as SqlRow[];
   if (columns.length > 0 && !columns.some((column) => String(column.name) === "source_path")) {
     db.exec("ALTER TABLE workflow_artifacts ADD COLUMN source_path TEXT");
+  }
+}
+
+function ensureWorkflowReceiptColumns(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(workflow_effect_receipts)").all() as SqlRow[];
+  if (columns.length === 0) return;
+  const names = new Set(columns.map((column) => String(column.name)));
+  if (!names.has("step_id")) {
+    db.exec("ALTER TABLE workflow_effect_receipts ADD COLUMN step_id TEXT");
+  }
+  if (!names.has("step_label")) {
+    db.exec("ALTER TABLE workflow_effect_receipts ADD COLUMN step_label TEXT");
+  }
+  if (!names.has("output_fields_json")) {
+    db.exec("ALTER TABLE workflow_effect_receipts ADD COLUMN output_fields_json TEXT NOT NULL DEFAULT '[]'");
+  }
+}
+
+function tableColumnNames(db: DatabaseSync, tableName: string): Set<string> {
+  return new Set(
+    (db.prepare(`PRAGMA table_info(${tableName})`).all() as SqlRow[])
+      .map((column) => String(column.name)),
+  );
+}
+
+function nextWorkflowReceiptSequence(db: DatabaseSync, runId: string): number {
+  const row = db.prepare(`
+    SELECT COALESCE(MAX(sequence), 0) AS sequence
+    FROM workflow_effect_receipts
+    WHERE run_id = ?
+  `).get(runId) as SqlRow | undefined;
+  return Number(row?.sequence ?? 0) + 1;
+}
+
+function ensureWorkflowStepResultColumns(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(workflow_step_results)").all() as SqlRow[];
+  if (columns.length === 0) return;
+  const names = new Set(columns.map((column) => String(column.name)));
+  if (!names.has("output_fields_json")) {
+    db.exec("ALTER TABLE workflow_step_results ADD COLUMN output_fields_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!names.has("sequence")) {
+    db.exec("ALTER TABLE workflow_step_results ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -901,6 +1001,9 @@ export class PolarisControlStore {
         run_id TEXT NOT NULL,
         tenant_id TEXT NOT NULL,
         request_id TEXT NOT NULL UNIQUE,
+        step_id TEXT,
+        step_label TEXT,
+        output_fields_json TEXT NOT NULL DEFAULT '[]',
         port TEXT NOT NULL,
         version TEXT NOT NULL,
         effect TEXT NOT NULL,
@@ -911,6 +1014,25 @@ export class PolarisControlStore {
         error_message TEXT,
         created_at TEXT NOT NULL,
         completed_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_step_results (
+        id TEXT PRIMARY KEY,
+        sequence INTEGER NOT NULL,
+        run_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        step_id TEXT NOT NULL,
+        step_label TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+        detail TEXT NOT NULL,
+        call TEXT,
+        input_json TEXT NOT NULL,
+        output_json TEXT NOT NULL,
+        output_fields_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        UNIQUE(run_id, sequence),
         FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
       );
 
@@ -1048,6 +1170,8 @@ export class PolarisControlStore {
     ensureIdempotencyResponseColumns(db);
     ensureWorkflowRunColumns(db);
     ensureWorkflowArtifactColumns(db);
+    ensureWorkflowReceiptColumns(db);
+    ensureWorkflowStepResultColumns(db);
     fs.chmodSync(filePath, 0o600);
     return new PolarisControlStore(filePath, db);
   }
@@ -1287,10 +1411,12 @@ export class PolarisControlStore {
         SELECT envelope_id, capability_lease_id
         FROM workflow_runs
         WHERE tenant_id = ? AND id = ?
-      `).get(tenant, id) as SqlRow;
+      `).get(tenant, id) as { envelope_id: string; capability_lease_id: string };
       this.db.prepare("DELETE FROM workflow_events WHERE tenant_id = ? AND run_id = ?")
         .run(tenant, id);
       this.db.prepare("DELETE FROM workflow_effect_receipts WHERE tenant_id = ? AND run_id = ?")
+        .run(tenant, id);
+      this.db.prepare("DELETE FROM workflow_step_results WHERE tenant_id = ? AND run_id = ?")
         .run(tenant, id);
       this.db.prepare("DELETE FROM workflow_artifacts WHERE tenant_id = ? AND run_id = ?")
         .run(tenant, id);
@@ -1320,10 +1446,13 @@ export class PolarisControlStore {
     const receipts = (this.db.prepare(`
       SELECT * FROM workflow_effect_receipts WHERE run_id = ? ORDER BY created_at ASC
     `).all(runId) as SqlRow[]).map(rowToWorkflowReceipt);
+    const steps = (this.db.prepare(`
+      SELECT * FROM workflow_step_results WHERE run_id = ? ORDER BY sequence ASC
+    `).all(runId) as SqlRow[]).map(rowToWorkflowStepResult);
     const artifacts = (this.db.prepare(`
       SELECT * FROM workflow_artifacts WHERE run_id = ? ORDER BY created_at ASC
     `).all(runId) as SqlRow[]).map(rowToWorkflowArtifact);
-    return rowToWorkflowRun(row, events, receipts, artifacts);
+    return rowToWorkflowRun(row, events, steps, receipts, artifacts);
   }
 
   listWorkflowRuns(tenantId: string): WorkflowRunRecord[] {
@@ -1476,16 +1605,27 @@ export class PolarisControlStore {
   }
 
   recordWorkflowEffectReceipt(receipt: WorkflowEffectReceiptRecord): void {
+    const hasLegacySequenceColumn = tableColumnNames(this.db, "workflow_effect_receipts").has("sequence");
+    const sequenceColumn = hasLegacySequenceColumn ? "sequence, " : "";
+    const sequencePlaceholder = hasLegacySequenceColumn ? "?, " : "";
+    const sequenceValue = hasLegacySequenceColumn
+      ? [nextWorkflowReceiptSequence(this.db, receipt.runId)]
+      : [];
     this.db.prepare(`
       INSERT OR IGNORE INTO workflow_effect_receipts (
-        id, run_id, tenant_id, request_id, port, version, effect, status,
-        input_json, output_json, error_code, error_message, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, ${sequenceColumn}run_id, tenant_id, request_id, step_id, step_label,
+        output_fields_json, port, version, effect, status, input_json,
+        output_json, error_code, error_message, created_at, completed_at
+      ) VALUES (?, ${sequencePlaceholder}?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       receipt.id,
+      ...sequenceValue,
       receipt.runId,
       receipt.tenantId,
       receipt.requestId,
+      receipt.stepId ?? null,
+      receipt.stepLabel ?? null,
+      boundedJsonArray(receipt.outputFields ?? []),
       receipt.port,
       receipt.version,
       receipt.effect,
@@ -1496,6 +1636,30 @@ export class PolarisControlStore {
       receipt.errorMessage ?? null,
       receipt.createdAt,
       receipt.completedAt,
+    );
+  }
+
+  recordWorkflowStepResult(step: WorkflowStepResultRecord): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO workflow_step_results (
+        id, sequence, run_id, tenant_id, step_id, step_label, status, detail, call,
+        input_json, output_json, output_fields_json, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      step.id,
+      step.sequence,
+      step.runId,
+      step.tenantId,
+      step.stepId,
+      step.stepLabel,
+      step.status,
+      boundedText(step.detail, MAX_ERROR_BYTES) ?? "",
+      step.call ?? null,
+      boundedJson(step.input),
+      boundedJson(step.output),
+      boundedJsonArray(step.outputFields),
+      step.createdAt,
+      step.completedAt,
     );
   }
 

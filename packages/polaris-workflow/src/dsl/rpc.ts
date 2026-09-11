@@ -40,6 +40,9 @@ export interface FfiRpcRequest {
   call: FfiRpcCallRef
   input: StepContext
   mode: FfiRpcMode
+  stepId?: string
+  stepLabel?: string
+  outputFields?: string[]
   deadlineAt?: string
   traceId?: string
 }

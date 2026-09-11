@@ -135,10 +135,32 @@ export type WorkflowExecutionDriver = "none" | "vault";
 export type WorkflowEffectReceipt = {
   id: string;
   requestId: string;
+  stepId?: string;
+  stepLabel?: string;
+  outputFields?: string[];
   port: string;
   version: string;
   effect: string;
   status: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  completedAt: string;
+};
+
+export type WorkflowStepResult = {
+  id: string;
+  sequence: number;
+  stepId: string;
+  stepLabel: string;
+  status: "completed" | "failed";
+  detail: string;
+  call?: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  outputFields: string[];
   createdAt: string;
   completedAt: string;
 };
@@ -172,6 +194,7 @@ export type WorkflowRunProjection = {
     reasons: string[];
   };
   events: WorkflowEvent[];
+  steps: WorkflowStepResult[];
   receipts: WorkflowEffectReceipt[];
   artifacts: WorkflowArtifact[];
   error?: {
