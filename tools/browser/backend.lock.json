@@ -111,14 +111,9 @@
         "reason": "Node package manifest for Camofox and Playwright."
       },
       {
-        "path": "SETUP-DISPLAY.md",
+        "path": "SETUP-BROWSER.md",
         "kind": "required",
-        "reason": "Host DISPLAY / Xvfb and Camofox setup for headed capture."
-      },
-      {
-        "path": "SETUP-CAMOFOX.md",
-        "kind": "required",
-        "reason": "camofox-browser install and Polaristool session (userId + cookies)."
+        "reason": "Host DISPLAY / Xvfb, Camofox installation, and persistent session setup for headed capture."
       }
     ]
   }

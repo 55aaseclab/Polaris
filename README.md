@@ -83,8 +83,7 @@ To inspect one tool:
 ```
 
 Headed PDF capture needs an X11 display and a Camofox session. See
-[tools/browser/SETUP-DISPLAY.md](tools/browser/SETUP-DISPLAY.md) and
-[tools/browser/SETUP-CAMOFOX.md](tools/browser/SETUP-CAMOFOX.md). Put
+[tools/browser/SETUP-BROWSER.md](tools/browser/SETUP-BROWSER.md). Put
 the values those guides name into `.env.dev`.
 
 After tools are ready, start Polaristool:

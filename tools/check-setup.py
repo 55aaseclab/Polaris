@@ -22,11 +22,11 @@ from urllib.request import urlopen
 
 
 NEXT_STEPS: dict[str, str] = {
-    "DISPLAY": "Start Xvfb and set DISPLAY=:99. See tools/browser/SETUP-DISPLAY.md",
-    "BROWSER_CAMOFOX_URL": "Run ./tools/browser/clue-browser setup, then start Camofox or leave Polaristool to start one. See tools/browser/SETUP-CAMOFOX.md",
-    "BROWSER_CAMOFOX_USER_ID": "Set BROWSER_CAMOFOX_USER_ID=polaris-literature so cookies persist. See tools/browser/SETUP-CAMOFOX.md",
-    "BROWSER_IMPORT_COOKIES_PATH": "Optional: export Netscape cookies.txt into ~/.camofox/cookies and point this at the file. See tools/browser/SETUP-CAMOFOX.md",
-    "CAMOFOX_API_KEY": "Set CAMOFOX_API_KEY if Camofox is not on loopback and you import cookies. See tools/browser/SETUP-CAMOFOX.md",
+    "DISPLAY": "Start Xvfb and set DISPLAY=:99. See tools/browser/SETUP-BROWSER.md",
+    "BROWSER_CAMOFOX_URL": "Run ./tools/browser/clue-browser setup, then start Camofox or leave Polaristool to start one. See tools/browser/SETUP-BROWSER.md",
+    "BROWSER_CAMOFOX_USER_ID": "Set BROWSER_CAMOFOX_USER_ID=polaris-literature so cookies persist. See tools/browser/SETUP-BROWSER.md",
+    "BROWSER_IMPORT_COOKIES_PATH": "Optional: export Netscape cookies.txt into ~/.camofox/cookies and point this at the file. See tools/browser/SETUP-BROWSER.md",
+    "CAMOFOX_API_KEY": "Set CAMOFOX_API_KEY if Camofox is not on loopback and you import cookies. See tools/browser/SETUP-BROWSER.md",
     "BROWSER_PROXY_SERVER": "Set BROWSER_PROXY_SERVER when publisher sites need an ISP/residential proxy.",
     "BROWSER_PROXY_USERNAME": "Set with BROWSER_PROXY_SERVER for authenticated proxies.",
     "BROWSER_PROXY_PASSWORD": "Set with BROWSER_PROXY_SERVER for authenticated proxies.",
@@ -39,10 +39,8 @@ NEXT_STEPS: dict[str, str] = {
     "python3": "Install Python 3.11+.",
     "docker": "Install Docker to run the local SearXNG backend.",
     "xelatex": "Install TeX Live / XeLaTeX for formal PDF rendering.",
-    "SETUP-DISPLAY.md": "Restore tools/browser/SETUP-DISPLAY.md.",
-    "SETUP-CAMOFOX.md": "Restore tools/browser/SETUP-CAMOFOX.md.",
-    "../browser/SETUP-DISPLAY.md": "Restore tools/browser/SETUP-DISPLAY.md.",
-    "../browser/SETUP-CAMOFOX.md": "Restore tools/browser/SETUP-CAMOFOX.md.",
+    "SETUP-BROWSER.md": "Restore tools/browser/SETUP-BROWSER.md.",
+    "../browser/SETUP-BROWSER.md": "Restore tools/browser/SETUP-BROWSER.md.",
     "package.json": "Restore tools/browser/package.json and run ./clue-browser setup.",
     "config/settings.yml": "Restore tools/web-search/config/settings.yml.",
 }
@@ -250,7 +248,7 @@ def collect_live_findings(tool_id: str, environment: dict[str, str]) -> list[dic
                     "recommended",
                     "env",
                     "BROWSER_CAMOFOX_USER_ID",
-                    "Camofox session has no ~/.camofox/profiles yet. Import cookies or log in once. See tools/browser/SETUP-CAMOFOX.md",
+                    "Camofox session has no ~/.camofox/profiles yet. Import cookies or log in once. See tools/browser/SETUP-BROWSER.md",
                 )
             )
     cookies_path = (environment.get("BROWSER_IMPORT_COOKIES_PATH") or "").strip()
@@ -266,7 +264,7 @@ def collect_live_findings(tool_id: str, environment: dict[str, str]) -> list[dic
                     "recommended",
                     "file",
                     "BROWSER_IMPORT_COOKIES_PATH",
-                    "cookie file not found. See tools/browser/SETUP-CAMOFOX.md",
+                    "cookie file not found. See tools/browser/SETUP-BROWSER.md",
                 )
             )
     return findings

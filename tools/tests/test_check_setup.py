@@ -22,7 +22,7 @@ class CheckSetupTests(unittest.TestCase):
         report = json.loads(completed.stdout)
         display = next(item for item in report["checked"] if item["key"] == "DISPLAY")
         self.assertEqual(display["status"], "missing")
-        self.assertIn("SETUP-DISPLAY.md", display["next"])
+        self.assertIn("SETUP-BROWSER.md", display["next"])
         self.assertTrue(
             any(item["key"] == "DISPLAY" for item in report["missingRecommended"])
         )

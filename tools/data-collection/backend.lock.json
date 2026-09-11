@@ -59,14 +59,9 @@
     "commands": [],
     "files": [
       {
-        "path": "../browser/SETUP-DISPLAY.md",
+        "path": "../browser/SETUP-BROWSER.md",
         "kind": "required",
-        "reason": "Phase-2 PDF capture follows the same DISPLAY / Camofox host setup."
-      },
-      {
-        "path": "../browser/SETUP-CAMOFOX.md",
-        "kind": "required",
-        "reason": "Phase-2 PDF capture uses the Polaristool Camofox session."
+        "reason": "Phase-2 PDF capture follows the same DISPLAY, Camofox, and persistent session setup."
       }
     ]
   }
