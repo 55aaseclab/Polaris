@@ -99,13 +99,22 @@ session reusable but does not log in to a publisher.
 
 ### Cookie import
 
-The source file must use Netscape `cookies.txt` format:
+First export the cookies from the already authenticated publisher browser
+session in Netscape `cookies.txt` format. A browser cookie-export extension can
+create this file. The export is an input supplied by you; Polaris does not
+download or create it.
+
+Then use the actual path and filename of that export:
 
 ```sh
 mkdir -p ~/.camofox/cookies
-cp ~/Downloads/publisher_cookies.txt ~/.camofox/cookies/publisher.txt
+cp /path/to/your/exported-cookies.txt ~/.camofox/cookies/publisher.txt
 export BROWSER_IMPORT_COOKIES_PATH=publisher.txt
 ```
+
+`/path/to/your/exported-cookies.txt` is a placeholder and must be replaced by
+the file you exported. The destination filename `publisher.txt` is arbitrary;
+it is only the local name used by `BROWSER_IMPORT_COOKIES_PATH`.
 
 Relative paths use `CAMOFOX_COOKIES_DIR` (default `~/.camofox/cookies`). An
 absolute path is also accepted. Set `CAMOFOX_API_KEY` when Camofox is not on
