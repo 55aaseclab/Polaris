@@ -3,11 +3,12 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
-## [0.3.4] - Unreleased
+## [0.3.4] - 2026-09-11
 
-Started the next working release after the archived 0.3.3 capacity ship.
-This release keeps the reviewed single-host envelope at 20 active vaults and
-consolidates the current control/vault-data, Portal, and Paseo surface state.
+Released the current single-host working baseline after the archived 0.3.3
+capacity ship. This release keeps the reviewed envelope at 20 active vaults
+and consolidates the control/vault-data, Portal, Paseo, and Wanghai-migration
+state. Workflow live tools remain out of this release.
 
 ### Current state
 
@@ -34,13 +35,14 @@ consolidates the current control/vault-data, Portal, and Paseo surface state.
   fixed-mount format adapters remain there because Polaris owns the integrated
   lifecycle and release policy.
 
-### Next
+### Deferred
 
-- Produce and verify the 0.3.4 release manifest and host environment.
-- Re-run the focused source, deployment, and read-only remote checks for the
-  new release identity before promotion.
+- Re-run host-bound manifest generation and read-only remote checks after the
+  source tag when a new designated-host candidate is cut.
 - Close or explicitly defer the remaining external perimeter, authenticated
   tenant-matrix, restart-safety, supply-chain, and operator-approval gaps.
+- Workflow live tools, operator UX validation, and the next release identity
+  remain [Polaris 0.4.0](apps/docs/site/operations/polaris-0.4.0/) work.
 
 ## [0.3.3] - 2026-08-09
 

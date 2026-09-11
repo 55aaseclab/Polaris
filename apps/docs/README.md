@@ -48,7 +48,7 @@ record.
 
 Use one small change batch, one canonical owner, and one verification result.
 For the routine and release status, read
-[Polaris 0.3.4 current state](site/operations/polaris-0.3.4/index.md) and
+[Polaris 0.3.4 shipped baseline](site/operations/polaris-0.3.4/index.md) and
 [archived Polaris 0.3 Release](site/operations/polaris-release/index.md) for
 the original gate record.
 

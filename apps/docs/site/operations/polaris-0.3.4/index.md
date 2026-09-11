@@ -1,9 +1,9 @@
 # Polaris 0.3.4
 
-Status: **active working release**, started 2026-08-11. Polaris 0.3.3 is
+Status: **shipped as source tag `0.3.4` on 2026-09-11**. Polaris 0.3.3 is
 archived; its capacity, migration, and deployment records remain the
-historical baseline. This page is the current state summary and the working
-boundary for the next release.
+historical baseline. This page is the current shipped-state summary. The next
+product slice is [Polaris 0.4.0](../polaris-0.4.0/).
 
 References below to private surface are retained only as historical deployment
 evidence. private surface documentation and source are archived; current product
@@ -50,9 +50,12 @@ from the measured 0.3.3 baseline; 0.3.4 does not raise them.
 
 The current source baseline includes the control/vault-data split, data-root
 backup-key derivation, Portal extraction, Paseo package relocation, the
-Paseo-aligned Portal visual system, and the Docker vertical-runtime startup
-fixes. The active candidate is committed as
-`c13647b1fbc0a2b8fe140efd3564e9c78fece846`.
+Paseo-aligned Portal visual system, Docker vertical-runtime startup fixes,
+the Wanghai migration boundary, and the durable mock workflow control slice.
+The last recorded m00 candidate is
+`c13647b1fbc0a2b8fe140efd3564e9c78fece846`. The source tag `0.3.4` is the
+current working-tree baseline after that candidate. Formal production
+promotion remains separate.
 
 ## Focused Verification Already Available
 
@@ -113,15 +116,15 @@ The active blue candidate has no public private surface gateway port. The remote
 check found no active private surface container or `9090` listener, and the private
 gateway boundary still returned `401` without a session.
 
-## 0.3.4 Next Work
+## After This Ship
 
-1. Repeat the focused source checks, host-bound manifest generation, and
-   read-only remote checks after each source or reviewed environment change.
+1. Repeat host-bound manifest generation and read-only remote checks only
+   when a new designated-host candidate is cut from this tag.
 2. Close or explicitly carry forward the remaining external authenticated
    tenant matrix, failed-restart committed-write proof, signed supply-chain
    evidence, and operator approval gaps.
-3. Keep the 0.3.3 capacity and migration evidence immutable while recording
-   each new 0.3.4 result in this release's evidence pages.
+3. Keep the 0.3.3 capacity and migration evidence immutable. New workflow
+   and live-tool work belongs on [Polaris 0.4.0](../polaris-0.4.0/).
 
 ## Relationship To Later Releases
 

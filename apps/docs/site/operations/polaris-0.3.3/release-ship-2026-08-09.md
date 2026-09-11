@@ -12,14 +12,14 @@ Status: **shipped**. Operator decision: stop open verification gates and publish
 | Release | `0.3.3` |
 | Profile | `0.3.0-single-host` |
 | `maxActiveVaults` | 20 |
-| Polaris source (ship commit) | `e22e638` (`v0.3.3`) |
+| Polaris source (ship commit) | `e22e638` (`0.3.3`) |
 | Migration label | `release-0.3.3-ship` |
 
 ## Surfaces (post-ship)
 
 | Surface | Color | Auth | Release in process | Health |
 | --- | --- | --- | --- | --- |
-| Local checkout | n/a | n/a | tag `v0.3.3`, profile 20 | n/a |
+| Local checkout | n/a | n/a | tag `0.3.3`, profile 20 | n/a |
 | `m00e04c1b76c0.dyn.epfl.ch` | blue | disabled | `0.3.3` / max 20 | 200 |
 | `polaris.jianxiaoyitech.com` | green | `authing-browser-session` | `0.3.3` / max 20 | HTTPS 200; session 401 |
 
@@ -35,7 +35,7 @@ pre-ship). EPFL data root left intact; no synthetic leftovers required.
 ## Post-ship Source Review
 
 The runtime extraction was reviewed against Polaris baseline commit `e22e638`
-(`v0.3.3`). This is implementation-level evidence from the working tree, not
+(`0.3.3`). This is implementation-level evidence from the working tree, not
 a new deployment or a release-gate closure.
 
 - Moved the reusable Docker, Pod, and KubeVirt execution code to

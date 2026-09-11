@@ -29,7 +29,6 @@ const directoryOrder: Record<string, string[]> = {
     "index.md",
     "remote-deploy.md",
     "infamous-regression.md",
-    "topology.md",
     "polaris-release",
     "polaris-0.3.1",
     "polaris-0.3.2",
@@ -97,7 +96,7 @@ const directoryLabels: Record<string, string> = {
   "operations/polaris-0.3.1": "Polaris 0.3.1 Performance (Archived)",
   "operations/polaris-0.3.2": "Polaris 0.3.2 Production (Archived)",
   "operations/polaris-0.3.3": "Polaris 0.3.3 Capacity (Archived)",
-  "operations/polaris-0.3.4": "Polaris 0.3.4 (Current)",
+  "operations/polaris-0.3.4": "Polaris 0.3.4 (Shipped)",
   "operations/polaris-0.4.0": "Polaris 0.4.0 Workflows",
   "operations/polaris-0.5.0": "Polaris 0.5.0 Local Cell",
 };

@@ -1,6 +1,6 @@
 ===== LOCAL =====
 commit=e22e63809af68c5bd52eb1f6ecf945ee69242372
-tag=v0.3.3
+tag=0.3.3
 ## [0.3.3] - 2026-08-09
 POLARIS_RELEASE_ID=0.3.3
 maxActiveVaults 20

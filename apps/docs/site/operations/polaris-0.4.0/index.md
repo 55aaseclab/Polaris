@@ -1,70 +1,104 @@
 # Polaris 0.4.0
 
-Status: the Phase 3-6 deterministic control slice is implemented. The Portal
-is the work console, Domain Packs and workflow definitions live outside every
-Vault, and each run is bound to one selected Vault. Execution remains a
-Polaris-owned mock host: no real Agent, registry adapter, external tool, or
-private surface action is enabled by this slice. An isolated operator drill
-exists for the disabled read-only Vault metadata pilot. The minimum
-first-party business domain, `VaultKnowledgeHealth@1.0.0`, is implemented and
-maps `ArtifactMetadata@1.0.0` to `vault.artifact.metadata.read`, but ordinary
-workflow runs still use the mock host.
+Status: **in progress on the shipped `0.3.4` baseline**. The Phase 3-6
+deterministic control slice is in the tree. The Portal is the work console,
+Domain Packs and workflow definitions live outside every Vault, and each run
+is bound to one selected Vault or the Polaris host. Execution remains a
+Polaris-owned host or mock host: no real Agent, registry adapter, external
+tool, or private surface action is enabled by this slice. An isolated
+operator drill exists for the disabled read-only Vault metadata pilot. The
+minimum first-party business domain, `VaultKnowledgeHealth@1.0.0`, is
+implemented and maps `ArtifactMetadata@1.0.0` to
+`vault.artifact.metadata.read`. Ordinary Vault-target workflow runs still
+use the mock host.
 
 This page is the authoritative summary of the 0.4.0 implementation state.
 It separates the product contract, the current mock boundary, and later live
 execution work so a passing UI test cannot be mistaken for proof of an
 external side effect.
 
-## Done And TODO
+## Remaining Work
 
-Done:
+Code is the ground truth. 0.4.0 is an in-progress workflow slice on the
+shipped `0.3.4` baseline. It is not a released version: `CHANGELOG.md`,
+`deploy/release-manifest.json`, and `POLARIS_RELEASE_ID` still say `0.3.4`.
 
-- The Phase 3-6 durable mock workflow control slice is implemented: verified
-  pack install, WorkEnvelope admission, immutable pack pins, Vault capability
-  leases, durable queue state, worker recovery, manual approval, cancellation,
-  retry, event replay, receipts, artifacts, and non-executable suggestions.
-- `packages/polaris-tools` is the canonical first-party tool catalog. Polaris
-  derives the disabled live action catalog and mock receipts from that package.
-- `VaultKnowledgeHealth@1.0.0` is the minimum first-party business domain. Its
-  `ReviewKnowledgeHealth` flow declares `ArtifactMetadata@1.0.0`; Polaris maps
-  that call to the Common tool `vault.artifact.metadata.read`.
-- `polaris-workflow` now has a separately gated `v0.4-trial` language surface.
-  Its syntax, budgets, and CVE-Genie fixture are documented on
-  [Polaris DSL](/polaris/dsl). It remains a package-level deterministic
-  trial and is not wired into the ordinary Portal worker or any live
-  external action.
-- The private surface literature-review implementation is migrated into the Polaris
-  workflow at `workflows/literature-review`. It owns the
-  [Polaris DSL](/polaris/dsl) declaration,
-  orchestration, CLI, skills, environment contract, and review continuation;
-  it binds each node to reusable implementations under the one root `tools/`
-  directory. No application-local tool bundle, private surface package, or private surface
-  executable is required.
-- The common tools include Polaris-owned collection and analysis review
-  adapters. Their state files use atomic replacement, bounded audit history,
-  stable collection identities, and claim revision-hash checks. The workflow
-  setup command prepares locked SearXNG/JustOneAPI backends and browser
-  dependencies only for explicitly requested local execution.
-- The generic live tool gateway, disabled metadata executor family, ordinary
-  worker candidate route, operator admission path, receipt reconciliation, and
-  isolated metadata drill exist for `vault.artifact.metadata.read`.
+### Already in the tree
 
-TODO before live tools:
+- Durable mock workflow control: verified packs, WorkEnvelope admission,
+  immutable pack pins, Vault capability leases, queue, worker recovery,
+  approval, cancellation, retry, event replay, receipts, artifacts, and
+  non-executable suggestions.
+- `packages/polaris-tools` is the first-party catalog. Polaris derives the
+  disabled live action catalog from it.
+- `packs/vault-knowledge-health/main.ord` is `VaultKnowledgeHealth@1.0.0`.
+  `ReviewKnowledgeHealth` declares `ArtifactMetadata@1.0.0`; Polaris maps
+  that call to `vault.artifact.metadata.read`.
+- Repository packs under `packs/` are discovered as built-in. `pack add`
+  installs extra versions under `$POLARIS_DATA_ROOT/control/domain-packs/`.
+- `polaris-workflow` has a separately gated `v0.4-trial` surface. It is not
+  wired into the ordinary Portal worker.
+- Literature Review is the `AutoResearch` / `LiteratureReview` pack at
+  `packs/autoresearch/`, with reusable adapters under `tools/`. There is no
+  `workflows/literature-review` tree and no `polaris -- literature-review`
+  CLI command.
+- Ordinary Portal vault runs persist `mode: "mock"`. Host runs
+  (`driver=none`) persist `mode: "host"`. Live mode exists only on the
+  operator metadata-admission path.
+- The live tool gateway, metadata executor family, candidate worker route,
+  operator admission command, receipt reconciliation, and isolated drill
+  exist for `vault.artifact.metadata.read` only.
 
-- Validate the ordinary user experience in the target environment: install the
-  first-party pack, select `VaultKnowledgeHealth`, choose a user-owned runnable
-  Vault, and run `ReviewKnowledgeHealth` through the normal Portal flow.
-- Keep ordinary UI-created setup, provisioning, manual, and retry runs
-  `mode: "mock"` until a separate live-admission decision is made.
-- If live `vault.artifact.metadata.read` is needed, admit it only through the
-  existing Polaris operator path with both live flags, release evidence, a
-  reviewed candidate acknowledgement, and a current user-owned runnable Vault.
-- Add future live tools by extending small executor families behind the same
-  live tool gateway. Do not add one adapter per tool and do not expose live
-  execution from private surface, setup provisioning, or ordinary UI-created
-  runs.
-- AI-assisted workflow generation remains later work. A model may not publish,
-  enable, or execute workflow definitions in this release.
+### Must stay true while finishing 0.4.0
+
+- [ ] Do not bump `POLARIS_RELEASE_ID`, the release manifest, or a `0.4.0`
+  tag until the items below are accepted.
+- [ ] Keep ordinary UI-created setup, provisioning, and Vault-target manual
+  or retry runs `mode: "mock"`.
+- [ ] Admit live `vault.artifact.metadata.read` only through
+  `ops workflow-admit-live-metadata` with both live flags, release evidence,
+  candidate acknowledgement, and a current user-owned runnable Vault.
+- [ ] Add later live tools as executor families behind the same gateway. Do
+  not add one adapter per tool and do not expose live execution from private
+  surface, setup provisioning, or ordinary UI-created runs.
+- [ ] Keep `v0.4-trial` out of the ordinary Portal worker.
+- [ ] Do not enable a real Vault Host, private-surface mutation, external
+  Agent, or AI-assisted workflow generation in this slice.
+
+### Docs that no longer match the code
+
+- [ ] Rewrite claims that Literature Review lives at
+  `workflows/literature-review` or is launched by
+  `pnpm --dir apps/polaris run polaris -- literature-review`. The current
+  CLI workflow commands are `pack`, `ops workflow-smoke`,
+  `ops workflow-admit-live-metadata`, and `ops workflow-live-metadata-drill`.
+- [ ] Rewrite [Polaris usage](/polaris/usage) host-adapter and
+  `SysSecResearch` paths so they match `packs/autoresearch` and the Portal
+  host / Vault drivers.
+- [ ] Say that built-in packs are discovered from `packs/`. `pack add` is
+  for extra or overridden versions, not the only way to see first-party
+  packs.
+- [ ] Document that host runs use `mode: "host"` and Vault runs use
+  `mode: "mock"`. Do not call every ordinary UI run mock-only.
+- [ ] Add `DELETE /api/workflow-runs/:runId` to the Portal API contract if
+  that route stays.
+
+### Product checks still missing
+
+- [ ] Run the ordinary Portal path in the target environment: select
+  `VaultKnowledgeHealth`, choose host or a user-owned runnable Vault, and
+  complete `ReviewKnowledgeHealth`.
+- [ ] Decide whether host retry should requeue the same run id and skip
+  completed steps. Uncommitted `requeueWorkflowRun` work is not in `0.3.4`
+  and is not accepted 0.4.0 behavior yet.
+- [ ] Keep `ops workflow-smoke` as the operator-facing proof that the
+  default path is mock-only.
+
+### When this slice is accepted
+
+- [ ] Date `CHANGELOG.md` as `[0.4.0]`.
+- [ ] Cut a reviewed designated-host candidate only if operators need one.
+- [ ] Tag `0.4.0`, not `v0.4.0`.
 
 ## Product Boundary
 
@@ -341,14 +375,12 @@ production approval, or proof of external side effects.
 
 ## Release Boundary
 
-The Phase 3-6 slice is complete when the focused checks above pass and the
-Portal contract remains unchanged. 0.4.0 is not a live Agent execution
-release. The mocked workflow path can be run through the current Polaris
-Portal with `VaultKnowledgeHealth`, while all ordinary UI-created manual,
-setup, provisioning, and retry runs remain mock-only. The read-only metadata
-pilot has candidate ordinary-worker wiring and a deliberate operator admission
-path, but only for `vault.artifact.metadata.read` durable live-policy runs
-with both deployment flags enabled. The next boundary is live executor-family
+The Phase 3-6 slice is source-complete when the focused checks above pass
+and the Portal contract remains unchanged. 0.4.0 is not a released version
+and is not a live Agent execution release. The ordinary Portal path can run
+`VaultKnowledgeHealth` as a host run or a mock Vault run. Live
+`vault.artifact.metadata.read` remains behind the operator admission path
+and both deployment flags. The next boundary is live executor-family
 implementations behind the same Polaris gateway, admission, async host,
 receipt, and audit contract, without one adapter per tool. AI-assisted
 workflow generation remains an open later capability.

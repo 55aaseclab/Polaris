@@ -14,7 +14,7 @@ surface boundaries.
 4. Read [Polaris Gateway](/polaris/gateway) for the public ingress and
    authority boundary.
 5. Read [Remote Deploy](./remote-deploy.md) for host layout and rollout.
-6. Read [Polaris 0.3.4](./polaris-0.3.4/) for the current state and next work;
+6. Read [Polaris 0.3.4](./polaris-0.3.4/) for the current shipped baseline;
    use [Polaris 0.3 Release](./polaris-release/) for the original 0.3 gates,
    evidence, and go/no-go record.
 7. Read [archived Polaris 0.3.1](./polaris-0.3.1/) for performance work, then

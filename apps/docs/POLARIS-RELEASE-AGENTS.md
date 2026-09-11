@@ -2,13 +2,12 @@
 
 ## Mission
 
-Maintain the Polaris 0.3.4 working release on the inherited single-host
-20-vault profile without a tenant-boundary failure, unauthenticated access to
-the retained private surface, data loss, or an unrepeatable release. Polaris
-0.3.3 is archived. The
-current source line has a release-manifest-backed designated-host deployment;
-0.3.4 remains a controlled HTTP test-host candidate, not a production
-promotion.
+Maintain the shipped Polaris 0.3.4 source baseline on the inherited
+single-host 20-vault profile without a tenant-boundary failure,
+unauthenticated access to the retained private surface, data loss, or an
+unrepeatable release. Polaris 0.3.3 is archived. The source tag is `0.3.4`.
+Formal production promotion remains separate. New workflow and live-tool work
+belongs on the 0.4.0 page.
 
 ## Restore Context
 
@@ -31,12 +30,12 @@ The Polaris runtime boundary, backup recovery, resource envelope, restart
 drill, 20-vault capacity baseline, control/vault-data migration, and
 Portal/Paseo surface extraction have source or isolated-host evidence. The
 0.3.3 capacity and migration records are archived; 0.3.4 inherits the same
-20-vault profile and is the active stabilization line.
+20-vault profile and is the shipped source baseline.
 
-Open 0.3.4 work is to close or explicitly carry forward the external
-authenticated tenant matrix, failed-restart committed-write proof, signed
-promotion evidence, security triage, and operator approval. Standalone runtime
-variants, unsupported runtimes, and larger capacity remain outside this line.
+Open 0.3.4 carry-forward work is the external authenticated tenant matrix,
+failed-restart committed-write proof, signed promotion evidence, security
+triage, and operator approval. Standalone runtime variants, unsupported
+runtimes, larger capacity, and live workflow tools remain outside this line.
 
 ## Non-Negotiable Boundary
 
@@ -72,7 +71,8 @@ variants, unsupported runtimes, and larger capacity remain outside this line.
 - Do not use or record real credentials, customer data, cookies, assertions, or
   unredacted host output.
 - Preserve user work, including Polaris untracked `packages/paseo/.surface-*`
-  directories and the docs `topology.md` edit.
+  directories. Deployment topology lives in Vault Management, not a separate
+  operations page.
 
 ## Working Method
 

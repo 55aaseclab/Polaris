@@ -5,7 +5,7 @@ import path from "node:path";
 const distRoot = path.resolve("site/.vitepress/dist");
 const pageCandidates = [
   path.join(distRoot, "polaris", "gateway.html"),
-  path.join(distRoot, "operations", "topology.html"),
+  path.join(distRoot, "polaris", "vault-management.html"),
   path.join(distRoot, "deployment", "local-development.html"),
 ];
 const pagePath = pageCandidates.find((candidate) => fs.existsSync(candidate));
