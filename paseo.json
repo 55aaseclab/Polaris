@@ -1,5 +1,10 @@
 {
   "scripts": {
+    "docs": {
+      "type": "service",
+      "port": 4180,
+      "command": "bash -lc 'exec pnpm run docs:dev'"
+    },
     "stack": {
       "type": "service",
       "command": "bash -lc 'bash ./scripts/run-polaris-local-stack-service.sh .env.dev'"
