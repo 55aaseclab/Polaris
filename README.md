@@ -31,72 +31,45 @@ runbooks, and release evidence live on the
 
 ## Local Development
 
-Local stack service:
-
 ```bash
+# clone
+git clone --recurse-submodules git@github.com:jianxiaoyitech/Polaris.git
+cd Polaris
+# init submodules
+git submodule update --init --recursive
+# copy and edit .env.dev (minimum below)
+cp .env.dev.example .env.dev
+# start the local stack
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
-You can also start it through the `stack` service in `paseo.json`.
+Keep `POLARIS_AUTH_MODE=disabled`. Authing vars are unused. Use one
+`POLARIS_DATA_ROOT` in every process.
 
-Paseo runs through its Expo web development server in this stack. Changes under
-`packages/paseo/source` use Fast Refresh and do not rebuild the Paseo web
-artifact.
-On the first run only, its shared package dependencies are compiled when their
-upstream `dist` entry points are absent.
-
-When you start `polaris server` outside the local stack wrapper, keep the same
-runtime data root in every process. In local development that usually means
-exporting:
+Minimum `.env.dev`:
 
 ```bash
-POLARIS_DATA_ROOT=/path/to/polaris/data
-```
-
-If different host processes point at different `POLARIS_DATA_ROOT` values, the
-portal can show workspace state that another process cannot resolve.
-
-Local development uses `.env.dev`.
-Polaris test commands also source `.env.dev` and use the same configured
-`POLARIS_DATA_ROOT`.
-Use `.env.dev.example` as the starting template.
-
-The main values are:
-
-```bash
+POLARIS_AUTH_MODE=disabled
+POLARIS_AUTH_DEFAULT_USER_ID=100000000000000001
 POLARIS_DATA_ROOT=/path/to/polaris/data
 POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/vault-data
-POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
+POLARIS_SERVER_BIND_HOST=0.0.0.0
 POLARIS_SERVER_PORT=8787
-POLARIS_PUBLIC_BASE_URL=http://HOST_IP:8081
-POLARIS_PASEO_APP_BASE_URL=http://HOST_IP:8082
-POLARIS_AUTHING_APP_ID=your-authing-app-id
-POLARIS_AUTHING_APP_SECRET=your-authing-app-secret
-POLARIS_AUTHING_ISSUER=https://your-tenant.authing.cn/oidc
-POLARIS_AUTHING_JWKS_URL=https://your-tenant.authing.cn/oidc/.well-known/jwks.json
-POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
-POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
-POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
-POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://HOST_IP:5173
-POLARIS_AUTHING_REDIRECT_URI=http://HOST_IP:8082/auth/callback
-```
+POLARIS_PUBLIC_BASE_URL=http://127.0.0.1:8787
+POLARIS_PASEO_APP_BIND_HOST=0.0.0.0
+POLARIS_PASEO_APP_PORT=8082
+POLARIS_PASEO_APP_BASE_URL=http://127.0.0.1:8082
+POLARIS_PORTAL_ALLOWED_ORIGINS=http://127.0.0.1:8787,http://127.0.0.1:8082
+POLARIS_WANGHAI_GATEWAY_ORIGIN=http://127.0.0.1:8787
+POLARIS_WANGHAI_GATEWAY_MASTER_SECRET=replace-with-at-least-32-random-characters
+POLARIS_WANGHAI_DOCKER_GATEWAY_HOST=127.0.0.1
 
-Minimal Polaris env:
-
-```bash
-POLARIS_DATA_ROOT=/path/to/polaris/data
-POLARIS_NETFS_LOCAL_EXPORT_ROOT=/path/to/polaris/data/vault-data
-POLARIS_SERVER_BIND_HOST=127.0.0.1
-POLARIS_SERVER_PORT=8787
-POLARIS_AUTHING_APP_ID=your-authing-app-id
-POLARIS_AUTHING_APP_SECRET=your-authing-app-secret
-POLARIS_AUTHING_ISSUER=https://your-tenant.authing.cn/oidc
-POLARIS_AUTHING_JWKS_URL=https://your-tenant.authing.cn/oidc/.well-known/jwks.json
-POLARIS_AUTHING_AUTHORIZATION_URL=https://your-tenant.authing.cn/oidc/auth
-POLARIS_AUTHING_TOKEN_URL=https://your-tenant.authing.cn/oidc/token
-POLARIS_AUTHING_LOGOUT_URL=https://your-tenant.authing.cn/oidc/session/end
-POLARIS_AUTHING_LOGOUT_REDIRECT_URI=http://127.0.0.1:5173
-POLARIS_AUTHING_REDIRECT_URI=http://127.0.0.1:8082/auth/callback
+# Codex / RightCode tool defaults
+RIGHTCODE_USERNAME=your-username
+RIGHTCODE_PASSWORD=your-password
+POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT='node scripts/rightcode-api-key.mjs create'
+POLARIS_DEFAULT_CODEX_RIGHTCODE_QUOTA_LIMIT=20
+POLARIS_DEFAULT_CODEX_RIGHTCODE_ALLOWED_PREFIXES=/codex,/draw
 ```
 
 ## Polaris CLI
