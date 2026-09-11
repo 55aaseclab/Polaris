@@ -1,0 +1,12 @@
+HTTP/2 200 
+server: nginx/1.22.1
+date: Sun, 09 Aug 2026 08:19:17 GMT
+content-type: text/html; charset=utf-8
+content-length: 3332
+content-disposition: inline; filename="index.html"
+accept-ranges: bytes
+etag: "dea2cf1333fcee621f8d9267f47d19f3c0a9dd05"
+vary: Accept-Encoding
+content-security-policy: upgrade-insecure-requests
+set-cookie: polaris_auth_override=; Path=/; SameSite=Lax
+

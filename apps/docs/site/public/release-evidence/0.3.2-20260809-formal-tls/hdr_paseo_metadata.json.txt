@@ -1,0 +1,12 @@
+HTTP/2 200 
+server: nginx/1.22.1
+date: Sun, 09 Aug 2026 08:19:18 GMT
+content-type: application/json; charset=utf-8
+content-length: 49
+content-disposition: inline; filename="metadata.json"
+accept-ranges: bytes
+etag: "f8e3dd814cc63e6236b2156972e30baf3b26374b"
+vary: Accept-Encoding
+content-security-policy: upgrade-insecure-requests
+set-cookie: polaris_auth_override=; Path=/; SameSite=Lax
+

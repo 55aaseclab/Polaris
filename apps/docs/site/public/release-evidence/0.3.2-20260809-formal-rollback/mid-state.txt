@@ -1,0 +1,7 @@
+ACTIVE=green
+UPSTREAM=set $polaris_upstream http://127.0.0.1:28080;
+DATA_BYTES=60665657
+USER_DIRS=69
+POLARIS_RELEASE_ID=0.3.1
+loop_healthz 200
+green_direct 200

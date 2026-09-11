@@ -1,0 +1,8 @@
+ACTIVE=blue
+UPSTREAM=set $polaris_upstream http://127.0.0.1:18080;
+BLUE_RELEASE=POLARIS_RELEASE_ID=0.3.2
+GREEN_RELEASE=POLARIS_RELEASE_ID=0.3.1
+DATA_BYTES=60665657
+USER_DIRS=69
+379564dcc39d6cfbf4364e1db6dc1fd2d83a0a9596ed693c68535a9c76e670fd  /srv/polaris/app/deploy/release-manifest.json
+loop_healthz 200

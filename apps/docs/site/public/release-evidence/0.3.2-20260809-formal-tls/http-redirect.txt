@@ -1,0 +1,1 @@
+http_root 301 redirect=https://polaris.jianxiaoyitech.com/

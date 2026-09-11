@@ -1,0 +1,39 @@
+===== LOCAL =====
+commit=e22e63809af68c5bd52eb1f6ecf945ee69242372
+tag=v0.3.3
+## [0.3.3] - 2026-08-09
+POLARIS_RELEASE_ID=0.3.3
+maxActiveVaults 20
+===== FORMAL =====
+ACTIVE=green
+POLARIS_AUTH_MODE=authing-browser-session
+POLARIS_MAX_ACTIVE_VAULTS=20
+POLARIS_RELEASE_ID=0.3.3
+MANIFEST=0.3.3 e22e638
+DATA=60665657
+loop_healthz 200
+loop_session 401
+{
+  "error": "Authentication is required"
+}
+
+https_healthz 200
+https_session 401
+{
+  "error": "Authentication is required"
+}
+
+===== M00 =====
+ACTIVE=blue
+POLARIS_AUTH_MODE=disabled
+POLARIS_MAX_ACTIVE_VAULTS=20
+POLARIS_RELEASE_ID=0.3.3
+MANIFEST 0.3.3 e22e638
+DATA=3794177
+healthz 200
+session 200
+{
+  "authMode": "disabled",
+  "authenticated": true,
+  "authingUserId": "local-dev-authing-user:cyruscyliu",
+  "authingU

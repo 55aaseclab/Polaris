@@ -1,0 +1,78 @@
+{
+  "kind": "polaris-gateway-performance-benchmark",
+  "recordedAt": "2026-08-06T08:46:49.841Z",
+  "fixture": {
+    "samples": 150,
+    "vaults": 10,
+    "warmupSamples": 20
+  },
+  "runtime": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "release": "6.12.74+deb13+1-amd64"
+  },
+  "operations": {
+    "portal.hosts.list": {
+      "count": 150,
+      "maxMs": 11,
+      "p50Ms": 3.37,
+      "p95Ms": 4.82,
+      "p99Ms": 8.51
+    },
+    "gateway.launch": {
+      "count": 150,
+      "maxMs": 3.37,
+      "p50Ms": 1.75,
+      "p95Ms": 2.19,
+      "p99Ms": 2.82
+    },
+    "gateway.exchange": {
+      "count": 150,
+      "maxMs": 2.67,
+      "p50Ms": 1.54,
+      "p95Ms": 1.87,
+      "p99Ms": 2.18
+    },
+    "gateway.read": {
+      "count": 150,
+      "maxMs": 4.9,
+      "p50Ms": 3.23,
+      "p95Ms": 3.77,
+      "p99Ms": 4.65
+    },
+    "gateway.mutation": {
+      "count": 150,
+      "maxMs": 10.42,
+      "p50Ms": 7.53,
+      "p95Ms": 8.74,
+      "p99Ms": 10.28
+    }
+  },
+  "errors": {
+    "portal.hosts.list": 0,
+    "gateway.launch": 0,
+    "gateway.exchange": 0,
+    "gateway.read": 0,
+    "gateway.mutation": 0
+  },
+  "profiles": {
+    "boundedMutation": {
+      "durationMs": 1173.42,
+      "filePath": "/release-evidence/0.3.1-20260806-control-plane-performance/profiles/candidate-64b0b51-run-1-bounded-mutation.profile.json",
+      "nodeCount": 404,
+      "sampleCount": 1064,
+      "sha256": "c7417c07fc25175342e5456ed67431af6f8c5957ae381d448a75e8d3f633ba5d"
+    }
+  },
+  "process": {
+    "userCpuMs": 1516.11,
+    "systemCpuMs": 141.08,
+    "peakRssBytes": 179929088,
+    "eventLoopDelay": {
+      "p50Ms": 9.99,
+      "p95Ms": 10.8,
+      "p99Ms": 12.66,
+      "maxMs": 44.04
+    }
+  }
+}

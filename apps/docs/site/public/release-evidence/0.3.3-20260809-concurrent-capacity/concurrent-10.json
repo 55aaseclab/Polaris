@@ -1,0 +1,79 @@
+{
+  "kind": "polaris-concurrent-user-capacity-benchmark",
+  "recordedAt": "2026-08-09T07:53:06.582Z",
+  "fixture": {
+    "users": 10,
+    "rounds": 3,
+    "warmupRounds": 1,
+    "authMode": "oauth2-proxy"
+  },
+  "profileTargets": {
+    "readP95Ms": 500,
+    "gatewayLaunchSuccessPercent": 99.5,
+    "max5xxPercent": 1
+  },
+  "runtime": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "release": "6.12.74+deb13+1-amd64"
+  },
+  "operations": {
+    "portal.login": {
+      "count": 30,
+      "maxMs": 6.32,
+      "p50Ms": 2.5,
+      "p95Ms": 6.19,
+      "p99Ms": 6.32
+    },
+    "portal.hosts.list": {
+      "count": 30,
+      "maxMs": 10.2,
+      "p50Ms": 5.28,
+      "p95Ms": 6.87,
+      "p99Ms": 10.2
+    },
+    "gateway.launch": {
+      "count": 30,
+      "maxMs": 14.73,
+      "p50Ms": 6.85,
+      "p95Ms": 12.11,
+      "p99Ms": 14.73
+    },
+    "gateway.exchange": {
+      "count": 30,
+      "maxMs": 16.46,
+      "p50Ms": 14.43,
+      "p95Ms": 16.46,
+      "p99Ms": 16.46
+    },
+    "gateway.read": {
+      "count": 30,
+      "maxMs": 28.3,
+      "p50Ms": 18.7,
+      "p95Ms": 27.49,
+      "p99Ms": 28.3
+    }
+  },
+  "errors": {
+    "portal.login": 0,
+    "portal.hosts.list": 0,
+    "gateway.launch": 0,
+    "gateway.exchange": 0,
+    "gateway.read": 0
+  },
+  "process": {
+    "userCpuMs": 113.42,
+    "systemCpuMs": 14.35,
+    "peakRssBytes": 140177408,
+    "eventLoopDelay": {
+      "p50Ms": 12.84,
+      "p95Ms": 21.18,
+      "p99Ms": 21.18,
+      "maxMs": 21.18
+    }
+  },
+  "gatewayLaunchSuccessPercent": 100,
+  "fiveXxPercent": 0,
+  "readP95Ms": 27.49,
+  "passed": true
+}

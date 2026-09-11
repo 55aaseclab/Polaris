@@ -1,0 +1,7 @@
+/healthz 200
+/readyz 200
+/paseo/ 200
+/paseo/metadata.json 200
+/api/session 401
+/api/polaris-hosts 401
+/api/authing-config 200

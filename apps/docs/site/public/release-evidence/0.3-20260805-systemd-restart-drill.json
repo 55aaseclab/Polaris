@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "polaris-systemd-restart-drill",
+  "recordedAt": "2026-08-05T16:00:19Z",
+  "environment": "designated HTTP test host; isolated loopback candidate",
+  "source": {
+    "polaris": "52c70e2",
+    "profile": "transient-systemd-candidate"
+  },
+  "unit": {
+    "name": "polaris-recovery-drill.service",
+    "bind": "127.0.0.1:39904",
+    "dataRoot": "/run/polaris-recovery-drill",
+    "firstPid": 647785,
+    "restartPid": 647872,
+    "formalBlueGreenTouched": false
+  },
+  "checks": {
+    "initialActive": true,
+    "initialHealthz": 200,
+    "initialReadyz": 200,
+    "pidChangedAfterRestart": true,
+    "postRestartActive": true,
+    "postRestartHealthz": 200,
+    "postRestartReadyz": 200,
+    "unitRemoved": true,
+    "runtimeDirectoryRemoved": true,
+    "portRemoved": true,
+    "formalBlueActive": true,
+    "formalGreenActive": true
+  },
+  "result": "pass",
+  "productionEvidence": false,
+  "notes": [
+    "The drill used no tenant data and did not restart the formal blue/green services.",
+    "This is host-level candidate evidence, not approval for production traffic or a completed release gate."
+  ]
+}

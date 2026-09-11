@@ -1,0 +1,60 @@
+{
+  "kind": "polaris-control-plane-performance-benchmark",
+  "recordedAt": "2026-08-06T09:28:33.517Z",
+  "fixture": {
+    "samples": 150,
+    "warmupSamples": 20
+  },
+  "runtime": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "release": "6.12.74+deb13+1-amd64"
+  },
+  "operations": {
+    "control-store.mutation-admission": {
+      "count": 150,
+      "maxMs": 4.29,
+      "p50Ms": 0.49,
+      "p95Ms": 0.63,
+      "p99Ms": 0.72
+    },
+    "worker.provision": {
+      "count": 150,
+      "maxMs": 35.73,
+      "p50Ms": 31.08,
+      "p95Ms": 34.88,
+      "p99Ms": 35.53
+    }
+  },
+  "errors": {
+    "control-store.mutation-admission": 0,
+    "worker.provision": 0
+  },
+  "profiles": {
+    "controlStore": {
+      "durationMs": 108.3,
+      "filePath": "/release-evidence/0.3.1-20260806-control-plane-performance/profiles/baseline-pre-worker-status-run-3-control-store.profile.json",
+      "nodeCount": 51,
+      "sampleCount": 74,
+      "sha256": "3d8f96bc9ba011f5dc8dcba56ba8f241be457c9c64b31adfd607874cbf94552e"
+    },
+    "worker": {
+      "durationMs": 4457.51,
+      "filePath": "/release-evidence/0.3.1-20260806-control-plane-performance/profiles/baseline-pre-worker-status-run-3-worker.profile.json",
+      "nodeCount": 1716,
+      "sampleCount": 4038,
+      "sha256": "8df2b0acf4149a0d5b12b808b950067762a54e2a7adf4ebbd7edd5ea7deccbb6"
+    }
+  },
+  "process": {
+    "userCpuMs": 2404.07,
+    "systemCpuMs": 1358.75,
+    "peakRssBytes": 140161024,
+    "eventLoopDelay": {
+      "p50Ms": 31.13,
+      "p95Ms": 35.09,
+      "p99Ms": 36.08,
+      "maxMs": 36.6
+    }
+  }
+}

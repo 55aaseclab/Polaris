@@ -1,0 +1,60 @@
+{
+  "kind": "polaris-control-plane-performance-benchmark",
+  "recordedAt": "2026-08-06T09:31:47.193Z",
+  "fixture": {
+    "samples": 150,
+    "warmupSamples": 20
+  },
+  "runtime": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "release": "6.12.74+deb13+1-amd64"
+  },
+  "operations": {
+    "control-store.mutation-admission": {
+      "count": 150,
+      "maxMs": 0.71,
+      "p50Ms": 0.46,
+      "p95Ms": 0.58,
+      "p99Ms": 0.66
+    },
+    "worker.provision": {
+      "count": 150,
+      "maxMs": 24.78,
+      "p50Ms": 18.63,
+      "p95Ms": 22.65,
+      "p99Ms": 24.35
+    }
+  },
+  "errors": {
+    "control-store.mutation-admission": 0,
+    "worker.provision": 0
+  },
+  "profiles": {
+    "controlStore": {
+      "durationMs": 110.69,
+      "filePath": "/release-evidence/0.3.1-20260806-control-plane-performance/profiles/candidate-64b0b51-run-1-control-store.profile.json",
+      "nodeCount": 53,
+      "sampleCount": 66,
+      "sha256": "118c1975a124063b2bf5b5f74bd81de9b8e4f6dfd5ae49510536be7837ea0aca"
+    },
+    "worker": {
+      "durationMs": 2658.61,
+      "filePath": "/release-evidence/0.3.1-20260806-control-plane-performance/profiles/candidate-64b0b51-run-1-worker.profile.json",
+      "nodeCount": 1335,
+      "sampleCount": 2412,
+      "sha256": "e7e1f88d53c300eeb3f3b0a1947fad12d13a6a454b3039136efee3c0d67a64aa"
+    }
+  },
+  "process": {
+    "userCpuMs": 1670.53,
+    "systemCpuMs": 824.38,
+    "peakRssBytes": 139784192,
+    "eventLoopDelay": {
+      "p50Ms": 18.83,
+      "p95Ms": 22.74,
+      "p99Ms": 24.13,
+      "maxMs": 25.26
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "authMode": "authing-browser-session",
+  "appId": "6a60d1071f867818cf32abe3",
+  "authorizationUrl": "https://ykileupw7yax-qingniao.authing.cn/oidc/auth",
+  "redirectUri": "https://polaris.jianxiaoyitech.com/auth/callback",
+  "logoutUrl": "https://ykileupw7yax-qingniao.authing.cn/oidc/session/end",
+  "logoutRedirectUri": "https://polaris.jianxiaoyitech.com/welcome",
+  "paseoAppBaseUrl": "https://polaris.jianxiaoyitech.com/paseo",
+  "signInUrl": "",
+  "signOutUrl": ""
+}

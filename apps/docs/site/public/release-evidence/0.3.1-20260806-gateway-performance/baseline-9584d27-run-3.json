@@ -1,0 +1,61 @@
+{
+  "kind": "polaris-gateway-performance-benchmark",
+  "recordedAt": "2026-08-06T04:53:54.276Z",
+  "fixture": {
+    "samples": 150,
+    "vaults": 10,
+    "warmupSamples": 20
+  },
+  "runtime": {
+    "node": "v22.23.1",
+    "platform": "linux",
+    "release": "6.12.74+deb13+1-amd64"
+  },
+  "operations": {
+    "portal.hosts.list": {
+      "count": 150,
+      "maxMs": 9.65,
+      "p50Ms": 5.06,
+      "p95Ms": 6.08,
+      "p99Ms": 8.84
+    },
+    "gateway.launch": {
+      "count": 150,
+      "maxMs": 10.19,
+      "p50Ms": 5.18,
+      "p95Ms": 5.77,
+      "p99Ms": 7.76
+    },
+    "gateway.exchange": {
+      "count": 150,
+      "maxMs": 2,
+      "p50Ms": 1.63,
+      "p95Ms": 1.76,
+      "p99Ms": 1.97
+    },
+    "gateway.read": {
+      "count": 150,
+      "maxMs": 11.7,
+      "p50Ms": 6.68,
+      "p95Ms": 8.09,
+      "p99Ms": 9.2
+    }
+  },
+  "errors": {
+    "portal.hosts.list": 0,
+    "gateway.launch": 0,
+    "gateway.exchange": 0,
+    "gateway.read": 0
+  },
+  "process": {
+    "userCpuMs": 2083.77,
+    "systemCpuMs": 240.88,
+    "peakRssBytes": 164892672,
+    "eventLoopDelay": {
+      "p50Ms": 11.45,
+      "p95Ms": 13.1,
+      "p99Ms": 14.29,
+      "maxMs": 15.26
+    }
+  }
+}

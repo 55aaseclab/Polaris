@@ -1,0 +1,1109 @@
+{
+  "auto_groups": [
+    "GPT特供",
+    "Free模型",
+    "MIX分组",
+    "第三方模型"
+  ],
+  "data": [
+    {
+      "cache_ratio": 0.0997566909975669,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2506082725060823,
+      "description": "Claude Fable 5，适合日常对话与编程任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-fable-5",
+      "model_price": 0,
+      "model_ratio": 2.055,
+      "owner_by": "",
+      "pricing_version": "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.10243902439024392,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2487804878048785,
+      "description": "Claude Opus 4.6，面向高质量复杂推理与代码生成。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-opus-4-6",
+      "model_price": 0,
+      "model_ratio": 1.025,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.0967741935483871,
+      "completion_ratio": 6,
+      "description": "Gemini 3.5 Flash High，适合快速且高质量的通用任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3.5-flash-high",
+      "model_price": 0,
+      "model_ratio": 0.31,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.178571428571429,
+      "completion_ratio": 3.142857142857143,
+      "description": "OpenCode GLM-5.3",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "智谱",
+      "model_name": "glm-5.3",
+      "model_price": 0,
+      "model_ratio": 0.28,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,glm",
+      "vendor_id": 6
+    },
+    {
+      "completion_ratio": 0,
+      "description": "Grok Imagine Image 2.0，适合新一代图像生成任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "grok-imagine-image-2.0",
+      "model_price": 0.82,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "vendor_id": 14
+    },
+    {
+      "cache_ratio": 0,
+      "completion_ratio": 2,
+      "description": "OpenCode Muse Spark 1.3 Contributor",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "OpenCode",
+      "model_name": "muse-spark-1.3-contributor",
+      "model_price": 0,
+      "model_ratio": 0.02,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,contributor",
+      "vendor_id": 9
+    },
+    {
+      "completion_ratio": 1,
+      "description": "Google Gemma 大参数免费指令模型，适合通用问答与较复杂文本任务。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Gemini.Color",
+      "model_name": "google/gemma-4-31b-it:free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "通用,免费,第三方",
+      "vendor_id": 5
+    },
+    {
+      "completion_ratio": 3,
+      "description": "Mistral 代码模型，适合代码生成、解释、重构与开发辅助。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Mistral.Color",
+      "model_name": "mistral-code-latest",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "编程,免费,第三方",
+      "vendor_id": 7
+    },
+    {
+      "cache_ratio": 0.10243902439024392,
+      "completion_ratio": 5,
+      "description": "面向复杂推理、长文本分析与高质量编程任务的 Claude 旗舰模型。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Claude.Color",
+      "model_name": "claude-opus-5",
+      "model_price": 0,
+      "model_ratio": 1.025,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "tags": "推理,编程,长文本,第三方",
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.0967741935483871,
+      "completion_ratio": 5,
+      "description": "Gemini 3.8 Flash，适合高吞吐的多用途任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3.8-flash",
+      "model_price": 0,
+      "model_ratio": 0.155,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 5,
+      "description": "OpenCode Kimi K3",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "Moonshot",
+      "model_name": "kimi-k3",
+      "model_price": 0,
+      "model_ratio": 0.6,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,kimi",
+      "vendor_id": 12
+    },
+    {
+      "cache_ratio": 0,
+      "completion_ratio": 2,
+      "description": "OpenCode Muse Spark 1.2 Contributor",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "OpenCode",
+      "model_name": "muse-spark-1.2-contributor",
+      "model_price": 0,
+      "model_ratio": 0.02,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,contributor",
+      "vendor_id": 9
+    },
+    {
+      "cache_ratio": 0.2,
+      "completion_ratio": 6.4,
+      "description": "面向代码审查优化的 Codex 模型，适合检查变更、定位缺陷与给出修复建议。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "model_name": "codex-auto-review",
+      "model_price": 0,
+      "model_ratio": 0.125,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "编程,代码审查,缺陷检测,安全",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 8,
+      "description": "面向编程代理与代码协作优化的 Codex 模型，适合快速开发和工具调用。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "image_ratio": 0.2,
+      "model_name": "gpt-5.3-codex-spark",
+      "model_price": 0,
+      "model_ratio": 0.875,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "编程,代理,工具调用,官方直连",
+      "vendor_id": 1
+    },
+    {
+      "audio_ratio": 0.2,
+      "cache_ratio": 0.1,
+      "completion_ratio": 6,
+      "create_cache_ratio": 0.2,
+      "description": "OpenAI 旗舰通用模型，适合高难度推理、代码与专业工作流。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "image_ratio": 0.2,
+      "model_name": "gpt-5.5",
+      "model_price": 0,
+      "model_ratio": 2.5,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "推理,编程,旗舰,官方直连",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.25,
+      "description": "GPT 6 Astra，最新 GPT-6 系列模型，适合高质量编程与复杂推理任务。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "model_name": "gpt-6-astra",
+      "model_price": 0,
+      "model_ratio": 3,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "GPT,推理,编程,新模型",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.0967741935483871,
+      "completion_ratio": 6,
+      "description": "Gemini 3.5 Flash Preview，适合快速试用新能力。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3.5-flash-preview",
+      "model_price": 0,
+      "model_ratio": 0.31,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.0967741935483871,
+      "completion_ratio": 5,
+      "description": "Gemini Flash 高速模型，兼顾响应速度、推理能力与多场景通用性。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Gemini.Color",
+      "model_name": "gemini-3.7-flash",
+      "model_price": 0,
+      "model_ratio": 0.155,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "tags": "快速,多模态,第三方",
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.166666666666667,
+      "completion_ratio": 4,
+      "description": "MiniMax M3 高性价比通用文本模型，适合对话、推理与代码等任务。",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "Minimax.Color",
+      "model_name": "minimax-m3",
+      "model_price": 0,
+      "model_ratio": 0.06,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "文本,对话,推理,代码,高性价比",
+      "vendor_id": 11
+    },
+    {
+      "completion_ratio": 1,
+      "description": "DeepSeek 系列高速免费模型，适合快速问答、代码辅助与轻量推理。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "DeepSeek.Color",
+      "model_name": "deepseek-v4-flash-free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "推理,编程,免费,第三方",
+      "vendor_id": 4
+    },
+    {
+      "completion_ratio": 1,
+      "description": "Google Gemma 免费指令模型，适合通用问答、摘要与轻量文本任务。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Gemini.Color",
+      "model_name": "google/gemma-4-26b-a4b-it:free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "通用,免费,第三方",
+      "vendor_id": 5
+    },
+    {
+      "completion_ratio": 1,
+      "description": "Mistral 轻量免费模型，适合快速问答、摘要与基础文本处理。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Mistral.Color",
+      "model_name": "ministral-14b-latest",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "快速,通用,免费,第三方",
+      "vendor_id": 7
+    },
+    {
+      "cache_ratio": 0.10243902439024392,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2487804878048785,
+      "description": "Claude Opus 4.8，适合复杂推理、长上下文与代码任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-opus-4-8",
+      "model_price": 0,
+      "model_ratio": 1.025,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.04761904761904762,
+      "completion_ratio": 6,
+      "description": "Gemini 3 Flash Preview，适合快速响应与通用任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3-flash-preview",
+      "model_price": 0,
+      "model_ratio": 0.105,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.210526315789474,
+      "completion_ratio": 4.210526315789474,
+      "description": "OpenCode Kimi K2.7 Code",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "Moonshot",
+      "model_name": "kimi-k2.7-code",
+      "model_price": 0,
+      "model_ratio": 0.19,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,kimi,code",
+      "vendor_id": 12
+    },
+    {
+      "completion_ratio": 1,
+      "description": "OpenAI 开放权重免费模型，适合通用问答、代码与能力评估。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "model_name": "openai/gpt-oss-20b:free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "开源,编程,免费,第三方",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.25,
+      "description": "OpenAI 高能力模型，适合复杂推理、深度编程与长任务处理。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "image_ratio": 0.1,
+      "model_name": "gpt-5.6-sol",
+      "model_price": 0,
+      "model_ratio": 1,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "推理,编程,高质量,官方直连",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 6,
+      "create_cache_ratio": 1.25,
+      "description": "OpenAI 均衡型模型，兼顾推理质量、响应速度与通用任务表现。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "image_ratio": 0.4,
+      "model_name": "gpt-5.6-terra",
+      "model_price": 0,
+      "model_ratio": 1,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "均衡,推理,编程,官方直连",
+      "vendor_id": 1
+    },
+    {
+      "completion_ratio": 0,
+      "description": "OpenAI 图像生成模型，适合高质量文生图、设计素材与创意视觉生成。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "model_name": "gpt-image-1.5",
+      "model_price": 0.1,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "image-generation"
+      ],
+      "tags": "图像生成,文生图,OpenAI",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.0975609756097561,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2439024390243902,
+      "description": "Claude Sonnet 5 模型，适合编程、代码分析与复杂任务；由第三方渠道提供。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Claude.Color",
+      "model_name": "claude-sonnet-5",
+      "model_price": 0,
+      "model_ratio": 0.41,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "tags": "编程,代码分析,推理,第三方",
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.166666666666667,
+      "completion_ratio": 4,
+      "create_cache_ratio": 1.25,
+      "description": "OpenCode Go MiniMax M2.7",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "model_name": "minimax-m2.7",
+      "model_price": 0,
+      "model_ratio": 0.06,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "vendor_id": 11
+    },
+    {
+      "cache_ratio": 0.166666666666667,
+      "completion_ratio": 3.166666666666667,
+      "create_cache_ratio": 1.333333333333333,
+      "description": "OpenCode Qwen3.8 Flash",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "阿里巴巴",
+      "model_name": "qwen3.8-flash",
+      "model_price": 0,
+      "model_ratio": 0.03,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,qwen",
+      "vendor_id": 13
+    },
+    {
+      "completion_ratio": 1,
+      "description": "轻量免费代码模型，适合代码补全、解释和基础开发辅助。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Code",
+      "model_name": "north-mini-code-free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "编程,免费,第三方",
+      "vendor_id": 9
+    },
+    {
+      "cache_ratio": 0.1,
+      "completion_ratio": 5.999999999999999,
+      "create_cache_ratio": 1.25,
+      "description": "OpenAI 高效通用模型，面向日常问答、内容处理与轻量开发任务。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "image_ratio": 0.5,
+      "model_name": "gpt-5.6-luna",
+      "model_price": 0,
+      "model_ratio": 0.1,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "快速,通用,编程,官方直连",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.0975609756097561,
+      "completion_ratio": 6,
+      "description": "Gemini 3.1 Pro High，适合高质量推理与复杂任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3.1-pro-high",
+      "model_price": 0,
+      "model_ratio": 0.41,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "completion_ratio": 0,
+      "description": "第三方高分辨率图像生成模型，适合 4K 级精细文生图与视觉创作。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Image",
+      "model_name": "gpt-image-2-4k",
+      "model_price": 0.99,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "image-generation"
+      ],
+      "tags": "图像生成,文生图,4K,第三方"
+    },
+    {
+      "completion_ratio": 0,
+      "description": "Grok Imagine Image Quality，侧重高质量图像生成效果。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "grok-imagine-image-quality",
+      "model_price": 0.41,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "vendor_id": 14
+    },
+    {
+      "cache_ratio": 0.125,
+      "completion_ratio": 3,
+      "create_cache_ratio": 1.25,
+      "description": "OpenCode Qwen3.8 Max",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "阿里巴巴",
+      "model_name": "qwen3.8-max",
+      "model_price": 0,
+      "model_ratio": 0.4,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "opencode,qwen",
+      "vendor_id": 13
+    },
+    {
+      "completion_ratio": 0,
+      "description": "新一代 OpenAI 图像生成模型，适合更高质量的文生图与复杂视觉创作。",
+      "enable_groups": [
+        "GPT特供",
+        "MIX分组"
+      ],
+      "icon": "OpenAI",
+      "model_name": "gpt-image-2",
+      "model_price": 0.2,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "image-generation"
+      ],
+      "tags": "图像生成,文生图,OpenAI",
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.024330900243309,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2506082725060823,
+      "description": "Claude Fable 5.1，适合复杂推理与编程任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-fable-5-1",
+      "model_price": 0,
+      "model_ratio": 2.055,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.037735849056604,
+      "completion_ratio": 2.981132075471698,
+      "description": "DeepSeek 系列高能力模型，适合复杂推理、代码生成与综合任务。",
+      "enable_groups": [
+        "OpenCode源",
+        "MIX分组"
+      ],
+      "icon": "DeepSeek.Color",
+      "model_name": "deepseek-v4-pro",
+      "model_price": 0,
+      "model_ratio": 0.265,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai",
+        "openai-response"
+      ],
+      "tags": "推理,编程,第三方",
+      "vendor_id": 4
+    },
+    {
+      "cache_ratio": 0.0975609756097561,
+      "completion_ratio": 6,
+      "description": "Gemini Pro 预览模型，适合复杂推理、长上下文与综合内容处理。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Gemini.Color",
+      "model_name": "gemini-3.1-pro-preview",
+      "model_price": 0,
+      "model_ratio": 0.41,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "tags": "推理,长文本,多模态,第三方",
+      "vendor_id": 5
+    },
+    {
+      "cache_ratio": 0.0967741935483871,
+      "completion_ratio": 5,
+      "description": "Gemini Flash 高速模型，兼顾响应速度、推理能力与多场景通用性。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "icon": "Gemini.Color",
+      "model_name": "gemini-3.6-flash",
+      "model_price": 0,
+      "model_ratio": 0.31,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "tags": "快速,多模态,第三方",
+      "vendor_id": 5
+    },
+    {
+      "completion_ratio": 0,
+      "description": "Grok Imagine Image，适合根据文本生成图像。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "grok-imagine-image",
+      "model_price": 0.41,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "vendor_id": 14
+    },
+    {
+      "cache_ratio": 0.10243902439024392,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2487804878048785,
+      "description": "Claude Opus 4.7，适合高难度分析与软件开发任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-opus-4-7",
+      "model_price": 0,
+      "model_ratio": 1.025,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "cache_ratio": 0.0975609756097561,
+      "completion_ratio": 5,
+      "create_cache_ratio": 1.2520325203252034,
+      "description": "Claude Sonnet 4.6，在速度与能力之间保持良好平衡。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "claude-sonnet-4-6",
+      "model_price": 0,
+      "model_ratio": 0.615,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    },
+    {
+      "completion_ratio": 0,
+      "description": "GPT Image 2 Super，适合高质量图像生成与编辑。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gpt-image-2-super",
+      "model_price": 0.41,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 1,
+      "supported_endpoint_types": [
+        "image-generation"
+      ],
+      "vendor_id": 1
+    },
+    {
+      "cache_ratio": 0.04761904761904762,
+      "completion_ratio": 3,
+      "description": "Gemini 3.1 Flash Lite，适合低延迟和高吞吐任务。",
+      "enable_groups": [
+        "第三方模型",
+        "MIX分组"
+      ],
+      "model_name": "gemini-3.1-flash-lite",
+      "model_price": 0,
+      "model_ratio": 0.105,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "gemini",
+        "openai"
+      ],
+      "vendor_id": 5
+    },
+    {
+      "completion_ratio": 1,
+      "description": "NVIDIA Nemotron 免费模型，适合通用问答、轻量推理和开发实验。",
+      "enable_groups": [
+        "Free模型",
+        "MIX分组"
+      ],
+      "icon": "Nvidia.Color",
+      "model_name": "nvidia/nemotron-3-nano-30b-a3b:free",
+      "model_price": 0,
+      "model_ratio": 0,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "tags": "推理,通用,免费,第三方",
+      "vendor_id": 10
+    }
+  ],
+  "group_ratio": {
+    "Free模型": 1,
+    "GPT特供": 1,
+    "MIX分组": 1,
+    "OpenCode源": 1,
+    "第三方模型": 1
+  },
+  "pricing_version": "a42d372ccf0b5dd13ecf71203521f9d2",
+  "success": true,
+  "supported_endpoint": {
+    "anthropic": {
+      "method": "POST",
+      "path": "/v1/messages"
+    },
+    "gemini": {
+      "method": "POST",
+      "path": "/v1beta/models/{model}:generateContent"
+    },
+    "image-generation": {
+      "method": "POST",
+      "path": "/v1/images/generations"
+    },
+    "openai": {
+      "method": "POST",
+      "path": "/v1/chat/completions"
+    },
+    "openai-response": {
+      "method": "POST",
+      "path": "/v1/responses"
+    }
+  },
+  "usable_group": {
+    "Free模型": "暂时限额免费的分组",
+    "GPT特供": "默认分组：包含openAI系列模型",
+    "MIX分组": "可以使用全部模型，遇事不决选这个",
+    "OpenCode源": "来自opencode官方的API",
+    "第三方模型": "第三方分组，不保真！！！"
+  },
+  "vendors": [
+    {
+      "description": "OpenCode 第三方模型",
+      "icon": "Code",
+      "id": 9,
+      "name": "OpenCode"
+    },
+    {
+      "description": "NVIDIA 模型",
+      "icon": "Nvidia.Color",
+      "id": 10,
+      "name": "NVIDIA"
+    },
+    {
+      "icon": "Zhipu.Color",
+      "id": 6,
+      "name": "智谱"
+    },
+    {
+      "icon": "Mistral.Color",
+      "id": 7,
+      "name": "Mistral"
+    },
+    {
+      "icon": "Minimax.Color",
+      "id": 11,
+      "name": "MiniMax"
+    },
+    {
+      "icon": "Moonshot",
+      "id": 12,
+      "name": "Moonshot"
+    },
+    {
+      "icon": "Qwen.Color",
+      "id": 13,
+      "name": "阿里巴巴"
+    },
+    {
+      "icon": "XAI",
+      "id": 14,
+      "name": "xAI"
+    },
+    {
+      "icon": "OpenAI",
+      "id": 1,
+      "name": "OpenAI"
+    },
+    {
+      "icon": "Spark.Color",
+      "id": 2,
+      "name": "讯飞"
+    },
+    {
+      "icon": "Claude.Color",
+      "id": 3,
+      "name": "Anthropic"
+    },
+    {
+      "icon": "DeepSeek.Color",
+      "id": 4,
+      "name": "DeepSeek"
+    },
+    {
+      "icon": "Gemini.Color",
+      "id": 5,
+      "name": "Google"
+    },
+    {
+      "description": "Cohere 模型",
+      "icon": "Cohere.Color",
+      "id": 8,
+      "name": "Cohere"
+    }
+  ]
+}

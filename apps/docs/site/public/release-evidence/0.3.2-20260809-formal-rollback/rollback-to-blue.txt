@@ -1,0 +1,5 @@
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+2026/08/09 16:53:47 [notice] 3125799#3125799: signal process started
+active_color=blue
+port=18080
