@@ -107,6 +107,62 @@ class CheckSetupTests(unittest.TestCase):
             any(item["key"] == "POLARIS_LITERATURE_CODEX_BIN" for item in report["missingRecommended"])
         )
 
+    def test_browser_proxy_uses_one_public_configuration(self):
+        env = os.environ.copy()
+        env["POLARIS_DATA_ROOT"] = "/tmp/polaris-isolated-browser-proxy"
+        env["BROWSER_PROXY_SERVER"] = "http://proxy.test:33335"
+        env["BROWSER_PROXY_USERNAME"] = "proxy-user"
+        env["BROWSER_PROXY_PASSWORD"] = "proxy-password"
+        env.pop("BROWSER_PROXY_BYPASS", None)
+        env.pop("PROXY_HOST", None)
+        env.pop("PROXY_PORT", None)
+        env.pop("PROXY_USERNAME", None)
+        env.pop("PROXY_PASSWORD", None)
+        completed = subprocess.run(
+            [str(TOOLS / "browser" / "check-setup"), "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        report = json.loads(completed.stdout)
+        self.assertFalse(
+            any(
+                item["key"] == "BROWSER_PROXY_SERVER"
+                and item["status"] == "missing"
+                for item in report["checked"]
+            )
+        )
+        self.assertFalse(
+            any(
+                item["key"] in {"BROWSER_PROXY_USERNAME", "BROWSER_PROXY_PASSWORD"}
+                and item["status"] == "missing"
+                for item in report["checked"]
+            )
+        )
+
+    def test_browser_proxy_check_rejects_partial_authentication(self):
+        env = os.environ.copy()
+        env["POLARIS_DATA_ROOT"] = "/tmp/polaris-isolated-browser-proxy-partial"
+        env["BROWSER_PROXY_SERVER"] = "http://proxy.test:33335"
+        env["BROWSER_PROXY_USERNAME"] = "proxy-user"
+        env.pop("BROWSER_PROXY_PASSWORD", None)
+        completed = subprocess.run(
+            [str(TOOLS / "browser" / "check-setup"), "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        report = json.loads(completed.stdout)
+        password = next(
+            item
+            for item in report["checked"]
+            if item["key"] == "BROWSER_PROXY_PASSWORD"
+        )
+        self.assertEqual(password["status"], "missing")
+        self.assertIn("both", password["reason"])
+
     def test_common_inventory_tools_own_check_setup(self):
         inventory = json.loads((TOOLS / "tool-inventory.json").read_text(encoding="utf-8"))
         for item in inventory["tools"]:

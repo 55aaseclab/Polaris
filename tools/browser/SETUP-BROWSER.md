@@ -41,8 +41,8 @@ setup.
 
 ## 3. Configure a proxy when needed
 
-Proxy access is optional. Do not set any `BROWSER_PROXY_*` or `PROXY_*`
-variables when the target sites are reachable without a proxy.
+Proxy access is optional. Do not set any proxy variables when the target sites
+are reachable without a proxy.
 
 When a proxy is required, configure the Polaris-side variables before running
 PDF capture:
@@ -91,27 +91,23 @@ loads it before starting Camofox. Use the same env file that starts Polaris:
 Use `./tools/browser/start-camofox .env` when `.env` is the file containing
 the local configuration.
 
-If a proxy is required, configure both interfaces before starting the
-service. Polaris uses `BROWSER_PROXY_*`; the standalone Camofox process uses
-`PROXY_*`. Use the actual host, port, and credentials supplied by your proxy
-provider. Do not run this block when no proxy is needed:
+If a proxy is required, configure this one public set of Polaris variables
+before starting the service. Use the actual host, port, and credentials
+supplied by your proxy provider. Do not run this block when no proxy is
+needed:
 
 ```sh
 export BROWSER_PROXY_SERVER=http://proxy.example:33335
 export BROWSER_PROXY_USERNAME=proxy-user
 export BROWSER_PROXY_PASSWORD=proxy-password
 export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
-
-export PROXY_HOST=proxy.example
-export PROXY_PORT=33335
-export PROXY_USERNAME=proxy-user
-export PROXY_PASSWORD=proxy-password
 ```
 
 If the proxy does not require authentication, omit both username and password
-exports. The standalone Camofox service does not consume
-`BROWSER_PROXY_BYPASS`; use Camofox's own proxy configuration if bypass rules
-are needed.
+exports. `start-camofox` maps the server and authentication values internally
+for Camofox and maps the bypass list to standard `NO_PROXY` variables. Do not
+export `PROXY_HOST`, `PROXY_PORT`, `PROXY_USERNAME`, or `PROXY_PASSWORD`
+yourself.
 
 Start the service in the background and keep the PID and logs:
 

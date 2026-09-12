@@ -19,6 +19,40 @@ export POLARIS_LITERATURE_ENV_FILE="$ENV_FILE"
 # shellcheck source=../load-env.sh
 source "$ROOT_DIR/../load-env.sh"
 
+if [[ -n "${BROWSER_PROXY_SERVER:-}" ]]; then
+  proxy_parts="$(
+    node - "${BROWSER_PROXY_SERVER}" <<'NODE'
+const value = process.argv[2];
+let parsed;
+try {
+  parsed = new URL(value.includes("://") ? value : `http://${value}`);
+} catch {
+  process.exit(2);
+}
+if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) {
+  process.exit(2);
+}
+process.stdout.write(
+  `${parsed.hostname}\t${parsed.port || (parsed.protocol === "https:" ? "443" : "80")}`,
+);
+NODE
+  )" || {
+    echo "error: BROWSER_PROXY_SERVER must be a valid HTTP(S) proxy URL" >&2
+    exit 1
+  }
+  IFS=$'\t' read -r proxy_host proxy_port <<<"$proxy_parts"
+  export PROXY_HOST="$proxy_host"
+  export PROXY_PORT="$proxy_port"
+  export PROXY_USERNAME="${BROWSER_PROXY_USERNAME:-}"
+  export PROXY_PASSWORD="${BROWSER_PROXY_PASSWORD:-}"
+  if [[ -n "${BROWSER_PROXY_BYPASS:-}" ]]; then
+    export NO_PROXY="$BROWSER_PROXY_BYPASS"
+    export no_proxy="$BROWSER_PROXY_BYPASS"
+  fi
+else
+  unset PROXY_HOST PROXY_PORT PROXY_USERNAME PROXY_PASSWORD
+fi
+
 SERVER_ENTRY="$ROOT_DIR/node_modules/@askjo/camofox-browser/server.js"
 if [[ ! -f "$SERVER_ENTRY" ]]; then
   SERVER_ENTRY="$(find "$ROOT_DIR/node_modules" \

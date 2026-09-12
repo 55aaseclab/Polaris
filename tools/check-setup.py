@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import urlopen
 
 
@@ -149,7 +150,14 @@ def collect_lock_checks(tool_id: str, lock_path: Path, environment: dict[str, st
             continue
         kind = "required" if item.get("kind") == "required" else "recommended"
         reason = str(item.get("reason") or f"set {item['key']}")
-        ok = env_present(environment, item["key"]) or (
+        key = item["key"]
+        proxy_is_optional = key in {
+            "BROWSER_PROXY_SERVER",
+            "BROWSER_PROXY_USERNAME",
+            "BROWSER_PROXY_PASSWORD",
+            "BROWSER_PROXY_BYPASS",
+        }
+        ok = proxy_is_optional or env_present(environment, key) or (
             kind != "required" and command_satisfies_env(item)
         )
         checked.append(finding(tool_id, kind, "env", item["key"], reason, "ok" if ok else "missing"))
@@ -214,6 +222,51 @@ def camofox_health_ok(url: str) -> bool:
         return False
 
 
+def browser_proxy_findings(tool_id: str, environment: dict[str, str]) -> list[dict[str, str]]:
+    server = (environment.get("BROWSER_PROXY_SERVER") or "").strip()
+    username = (environment.get("BROWSER_PROXY_USERNAME") or "").strip()
+    password = (environment.get("BROWSER_PROXY_PASSWORD") or "").strip()
+    if not server:
+        return []
+    parsed = urlparse(server if "://" in server else f"http://{server}")
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return [
+            finding(
+                tool_id,
+                "recommended",
+                "env",
+                "BROWSER_PROXY_SERVER",
+                "BROWSER_PROXY_SERVER must be a valid HTTP(S) proxy URL.",
+            )
+        ]
+    try:
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError
+    except ValueError:
+        return [
+            finding(
+                tool_id,
+                "recommended",
+                "env",
+                "BROWSER_PROXY_SERVER",
+                "BROWSER_PROXY_SERVER must include a valid proxy port.",
+            )
+        ]
+    findings: list[dict[str, str]] = []
+    if bool(username) != bool(password):
+        missing_key = "BROWSER_PROXY_PASSWORD" if username else "BROWSER_PROXY_USERNAME"
+        findings.append(
+            finding(
+                tool_id,
+                "recommended",
+                "env",
+                missing_key,
+                "Proxy authentication requires both BROWSER_PROXY_USERNAME and BROWSER_PROXY_PASSWORD.",
+            )
+        )
+    return findings
+
+
 def collect_live_findings(tool_id: str, environment: dict[str, str]) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     display = (environment.get("DISPLAY") or "").strip()
@@ -267,6 +320,7 @@ def collect_live_findings(tool_id: str, environment: dict[str, str]) -> list[dic
                     "cookie file not found. See tools/browser/SETUP-BROWSER.md",
                 )
             )
+    findings.extend(browser_proxy_findings(tool_id, environment))
     return findings
 
 
@@ -293,6 +347,9 @@ def evaluate(root: Path, environment: dict[str, str]) -> dict[str, Any]:
         "BROWSER_CAMOFOX_URL",
         "BROWSER_CAMOFOX_USER_ID",
         "BROWSER_IMPORT_COOKIES_PATH",
+        "BROWSER_PROXY_SERVER",
+        "BROWSER_PROXY_USERNAME",
+        "BROWSER_PROXY_PASSWORD",
     }:
         for item in collect_live_findings(tool_id, environment):
             apply_finding(checked, item)
