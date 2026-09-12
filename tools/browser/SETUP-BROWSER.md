@@ -83,6 +83,14 @@ export BROWSER_CAMOFOX_USER_ID=polaris-literature
 export CAMOFOX_CRASH_REPORT_ENABLED=false
 ```
 
+The browser launcher takes the environment file as its first argument and
+loads it before starting Camofox. Use the same env file that starts Polaris:
+
+`./tools/browser/start-camofox .env.dev`
+
+Use `./tools/browser/start-camofox .env` when `.env` is the file containing
+the local configuration.
+
 If a proxy is required, configure both interfaces before starting the
 service. Polaris uses `BROWSER_PROXY_*`; the standalone Camofox process uses
 `PROXY_*`. Use the actual host, port, and credentials supplied by your proxy
@@ -108,7 +116,7 @@ are needed.
 Start the service in the background and keep the PID and logs:
 
 ```sh
-node tools/browser/node_modules/@askjo/camofox-browser/server.js \
+./tools/browser/start-camofox .env.dev \
   >/tmp/polaris-camofox.log 2>&1 &
 echo $! >/tmp/polaris-camofox.pid
 ```
