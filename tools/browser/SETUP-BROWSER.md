@@ -39,9 +39,13 @@ This installs Playwright Chromium and `@askjo/camofox-browser`, and fetches
 the Camoufox binary. The data-collection dependency installer runs the same
 setup.
 
-## 3. Configure the proxy
+## 3. Configure a proxy when needed
 
-Set the proxy environment before starting Camofox or running PDF capture:
+Proxy access is optional. Do not set any `BROWSER_PROXY_*` or `PROXY_*`
+variables when the target sites are reachable without a proxy.
+
+When a proxy is required, configure the Polaris-side variables before running
+PDF capture:
 
 ```sh
 export BROWSER_PROXY_SERVER=http://proxy.example:33335
@@ -54,10 +58,9 @@ export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
 are passed through for proxy authentication. If the proxy does not require
 authentication, omit those two variables. `BROWSER_PROXY_BYPASS` is optional.
 
-When `browser.proxy` is omitted, the configured `BROWSER_PROXY_*` values are
-mapped to Camofox `PROXY_HOST`, `PROXY_PORT`, `PROXY_USERNAME`, and
-`PROXY_PASSWORD` when Camofox starts. An explicit browser input takes
-precedence:
+When `browser.proxy` is omitted, `clue-browser` maps the configured
+`BROWSER_PROXY_*` values to Camofox when it starts a local server. An explicit
+browser input takes precedence:
 
 ```json
 {"browser": {"proxy": false}}
@@ -67,22 +70,84 @@ The explicit `false` disables the environment proxy for that run. An explicit
 `browser.proxy` object supplies the proxy for that run. If no proxy variables
 are set, no proxy is passed to Camofox.
 
-## 4. Start or reuse Camofox
+## 4. Start a long-running Camofox service
 
-`BROWSER_CAMOFOX_URL` is optional. Set it when a long-lived Camofox server is
-already running or when you want to run one yourself:
+Start Camofox once and keep it running for the complete PDF-capture workflow.
+Set the same URL in the Polaris environment so every capture reuses this
+server instead of starting a new browser process:
 
 ```sh
 export DISPLAY=:99
 export BROWSER_CAMOFOX_URL=http://127.0.0.1:9377
+export BROWSER_CAMOFOX_USER_ID=polaris-literature
 export CAMOFOX_CRASH_REPORT_ENABLED=false
-node tools/browser/node_modules/@askjo/camofox-browser/server.js
+```
+
+If a proxy is required, configure both interfaces before starting the
+service. Polaris uses `BROWSER_PROXY_*`; the standalone Camofox process uses
+`PROXY_*`. Use the actual host, port, and credentials supplied by your proxy
+provider. Do not run this block when no proxy is needed:
+
+```sh
+export BROWSER_PROXY_SERVER=http://proxy.example:33335
+export BROWSER_PROXY_USERNAME=proxy-user
+export BROWSER_PROXY_PASSWORD=proxy-password
+export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
+
+export PROXY_HOST=proxy.example
+export PROXY_PORT=33335
+export PROXY_USERNAME=proxy-user
+export PROXY_PASSWORD=proxy-password
+```
+
+If the proxy does not require authentication, omit both username and password
+exports. The standalone Camofox service does not consume
+`BROWSER_PROXY_BYPASS`; use Camofox's own proxy configuration if bypass rules
+are needed.
+
+Start the service in the background and keep the PID and logs:
+
+```sh
+node tools/browser/node_modules/@askjo/camofox-browser/server.js \
+  >/tmp/polaris-camofox.log 2>&1 &
+echo $! >/tmp/polaris-camofox.pid
+```
+
+Wait for readiness before starting a capture. The loop also fails if the
+process exits during startup:
+
+```sh
+until curl -fsS "$BROWSER_CAMOFOX_URL/health" >/dev/null; do
+  if ! kill -0 "$(cat /tmp/polaris-camofox.pid)" 2>/dev/null; then
+    echo "Camofox exited; inspect /tmp/polaris-camofox.log" >&2
+    exit 1
+  fi
+  sleep 1
+done
 curl -fsS "$BROWSER_CAMOFOX_URL/health"
 ```
 
-When `BROWSER_CAMOFOX_URL` is unset, `clue-browser` uses its local Camofox
-startup path. A configured URL must be reachable and return a healthy
-`/health` response; it is not silently replaced by another remote server.
+Keep the Camofox process running while Polaris executes collection,
+augmentation, or any other PDF capture. A configured `BROWSER_CAMOFOX_URL`
+must be reachable and return a healthy `/health` response; it is not silently
+replaced by another remote server.
+
+Stop the service only after all captures finish:
+
+```sh
+if test -s /tmp/polaris-camofox.pid; then
+  kill "$(cat /tmp/polaris-camofox.pid)" 2>/dev/null || true
+  rm -f /tmp/polaris-camofox.pid
+fi
+```
+
+If the service becomes unhealthy, inspect `/tmp/polaris-camofox.log`, stop the
+old process, and start it again. Do not start a second server on port `9377`.
+
+When `BROWSER_CAMOFOX_URL` is unset, `clue-browser` can start a temporary
+local Camofox for one capture. That mode is useful for a one-off diagnostic;
+the long-running service above is the supported setup for a multi-paper
+workflow.
 
 ## 5. Configure the Camofox session
 
@@ -167,12 +232,15 @@ VNC login; set `VNC_PASSWORD` when required.
 ```sh
 ./tools/browser/check-setup
 xdpyinfo >/dev/null
-curl -fsS "${BROWSER_CAMOFOX_URL:-http://127.0.0.1:9377}/health"
+curl -fsS "$BROWSER_CAMOFOX_URL/health"
 ls ~/.camofox/profiles
 ```
 
-These checks verify the display, server health, and profile directory. They do
-not verify that a publisher account is logged in.
+These checks verify the installed tool, display, long-running service, and
+profile directory. They do not verify that a publisher account is logged in
+or that a specific publisher allows access. Before a large run, execute one
+small real capture against a representative publisher URL and inspect its
+output PDF.
 
 Upstream reference:
 <https://github.com/jo-inc/camofox-browser>
