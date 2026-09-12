@@ -1,7 +1,7 @@
-# Polaris collection review adapter
+# Polaris manual-review adapter
 
-This adapter owns the collection phase-3 manual-review state used by the
-literature workflow. It is independent of the Polaris Portal and Wanghai.
+This adapter owns durable manual-review state used by workflows. It is
+independent of the Polaris Portal and any particular domain.
 
 The input pair is the collector's:
 
@@ -17,20 +17,20 @@ the last 100 audit entries.
 Direct cell diagnostics:
 
 ```sh
-./clue-collection-review bootstrap \
+./clue-manual-review bootstrap \
   --manual-list <manual-review-list.json> \
   --non-review <non-review-results.json> \
   --state <review-state.json> \
   --output <review-output.json>
 
-./clue-collection-review save \
+./clue-manual-review save \
   --manual-list <manual-review-list.json> \
   --non-review <non-review-results.json> \
   --state <review-state.json> \
   --output <review-output.json> \
   --record-id <record-id> --status approved --note "Reviewed."
 
-./clue-collection-review export \
+./clue-manual-review export \
   --manual-list <manual-review-list.json> \
   --non-review <non-review-results.json> \
   --state <review-state.json> \
@@ -38,5 +38,5 @@ Direct cell diagnostics:
 ```
 
 The public workflow command binds those paths to the run manifest and
-`complete-collection-review` reconstructs a final
+`complete` reconstructs a final
 `clue.data-collection.output.v2` before starting analysis.

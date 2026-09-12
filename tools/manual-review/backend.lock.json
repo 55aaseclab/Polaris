@@ -1,7 +1,7 @@
 {
   "schema_version": "clue.tool-backend-lock.v1",
   "tool": {
-    "name": "clue-collection-review",
+    "name": "clue-manual-review",
     "version": "0.1.0"
   },
   "runtime": {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Polaris-owned collection manual-review state and export semantics.
+"""Polaris-owned manual-review state and export semantics.
 
 The literature collector deliberately stops at phase 3 when
 ``review_mode=manual-review``.  This module owns the durable continuation that
@@ -30,15 +30,15 @@ COLLECTION_STATE_SCHEMA = "clue.data-collection.review-state.v1"
 COLLECTION_RESULT_SCHEMA = "clue.data-collection.review-output.v1"
 COLLECTION_OUTPUT_SCHEMA = "clue.data-collection.output.v2"
 REVIEW_STATUSES = {"pending", "approved", "rejected"}
-POLARIS_PRODUCER = {"name": "polaris-literature-review"}
+POLARIS_PRODUCER = {"name": "polaris-manual-review"}
 
 
-class CollectionReviewError(Exception):
+class ManualReviewError(Exception):
     """A bounded review-state or review-export error."""
 
 
 @dataclass(frozen=True)
-class CollectionReviewPaths:
+class ManualReviewPaths:
     manual_list: Path
     non_review: Path
     state: Path
@@ -52,7 +52,7 @@ class CollectionReviewPaths:
         non_review: str | Path,
         state: str | Path,
         output: str | Path,
-    ) -> "CollectionReviewPaths":
+    ) -> "ManualReviewPaths":
         return cls(
             manual_list=Path(manual_list).expanduser(),
             non_review=Path(non_review).expanduser(),
@@ -86,24 +86,24 @@ def equal_json(left: Any, right: Any) -> bool:
 
 def require_string(value: Any, key: str, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise CollectionReviewError(f"{label} must contain a non-empty '{key}' string")
+        raise ManualReviewError(f"{label} must contain a non-empty '{key}' string")
     return value
 
 
 def input_path(value: Path, label: str) -> Path:
     expanded = value.expanduser()
     if expanded.is_symlink():
-        raise CollectionReviewError(f"{label} must not be a symbolic link")
+        raise ManualReviewError(f"{label} must not be a symbolic link")
     resolved = expanded.resolve()
     if not resolved.is_file():
-        raise CollectionReviewError(f"{label} does not exist: {resolved}")
+        raise ManualReviewError(f"{label} does not exist: {resolved}")
     return resolved
 
 
 def output_path(value: Path, label: str) -> Path:
     expanded = value.expanduser()
     if expanded.is_symlink():
-        raise CollectionReviewError(f"{label} must not be a symbolic link")
+        raise ManualReviewError(f"{label} must not be a symbolic link")
     return expanded.resolve()
 
 
@@ -112,9 +112,9 @@ def read_json_object(path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise CollectionReviewError(f"{label} is not valid UTF-8 JSON: {path}") from error
+        raise ManualReviewError(f"{label} is not valid UTF-8 JSON: {path}") from error
     if not isinstance(value, dict):
-        raise CollectionReviewError(f"{label} must contain a JSON object")
+        raise ManualReviewError(f"{label} must contain a JSON object")
     return value
 
 
@@ -143,7 +143,7 @@ def require_object_list(document: dict[str, Any], key: str, label: str) -> list[
     if not isinstance(value, list) or any(
         not isinstance(item, dict) for item in value
     ):
-        raise CollectionReviewError(f"{label} must contain a '{key}' array of records")
+        raise ManualReviewError(f"{label} must contain a '{key}' array of records")
     return value
 
 
@@ -151,7 +151,7 @@ def digest_file(path: Path) -> str:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError as error:
-        raise CollectionReviewError(f"cannot hash review source {path}: {error}") from error
+        raise ManualReviewError(f"cannot hash review source {path}: {error}") from error
 
 
 def source_manifest(path: Path, document: dict[str, Any]) -> dict[str, Any]:
@@ -193,11 +193,11 @@ def append_audit(state: dict[str, Any], entry: dict[str, Any]) -> None:
     state["audit"] = audit[-100:]
 
 
-class CollectionReview:
-    """Implement collection review state independently of any portal app."""
+class ManualReview:
+    """Implement durable manual-review state independently of any portal app."""
 
-    def __init__(self, paths: CollectionReviewPaths):
-        self.paths = CollectionReviewPaths(
+    def __init__(self, paths: ManualReviewPaths):
+        self.paths = ManualReviewPaths(
             manual_list=input_path(paths.manual_list, "manual review input"),
             non_review=input_path(paths.non_review, "non-review input"),
             state=output_path(paths.state, "review state"),
@@ -216,7 +216,7 @@ class CollectionReview:
             self.paths.manual_list.name,
         )
         if self.non_review_document.get("collection_id") != self.collection_id:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "manual-review-list.json and non-review-results.json belong to "
                 "different collection_id values"
             )
@@ -244,12 +244,12 @@ class CollectionReview:
             for item in self.automatic_records
         ]
         if len(set(automatic_ids)) != len(automatic_ids):
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 f"{self.paths.non_review.name} has duplicate record_id values"
             )
         overlap = set(automatic_ids) & set(self.manual_by_record_id)
         if overlap:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "manual and non-review records share record_id values: "
                 + ", ".join(sorted(overlap))
             )
@@ -268,14 +268,14 @@ class CollectionReview:
             None,
             MANUAL_LIST_SCHEMA,
         }:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 f"manual review input must use {MANUAL_LIST_SCHEMA}"
             )
         if self.non_review_document.get("schema_version") not in {
             None,
             NON_REVIEW_SCHEMA,
         }:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 f"non-review input must use {NON_REVIEW_SCHEMA}"
             )
         for document, label in (
@@ -284,7 +284,7 @@ class CollectionReview:
         ):
             kind = document.get("collection_kind")
             if kind not in {None, "literature"}:
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     f"{label} must use collection_kind=literature"
                 )
 
@@ -294,12 +294,12 @@ class CollectionReview:
                 record.get("record_id"), "record_id", self.paths.manual_list.name
             )
             if record_id in self.manual_by_record_id:
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     f"{self.paths.manual_list.name} has duplicate record_id: {record_id}"
                 )
             review_key = self._review_key_for_record(record)
             if review_key in self.manual_by_review_key:
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     f"{self.paths.manual_list.name} has duplicate durable review "
                     f"identity: {review_key}"
                 )
@@ -336,17 +336,17 @@ class CollectionReview:
             return self._empty_state()
         state = read_json_object(self.paths.state, "review state")
         if state.get("schema_version") != COLLECTION_STATE_SCHEMA:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review state has an unsupported schema_version"
             )
         if state.get("collection_id") != self.collection_id:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review state belongs to another collection_id; choose another "
                 "state path"
             )
         raw_reviews = state.get("reviews")
         if not isinstance(raw_reviews, dict):
-            raise CollectionReviewError("review state must contain a reviews object")
+            raise ManualReviewError("review state must contain a reviews object")
         reviews: dict[str, dict[str, Any]] = {}
         migrated_legacy_keys = 0
         for stored_key, value in raw_reviews.items():
@@ -395,7 +395,7 @@ class CollectionReview:
     def _reviews(self) -> dict[str, Any]:
         reviews = self.state.get("reviews")
         if not isinstance(reviews, dict):
-            raise CollectionReviewError("review state must contain a reviews object")
+            raise ManualReviewError("review state must contain a reviews object")
         return reviews
 
     def _decision_for_record_id(self, record_id: str) -> dict[str, Any]:
@@ -451,15 +451,15 @@ class CollectionReview:
 
     def save(self, record_id: str, status: Any, note: Any) -> dict[str, Any]:
         if not record_id.strip():
-            raise CollectionReviewError("Review request requires record_id")
+            raise ManualReviewError("Review request requires record_id")
         if record_id not in self.manual_by_record_id:
-            raise CollectionReviewError("record_id is not in the manual review list")
+            raise ManualReviewError("record_id is not in the manual review list")
         if status not in REVIEW_STATUSES:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "status must be pending, approved or rejected"
             )
         if not isinstance(note, str) or len(note) > 5000:
-            raise CollectionReviewError("note must be a string up to 5000 characters")
+            raise ManualReviewError("note must be a string up to 5000 characters")
         review_key = self.review_key_by_record_id[record_id]
         decision = {
             "note": note,
@@ -553,30 +553,30 @@ class CollectionReview:
     ) -> dict[str, Any]:
         """Convert a completed review export to a final literature v2 output."""
         if base_output.get("schema_version") != COLLECTION_OUTPUT_SCHEMA:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 f"collection output must use {COLLECTION_OUTPUT_SCHEMA}"
             )
         if base_output.get("collection_id") != self.collection_id:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "collection output and manual review list belong to different collection_id values"
             )
         if base_output.get("collection_kind") != "literature":
-            raise CollectionReviewError("collection output must use collection_kind=literature")
+            raise ManualReviewError("collection output must use collection_kind=literature")
         if base_output.get("status") != "pending_manual_review":
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "collection output must be pending_manual_review before completion"
             )
         payload = review_output or self.build_export()
         if payload.get("schema_version") != COLLECTION_RESULT_SCHEMA:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 f"review output must use {COLLECTION_RESULT_SCHEMA}"
             )
         if payload.get("collection_id") != self.collection_id:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review output and manual review list belong to different collection_id values"
             )
         if not equal_json(payload.get("sources"), self.sources):
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review output was produced from different collection source files"
             )
         pending = payload.get("pending_manual_review_records")
@@ -587,9 +587,9 @@ class CollectionReview:
             isinstance(items, list)
             for items in (pending, ready, manually_rejected, source_rejected)
         ):
-            raise CollectionReviewError("review output has an invalid record grouping")
+            raise ManualReviewError("review output has an invalid record grouping")
         if pending:
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "collection review is still pending; resolve every record before continuation"
             )
 
@@ -599,19 +599,19 @@ class CollectionReview:
             for item in base_records
         ]
         if len(set(base_id_list)) != len(base_id_list):
-            raise CollectionReviewError("collection output contains duplicate record_id values")
+            raise ManualReviewError("collection output contains duplicate record_id values")
         base_ids = set(base_id_list)
         reviewed_ids = {
             require_string(item.get("record_id"), "record_id", "review output")
             for item in [*ready, *manually_rejected]
         }
         if len(reviewed_ids) != len([*ready, *manually_rejected]):
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review output contains duplicate record_id values"
             )
         if not reviewed_ids.issubset(base_ids):
             missing = sorted(reviewed_ids - base_ids)
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review output contains records not present in the pending collection: "
                 + ", ".join(missing)
             )
@@ -629,7 +629,7 @@ class CollectionReview:
                 detail.append("missing=" + ",".join(missing))
             if extra:
                 detail.append("extra=" + ",".join(extra))
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "pending collection does not match its review records ("
                 + "; ".join(detail)
                 + ")"
@@ -642,7 +642,7 @@ class CollectionReview:
                 detail.append("missing=" + ",".join(missing))
             if extra:
                 detail.append("extra=" + ",".join(extra))
-            raise CollectionReviewError(
+            raise ManualReviewError(
                 "review output does not cover the pending collection records ("
                 + "; ".join(detail)
                 + ")"
@@ -651,20 +651,20 @@ class CollectionReview:
             record_id = item["record_id"]
             decision = item.get("manual_review")
             if not isinstance(decision, dict):
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     f"review output is missing manual_review for {record_id}"
                 )
             expected_status = (
                 "not_required" if record_id in automatic_ids else "approved"
             )
             if decision.get("status") != expected_status:
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     f"review output has an invalid ready status for {record_id}"
                 )
         for item in manually_rejected:
             decision = item.get("manual_review")
             if not isinstance(decision, dict) or decision.get("status") != "rejected":
-                raise CollectionReviewError(
+                raise ManualReviewError(
                     "review output has an invalid rejected status"
                 )
 
@@ -711,8 +711,8 @@ class CollectionReview:
         atomic_write_json(self.paths.state, self.state)
 
 
-def paths_from_args(args: argparse.Namespace) -> CollectionReviewPaths:
-    return CollectionReviewPaths.from_values(
+def paths_from_args(args: argparse.Namespace) -> ManualReviewPaths:
+    return ManualReviewPaths.from_values(
         manual_list=args.manual_list,
         non_review=args.non_review,
         state=args.state,
@@ -722,8 +722,8 @@ def paths_from_args(args: argparse.Namespace) -> CollectionReviewPaths:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="polaris-literature-collection-review",
-        description="Polaris-owned literature collection review state and export.",
+        prog="polaris-manual-review",
+        description="Polaris-owned manual-review state and export.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -748,13 +748,41 @@ def build_parser() -> argparse.ArgumentParser:
     complete = commands.add_parser("complete")
     add_paths(complete)
     complete.add_argument("--collection-output", required=True)
+
+    workflow = commands.add_parser("review")
+    workflow.add_argument("--input", required=True)
+    workflow.add_argument("--output", required=True)
     return parser
 
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
     try:
-        review = CollectionReview(paths_from_args(args))
+        if args.command == "review":
+            request = read_json_object(Path(args.input), "review input")
+            source = request.get("capturedCollectionRef")
+            if not isinstance(source, str) or not source.strip():
+                raise ManualReviewError("review input requires capturedCollectionRef")
+            collection = read_json_object(Path(source), "captured collection")
+            records = require_object_list(collection, "records", "captured collection")
+            reviewed_records = [{
+                **record,
+                "manual_review": {"status": "pending", "note": "", "updated_at": None},
+            } for record in records]
+            reviewed = {
+                **collection,
+                "status": "pending_manual_review",
+                "records": reviewed_records,
+                "pipeline": {"boundary": "manual-review", "status": "pending"},
+            }
+            atomic_write_json(Path(args.output), reviewed)
+            print(json.dumps({
+                "reviewedCollectionRef": str(Path(args.output).resolve()),
+                "reviewCount": len(reviewed_records),
+                "reviewStatus": "pending",
+            }, ensure_ascii=False, indent=2))
+            return 0
+        review = ManualReview(paths_from_args(args))
         if args.command == "bootstrap":
             print(json.dumps(review.bootstrap(), ensure_ascii=False, indent=2))
             return 0
@@ -814,8 +842,8 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 0
-        raise CollectionReviewError(f"unsupported command: {args.command}")
-    except (CollectionReviewError, OSError, ValueError) as error:
+        raise ManualReviewError(f"unsupported command: {args.command}")
+    except (ManualReviewError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

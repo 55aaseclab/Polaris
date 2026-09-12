@@ -669,7 +669,7 @@ def _run_browser(url: str, run_id: str, work_dir: Path, timeout_ms: int, actions
     log("browser_start", run_id=run_id, url=url, timeout_ms=timeout_ms)
     try:
         completed = subprocess.run(
-            [str(browser_cli()), "run", "--input", str(input_path), "--output", str(output_path)],
+            [str(browser_cli()), "capture", "--input", str(input_path), "--output", str(output_path)],
             cwd=str(tools_root().parent),
             text=True,
             capture_output=True,
@@ -692,7 +692,7 @@ def _run_browser(url: str, run_id: str, work_dir: Path, timeout_ms: int, actions
     }
     if completed.returncode != 0 or not output_path.is_file():
         result["status"] = "failed"
-        result["error"] = "clue-browser run failed"
+        result["error"] = "clue-browser capture failed"
         log(
             "browser_done",
             run_id=run_id,

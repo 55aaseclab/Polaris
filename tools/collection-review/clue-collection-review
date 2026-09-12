@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# Polaris-owned literature collection-review state adapter.
-set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source "$ROOT_DIR/../load-env.sh"
-polaris_literature_assert_local_command "collection-review"
-exec python3 "$ROOT_DIR/review.py" "$@"

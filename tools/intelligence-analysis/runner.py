@@ -1047,7 +1047,7 @@ def command_workflow(args: argparse.Namespace) -> int:
 
     if args.step_command == "prepare":
         collection_output = Path(
-            workflow_string(values, "collectionOutputRef", args.step_command)
+            workflow_string(values, "reviewedCollectionRef", args.step_command)
         ).expanduser().resolve()
         document = workflow_document(request, values, collection_output)
         validate_input(document)

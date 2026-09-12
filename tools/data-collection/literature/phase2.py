@@ -125,3 +125,33 @@ def run_augmentation(
         pdf_capture=pdf_capture_summary,
     )
     return augmented, phase
+
+
+def run_pdf_capture(
+    *,
+    input_value: dict[str, Any],
+    collection_output: dict[str, Any],
+    work_dir: Path,
+    run_prefix: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Capture PDFs only; qualification and review are separate operations."""
+    working = collection_output
+    has_listed_links = any(
+        isinstance((record.get("payload") or {}).get("pdf_links"), dict)
+        for record in (working.get("records") or [])
+        if isinstance(record, dict)
+    )
+    if not has_listed_links:
+        working = collect_paper_links(working)
+    capture_dir = work_dir / f"{run_prefix}-pdf-capture"
+    result = capture_pdfs_for_collection(
+        working, output_dir=capture_dir, max_urls_per_record=4, max_workers=None
+    )
+    captured = json.loads(Path(result["output"]).read_text(encoding="utf-8"))
+    phase = {
+        "phase": "pdf-capture", "status": "succeeded",
+        "output": str(result["output"]),
+        "record_count": len(captured.get("records") or []),
+        "summary": result.get("summary"),
+    }
+    return captured, phase

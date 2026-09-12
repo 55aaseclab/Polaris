@@ -391,10 +391,6 @@
             "manual-review"
           ],
           "default": "auto-pass"
-        },
-        "skip_augmentation": {
-          "type": "boolean",
-          "default": false
         }
       },
       "additionalProperties": false

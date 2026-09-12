@@ -2,7 +2,7 @@
 /** Playwright browser automation with stealth + humanized interaction. */
 
 import { createHash, randomInt } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -1611,6 +1611,61 @@ function argumentValue(argumentsList, name) {
 
 async function main(argumentsList) {
   const [command, ...rest] = argumentsList;
+  if (command === "workflow") {
+    const [workflowCommand, ...workflowArgs] = rest;
+    if (workflowCommand !== "capture") {
+      throw new CliError(`unsupported workflow command: ${workflowCommand || "(missing)"}`);
+    }
+    const inputPath = argumentValue(workflowArgs, "--input");
+    const outputPath = argumentValue(workflowArgs, "--output");
+    const request = await readJson(inputPath, "workflow input");
+    const values = request.input;
+    if (!values || typeof values !== "object" || Array.isArray(values)) {
+      throw new CliError("workflow input must contain an input object");
+    }
+    let captureUrl = values.url;
+    if (typeof captureUrl !== "string" && typeof values.item === "string") {
+      try {
+        const item = JSON.parse(values.item);
+        captureUrl = item.url || item.source_url || item.payload?.url || item.payload?.source_url;
+        if (typeof captureUrl !== "string") {
+          const links = item.payload?.pdf_links?.candidates;
+          captureUrl = Array.isArray(links) ? links[0]?.url : undefined;
+        }
+      } catch {
+        captureUrl = undefined;
+      }
+    }
+    if (typeof captureUrl !== "string" || !/^https?:\/\//i.test(captureUrl)) {
+      throw new CliError("capture input requires an HTTP url");
+    }
+    const nestedPath = `${outputPath}.browser-input.json`;
+    const browserOutputPath = `${outputPath}.browser-output.json`;
+    await writeJson(nestedPath, {
+      schema_version: INPUT_SCHEMA,
+      run_id: request.runId || `capture-${Date.now()}`,
+      start_url: captureUrl,
+      browser: values.browser || undefined,
+      actions: [{ type: "wait-for", selector: "body", timeout_ms: 30_000 }],
+    });
+    try {
+      const summary = await commandRun(nestedPath, browserOutputPath);
+      const browserOutput = await readJson(browserOutputPath, "browser output");
+      const pdf = Array.isArray(browserOutput.artifacts)
+        ? browserOutput.artifacts.find((artifact) =>
+          artifact && artifact.kind === "download" && /\.pdf$/i.test(artifact.path || artifact.filename || ""))
+        : undefined;
+      await writeJson(outputPath, {
+        pdfPath: pdf?.path || null,
+        captureStatus: pdf ? "succeeded" : "no-pdf",
+        browserOutputRef: resolve(browserOutputPath),
+      });
+      process.stdout.write(`${JSON.stringify({ ...summary, pdfPath: pdf?.path || null }, null, 2)}\n`);
+    } finally {
+      await unlink(nestedPath).catch(() => {});
+    }
+    return;
+  }
   if (command === "version") {
     const version = (await readFile(new URL("./VERSION", import.meta.url), "utf8")).trim();
     process.stdout.write(
@@ -1637,7 +1692,7 @@ async function main(argumentsList) {
     );
     return;
   }
-  if (command === "run") {
+  if (command === "capture") {
     const summary = await commandRun(
       argumentValue(rest, "--input"),
       argumentValue(rest, "--output"),
@@ -1645,7 +1700,7 @@ async function main(argumentsList) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;
   }
-  throw new CliError("usage: clue-browser <version|validate-input|validate-output|run> [options]");
+  throw new CliError("usage: clue-browser <version|validate-input|validate-output|capture> [options]");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -375,7 +375,6 @@ def prepare_literature_input(args: argparse.Namespace) -> int:
     })
     values.setdefault("pipeline", {
         "review_mode": "auto-pass",
-        "skip_augmentation": False,
     })
     write_json(Path(args.output), values)
     emit({"status": "valid", "output": str(Path(args.output).resolve()),
@@ -436,7 +435,7 @@ def command_workflow(args: argparse.Namespace) -> int:
         write_json(output, {"inputValid": True})
         return 0
 
-    if args.step_command == "run":
+    if args.step_command == "collect-and-expand":
         collection_input = Path(
             workflow_string(values, "collectionInputRef", args.step_command)
         ).expanduser().resolve()
@@ -445,20 +444,26 @@ def command_workflow(args: argparse.Namespace) -> int:
         destination = collection_root / "data-collections" / input_value["collection_id"]
         (destination / "inputs").mkdir(parents=True, exist_ok=True)
         write_json(destination / "inputs" / "input.json", input_value)
-        final = run_three_phase_pipeline(
-            input_value,
-            destination,
-            run_id,
-            review_mode=workflow_string(values, "reviewMode", args.step_command),
-        )
-        collection_output = destination / "outputs" / "output.json"
-        write_json(collection_output, final)
-        validate_v2_output(final)
+        collected, tasks, collection_path = phase_collection(input_value, destination, run_id)
+        phases = [{"phase": "collection", "status": "succeeded", "output": str(collection_path),
+                   "task_count": len(tasks)}]
+        if input_value.get("collection_kind") == "literature":
+            from literature.phase15 import run_expansion
+            collected, expansion = run_expansion(
+                input_value=input_value, collected=collected,
+                collection_base=destination, run_prefix=run_id,
+                expand_dir=destination / "work" / f"{run_id}-expand",
+            )
+            phases.append(expansion)
+        collection_output = destination / "outputs" / "expanded-collection.json"
+        collected = {**collected, "pipeline": {"boundary": "collect-and-expand", "phases": phases}}
+        write_json(collection_output, collected)
+        validate_v2_output(collected)
         write_json(output, {
-            "collectionOutputRef": str(collection_output),
-            "collectionId": str(final["collection_id"]),
-            "collectionCount": len(final["records"]),
-            "collectionStatus": str(final["status"]),
+            "expandedCollectionRef": str(collection_output),
+            "collectionId": str(collected["collection_id"]),
+            "collectionCount": len(collected["records"]),
+            "collectionStatus": str(collected["status"]),
         })
         return 0
 
@@ -585,7 +590,7 @@ def pipeline_options(
             "pipeline.review_mode "
             "(auto-pass, auto-approve, or manual-review)"
         )
-    unknown_fields = sorted(set(pipeline) - {"review_mode", "skip_augmentation"})
+    unknown_fields = sorted(set(pipeline) - {"review_mode"})
     if unknown_fields:
         raise CliError(
             "pipeline has unsupported field(s): "
@@ -596,14 +601,7 @@ def pipeline_options(
     if not isinstance(review_mode, str) or review_mode not in REVIEW_MODES:
         choices = ", ".join(sorted(REVIEW_MODES))
         raise CliError(f"pipeline.review_mode must be one of: {choices}")
-    # skip_augmentation affects phase 2 only (never phase 3).
-    skip_augmentation = pipeline.get("skip_augmentation", False)
-    if not isinstance(skip_augmentation, bool):
-        raise CliError("pipeline.skip_augmentation must be a boolean")
-    return {
-        "review_mode": review_mode,
-        "skip_augmentation": skip_augmentation,
-    }
+    return {"review_mode": review_mode}
 
 
 def _phase_record(phase_id: int, name: str, status: str, **extra: Any) -> dict[str, Any]:
@@ -715,8 +713,6 @@ def phase_augmentation(
     collection_output: dict[str, Any],
     collection_base: Path,
     run_prefix: str,
-    *,
-    skip: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Phase 2 (augmentation): post-collection enrich (not phase 3 manual-review).
 
@@ -731,20 +727,9 @@ def phase_augmentation(
         "phase_start",
         phase_id=PHASE_AUGMENTATION,
         phase="augmentation",
-        skip=skip,
         kind=kind,
         input_records=len(collection_output.get("records") or []),
     )
-
-    if skip:
-        phase = _phase_record(
-            PHASE_AUGMENTATION,
-            "augmentation",
-            "skipped",
-            reason="pipeline.skip_augmentation",
-        )
-        log("phase_done", phase_id=PHASE_AUGMENTATION, phase="augmentation", status="skipped")
-        return collection_output, phase
 
     if kind == "customer-leads":
         # Customer-leads phase 2 lives in customer_leads.py (preprocess|augment).
@@ -1012,7 +997,6 @@ def run_three_phase_pipeline(
         collection_kind=input_value.get("collection_kind"),
         run_prefix=run_prefix,
         review_mode=options["review_mode"],
-        skip_augmentation=options["skip_augmentation"],
         order=[{"phase_id": pid, "phase": name} for pid, name in PIPELINE_PHASES],
     )
 
@@ -1147,7 +1131,6 @@ def run_three_phase_pipeline(
         collected,
         collection_base,
         run_prefix,
-        skip=options["skip_augmentation"],
     )
     phases.append(aug_phase)
 
@@ -1166,7 +1149,6 @@ def run_three_phase_pipeline(
     ]
     pipeline_meta["phases"] = phases
     pipeline_meta["review_mode"] = options["review_mode"]
-    pipeline_meta["skip_augmentation"] = options["skip_augmentation"]
     final = {**final, "pipeline": pipeline_meta}
     log(
         "pipeline_done",

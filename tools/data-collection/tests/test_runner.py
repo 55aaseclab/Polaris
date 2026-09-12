@@ -110,7 +110,7 @@ class ContractTests(unittest.TestCase):
                 prepared["payload"]["literature_scope"]["topic_keywords"],
                 ["synthetic alpha", "synthetic beta"],
             )
-            self.assertEqual(prepared["pipeline"]["skip_augmentation"], False)
+            self.assertEqual(prepared["pipeline"], {"review_mode": "auto-pass"})
 
     def test_pipeline_uses_a_three_state_review_mode(self):
         self.assertEqual(
@@ -125,15 +125,15 @@ class ContractTests(unittest.TestCase):
                         None,
                     )
 
-    def test_pipeline_rejects_unknown_fields_and_invalid_augmentation_flag(self):
+    def test_pipeline_rejects_unknown_fields_including_removed_augmentation_flag(self):
         with self.assertRaisesRegex(runner.CliError, "unsupported"):
             runner.pipeline_options(
                 {**V2_INPUT, "pipeline": {"unrecognized": True}},
                 None,
             )
-        with self.assertRaisesRegex(runner.CliError, "must be a boolean"):
+        with self.assertRaisesRegex(runner.CliError, "unsupported"):
             runner.pipeline_options(
-                {**V2_INPUT, "pipeline": {"skip_augmentation": "false"}},
+                {**V2_INPUT, "pipeline": {"removed_option": False}},
                 None,
             )
 
@@ -186,10 +186,7 @@ class ContractTests(unittest.TestCase):
             pipeline["properties"]["review_mode"]["default"],
             "auto-pass",
         )
-        self.assertEqual(
-            pipeline["properties"]["skip_augmentation"]["default"],
-            False,
-        )
+        self.assertNotIn("skip_augmentation", pipeline["properties"])
         self.assertFalse(pipeline["additionalProperties"])
 
     def test_seed_scope_filters_out_of_window_and_non_ccf(self):
@@ -558,7 +555,6 @@ class ContractTests(unittest.TestCase):
                 collected,
                 collection_base,
                 "run-prefix",
-                skip=False,
             )
             self.assertEqual(aug_phase["phase"], "augmentation")
             self.assertEqual(aug_phase["phase_id"], runner.PHASE_AUGMENTATION)
@@ -601,7 +597,6 @@ class ContractTests(unittest.TestCase):
                 literature_output(1),
                 collection_base,
                 "run-prefix",
-                skip=False,
             )
 
             final, review_phase = runner.phase_manual_review(
@@ -640,7 +635,6 @@ class ContractTests(unittest.TestCase):
                 collected,
                 collection_base,
                 "run-prefix",
-                skip=False,
             )
             final, review_phase = runner.phase_manual_review(
                 V2_INPUT,
@@ -850,7 +844,6 @@ class ContractTests(unittest.TestCase):
                 collected,
                 collection_base,
                 "run-prefix",
-                skip=False,
             )
             self.assertEqual(aug_phase["status"], "succeeded")
             self.assertEqual(aug_phase["mode"], "ad-content-intel")

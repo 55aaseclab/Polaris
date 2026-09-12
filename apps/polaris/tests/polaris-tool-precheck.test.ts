@@ -31,7 +31,7 @@ test("every common tool lock declares prerequisites and Python tools declare req
   for (const lock of locks) {
     assert.ok(fs.existsSync(lock.checkSetupPath), `${lock.toolId} check-setup`);
     assert.ok(Array.isArray(lock.prerequisites.env), `${lock.toolId} env`);
-    const pythonTool = lock.toolId !== "literature.pdf.capture"
+    const pythonTool = lock.toolId !== "pdf.capture"
       && lock.toolId !== "literature.source.curated-web";
     if (pythonTool) {
       assert.ok(lock.prerequisites.python, `${lock.toolId} must declare python requirements`);

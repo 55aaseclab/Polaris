@@ -75,7 +75,6 @@ cd tools/data-collection
 | List curated sites | `./clue-data-collection list-sources --topic <topic-id>` |
 | Full literature or ad-content-intel pipeline | Polaristool `workflow run` via `/settings/tools` / the work desk |
 | Choose phase-3 behavior | add `--review-mode auto-pass\|auto-approve\|manual-review` |
-| Skip phase-2 only | `"pipeline": {"skip_augmentation": true}` in input |
 | Customer-leads preprocess | `./clue-data-collection preprocess --workspace <id> --run-id <run> --source-output type=path …` |
 | Customer-leads augment | `./clue-data-collection augment --workspace <id> --run-id <run> --candidates <path>` |
 | Rebuild review projections | `review-list` / `non-review-results` |

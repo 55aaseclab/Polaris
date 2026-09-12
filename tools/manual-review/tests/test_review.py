@@ -1,14 +1,23 @@
 import json
+import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from review import (
-    COLLECTION_RESULT_SCHEMA,
-    CollectionReview,
-    CollectionReviewError,
-    CollectionReviewPaths,
+MODULE_PATH = Path(__file__).resolve().parents[1] / "review.py"
+SPEC = importlib.util.spec_from_file_location(
+    "polaris_manual_review_test_module", MODULE_PATH
 )
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError(f"cannot load {MODULE_PATH}")
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+COLLECTION_RESULT_SCHEMA = MODULE.COLLECTION_RESULT_SCHEMA
+ManualReview = MODULE.ManualReview
+ManualReviewError = MODULE.ManualReviewError
+ManualReviewPaths = MODULE.ManualReviewPaths
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -31,9 +40,9 @@ def record(record_id: str, *, duplicate_group_id: str | None = None) -> dict:
     return value
 
 
-class CollectionReviewTests(unittest.TestCase):
-    def make_case(self) -> tuple[tempfile.TemporaryDirectory, CollectionReviewPaths]:
-        temporary = tempfile.TemporaryDirectory(prefix="polaris-collection-review-")
+class ManualReviewTests(unittest.TestCase):
+    def make_case(self) -> tuple[tempfile.TemporaryDirectory, ManualReviewPaths]:
+        temporary = tempfile.TemporaryDirectory(prefix="polaris-manual-review-")
         root = Path(temporary.name)
         outputs = root / "data-collections" / "synthetic" / "outputs"
         manual = outputs / "manual-review-list.json"
@@ -62,7 +71,7 @@ class CollectionReviewTests(unittest.TestCase):
                 "rejected_records": [record("paper-source-rejected")],
             },
         )
-        return temporary, CollectionReviewPaths.from_values(
+        return temporary, ManualReviewPaths.from_values(
             manual_list=manual,
             non_review=non_review,
             state=state,
@@ -72,10 +81,10 @@ class CollectionReviewTests(unittest.TestCase):
     def test_state_update_and_export_preserve_stable_review_identity(self) -> None:
         temporary, paths = self.make_case()
         try:
-            review = CollectionReview(paths)
+            review = ManualReview(paths)
             bootstrapped = review.bootstrap()
             self.assertEqual(bootstrapped["summary"]["manual_review_pending"], 2)
-            self.assertEqual(bootstrapped["tool"]["name"], "polaris-literature-review")
+            self.assertEqual(bootstrapped["tool"]["name"], "polaris-manual-review")
 
             review.save("paper-alpha", "approved", "Synthetic approval.")
             review.save("paper-beta", "rejected", "Synthetic rejection.")
@@ -86,7 +95,7 @@ class CollectionReviewTests(unittest.TestCase):
 
             document = json.loads(paths.output.read_text(encoding="utf-8"))
             self.assertEqual(document["schema_version"], COLLECTION_RESULT_SCHEMA)
-            self.assertEqual(document["producer"]["name"], "polaris-literature-review")
+            self.assertEqual(document["producer"]["name"], "polaris-manual-review")
             self.assertEqual(document["summary"]["manual_review_approved"], 1)
             self.assertEqual(document["summary"]["manual_review_rejected"], 1)
             state = json.loads(paths.state.read_text(encoding="utf-8"))
@@ -116,7 +125,7 @@ class CollectionReviewTests(unittest.TestCase):
                     "audit": [],
                 },
             )
-            review = CollectionReview(paths)
+            review = ManualReview(paths)
             self.assertEqual(review.bootstrap()["reviews"]["paper-alpha"]["status"], "approved")
             self.assertEqual(review.bootstrap()["summary"]["manual_review_pending"], 1)
             self.assertTrue(any(item["action"] == "review_identity_migrated" for item in review.state["audit"]))
@@ -126,7 +135,7 @@ class CollectionReviewTests(unittest.TestCase):
     def test_completed_review_reconstitutes_a_final_literature_v2_handoff(self) -> None:
         temporary, paths = self.make_case()
         try:
-            review = CollectionReview(paths)
+            review = ManualReview(paths)
             base = {
                 "schema_version": "clue.data-collection.output.v2",
                 "collection_id": "synthetic",
@@ -140,7 +149,7 @@ class CollectionReviewTests(unittest.TestCase):
                     "phases": [{"phase": "manual-review", "status": "pending"}]
                 },
             }
-            with self.assertRaisesRegex(CollectionReviewError, "still pending"):
+            with self.assertRaisesRegex(ManualReviewError, "still pending"):
                 review.finalize_collection_output(base)
             review.save("paper-alpha", "approved", "Approved.")
             review.save("paper-beta", "rejected", "Rejected.")

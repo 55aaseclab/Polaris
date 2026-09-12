@@ -420,12 +420,11 @@ Optional input:
 
 ```json
 "pipeline": {
-  "review_mode": "auto-pass",
-  "skip_augmentation": false
+  "review_mode": "auto-pass"
 }
 ```
 
-`skip_augmentation` skips **phase 2 only**. `review_mode` controls **phase 3 only**.
+Phase 2 augmentation always runs. `review_mode` controls **phase 3 only**.
 
 Phase-2 customer commands (same CLI):
 
