@@ -25,7 +25,7 @@ from urllib.request import urlopen
 NEXT_STEPS: dict[str, str] = {
     "DISPLAY": "Start Xvfb and set DISPLAY=:99. See tools/browser/SETUP-BROWSER.md",
     "BROWSER_CAMOFOX_URL": "Run ./tools/browser/clue-browser setup, then start Camofox or leave Polaristool to start one. See tools/browser/SETUP-BROWSER.md",
-    "BROWSER_CAMOFOX_USER_ID": "Set BROWSER_CAMOFOX_USER_ID=polaris-literature so cookies persist. See tools/browser/SETUP-BROWSER.md",
+    "BROWSER_CAMOFOX_USER_ID": "Set BROWSER_CAMOFOX_USER_ID=polaris so cookies persist. See tools/browser/SETUP-BROWSER.md",
     "BROWSER_IMPORT_COOKIES_PATH": "Optional: export Netscape cookies.txt into ~/.camofox/cookies and point this at the file. See tools/browser/SETUP-BROWSER.md",
     "CAMOFOX_API_KEY": "Set CAMOFOX_API_KEY if Camofox is not on loopback and you import cookies. See tools/browser/SETUP-BROWSER.md",
     "BROWSER_PROXY_SERVER": "Set BROWSER_PROXY_SERVER when publisher sites need an ISP/residential proxy.",

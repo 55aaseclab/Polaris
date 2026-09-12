@@ -43,7 +43,7 @@ Instagram remains available for business-account discovery.
 Ensure repo `.env` exists (from `.env.example`), including:
 
 - `DISPLAY=:99` (or another usable X display for Camofox PDF capture)
-- `BROWSER_CAMOFOX_USER_ID=polaris-literature` (stable Camofox session)
+- `BROWSER_CAMOFOX_USER_ID=polaris` (stable Camofox session)
 - `BROWSER_PROXY_*` when PDF sites need a proxy
 - `SEMANTIC_SCHOLAR_API_KEY` for batch literature expand
 

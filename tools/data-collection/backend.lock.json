@@ -33,7 +33,7 @@
       {
         "key": "BROWSER_CAMOFOX_USER_ID",
         "kind": "recommended",
-        "reason": "Stable Camofox userId for PDF capture. Defaults to polaris-literature when unset."
+        "reason": "Stable Camofox userId for PDF capture. Defaults to polaris when unset."
       },
       {
         "key": "BROWSER_IMPORT_COOKIES_PATH",

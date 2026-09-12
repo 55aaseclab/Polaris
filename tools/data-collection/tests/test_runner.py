@@ -1057,7 +1057,7 @@ class ContractTests(unittest.TestCase):
         previous = os.environ.get("BROWSER_CAMOFOX_USER_ID")
         try:
             os.environ.pop("BROWSER_CAMOFOX_USER_ID", None)
-            self.assertEqual(camofox_session_user_id(), "polaris-literature")
+            self.assertEqual(camofox_session_user_id(), "polaris")
             os.environ["BROWSER_CAMOFOX_USER_ID"] = "polaris-host"
             self.assertEqual(camofox_session_user_id(), "polaris-host")
         finally:

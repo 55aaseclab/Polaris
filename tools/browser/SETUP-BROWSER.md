@@ -79,7 +79,7 @@ server instead of starting a new browser process:
 ```sh
 export DISPLAY=:99
 export BROWSER_CAMOFOX_URL=http://127.0.0.1:9377
-export BROWSER_CAMOFOX_USER_ID=polaris-literature
+export BROWSER_CAMOFOX_USER_ID=polaris
 export CAMOFOX_CRASH_REPORT_ENABLED=false
 ```
 
@@ -155,11 +155,11 @@ workflow.
 
 ## 5. Configure the Camofox session
 
-Camofox stores cookies and localStorage per `userId`. Use a stable ID for all
-literature PDF runs:
+Camofox stores cookies and localStorage per `userId`. Use a stable ID for
+Polaris browser work:
 
 ```sh
-export BROWSER_CAMOFOX_USER_ID=polaris-literature
+export BROWSER_CAMOFOX_USER_ID=polaris
 ```
 
 The profile is stored at
@@ -224,7 +224,7 @@ With a usable desktop display, open the publisher URL in Camofox and sign in:
 
 ```sh
 export CAMOFOX_INTERACTIVE=desktop
-export BROWSER_CAMOFOX_USER_ID=polaris-literature
+export BROWSER_CAMOFOX_USER_ID=polaris
 ```
 
 After login, unset `CAMOFOX_INTERACTIVE` or set it to `off` for normal capture.

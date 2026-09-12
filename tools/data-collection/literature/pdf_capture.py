@@ -635,7 +635,7 @@ def _download_urls_from_document(document: dict[str, Any], page_url: str) -> lis
 def camofox_session_user_id() -> str:
     """Stable Camofox userId so cookies persist across PDF captures."""
     value = (os.environ.get("BROWSER_CAMOFOX_USER_ID") or "").strip()
-    return value or "polaris-literature"
+    return value or "polaris"
 
 
 def _run_browser(url: str, run_id: str, work_dir: Path, timeout_ms: int, actions: list[dict[str, Any]]) -> dict[str, Any]:
