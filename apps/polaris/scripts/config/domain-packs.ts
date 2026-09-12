@@ -583,14 +583,20 @@ function flowGraph(
   }];
   for (const step of flow.steps) {
     const port = portForStep(ports, step);
+    const call = step.map
+      ? resolvePort(ports, step.map.call.name, step.map.call.version)?.qualifiedName
+        ?? resolvePort(ports, step.map.call.name, step.map.call.version)?.name
+        ?? step.map.call.raw
+      : port?.qualifiedName ?? port?.name ?? step.call?.raw;
     nodes.push({
       id: step.id,
       label: step.label,
       kind: "step",
-      ...(step.call ? { call: port?.qualifiedName ?? port?.name ?? step.call.raw } : {}),
+      ...(call ? { call } : {}),
       ...(port?.effect ? { effect: port.effect } : {}),
       uses: [...step.uses],
       outputs: step.outputs.map((output) => output.name),
+      ...(step.map ? { map: { item: step.map.item, source: step.map.source, call: step.map.call.raw } } : {}),
     });
   }
   nodes.push({
@@ -648,7 +654,8 @@ export function getDomainPackFlowGraphProjection(
   if (!pipeline.ok || !pipeline.ast) throw new Error(`Domain Pack cannot be projected: ${packId}`);
   const flow = flattenDomain(pipeline.ast).flows.find((candidate) => candidate.name === flowId);
   if (!flow) throw new Error(`Workflow is unavailable: ${packId}/${flowId}`);
-  return flowGraph(pack, flow, flattenDomain(pipeline.ast).ports);
+  const flattened = flattenDomain(pipeline.ast);
+  return flowGraph(pack, flow, flattened.ports);
 }
 
 /** Load exactly the installed bytes named by a run's immutable pack pin. */

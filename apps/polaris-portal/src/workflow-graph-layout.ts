@@ -29,7 +29,7 @@ export type WorkflowGraphLayout = {
 };
 
 const NODE_WIDTH = 232;
-const NODE_HEIGHT = 84;
+const NODE_HEIGHT = 102;
 const PADDING_X = 36;
 const PADDING_Y = 28;
 

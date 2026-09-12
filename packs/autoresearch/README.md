@@ -11,6 +11,11 @@ The workflow preserves the existing `clue.*.v2` wire contracts so existing
 research inputs remain compatible. Polaris loads and executes `main.ord`
 through its DSL runtime.
 
+The literature flow uses three explicit boundaries: `literature.collection`
+performs collect-and-expand, `pdf.capture` captures one PDF per mapped record,
+and `manual.review` is the workflow-level manual gate. There is no
+legacy monolithic collection command.
+
 ## Exact behavior retained
 
 - source task types `crossref-doi`, `crossref-search`,
@@ -21,7 +26,7 @@ through its DSL runtime.
   status, and exact record hashes;
 - phase 3 `auto-pass`, `auto-approve`, and `manual-review` with separate
   review-list and non-review artifacts;
-- Polaris-owned collection review state, stable review identities, audit
+- Polaris-owned manual-review state, stable review identities, audit
   entries, atomic export, and continuation back into a final collection v2
   handoff;
 - analysis methods `iterate`, `batches`, and `propose`, including exact
@@ -75,7 +80,7 @@ Optional provider settings:
 
 There is no pack-local runner or workflow-specific CLI. Polaris loads
 `main.ord`, validates the declaration, and executes the
-`LiteratureReviewExecution` trial as a durable job. The trial resolves its
+`LiteratureReview` flow as a durable job. The flow resolves its
 port bindings through the common tool inventory and persists its run state in
 Polaris.
 
@@ -117,12 +122,12 @@ source is not removed by the importer.
 Inspect a historical import with the migration verifier, not a
 `literature-review` CLI. There is no `polaris -- literature-review` command.
 
-For a pending analysis or collection review, continue the same durable
+For a pending analysis or manual review, continue the same durable
 Polaris run from the Portal work desk or workflow API. Local tool adapters
 under `tools/` remain available for cell-level diagnostics:
 
 - `tools/analysis-review/clue-analysis-review`
-- `tools/collection-review/clue-collection-review`
+- `tools/manual-review/clue-manual-review`
 
 The analysis-review export is `clue.manual-review.result.v2`, bound to each
 claim's `review_key` and `revision_hash`. Collection continuation writes an
@@ -133,7 +138,7 @@ resumes analysis.
 The lower-level migrated CLIs remain available under `tools/` for debugging:
 
 - `tools/data-collection/clue-data-collection`
-- `tools/collection-review/clue-collection-review`
+- `tools/manual-review/clue-manual-review`
 - `tools/analysis-review/clue-analysis-review`
 - `tools/intelligence-analysis/clue-intelligence-analysis`
 - `tools/intelligence-analysis/literature-review/literature-review`

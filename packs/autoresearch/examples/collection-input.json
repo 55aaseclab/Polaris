@@ -24,7 +24,6 @@
     "pdf_links": { "enabled": true }
   },
   "pipeline": {
-    "review_mode": "auto-pass",
-    "skip_augmentation": false
+    "review_mode": "auto-pass"
   }
 }

@@ -1127,7 +1127,7 @@ function ToolsPage() {
                 <strong>{t("tools.checkSetup")} · {tool.checkSetupPath}</strong>
                 <ul className="tool-check-setup-list">
                   {((tool.checkSetup.checked ?? []).length > 0
-                    ? tool.checkSetup.checked
+                    ? (tool.checkSetup.checked ?? [])
                     : [...tool.missingRequired, ...tool.missingRecommended]
                   ).map((item) => {
                     const ok = item.status === "ok";
@@ -1282,7 +1282,8 @@ function WorkflowGraphViewer({ graph }: { graph: WorkflowGraphProjection }) {
           return <g key={node.id} className={cn("workflow-graph-node", node.kind === "input" && "workflow-graph-node-input", node.kind === "output" && "workflow-graph-node-output", selectedNodeId === node.id && "is-selected")} transform={`translate(${position.x} ${position.y})`} onClick={() => setSelectedNodeId(node.id)} tabIndex={0} role="button" aria-label={node.label}>
             <rect width={layout.nodeWidth} height={layout.nodeHeight} rx="6" />
             <text x="14" y="24" className="workflow-graph-node-label">{node.label}</text>
-            <text x="14" y="48" className="workflow-graph-node-meta">{t("run.graphInputs")} {node.uses.length} · {t("run.graphOutputs")} {node.outputs.length}</text>
+            {node.call && <text x="14" y="44" className="workflow-graph-node-call">{t("run.graphCall", { port: node.call })}</text>}
+            <text x="14" y={node.call ? 66 : 48} className="workflow-graph-node-meta">{t("run.graphInputs")} {node.uses.length} · {t("run.graphOutputs")} {node.outputs.length}</text>
           </g>;
         })}
       </svg>

@@ -196,6 +196,11 @@ test("run detail keeps only final artifacts viewable", () => {
   assert.match(cssSource, /\.timeline-file-open\s*\{/u);
 });
 
+test("workflow graph nodes expose their declared call", () => {
+  assert.match(appSource, /className="workflow-graph-node-call"/u);
+  assert.match(appSource, /t\("run\.graphCall", \{ port: node\.call \}\)/u);
+});
+
 test("artifact preview supports text, structured data, and media files", () => {
   assert.match(appSource, /function RunPreviewPage/u);
   assert.match(appSource, /kind="artifact"/u);

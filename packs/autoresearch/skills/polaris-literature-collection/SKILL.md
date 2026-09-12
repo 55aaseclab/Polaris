@@ -2,7 +2,7 @@
 name: polaris-literature-collection
 description: >
   Route literature input validation, source collection, citation expansion,
-  PDF augmentation, and collection manual-review continuation through Polaris.
+  PDF augmentation, and manual-review continuation through Polaris.
 ---
 
 # Polaris literature collection
@@ -35,7 +35,7 @@ dispatches the `CollectLiteratureSources` and
 
 ## Collection manual review
 
-When the `ResolveCollectionReview` port returns
+When the `ResolveManualReview` port returns
 `collectionReviewPending`, Polaris persists the trial checkpoint and exposes
 the review action on the run detail page. Approval resumes the same trial
 with the supplied review result.

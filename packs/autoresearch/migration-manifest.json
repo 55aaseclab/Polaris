@@ -81,7 +81,7 @@
   ],
   "migrated_components": {
     "collection": ["data-collection", "data-collection/literature", "data-collection/ad_content"],
-    "collection_review": ["collection-review/review.py", "collection-review/clue-collection-review"],
+    "manual_review": ["manual-review/review.py", "manual-review/clue-manual-review"],
     "analysis_review": ["analysis-review/review.py", "analysis-review/clue-analysis-review"],
     "shared_support": ["tools/paths.py"],
     "source_adapters": ["crossref", "semantic-scholar", "deepsec", "web-search"],
@@ -110,7 +110,7 @@
   "polaris_adaptations": [
     {
       "area": "orchestration",
-      "detail": "Polaris loads main.ord and executes LiteratureReviewExecution through the v0.4-trial runtime; no pack-local orchestrator is called."
+      "detail": "Polaris loads main.ord and executes the LiteratureReview flow; no pack-local orchestrator is called."
     },
     {
       "area": "environment",
@@ -118,7 +118,7 @@
     },
     {
       "area": "tool-binding",
-      "detail": "Each LiteratureReviewExecution node is bound in workflow.json to one root-level entry in tools/tool-inventory.json; the workflow is not registered as a common tool."
+      "detail": "Each LiteratureReview flow step is bound in workflow.json to one root-level entry in tools/tool-inventory.json; the workflow is not registered as a common tool."
     },
     {
       "area": "codex",
@@ -129,8 +129,8 @@
       "detail": "Collection and analysis handoffs are validated again at the Polaris boundary and bound to the requested collection, analysis, and report identifiers."
     },
     {
-      "area": "collection-review",
-      "detail": "The collection manual-review state machine, stable review identities, audit trail, atomic export, and v2 continuation are owned by the Polaris workflow; the producer metadata is Polaris-owned while the clue review-output contract remains compatible."
+      "area": "manual-review",
+      "detail": "The manual-review state machine, stable review identities, audit trail, atomic export, and v2 continuation are owned by the Polaris workflow; the producer metadata is Polaris-owned while the existing review-output contracts remain unchanged."
     },
     {
       "area": "integrated-mode",
@@ -139,7 +139,7 @@
   ],
   "polaris_verification": [
     "apps/polaris/tests/polaris-literature-review.test.ts",
-    "tools/collection-review/tests/test_review.py",
+    "tools/manual-review/tests/test_review.py",
     "tools/analysis-review/tests/test_review.py",
     "pnpm --dir apps/polaris run test:literature-review"
   ]

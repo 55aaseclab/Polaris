@@ -1,14 +1,14 @@
-dsl version "0.3"
+dsl version "0.4"
 domain AutoResearch version "0.1.0"
 title "autoresearch"
 description "Evidence-bound literature collection, analysis, and report production."
 category "Research"
 
-port literature.codex version "1.0.0" {
+port codex version "1.0.0" {
   in { question: String }
   out { keywordPlanRef: String, keywordCount: Number, keywordStatus: String }
   effect ffi
-  binding { tool "literature.codex" }
+  binding { tool "codex" }
 }
 
 port literature.collection version "1.0.0" {
@@ -16,17 +16,14 @@ port literature.collection version "1.0.0" {
     question: String
     keywordPlanRef: String
     collectionInputRef: String
-    collectionOutputRef: String
     workspaceId: ID
     runPrefix: ID
     decisionContext: String
     audience: String
-    reviewMode: String
   }
   out {
     collectionInputRef: String
     inputValid: Boolean
-    collectionOutputRef: String
     collectionId: ID
     collectionCount: Number
     collectionStatus: String
@@ -35,9 +32,23 @@ port literature.collection version "1.0.0" {
   binding { tool "literature.collection" }
 }
 
+port pdf.capture version "1.0.0" {
+  in { url: String }
+  out { pdfPath: String? }
+  effect ffi
+  binding { tool "pdf.capture" }
+}
+
+port manual.review version "1.0.0" {
+  in { capturedCollectionRef: String, reviewMode: String }
+  out { reviewedCollectionRef: String, reviewStatus: String }
+  effect ffi
+  binding { tool "manual.review" }
+}
+
 port literature.analysis version "1.0.0" {
   in {
-    collectionOutputRef: String
+    reviewedCollectionRef: String
     analysisInputRef: String
     analysisOutputRef: String
     analysisRoot: String
@@ -102,7 +113,7 @@ flow LiteratureReview title "Literature Review" create {
   steps {
     planKeywords "Plan search keywords" {
       uses { question }
-      call literature.codex
+      call codex
       command "plan-search-keywords"
       output { keywordPlanRef: String, keywordCount: Number, keywordStatus: String }
     }
@@ -118,19 +129,31 @@ flow LiteratureReview title "Literature Review" create {
       command "validate-input"
       output { inputValid: Boolean }
     }
-    collectSources "Collect literature sources" {
-      uses { collectionInputRef, reviewMode }
+    collectAndExpand "Collect and expand literature sources" {
+      uses { collectionInputRef }
       call literature.collection
-      command "run"
+      command "collect-and-expand"
       output {
-        collectionOutputRef: String
+        expandedCollectionRef: String
         collectionId: ID
         collectionCount: Number
         collectionStatus: String
       }
     }
+    capturePdfs "Capture PDFs" {
+      uses { expandedCollectionRef }
+      map item in expandedCollectionRef call pdf.capture
+      command "capture"
+      output { capturedCollectionRef: String, captureStatus: String }
+    }
+    reviewRecords "Review records" {
+      uses { capturedCollectionRef, reviewMode }
+      call manual.review
+      command "review"
+      output { reviewedCollectionRef: String, reviewStatus: String }
+    }
     prepareAnalysis "Prepare analysis snapshot" {
-      uses { collectionOutputRef, question, decisionContext, audience }
+      uses { reviewedCollectionRef, question, decisionContext, audience }
       call literature.analysis
       command "prepare"
       output { snapshotRef: String, analysisInputRef: String, clueCount: Number }

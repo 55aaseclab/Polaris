@@ -2,7 +2,7 @@
   "schema_version": "polaris.literature-review.workflow.v1",
   "workflow_id": "literature-review",
   "workflow_version": "0.1.0",
-  "workflow_language": "0.4-trial",
+  "workflow_language": "0.4",
   "contract_compatibility": [
     "clue.data-collection.input.v2",
     "clue.data-collection.output.v2",
@@ -23,17 +23,18 @@
   },
   "components": {
     "collection": "tools/data-collection/clue-data-collection",
-    "collection_review": "tools/collection-review/clue-collection-review",
+    "pdf_capture": "tools/browser/clue-browser",
+    "manual_review": "tools/manual-review/clue-manual-review",
     "analysis_review": "tools/analysis-review/clue-analysis-review",
     "analysis": "tools/intelligence-analysis/clue-intelligence-analysis",
     "report": "tools/report-writing/clue-report-writing"
   },
   "port_bindings": {
-    "PlanLiteratureSearchKeywords": "literature.codex",
+    "PlanLiteratureSearchKeywords": "codex",
     "ValidateLiteratureInput": "literature.collection",
     "CollectLiteratureSources": "literature.collection",
-    "AugmentLiteratureCollection": "literature.collection",
-    "ResolveCollectionReview": "literature.collection.review",
+    "CaptureLiteraturePdfs": "pdf.capture",
+    "ResolveManualReview": "manual.review",
     "FreezeLiteratureSnapshot": "literature.analysis",
     "IterateLiteratureClaims": "literature.analysis.iterator",
     "ProposeLiteratureBatches": "literature.analysis.iterator",

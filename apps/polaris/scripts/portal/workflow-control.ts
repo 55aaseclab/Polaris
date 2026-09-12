@@ -356,6 +356,14 @@ class WorkflowRpcHost implements AsyncFfiHost {
     }
   }
 
+  resolveCollection(reference: unknown): unknown[] | null {
+    return this.toolDispatcher?.resolveCollection(reference) ?? null;
+  }
+
+  materializeCollection(items: unknown[]): string {
+    return this.toolDispatcher?.materializeCollection(items) ?? JSON.stringify(items);
+  }
+
   private policyMode(): "mock" | "live" {
     return this.run.policy.mode === "live" ? "live" : "mock";
   }

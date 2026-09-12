@@ -16,10 +16,10 @@ test("DSL flow projection exposes every declared step and only data dependencies
     "AutoResearch",
     "LiteratureReview",
   );
-  assert.equal(graph.flow.nodes.length, 15);
+  assert.equal(graph.flow.nodes.length, 17);
   assert.equal(graph.flow.nodes.filter((node) => node.kind === "input").length, 1);
   assert.equal(graph.flow.nodes.filter((node) => node.id.startsWith("__")).length, 2);
-  assert.equal(graph.flow.nodes.filter((node) => node.kind === "step").length, 13);
+  assert.equal(graph.flow.nodes.filter((node) => node.kind === "step").length, 15);
   assert.deepEqual(
     graph.flow.edges
       .filter((edge) => edge.to === "prepareCollection")
@@ -34,10 +34,12 @@ test("DSL flow projection exposes every declared step and only data dependencies
   assert.deepEqual(
     graph.flow.nodes.map((node) => node.call).filter(Boolean),
     [
-      "literature.codex",
+      "codex",
       "literature.collection",
       "literature.collection",
       "literature.collection",
+      "pdf.capture",
+      "manual.review",
       "literature.analysis",
       "literature.analysis",
       "literature.analysis",
@@ -315,64 +317,13 @@ module Student title "Student workflows" code "student" {
   });
 });
 
-test("pack projection omits legacy trial metadata from the Portal catalog", { concurrency: false }, async () => {
-  await withDataRoot(async (dataRoot) => {
-    const sourcePath = path.join(dataRoot, "trial-pack.ord");
-    fs.writeFileSync(sourcePath, `dsl version "0.4-trial"
-domain TrialPack version "1.0.0"
-title "Synthetic trial pack"
-port Work version "1.0.0" {
-  in {
-    token: String
-  }
-  out {
-    result: String
-  }
-  effect ffi
-}
-trial Main title "Synthetic trial" {
-  input {
-    token: String required
-  }
-  budget {
-    timeout 10s
-    cost 1
-    maxTransitions 4
-  }
-  execution {
-    class ai
-    isolation disposable
-    network deny
-  }
-  start work
-  terminal { work }
-  nodes {
-    work "Work" {
-      uses { token }
-      call Work
-      output { result: String }
-      retry { max 1 }
-    }
-  }
-}
-`, "utf8");
-
-    await runCli(["pack", "add", sourcePath]);
-
-    const projection = listDomainPackProjections(import.meta.url)
-      .find((pack) => pack.id === "TrialPack");
-    assert.ok(projection);
-    assert.deepEqual(projection.flows, []);
-  });
-});
-
-test("built-in AutoResearch pack exposes one v0.3 flow", { concurrency: false }, async () => {
+test("built-in AutoResearch pack exposes one v0.4 flow", { concurrency: false }, async () => {
   await withDataRoot(async () => {
     const projection = listDomainPackProjections(import.meta.url)
       .find((candidate) => candidate.id === "AutoResearch");
     assert.ok(projection);
     assert.equal(projection.title, "autoresearch");
-    assert.equal(projection.languageVersion, "0.3");
+    assert.equal(projection.languageVersion, "0.4");
     assert.deepEqual(
       projection.flows.map((flow) => ({
         id: flow.id,
@@ -382,7 +333,7 @@ test("built-in AutoResearch pack exposes one v0.3 flow", { concurrency: false },
       [{
         id: "LiteratureReview",
         title: "Literature Review",
-        estimate: "13 个阶段",
+        estimate: "15 个阶段",
       }],
     );
     assert.equal(projection.flows.length, 1);

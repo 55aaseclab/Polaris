@@ -3011,7 +3011,7 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
       evidence_policy: { required_fields: ["source_url", "quote", "observed_at", "content_hash"] },
       source_tasks: [{ task_id: "synthetic-source", source_type: "crossref-search", config: { query: "bounded behavior" } }],
       payload: { literature_scope: { enabled: true }, pdf_links: { enabled: true } },
-      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+      pipeline: { review_mode: "auto-pass" },
     };
     const output = {
       schema_version: "clue.data-collection.output.v2",
@@ -3030,7 +3030,7 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
       rejected_records: [],
       run_artifacts: [],
       information_gaps: [],
-      pipeline: { review_mode: "auto-pass", skip_augmentation: true },
+      pipeline: { review_mode: "auto-pass" },
     };
     await withEnv("POLARIS_AUTH_MODE", "disabled", async () => {
       await withEnv("POLARIS_AUTH_DEFAULT_USER_ID", uniqueName("portal-host-literature-user"), async () => {
@@ -3050,7 +3050,6 @@ test("portal runs AutoResearch LiteratureReview on the host and returns real art
                 brief: input.question,
                 collectionInput: JSON.stringify(input),
                 collectionOutput: JSON.stringify(output),
-                skipAugmentation: "true",
               },
             }),
           });

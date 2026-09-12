@@ -1,7 +1,7 @@
 ---
 name: polaris-literature-review
 description: >
-  Map a literature-review request onto the Polaris v0.4-trial Domain Pack,
+  Map a literature-review request onto the Polaris AutoResearch Domain Pack,
   including collection, evidence analysis, human review, and report output.
 ---
 
@@ -18,8 +18,8 @@ Pack. The public entry point is the Polaris workflow API.
 - human gates → Polaris durable review continuation
 
 The canonical declaration is `packs/autoresearch/main.ord` and explicitly uses
-`dsl version "0.4-trial"`. Polaris loads the declaration and runs its
-`LiteratureReviewExecution` trial.
+`dsl version "0.4"`. Polaris loads the declaration and runs its
+`LiteratureReview` flow.
 
 ## Standard lifecycle
 

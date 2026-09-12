@@ -34,6 +34,15 @@ class SyntheticToolHost implements FfiHost {
     this.log.length = 0;
   }
 
+  resolveCollection(reference: string): unknown[] | null {
+    if (reference.startsWith("synthetic:")) return [{ url: "https://example.test/a" }];
+    return null;
+  }
+
+  materializeCollection(items: unknown[]): string {
+    return JSON.stringify(items);
+  }
+
   invoke(request: FfiInvokeRequest): FfiInvokeResult {
     const port = this.ports.find((candidate) =>
       (candidate.qualifiedName ?? candidate.name) === request.port
@@ -57,14 +66,15 @@ test("AutoResearch is a declaration-only pack with one flow and no legacy graphs
   assert.equal(result.ok, true, result.issues.map((issue) => issue.message).join("; "));
   assert.equal(result.ast?.name, "AutoResearch");
   assert.deepEqual(result.ast?.pipelines, []);
-  assert.deepEqual(result.ast?.trials, []);
   assert.deepEqual(result.ast?.flows.map((flow) => flow.name), ["LiteratureReview"]);
-  assert.equal(result.ast?.flows[0]?.steps.length, 13);
+  assert.equal(result.ast?.flows[0]?.steps.length, 15);
   assert.deepEqual(
     result.ast?.ports.map((port) => port.qualifiedName ?? port.name),
     [
-      "literature.codex",
+      "codex",
       "literature.collection",
+      "pdf.capture",
+      "manual.review",
       "literature.analysis",
       "literature.report",
     ],
@@ -75,6 +85,15 @@ test("AutoResearch is a declaration-only pack with one flow and no legacy graphs
   );
   assert.equal(fs.existsSync(path.join(REPO_ROOT, "tools", "literature-review")), false);
   assert.equal(fs.existsSync(path.join(REPO_ROOT, "packs", "autoresearch", "workflow.py")), false);
+});
+
+test("LiteratureReview maps collection items under the pdf capture input name", () => {
+  const result = runPipeline(fs.readFileSync(DEFINITION, "utf8"));
+  assert.ok(result.ast);
+  const step = result.ast.flows[0]?.steps.find((candidate) => candidate.id === "capturePdfs");
+  assert.equal(step?.map?.item, "item");
+  assert.equal(step?.map?.source, "expandedCollectionRef");
+  assert.equal(step?.map?.call.name, "pdf.capture");
 });
 
 test("the compiled LiteratureReview flow runs from its declared inputs and produces pdfRef", async () => {

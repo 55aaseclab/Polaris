@@ -29,7 +29,7 @@ review dimensions must pass before Markdown publication.
 ## Execution
 
 Submit the `AutoResearch/LiteratureReview` flow through the Polaris workflow
-API. The `LiteratureReviewExecution` trial routes report preparation, review,
+API. The `LiteratureReview` flow routes report preparation, review,
 publication, and PDF rendering through its declared ports.
 
 ## Rules

@@ -149,6 +149,30 @@ export class WorkflowToolDispatcher {
         tool.id === port.binding?.tool));
   }
 
+  resolveCollection(reference: unknown): unknown[] | null {
+    if (typeof reference !== "string" || !reference.trim()) return null;
+    try {
+      const value: unknown = JSON.parse(fs.readFileSync(reference, "utf8"));
+      if (Array.isArray(value)) return value;
+      if (isRecord(value) && Array.isArray(value.records)) return value.records;
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  materializeCollection(items: unknown[]): string {
+    const root = path.join(
+      this.options.environment.POLARIS_WORKFLOW_WORKSPACES_ROOT
+        || path.join(repoRoot(this.options.importMetaUrl), ".polaris", "workflow-workspaces"),
+      safeRunId(this.runRecord.id),
+      "artifacts",
+    );
+    const file = path.join(root, `collection-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+    writeJson(file, { schema_version: "clue.data-collection.output.v2", records: items });
+    return file;
+  }
+
   async invoke(req: FfiInvokeRequest, port: PortAst): Promise<FfiInvokeResult> {
     try {
       if (!port.binding) throw new Error(`port ${port.name} has no external binding`);
