@@ -6,7 +6,6 @@ import {
   type ValidationIssue,
 } from './ast.js'
 import { resolvePort } from './resolve.js'
-import { validateTrial } from './trial.js'
 
 const BUILTIN_TYPES = new Set(['ID', 'String', 'Number', 'Money', 'Boolean', 'Status'])
 
@@ -67,7 +66,7 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
   const issues: ValidationIssue[] = []
   if (!ast.name) push(issues, 'error', 'E_DOMAIN_NAME', 'Domain name is required')
   const languageVersion = ast.languageVersion ?? '0.3'
-  if (languageVersion !== '0.3' && languageVersion !== '0.4-trial') {
+  if (languageVersion !== '0.3' && languageVersion !== '0.4') {
     push(issues, 'error', 'E_DSL_VERSION', `Unsupported DSL language version ${languageVersion}`)
   }
 
@@ -157,6 +156,19 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     const called: PortRef[] = []
 
     for (const step of flow.steps) {
+      if (step.map) {
+        if (!available.has(step.map.source)) {
+          push(issues, 'error', 'E_MAP_SOURCE', `map ${step.id} uses unknown collection ${step.map.source}`, `flow.${flow.name}.${step.id}`)
+        }
+        const port = findPort(flat.ports, step.map.call)
+        if (!port) {
+          push(issues, 'error', 'E_MAP_PORT', `map ${step.id} references unknown port ${step.map.call.raw}`, `flow.${flow.name}.${step.id}`)
+        }
+        if (step.call) {
+          push(issues, 'error', 'E_MAP_CALL', `map ${step.id} must not also declare call`, `flow.${flow.name}.${step.id}`)
+        }
+        called.push(step.map.call)
+      }
       if (step.uses.length === 0 && !step.call) {
         push(issues, 'warning', 'W_STEP_NO_USES', `step ${step.id} 未声明 uses`, `flow.${flow.name}.${step.id}`)
       }
@@ -304,22 +316,6 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
         )
       }
     }
-  }
-
-  const trialNames = new Set<string>()
-  for (const trial of ast.trials ?? []) {
-    if (trialNames.has(trial.name)) push(issues, 'error', 'E_DUP_TRIAL', `Duplicate trial ${trial.name}`)
-    trialNames.add(trial.name)
-    if (languageVersion !== '0.4-trial') {
-      push(
-        issues,
-        'error',
-        'E_TRIAL_LANGUAGE_VERSION',
-        `trial ${trial.name} requires DSL language version 0.4-trial`,
-        `trial.${trial.name}`,
-      )
-    }
-    issues.push(...validateTrial(trial, flat.ports))
   }
 
   return { ok: !issues.some((i) => i.level === 'error'), issues }

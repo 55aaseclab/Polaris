@@ -10,7 +10,5 @@ declaration binds AutoResearch ports to common-tool entries in
 runs `LiteratureReview` as a durable host or mock Vault workflow. There is
 no pack-local runner.
 
-`cve-genie-trial/` is the bounded v0.4-trial CVE-Genie fixture.
-
 `vision-kernel/` is a design sketch of the kernel with orders and stock
 ports. It is not a claim that every form in that file is product-wired.

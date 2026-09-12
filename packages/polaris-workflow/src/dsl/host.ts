@@ -66,6 +66,7 @@ export interface FfiHost {
   invoke(req: FfiInvokeRequest): FfiInvokeResult
   readonly log: FfiCallLog[]
   clearLog(): void
+  resolveCollection?: (reference: CtxValue) => unknown[] | null
 }
 
 export interface AsyncFfiHost extends FfiHost {

@@ -1,7 +1,7 @@
 # Polaris DSL As Workflow IR
 
 This page moved. The language, Domain Pack contract, FFI Host boundary, and
-v0.4-trial surface now live on the product reference:
+The current DSL surface lives on the product reference:
 
 - [Polaris DSL](../../polaris/dsl.md)
 

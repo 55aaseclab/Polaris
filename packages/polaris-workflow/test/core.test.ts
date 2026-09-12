@@ -56,6 +56,22 @@ test("public package pipeline parses, validates, and interprets a flow", () => {
   assert.equal(store.events[0]?.name, "OrderCreated");
 });
 
+test("removed trial DSL surface is rejected", () => {
+  const versioned = runPipeline(`dsl version "0.4-trial"
+domain RemovedTrial version "1.0.0"
+entity Record { id: ID }
+`);
+  assert.equal(versioned.ok, false);
+  assert.match(versioned.parseErrors.map((error) => error.message).join("; "), /Unsupported DSL language version/u);
+
+  const trial = runPipeline(`dsl version "0.4"
+domain RemovedTrial version "1.0.0"
+trial Main { }
+`);
+  assert.equal(trial.ok, false);
+  assert.match(trial.parseErrors.map((error) => error.message).join("; "), /trial DSL surface has been removed/u);
+});
+
 test("zero-input host ports may be called without a uses declaration", () => {
   const pipeline = runPipeline(`
 domain ContextPack version "1.0.0"
@@ -138,6 +154,53 @@ test("DSL validation rejects an FFI port without a binding", () => {
   const result = runPipeline(boundToolSource.replace('binding { tool "synthetic.tool" }', ""));
   assert.equal(result.ok, false);
   assert.ok(result.issues.some((issue) => issue.code === "E_FFI_BINDING"));
+});
+
+test("map invokes its port once per collection item and aggregates outputs", () => {
+  const source = `
+domain MapPack version "0.1.0"
+port item.process version "1.0.0" {
+  in { item: String }
+  out { value: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+flow MapItems title "Map items" create {
+  input { collection: String required }
+  steps {
+    process "Process items" {
+      uses { collection }
+      map item in collection call item.process
+      command "run"
+      output { value: String }
+    }
+  }
+  output { value: String from value }
+  ui { layout form primary "Run" }
+}
+`;
+  const parsed = runPipeline(source, { toolResolver });
+  assert.equal(parsed.ok, true, parsed.issues.map((issue) => issue.message).join("; "));
+  const calls: FfiInvokeRequest[] = [];
+  const host = {
+    has: () => true,
+    clearLog: () => {},
+    log: [],
+    resolveCollection: () => [{ id: "a" }, { id: "b" }],
+    invoke(request: FfiInvokeRequest): FfiInvokeResult {
+      calls.push(request);
+      return { ok: true, output: { value: String(request.input.item) } };
+    },
+  };
+  const result = parsed.program!.run("MapItems", { collection: "collection-ref" }, new DocStore(), host);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.meta?.mapIndex, 0);
+  assert.equal(calls[1]?.meta?.mapIndex, 1);
+  assert.deepEqual(JSON.parse(String(result.outputs?.value)), [
+    { id: "a", value: "{\"id\":\"a\"}" },
+    { id: "b", value: "{\"id\":\"b\"}" },
+  ]);
 });
 
 const asyncSource = `

@@ -8,9 +8,8 @@ Polaris 0.4.0 的可嵌入 Polaris DSL / workflow IR Node.js 包。
 
 通用业务描述语言的实验实现：**行业无关内核** + **业务包** + **（目标）FFI Port**。
 
-语言表面默认为 **v0.3**。显式写入 `dsl version "0.4-trial"` 后，可使用
-有界 durable trial 图来表达 Agent 编排、条件边、反馈回边、重试和预算；
-这不会改变 v0.3 的 `flow` 语义。
+语言表面支持 **v0.3** 和 **v0.4**。v0.4 在普通 `flow` 中增加可执行的
+`map` step；控制流仍由宿主负责。
 
 ## 设计立场（先读）
 
@@ -25,6 +24,10 @@ Polaris 0.4.0 的可嵌入 Polaris DSL / workflow IR Node.js 包。
 
 目标态素描：`packs/vision-kernel/main.ord`；`port` / `call` / `needs` 已在 P1 实现。
 
+DSL 0.4 adds executable `map` steps. A map resolves a collection, invokes its
+port once per item, and materializes the item/output pairs as a new collection
+artifact. Collection-level gates remain ordinary port steps.
+
 ## 当前实现
 
 | 能力 | 状态 |
@@ -36,14 +39,12 @@ Polaris 0.4.0 的可嵌入 Polaris DSL / workflow IR Node.js 包。
 | shadcn 渲染 + 数据流 + FFI 日志 | ✅ |
 | **1000 域包压测 + Unicode 标识符** | ✅ |
 | **`import` 跨域包 + port 版本 (`@ver`)** | ✅ P2 |
-| **`dsl version "0.4-trial"` + Trial/Node/Edge runtime** | ✅ trial |
 | Polaris Domain Pack 安装/列出/删除 CLI | ✅ 0.4 foundation |
 | 真实 Host CLI/HTTP 执行 adapter | 🚧 P3 |
 
 第一方域包位于仓库根目录 `packs/`：
 
 - `packs/autoresearch/main.ord` — 第一方文献研究
-- `packs/cve-genie-trial/main.ord` — 有界 CVE-Genie trial
 - `packs/vision-kernel/main.ord` — 内核素描
 
 ```bash
@@ -61,13 +62,6 @@ pnpm stress:all
 
 详见 [docs/DOMAIN_PACKS.md](./docs/DOMAIN_PACKS.md)、[docs/DESIGN.md](./docs/DESIGN.md)、  
 [docs/POLARIS-0.4-BRIDGE.md](./docs/POLARIS-0.4-BRIDGE.md)（与 Polaris 任务推送/学习对接）。
-
-v0.4-trial 示例：
-
-- `packs/cve-genie-trial/main.ord` — CVE-Genie 的完整 bounded control graph
-- `src/dsl/trial.ts` — condition evaluator、Host contract、checkpoint runtime
-- `src/dsl/visualize.ts` — deterministic Graphviz DOT projection for trial graphs
-- `test/trial.test.ts` — v0.3 compatibility、feedback、retry、resume、budget
 
 ## 目录
 

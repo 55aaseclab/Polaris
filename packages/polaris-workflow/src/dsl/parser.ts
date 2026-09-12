@@ -16,18 +16,11 @@ import type {
   PortRef,
   StepAst,
   StepOutputAst,
-  TrialArtifactAst,
-  TrialAst,
-  TrialEdgeAst,
-  TrialExecutionAst,
-  TrialNodeAst,
-  TrialRetryAst,
 } from './ast.js'
 import {
   DEFAULT_DSL_LANGUAGE_VERSION,
   normalizeVersion,
   parsePortRef,
-  TRIAL_DSL_LANGUAGE_VERSION,
 } from './ast.js'
 
 export interface ParseResult {
@@ -85,7 +78,8 @@ function splitEntries(source: string): string[] {
 }
 
 function parseFieldLine(line: string): FieldAst | null {
-  const m = line.match(re(`^(${ID})\\s*:\\s*(${ID})(\\?)?(?:\\s*=\\s*(.+))?$`))
+  const typeExpr = `${ID}(?:<${ID}(?:<${ID}>)?>)?`
+  const m = line.match(re(`^(${ID})\\s*:\\s*(${typeExpr})(\\?)?(?:\\s*=\\s*(.+))?$`))
   if (!m) return null
   const [, name, type, optional, def] = m
   const field: FieldAst = { name, type, optional: Boolean(optional) }
@@ -99,7 +93,8 @@ function parseFieldLine(line: string): FieldAst | null {
 }
 
 function parseInputLine(line: string): InputFieldAst | null {
-  const m = line.match(re(`^(${ID})\\s*:\\s*(${ID})(.*)$`))
+  const typeExpr = `${ID}(?:<${ID}(?:<${ID}>)?>)?`
+  const m = line.match(re(`^(${ID})\\s*:\\s*(${typeExpr})(.*)$`))
   if (!m) return null
   const [, name, type, rest] = m
   const input: InputFieldAst = { name, type }
@@ -154,7 +149,6 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
   const title = titleM ? (titleM[2] ?? titleM[3]) : name
   const onM = header.match(re(`\\bon\\s+(${ID})`, "i"))
   const on = onM?.[1]
-
   let description: string | undefined
   let create = /\bcreate\b/i.test(header)
   const inputs: InputFieldAst[] = []
@@ -436,7 +430,7 @@ function parseFlowOutputs(body: string): FlowOutputAst[] {
   const list: FlowOutputAst[] = []
   for (const line of splitEntries(body)) {
     const m = line.match(
-      re(`^(${ID})\\s*:\\s*(${ID})(?:\\s+from\\s+(${ID}(?:\\.${ID})?))?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
+      re(`^(${ID})\\s*:\\s*(${ID}(?:<${ID}(?:<${ID}>)?>)?)(?:\\s+from\\s+(${ID}(?:\\.${ID})?))?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
     )
     if (!m) continue
     list.push({
@@ -461,7 +455,7 @@ function parseStepOutputs(body: string): StepOutputAst[] {
   const list: StepOutputAst[] = []
   for (const line of splitEntries(body)) {
     const m = line.match(
-      re(`^(${ID})\\s*:\\s*(${ID})(\\?)?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
+      re(`^(${ID})\\s*:\\s*(${ID}(?:<${ID}(?:<${ID}>)?>)?)(\\?)?(?:\\s+label\\s+("([^"]*)"|'([^']*)'))?`),
     )
     if (!m) continue
     list.push({ name: m[1], type: m[2], optional: Boolean(m[3]), label: m[5] ?? m[6] })
@@ -498,6 +492,7 @@ function parseStepsBlock(body: string): StepAst[] | string {
     let outputs: StepOutputAst[] = []
     let call: PortRef | undefined
     let command: string | undefined
+    let map: StepAst['map'] | undefined
 
     // 块形式
     if (body[i] === '{') {
@@ -522,6 +517,14 @@ function parseStepsBlock(body: string): StepAst[] | string {
         if (commandM) {
           command = commandM[2] ?? commandM[3] ?? commandM[4]
           j += commandM[0].length
+          continue
+        }
+
+        const mapM = part.match(re(`^map\\s+(${ID})\\s+in\\s+(${ID})\\s+call\\s+(${PORT_ID})(?:@([\\d.]+))?`, 'i'))
+        if (mapM) {
+          const raw = mapM[4] ? `${mapM[3]}@${mapM[4]}` : mapM[3]
+          map = { item: mapM[1], source: mapM[2], call: parsePortRef(raw) }
+          j += mapM[0].length
           continue
         }
 
@@ -563,7 +566,7 @@ function parseStepsBlock(body: string): StepAst[] | string {
       }
     }
 
-    steps.push({ id, label, uses, outputs, call, ...(command ? { command } : {}) })
+    steps.push({ id, label, uses, outputs, call, ...(command ? { command } : {}), ...(map ? { map } : {}) })
   }
   return steps
 }
@@ -582,6 +585,8 @@ function parseListBlock(body: string): string[] {
   return parseUsesList(body)
 }
 
+/* Removed trial parser implementation retained only in history. */
+/*
 function parseTrialRetry(body: string): TrialRetryAst {
   const maxM = body.match(/\bmax(?:Attempts)?\s+([^\s}]+)/i)
   const backoffToken = body.match(/\bbackoff\s+([^\s}]+)/i)
@@ -755,9 +760,9 @@ function parseTrialBudget(body: string): TrialAst['budget'] {
   const costM = body.match(/\b(?:cost|maxCost)\s+([^\s}]+)/i)
   const transitionM = body.match(/\bmaxTransitions\s+([^\s}]+)/i)
   return {
-    timeoutMs: timeoutM ? (parseDurationMs(timeoutM[1]) ?? Number.NaN) : 2_700_000,
-    maxCost: costM ? Number(costM[1]) : 5,
-    maxTransitions: transitionM ? Number(transitionM[1]) : 128,
+    timeoutMs: timeoutM ? (parseDurationMs(timeoutM[1]) ?? Number.NaN) : Number.POSITIVE_INFINITY,
+    maxCost: costM ? Number(costM[1]) : Number.POSITIVE_INFINITY,
+    maxTransitions: transitionM ? Number(transitionM[1]) : Number.POSITIVE_INFINITY,
   }
 }
 
@@ -820,33 +825,7 @@ function parseTrial(header: string, body: string): TrialAst | ParseError {
   }
   return trial
 }
-
-function parseTrials(cleaned: string, errors: ParseError[]): { trials: TrialAst[]; ranges: { start: number; end: number }[] } {
-  const trials: TrialAst[] = []
-  const ranges: { start: number; end: number }[] = []
-  const trialRe = new RegExp(`^[ \\t]*trial\\s+${ID}`, 'gimu')
-  let match: RegExpExecArray | null
-  while ((match = trialRe.exec(cleaned)) !== null) {
-    const start = match.index
-    const headerStart = cleaned.slice(start)
-    const brace = headerStart.indexOf('{')
-    if (brace < 0) {
-      errors.push({ message: `trial ${match[0].trim()} missing body` })
-      continue
-    }
-    const absBrace = start + brace
-    const block = extractBlock(cleaned, absBrace)
-    if (!block) {
-      errors.push({ message: `Unclosed trial ${match[0].trim()}` })
-      continue
-    }
-    const parsed = parseTrial(cleaned.slice(start, absBrace).trim(), block.body)
-    if ('kind' in parsed && parsed.kind === 'Trial') trials.push(parsed)
-    else errors.push(parsed as ParseError)
-    ranges.push({ start, end: block.end })
-  }
-  return { trials, ranges }
-}
+*/
 
 /** 解析 entity|enum|flow|port|outputs */
 function parseMembers(
@@ -970,13 +949,12 @@ export function parse(source: string): ParseResult {
     flows: [],
     modules: [],
     pipelines: [],
-    trials: [],
   }
 
   const languageM = cleaned.match(/^\s*dsl\s+version\s+(?:"([^"]*)"|'([^']*)')/im)
   if (languageM) {
     const requested = (languageM[1] ?? languageM[2] ?? '').trim().replace(/^v(?=\d)/i, '')
-    if (requested === '0.3' || requested === TRIAL_DSL_LANGUAGE_VERSION) {
+    if (requested === '0.3' || requested === '0.4') {
       ast.languageVersion = requested
     } else {
       errors.push({ message: `Unsupported DSL language version: ${requested}` })
@@ -992,15 +970,10 @@ export function parse(source: string): ParseResult {
   ast.version = normalizeVersion(domM[3] ?? domM[4] ?? '0.0.0')
   ast.imports = parseImports(cleaned)
   ast.pipelines = parsePipelines(cleaned, errors)
-  const trials = parseTrials(cleaned, errors)
-  ast.trials = trials.trials
-  if (ast.trials.length > 0 && ast.languageVersion !== TRIAL_DSL_LANGUAGE_VERSION) {
-    errors.push({
-      message: `trial requires dsl version "${TRIAL_DSL_LANGUAGE_VERSION}"`,
-    })
+  if (new RegExp(String.raw`\btrial\s+${ID}`, 'iu').test(cleaned)) {
+    errors.push({ message: 'The trial DSL surface has been removed; use flow instead' })
   }
-
-  const headEnd = cleaned.search(new RegExp(String.raw`\b(module|entity|enum|flow|port|trial)\s+${ID}`, 'iu'))
+  const headEnd = cleaned.search(new RegExp(String.raw`\b(module|entity|enum|flow|port)\s+${ID}`, 'iu'))
   const head = headEnd >= 0 ? cleaned.slice(0, headEnd) : cleaned
   const titleM = head.match(/\btitle\s+("([^"]*)"|'([^']*)')/)
   if (titleM) ast.title = titleM[2] ?? titleM[3]
@@ -1045,10 +1018,6 @@ export function parse(source: string): ParseResult {
   for (const r of moduleRanges) {
     masked = masked.slice(0, r.start) + ' '.repeat(r.end - r.start) + masked.slice(r.end)
   }
-  for (const r of trials.ranges) {
-    masked = masked.slice(0, r.start) + ' '.repeat(r.end - r.start) + masked.slice(r.end)
-  }
-
   const top = parseMembers(masked, errors)
   ast.entities.push(...top.entities)
   ast.enums.push(...top.enums)
@@ -1058,7 +1027,7 @@ export function parse(source: string): ParseResult {
   // 能力域包可只有 port/entity（供 import），不强制 flow
   const totalFlows = ast.flows.length + ast.modules.reduce((n, m) => n + m.flows.length, 0)
   const totalPorts = ast.ports.length + ast.modules.reduce((n, m) => n + m.ports.length, 0)
-  if (totalFlows === 0 && totalPorts === 0 && ast.entities.length === 0 && ast.trials.length === 0) {
+  if (totalFlows === 0 && totalPorts === 0 && ast.entities.length === 0) {
     errors.push({ message: 'Domain is empty (no flow / port / entity)' })
   }
 

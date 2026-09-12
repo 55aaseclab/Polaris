@@ -125,6 +125,7 @@ export interface StepSpec {
   /** port 版本钉扎 */
   callVersion?: string
   command?: string
+  map?: { item: string; source: string; call: string; callVersion?: string }
 }
 
 export interface StepExecOptions {
@@ -141,6 +142,10 @@ export interface StepExecOptions {
         mode?: 'interpret' | 'compile'
         command?: string
         outputFields?: string[]
+        mapCall?: string
+        mapItem?: string
+        mapSource?: string
+        mapIndex?: number
       }
     }) => {
       ok: boolean
@@ -150,6 +155,8 @@ export interface StepExecOptions {
       resolvedVersion?: string
     }
     has?: (port: string, version?: string) => boolean
+    resolveCollection?: (reference: CtxValue) => unknown[] | null
+    materializeCollection?: (items: unknown[]) => CtxValue
   }
   flowName?: string
   mode?: 'interpret' | 'compile'
@@ -268,6 +275,80 @@ function ffiSuccessLog(
   }
 }
 
+function mapItems(value: CtxValue): unknown[] | null {
+  if (typeof value !== 'string') return null
+  let text = value
+  try {
+    // Artifact references are local JSON files in the workflow runtime.
+    // Inline JSON remains useful for pure runtime and unit-test hosts.
+    if (!text.trim().startsWith('[') && !text.trim().startsWith('{')) {
+      // Lazy require is unavailable in ESM; file references are supplied by
+      // hosts as JSON strings until an artifact store is attached.
+      return null
+    }
+    const parsed = JSON.parse(text) as unknown
+    if (Array.isArray(parsed)) return parsed
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { records?: unknown[] }).records)) {
+      return (parsed as { records: unknown[] }).records
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function mapFailureLog(step: StepSpec, used: Record<string, CtxValue>, detail: string): StepLog {
+  return { id: step.id, label: step.label, ok: false, detail, used, call: step.call, ffi: Boolean(step.call) }
+}
+
+function mappedInput(item: unknown, itemName: string, used: Record<string, CtxValue>): StepContext {
+  const input: StepContext = { ...used }
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') input[key] = value
+    }
+  }
+  input[itemName] = JSON.stringify(item)
+  return input
+}
+
+function executeMappedSync(step: StepSpec, opts: StepExecOptions, used: Record<string, CtxValue>): StepLog {
+  const { ctx, record, host, flowName, mode } = opts
+  if (!host) return ffiMissingHostLog(step, used)
+  const mappedHost = host
+  const source = mappedHost.resolveCollection?.(ctx[step.map!.source] ?? used[step.map!.source])
+    ?? mapItems(ctx[step.map!.source] ?? used[step.map!.source])
+  if (!source) return mapFailureLog(step, used, `map source ${step.map!.source} must be a JSON collection`)
+  const results: StepContext[] = []
+  for (const [index, item] of source.entries()) {
+    const input = mappedInput(item, step.map!.item, used)
+    const res = host.invoke({
+      port: step.map!.call, version: step.map!.callVersion,
+      input,
+      meta: { stepId: step.id, flowName, mode, command: step.command, mapCall: step.map!.call,
+        mapItem: step.map!.item, mapSource: step.map!.source, mapIndex: index,
+        outputFields: step.outputs.map((output) => output.name) },
+    })
+    if (!res.ok) return ffiFailureLog(step, input, res.error)
+    results.push(res.output)
+  }
+  const collection = source.map((item, index) => {
+    const output = results[index] ?? {}
+    return item && typeof item === 'object' && !Array.isArray(item)
+      ? { ...(item as Record<string, unknown>), ...output }
+      : { item, ...output }
+  })
+  const produced: Record<string, CtxValue> = {}
+  for (const output of step.outputs) {
+    const value = host.materializeCollection?.(collection) ?? JSON.stringify(collection)
+    produced[output.name] = value
+    ctx[output.name] = value
+  }
+  return { id: step.id, label: step.label, ok: true,
+    detail: `map ${step.map?.item} in ${step.map?.source} · ${source.length} item(s)`,
+    used, produced, call: step.map?.call, ffi: true }
+}
+
 /**
  * 执行一步：
  * 1. 从 ctx 取 uses
@@ -279,6 +360,8 @@ export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
   const collected = collectStepUses(step, ctx, record)
   if (!collected.ok) return collected.log
   const { used } = collected
+
+  if (step.map) return executeMappedSync(step, opts, used)
 
   const produced: Record<string, CtxValue> = {}
 
@@ -340,6 +423,43 @@ export async function execStepWithIOAsync(
   const collected = collectStepUses(step, ctx, record)
   if (!collected.ok) return collected.log
   const { used } = collected
+
+  if (step.map) {
+    const source = host?.resolveCollection?.(ctx[step.map.source] ?? used[step.map.source])
+      ?? mapItems(ctx[step.map.source] ?? used[step.map.source])
+    if (!source) return mapFailureLog(step, used, `map source ${step.map.source} must be a JSON collection`)
+    if (!host) return ffiMissingHostLog(step, used)
+    const invoke = host.invokeAsync
+      ? (req: Parameters<NonNullable<AsyncStepExecOptions['host']>['invoke']>[0]) => host.invokeAsync!(req)
+      : (req: Parameters<NonNullable<AsyncStepExecOptions['host']>['invoke']>[0]) => Promise.resolve(host.invoke(req))
+    const results: StepContext[] = []
+    for (const [index, item] of source.entries()) {
+      const input = mappedInput(item, step.map.item, used)
+      const res = await invoke({
+        port: step.map.call, version: step.map.callVersion, input,
+        meta: { stepId: step.id, flowName, mode, command: step.command, mapCall: step.map.call,
+          mapItem: step.map.item, mapSource: step.map.source, mapIndex: index,
+          outputFields: step.outputs.map((output) => output.name) },
+      })
+      if (!res.ok) return ffiFailureLog(step, input, res.error)
+      results.push(res.output)
+    }
+    const collection = source.map((item, index) => {
+      const output = results[index] ?? {}
+      return item && typeof item === 'object' && !Array.isArray(item)
+        ? { ...(item as Record<string, unknown>), ...output }
+        : { item, ...output }
+    })
+    const produced: Record<string, CtxValue> = {}
+    for (const output of step.outputs) {
+      const value = host.materializeCollection?.(collection) ?? JSON.stringify(collection)
+      produced[output.name] = value
+      ctx[output.name] = value
+    }
+    return { id: step.id, label: step.label, ok: true,
+      detail: `map ${step.map.item} in ${step.map.source} · ${source.length} item(s)`,
+      used, produced, call: step.map.call, ffi: true }
+  }
 
   if (!step.call) {
     return execStepWithIO(step, opts)

@@ -96,6 +96,12 @@ export class DslInterpreter {
           outputs: step.outputs.map((o) => ({ name: o.name, type: o.type })),
           call: step.call?.name,
           callVersion: step.call?.version,
+          map: step.map ? {
+            item: step.map.item,
+            source: step.map.source,
+            call: step.map.call.name,
+            callVersion: step.map.call.version,
+          } : undefined,
         },
         {
           ctx,

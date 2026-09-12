@@ -7,10 +7,9 @@ export type FieldType = 'ID' | 'String' | 'Number' | 'Money' | 'Boolean' | strin
 
 export type PortEffect = 'pure' | 'read' | 'write' | 'ffi' | 'human' | 'time'
 export type DomainAccent = 'green' | 'blue' | 'amber'
-export type DslLanguageVersion = '0.3' | '0.4-trial' | string
+export type DslLanguageVersion = '0.3' | '0.4' | string
 
 export const DEFAULT_DSL_LANGUAGE_VERSION: DslLanguageVersion = '0.3'
-export const TRIAL_DSL_LANGUAGE_VERSION = '0.4-trial'
 
 /** 跨域包导入 */
 export interface ImportAst {
@@ -49,7 +48,6 @@ export interface DomainAst {
   flows: FlowAst[]
   modules: ModuleAst[]
   pipelines: PipelineAst[]
-  trials?: TrialAst[]
 }
 
 export interface ModuleAst {
@@ -138,6 +136,12 @@ export interface PortRef {
   version?: string
 }
 
+export interface MapAst {
+  item: string
+  source: string
+  call: PortRef
+}
+
 export interface StepAst {
   id: string
   label: string
@@ -146,6 +150,7 @@ export interface StepAst {
   /** 调用的 port（可带 @version） */
   call?: PortRef
   command?: string
+  map?: MapAst
 }
 
 export interface RequireAst {
@@ -180,80 +185,6 @@ export interface FlowAst {
     icon?: string
   }
   module?: string
-}
-
-export type TrialRole = 'processor' | 'developer' | 'critic' | 'validator' | 'sink' | string
-export type TrialExecutionClass = 'pure' | 'workspace' | 'ai'
-export type TrialIsolation = 'disposable' | 'scoped' | 'none'
-export type TrialNetworkPolicy = 'deny' | 'allow'
-
-export interface TrialRetryAst {
-  /** Maximum number of invocations of this node in one trial. */
-  maxAttempts: number
-  /** Delay before an automatic retry after a failed invocation. */
-  backoffMs: number
-}
-
-export interface TrialNodeAst {
-  kind: 'TrialNode'
-  id: string
-  label: string
-  role?: TrialRole
-  uses: string[]
-  outputs: StepOutputAst[]
-  call?: PortRef
-  capabilities: string[]
-  retry: TrialRetryAst
-  timeoutMs?: number
-  maxActions?: number
-}
-
-export interface TrialEdgeAst {
-  kind: 'TrialEdge'
-  from: string
-  to: string
-  /** Restricted boolean expression evaluated against trial context. */
-  when?: string
-  /** Output name that must be carried as feedback on this edge. */
-  feedback?: string
-  /** Context name used by the destination node for the feedback value. */
-  feedbackAs?: string
-  /** Reset the destination node's attempt counter before entering it. */
-  resetAttempts?: boolean
-}
-
-export interface TrialBudgetAst {
-  timeoutMs: number
-  maxCost: number
-  maxTransitions: number
-}
-
-export interface TrialExecutionAst {
-  class: TrialExecutionClass
-  isolation: TrialIsolation
-  network: TrialNetworkPolicy
-}
-
-export interface TrialArtifactAst {
-  name: string
-  type: FieldType
-  kind: 'data' | 'report' | 'log' | 'snapshot' | 'script'
-  redacted: boolean
-}
-
-/** v0.4-trial durable control graph; ordinary flows remain v0.3-compatible. */
-export interface TrialAst {
-  kind: 'Trial'
-  name: string
-  title: string
-  inputs: InputFieldAst[]
-  nodes: TrialNodeAst[]
-  edges: TrialEdgeAst[]
-  start: string
-  terminal: string[]
-  budget: TrialBudgetAst
-  execution: TrialExecutionAst
-  artifacts: TrialArtifactAst[]
 }
 
 export interface ParseError {

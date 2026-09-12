@@ -10,5 +10,3 @@ export * from "./dsl/rpc.js";
 export * from "./dsl/semver.js";
 export * from "./dsl/ui-model.js";
 export * from "./dsl/validator.js";
-export * from "./dsl/trial.js";
-export * from "./dsl/visualize.js";

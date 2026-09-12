@@ -34,7 +34,7 @@ shipped `0.3.4` single-host baseline. `CHANGELOG.md`,
   installs extra versions under `$POLARIS_DATA_ROOT/control/domain-packs/`.
 - `packs/vault-knowledge-health/` is removed. The first-party Portal pack
   is `AutoResearch`.
-- `polaris-workflow` has a separately gated `v0.4-trial` surface. It is not
+- `polaris-workflow` has a v0.4 flow and map surface. It is not
   wired into the ordinary Portal worker.
 - Literature Review is the `AutoResearch` / `LiteratureReview` pack at
   `packs/autoresearch/`, with reusable adapters under `tools/`. There is no
@@ -74,7 +74,7 @@ These are later authority boundaries. They do not block the 0.4.0 tag:
   `vault.artifact.metadata.read` pilot.
 - AI-assisted workflow generation, a real Vault Host, private-surface
   mutation, or autonomous Agent execution.
-- Wiring `v0.4-trial` into the ordinary Portal worker.
+- Durable conditional workflow execution beyond the current flow surface.
 - `ops workflow-smoke` as operator-facing proof that a Vault-target path
   is mock-only. That command installs a synthetic pack into a temp data
   root and drives mocked setup, approval, receipts, artifacts, and a
@@ -348,7 +348,6 @@ synthetic fixtures and do not call private surface or external providers.
 | `9270f27` | Operator admission path for the metadata pilot. `ops workflow-admit-live-metadata` requires operator identity, release id, both live flags, explicit candidate acknowledgement, a current user-owned runnable Vault, required flow inputs, an immutable installed pack digest, and exactly one compiled `ArtifactMetadata@1.0.0` read call before creating a durable `mode: "live"` run and `workflow.live.admit` audit event. Private surface, setup provisioning, and ordinary UI-created workflow runs remain non-execution surfaces. | `pnpm --filter polaris run check`; `polaris-workflow-control`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, and `polaris-workflow-live-metadata-drill`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `9a1ad1c` | Generic live tool gateway for the metadata pilot. `workflow-live-tool-gateway` owns common admission dispatch, executor-family matching, abort-signal propagation, receipt output, audit metadata, and failed admitted evidence recording. `vault.artifact.metadata.read` is now the first `polaris.projection` tool definition; the public portal shows executor family wording, and no additional live executable surface was added. | `pnpm --filter polaris run check`; `polaris-workflow-live-tool-gateway`, `polaris-workflow-live-boundary`, `polaris-workflow-live-vault-adapter`, `polaris-workflow-live-worker-binding`, `polaris-workflow-live-metadata-drill`, `polaris-workflow-control`, and `polaris-portal`; `pnpm --filter polaris-tools test`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
 | `2b5ec6c` | Historical pack-flow portal UX for a later-removed Vault Knowledge Health pack. The current first-party business pack is `AutoResearch`. | `pnpm --filter polaris-tools test`; `pnpm --filter polaris run check`; `pnpm --filter polaris run test:domain-packs`; `pnpm --filter polaris run smoke:workflow`; `git diff --check` |
-| `f284e9f` | Adds the separately versioned `v0.4-trial` AST/parser/compiler/runtime, bounded CVE-Genie graph, and the Polaris-owned literature-review workflow. Literature Review now lives in `packs/autoresearch/`; reusable implementations live once under `tools/`. v0.3 remains the default, and no trial or literature execution is wired to ordinary Portal live tools. | `polaris-workflow` typecheck/test; `polaris-tools` typecheck/test; `polaris` check; `polaris` test:smoke; `polaris` test:domain-packs; `polaris` test:literature-review; workflow smoke; final Docker image static-plan smoke; `git diff --check`; docs check |
 | `1b05212` | Imports private surface Literature Review history into a tenant/vault-scoped Polaris historical archive. The copy is byte/hash verified, marked historical-only, and does not create a new durable run. | Polaris Literature Review `18/18`; migration tests `3/3`; receipt verification `valid=true` |
 | `2922a4e` | Moves private surface business tools, contracts, and business-core implementation into Polaris-owned tool and business-core locations. | Business tool contract checks `5/5`; business-core typecheck/tests; focused path and schema checks |
 | `044cfac` | Moves the private surface business Portal surface into the Polaris business Portal while retaining the private surface gateway boundary. | Business Portal typecheck/tests; gateway and mutation-policy checks |

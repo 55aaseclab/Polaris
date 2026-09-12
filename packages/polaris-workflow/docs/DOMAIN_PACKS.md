@@ -11,7 +11,6 @@
 | 名称 | `domain <PascalOrUnicode> version "x.y"` |
 | 展示元数据 | 可选 `title`、`description`、`category`、`accent "green|blue|amber"` |
 | 内容 | `enum` / `entity` / `port` / `flow`（可选 `module`） |
-| Trial 内容 | 显式 `dsl version "0.4-trial"` 后可声明 `trial` graph |
 | 输入控件 | flow input 可加 `control text` 或 `control textarea` |
 | FFI | 只声明 `port`；Host binding 在语言外 |
 | 标识符 | **Unicode**：`任务单`、`分拣臂`、`ReserveStock` 均可 |
@@ -80,8 +79,6 @@ pnpm --dir apps/polaris run polaris -- pack remove <domain> \
 ```
 
 `add` 在原子写入前执行 `parse → resolve(import) → validate → compile`。
-v0.4-trial pack 只投影 trial 的图元数据；不会被 v0.3 Portal flow worker
-自动执行。
 被引用的 pack 必须已经安装。多版本同时存在时，删除必须明确版本；
 删除不影响任何 Vault 数据。
 
@@ -96,7 +93,6 @@ pnpm --dir apps/polaris run polaris -- pack add <file.ord|pack-directory>
 | 域包 | 路径 | 作用 |
 |------|------|------|
 | AutoResearch | `packs/autoresearch/main.ord` | 第一方文献收集、分析和报告 |
-| CVE-Genie trial | `packs/cve-genie-trial/main.ord` | 有界 v0.4-trial 控制图 |
 | Vision kernel | `packs/vision-kernel/main.ord` | 内核素描，非全部已被 parser 实现 |
 
 ## 压测集

@@ -25,11 +25,9 @@ queued -> running -> succeeded
 queued/running/waiting --cancel----------------> cancelled
 ```
 
-The package-level `v0.4-trial` extension adds a separate bounded graph
-runner. Its language and `TrialStateStore` contract live on
-[Polaris DSL](../../polaris/dsl.md). It is source-level trial
-functionality only: it does not widen the current Polaris worker, does not
-enable live Agent execution, and does not create a private surface route.
+The DSL currently remains a flow and data-processing surface. Conditional
+routing, feedback, retries, and durable checkpoints remain future runtime
+work; they do not create a separate trial language.
 
 The run retains its original pack version and digest across every transition.
 Retry requeues the same run id with source `retry` and keeps completed

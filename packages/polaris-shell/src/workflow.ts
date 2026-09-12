@@ -36,6 +36,7 @@ export type WorkflowGraphNode = {
   effect?: string;
   uses: string[];
   outputs: string[];
+  map?: { item: string; source: string; call: string };
   capabilities?: string[];
   retry?: { maxAttempts: number; backoffMs: number };
   timeoutMs?: number;

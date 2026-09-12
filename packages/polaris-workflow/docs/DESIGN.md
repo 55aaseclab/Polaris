@@ -1,4 +1,4 @@
-# Polaris DSL · 设计认知（v0.3）
+# Polaris DSL · 设计认知（v0.4）
 
 > 目标：一门**与行业无关**的业务描述语言。  
 > 电商、ERP、科研流水线、制造执行——都是**业务包**，不是语言本身。  
@@ -304,17 +304,11 @@ Renderer / AI：
 | **P3** | registry/API projection；port schema 导出；真实 CLI/HTTP Host adapter | 可上生产宿主 |
 | **P4** | human port；时间；补偿/saga 叙事 | 长事务 |
 
-### v0.4-trial（实验层）
+### v0.4（当前实验范围）
 
-v0.3 保留为默认语言表面，后续仍可独立使用。显式声明
-`dsl version "0.4-trial"` 的 Domain Pack 才能使用 `trial`、节点、条件边、
-反馈、重试、预算和 artifact 声明。该层用于表达有界 Agent control graph，
-不把模型、prompt、shell 或宿主路径写入 DSL。
-
-具体语法和运行语义见 [TRIAL-0.4.md](./TRIAL-0.4.md)。
-
-v0.4-trial 的 durable state store、Host binding 和真实执行 cell 仍由
-Polaris 宿主负责；语言包只提供可验证的图和运行时协议。
+v0.4 当前只扩展普通 `flow` 的数据处理能力，包括可执行的 `map` step。
+条件路由、反馈回边、重试、checkpoint/resume 和执行限制仍是后续设计，
+暂不属于 DSL 语言面。
 
 ---
 

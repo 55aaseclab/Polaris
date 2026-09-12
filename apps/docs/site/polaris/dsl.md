@@ -88,7 +88,6 @@ valid.
 | `pipeline` | Computation | Optional metadata for a main path of flows |
 | `import` | Pack | Cross-pack enum, entity, and port reuse |
 | `ui` | Presentation | Optional form projection; not semantic core |
-| `trial` | v0.4-trial | Bounded durable control graph |
 
 A file is one Domain Pack. The header names the pack and, optionally, the
 language surface:
@@ -107,11 +106,10 @@ Optional pack metadata is `title`, `description`, `category`, and
 `control textarea`, plus `label` and `placeholder`.
 
 The language surface defaults to **v0.3**. Ordinary packs use `domain`,
-`flow`, `port`, `import`, and `pipeline`. A source file must declare
-`dsl version "0.4-trial"` to use `trial`, `nodes`, `edges`, retry budgets, or
-feedback routing. The parser rejects an unknown language version. A `trial`
-graph without that declaration is a parse error. `domain.version` is the pack
-version and is separate from the language version.
+`flow`, `port`, `import`, and `pipeline`; v0.4 adds executable `map` steps.
+The parser rejects the removed `trial` syntax and unknown language versions.
+`domain.version` is the pack version and is separate from the language
+version.
 
 These forms stay out of the kernel:
 
@@ -232,24 +230,8 @@ Rules:
 - a capability pack may declare only ports; and
 - imported packs must already be installed.
 
-### v0.4-trial
-
-`v0.4-trial` is a separately gated experiment for bounded Agent graphs. It
-does not replace v0.3 flow semantics and is not wired to the ordinary Portal
-worker.
-
-Extra forms are:
-
-- `nodes` with `uses`, `call`, `output`, `retry`, `timeout`, and
-  `maxActions`;
-- `edges` with `when`, `feedback`, `feedbackAs`, and `reset`;
-- `budget` for timeout, cost, and transition limits;
-- `execution` for class, isolation, and network intent; and
-- artifact metadata for references, digest, size, and redaction.
-
-Condition expressions are a restricted boolean language: `&&`, `||`, field
-and literal `==` / `!=`, and numeric `<` / `<=` / `>` / `>=`. They do not
-execute JavaScript or shell.
+Execution policies such as conditional routing, feedback, retry, and durable
+checkpointing are intentionally deferred from the current DSL surface.
 
 AI-assisted workflow generation is not implemented. A model may later propose
 a fragment or AST, but Polaris must still validate, dry-run, require human
@@ -281,8 +263,8 @@ supported entry. `pack add` runs the same sequence before the atomic install.
 
 | Stage | Module | Responsibility |
 | --- | --- | --- |
-| Parse | `packages/polaris-workflow/src/dsl/parser.ts` | Comments, Unicode identifiers, v0.3 and trial syntax |
-| AST | `packages/polaris-workflow/src/dsl/ast.ts` | Domain, module, entity, port, flow, trial types |
+| Parse | `packages/polaris-workflow/src/dsl/parser.ts` | Comments, Unicode identifiers, v0.3 and v0.4 syntax |
+| AST | `packages/polaris-workflow/src/dsl/ast.ts` | Domain, module, entity, port, and flow types |
 | Resolve | `packages/polaris-workflow/src/dsl/resolve.ts` | Expand `import`, merge symbols, pin port versions |
 | Validate | `packages/polaris-workflow/src/dsl/validator.ts` | Closed uses/output, known ports, Host tool inventory |
 | Compile | `packages/polaris-workflow/src/dsl/compiler.ts` | Bake a `Program` that still calls Host by port symbol |
@@ -290,8 +272,6 @@ supported entry. `pack add` runs the same sequence before the atomic install.
 | Runtime | `packages/polaris-workflow/src/dsl/runtime.ts` | Context, require guards, step I/O |
 | Host | `packages/polaris-workflow/src/dsl/host.ts` | Port table and `invoke` |
 | RPC | `packages/polaris-workflow/src/dsl/rpc.ts` | Versioned request, lease check, receipt |
-| Trial | `packages/polaris-workflow/src/dsl/trial.ts` | Bounded graph compile and checkpoint runtime |
-| Visualize | `packages/polaris-workflow/src/dsl/visualize.ts` | Deterministic Graphviz DOT for trial graphs |
 | UI model | `packages/polaris-workflow/src/dsl/ui-model.ts` | Flow and module projections for a renderer |
 
 A compiled Program still carries port symbols. That is the real compilation
@@ -495,50 +475,11 @@ flow Place {
 }
 ```
 
-### Bounded trial graph
+### Map step
 
-`packs/cve-genie-trial/main.ord` is the bounded CVE-Genie fixture. It does
-not widen the Portal worker or enable live Agent execution. The smaller
-surface looks like this:
-
-```text
-dsl version "0.4-trial"
-domain Example version "1.0.0"
-
-port Work version "1.0.0" {
-  in { inputRef: String }
-  out { resultRef: String, accepted: Boolean }
-  effect ffi
-}
-
-trial Main title "Bounded trial" {
-  input { inputRef: String required }
-  budget { timeout 60s cost 1 maxTransitions 12 }
-  execution { class ai isolation disposable network deny }
-  start work
-  terminal { done }
-
-  nodes {
-    work "Work" {
-      uses { inputRef }
-      call Work
-      output { resultRef: String, accepted: Boolean }
-      retry { max 2 backoff 1s }
-    }
-    done "Done" {
-      uses { resultRef }
-      call Work
-      output { resultRef: String, accepted: Boolean }
-      retry { max 1 }
-    }
-  }
-
-  edges {
-    edge work -> done when "accepted == true"
-    edge work -> work when "accepted == false"
-  }
-}
-```
+v0.4 supports an executable `map` step for applying a port to each item in a
+collection. It remains an ordinary flow step and does not introduce a second
+workflow runtime.
 
 `packs/vision-kernel/main.ord` is a design sketch of the same kernel with
 orders and stock ports. It is a target-state drawing, not a claim that

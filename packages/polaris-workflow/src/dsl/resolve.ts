@@ -71,23 +71,6 @@ export function resolveImports(
     ports: root.ports.map((p) => clonePort(p, { version: normalizeVersion(p.version || '1.0.0') })),
     flows: [...root.flows],
     pipelines: root.pipelines ? root.pipelines.map((p) => ({ ...p, steps: [...p.steps] })) : [],
-    trials: root.trials ? root.trials.map((trial) => ({
-      ...trial,
-      inputs: trial.inputs.map((input) => ({ ...input })),
-      nodes: trial.nodes.map((node) => ({
-        ...node,
-        uses: [...node.uses],
-        outputs: node.outputs.map((output) => ({ ...output })),
-        capabilities: [...node.capabilities],
-        retry: { ...node.retry },
-        ...(node.call ? { call: { ...node.call } } : {}),
-      })),
-      edges: trial.edges.map((edge) => ({ ...edge })),
-      terminal: [...trial.terminal],
-      budget: { ...trial.budget },
-      execution: { ...trial.execution },
-      artifacts: trial.artifacts.map((artifact) => ({ ...artifact })),
-    })) : [],
     modules: root.modules.map((m) => ({
       ...m,
       entities: m.entities.map((e) => ({ ...e, fields: [...e.fields] })),
