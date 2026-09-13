@@ -41,6 +41,7 @@ cohorts are short-lived (class, exam, hackathon, PoC).
 ## Documents
 
 - [Gaps and improvements from scenarios](./scenario-driven-improvements.md)
+- [Intelligence pack plan (TODO)](./intelligence-pack.md)
 
 ## Dependencies
 
