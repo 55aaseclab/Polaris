@@ -84,8 +84,6 @@ const directoryOrder: Record<string, string[]> = {
     "customer-segment-analysis.md",
     "product-matrix.md",
     "use-scenarios.md",
-    "api-relay-pricing-comparison-2026-09-08.md",
-    "china-model-price-ranking-v2-2026-09-08.md",
     "target-customers-and-roadmap.md",
     "non-target-customers.md",
   ],

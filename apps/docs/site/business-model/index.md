@@ -49,7 +49,4 @@ Polaris 的产品定位是：
   定义从试点到复制的销售、交付和产品顺序。
 - [非目标客户与边界](./non-target-customers.md)
   记录当前不应优先服务的需求，防止产品叙事漂移。
-- [API 中转站价格比较（2026-09-08）](./api-relay-pricing-comparison-2026-09-08.md)
-- [中国大模型中转价格排名 V2（2026-09-08）](./china-model-price-ranking-v2-2026-09-08.md)
-
 价格研究是供应商和成本决策依据，不改变 Polaris 的核心客户定位。
