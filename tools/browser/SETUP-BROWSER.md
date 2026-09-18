@@ -44,19 +44,26 @@ setup.
 Proxy access is optional. Do not set any proxy variables when the target sites
 are reachable without a proxy.
 
-When a proxy is required, configure the Polaris-side variables before running
-PDF capture:
+When a proxy is required, add the Polaris-side variables to the repository env
+file used by the local setup, normally `.env.dev`:
+
+```dotenv
+BROWSER_PROXY_SERVER=http://proxy.example:33335
+BROWSER_PROXY_USERNAME=proxy-user
+BROWSER_PROXY_PASSWORD=proxy-password
+BROWSER_PROXY_BYPASS=localhost,127.0.0.1
+```
+
+If the proxy does not require authentication, omit the username and password
+lines. Load `.env.dev` before running commands directly from the shell:
 
 ```sh
-export BROWSER_PROXY_SERVER=http://proxy.example:33335
-export BROWSER_PROXY_USERNAME=proxy-user
-export BROWSER_PROXY_PASSWORD=proxy-password
-export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
+set -a && . ./.env.dev && set +a
 ```
 
 `BROWSER_PROXY_SERVER` enables the environment proxy. Username and password
-are passed through for proxy authentication. If the proxy does not require
-authentication, omit those two variables. `BROWSER_PROXY_BYPASS` is optional.
+are passed through for proxy authentication. `BROWSER_PROXY_BYPASS` is
+optional.
 
 When `browser.proxy` is omitted, `clue-browser` maps the configured
 `BROWSER_PROXY_*` values to Camofox when it starts a local server. An explicit
@@ -73,41 +80,22 @@ are set, no proxy is passed to Camofox.
 ## 4. Start a long-running Camofox service
 
 Start Camofox once and keep it running for the complete PDF-capture workflow.
-Set the same URL in the Polaris environment so every capture reuses this
-server instead of starting a new browser process:
+Add the service settings to the same repository env file, normally `.env.dev`:
 
-```sh
-export DISPLAY=:99
-export BROWSER_CAMOFOX_URL=http://127.0.0.1:9377
-export BROWSER_CAMOFOX_USER_ID=polaris
-export CAMOFOX_CRASH_REPORT_ENABLED=false
+```dotenv
+DISPLAY=:99
+BROWSER_CAMOFOX_URL=http://127.0.0.1:9377
+BROWSER_CAMOFOX_USER_ID=polaris
+CAMOFOX_CRASH_REPORT_ENABLED=false
 ```
 
-The browser launcher takes the environment file as its first argument and
-loads it before starting Camofox. Use the same env file that starts Polaris:
+The browser launcher takes the env file as its first argument and loads it
+before starting Camofox. Use `.env.dev`, the same file that starts Polaris:
 
 `./tools/browser/start-camofox .env.dev`
 
-Use `./tools/browser/start-camofox .env` when `.env` is the file containing
-the local configuration.
-
-If a proxy is required, configure this one public set of Polaris variables
-before starting the service. Use the actual host, port, and credentials
-supplied by your proxy provider. Do not run this block when no proxy is
-needed:
-
-```sh
-export BROWSER_PROXY_SERVER=http://proxy.example:33335
-export BROWSER_PROXY_USERNAME=proxy-user
-export BROWSER_PROXY_PASSWORD=proxy-password
-export BROWSER_PROXY_BYPASS=localhost,127.0.0.1
-```
-
-If the proxy does not require authentication, omit both username and password
-exports. `start-camofox` maps the server and authentication values internally
-for Camofox and maps the bypass list to standard `NO_PROXY` variables. Do not
-export `PROXY_HOST`, `PROXY_PORT`, `PROXY_USERNAME`, or `PROXY_PASSWORD`
-yourself.
+Proxy settings from section 3 are loaded from that same file. Do not configure
+or export Camofox's internal `PROXY_*` variables yourself.
 
 Start the service in the background and keep the PID and logs:
 
@@ -115,6 +103,12 @@ Start the service in the background and keep the PID and logs:
 ./tools/browser/start-camofox .env.dev \
   >/tmp/polaris-camofox.log 2>&1 &
 echo $! >/tmp/polaris-camofox.pid
+```
+
+Load the env file in the current shell before using the readiness checks:
+
+```sh
+set -a && . ./.env.dev && set +a
 ```
 
 Wait for readiness before starting a capture. The loop also fails if the
