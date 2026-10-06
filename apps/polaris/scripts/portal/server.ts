@@ -147,7 +147,7 @@ import {
   WorkflowControlError,
   WorkflowControlService,
   registerWorkflowProvisionHook,
-} from "./workflow-control.js";
+} from "./workflow/workflow-control.js";
 import { getDomainPackFlowGraphProjection } from "../config/domain-packs.js";
 import type {
   WorkflowExecutionDriver,

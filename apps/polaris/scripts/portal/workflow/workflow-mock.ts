@@ -14,7 +14,7 @@ import type {
   WorkflowStatus,
   WorkflowVaultProjection,
 } from "@polaris/polaris-shell";
-import type { PortalVaultSummary } from "../core/portal.js";
+import type { PortalVaultSummary } from "../../core/portal.js";
 
 export class WorkflowMockError extends Error {
   constructor(

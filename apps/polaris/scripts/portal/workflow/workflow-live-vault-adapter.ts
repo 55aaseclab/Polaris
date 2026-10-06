@@ -4,12 +4,12 @@ import {
 } from "node:crypto";
 import type {
   PolarisControlStore,
-} from "./control-store.js";
+} from "../control-store.js";
 import {
   listOwnedVaults,
   listVaultDriverTargets,
   readVaultStatus,
-} from "../core/portal.js";
+} from "../../core/portal.js";
 import {
   type EvaluateWorkflowLiveInvocationInput,
   type WorkflowActionCatalogEntry,

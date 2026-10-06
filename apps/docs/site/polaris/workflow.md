@@ -483,14 +483,14 @@ The package also generates and stresses synthetic packs with
 
 | Path | Role |
 | --- | --- |
-| `apps/polaris/scripts/portal/workflow-control.ts` | `WorkflowControlService`: setup, admission, runs, approve/cancel/retry, receipts, artifacts, events, suggestions |
+| `apps/polaris/scripts/portal/workflow/workflow-control.ts` | `WorkflowControlService`: setup, admission, runs, approve/cancel/retry, receipts, artifacts, events, suggestions |
 | `apps/polaris/scripts/portal/control-store.ts` | SQLite `workflow_runs`, `workflow_outbox`, leases, run records |
-| `apps/polaris/scripts/portal/workflow-mock.ts` | Mock fixtures and Vault projection helpers |
-| `apps/polaris/scripts/portal/workflow-live-boundary.ts` | Live-execution gates and action catalog |
-| `apps/polaris/scripts/portal/workflow-live-tool-gateway.ts` | Shared live execution shape and durable evidence |
-| `apps/polaris/scripts/portal/workflow-live-vault-adapter.ts` | Candidate `polaris.projection` tool definition |
-| `apps/polaris/scripts/portal/workflow-live-worker-binding.ts` | Worker-thread binding for live reads |
-| `apps/polaris/scripts/portal/workflow-tool-dispatcher.ts` | Tool process spawning for FFI invocations |
+| `apps/polaris/scripts/portal/workflow/workflow-mock.ts` | Mock fixtures and Vault projection helpers |
+| `apps/polaris/scripts/portal/workflow/workflow-live-boundary.ts` | Live-execution gates and action catalog |
+| `apps/polaris/scripts/portal/workflow/workflow-live-tool-gateway.ts` | Shared live execution shape and durable evidence |
+| `apps/polaris/scripts/portal/workflow/workflow-live-vault-adapter.ts` | Candidate `polaris.projection` tool definition |
+| `apps/polaris/scripts/portal/workflow/workflow-live-worker-binding.ts` | Worker-thread binding for live reads |
+| `apps/polaris/scripts/portal/workflow/workflow-tool-dispatcher.ts` | Tool process spawning for FFI invocations |
 | `apps/polaris/scripts/portal/server.ts` | `/api/workflow-*` HTTP routes |
 | `apps/polaris/scripts/config/domain-packs.ts` | Pack install/list/delete and graph projection |
 

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
-import { repoRoot } from "../utils/paths.js";
+import { repoRoot } from "../../utils/paths.js";
 import type {
   CtxValue,
   FfiInvokeRequest,
@@ -10,7 +10,7 @@ import type {
   PortAst,
   StepContext,
 } from "polaris-workflow";
-import type { WorkflowRunRecord } from "./control-store.js";
+import type { WorkflowRunRecord } from "../control-store.js";
 
 type DispatcherOptions = {
   importMetaUrl: string;

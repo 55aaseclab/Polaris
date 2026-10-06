@@ -63,7 +63,7 @@ import {
 import { polarisUsersRoot } from "../utils/paths.js";
 import { withUserMutationLock } from "../utils/user-mutation-lock.js";
 import { listDomainPackProjections } from "../config/domain-packs.js";
-import { projectWorkflowVaults } from "./workflow-mock.js";
+import { projectWorkflowVaults } from "./workflow/workflow-mock.js";
 import {
   deletePortalVault as deletePortalVaultExecutor,
   getWanghaiBackupJob as getWanghaiBackupJobExecutor,

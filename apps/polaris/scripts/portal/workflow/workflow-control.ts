@@ -58,15 +58,15 @@ import type {
 } from "@polaris/polaris-shell";
 import {
   loadVerifiedDomainPackRuntime,
-} from "../config/domain-packs.js";
+} from "../../config/domain-packs.js";
 import {
   getPolarisControlStore,
   type PolarisControlStore,
   type WorkflowArtifactRecord,
   type WorkflowRunRecord,
-} from "./control-store.js";
-import { isHostVaultMode } from "../config/vault-mode.js";
-import { repoRoot } from "../utils/paths.js";
+} from "../control-store.js";
+import { isHostVaultMode } from "../../config/vault-mode.js";
+import { repoRoot } from "../../utils/paths.js";
 
 export class WorkflowControlError extends Error {
   constructor(

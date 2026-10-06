@@ -17,7 +17,7 @@ import {
   type WorkflowLiveVaultArtifactMetadataInvocationResult,
   type WorkflowLiveVaultArtifactMetadataReader,
 } from "./workflow-live-vault-adapter.js";
-import type { PolarisControlStore } from "./control-store.js";
+import type { PolarisControlStore } from "../control-store.js";
 
 export interface WorkflowLiveMetadataWorkerBindingInput {
   store: PolarisControlStore;

@@ -5,7 +5,7 @@ import type { FfiRpcRequest } from "polaris-workflow";
 import type {
   PolarisControlStore,
   WorkflowEffectReceiptRecord,
-} from "./control-store.js";
+} from "../control-store.js";
 import {
   evaluateWorkflowLiveInvocation,
   type EvaluateWorkflowLiveInvocationInput,
