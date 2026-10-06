@@ -537,7 +537,6 @@ The package also generates and stresses synthetic packs with
 | `apps/docs/site/polaris/workflow.md` | This page |
 | `apps/docs/site/polaris/cli.md` | Full CLI command reference |
 | `apps/docs/site/polaris/polaris-portal.md` | Portal workflow API and flow |
-| `apps/docs/site/polaris/usage.md` | Host-run vs Vault-run usage |
 | `apps/docs/site/operations/polaris-0.4.0/dynamic-workflow-runtime.md` | Runtime state machine and invariants |
 | `apps/docs/site/operations/polaris-0.4.0/work-envelope-and-workflow-plan.md` | WorkEnvelope and setup contracts |
 | `CHANGELOG.md` | Workflow slices per release |

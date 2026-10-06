@@ -18,7 +18,6 @@ intent back to the Portal API.
 The Portal contract is used together with [User Management](./user-management.md),
 [Vault Management](./vault-management.md), and [Polaris Gateway](./gateway.md).
 Coding-surface behavior is documented in [Paseo Management](./paseo.md).
-The operator sequence is documented in [Polaris Usage](./usage.md).
 
 ## 1. Static Model
 

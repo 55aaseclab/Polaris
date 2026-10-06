@@ -9,7 +9,6 @@ repository root README. This page intentionally stays focused on the product
 boundary and the cross-repository references that are useful after setup.
 
 - [User Management](./user-management.md)
-- [Usage](./usage.md)
 - [Polaris Portal](./polaris-portal.md)
 - [Polaris Workflow](./workflow.md)
 - [Vault Management](./vault-management.md)
