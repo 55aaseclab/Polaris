@@ -16,7 +16,6 @@ const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const sectionNames = [
   "polaris",
   "operations",
-  "business-model",
 ];
 
 function relativeSitePath(filePath: string): string {

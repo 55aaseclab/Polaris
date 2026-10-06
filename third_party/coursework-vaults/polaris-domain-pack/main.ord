@@ -248,6 +248,7 @@ port OpenAgentEnvironment version "1.0.0" {
     launchToken: String
   }
   effect ffi
+  binding { tool "paseo" }
 }
 
 port SaveCheckpoint version "1.0.0" {

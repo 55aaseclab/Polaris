@@ -97,10 +97,10 @@ function usage(): string {
     "  --help                   Show this message",
     "",
     "Examples:",
-    "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex polaris-business",
+    "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex polaris-data-collection",
     "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target claude --force",
     "  pnpm --dir apps/polaris exec tsx scripts/install-skills.ts --target codex "
-      + "--scope project --mode link polaris-business",
+      + "--scope project --mode link polaris-data-collection",
   ].join("\n");
 }
 

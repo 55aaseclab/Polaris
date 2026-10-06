@@ -319,41 +319,6 @@ flow LiteratureReview title "Literature Review" create {
 execution constraints, tool components, and the full port-to-tool binding
 table.
 
-### Ecommerce pack
-
-`schemas/wanghai.ecommerce.workflow.ord` shows entities, enums, a pipeline,
-and flows with deterministic guards:
-
-```text
-enum OrderStatus {
-  Draft, Created, Approved, Shipped, Paid, Cancelled
-}
-
-entity Order {
-  id: ID, orderNo: String, customer: String, sku: String,
-  quantity: Number, amount: Money, status: OrderStatus
-}
-
-pipeline OrderLifecycle title "订单生命周期" {
-  CreateOrder -> ApproveOrder -> ShipOrder -> RecordPayment
-}
-
-flow ApproveOrder title "审批订单" on Order {
-  input { recordId: String required label "订单" }
-  require { status == Created }
-  steps {
-    approve_order "审批订单" {
-      uses { recordId }
-      output { approved: Boolean }
-    }
-  }
-  output { approved: Boolean from approved, status: OrderStatus from record.status }
-  transition status -> Approved
-  emit OrderApproved
-  ui { layout form primary "批准履约" icon "workflow" }
-}
-```
-
 ### Human review as a generic built-in
 
 The pack owns the review fields and labels; Polaris owns the approval state
@@ -403,8 +368,7 @@ flow Place {
 }
 ```
 
-`packs/vision-kernel/main.ord` is the target-state kernel sketch;
-`packs/business/templates.yaml` defines workflow templates for the DTC pack.
+`packs/vision-kernel/main.ord` is the target-state kernel sketch.
 
 ## CLI
 
@@ -500,9 +464,6 @@ The package also generates and stresses synthetic packs with
 | --- | --- |
 | `packages/polaris-shell/src/workflow.ts` | Shared workflow projections and run/artifact/event types |
 | `packages/polaris-tools/src/index.ts` | Tool manifest with `category: "workflow"` and workflow block |
-| `packages/polaris-business-core/src/workflow-runtime-status.ts` | Running-stage detection from `/proc` |
-| `apps/polaris-business-portal/lib/workflow-*.ts` | Workflows YAML parsing, graph, editing, status libs |
-| `apps/polaris-business-portal/app/api/.../workflows/` | Portal API routes for workflow instances |
 | `apps/polaris-portal/src/workflow-mocks.ts`, `workflow-graph-layout.ts` | Portal UI mocks and graph layout |
 
 ### CLI and scripts
@@ -525,7 +486,6 @@ The package also generates and stresses synthetic packs with
 | `apps/polaris/tests/polaris-control-store.test.ts` | Atomic run admission and lease recovery |
 | `packages/polaris-workflow/test/` | Language and RPC tests |
 | `apps/polaris-portal/src/workflow-*.test.ts` | Portal UI tests |
-| `apps/polaris-business-portal/test/workflow-*.test.ts` | Workflow lib tests |
 
 ### DSL data and schemas
 
@@ -534,9 +494,7 @@ The package also generates and stresses synthetic packs with
 | `packs/autoresearch/main.ord` | First-party Literature Review pack |
 | `packs/autoresearch/workflow.json` | Literature-review contract and port bindings |
 | `packs/vision-kernel/main.ord` | Kernel sketch |
-| `packs/business/templates.yaml` | DTC workflow templates |
-| `schemas/wanghai.ecommerce.workflow.ord` | Ecommerce domain pack |
-| `tools/tool-inventory.json`, `tools/business-tool-inventory.json` | Workflow command inventory |
+| `tools/tool-inventory.json` | Workflow command inventory |
 
 ### Documentation
 

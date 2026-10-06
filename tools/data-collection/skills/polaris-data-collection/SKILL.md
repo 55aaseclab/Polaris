@@ -25,8 +25,8 @@ Schemas (when editing `input.json` / checking outputs) — **repo root**:
 For **ad-content-intel** records use content `record_kind` values such as
 `xhs_note`, `xhs_video`, `xhs_comment`, `social_post`, `ad_creative`; put title,
 text, author, engagement, tags, `is_ad_like`, and optional comments in
-`payload` (see README). Workflow template: `ad-content-intel` in
-`packs/business/templates.yaml` (first stage is always data-collection).
+`payload` (see README). Workflow template: `ad-content-intel`
+(first stage is always data-collection).
 
 **`run` supports ad-content-intel** with phase-1 source types `web-search`,
 `curated-web-search`, and `social_media`. Xiaohongshu is enabled via
@@ -120,8 +120,7 @@ Polaristool writes collection output under the run `workspaceRoot`.
 data-collection → intelligence-analysis → report-writing
 ```
 
-**Ad / content intel** — `packs/business/templates.yaml`, template
-`ad-content-intel`:
+**Ad / content intel** — template `ad-content-intel`:
 
 ```text
 data-collection → intelligence-analysis

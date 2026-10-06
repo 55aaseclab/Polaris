@@ -13,23 +13,17 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY apps/polaris-portal/package.json apps/polaris-portal/package.json
 COPY packages/polaris-auth-server/package.json packages/polaris-auth-server/package.json
-COPY packages/polaris-business-core/package.json packages/polaris-business-core/package.json
 COPY packages/polaris-tools/package.json packages/polaris-tools/package.json
 COPY packages/vault-runtime/package.json packages/vault-runtime/package.json
 COPY packages/polaris-workflow/package.json packages/polaris-workflow/package.json
 COPY packages/polaris-shell/package.json packages/polaris-shell/package.json
 COPY packages/surface-coding/package.json packages/surface-coding/package.json
 COPY packages/surface-wanghai/package.json packages/surface-wanghai/package.json
-COPY tools/content-production/package.json tools/content-production/package.json
-COPY tools/product-video/package.json tools/product-video/package.json
 
 RUN --mount=type=cache,target=/pnpm/store \
   pnpm install --frozen-lockfile \
     --filter polaris... \
-    --filter polaris-portal... \
-    --filter @polaris/business-core... \
-    --filter @polaris/content-production... \
-    --filter @polaris/product-video...
+    --filter polaris-portal...
 
 COPY apps/polaris ./apps/polaris
 COPY schemas ./schemas
@@ -37,15 +31,12 @@ COPY tools ./tools
 COPY workflows ./workflows
 COPY apps/polaris-portal ./apps/polaris-portal
 COPY packages/polaris-auth-server ./packages/polaris-auth-server
-COPY packages/polaris-business-core ./packages/polaris-business-core
 COPY packages/polaris-tools ./packages/polaris-tools
 COPY packages/vault-runtime ./packages/vault-runtime
 COPY packages/polaris-workflow ./packages/polaris-workflow
 COPY packages/polaris-shell ./packages/polaris-shell
 COPY packages/surface-coding ./packages/surface-coding
 COPY packages/surface-wanghai ./packages/surface-wanghai
-COPY tools/content-production ./tools/content-production
-COPY tools/product-video ./tools/product-video
 
 RUN --mount=type=cache,target=/pnpm/store \
   pnpm run build:surfaces \
@@ -61,7 +52,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --from=build /vault/node_modules ./node_modules
 COPY apps/polaris/package.json apps/polaris/package.json
 COPY --from=build /vault/packages/polaris-auth-server ./packages/polaris-auth-server
-COPY --from=build /vault/packages/polaris-business-core ./packages/polaris-business-core
 COPY --from=build /vault/packages/polaris-tools ./packages/polaris-tools
 COPY --from=build /vault/packages/vault-runtime ./packages/vault-runtime
 COPY --from=build /vault/packages/polaris-workflow ./packages/polaris-workflow

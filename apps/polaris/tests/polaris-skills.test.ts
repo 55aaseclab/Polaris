@@ -34,30 +34,23 @@ const DEMO_USER_PROFILE_ID = "100000000000000001";
 test("built-in skill installer reads the repository skill tree", () => {
   const skills = listAvailableSkills();
   assert.ok(skills.includes("rc-draw"));
-  assert.ok(skills.includes("polaris-business"));
   assert.ok(skills.includes("polaris-data-collection"));
 });
 
 test("migrated skill bundle and coursework pack are Polaris-owned", () => {
   const migratedSkills = [
-    "polaris-business",
-    "polaris-content-production",
     "polaris-data-collection",
     "polaris-intelligence-analysis",
     "polaris-order-ops",
     "polaris-outreach",
     "polaris-report-writing",
-    "polaris-ads-system-setup",
   ];
   const skillRoots: Record<string, string> = {
-    "polaris-business": path.join(REPO_ROOT, "packs", "business", "skills", "polaris-business"),
-    "polaris-content-production": path.join(REPO_ROOT, "tools", "content-production", "skills", "polaris-content-production"),
     "polaris-data-collection": path.join(REPO_ROOT, "tools", "data-collection", "skills", "polaris-data-collection"),
     "polaris-intelligence-analysis": path.join(REPO_ROOT, "tools", "intelligence-analysis", "skills", "polaris-intelligence-analysis"),
     "polaris-order-ops": path.join(REPO_ROOT, "tools", "logistics-management", "skills", "polaris-order-ops"),
     "polaris-outreach": path.join(REPO_ROOT, "tools", "outreach", "skills", "polaris-outreach"),
     "polaris-report-writing": path.join(REPO_ROOT, "tools", "report-writing", "skills", "polaris-report-writing"),
-    "polaris-ads-system-setup": path.join(REPO_ROOT, "packs", "business", "skills", "polaris-ads-system-setup"),
   };
   for (const skill of migratedSkills) {
     const skillPath = path.join(skillRoots[skill]!, "SKILL.md");

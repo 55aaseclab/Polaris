@@ -32,9 +32,8 @@ through Polaris durable jobs.
 ## Business tools
 
 Business implementations migrated from the former Wanghai tool tree live under
-`content-production`, `product-video`, `google-map`, `industry-directories`,
-`logistics-management`, `outreach`, and `social-publish`. Their ownership and
-runtime policy are recorded in `business-tool-inventory.json`.
+`google-map`, `industry-directories`, `logistics-management`, `outreach`,
+`social-media`, and `social-publish`.
 
 These tools use `POLARIS_BUSINESS_*` configuration in standalone local mode.
 Integrated mode is fail-closed: writes, external requests, publishing, SMTP,

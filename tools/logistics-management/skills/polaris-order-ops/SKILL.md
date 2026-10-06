@@ -143,7 +143,6 @@ description: 当用户要处理跨境零售或电商业务的出单、收款、�
 - PI 模板：`assets/proforma-invoice-template.html`
 - CI 模板：`assets/commercial-invoice-template.html`
 - 报检单模板：`assets/报检单模板.html`
-- 报价单生成脚本：`scripts/render-quote.ts`
 - 开票信息模板：`assets/开票信息收集模板.md`
 - 发货记录模板：`assets/发货记录模板.md`
 - 对账模板：`assets/对账汇总模板.md`
