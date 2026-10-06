@@ -3,20 +3,16 @@
 Self-hosted control plane for agentic workflows.
 
 ```text
- Portal
-  |-- work desk + workflow settings
-  |    select pack and flow, submit run
-  v
- Workflow definition (Domain Pack .ord)
-  |-- flows, ports, steps
-  |    compiled Program + FFI calls
-  v
- Workflow engine
-  |-- DSL parse / validate / compile
-  |-- admission, lease, queue, receipts
-  |    run projection, approval, artifacts
-  v
- Portal
+ Portal (User)                        Polaris server
++--------------------------+  REST   +------------------------------+
+| work desk                | <-----> | Workflow definition           |
+| workflow settings        |  API    |   Domain Pack (.ord)          |
+| submit run / approval    |         |   flows, ports, steps         |
+| view run / artifacts     |         | Workflow engine              |
+|                          |         |   parse / validate / compile |
+| (browser client)         |         |   admission, lease, queue    |
+|                          |         |   receipts, artifacts        |
++--------------------------+         +------------------------------+
 ```
 
 ## Docs
