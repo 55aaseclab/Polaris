@@ -2,17 +2,6 @@
 
 Self-hosted control plane for agentic workflows.
 
-## Features
-
-Polaris owns identity, Vaults, workflow admission, and the public origin.
-
-- Isolated Vaults on `docker`, `pod`, and `kubevirt-vm` backends
-- Authing identity, ownership, sessions, quotas, lifecycle, and audit
-- Portal work desk for Domain Pack runs, approval, and artifacts
-- Polaris DSL packs, Host binding, and host or Vault execution
-- Private-surface Gateway and the Paseo coding surface
-- CLI for users, Vaults, packs, and operators
-
 ## Docs
 
 This README is the source-owned onboarding guide. Product pages, operator
