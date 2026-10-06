@@ -2,6 +2,25 @@
 
 Self-hosted control plane for agentic workflows.
 
+```mermaid
+flowchart LR
+  subgraph Portal["Portal"]
+    Work["Work desk"]
+    Settings["Workflow settings"]
+  end
+  subgraph Definition["Workflow definition"]
+    Pack["Domain Pack (.ord)"]
+    Flow["Flows · ports · steps"]
+  end
+  subgraph Engine["Workflow engine"]
+    Kernel["DSL parse / validate / compile"]
+    Control["Admission · lease · queue · receipts"]
+  end
+  Portal -->|"select pack and flow, submit run"| Definition
+  Definition -->|"compiled Program + FFI calls"| Engine
+  Engine -->|"run projection, approval, artifacts"| Portal
+```
+
 ## Docs
 
 This README is the source-owned onboarding guide. Product pages, operator
