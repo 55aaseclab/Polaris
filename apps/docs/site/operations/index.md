@@ -22,10 +22,13 @@ surface boundaries.
    [archived Polaris 0.3.2](./polaris-0.3.2/) for the production perimeter, and the
    [archived Polaris 0.3.3](./polaris-0.3.3/) for user-count growth, storage
    capacity, migration, and scale evidence.
-   The Domain Pack language itself is on [Polaris DSL](/polaris/dsl).
-   Read [Polaris 0.5.0](./polaris-0.5.0/) for local identity, cohort
-   lifecycle, scenario packaging, and the real `mode: "vault"` executor on
-   the 20-seat cell.
+   The Domain Pack language itself is on [Polaris DSL](/polaris/workflow).
+   Read [Polaris 0.5.0](./polaris-0.5.0/) for the cloud service, WeChat Mini
+   Program, Web Portal, Workflow API, and subscription workflows. Read
+   [Polaris 1.0.0](./polaris-1.0.0/) for production reliability,
+   explainability, recovery, and audit requirements. Read
+   [Polaris 2.0.0](./polaris-2.0.0/) for the future local deployment,
+   offline identity, 20-seat isolation, and operator requirements.
 The release records are deliberately separate from product reference pages.
 A passing unit test is not production evidence.
 

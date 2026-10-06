@@ -1,137 +1,100 @@
-# 0.5.0 场景驱动的可提升项
+# 0.5.0 云服务与客户端需求
 
-Date: 2026-08-09
+Status: planned requirements for Polaris **0.5.0**.
 
-Status: planned improvement backlog for Polaris **0.5.0**. Derived from
-[use scenarios](/business-model/use-scenarios),
-[target customers](/business-model/target-customers-and-roadmap), and the
-shipped [0.3.3 baseline](../polaris-0.3.3/twenty-user-resource-baseline.md).
+## 一、云服务底座（P0）
 
-This is not a capacity claim beyond 20, and not a rewrite of the
-Polaris/private surface boundary.
+- 提供正式域名、TLS、服务健康检查和可回滚发布。
+- 建立租户、用户、工作流、订阅、运行和投递的持久化模型。
+- 所有执行经过 admission、配额、版本固定和能力授权。
+- 凭据由服务端 secret 管理，不写入 pack、客户端或运行日志。
+- 记录运行耗时、模型成本、外部调用、失败原因和审计事件。
+- 支持按订阅暂停、恢复、取消和删除用户数据。
 
-## Why 0.5.0 Exists
+## 二、微信小程序（P0）
 
-0.3.x proved a single-host control plane and a **20 active vault** package.
-0.4.0 owns the host workflow path and keeps Vault-target runs
-`mode: "mock"`. Real buyers in the 10–20 isolation band still hit product
-gaps before they will run a semester lab, a delivery pod, or a pure
-**local deployment** without Authing. Real `mode: "vault"` execution is
-also 0.5.0 work.
+- 使用微信登录凭证换取 Polaris 服务端会话。
+- 将微信身份映射到 Polaris 用户，不以 `openid` 作为公开业务主键。
+- 支持选择工作流、填写参数、创建订阅和查看运行状态。
+- 支持查看匹配事件、跳转原始商品链接和管理通知偏好。
+- 不在小程序保存目标平台账号凭据、Cookie 或采集会话。
+- 小程序只是客户端，不直接执行采集或调度任务。
 
-The sharpest example:
+## 三、Web Portal（P0）
 
-> Strong local-deploy demand needs a **local user authentication system**.
+- 保留 `/work` 入口，与小程序共享工作流和运行 API。
+- 提供比小程序更完整的筛选条件、历史记录和结果导出。
+- 提供订阅暂停、恢复、取消、通知重试和凭据撤销。
+- 管理界面可查看失败、成本、投递状态和来源健康度。
 
-Authing-only identity blocks air-gapped enterprises, many campus labs, and
-exam/course installs that refuse external IdP. `POLARIS_AUTH_MODE=disabled` is
-a lab fixture, not a multi-user product.
+## 四、Workflow API（P0）
 
-## Improvement Map (by theme)
+首版提供稳定、版本化的资源 API：
 
-### A. Local identity and access (P0)
+```http
+POST   /v1/workflows/{workflowId}/subscriptions
+GET    /v1/subscriptions/{subscriptionId}
+PATCH  /v1/subscriptions/{subscriptionId}
+DELETE /v1/subscriptions/{subscriptionId}
+GET    /v1/subscriptions/{subscriptionId}/events
+```
 
-| Gap | Today | 0.5.0 target | Scenarios |
-| --- | --- | --- | --- |
-| Local user auth | Authing browser session, or single disabled dev user | First-class **local account** mode: create user, password/passkey or invite, login, logout, session | E1–E3, U1–U2, S07–S10, S22 |
-| Local admin of users | CLI / files / user-map oriented | Admin API + minimal UI: list, disable, reset, role, line | all multi-user |
-| Map local identity → Polaris user/vault ownership | Works for Authing map; weak for pure local | Same ownership model for local subjects; no second control plane in private surface | all |
-| Cohort accounts | Manual | Bulk create N local users for a class/exam with one operation | S07, S08, S09, S10 |
-| Offline / air-gap | Needs external Authing URLs | Local mode runs with **no outbound IdP** | campus, regulated E13 |
+- API key 必须绑定租户、权限、配额和速率限制。
+- 创建请求支持幂等键，重复请求不得建立重复订阅。
+- Webhook 使用签名、事件 ID、重试退避和投递回执。
+- API、Web 和小程序创建的订阅使用相同资源表示与状态机。
 
-**Design constraints**
+## 五、订阅运行时（P0）
 
-- Local auth is another `POLARIS_AUTH_MODE`, not a parallel policy engine.
-- Production formal origin may keep Authing; local mode is for local-test and
-  air-gapped single-host cells.
-- Disabled auth remains fixture-only; must not be the multi-seat answer.
-- Password storage, lockout, and invite tokens need durable audit events.
+- 支持固定间隔或平台允许范围内的计划执行。
+- 保存增量游标、内容哈希和最近成功检查时间。
+- 将采集、规范化、去重、筛选和投递拆成可恢复步骤。
+- 同一来源项目在同一订阅内只生成一个有效事件。
+- 投递采用幂等键，超时重试不得产生重复通知。
+- 部分来源失败不丢失已经获得的有效结果。
 
-### B. Cohort and vault lifecycle (P0/P1)
+## 六、通知与计费（P1）
 
-| Gap | Today | 0.5.0 target | Scenarios |
-| --- | --- | --- | --- |
-| Batch vault create | One-by-one CLI | Cohort API: N vaults, same image, naming template | S07–S10, S08 |
-| Timed expiry | Manual stop/delete | Optional `expiresAt` / TTL; sweeper job reclaims | exam, hackathon, PoC |
-| Creator-destroys automation | Documented discipline | Official cleanup job: containers, **networks**, volumes, users matching cohort id | all short-life |
-| Docker address pools | Default pool dies ~7 user networks on some hosts | Documented daemon pool preset + preflight check for ≥24 networks | 20 hot vaults |
-| Pre-warm pool | Cold start per user | Optional warm idle vaults for exam start spike | S08, S10 |
+- 首版至少支持小程序消息和 Web 站内结果；Webhook 面向 API 客户。
+- 渠道授权过期、配额用尽和投递失败必须对用户可见。
+- 套餐按检查频率、有效订阅数和通知量限制资源。
+- 模型与外部服务成本进入 receipt，支持毛利和异常成本分析。
+- 价格对普通用户可理解，不直接销售不透明的 token 包。
 
-### C. Isolation evidence and admin visibility (P1)
+## 七、云端安全与滥用控制（P0）
 
-| Gap | Today | 0.5.0 target | Scenarios |
-| --- | --- | --- | --- |
-| “Prove they cannot see each other” | Architecture + tests | Operator isolation check report (two synthetic tenants, redacted) | security buyers |
-| Who is active / over quota | Partial APIs | Admin host list: vault, user, age, storage, last active | E3, U1 |
-| Stale vault detection | Manual | Mark stale; one-click reclaim policy | lab, delivery |
-| Audit export | Internal | Export pack for pilot questionnaire (login, launch, deny) | E2, E13, S08 |
+- 租户数据、凭据、运行产物和通知目标必须隔离。
+- 对来源域名、请求频率、并发和重试设置策略上限。
+- 不绕过验证码、登录保护、访问控制或平台封禁。
+- 提供删除、导出和保留期限策略，减少不必要的个人数据。
+- 对异常抓取量、账号失效和平台规则变化建立告警与熔断。
 
-### D. Scenario packs (P1)
+## 八、明确后移到 2.0.0
 
-Thin templates, not separate products:
+以下能力不进入 0.5.0：
 
-| Pack | Defaults | Scenarios |
-| --- | --- | --- |
-| `lab-cell` | 20 seats, long TTL, Authing or local | S01, S06 |
-| `course-cohort` | N students, shared image, medium TTL | S07, S09 |
-| `exam-session` | N candidates, short TTL, strict cleanup, optional network tighten | S08 |
-| `delivery-pod` | project-scoped vaults, handover notes | S02, S19 |
-| `ephemeral-event` | hackathon/GameDay/PoC, destroy-all | S10, S20, S22 |
+- 客户自托管和私有化交付。
+- 无公网、半离线或完全离线安装。
+- 本地账号、离线管理员和企业 IdP 本地联邦。
+- 20 席本地 Vault 容量包、网络池预检和批量生命周期管理。
+- 本地备份恢复、升级回滚和隔离证据包。
 
-Packs only compose existing Polaris knobs (users, vaults, quotas, TTL,
-cleanup). They must not invent a second orchestrator in private surface.
+这些需求统一由 [Polaris 2.0.0](../polaris-2.0.0/) 跟踪。开发者本机环境只用于
+开发和测试，不等于客户可用的本地部署产品。
 
-### E. Local deploy productization (P0)
+## 交付顺序
 
-| Gap | Today | 0.5.0 target |
-| --- | --- | --- |
-| Install story | Operator-heavy remote scripts | One documented **air-gap / campus local** path: images, env, local auth bootstrap admin |
-| IdP optional | Authing required for “real” multi-user | Local auth bootstrap + optional later link to Authing/OIDC |
-| Capacity honesty | 0.3.3 baseline exists | Installer/preflight prints host fit vs 20-seat table (RAM, CPU, disk, **network pool**) |
-| Backup/restore narrative | Exists as jobs | Pilot-facing “what we backup / what we do not” one-pager |
+1. 统一云 API、身份和订阅状态机。
+2. 完成闲鱼监控的采集、去重、筛选和事件模型。
+3. 接入 Web Portal 和微信小程序。
+4. 完成通知、Webhook、配额和基础计费。
+5. 补齐观测、安全、滥用控制和运营后台。
 
-### F. Intentionally later (not 0.5.0 core)
+## 验收清单
 
-- Beating Cursor on personal laptop UX
-- Mass non-CS consumer GPT surface
-- Multi-host 50/100 without measured host classes
-- Full browser two-tenant matrix polish if still owned by 0.3.2 track
-- Replacing every campus IdP with only local passwords long-term
-
-## Priority Slice For 0.5.0
-
-Suggested build order:
-
-1. **Local auth mode** (accounts, sessions, admin CRUD, bootstrap admin)
-2. **Preflight: Docker network pool + 20-seat host fit**
-3. **Cohort batch create + TTL sweeper + network-inclusive destroy**
-4. **Admin active/stale/quota view**
-5. **Exam/course/lab packs as config+docs+scripts**, not new daemons
-6. **Isolation/audit export pack** for pilot security
-
-## Acceptance Sketch
-
-0.5.0 is ready to pilot when:
-
-1. A pure local install can create 20 local users **without Authing**, each
-   with an isolated vault, login, and logout.
-2. A cohort of 20 can be created and **fully destroyed** (users, vaults,
-   containers, **networks**, volumes) by one operator action or job.
-3. Preflight refuses hosts that cannot provide network pool headroom for the
-   declared active-vault ceiling.
-4. An admin can answer “who is on, who is over quota, what is stale” without
-   SSH archaeology.
-5. Authing mode still works on formal/enterprise cells; local mode does not
-   weaken gateway isolation rules.
-
-## Relation To Other Releases
-
-| Release | Focus |
-| --- | --- |
-| 0.3.x | Control plane, perimeter, **20-seat capacity identity** |
-| 0.4.0 | WorkEnvelope, host workflow path, mock Vault-target runs |
-| **0.5.0** | **Local identity, cohort lifecycle, scenario packaging, `mode: "vault"`, Vault-target `ops workflow-smoke`** |
-
-0.5.0 should consume 0.3.3 limits and may call 0.4.0 work items later (for
-example exam “submit” as a work envelope). It must not block 0.4.0, and must
-not move identity or lifecycle ownership into private surface.
+- 同一用户可在小程序创建订阅，并在 Web 查看同一条订阅。
+- API 创建订阅使用同一状态机，且支持幂等创建与签名 Webhook。
+- 调度中断后可恢复，不重复生成事件或发送通知。
+- 用户可以暂停、恢复、取消订阅并删除相关数据。
+- 运维人员可以定位一次检查为何失败、花费多少、是否已通知。
+- 所有客户交付均运行在 Polaris 管理的云环境中。

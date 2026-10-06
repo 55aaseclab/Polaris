@@ -9,15 +9,10 @@ not a second execution engine.
 
 ## Execution targets
 
-The default execution target is the Polaris host. No Vault is required for a
-host run: `driver=none` sends the admitted workflow to the host worker.
-
-A Vault is an optional target in 0.4.0, not a real executor. When a concrete
-Vault is selected, Polaris still performs ownership and readiness checks,
-then runs the compatibility mock host and persists `mode: "mock"`. A real
-`mode: "vault"` executor is [Polaris 0.5.0](/operations/polaris-0.5.0/)
-work. The Portal does not require users to understand this distinction for
-ordinary work.
+The default execution target is the Polaris host. A Vault is an optional
+target in 0.4.0. Run drivers, run modes, and admission are specified on the
+[Polaris Workflow](./workflow.md) page. The Portal does not require users to
+understand the distinction for ordinary work.
 
 ## Optional Vault setup
 
@@ -81,20 +76,10 @@ additionally verifies Vault ownership and readiness admission.
 ## Current execution boundary
 
 `AutoResearch/LiteratureReview` with `driver=none` is a host run. Polaris
-persists `mode: "host"` and executes the compiled pack through the host
-tool dispatcher. Collection, analysis, and report adapters live under
-`tools/`. There is no `workflows/literature-review` tree and no
-`polaris -- literature-review` command.
-
-A Vault-target Literature Review run remains the compatibility mock path.
-Those runs persist `mode: "mock"` and must not be interpreted as real
-Vault execution. Real `mode: "vault"` is postponed to
-[Polaris 0.5.0](/operations/polaris-0.5.0/). Live
-`vault.artifact.metadata.read` exists only on the operator admission path.
-
-Retry of a failed or cancelled run requeues the same run id and skips
-completed steps. It does not create a new run for host or Vault-target
-paths.
+executes the compiled pack through the host tool dispatcher; collection,
+analysis, and report adapters live under `tools/`. Run modes, retry, and the
+admission boundary are specified on the [Polaris Workflow](./workflow.md)
+page.
 
 ## Conversation boundary
 

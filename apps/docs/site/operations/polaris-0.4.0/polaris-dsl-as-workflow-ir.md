@@ -1,9 +1,9 @@
 # Polaris DSL As Workflow IR
 
-This page moved. The language, Domain Pack contract, FFI Host boundary, and
-The current DSL surface lives on the product reference:
+This page moved. The DSL definition, engine, examples, and workflow CLI live
+on the single workflow reference:
 
-- [Polaris DSL](../../polaris/dsl.md)
+- [Polaris Workflow](../../polaris/workflow.md)
 
 Keep this file only as a stable operations URL. Do not add language or pack
 IR detail here.

@@ -13,99 +13,7 @@ type SidebarItem = {
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const directoryOrder: Record<string, string[]> = {
-  polaris: [
-    "index.md",
-    "usage.md",
-    "user-management.md",
-    "polaris-portal.md",
-    "dsl.md",
-    "vault-management.md",
-    "gateway.md",
-    "paseo.md",
-    "cli.md",
-  ],
-  operations: [
-    "index.md",
-    "remote-deploy.md",
-    "infamous-regression.md",
-    "polaris-release",
-    "polaris-0.3.1",
-    "polaris-0.3.2",
-    "polaris-0.3.3",
-    "polaris-0.3.4",
-    "polaris-0.4.0",
-    "polaris-0.5.0",
-  ],
-  "operations/polaris-release": [
-    "index.md",
-    "0.3-design.md",
-    "0.3-release-todo.md",
-    "0.3-release-evidence.md",
-    "0.3-operator-runbook.md",
-  ],
-  "operations/polaris-0.3.1": [
-    "index.md",
-    "performance-plan.md",
-    "gateway-performance-evidence-2026-08-06.md",
-    "host-list-performance-evidence-2026-08-06.md",
-    "control-plane-performance-evidence-2026-08-06.md",
-  ],
-  "operations/polaris-0.3.2": [
-    "index.md",
-    "production-perimeter-plan.md",
-    "signed-image-evidence-2026-08-06.md",
-    "formal-origin-online-2026-08-09.md",
-    "formal-origin-post-bump-online-2026-08-09.md",
-    "formal-tls-and-perimeter-2026-08-09.md",
-    "formal-rollback-drill-2026-08-09.md",
-  ],
-  "operations/polaris-0.3.3": [
-    "index.md",
-    "user-growth-and-capacity-plan.md",
-    "test-host-bringup.md",
-    "concurrent-capacity-evidence-2026-08-09.md",
-    "test-host-smoke-2026-08-09.md",
-    "epfl-verify-2026-08-09.md",
-    "twenty-user-resource-baseline.md",
-    "release-ship-2026-08-09.md",
-    "post-release-control-vault-data-2026-08-10.md",
-  ],
-  "operations/polaris-0.3.4": ["index.md"],
-  "operations/polaris-0.4.0": [
-    "index.md",
-    "work-envelope-and-workflow-plan.md",
-    "dynamic-workflow-runtime.md",
-    "polaris-dsl-as-workflow-ir.md",
-  ],
-  "operations/polaris-0.5.0": ["index.md", "scenario-driven-improvements.md"],
-  "business-model": [
-    "index.md",
-    "customer-segment-analysis.md",
-    "product-matrix.md",
-    "use-scenarios.md",
-    "target-customers-and-roadmap.md",
-    "non-target-customers.md",
-  ],
-};
-
-const directoryLabels: Record<string, string> = {
-  "operations/polaris-release": "Polaris 0.3 Release (Archived)",
-  "operations/polaris-0.3.1": "Polaris 0.3.1 Performance (Archived)",
-  "operations/polaris-0.3.2": "Polaris 0.3.2 Production (Archived)",
-  "operations/polaris-0.3.3": "Polaris 0.3.3 Capacity (Archived)",
-  "operations/polaris-0.3.4": "Polaris 0.3.4 (Archived)",
-  "operations/polaris-0.4.0": "Polaris 0.4.0 (Shipped)",
-  "operations/polaris-0.5.0": "Polaris 0.5.0 Local Cell",
-};
-
-const sectionLabels: Record<string, string> = {
-  polaris: "Polaris",
-  operations: "Operations",
-  "business-model": "Business Model",
-};
-
-const sectionOrder = [
+const sectionNames = [
   "polaris",
   "operations",
   "business-model",
@@ -147,28 +55,19 @@ function hasMarkdown(directory: string): boolean {
   });
 }
 
-function entryRank(relativeDirectory: string, entryName: string): number {
-  const order = directoryOrder[relativeDirectory] ?? [];
-  const knownIndex = order.indexOf(entryName);
-  return knownIndex === -1 ? order.length : knownIndex;
-}
-
-function sortEntries(relativeDirectory: string) {
+function sortEntries() {
   return (left: { name: string }, right: { name: string }): number => {
-    const rankDifference = entryRank(relativeDirectory, left.name)
-      - entryRank(relativeDirectory, right.name);
-    return rankDifference || left.name.localeCompare(right.name);
+    if (left.name === "index.md") return -1;
+    if (right.name === "index.md") return 1;
+    return left.name.localeCompare(right.name);
   };
 }
 
-function directoryItems(
-  directory: string,
-  relativeDirectory: string,
-): SidebarItem[] {
+function directoryItems(directory: string, relativeDirectory: string): SidebarItem[] {
   const entries = fs
     .readdirSync(directory, { withFileTypes: true })
     .filter((entry) => !entry.name.startsWith("."))
-    .sort(sortEntries(relativeDirectory));
+    .sort(sortEntries());
   const items: SidebarItem[] = [];
 
   for (const entry of entries) {
@@ -186,8 +85,7 @@ function directoryItems(
     if (childItems.length === 0) continue;
     const indexPath = path.join(entryPath, "index.md");
     items.push({
-      text: directoryLabels[entryRelativePath]
-        || markdownTitle(indexPath, humanize(entry.name)),
+      text: markdownTitle(indexPath, humanize(entry.name)),
       collapsed: true,
       items: childItems,
     });
@@ -196,31 +94,34 @@ function directoryItems(
   return items;
 }
 
+function sectionTitle(section: string): string {
+  return markdownTitle(
+    path.join(siteRoot, section, "index.md"),
+    humanize(section),
+  );
+}
+
 function sectionSidebar(section: string): SidebarItem[] {
   const directory = path.join(siteRoot, section);
   return [{
-    text: sectionLabels[section] || markdownTitle(
-      path.join(directory, "index.md"),
-      humanize(section),
-    ),
+    text: sectionTitle(section),
     items: directoryItems(directory, section),
   }];
 }
 
-const sectionNames = [...sectionOrder];
 const primaryNavSections = ["polaris", "operations"];
 const primarySections = sectionNames.filter((section) => primaryNavSections.includes(section));
 const referenceSections = sectionNames.filter((section) => !primaryNavSections.includes(section));
 const nav = [
   ...primarySections.map((section) => ({
-    text: sectionLabels[section] || humanize(section),
+    text: sectionTitle(section),
     link: `/${section}/`,
   })),
   ...(referenceSections.length > 0
     ? [{
       text: "Reference",
       items: referenceSections.map((section) => ({
-        text: sectionLabels[section] || humanize(section),
+        text: sectionTitle(section),
         link: `/${section}/`,
       })),
     }]
@@ -232,7 +133,7 @@ const homeSidebar: SidebarItem[] = [{
   items: [
     { text: "Documentation Home", link: "/" },
     ...sectionNames.map((section) => ({
-      text: sectionLabels[section] || humanize(section),
+      text: sectionTitle(section),
       link: `/${section}/`,
     })),
   ],

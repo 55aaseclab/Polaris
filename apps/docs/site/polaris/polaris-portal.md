@@ -53,7 +53,7 @@ flowchart LR
 | `apps/polaris-portal` | React pages, cards, navigation, Zustand state, SSE client, browser actions | Identity, ownership, capability authority, durable state |
 | `@polaris/polaris-shell` | Route, product-line, host-action, and user contracts | Portal UI, session authority, authorization |
 | `apps/polaris/scripts/portal` | Authenticated API, verified Domain Pack and workflow projections, durable workflow control, host Literature Review adapter, compatibility FFI host, SSE endpoint, lifecycle adapters, Gateway transport, static-artifact serving | Browser rendering |
-| Polaris Domain Pack store | CLI-managed verified [Polaris DSL](./dsl.md) installations and manifests outside Vaults | Flow execution, scheduling, Agent adapters |
+| Polaris Domain Pack store | CLI-managed verified [Polaris Workflow](./workflow.md) pack installations and manifests outside Vaults | Flow execution, scheduling, Agent adapters |
 | `vault-live-hub.ts` | Per-user filesystem observation, reconciliation, and scoped events | Durable authorization or audit authority |
 | User Management | Authing mapping, ownership, roles, and product-line access | Portal layout |
 | Vault Management | Runtime, data, status, jobs, recovery, and capacity | Browser state |
@@ -84,13 +84,6 @@ same-origin Polaris routes and are admitted by the Gateway.
 | User projection | `GET /api/polaris-user` | Return profile, session, and credential summaries |
 | Host projection | `GET /api/polaris-hosts` | Return the current user's vault summaries |
 | Domain Pack projection | `GET /api/domain-packs` | Return verified CLI-installed packs, flow metadata, inputs, capabilities, and approval requirements |
-| Workflow Vault projection | `GET /api/workflow-vaults` | Return the current user's Vaults with canonical driver status and server-derived run availability |
-| Workflow setup | `GET/PUT /api/workflow-setup` | Read or persist the tenant's selected pack, optional Vault, and enabled flows |
-| Workflow runs | `GET/POST /api/workflow-runs` | List or submit tenant-owned durable runs for host or Vault execution |
-| Run projection | `GET /api/workflow-runs/:runId` | Return one tenant-owned run projection |
-| Run events | `GET /api/workflow-runs/:runId/events?after=:cursor` | Return replayable ordered events for one run using the tenant-global cursor |
-| Run actions | `POST /api/workflow-runs/:runId/{approve,cancel,retry}` | Apply server-side durable transitions |
-| Workflow suggestions | `GET/POST /api/workflow-suggestions` | List or create non-executable deterministic drafts from successful runs |
 | Host lifecycle | `POST /api/polaris-hosts` | Queue creation of an owned vault |
 | Host lifecycle | `POST /api/polaris-hosts/:name` | Start or stop an owned vault |
 | Host deletion | `DELETE /api/polaris-hosts/:name` | Delete an owned vault through the lifecycle policy |
@@ -101,6 +94,11 @@ same-origin Polaris routes and are admitted by the Gateway.
 The browser sends credentials only to same-origin `/api` requests. The SSE
 connection uses the same authenticated origin and the server checks the route
 user ID against the current session before subscribing.
+
+Workflow endpoints (`/api/workflow-vaults`, `/api/workflow-setup`,
+`/api/workflow-runs`, `/api/workflow-runs/:runId/*`,
+`/api/workflow-suggestions`) are specified on the
+[Polaris Workflow](./workflow.md) page.
 
 ### 1.3 Static, Live, And View State
 
@@ -132,23 +130,17 @@ Vault implicitly.
 ### 1.4 Domain Pack Catalog
 
 Polaris discovers first-party packs from `packs/` and extra versions from
-the control-store install root after the [Polaris DSL](./dsl.md) pipeline:
-parse, import resolution, validation, and compilation. Extra versions
-installed with `pack add` keep an immutable source and manifest under the
-control data root, outside every Vault. The Portal API reads that combined
-catalog on each authenticated request and exposes only verified
-installations. A source whose digest no longer matches its manifest is
-omitted from the catalog.
+the control-store install root. The DSL pipeline, install layout, and digest
+verification are specified on the [Polaris Workflow](./workflow.md) page.
+The Portal API reads that combined catalog on each authenticated request and
+exposes only verified installations. A source whose digest no longer matches
+its manifest is omitted from the catalog.
 
 The projection is descriptive. It carries the pack version and digest, flow
 titles and summaries, input controls, capabilities, and whether a flow reaches
 a human approval port. It carries no prompt, command, path, credential, or
-execution binding. The current Portal binds the selected projection to a
-durable Polaris run. `driver=none` uses the Polaris host adapter and persists
-`mode: "host"`. The first-party Literature Review flow is
-`AutoResearch/LiteratureReview`. A concrete Vault target uses the
-compatibility mock path and persists `mode: "mock"`. Real `mode: "vault"`
-execution is postponed to [Polaris 0.5.0](/operations/polaris-0.5.0/).
+execution binding. Run drivers and modes are specified on the
+[Polaris Workflow](./workflow.md) page.
 
 The browser keeps the hierarchy explicit: `domainPackId` is the selected work
 scene, while `enabledWorkflowKeys` contains individual `packId:flowId` entries.
@@ -337,25 +329,19 @@ authorization and selected-driver checks when the surface is opened.
 
 ### 3.5 Workflow Submission And Debug Observation
 
+Submission admission, run state, and drivers are specified on the
+[Polaris Workflow](./workflow.md) page. The Portal-specific projection is:
+
 ```text
 Portal form
   -> authenticated pack/flow/optional execution-target request
-  -> Polaris rechecks pack digest, then validates host execution or Vault ownership and selected driver
   -> WorkflowControlService atomically creates the envelope, lease, run, event, and outbox row
-  -> host Literature Review adapter or deterministic FFI worker runs the pinned workflow
-  -> receipts, artifacts, and replayable events are persisted
   -> Zustand stores the run projection; Work and run detail render that store
 ```
 
-The run keeps `packVersion`, `packDigest`, optional `vaultId`, execution driver, capability lease, policy,
-and the submitted input snapshot. Approval, cancellation, retry, and failure
-are durable server transitions. The Debug page only selects a run and
-displays replayable events; it cannot mutate run state by editing browser
-data. `driver=none` on `AutoResearch/LiteratureReview` runs the compiled
-collection-to-report workflow on a tenant-scoped Polaris host workspace.
-Retry requeues that same run id and skips completed steps. Vault-target
-runs retain the deterministic compatibility executor. All run control state
-survives a Portal process restart in the existing control store.
+The Debug page only selects a run and displays replayable events; it cannot
+mutate run state by editing browser data. All run control state survives a
+Portal process restart in the existing control store.
 
 ## 4. Security, Resilience, And Concurrency
 
@@ -507,7 +493,7 @@ records, cookies, or private runtime paths.
 ## Related Docs
 
 - [Polaris overview](./index.md)
-- [Polaris DSL](./dsl.md)
+- [Polaris Workflow](./workflow.md)
 - [User Management](./user-management.md)
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)

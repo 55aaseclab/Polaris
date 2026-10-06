@@ -68,8 +68,8 @@ this tag.
 
 These are later authority boundaries. They do not block the 0.4.0 tag:
 
-- Real `mode: "vault"` execution inside a selected Vault. Postponed to
-  [Polaris 0.5.0](../polaris-0.5.0/).
+- Real `mode: "vault"` execution inside a selected Vault. Postponed to the
+  local-deployment requirements in [Polaris 2.0.0](../polaris-2.0.0/).
 - Additional live executor families beyond the operator-only
   `vault.artifact.metadata.read` pilot.
 - AI-assisted workflow generation, a real Vault Host, private-surface
@@ -78,7 +78,7 @@ These are later authority boundaries. They do not block the 0.4.0 tag:
 - `ops workflow-smoke` as operator-facing proof that a Vault-target path
   is mock-only. That command installs a synthetic pack into a temp data
   root and drives mocked setup, approval, receipts, artifacts, and a
-  suggestion. Postpone it to [Polaris 0.5.0](../polaris-0.5.0/) with the
+  suggestion. Postpone it to [Polaris 2.0.0](../polaris-2.0.0/) with the
   real `mode: "vault"` executor.
 
 ### Must stay true while finishing 0.4.0
@@ -108,7 +108,7 @@ and command surface for those Polaris decisions. Zustand stores browser
 projections and optimistic UI state; it is not an authority.
 
 A Domain Pack is a reusable library outside a Vault. Its workflows use the
-[Polaris DSL](/polaris/dsl) for entities, typed dataflow, and FFI ports. A
+[Polaris DSL](/polaris/workflow) for entities, typed dataflow, and FFI ports. A
 run is the unit that enters a Vault:
 
 ```text
@@ -124,7 +124,7 @@ Domain Pack outside Vault
 The current mock host runs in the Polaris process and simulates a
 Vault-scoped host. It still carries tenant ID, Vault ID, pack digest, and
 lease identity in every RPC request. A real `mode: "vault"` adapter is
-0.5.0 work. When it arrives, it must preserve that envelope and must not
+2.0.0 work. When it arrives, it must preserve that envelope and must not
 move workflow authority into a Vault, private surface, or the browser.
 
 The official tool catalog lives in `packages/polaris-tools`. Polaris derives
@@ -159,7 +159,7 @@ Verified packs are installed by the Polaris CLI at:
 $POLARIS_DATA_ROOT/control/domain-packs/<domain>/<version>/
 ```
 
-Each installation contains immutable [Polaris DSL](/polaris/dsl) source and
+Each installation contains immutable [Polaris DSL](/polaris/workflow) source and
 a manifest with a SHA-256 digest. `pack add` validates source and imports
 before the atomic write; `pack list` detects drift; `pack remove` removes
 only the requested version. The authenticated `GET /api/domain-packs`
@@ -197,7 +197,7 @@ mock is no longer an in-memory source of run truth.
 ### Phase 2: Real Pack And Vault Projections
 
 Implemented. Packs come from the verified CLI-managed
-[Polaris DSL](/polaris/dsl) store. Vaults come from the current user-owned
+[Polaris DSL](/polaris/workflow) store. Vaults come from the current user-owned
 Polaris Vault projection. `status`, `canRun`, and `availabilityReason` remain
 server-derived; the Portal does not invent a second Vault lifecycle.
 
@@ -213,7 +213,7 @@ envelope, its lease, and its initial event commit in one SQLite transaction.
 
 Implemented as a mock-only boundary. The versioned RPC envelope carries the
 run, tenant, Vault, pack pin, capability lease, call, input, mode, and trace
-identity. The [Polaris DSL](/polaris/dsl) parser supports explicit
+identity. The [Polaris DSL](/polaris/workflow) parser supports explicit
 `builtin manual.review`; the generic built-in registry defines the
 interface, while a Domain Pack port declares where it is used. The mock host
 records deterministic receipts and produces synthetic artifacts. No real
@@ -238,7 +238,7 @@ the current draft is deterministic metadata derived from a confirmed run.
 
 ## FFI And Ownership
 
-FFI calls are declared inside [Polaris DSL](/polaris/dsl) workflow
+FFI calls are declared inside [Polaris DSL](/polaris/workflow) workflow
 definitions. Port syntax, built-in interfaces, and the RPC wire contract
 live on that page.
 
@@ -363,7 +363,7 @@ production approval, or proof of external side effects.
 
 - [WorkEnvelope and workflow plan](./work-envelope-and-workflow-plan.md)
 - [Dynamic workflow runtime](./dynamic-workflow-runtime.md)
-- [Polaris DSL](../../polaris/dsl.md)
+- [Polaris DSL](../../polaris/workflow.md)
 - [Polaris Portal](../../polaris/polaris-portal.md)
 - [Vault Management](../../polaris/vault-management.md)
 - [Polaris Gateway](../../polaris/gateway.md)
@@ -375,7 +375,7 @@ The Phase 3-6 slice is source-complete when the focused checks above pass
 and the Portal contract remains unchanged. 0.4.0 is a host-workflow
 release, not a live Agent release and not a real Vault-executor release.
 The ordinary Portal path can run `AutoResearch` / `LiteratureReview` as a
-host run. A selected Vault target remains `mode: "mock"` until 0.5.0. Live
+host run. A selected Vault target remains `mode: "mock"` until 2.0.0. Live
 `vault.artifact.metadata.read` remains behind the operator admission path
 and both deployment flags. AI-assisted workflow generation remains later
 work.

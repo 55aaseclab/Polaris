@@ -131,7 +131,7 @@ gateway boundary still returned `401` without a session.
 - [Polaris 0.4.0](../polaris-0.4.0/) is the active workflow implementation
   slice built on this 0.3.4 boundary. Its Phase 3-6 control state is
   mock-only and does not reopen the archived vertical runtime.
-- [Polaris 0.5.0](../polaris-0.5.0/) remains a planned local-cell and cohort
+- [Polaris 2.0.0](../polaris-2.0.0/) remains a planned local-cell and cohort
   lifecycle release. It continues to consume the 0.3.3 capacity baseline and
   is not re-scoped by this version bump.
 

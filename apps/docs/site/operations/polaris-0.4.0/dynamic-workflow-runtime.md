@@ -169,7 +169,7 @@ two reads.
 
 ## FFI And Receipts
 
-The compiled [Polaris DSL](../../polaris/dsl.md) Program retains versioned
+The compiled [Polaris DSL](../../polaris/workflow.md) Program retains versioned
 port symbols. The mock Host turns a
 call into an RPC request containing protocol, request/idempotency IDs, tenant,
 Vault, run, pack digest, capability lease, port/version, effect, optional
@@ -207,7 +207,7 @@ evidence: source run and event IDs
 
 The record is not a `WorkflowDefinition`. It cannot be enabled, scheduled, or
 executed. AI generation is later work. A future proposer may write a
-[Polaris DSL](../../polaris/dsl.md) fragment or AST, but Polaris must
+[Polaris DSL](../../polaris/workflow.md) fragment or AST, but Polaris must
 validate it, dry-run it without effects, require human publication, and issue
 a new immutable version before any run can reference it.
 

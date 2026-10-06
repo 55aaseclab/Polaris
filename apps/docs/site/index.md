@@ -8,7 +8,7 @@ fixed directory configuration.
 
 - [Polaris](/polaris/) is the workflow execution platform and control plane for
   isolated environments. The Domain Pack language is on
-  [Polaris DSL](/polaris/dsl).
+  [Polaris DSL](/polaris/workflow).
 - [Operations](/operations/) contains gateway, deployment, and release records.
 
 ## Source Of Truth

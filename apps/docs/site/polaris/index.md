@@ -11,7 +11,7 @@ boundary and the cross-repository references that are useful after setup.
 - [User Management](./user-management.md)
 - [Usage](./usage.md)
 - [Polaris Portal](./polaris-portal.md)
-- [Polaris DSL](./dsl.md)
+- [Polaris Workflow](./workflow.md)
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)
 - [Paseo Management](./paseo.md)

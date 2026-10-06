@@ -76,27 +76,11 @@ Vault references are parsed as:
 - `<project>@pod:<profile>`
 - `<project>@kubevirt-vm`
 
-## Domain Pack Commands
+## Domain Pack and Workflow Commands
 
-Domain Packs are Polaris control-plane objects. First-party and third-party
-packs under `packs/` and `third_party/` are discovered automatically. Extra
-versions can be installed outside every Vault under
-`$POLARIS_DATA_ROOT/control/domain-packs/<domain>/<version>/`. Each extra
-installation contains the [Polaris DSL](./dsl.md) source and a SHA-256
-manifest. Language, import, and validation rules live on that page.
-
-```bash
-pnpm --dir apps/polaris run polaris -- pack add <file.ord|pack-directory>
-pnpm --dir apps/polaris run polaris -- pack list
-pnpm --dir apps/polaris run polaris -- pack remove <domain> \
-  [--version <x.y.z>]
-```
-
-`pack list` reports built-in packs plus any extra versions. Extra installs
-are `verified` or `drifted`. `pack add` is only for extra or overridden
-versions; it validates the source and its already-installed imports before
-the atomic write. When more than one extra version is installed,
-`pack remove` requires `--version`; it never removes Vault data.
+Domain Pack install, list, remove, workflow run, live admission, and drill
+commands are specified on the [Polaris Workflow](./workflow.md) page. That
+page is the single workflow reference.
 
 ## User Commands
 
@@ -182,27 +166,14 @@ pnpm --dir apps/polaris run polaris -- ops audit \
   [--limit <1-1000>] [--verify] [--json]
 
 pnpm --dir apps/polaris run polaris -- ops tool-precheck [--json]
-
-pnpm --dir apps/polaris run polaris -- ops workflow-admit-live-metadata \
-  --tenant <userId> --vault <vault> --pack <packId> --flow <flowId> \
-  --operator <operatorId> --candidate-live-enabled \
-  [--value key=value ...] [--release-id <id>] [--wait] [--json]
-
-pnpm --dir apps/polaris run polaris -- ops workflow-live-metadata-drill \
-  --user <userId> --vault <vault> --candidate-live-enabled \
-  [--release-id <id>] [--json]
 ```
 
-There is no `polaris -- literature-review` command. Literature Review is the
-`AutoResearch` / `LiteratureReview` Domain Pack. Run it from the Portal
-work desk or through the workflow API.
-
-`ops workflow-smoke` remains in the tree as a mock-only Vault-target
-drill. It is postponed to [Polaris 0.5.0](/operations/polaris-0.5.0/)
-with the real `mode: "vault"` executor and is not a 0.4.0 release gate.
-The live metadata commands require both
-`POLARIS_WORKFLOW_LIVE_ADAPTER=enabled` and
-`POLARIS_WORKFLOW_LIVE_WORKER_BINDING=enabled`.
+Workflow operator commands (`ops workflow-smoke`,
+`ops workflow-admit-live-metadata`, `ops workflow-live-metadata-drill`) are
+specified on the [Polaris Workflow](./workflow.md) page. There is no
+`polaris -- literature-review` command; Literature Review is the
+`AutoResearch` Domain Pack, run from the Portal work desk or through the
+workflow API.
 
 `ops audit` is a host-operator command. It lists a redacted audit envelope and
 never prints stored metadata. `--verify` checks the local durable hash chain

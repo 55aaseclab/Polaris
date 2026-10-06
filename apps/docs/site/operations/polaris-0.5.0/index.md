@@ -1,55 +1,90 @@
 # Polaris 0.5.0
 
-Status: planned. This release turns the 0.3.x single-host control plane and
-the 0.4.0 work/workflow surface into a **sellable 10–20 seat local cell** for
-enterprise pilots, university labs, courses, and short-lived cohorts.
+Status: planned.
 
-It does not replace 0.4.0 workflow work. It packages isolation, identity,
-lifecycle, and operator experience so the scenarios in
-[Use scenarios](/business-model/use-scenarios) stop depending on
-Authing-only identity or hand-built scripts.
+0.5.0 将 Polaris 从单机工作流能力推进为面向普通用户的云服务。
+本版本保留 Web 入口，新增微信小程序入口，并把 API 作为与界面同级的
+交付渠道。三个入口共享同一套云端身份、订阅、运行、计费和审计能力。
 
-## Objective
+客户本地部署、离线安装和本地身份系统不属于 0.5.0，统一进入
+[Polaris 2.0.0](../polaris-2.0.0/) 需求清单。开发者在本机运行测试环境仍然
+保留，但不构成对客户提供的自托管产品。
 
-Make “one host, about twenty isolated daily AI users” operable **without a
-cloud IdP** when the buyer demands pure local deployment, and still clean when
-cohorts are short-lived (class, exam, hackathon, PoC).
+云端工作流在长期运行中的可靠性、故障解释、检查点恢复和审计发布门槛，
+由 [Polaris 1.0.0](../polaris-1.0.0/) 定义。
 
-## Scope Themes
+## 产品目标
 
-1. **Local identity** — first-class local user authentication and admin of
-   users/roles without Authing.
-2. **Cohort lifecycle** — batch create, timed expiry, and creator-destroys
-   cleanup including Docker networks.
-3. **Operator product surface** — admin views for active vaults, quota, stale
-   users, and isolation health.
-4. **Scenario packs** — lab, course, delivery, exam/drill templates on top of
-   the 20-seat baseline.
-5. **Evidence for buyers** — isolation and audit exports good enough for a
-   pilot security questionnaire.
-6. **Real Vault workflow execution** — persist and implement `mode: "vault"`
-   so a selected running Vault is the executor, not the 0.4.0 mock host.
-   Keep the same WorkEnvelope, pack pin, capability lease, receipt, and
-   audit contract. Do not invent a second scheduler in private surface.
-7. **Vault-target workflow smoke** — keep `ops workflow-smoke` as the
-   operator-facing proof for the Vault-target path. Today it installs a
-   synthetic pack into a temp data root and drives mocked setup,
-   approval, receipts, artifacts, and a suggestion. After `mode: "vault"`
-   exists, that command should prove a selected running Vault, not the
-   0.4.0 mock host.
+Polaris 不向普通用户销售工作流编排器，而是销售经过精炼、稳定且价格可控的
+工作流服务。用户描述目标并填写少量参数，Polaris 负责持续执行、失败恢复、
+结果交付和运行记录。
 
-## Documents
+```text
+Domain Pack = 产品线
+Flow        = 可购买的服务
+Input       = 用户提交的参数
+Run         = 一次订单或执行
+Artifact    = 交付结果
+Receipt     = 成本与执行证据
+Approval    = 必要的质量控制
+```
 
-- [Gaps and improvements from scenarios](./scenario-driven-improvements.md)
-- [Intelligence pack plan (TODO)](./intelligence-pack.md)
+## 0.5.0 范围
 
-## Dependencies
+1. **云服务基础**：多租户身份、配额、凭据、持久运行、审计和托管执行。
+2. **微信小程序**：登录、创建订阅、查看状态、接收结果和管理通知。
+3. **Web 入口**：保留 `/work`，覆盖完整配置、运行历史和运营管理能力。
+4. **Workflow API**：允许合作方创建任务或订阅、查询状态并接收 Webhook。
+5. **订阅型工作流**：支持定时执行、增量状态、去重、幂等投递和取消订阅。
+6. **首个商品化流程**：监控闲鱼商品上新，经规则和 AI 筛选后通知用户。
+7. **云端隔离**：凭据和会话只保存在服务端；用户入口不接触采集凭据。
 
-- 0.3.3 capacity identity (`maxActiveVaults=20`) and resource baseline remain
-  the package size.
-- 0.4.0 ships the host workflow path and keeps Vault-target runs
-  `mode: "mock"`. 0.5.0 owns the real `mode: "vault"` executor and the
-  Vault-target `ops workflow-smoke` proof. 0.5.0 must not make private
-  surface a second identity, lifecycle, or workflow control plane.
-- Formal Authing mode stays supported; local auth is an additional mode for
-  air-gapped and campus-local installs, not a removal of enterprise IdP.
+## 统一入口模型
+
+```text
+微信小程序 ----\
+                > 云 API -> Admission -> Run -> Artifact / Notification
+Web Portal ----/
+合作方 API ----/
+```
+
+三个入口不得各自实现工作流语义。任何入口创建的任务都必须进入同一套 admission、
+版本固定、配额、运行状态、回执和审计模型。
+
+## 首个工作流
+
+闲鱼上新监控的详细产品契约见
+[Marketplace Monitor Pack](./marketplace-monitor-pack.md)。首版至少支持关键词、
+价格区间、地区、排除词、成色、检查频率和通知渠道；输出包含原始链接、发现时间、
+匹配理由、去重状态和投递回执。
+
+采集必须遵守目标平台规则和适用法律，不绕过验证码或访问控制，不收集完成服务
+所不需要的个人信息。平台限制、账号风险和来源失效必须作为显式运行状态呈现。
+
+## 非目标
+
+- 不在 0.5.0 提供客户自托管、私有化或离线安装包。
+- 不为不同客户端维护独立的调度器、身份系统或计费逻辑。
+- 不向普通用户暴露 DSL、运行容器或底层 agent 编排细节。
+- 不承诺绕过第三方平台的反自动化措施。
+- 不把当前 `mode: "mock"` 的 Vault 路径包装成生产能力。
+
+## 文档
+
+- [云服务与客户端需求](./scenario-driven-improvements.md)
+- [Marketplace Monitor Pack](./marketplace-monitor-pack.md)
+- [Intelligence Pack](./intelligence-pack.md)
+- [Polaris 1.0.0 云端生产成熟度](../polaris-1.0.0/)
+- [Polaris 2.0.0 本地部署需求](../polaris-2.0.0/)
+
+## 验收摘要
+
+0.5.0 可以发布时：
+
+1. 小程序和 Web 能通过同一云 API 创建、查看、暂停和取消订阅。
+2. API 客户能创建订阅、查询事件并通过签名 Webhook 接收结果。
+3. 闲鱼监控能定时检查、规范化、去重、筛选并幂等通知。
+4. 每个事件都记录来源、发现时间、工作流版本、成本和投递回执。
+5. 凭据和来源会话不下发到小程序、浏览器或 API 调用方。
+6. 失败可重试且不会重复发送已确认的通知。
+7. 产品文档和销售入口不把本地部署列为 0.5.0 能力。

@@ -24,7 +24,7 @@ Polaris 面向的是**稳定业务流程的业务处理团队**。
 
 Polaris 的产品定位是：
 
-> 用灵活 [Polaris DSL](/polaris/dsl) 定义业务流程，用卡片式界面执行、复核和交接，
+> 用灵活 [Polaris DSL](/polaris/workflow) 定义业务流程，用卡片式界面执行、复核和交接，
 > 让重复业务处理稳定、可追踪、可恢复。
 
 ## 业务结果

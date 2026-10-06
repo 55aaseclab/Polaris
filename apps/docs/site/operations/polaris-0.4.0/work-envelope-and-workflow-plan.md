@@ -41,7 +41,7 @@ decision locally.
 | Result projection | Polaris | `workflow_artifacts` |
 | Draft suggestion | Polaris | `workflow_suggestions`, status `suggested` only |
 | First-party tool catalog | Polaris | `packages/polaris-tools` manifests |
-| Business declaration | Domain Pack repository | [Polaris DSL](../../polaris/dsl.md) `.ord` source; no runtime authority |
+| Business declaration | Domain Pack repository | [Polaris DSL](../../polaris/workflow.md) `.ord` source; no runtime authority |
 | Domain surface | private surface or another private surface | Adapter only; no run scheduler |
 | Execution cell | Vault | The selected target; live adapter is not enabled in this slice |
 
@@ -132,7 +132,7 @@ generation and dynamic plan patching are deliberately outside this phase.
 
 FFI is part of the workflow definition, not an out-of-band tool list. Port
 syntax, `manual.review`, and the RPC wire contract live on
-[Polaris DSL](../../polaris/dsl.md).
+[Polaris DSL](../../polaris/workflow.md).
 
 Official tool publication metadata lives in `packages/polaris-tools`. That
 package is the single source for first-party tool manifests, disabled live
@@ -232,7 +232,7 @@ responses into Zustand and refreshes after mutations.
 ## Developer And Operator Workflow
 
 Domain Pack development happens in the pack repository or a local pack source:
-write `.ord`, run [Polaris DSL](../../polaris/dsl.md) validation, and install
+write `.ord`, run [Polaris DSL](../../polaris/workflow.md) validation, and install
 through the Polaris CLI. Domain
 Pack code must not import Polaris control-store internals or hardcode a Portal
 route. Polaris owns the parser, registry, policy, leases, queue, RPC host,
@@ -273,13 +273,13 @@ Implemented here:
 - mock-only Vault-target host and synthetic artifacts; and
 - non-executable deterministic suggestions.
 
-`ops workflow-smoke` is postponed to [Polaris 0.5.0](../polaris-0.5.0/)
+`ops workflow-smoke` is postponed to [Polaris 2.0.0](../polaris-2.0.0/)
 with the real `mode: "vault"` executor.
 
 Not enabled here:
 
 - real `mode: "vault"` execution inside a selected Vault (postponed to
-  [Polaris 0.5.0](../polaris-0.5.0/));
+  [Polaris 2.0.0](../polaris-2.0.0/));
 - live Vault tool adapters or package installation into Vaults;
 - private surface mutation calls from a workflow;
 - external email, outreach, deployment, deletion, or credential effects;

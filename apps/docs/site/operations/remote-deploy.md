@@ -83,6 +83,14 @@ First-time machine setup:
 bash ./scripts/provision-remote.sh debian@your-server
 ```
 
+Default remote paths:
+
+- app dir: `/srv/polaris/app`
+- data dir: `/srv/polaris/data`
+- env file: `/etc/polaris/polaris.env`
+- active color file: `/etc/polaris/active-color`
+- nginx upstream file: `/etc/nginx/snippets/polaris-gateway-upstream.conf`
+
 Expected installed packages:
 
 - `docker.io`
@@ -214,6 +222,31 @@ Blue/green deploy should:
 ```bash
 bash ./scripts/cd-remote.sh debian@your-server
 ```
+
+Production uses `.env.prod`.
+
+Production data lives under `POLARIS_DATA_ROOT` instead of the repo checkout.
+
+Remote production runs `polaris-server` as a host systemd service.
+Docker keeps only the blue/green web stack (`paseo-app` and `nginx`).
+
+The current default is:
+
+```bash
+POLARIS_DATA_ROOT=/srv/polaris/data
+```
+
+Optional access bootstrap:
+
+```bash
+POLARIS_BOOTSTRAP_ADMIN_USERS=<authing-username-1>,<authing-username-2>
+```
+
+Runtime note:
+
+- workspace lifecycle operations run in-process inside `polaris-server`
+
+Polaris separates workspace archive from workspace delete.
 
 Expected flow:
 
