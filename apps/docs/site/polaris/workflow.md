@@ -156,13 +156,23 @@ port literature.collection version "1.0.0" {
 }
 ```
 
-Effects are `pure`, `read`, `write`, `ffi`, `human`, or `time`. A port may
-bind a Polaris built-in (`builtin manual.review`) or a Host tool-inventory ID.
-Those names remain symbols; the Host decides how the call runs. Built-ins are
-generic Polaris interfaces, not domain-specific tool bodies: a new built-in
-needs a versioned input and output contract, risk class, policy requirement,
-receipt model, and mock implementation. A pack cannot bind a built-in to an
-arbitrary executable or endpoint.
+Effects are `pure`, `read`, `write`, `ffi`, `human`, or `time`:
+
+| Effect | Meaning | Example |
+| --- | --- | --- |
+| `pure` | Touches only the context | Validation, assembly, mapping |
+| `read` | Reads the outside world | Query an inventory port |
+| `write` | Writes the outside world | Persist, send a message |
+| `ffi` | Generic external call | Collection, analysis CLI |
+| `human` | Waits for a person | Approval, human gate |
+| `time` | Delay or schedule | Due date, SLA |
+
+A port may bind a Polaris built-in (`builtin manual.review`) or a Host
+tool-inventory ID. Those names remain symbols; the Host decides how the call
+runs. Built-ins are generic Polaris interfaces, not domain-specific tool
+bodies: a new built-in needs a versioned input and output contract, risk
+class, policy requirement, receipt model, and mock implementation. A pack
+cannot bind a built-in to an arbitrary executable or endpoint.
 
 A flow is a typed transaction:
 
@@ -196,6 +206,39 @@ AI-assisted workflow generation is not implemented. A model may later propose
 a fragment or AST, but Polaris must still validate it, dry-run it without
 effects, require human publication, and issue a new immutable pack version
 before any run can use it.
+
+### Design principles
+
+1. Industry words never enter the kernel; only `entity`, `flow`, `port` and
+   the other forms above do.
+2. Tool is a port, not a step field.
+3. Every datum has a name; `uses` and `out` are visible, no hidden globals.
+4. Every effect is declared; `call` / `human` / `write` are auditable.
+5. Every binding is replaceable; the same description runs on many Hosts.
+6. Configuration is not language; paths, secrets, and replica counts stay in
+   the binding.
+7. UI is a projection; rendering can change without changing semantics.
+8. AI writes models, not arbitrary code; it generates `.ord` and validates,
+   it does not emit ungovernable scripts.
+
+### Implementation status
+
+| Capability | Status |
+| --- | --- |
+| Parser / Validator / Interpreter / Compiler | Implemented |
+| `entity` · `flow` · `input` · `steps.uses/output` · `flow.output` | Implemented |
+| `port` · `call` · `needs` · `MockHost.invoke` | Implemented |
+| Interpreted vs compiled execution (both through Host) | Implemented |
+| 1000-pack stress and Unicode identifiers | Implemented |
+| `import` across packs and port versions (`@ver`) | Implemented |
+| Pack install / list / remove CLI | Implemented |
+| Real Host CLI/HTTP execution adapter | Future P3 |
+
+The package stress suite generates 1000 synthetic packs plus an adversarial
+set and runs full `parse -> validate -> compile -> interpret` over them.
+The adversarial suite is what keeps a synthetic "all green" run from hiding
+weak cases; it caught Unicode identifiers and capability-only packs (ports
+without flows) as regressions.
 
 ## DSL engine
 
@@ -314,11 +357,6 @@ flow LiteratureReview title "Literature Review" create {
 }
 ```
 
-`packs/autoresearch/workflow.json` is the matching contract definition: the
-`literature-review` workflow id, compatible data-contract versions,
-execution constraints, tool components, and the full port-to-tool binding
-table.
-
 ### Human review as a generic built-in
 
 The pack owns the review fields and labels; Polaris owns the approval state
@@ -367,8 +405,6 @@ flow Place {
   }
 }
 ```
-
-`packs/vision-kernel/main.ord` is the target-state kernel sketch.
 
 ## CLI
 
@@ -492,8 +528,6 @@ The package also generates and stresses synthetic packs with
 | Path | Role |
 | --- | --- |
 | `packs/autoresearch/main.ord` | First-party Literature Review pack |
-| `packs/autoresearch/workflow.json` | Literature-review contract and port bindings |
-| `packs/vision-kernel/main.ord` | Kernel sketch |
 | `tools/tool-inventory.json` | Workflow command inventory |
 
 ### Documentation
@@ -506,10 +540,6 @@ The package also generates and stresses synthetic packs with
 | `apps/docs/site/polaris/usage.md` | Host-run vs Vault-run usage |
 | `apps/docs/site/operations/polaris-0.4.0/dynamic-workflow-runtime.md` | Runtime state machine and invariants |
 | `apps/docs/site/operations/polaris-0.4.0/work-envelope-and-workflow-plan.md` | WorkEnvelope and setup contracts |
-| `packages/polaris-workflow/README.md` | Package overview |
-| `packages/polaris-workflow/docs/DESIGN.md` | Design cognition |
-| `packages/polaris-workflow/docs/DOMAIN_PACKS.md` | Pack conventions and stress methodology |
-| `packages/polaris-workflow/docs/POLARIS-0.4-BRIDGE.md` | Polaris 0.4.0 bridge |
 | `CHANGELOG.md` | Workflow slices per release |
 
 ## Related
