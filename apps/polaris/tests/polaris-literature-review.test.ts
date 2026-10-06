@@ -13,7 +13,7 @@ import {
 } from "polaris-workflow";
 import { listDomainPackProjections } from "../scripts/config/domain-packs.js";
 import { closePolarisControlStore } from "../scripts/portal/control-store.js";
-import { WorkflowControlService } from "../scripts/portal/workflow-control.js";
+import { WorkflowControlService } from "../scripts/portal/workflow/workflow-control.js";
 
 const REPO_ROOT = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),

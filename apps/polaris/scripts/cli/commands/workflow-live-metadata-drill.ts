@@ -18,7 +18,7 @@ import {
 import {
   invokeWorkflowLiveVaultArtifactMetadataFromWorker,
   type WorkflowLiveMetadataWorkerBindingResult,
-} from "../../portal/workflow-live-worker-binding.js";
+} from "../../portal/workflow/workflow-live-worker-binding.js";
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
@@ -30,7 +30,7 @@ import {
   type WorkflowLiveReadiness,
   type WorkflowLiveWorkerIntegrationPreconditions,
   type WorkflowLiveWorkerReleaseProfile,
-} from "../../portal/workflow-live-boundary.js";
+} from "../../portal/workflow/workflow-live-boundary.js";
 import { repoRoot } from "../../utils/paths.js";
 
 type DrillOptions = {

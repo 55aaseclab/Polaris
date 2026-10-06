@@ -9,7 +9,7 @@ import {
   projectWorkflowVault,
   WorkflowMockError,
   WorkflowMockService,
-} from "../scripts/portal/workflow-mock.js";
+} from "../scripts/portal/workflow/workflow-mock.js";
 
 const PACK: WorkflowDomainPackProjection = {
   id: "FixturePack",

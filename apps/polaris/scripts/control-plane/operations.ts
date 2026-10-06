@@ -81,7 +81,7 @@ import {
   getPolarisControlStore,
   type DurableJob,
 } from "../portal/control-store.js";
-import { notifyWorkflowVaultProvisioned } from "../portal/workflow-control.js";
+import { notifyWorkflowVaultProvisioned } from "../portal/workflow/workflow-control.js";
 import { durableJobWorkerConcurrency } from "./jobs/concurrency.js";
 import {
   WANGHAI_BACKUP_JOB_KIND,

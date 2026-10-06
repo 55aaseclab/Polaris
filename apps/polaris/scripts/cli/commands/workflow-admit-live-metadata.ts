@@ -7,10 +7,10 @@ import {
 } from "../../portal/control-store.js";
 import {
   WorkflowControlService,
-} from "../../portal/workflow-control.js";
+} from "../../portal/workflow/workflow-control.js";
 import {
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
-} from "../../portal/workflow-live-boundary.js";
+} from "../../portal/workflow/workflow-live-boundary.js";
 
 type AdmitLiveMetadataOptions = {
   tenantId?: string;

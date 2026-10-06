@@ -14,15 +14,15 @@ import {
 import {
   WorkflowControlError,
   WorkflowControlService,
-} from "../scripts/portal/workflow-control.js";
+} from "../scripts/portal/workflow/workflow-control.js";
 import {
   WORKFLOW_LIVE_ADAPTER_FLAG,
   WORKFLOW_LIVE_WORKER_BINDING_FLAG,
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 import type {
   WorkflowLiveVaultArtifactMetadataReader,
-} from "../scripts/portal/workflow-live-vault-adapter.js";
+} from "../scripts/portal/workflow/workflow-live-vault-adapter.js";
 import type {
   WorkflowDomainPackProjection,
   WorkflowVaultProjection,

@@ -17,7 +17,7 @@ import {
   type WorkflowLiveWorkerIntegrationPreconditions,
   type WorkflowLiveWorkerReleaseProfile,
   type WorkflowLiveReadiness,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 
 function request(overrides: Partial<FfiRpcRequest> = {}): FfiRpcRequest {
   return {
@@ -282,7 +282,7 @@ test("metadata worker integration preconditions allow only candidate worker wiri
   ]);
 
   const workerSource = fs.readFileSync(
-    new URL("../scripts/portal/workflow-control.ts", import.meta.url),
+    new URL("../scripts/portal/workflow/workflow-control.ts", import.meta.url),
     "utf8",
   );
   assert.equal(workerSource.includes('this.run.policy.mode === "live"'), true);

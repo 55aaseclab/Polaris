@@ -10,12 +10,12 @@ import {
   WORKFLOW_LIVE_ADAPTER_FLAG,
   type WorkflowActionCatalogEntry,
   type WorkflowLiveReadiness,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 import {
   invokeWorkflowLiveTool,
   invokeWorkflowLiveToolWithEvidence,
   type WorkflowLiveToolDefinition,
-} from "../scripts/portal/workflow-live-tool-gateway.js";
+} from "../scripts/portal/workflow/workflow-live-tool-gateway.js";
 
 type SyntheticOutput = {
   count: number;

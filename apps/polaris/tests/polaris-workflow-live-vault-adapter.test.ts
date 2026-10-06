@@ -10,13 +10,13 @@ import {
   normalizeWorkflowLiveVaultArtifactMetadata,
   readWorkflowLiveVaultArtifactMetadata,
   WorkflowLiveVaultMetadataReadError,
-} from "../scripts/portal/workflow-live-vault-adapter.js";
+} from "../scripts/portal/workflow/workflow-live-vault-adapter.js";
 import {
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
   type WorkflowActionCatalogEntry,
   type WorkflowLiveReadiness,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 import { createCommand } from "../scripts/cli/commands/create.js";
 import { createUserCommand } from "../scripts/cli/commands/create-user.js";
 import {

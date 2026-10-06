@@ -15,12 +15,12 @@ import {
   type WorkflowLiveReadiness,
   type WorkflowLiveWorkerIntegrationPreconditions,
   type WorkflowLiveWorkerReleaseProfile,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 import {
   invokeWorkflowLiveVaultArtifactMetadataFromWorker,
   rollbackWorkflowLiveMetadataWorkerBinding,
-} from "../scripts/portal/workflow-live-worker-binding.js";
-import { WorkflowLiveVaultMetadataReadError } from "../scripts/portal/workflow-live-vault-adapter.js";
+} from "../scripts/portal/workflow/workflow-live-worker-binding.js";
+import { WorkflowLiveVaultMetadataReadError } from "../scripts/portal/workflow/workflow-live-vault-adapter.js";
 
 function request(overrides: Partial<FfiRpcRequest> = {}): FfiRpcRequest {
   return {

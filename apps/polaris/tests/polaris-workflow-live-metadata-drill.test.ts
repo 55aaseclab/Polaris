@@ -14,7 +14,7 @@ import {
   WORKFLOW_LIVE_ADAPTER_FLAG,
   WORKFLOW_LIVE_WORKER_BINDING_FLAG,
   WORKFLOW_LIVE_VAULT_METADATA_ACTION_ID,
-} from "../scripts/portal/workflow-live-boundary.js";
+} from "../scripts/portal/workflow/workflow-live-boundary.js";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

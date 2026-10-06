@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { addDomainPack, listDomainPackProjections } from "../../config/domain-packs.js";
 import { closePolarisControlStore } from "../../portal/control-store.js";
-import { WorkflowControlService } from "../../portal/workflow-control.js";
+import { WorkflowControlService } from "../../portal/workflow/workflow-control.js";
 import type {
   WorkflowDomainPackProjection,
   WorkflowVaultProjection,
