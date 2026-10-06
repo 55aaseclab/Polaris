@@ -293,8 +293,8 @@ checks the lease, the Vault projection, and the exact verified pack bytes
 selected by ID, version, and digest. Each worker claim has an expiry and can
 be recovered after process loss. Every transition appends an event and outbox
 item transactionally, artifacts are bounded projections, and suggestions
-remain `suggested` and non-executable. The runtime invariants are specified
-in [Dynamic workflow runtime](../operations/polaris-0.4.0/dynamic-workflow-runtime.md).
+remain `suggested` and non-executable. The planned execution work is
+consolidated in [Polaris 0.5.0](../operations/polaris-0.5.0/).
 
 Verified installations live outside every Vault:
 
@@ -537,12 +537,11 @@ The package also generates and stresses synthetic packs with
 | `apps/docs/site/polaris/workflow.md` | This page |
 | `apps/docs/site/polaris/cli.md` | Full CLI command reference |
 | `apps/docs/site/polaris/polaris-portal.md` | Portal workflow API and flow |
-| `apps/docs/site/operations/polaris-0.4.0/dynamic-workflow-runtime.md` | Runtime state machine and invariants |
-| `apps/docs/site/operations/polaris-0.4.0/work-envelope-and-workflow-plan.md` | WorkEnvelope and setup contracts |
+| `apps/docs/site/operations/polaris-0.5.0/index.md` | Cloud workflow evolution plan |
 | `CHANGELOG.md` | Workflow slices per release |
 
 ## Related
 
 - [Polaris CLI](./cli.md)
 - [Polaris Portal](./polaris-portal.md)
-- [Polaris 0.4.0](../operations/polaris-0.4.0/)
+- [Polaris 0.5.0](../operations/polaris-0.5.0/)

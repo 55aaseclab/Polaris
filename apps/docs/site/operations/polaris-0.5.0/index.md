@@ -61,6 +61,30 @@ Web Portal ----/
 采集必须遵守目标平台规则和适用法律，不绕过验证码或访问控制，不收集完成服务
 所不需要的个人信息。平台限制、账号风险和来源失效必须作为显式运行状态呈现。
 
+## 工作流演进（并入 0.3 → 0.4 未完成事项）
+
+0.5.0 的云工作流计划见 [云服务与客户端需求](./scenario-driven-improvements.md)、
+[Marketplace Monitor Pack](./marketplace-monitor-pack.md) 与
+[Intelligence Pack](./intelligence-pack.md)。0.3 到 0.4 各版本中明确推迟、
+仍需实现的工作流能力一并并入 0.5.0 的演进清单：
+
+- **真实 `mode: "vault"` 执行**：在所选 Vault 内运行编译后的 DSL，替换兼容
+  mock 路径；`ops workflow-smoke` 以此作为真实 executor 的验收。
+- **真实 Vault Host 与工具包安装**：把已验证 pack 能力加载进 Vault，而不是在
+  Polaris 进程内跑 mock host。
+- **更多 live executor family**：当前只有 operator 专用的
+  `vault.artifact.metadata.read` 读示例；其它执行族必须走同一 RPC、能力租约
+  与 live tool gateway，禁止每个工具一个适配器。
+- **工作流发起的 private surface 变更调用、外部连接器效应**（email、
+  outreach、部署、删除、凭据）与**外部事件等待 / 定时驱动的计划修订**。
+- **持久条件执行**：当前 DSL 只有 flow 与 `map` 面，条件路由、反馈回边、
+  重试与 checkpoint/resume 仍是运行时工作。
+- **AI 辅助工作流生成与动态改写**：模型可生成 `.ord` 草稿，但必须经校验、
+  dry-run、人工发布并签发新不可变版本后才能运行；学习只消费
+  server-confirmed 事件。
+- **自主 Agent 执行与模型选择工具**：任意代码、模型选择的工具和不可治理脚本
+  不允许自动进入运行。
+
 ## 非目标
 
 - 不在 0.5.0 提供客户自托管、私有化或离线安装包。

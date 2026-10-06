@@ -14,16 +14,9 @@ surface boundaries.
 4. Read [Polaris Gateway](/polaris/gateway) for the public ingress and
    authority boundary.
 5. Read [Remote Deploy](./remote-deploy.md) for host layout and rollout.
-6. Read [Polaris 0.4.0](./polaris-0.4.0/) for the current shipped host
-   workflow baseline; use [Polaris 0.3.4](./polaris-0.3.4/) and
-   [Polaris 0.3 Release](./polaris-release/) for the previous single-host
-   baseline and original 0.3 gates.
-7. Read [archived Polaris 0.3.1](./polaris-0.3.1/) for performance work, then
-   [archived Polaris 0.3.2](./polaris-0.3.2/) for the production perimeter, and the
-   [archived Polaris 0.3.3](./polaris-0.3.3/) for user-count growth, storage
-   capacity, migration, and scale evidence.
-   The Domain Pack language itself is on [Polaris DSL](/polaris/workflow).
-   Read [Polaris 0.5.0](./polaris-0.5.0/) for the cloud service, WeChat Mini
+6. Read [Polaris Workflow](/polaris/workflow) for the workflow reference and the
+   consolidated workflow evolution plan.
+7. Read [Polaris 0.5.0](./polaris-0.5.0/) for the cloud service, WeChat Mini
    Program, Web Portal, Workflow API, and subscription workflows. Read
    [Polaris 1.0.0](./polaris-1.0.0/) for production reliability,
    explainability, recovery, and audit requirements. Read

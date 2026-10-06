@@ -863,8 +863,6 @@ variable.
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)
 - [User Management](./user-management.md)
-- [Polaris 0.3.4 current state](/operations/polaris-0.3.4/)
 - [Polaris 0.3.3 archived record][archived-release]
 - [Remote Deploy](/operations/remote-deploy)
 
-[archived-release]: ../operations/polaris-0.3.3/
