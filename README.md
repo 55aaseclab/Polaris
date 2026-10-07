@@ -111,7 +111,7 @@ curl -X POST http://127.0.0.1:8787/api/workflow-runs \
       "question": "How to build agent workflows within 2 years?",
       "decisionContext": "Two-year agent workflow platform strategy",
       "audience": "Platform engineering leadership",
-      "reviewMode": "review",
+      "reviewMode": "auto-approve",
       "reportTemplate": "standard"
     }
   }'

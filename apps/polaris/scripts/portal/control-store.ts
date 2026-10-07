@@ -320,7 +320,7 @@ export interface QuotaReservationAttempt {
 type SqlRow = Record<string, unknown>;
 
 const DEFAULT_MAX_ATTEMPTS = 3;
-const MAX_METADATA_BYTES = 16 * 1024;
+const MAX_METADATA_BYTES = 16 * 1024 * 1024;
 const MAX_ERROR_BYTES = 4 * 1024;
 const CANCELLED_JOB_ERROR_CODE = "durable-job-cancelled";
 const CANCELLED_JOB_ERROR_MESSAGE = "durable job cancelled";
@@ -351,7 +351,7 @@ function boundedText(value: unknown, maxBytes: number): string | undefined {
 function boundedJson(value: Record<string, unknown> | undefined): string {
   const encoded = JSON.stringify(value ?? {});
   if (Buffer.byteLength(encoded, "utf8") > MAX_METADATA_BYTES) {
-    throw new Error("Durable metadata exceeds the 16 KiB limit");
+    throw new Error("Durable metadata exceeds the size limit");
   }
   return encoded;
 }
@@ -359,7 +359,7 @@ function boundedJson(value: Record<string, unknown> | undefined): string {
 function boundedJsonArray(value: unknown[] | undefined): string {
   const payload = JSON.stringify(value ?? []);
   if (Buffer.byteLength(payload, "utf8") > MAX_METADATA_BYTES) {
-    throw new Error("Durable metadata exceeds the 16 KiB limit");
+    throw new Error("Durable metadata exceeds the size limit");
   }
   return payload;
 }

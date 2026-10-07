@@ -169,7 +169,11 @@ export class WorkflowToolDispatcher {
       "artifacts",
     );
     const file = path.join(root, `collection-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
-    writeJson(file, { schema_version: "clue.data-collection.output.v2", records: items });
+    writeJson(file, {
+      schema_version: "clue.data-collection.output.v2",
+      collection_id: `collection-${Date.now()}`,
+      records: items,
+    });
     return file;
   }
 

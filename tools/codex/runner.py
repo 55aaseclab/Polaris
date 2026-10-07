@@ -20,7 +20,7 @@ from typing import Any
 
 
 TOOL_NAME = "clue-codex-cli"
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "gpt-5.6-terra"
 DEFAULT_REASONING_EFFORT = "low"
 TOPIC_SCHEMA_NAME = "topic-judgment.schema.json"
 

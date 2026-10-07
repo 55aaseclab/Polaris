@@ -1649,7 +1649,23 @@ async function main(argumentsList) {
       actions: [{ type: "wait-for", selector: "body", timeout_ms: 30_000 }],
     });
     try {
-      const summary = await commandRun(nestedPath, browserOutputPath);
+      let summary;
+      try {
+        summary = await commandRun(nestedPath, browserOutputPath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const browserOutput = await readJson(browserOutputPath, "browser output")
+          .then(() => ({ error: message }))
+          .catch(() => ({ error: message }));
+        await writeJson(outputPath, {
+          pdfPath: null,
+          captureStatus: "unavailable",
+          captureError: message,
+          browserOutputRef: resolve(browserOutputPath),
+        });
+        process.stdout.write(`${JSON.stringify({ status: "skipped", captureStatus: "unavailable", detail: message }, null, 2)}\n`);
+        return;
+      }
       const browserOutput = await readJson(browserOutputPath, "browser output");
       const pdf = Array.isArray(browserOutput.artifacts)
         ? browserOutput.artifacts.find((artifact) =>

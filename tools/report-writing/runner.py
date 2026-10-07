@@ -31,7 +31,7 @@ LOCAL_EXECUTOR = "local-codex"
 REVIEW_DIMENSIONS = ("unity", "support", "coherence", "sentence_skills")
 MAX_RENDERED_EVIDENCE_CHARS = 480
 # Report drafting defaults are chosen for unattended workflow latency.
-DEFAULT_REPORT_MODEL = "gpt-5.5"
+DEFAULT_REPORT_MODEL = "gpt-5.6-terra"
 DEFAULT_REPORT_REASONING_EFFORT = "low"
 # Inline literature citations in draft prose: [@claim-001] or [@claim-001;claim-002]
 INLINE_CLAIM_CITE_RE = re.compile(r"\[@([A-Za-z0-9_.:\-]+(?:\s*;\s*[A-Za-z0-9_.:\-]+)*)\]")

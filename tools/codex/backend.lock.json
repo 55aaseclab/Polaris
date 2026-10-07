@@ -4,7 +4,7 @@
   "runtime": {
     "cli": "codex",
     "commands": ["exec", "exec resume"],
-    "default_model": "gpt-5.5",
+    "default_model": "gpt-5.6-terra",
     "default_reasoning_effort": "low",
     "env": [
       "CODEX_MODEL",
