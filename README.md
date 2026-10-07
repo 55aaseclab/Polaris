@@ -98,6 +98,31 @@ Portal start also runs `ops tool-precheck` and logs remaining gaps.
 After the stack is up, open `/settings/tools` to see the same
 `check-setup` result and re-run it from the Recheck control.
 
+Create a literature review task through the workflow REST API:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/workflow-runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "packId": "AutoResearch",
+    "flowId": "LiteratureReview",
+    "driver": "none",
+    "values": {
+      "question": "How to build agent workflows within 2 years?",
+      "decisionContext": "Two-year agent workflow platform strategy",
+      "audience": "Platform engineering leadership",
+      "reviewMode": "review",
+      "reportTemplate": "standard"
+    }
+  }'
+```
+
+Monitor the run:
+
+```bash
+curl -s http://127.0.0.1:8787/api/workflow-runs/<run-id>
+```
+
 ## Local CI
 
 ```bash
