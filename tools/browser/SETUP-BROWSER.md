@@ -16,12 +16,21 @@ Xvfb itself.
 ```sh
 sudo apt-get install -y --no-install-recommends xvfb
 export DISPLAY=:99
-if ! pgrep -af "Xvfb ${DISPLAY}" >/dev/null 2>&1; then
+if ! pgrep -af "Xvfb ${DISPLAY}" | grep -v "^$$ " >/dev/null 2>&1; then
   Xvfb "${DISPLAY}" -screen 0 1920x1080x24 -nolisten tcp \
     >/tmp/polaris-xvfb.log 2>&1 &
 fi
+for _ in {1..50}; do
+  xdpyinfo >/dev/null 2>&1 && break
+  sleep 0.1
+done
 xdpyinfo >/dev/null
 ```
+
+The `grep -v "^$$ "` keeps the guard from matching the shell that runs it,
+since `pgrep -f` also sees the command text. Xvfb starts in the background,
+so wait for the `:99` socket before probing with `xdpyinfo`; probing
+immediately after the `&` races the X server startup.
 
 Put `DISPLAY=:99` in `.env.dev` when this display should be used after a
 restart. If the host already has a usable desktop display, keep its existing
@@ -235,10 +244,11 @@ ls ~/.camofox/profiles
 ```
 
 These checks verify the installed tool, display, long-running service, and
-profile directory. They do not verify that a publisher account is logged in
-or that a specific publisher allows access. Before a large run, execute one
-small real capture against a representative publisher URL and inspect its
-output PDF.
+profile directory. `xdpyinfo` in section 1's wait loop guarantees the display
+is ready before this step. They do not verify that a publisher account is
+logged in or that a specific publisher allows access. Before a large run,
+execute one small real capture against a representative publisher URL and
+inspect its output PDF.
 
 Upstream reference:
 <https://github.com/jo-inc/camofox-browser>
