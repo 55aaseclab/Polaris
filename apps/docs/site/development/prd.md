@@ -308,7 +308,7 @@ flowchart LR
 | 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
-| 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 见 3.10.9；论文口径 per-CVE $5/45min 在 flow 级声明，插队 M2 前 |
+| 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
 
 ---
 

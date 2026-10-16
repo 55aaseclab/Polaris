@@ -7,6 +7,10 @@ ordered newest first.
 
 ### Added
 
+- Budget and attempt hierarchy (PRD 3.10.9): run-level budget/timeout
+  cap with stable stop error codes, per-step maxAttempts and
+  flow-level budgetUsd/timeoutMs in the `.ord` grammar, and
+  structured error values threaded to the Portal.
 - DSL v2 structured orchestration (PRD 3.13): `.ord` gains sequence,
   parallel (fork-join), choice, forEach, while, and subflow, with
   structural interpretation, DAG validation, per-branch step policy,
