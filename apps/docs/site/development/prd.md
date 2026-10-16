@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V2.0.0
+版本号：V2.1.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -14,6 +14,7 @@
 | V1.7.0 | 2026/10/16 | opencode | 裁决：重试/预算/超时归步级策略（3.10）；模块工具只做单次尝试，不重复实现 attempt 循环 |
 | V1.8.0 | 2026/10/16 | opencode | 裁决推广：平台横切能力（重试/隔离/回执/审计/编排/传递）工具一律不重复实现；新增 3.11.7 能力归属对照 |
 | V2.0.0 | 2026/10/16 | opencode | DSL v2：`.ord` 升级为结构化编排（六构造，无界 while + 预算兜底）；移除"线性 DAG"约束；插队 M2 前 |
+| V2.1.0 | 2026/10/16 | opencode | 新增 3.10.9 预算层级 gap 修复：run 级预算帽（论文 per-CVE $5/45min 口径）+ 步级 maxAttempts 进 `.ord` 文法；插队 M2 前 |
 
 ---
 
@@ -306,6 +307,7 @@ flowchart LR
 | 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
+| 运行 | run 级预算帽 + 步级 maxAttempts 语法 | P0 | 见 3.10.9；论文口径 per-CVE $5/45min，插队 M2 前 |
 
 ---
 
@@ -787,6 +789,16 @@ write_file / list_dir。以 Port 声明、由 Host 绑定实现
 | timeoutMs | Number | 否 | 单次尝试超时 | 2700000 |
 | budgetUsd | Number | 否 | 步级成本预算 | 1.0 [待确认] |
 
+#### 3.10.9 预算与尝试的层级（gap 修复）
+
+排查 CVE-Genie 对齐时发现的两条平台 gap（论文口径：per-CVE
+预算帽 $5 + 45 分钟，是全模块全局帽，不是单步）：
+
+| 层级 | 现状 | gap 修复 |
+|------|------|---------|
+| run 级预算帽 | 无（只有步级 budgetUsd/timeoutMs） | 新增 run 级 budgetUsd/timeoutMs：跨全部步骤与 parallel 分支累计，超帽即止损整个运行；env 可配 + 提交时可覆盖 |
+| 步级 maxAttempts 语法 | `.ord` 不表达（parser 只认 timeoutMs/budgetUsd；maxAttempts 走全局 env，不同 workflow 不能各配各的） | parser 接受 `maxAttempts <n>` 作为步 part；步级策略优先读步级值，env 兜底 |
+
 ### 3.11 领域模块工具与清单注册（dispatcher 协议）
 
 #### 3.11.1 描述
@@ -1023,6 +1035,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 模块工具 | 四模块注册后 `pack list` 无 warnings；缺失任一工具时 pack 不可执行 | P0 |
 | 发布护栏 | 空 registry 时评审 fail、终稿标 degraded；`final` 仅在 registry 非空且 provenance 齐全时可达 | P0 |
 | DSL v2 | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止循环；v1 线性 pack 安装不回归 | P0 |
+| 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 被 parser 接受且步级策略优先读步级值 | P0 |
 
 ---
 
