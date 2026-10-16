@@ -27,11 +27,17 @@
   documents.
 - One planning document version bump equals one commit: PRD, release
   slicing, and scheduling docs each follow this rule.
+- Version bumps are for scope changes; reference fixes and copy edits do
+  not bump a version.
 - Change the PRD first, then the code, when scope changes.
 - A shipped capability must appear in the PRD functional inventory; fix the
   PRD first when reference pages and the PRD disagree.
 - A roadmap derives from a specific PRD version; when the PRD bumps, cut a
-  new roadmap version or re-cut the slices.
+  new roadmap version or re-cut the slices, and re-point the basis
+  references of every dependent document in the same batch. A stale basis
+  reference is a defect.
+- Each document version's changelog row records the PRD version it was cut
+  from; keep historical rows historically accurate.
 
 ## Self-reflection and self-improving
 
