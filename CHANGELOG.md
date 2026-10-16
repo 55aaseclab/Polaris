@@ -8,8 +8,8 @@ ordered newest first.
 Released the host workflow slice on the shipped `0.3.4` single-host
 baseline. Ordinary Portal work can run `AutoResearch` / `LiteratureReview`
 as a host run. Vault-target runs stay `mode: "mock"`. A real
-`mode: "vault"` executor and `ops workflow-smoke` remain
-[Polaris 0.5.0](apps/docs/site/operations/polaris-0.5.0/) work.
+`mode: "vault"` executor and `ops workflow-smoke` remain planned work,
+tracked in the product PRD.
 
 ### Added
 
@@ -72,7 +72,7 @@ state. Workflow live tools remain out of this release.
 - Close or explicitly defer the remaining external perimeter, authenticated
   tenant-matrix, restart-safety, supply-chain, and operator-approval gaps.
 - Workflow live tools, operator UX validation, and the next release identity
-  remain [Polaris 0.4.0](apps/docs/site/operations/polaris-0.4.0/) work.
+  remain planned work, tracked in the product PRD.
 
 ## [0.3.3] - 2026-08-09
 

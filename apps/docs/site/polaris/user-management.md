@@ -471,4 +471,4 @@ best-effort fallback.
 - [Vault Management](./vault-management.md)
 - [Polaris Gateway](./gateway.md)
 - [Paseo Management](./paseo.md)
-- [Remote Deploy](/operations/remote-deploy)
+- [Remote Deploy](/development/remote-deploy)

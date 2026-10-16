@@ -620,4 +620,4 @@ identity, or read an old path opportunistically.
 - [Polaris Portal](./polaris-portal.md)
 - [Polaris Gateway](./gateway.md)
 - [Paseo Management](./paseo.md)
-- [Remote Deploy](/operations/remote-deploy)
+- [Remote Deploy](/development/remote-deploy)

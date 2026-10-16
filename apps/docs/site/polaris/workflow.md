@@ -58,8 +58,7 @@ command. A run is an admitted object, not a process spawn. Four paths exist:
    ```
 
 4. Mock-only end-to-end drill: `ops workflow-smoke`. It stays in the tree as
-   a Vault-target drill and is postponed to
-   [Polaris 2.0.0](/operations/polaris-2.0.0/); it is not a release gate.
+   a Vault-target drill; it is not a release gate.
 
 The run request body accepts `packId`, `flowId`, optional `vaultId`, optional
 `driver`, a `values` string of `key=value` pairs, and an optional `scenario`.
@@ -293,8 +292,8 @@ checks the lease, the Vault projection, and the exact verified pack bytes
 selected by ID, version, and digest. Each worker claim has an expiry and can
 be recovered after process loss. Every transition appends an event and outbox
 item transactionally, artifacts are bounded projections, and suggestions
-remain `suggested` and non-executable. The planned execution work is
-consolidated in [Polaris 0.5.0](../operations/polaris-0.5.0/).
+remain `suggested` and non-executable. Planned execution work is tracked in
+the [Polaris PRD](/development/prd).
 
 Verified installations live outside every Vault:
 
@@ -537,11 +536,11 @@ The package also generates and stresses synthetic packs with
 | `apps/docs/site/polaris/workflow.md` | This page |
 | `apps/docs/site/polaris/cli.md` | Full CLI command reference |
 | `apps/docs/site/polaris/polaris-portal.md` | Portal workflow API and flow |
-| `apps/docs/site/operations/polaris-0.5.0/index.md` | Cloud workflow evolution plan |
+| `apps/docs/site/development/prd.md` | Product requirements ground truth |
 | `CHANGELOG.md` | Workflow slices per release |
 
 ## Related
 
 - [Polaris CLI](./cli.md)
 - [Polaris Portal](./polaris-portal.md)
-- [Polaris 0.5.0](../operations/polaris-0.5.0/)
+- [Polaris PRD](/development/prd)

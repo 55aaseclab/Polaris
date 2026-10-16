@@ -18,6 +18,21 @@
 - For `third_party` submodules, default to two commits: commit inside the
   submodule first, then commit the parent repo submodule pointer update.
 
+## Planning document versioning
+
+- The PRD governs intent; the software version governs delivery. Two
+  independent axes, aligned by reconciling at each release.
+- A document version number must be anchored by a commit. A version number
+  without a commit is not a version; do not reference it from other
+  documents.
+- One planning document version bump equals one commit: PRD, release
+  slicing, and scheduling docs each follow this rule.
+- Change the PRD first, then the code, when scope changes.
+- A shipped capability must appear in the PRD functional inventory; fix the
+  PRD first when reference pages and the PRD disagree.
+- A roadmap derives from a specific PRD version; when the PRD bumps, cut a
+  new roadmap version or re-cut the slices.
+
 ## Self-reflection and self-improving
 
 - Reflect after each completed task on what worked and what did not.

@@ -15,7 +15,7 @@ const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const sectionNames = [
   "polaris",
-  "operations",
+  "development",
 ];
 
 function relativeSitePath(filePath: string): string {
@@ -108,7 +108,7 @@ function sectionSidebar(section: string): SidebarItem[] {
   }];
 }
 
-const primaryNavSections = ["polaris", "operations"];
+const primaryNavSections = ["polaris", "development"];
 const primarySections = sectionNames.filter((section) => primaryNavSections.includes(section));
 const referenceSections = sectionNames.filter((section) => !primaryNavSections.includes(section));
 const nav = [

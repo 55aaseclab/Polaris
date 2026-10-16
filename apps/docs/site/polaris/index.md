@@ -15,7 +15,8 @@ boundary and the cross-repository references that are useful after setup.
 - [Polaris Gateway](./gateway.md)
 - [Paseo Management](./paseo.md)
 - [CLI](./cli.md)
-- [Operations](/operations/)
+- [Development](/development/)
+- [Polaris PRD](/development/prd)
 
 ## Architecture Snapshot
 

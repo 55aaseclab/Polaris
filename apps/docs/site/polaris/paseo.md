@@ -864,5 +864,5 @@ variable.
 - [Polaris Gateway](./gateway.md)
 - [User Management](./user-management.md)
 - [Polaris 0.3.3 archived record][archived-release]
-- [Remote Deploy](/operations/remote-deploy)
+- [Remote Deploy](/development/remote-deploy)
 

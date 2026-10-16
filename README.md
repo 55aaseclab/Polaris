@@ -29,8 +29,8 @@ same command is the `docs` service in `paseo.json`.
 
 - [Polaris product docs](apps/docs/site/polaris/index.md) — Portal, Vaults,
   Gateway, Paseo, DSL, and CLI
-- [Operations](apps/docs/site/operations/index.md) — deploy, gateway,
-  incidents, and release records
+- [Development](apps/docs/site/development/index.md) — PRD, deploy, gateway,
+  and incident records
 - [CHANGELOG.md](CHANGELOG.md) — release history
 
 ## Local Development
