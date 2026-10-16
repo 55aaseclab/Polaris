@@ -305,7 +305,7 @@ flowchart LR
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
 | 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
-| 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 见 3.13；插队 M2 前 |
+| 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 
 ---
 

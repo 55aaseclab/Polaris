@@ -7,6 +7,10 @@ ordered newest first.
 
 ### Added
 
+- DSL v2 structured orchestration (PRD 3.13): `.ord` gains sequence,
+  parallel (fork-join), choice, forEach, while, and subflow, with
+  structural interpretation, DAG validation, per-branch step policy,
+  and Portal timeline/graph rendering. Linear v1 packs stay valid.
 - Step-level retry and budget policy (PRD 3.10): per-step
   maxAttempts/timeoutMs/budgetUsd, env-configurable, with
   `maxAttempts=1` by default so unconfigured behavior is unchanged.
