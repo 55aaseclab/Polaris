@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Synthetic tool fixture for step-policy tests (PRD 3.10). No business data:
+behavior is driven entirely by env vars and the per-run workspace state.
+
+    POLARIS_SYNTHETIC_FAIL_UNTIL   fail (exit 1) while attempt <= N
+    POLARIS_SYNTHETIC_SLEEP_MS     sleep before responding (timeout fixture)
+    POLARIS_SYNTHETIC_COST_USD     include costUsd in the tool output
+"""
+import json
+import os
+import sys
+import time
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    input_path = args[args.index("--input") + 1]
+    output_path = args[args.index("--output") + 1]
+    with open(input_path, encoding="utf-8") as handle:
+        request = json.load(handle)
+    workspace_root = request["workspaceRoot"]
+    os.makedirs(workspace_root, exist_ok=True)
+    counter_path = os.path.join(workspace_root, ".synthetic-step-policy-attempts")
+    previous = 0
+    if os.path.exists(counter_path):
+        with open(counter_path, encoding="utf-8") as handle:
+            previous = int(handle.read().strip() or "0")
+    attempt = previous + 1
+    with open(counter_path, "w", encoding="utf-8") as handle:
+        handle.write(str(attempt))
+
+    sleep_ms = int(os.environ.get("POLARIS_SYNTHETIC_SLEEP_MS", "0") or "0")
+    if sleep_ms > 0:
+        time.sleep(sleep_ms / 1000)
+
+    output = {"attempt": attempt, "status": f"ok-{attempt}"}
+    raw_cost = os.environ.get("POLARIS_SYNTHETIC_COST_USD", "").strip()
+    if raw_cost:
+        try:
+            output["costUsd"] = float(raw_cost)
+        except ValueError:
+            pass
+
+    fail_until = int(os.environ.get("POLARIS_SYNTHETIC_FAIL_UNTIL", "0") or "0")
+    if attempt <= fail_until:
+        # Report billed work before failing so partial cost is salvageable.
+        if "costUsd" in output:
+            output["status"] = f"failed-{attempt}"
+            with open(output_path, "w", encoding="utf-8") as handle:
+                json.dump(output, handle, indent=2)
+                handle.write("\n")
+        print(
+            f"synthetic step fixture failed on attempt {attempt} (fail until {fail_until})",
+            file=sys.stderr,
+        )
+        return 1
+
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(output, handle, indent=2)
+        handle.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

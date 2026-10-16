@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   artifactPreviewPage,
   pathLabelParts,
+  timelineAttempts,
   timelineCallBlock,
   timelineValue,
   workspaceFilePage,
@@ -70,5 +71,32 @@ test("builds dedicated preview pages for artifacts and workspace files", () => {
   assert.equal(
     workspaceFileUrl(RUN_ID, "collection/inputs/input.json"),
     `/api/workflow-runs/${RUN_ID}/files?path=collection%2Finputs%2Finput.json`,
+  );
+});
+
+test("groups a failed step's receipts into ordered attempts", () => {
+  const receipts = [
+    { requestId: `${RUN_ID.replace("run-", "ffi-")}-10`, stepId: "fixture", status: "failed", errorCode: "step-attempt-timeout", errorMessage: "boom", errorValues: { timeout: 100 }, createdAt: "2026-10-16T10:00:00.000Z" },
+    { requestId: "ffi-other-2", stepId: "other", status: "completed", createdAt: "2026-10-16T10:00:01.000Z" },
+    { requestId: "ffi-run-2", stepId: "fixture", status: "failed", createdAt: "2026-10-16T10:00:02.000Z" },
+    { requestId: "ffi-run-3", stepId: "fixture", status: "completed", createdAt: "2026-10-16T10:00:03.000Z" },
+  ];
+  assert.deepEqual(timelineAttempts(receipts, "fixture"), [
+    { attempt: 1, attemptCount: 3, requestId: "ffi-run-10", status: "failed", error: "boom", errorCode: "step-attempt-timeout", values: { timeout: 100 } },
+    { attempt: 2, attemptCount: 3, requestId: "ffi-run-2", status: "failed" },
+    { attempt: 3, attemptCount: 3, requestId: "ffi-run-3", status: "completed" },
+  ]);
+});
+
+test("attempt grouping tolerates missing receipts and unordered request ids", () => {
+  assert.deepEqual(timelineAttempts(undefined, "fixture"), []);
+  assert.deepEqual(timelineAttempts([], "fixture"), []);
+  const reversed = [
+    { requestId: "ffi-run-3", stepId: "fixture", status: "completed", createdAt: "2026-10-16T10:00:00.000Z" },
+    { requestId: "ffi-run-1", stepId: "fixture", status: "failed", createdAt: "2026-10-16T10:00:00.000Z" },
+  ];
+  assert.deepEqual(
+    timelineAttempts(reversed, "fixture").map((attempt) => attempt.requestId),
+    ["ffi-run-1", "ffi-run-3"],
   );
 });

@@ -147,6 +147,8 @@ export type WorkflowEffectReceipt = {
   output: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  /** Structured diagnostic values for the error code's localized copy. */
+  errorValues?: Record<string, string | number>;
   createdAt: string;
   completedAt: string;
 };

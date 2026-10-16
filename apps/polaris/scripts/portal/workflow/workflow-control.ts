@@ -256,6 +256,7 @@ function projectionForRun(
     output: receipt.output,
     ...(receipt.errorCode ? { errorCode: receipt.errorCode } : {}),
     ...(receipt.errorMessage ? { errorMessage: receipt.errorMessage } : {}),
+    ...(receipt.errorValues ? { errorValues: receipt.errorValues } : {}),
     createdAt: receipt.createdAt,
     completedAt: receipt.completedAt,
   }));
@@ -325,12 +326,83 @@ function projectionForRun(
   };
 }
 
+/** Step-level policy (PRD 3.10): maxAttempts defaults to 1, i.e. current behavior. */
+type WorkflowStepPolicy = {
+  maxAttempts: number;
+  timeoutMs?: number;
+  budgetUsd?: number;
+};
+
+const STEP_POLICY_ENV = "POLARIS_WORKFLOW_STEP_POLICY";
+const STEP_POLICY_MAX_ATTEMPTS_ENV = "POLARIS_WORKFLOW_STEP_MAX_ATTEMPTS";
+const STEP_POLICY_TIMEOUT_MS_ENV = "POLARIS_WORKFLOW_STEP_TIMEOUT_MS";
+const STEP_POLICY_BUDGET_USD_ENV = "POLARIS_WORKFLOW_STEP_BUDGET_USD";
+/** PRD 3.10 step-policy verdict codes; the Portal i18n map localizes them. */
+const STEP_BUDGET_EXCEEDED_CODE = "step-budget-exceeded";
+const STEP_ATTEMPTS_EXHAUSTED_CODE = "step-attempts-exhausted";
+const STEP_ATTEMPT_TIMEOUT_CODE = "step-attempt-timeout";
+
+function formatUsd(value: number): string {
+  return String(Math.round(value * 1e6) / 1e6);
+}
+
+function readOptionalNumber(value: unknown, minimum: number): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed < minimum) return undefined;
+  return parsed;
+}
+
+function readStepPolicy(environment: Record<string, string | undefined>): WorkflowStepPolicy {
+  let raw: Record<string, unknown> = {};
+  const json = environment[STEP_POLICY_ENV]?.trim();
+  if (json) {
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        raw = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Invalid JSON falls back to the individual env vars and the default.
+    }
+  }
+  const maxAttempts = readOptionalNumber(
+    raw.maxAttempts ?? environment[STEP_POLICY_MAX_ATTEMPTS_ENV],
+    1,
+  ) ?? 1;
+  const timeoutMs = readOptionalNumber(
+    raw.timeoutMs ?? environment[STEP_POLICY_TIMEOUT_MS_ENV],
+    1,
+  );
+  const budgetUsd = readOptionalNumber(
+    raw.budgetUsd ?? environment[STEP_POLICY_BUDGET_USD_ENV],
+    0,
+  );
+  return {
+    maxAttempts: Math.max(1, Math.floor(maxAttempts)),
+    ...(timeoutMs !== undefined ? { timeoutMs: Math.floor(timeoutMs) } : {}),
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+  };
+}
+
+/** Step-policy verdict: stable error code + structured values for the
+ * Portal's localized copy; no natural-language message on the backend. */
+type WorkflowStepVerdict = {
+  code: string;
+  values?: Record<string, string | number>;
+};
+
 class WorkflowRpcHost implements AsyncFfiHost {
   readonly log: FfiCallLog[] = [];
   readonly rpcLog: Array<{
     request: FfiRpcRequest;
     response: FfiRpcResponse;
     evidenceRecorded?: boolean;
+    /** Step-policy attempt sequence; only set on the dispatcher path. */
+    attempt?: number;
+    attemptCount?: number;
+    /** Structured diagnostic values for the receipt's localized error copy. */
+    errorValues?: Record<string, string | number>;
   }> = [];
   private readonly ports: PortAst[];
   private readonly toolDispatcher?: WorkflowToolDispatcher;
@@ -540,9 +612,21 @@ class WorkflowRpcHost implements AsyncFfiHost {
     request: FfiRpcRequest;
     response: FfiRpcResponse;
     evidenceRecorded?: boolean;
+    attempt?: number;
+    attemptCount?: number;
+    errorValues?: Record<string, string | number>;
   }): FfiInvokeResult {
-    const { req, request, response, evidenceRecorded } = input;
-    this.rpcLog.push({ request, response, evidenceRecorded });
+    const { req, request, response, evidenceRecorded, attempt, attemptCount, errorValues } = input;
+    this.rpcLog.push({
+      request,
+      response,
+      evidenceRecorded,
+      ...(attempt !== undefined ? { attempt, attemptCount } : {}),
+      ...(errorValues ? { errorValues } : {}),
+    });
+    const attemptNote = attempt !== undefined
+      ? ` (attempt ${attempt}/${attemptCount ?? attempt})`
+      : "";
     this.log.push({
       at: response.receipt.startedAt,
       port: req.port,
@@ -553,12 +637,12 @@ class WorkflowRpcHost implements AsyncFfiHost {
       input: { ...req.input },
       output: { ...response.output },
       ok: response.status !== "failed" && response.status !== "denied",
-      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})`,
+      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})${attemptNote}`,
     });
     return {
       ok: response.status !== "failed" && response.status !== "denied",
       output: response.output,
-      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})`,
+      detail: `rpc://${request.call.port}@${request.call.version} (${response.status})${attemptNote}`,
       ...(response.error ? { error: response.error.message } : {}),
       resolvedVersion: request.call.version,
     };
@@ -670,32 +754,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
             resolvedVersion: port.version,
           };
         }
-        const request = this.createRpcRequest(port, req, "mock");
-        const result = await this.toolDispatcher.invoke(req, port);
-        const completedAt = this.options.now().toISOString();
-        const response: FfiRpcResponse = {
-          protocolVersion: FFI_RPC_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          status: result.ok ? "completed" : "failed",
-          output: result.output,
-          receipt: {
-            id: `receipt-${request.requestId}`,
-            requestId: request.requestId,
-            status: result.ok ? "completed" : "failed",
-            call: request.call,
-            startedAt: completedAt,
-            completedAt,
-          },
-          ...(result.error
-            ? { error: { code: "common-tool-failed", message: result.error } }
-            : {}),
-        };
-        return this.logRpcInvocation({
-          req,
-          request,
-          response,
-          evidenceRecorded: result.ok,
-        });
+        return this.invokeDispatcherWithStepPolicy(req, port);
       }
       return this.invokeMock(req, port);
     }
@@ -718,6 +777,151 @@ class WorkflowRpcHost implements AsyncFfiHost {
       response: this.liveMetadataResponse({ request, result }),
       evidenceRecorded: result.workerBinding === "executed",
     });
+  }
+
+  /** PRD 3.10 step policy loop around the dispatcher path: each attempt gets
+   * its own requestId (hence its own receipt); timeout/budget/exhaustion are
+   * recorded as step failure, never thrown. Verdicts carry stable error codes
+   * that the Portal localizes; the step detail stays neutral. */
+  private async invokeDispatcherWithStepPolicy(
+    req: FfiInvokeRequest,
+    port: PortAst,
+  ): Promise<FfiInvokeResult> {
+    const dispatcher = this.toolDispatcher!;
+    const policy = readStepPolicy(this.options.environment);
+    const annotate = policy.maxAttempts > 1;
+    let totalCostUsd = 0;
+    let last: FfiInvokeResult | undefined;
+    let lastOutcome: Awaited<ReturnType<typeof this.attemptDispatcherOnce>> | undefined;
+    for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+      const request = this.createRpcRequest(port, req, "mock");
+      const outcome = await this.attemptDispatcherOnce(dispatcher, req, port, policy.timeoutMs);
+      if (outcome.result.ok) {
+        return this.logRpcInvocation({
+          req,
+          request,
+          response: this.dispatcherRpcResponse(request, outcome.result),
+          evidenceRecorded: true,
+          ...(annotate ? { attempt, attemptCount: policy.maxAttempts } : {}),
+        });
+      }
+      lastOutcome = outcome;
+      const costUsd = outcome.result.output.costUsd;
+      if (typeof costUsd === "number" && Number.isFinite(costUsd)) {
+        totalCostUsd += costUsd;
+      }
+      const budgetUsd = policy.budgetUsd;
+      const budgetExceeded = budgetUsd !== undefined && totalCostUsd > budgetUsd;
+      const exhausted = !budgetExceeded && annotate && attempt >= policy.maxAttempts;
+      // Receipt verdicts carry code + values only (no prose message);
+      // the Portal i18n map localizes by code + values.
+      const finalVerdict: WorkflowStepVerdict | undefined =
+        budgetExceeded && budgetUsd !== undefined
+          ? {
+              code: STEP_BUDGET_EXCEEDED_CODE,
+              values: {
+                total: `$${formatUsd(totalCostUsd)}`,
+                budget: `$${formatUsd(budgetUsd)}`,
+              },
+            }
+          : exhausted
+            ? {
+                code: STEP_ATTEMPTS_EXHAUSTED_CODE,
+                values: { count: policy.maxAttempts },
+              }
+            : undefined;
+      const timeoutMs = policy.timeoutMs;
+      const verdict: WorkflowStepVerdict | undefined = finalVerdict
+        ?? (outcome.timedOut && timeoutMs !== undefined
+          ? {
+              code: STEP_ATTEMPT_TIMEOUT_CODE,
+              values: { timeout: timeoutMs },
+            }
+          : undefined);
+      const response: FfiRpcResponse = this.dispatcherRpcResponse(request, outcome.result, verdict);
+      last = this.logRpcInvocation({
+        req,
+        request,
+        response,
+        evidenceRecorded: false,
+        ...(annotate ? { attempt, attemptCount: policy.maxAttempts } : {}),
+        ...(verdict?.values ? { errorValues: verdict.values } : {}),
+      });
+      if (finalVerdict) {
+        const error = budgetExceeded && budgetUsd !== undefined
+          ? `${STEP_BUDGET_EXCEEDED_CODE} (${formatUsd(totalCostUsd)} > ${formatUsd(budgetUsd)})`
+          : `${STEP_ATTEMPTS_EXHAUSTED_CODE} (${policy.maxAttempts}/${policy.maxAttempts}): ${outcome.result.error ?? "unknown"}`;
+        return { ...last, error };
+      }
+    }
+    if (last && lastOutcome?.timedOut) {
+      return { ...last, error: lastOutcome.result.error };
+    }
+    return last!;
+  }
+
+  /** Single attempt; a timeout is recorded as a failed attempt, not a throw. */
+  private async attemptDispatcherOnce(
+    dispatcher: WorkflowToolDispatcher,
+    req: FfiInvokeRequest,
+    port: PortAst,
+    timeoutMs: number | undefined,
+  ): Promise<{ result: FfiInvokeResult; timedOut: boolean }> {
+    if (timeoutMs === undefined) {
+      return { result: await dispatcher.invoke(req, port), timedOut: false };
+    }
+    const timeout = Symbol("step-policy-timeout");
+    const raced = await Promise.race([
+      dispatcher.invoke(req, port),
+      new Promise<typeof timeout>((resolve) => {
+        const timer = setTimeout(() => resolve(timeout), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    if (raced === timeout) {
+      return {
+        timedOut: true,
+        result: {
+          ok: false,
+          output: {},
+          error: `${STEP_ATTEMPT_TIMEOUT_CODE} (${timeoutMs}ms)`,
+        },
+      };
+    }
+    return { result: raced, timedOut: false };
+  }
+
+  private dispatcherRpcResponse(
+    request: FfiRpcRequest,
+    result: FfiInvokeResult,
+    verdict?: WorkflowStepVerdict,
+  ): FfiRpcResponse {
+    const completedAt = this.options.now().toISOString();
+    return {
+      protocolVersion: FFI_RPC_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      status: result.ok ? "completed" : "failed",
+      output: result.output,
+      receipt: {
+        id: `receipt-${request.requestId}`,
+        requestId: request.requestId,
+        status: result.ok ? "completed" : "failed",
+        call: request.call,
+        startedAt: completedAt,
+        completedAt,
+      },
+      // Receipt error requires a message: keep it mechanical (code + JSON values).
+      ...(verdict
+        ? {
+            error: {
+              code: verdict.code,
+              message: `${verdict.code} ${JSON.stringify(verdict.values ?? {})}`,
+            },
+          }
+        : result.error
+          ? { error: { code: "common-tool-failed", message: result.error } }
+          : {}),
+    };
   }
 
   private invokeMock(req: FfiInvokeRequest, port: PortAst): FfiInvokeResult {
@@ -1692,6 +1896,7 @@ export class WorkflowControlService {
         input: entry.request.input,
         output: entry.response.output,
         ...(entry.response.error ? { errorCode: entry.response.error.code, errorMessage: entry.response.error.message } : {}),
+        ...(entry.errorValues ? { errorValues: entry.errorValues } : {}),
         createdAt: receipt.startedAt,
         completedAt: receipt.completedAt,
       });

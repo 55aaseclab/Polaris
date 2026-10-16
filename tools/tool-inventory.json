@@ -86,6 +86,12 @@
       "version_file": "report-writing/VERSION",
       "commands": ["version", "templates", "prepare", "draft", "review", "revise", "publish", "preview", "pdf", "latex", "run", "workflow"],
       "capabilities": ["compress-outline-expand", "coverage", "four-reviewers", "markdown", "bibtex", "xelatex"]
+    },
+    {
+      "id": "synthetic.step.policy",
+      "entrypoint": "synthetic-step-policy/synthetic-step-policy",
+      "commands": ["workflow"],
+      "capabilities": ["synthetic-fixture"]
     }
   ],
   "policy": {

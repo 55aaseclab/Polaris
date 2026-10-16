@@ -121,6 +121,8 @@ export interface WorkflowEffectReceiptRecord {
   output: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  /** Structured diagnostic values for the error code's localized copy. */
+  errorValues?: Record<string, string | number>;
   createdAt: string;
   completedAt: string;
 }
@@ -525,9 +527,21 @@ function rowToWorkflowReceipt(row: SqlRow): WorkflowEffectReceiptRecord {
     output: parseRecord(row.output_json),
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
+    errorValues: parseErrorValues(row.error_values_json),
     createdAt: String(row.created_at),
     completedAt: String(row.completed_at),
   };
+}
+
+/** Keeps only string/number diagnostic values from a stored error-values blob. */
+function parseErrorValues(value: unknown): Record<string, string | number> | undefined {
+  if (value == null) return undefined;
+  const parsed = parseRecord(value);
+  const values: Record<string, string | number> = {};
+  for (const [key, item] of Object.entries(parsed)) {
+    if (typeof item === "string" || typeof item === "number") values[key] = item;
+  }
+  return Object.keys(values).length > 0 ? values : undefined;
 }
 
 function rowToWorkflowStepResult(row: SqlRow): WorkflowStepResultRecord {
@@ -795,6 +809,9 @@ function ensureWorkflowReceiptColumns(db: DatabaseSync): void {
   if (!names.has("output_fields_json")) {
     db.exec("ALTER TABLE workflow_effect_receipts ADD COLUMN output_fields_json TEXT NOT NULL DEFAULT '[]'");
   }
+  if (!names.has("error_values_json")) {
+    db.exec("ALTER TABLE workflow_effect_receipts ADD COLUMN error_values_json TEXT");
+  }
 }
 
 function tableColumnNames(db: DatabaseSync, tableName: string): Set<string> {
@@ -1012,6 +1029,7 @@ export class PolarisControlStore {
         output_json TEXT NOT NULL,
         error_code TEXT,
         error_message TEXT,
+        error_values_json TEXT,
         created_at TEXT NOT NULL,
         completed_at TEXT NOT NULL,
         FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
@@ -1670,8 +1688,8 @@ export class PolarisControlStore {
       INSERT OR IGNORE INTO workflow_effect_receipts (
         id, ${sequenceColumn}run_id, tenant_id, request_id, step_id, step_label,
         output_fields_json, port, version, effect, status, input_json,
-        output_json, error_code, error_message, created_at, completed_at
-      ) VALUES (?, ${sequencePlaceholder}?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        output_json, error_code, error_message, error_values_json, created_at, completed_at
+      ) VALUES (?, ${sequencePlaceholder}?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       receipt.id,
       ...sequenceValue,
@@ -1689,6 +1707,7 @@ export class PolarisControlStore {
       boundedJson(receipt.output),
       receipt.errorCode ?? null,
       receipt.errorMessage ?? null,
+      receipt.errorValues ? boundedJson(receipt.errorValues) : null,
       receipt.createdAt,
       receipt.completedAt,
     );

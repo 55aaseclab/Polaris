@@ -51,6 +51,27 @@ test("known workflow errors use error-code translations", () => {
   assert.equal(localizedWorkflowError({ code: "future-error", message: "server message" }, (key) => messages.en[key]), "server message");
 });
 
+test("step-policy verdict codes interpolate their diagnostic values", () => {
+  const zh = (key: keyof typeof messages.zh, values?: Record<string, string | number>) => interpolate(messages.zh[key], values);
+  const en = (key: keyof typeof messages.en, values?: Record<string, string | number>) => interpolate(messages.en[key], values);
+  assert.equal(
+    localizedWorkflowError({ code: "step-budget-exceeded", message: "fallback" }, zh, { total: "$0.8", budget: "$0.5" }),
+    "步级预算超限：累计成本 $0.8 超过预算 $0.5",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "step-budget-exceeded", message: "fallback" }, en, { total: "$0.8", budget: "$0.5" }),
+    "Step budget exceeded: cumulative cost $0.8 over budget $0.5",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "step-attempts-exhausted", message: "fallback" }, zh, { count: 3 }),
+    "步级尝试耗尽（3）",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "step-attempt-timeout", message: "fallback" }, en, { timeout: 100 }),
+    "Step attempt timed out (100ms)",
+  );
+});
+
 test("all stable workflow error codes have centralized translations", () => {
   const codes = [
     "approval-not-available",
@@ -71,6 +92,9 @@ test("all stable workflow error codes have centralized translations", () => {
     "release-id-required",
     "retry-not-available",
     "run-not-found",
+    "step-attempt-timeout",
+    "step-attempts-exhausted",
+    "step-budget-exceeded",
     "suggestion-not-ready",
     "vault-not-found",
     "vault-unavailable",

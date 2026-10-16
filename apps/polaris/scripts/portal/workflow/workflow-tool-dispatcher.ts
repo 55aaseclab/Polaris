@@ -178,6 +178,7 @@ export class WorkflowToolDispatcher {
   }
 
   async invoke(req: FfiInvokeRequest, port: PortAst): Promise<FfiInvokeResult> {
+    let outputPath: string | undefined;
     try {
       if (!port.binding) throw new Error(`port ${port.name} has no external binding`);
       const command = req.meta?.command || port.binding.command;
@@ -196,7 +197,7 @@ export class WorkflowToolDispatcher {
       fs.mkdirSync(root, { recursive: true, mode: 0o700 });
       const stem = port.name.replace(/[^A-Za-z0-9._-]/gu, "_");
       const inputPath = path.join(root, `${stem}.input.json`);
-      const outputPath = path.join(root, `${stem}.output.json`);
+      outputPath = path.join(root, `${stem}.output.json`);
       writeJson(inputPath, {
         runId: this.runRecord.id,
         tenantId: this.runRecord.tenantId,
@@ -221,10 +222,23 @@ export class WorkflowToolDispatcher {
     } catch (error) {
       return {
         ok: false,
-        output: {},
+        // A failed tool may still have billed work; salvage its costUsd so the
+        // step-level budget (PRD 3.10) accumulates across failed attempts.
+        output: partialCostUsd(outputPath),
         resolvedVersion: port.version,
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+}
+
+/** Reads a partial tool output and keeps only a finite costUsd, if any. */
+function partialCostUsd(outputPath: string | undefined): StepContext {
+  if (!outputPath || !fs.existsSync(outputPath)) return {};
+  try {
+    const value = readJson(outputPath).costUsd;
+    return typeof value === "number" && Number.isFinite(value) ? { costUsd: value } : {};
+  } catch {
+    return {};
   }
 }

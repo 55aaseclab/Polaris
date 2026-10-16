@@ -42,6 +42,8 @@ apps/docs/tsconfig.node.tsbuildinfo
 .env.local
 .env.dev
 .env.prod
+.env.*.bak
+.polaris/
 deploy/release-manifest.json
 
 # Polaris literature-review execution dependencies and local run state.

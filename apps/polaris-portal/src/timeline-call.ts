@@ -77,6 +77,53 @@ export function resumedNote(detail: string): string | undefined {
   return match?.[0];
 }
 
+export type TimelineAttempt = {
+  attempt: number;
+  attemptCount: number;
+  requestId: string;
+  status: string;
+  error?: string;
+  errorCode?: string;
+  values?: Record<string, string | number>;
+};
+
+type AttemptReceipt = {
+  requestId: string;
+  stepId?: string;
+  status: string;
+  errorCode?: string;
+  errorMessage?: string;
+  errorValues?: Record<string, string | number>;
+  createdAt: string;
+};
+
+function requestIdSequence(requestId: string): number {
+  const match = requestId.match(/-(\d+)$/u);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/** Groups a step's per-attempt receipts (PRD 3.3.5): each attempt
+ * keeps its own requestId, so chronological order is attempt order. */
+export function timelineAttempts(
+  receipts: readonly AttemptReceipt[] | undefined,
+  stepId: string,
+): TimelineAttempt[] {
+  const attempts = (receipts ?? [])
+    .filter((receipt) => receipt.stepId === stepId)
+    .sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt)
+      || requestIdSequence(left.requestId) - requestIdSequence(right.requestId));
+  return attempts.map((receipt, index) => ({
+    attempt: index + 1,
+    attemptCount: attempts.length,
+    requestId: receipt.requestId,
+    status: receipt.status,
+    ...(receipt.errorMessage ? { error: receipt.errorMessage } : {}),
+    ...(receipt.errorCode ? { errorCode: receipt.errorCode } : {}),
+    ...(receipt.errorValues ? { values: receipt.errorValues } : {}),
+  }));
+}
+
 export function timelineCallBlock(input: {
   runId: string;
   call?: string;

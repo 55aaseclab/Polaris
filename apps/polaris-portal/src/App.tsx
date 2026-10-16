@@ -83,8 +83,10 @@ import { formatRunDateTime } from "./formatters.js";
 import {
   artifactPreviewPage,
   pathLabelParts,
+  timelineAttempts,
   timelineCallBlock,
   workspaceFilePage,
+  type TimelineAttempt,
   type TimelineCallBlock,
   type TimelineField,
   type TimelineValue,
@@ -1316,6 +1318,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     detail: string;
     tone: "neutral" | "accent" | "warning" | "success";
     call: TimelineCallBlock | null;
+    attempts: TimelineAttempt[];
   }>>(() => [
     ...run.events.map((event) => ({
       id: `event-${event.id}`,
@@ -1325,6 +1328,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
       detail: localizedWorkflowEvent(event, t).detail,
       tone: event.tone,
       call: null,
+      attempts: [],
     })),
     ...run.steps.map((step) => {
       const call = timelineCallBlock({
@@ -1335,6 +1339,8 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
         outputFields: step.outputFields,
         detail: step.detail,
       });
+      // PRD 3.3.5: failed steps keep every attempt receipt expandable.
+      const attempts = timelineAttempts(run.receipts, step.stepId);
       return {
         id: `step-${step.id}`,
         timestamp: step.completedAt || step.createdAt,
@@ -1343,9 +1349,10 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
         detail: step.detail || t("run.stepDefaultDetail", { status: t(`status.${step.status}` as const), count: Object.keys(step.output ?? {}).length }),
         tone: step.status === "failed" ? "warning" as const : "accent" as const,
         call,
+        attempts: step.status === "failed" ? attempts : attempts.length > 1 ? attempts : [],
       };
     }),
-  ].sort((left, right) => right.timestamp.localeCompare(left.timestamp) || right.sequence - left.sequence), [run.events, run.id, run.steps, t]);
+  ].sort((left, right) => right.timestamp.localeCompare(left.timestamp) || right.sequence - left.sequence), [run.events, run.id, run.steps, run.receipts, t]);
   const copyRunId = async () => {
     try {
       await copyTextToClipboard(run.id);
@@ -1366,7 +1373,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
       <div className="run-detail-layout">
         <div className="run-detail-main">
           <Card><CardHeader><CardTitle>{t("run.progress")}</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{t("run.percentComplete", { percent: run.progress })}</span><span>{workflowExecutionTargetLabel(run, t)}</span></div></CardContent></Card>
-          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong><time>{item.timestamp.slice(11, 16)}</time></div>{item.call ? <TimelineCallView runId={run.id} block={item.call} fallback={item.detail} navigate={navigate} /> : <p>{item.detail}</p>}</div></div>)}</div></CardContent></Card>
+          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong><time>{item.timestamp.slice(11, 16)}</time></div>{item.call ? <TimelineCallView runId={run.id} block={item.call} fallback={item.detail} navigate={navigate} /> : <p>{item.detail}</p>}{item.attempts.length > 0 && <details className="timeline-attempts"><summary>{t("run.attempts", { count: item.attempts.length })}</summary><ul className="timeline-attempt-list">{item.attempts.map((attempt) => <li className="timeline-attempt" key={attempt.requestId}><span className={cn("timeline-attempt-index", attempt.status !== "completed" && attempt.status !== "succeeded" && "is-failed")}>#{attempt.attempt}/{attempt.attemptCount}</span><code>{attempt.requestId}</code><span className="timeline-attempt-status">{t(attempt.status === "completed" || attempt.status === "succeeded" ? "status.completed" : "status.failed")}</span>{attempt.error && <span className="timeline-attempt-error">{attempt.errorCode ? localizedWorkflowError({ code: attempt.errorCode, message: attempt.error }, t, attempt.values) : attempt.error}</span>}</li>)}</ul></details>}</div></div>)}</div></CardContent></Card>
           {run.error && <Card className="run-error-card"><CardHeader><CardTitle>{t("run.needsAction")}</CardTitle></CardHeader><CardContent><p>{localizedWorkflowError(run.error, t)}</p><code>{run.error.code}</code></CardContent></Card>}
         </div>
         <aside className="run-detail-side"><Card><CardHeader><CardTitle>{t("run.context")}</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>{t("run.pack")}</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>{t("run.version")}</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? t("run.executionLocation") : t("run.targetVault")}</dt><dd>{workflowExecutionTargetLabel(run, t)}</dd></div><div className="data-row"><dt>{t("run.strategy")}</dt><dd>{run.approvalRequired ? t("run.needsConfirmation") : t("run.autoComplete")}</dd></div><div className="data-row"><dt>{t("run.created")}</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>{t("run.inputSnapshot")}</CardTitle><CardDescription>{t("run.inputDescription")}</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{formatInputSnapshotValue(value)}</code></dd></div>)}</dl></CardContent></Card>{run.artifacts.length > 0 && <Card><CardHeader><CardTitle>{t("run.artifacts")}</CardTitle><CardDescription>{run.driver === "none" ? t("run.artifactHost") : t("run.artifactVault")}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <a href={artifactPreviewPage(run.id, item.id)} className="artifact-row" key={item.id} onClick={(event) => { event.preventDefault(); navigate(artifactPreviewPage(run.id, item.id)); }}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></a>)}</div></CardContent></Card>}</aside>

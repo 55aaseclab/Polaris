@@ -1679,6 +1679,48 @@
   color: var(--portal-muted);
 }
 
+.timeline-attempts {
+  margin: .4rem 0 0;
+  font-size: .74rem;
+}
+
+.timeline-attempts summary {
+  color: #5b6d63;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timeline-attempt-list {
+  margin: .3rem 0 0;
+  padding: 0 0 0 1rem;
+  display: grid;
+  gap: .25rem;
+}
+
+.timeline-attempt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .4rem;
+  color: var(--portal-muted);
+}
+
+.timeline-attempt code {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  color: #5b6d63;
+  overflow-wrap: anywhere;
+}
+
+.timeline-attempt-index.is-failed {
+  color: #a83232;
+}
+
+.timeline-attempt-error {
+  color: #a83232;
+  overflow-wrap: anywhere;
+}
+
 .timeline-file-path {
   color: #155e3a;
   font-family: var(--font-mono);
