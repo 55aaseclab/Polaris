@@ -9,7 +9,7 @@
 
 周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
 负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V1.6.0（唯一 ground truth）。
+依据：[Polaris PRD](./prd) V1.7.0（唯一 ground truth）。
 
 ---
 

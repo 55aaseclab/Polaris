@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V1.6.0
+版本号：V1.7.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -11,6 +11,7 @@
 | V1.4.0 | 2026/10/16 | opencode | 评审修订：SQLite 现状、幂等键、沙箱边界声明、LLM 依赖口径、产物脱敏、污染断言可执行化 |
 | V1.5.0 | 2026/10/16 | opencode | 裁决：北极星指标对齐替换成本三维；交付顺序改为 3.10 先行、沙箱为可选项 |
 | V1.6.0 | 2026/10/16 | opencode | 新增产物发布护栏（final 门槛/深度门槛/provenance 完整性） |
+| V1.7.0 | 2026/10/16 | opencode | 裁决：重试/预算/超时归步级策略（3.10）；模块工具只做单次尝试，不重复实现 attempt 循环 |
 
 ---
 
@@ -141,7 +142,8 @@ Polaris 是面向隔离多智能体系统的自托管控制平面。用户通过
   host 路径 URL；
 - 运行全程钉住 pack 版本与摘要（digest）；
 - `driver=none` 与 `vaultId` 互斥；`driver=vault` 必须提供 `vaultId`；
-- DSL 是线性 DAG：attempt 循环写在工具内部，不在 `.ord` 里表达循环；
+- DSL 是线性 DAG，不在 `.ord` 里表达循环；attempt 级重试、超时与
+  预算止损由步级策略（3.10）统一承担，模块工具只做单次尝试；
 - exploit 代码绝不跑宿主机，只在隔离环境；
 - fail-closed：工具不全时 pack 保持不可执行；
 - 测试用合成 fixture，不用真实数据。
@@ -803,7 +805,7 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
 | cve.processor | build-knowledge | 结构化知识库（摘要/根因/利用细节） |
 | cve.builder | plan | 环境搭建计划 |
 | cve.builder | setup | 沙箱内执行计划 + critic 纠错循环 |
-| cve.exploiter | exploit | dev+critic ReAct 循环；最多 maxAttempts 次；每次全新隔离环境（3.8 可选项生效时）；时长/成本预算 |
+| cve.exploiter | exploit | 单次尝试：内部只做 dev+critic 收敛迭代；attempt 级重试（maxAttempts=5）、timeoutMs、budgetUsd 由步级策略（3.10）承担；每次重试的全新隔离环境（3.8 可选项生效时）由步级重试提供 |
 | cve.verifier | verify | weak/strong CTF verifier，按成功判据检查 |
 
 #### 3.11.4 LLM 依赖与成本口径
@@ -813,7 +815,10 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
 - 凭据缺失时模块 fail-closed：返回非零退出并注明
   "LLM provider 不可用"，交由 3.10 步级策略处理；
 - costUsd 口径：优先回读 LLM wrapper 的计费输出；无计费输出时按
-  固定估算计入回执 [待确认]。
+  固定估算计入回执 [待确认]；
+- 公开参考实现（如 CVE-Genie）仅作方法与 prompt 对照，其自带的
+  attempt 循环、预算与超时逻辑不移植——重试能力统一由 3.10 步级
+  策略提供，避免与平台框架重复。
 
 #### 3.11.5 注册与转绿
 - 注册进 `tools/tool-inventory.json`（entrypoint + commands）；
