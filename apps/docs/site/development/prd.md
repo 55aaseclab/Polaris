@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V1.5.0
+版本号：V1.6.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -10,6 +10,7 @@
 | V1.3.0 | 2026/10/16 | opencode | 补充试验包契约：四原语沙箱、模块工具 dispatcher 协议、硬约束与验收 |
 | V1.4.0 | 2026/10/16 | opencode | 评审修订：SQLite 现状、幂等键、沙箱边界声明、LLM 依赖口径、产物脱敏、污染断言可执行化 |
 | V1.5.0 | 2026/10/16 | opencode | 裁决：北极星指标对齐替换成本三维；交付顺序改为 3.10 先行、沙箱为可选项 |
+| V1.6.0 | 2026/10/16 | opencode | 新增产物发布护栏（final 门槛/深度门槛/provenance 完整性） |
 
 ---
 
@@ -294,6 +295,7 @@ flowchart LR
 | 运维 | 工具预检 | P0 | CLI + `/settings/tools` |
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
 | 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
+| 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 
 ---
 
@@ -826,6 +828,48 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
 | 命令缺失 | step command 未提供 | 校验期拒绝 | "命令未定义" |
 | 工具退出非零 | 模块执行失败 | 步失败，保留回执，交由 3.10 步级策略 | 展示 stderr |
 
+### 3.12 产物发布护栏（final 门槛）
+
+#### 3.12.1 描述
+终态产物的发布护栏：`final` 有前置条件（证据 registry 非空 + 最少
+篇幅 + provenance 可复现）；不满足时标 `degraded` 并给排查指引。
+上游失败（如 provider 限流解出 0 条 claim）不得级联成空洞终稿照常
+发布。
+
+#### 3.12.2 用户故事
+```
+作为提交者，我希望空 registry 或篇幅不达标的产物不被标记为 final，
+以便上游失败不级联成空洞终稿。
+作为对账者，我希望终稿的 provenance（输入配置、摘要、re-run 命令）
+完整可复现，以便排查"为什么短"有入口。
+```
+
+#### 3.12.3 护栏口径
+
+| # | 护栏 | 口径 | 挡的失败 |
+|---|------|------|---------|
+| R-1 | final 前置检查 | registry 非空 + 最少字数；registry 为空时评审 fail（堵"无点可查=空真通过"漏洞） | 限流 → 0 claim → 骨架照常 final |
+| R-2 | 深度门槛 | 段落数/字数进 revise 触发器（软门槛，触发修订而非 fail）；评审加深度维 | 每 claim 一句的清单式报告 |
+| R-3 | provenance 完整性 | source tasks 回写、input digest、re-run command 记录；缺失即 degraded | 排查入口本身不可复现 |
+
+#### 3.12.4 异常/分支流程
+
+| 场景 | 触发条件 | 处理方式 | 提示文案 |
+|------|---------|---------|---------|
+| registry 为空 | 解出 0 条 claim | 评审 fail；终稿标 degraded + 排查指引 | "证据不足，见排查指引" |
+| 字数不达标 | 低于最少篇幅 | 触发 revise（软门槛） | 展开修订轮次 |
+| provenance 缺失 | 输入配置/摘要/命令未记录 | 补录；degraded 标记 | "配置未记录" |
+
+#### 3.12.5 数据字典（发布状态）
+
+| 字段名 | 类型 | 必填 | 说明 | 示例值 |
+|--------|------|------|------|--------|
+| status | Enum | 是 | final/degraded/short-report | "final" |
+| registryCount | Number | 是 | 证据 registry 条数 | 35 |
+| bodyWords | Number | 否 | 终稿正文字数 [待确认] | 1240 |
+| provenanceComplete | Boolean | 是 | 输入配置/摘要/命令是否齐全 | true |
+| degradedReason | String | 条件 | status != final 时必填 | "empty-registry" |
+
 ---
 
 ## 四、非功能需求（注意事项）
@@ -909,6 +953,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 沙箱端口 | 命令级回执含 exitCode/stdoutRef；越权路径被拒绝并留审计 | P0 |
 | 步级策略 | maxAttempts 耗尽后步失败且保留历次尝试回执；预算超限立即止损 | P0 |
 | 模块工具 | 四模块注册后 `pack list` 无 warnings；缺失任一工具时 pack 不可执行 | P0 |
+| 发布护栏 | 空 registry 时评审 fail、终稿标 degraded；`final` 仅在 registry 非空且 provenance 齐全时可达 | P0 |
 
 ---
 
