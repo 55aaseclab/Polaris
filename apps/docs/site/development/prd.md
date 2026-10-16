@@ -285,7 +285,7 @@ flowchart LR
 | 运行 | REST API 提交 | P0 | `/api/workflow-runs` |
 | 运行 | host 持久运行 | P0 | `driver=none`，`mode:"host"` |
 | 运行 | 同 run 重试 | P0 | 跳过已完成步骤 |
-| 运行 | 步级重试与预算止损 | P0 | 先行实现（maxAttempts / timeout / budget） |
+| 运行 | 步级重试与预算止损 | P0 | 已交付（2026/10/16）：maxAttempts / timeout / budget，默认 maxAttempts=1 行为不变 |
 | 运行 | 隔离环境执行器（干净环境重试） | P1 | 可选项，3.10 之后按需交付 |
 | 端口 | 沙箱 CLI 执行端口 | P1 | 可选项，与 3.8 配套 |
 | 审批 | 人工门禁（manual review） | P0 | waiting/approve/审计 |

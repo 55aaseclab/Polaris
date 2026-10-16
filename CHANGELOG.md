@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [Unreleased]
+
+### Added
+
+- Step-level retry and budget policy (PRD 3.10): per-step
+  maxAttempts/timeoutMs/budgetUsd, env-configurable, with
+  `maxAttempts=1` by default so unconfigured behavior is unchanged.
+- Per-attempt receipts surfaced in the Portal timeline with
+  collapsible attempt grouping (PRD 3.3.5).
+- `synthetic.step.policy` fixture tool for step-policy tests.
+
 ## [0.4.0] - 2026-09-11
 
 Released the host workflow slice on the shipped `0.3.4` single-host
