@@ -1322,5 +1322,29 @@ class ReportWritingTests(unittest.TestCase):
             self.assertIn(r"\usepackage{graphicx}", tex)
 
 
+
+class PdfBrowserResolutionTests(unittest.TestCase):
+    def test_prefers_browser_on_path(self) -> None:
+        with patch.object(runner.shutil, "which", side_effect=lambda name: "/usr/bin/chromium" if name == "chromium" else None):
+            self.assertEqual(runner.resolve_pdf_browser(), "chromium")
+
+    def test_falls_back_to_macos_app_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            binary = home / "Applications" / "Google Chrome.app" / "Contents" / "MacOS" / "Google Chrome"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n", encoding="utf-8")
+            binary.chmod(0o755)
+            with patch.object(runner.shutil, "which", return_value=None), patch.object(
+                runner.Path, "home", return_value=home
+            ), patch.object(runner, "MACOS_SYSTEM_APPS_DIR", home / "no-system-apps"):
+                self.assertEqual(runner.resolve_pdf_browser(), str(binary))
+
+    def test_returns_none_without_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(runner.shutil, "which", return_value=None), patch.object(
+            runner.Path, "home", return_value=Path(tmp)
+        ), patch.object(runner, "MACOS_BROWSER_APPS", ()):
+            self.assertIsNone(runner.resolve_pdf_browser())
+
 if __name__ == "__main__":
     unittest.main()

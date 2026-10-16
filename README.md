@@ -94,6 +94,18 @@ After tools are ready, start Polaristool:
 bash ./scripts/run-polaris-local-stack-service.sh .env.dev
 ```
 
+The stack script and tool loaders need bash >= 4.3. macOS ships bash 3.2,
+so install a newer one (`brew install bash`) and start with
+`"$(brew --prefix)/bin/bash" ./scripts/run-polaris-local-stack-service.sh .env.dev`.
+
+AI steps run through the Codex CLI (`npm install -g @openai/codex`), which
+must be installed and logged in (`codex login status`). `ops tool-precheck`
+does not check this yet. PDF rendering needs Chrome or Chromium; on macOS
+the app in `/Applications` is found automatically.
+
+`reportTemplate` must name a file in `tools/report-writing/templates/`
+(for a literature review: `literature-report`).
+
 Portal start also runs `ops tool-precheck` and logs remaining gaps.
 After the stack is up, open `/settings/tools` to see the same
 `check-setup` result and re-run it from the Recheck control.
@@ -112,7 +124,7 @@ curl -X POST http://127.0.0.1:8787/api/workflow-runs \
       "decisionContext": "Two-year agent workflow platform strategy",
       "audience": "Platform engineering leadership",
       "reviewMode": "auto-approve",
-      "reportTemplate": "standard"
+      "reportTemplate": "literature-report"
     }
   }'
 ```

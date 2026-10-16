@@ -31,6 +31,7 @@ apps/polaris-web/test-results/
 packages/paseo/dist-build/
 packages/paseo/source/
 .paseo/
+.polaris/
 apps/polaris/.coverage/
 apps/docs/node_modules/
 apps/docs/dist/

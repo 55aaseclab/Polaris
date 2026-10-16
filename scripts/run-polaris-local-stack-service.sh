@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script (wait -n) and the tool loaders (declare -A) need bash >= 4.3.
+# macOS ships bash 3.2 as /bin/bash; install a newer one with Homebrew.
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 3 ]; }; then
+  echo "error: bash >= 4.3 is required (found ${BASH_VERSION})." >&2
+  echo "On macOS: brew install bash, then run: \"\$(brew --prefix)/bin/bash\" $0 ${1:-.env.dev}" >&2
+  exit 1
+fi
+
 ENV_FILE="${1:-.env.dev}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

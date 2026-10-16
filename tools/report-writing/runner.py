@@ -2647,6 +2647,33 @@ def command_preview(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+MACOS_SYSTEM_APPS_DIR = Path("/Applications")
+MACOS_BROWSER_APPS = (
+    "Google Chrome.app/Contents/MacOS/Google Chrome",
+    "Chromium.app/Contents/MacOS/Chromium",
+)
+
+
+def resolve_pdf_browser() -> str | None:
+    """Find a Chrome/Chromium binary on PATH, then in the macOS app folders."""
+    for candidate in (
+        "chromium-headless-shell",
+        "chromium",
+        "google-chrome",
+        "chromium-browser",
+    ):
+        if shutil.which(candidate):
+            return candidate
+    # macOS installs Chrome as an app bundle, not on PATH. Use the bundle
+    # binary directly: a symlink to it breaks Chrome's framework lookup.
+    for apps_dir in (MACOS_SYSTEM_APPS_DIR, Path.home() / "Applications"):
+        for relative in MACOS_BROWSER_APPS:
+            binary = apps_dir / relative
+            if binary.is_file() and os.access(binary, os.X_OK):
+                return str(binary)
+    return None
+
+
 def command_pdf(args: argparse.Namespace, root: Path) -> int:
     markdown_path = Path(args.markdown).expanduser().resolve()
     if not markdown_path.is_file():
@@ -2658,19 +2685,7 @@ def command_pdf(args: argparse.Namespace, root: Path) -> int:
     html_path.parent.mkdir(parents=True, exist_ok=True)
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     write_text(html_path, markdown_to_html(markdown, title))
-    browser = args.browser or next(
-        (
-            candidate
-            for candidate in (
-                "chromium-headless-shell",
-                "chromium",
-                "google-chrome",
-                "chromium-browser",
-            )
-            if shutil.which(candidate)
-        ),
-        None,
-    )
+    browser = args.browser or resolve_pdf_browser()
     if browser is None:
         raise CliError("Chrome or Chromium is required for PDF rendering")
     completed = subprocess.run(
