@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V1.8.0
+版本号：V2.0.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -13,6 +13,7 @@
 | V1.6.0 | 2026/10/16 | opencode | 新增产物发布护栏（final 门槛/深度门槛/provenance 完整性） |
 | V1.7.0 | 2026/10/16 | opencode | 裁决：重试/预算/超时归步级策略（3.10）；模块工具只做单次尝试，不重复实现 attempt 循环 |
 | V1.8.0 | 2026/10/16 | opencode | 裁决推广：平台横切能力（重试/隔离/回执/审计/编排/传递）工具一律不重复实现；新增 3.11.7 能力归属对照 |
+| V2.0.0 | 2026/10/16 | opencode | DSL v2：`.ord` 升级为结构化编排（六构造，无界 while + 预算兜底）；移除"线性 DAG"约束；插队 M2 前 |
 
 ---
 
@@ -143,7 +144,9 @@ Polaris 是面向隔离多智能体系统的自托管控制平面。用户通过
   host 路径 URL；
 - 运行全程钉住 pack 版本与摘要（digest）；
 - `driver=none` 与 `vaultId` 互斥；`driver=vault` 必须提供 `vaultId`；
-- DSL 是线性 DAG，不在 `.ord` 里表达循环；
+- `.ord` v2 表达结构化编排（sequence/parallel/choice/forEach/
+  while/subflow，见 3.13）；编排模式进 DSL，attempt 内的领域收敛
+  迭代仍在工具内；
 - 平台已有的横切能力领域工具不重复实现：attempt 级重试、超时与
   预算止损归步级策略（3.10）；隔离环境与干净重试归隔离执行器
   （3.8）；回执、审计与产物留存归控制平面；模块工具只做领域逻辑
@@ -302,6 +305,7 @@ flowchart LR
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
 | 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
+| 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 见 3.13；插队 M2 前 |
 
 ---
 
@@ -849,7 +853,7 @@ prompt 对照，下表右列一律不移植：
 | 干净环境（快照/重建） | 隔离执行器（3.8，可选项） | vm_library 的 QEMU 快照管理与环境复用 |
 | 回执/审计/日志 | 控制平面（receipts/时间线/审计） | log.txt、conversations/*.json 自建日志 |
 | LLM 调用与凭据 | env 注入 + fail-closed（3.11.4） | agentlib 的 llm_api 重试与选型逻辑 |
-| 编排与续跑 | `.ord` DAG + 同 run 重试（跳过已完成步） | main.py 的 pipeline 编排、checkpoint 续跑 |
+| 编排与续跑 | `.ord` v2 结构化编排 + 同 run 重试（跳过已完成步） | main.py 的 pipeline 编排、checkpoint 续跑 |
 | 步间数据传递 | artifacts（outputFields/uses） | shared directory 自建约定 |
 
 ### 3.12 产物发布护栏（final 门槛）
@@ -893,6 +897,46 @@ prompt 对照，下表右列一律不移植：
 | bodyWords | Number | 否 | 终稿正文字数 [待确认] | 1240 |
 | provenanceComplete | Boolean | 是 | 输入配置/摘要/命令是否齐全 | true |
 | degradedReason | String | 条件 | status != final 时必填 | "empty-registry" |
+
+### 3.13 DSL v2（结构化编排表达力）
+
+#### 3.13.1 描述
+`.ord` v2 把编排表达力从线性步序升级为结构化控制流：sequence、
+parallel（fork-join）、choice（条件分支）、forEach（按列表产物逐项）、
+while（条件循环）、subflow（flow 组合）。裁决依据：线性链表达不了
+分支/并行/条件编排，编排被迫漏回工具内部，与 3.11.7 能力归属
+矛盾。目标不是 Turing complete，而是结构化表达力——编排模式进
+DSL，计算留在工具。
+
+#### 3.13.2 构造语义
+
+| 构造 | 语义 | 终止性 |
+|------|------|--------|
+| sequence | 线性步序（v1 已有） | 静态保证 |
+| parallel | 分支并发，全部到齐（join）才继续 | 静态 DAG 检查 |
+| choice | 按步输出/输入字段条件分支 | 谓词静态校验 |
+| forEach | 按列表产物逐项执行，maxInFlight 并发上限 | 数据有界 |
+| while | 条件循环，无静态迭代上限 | 步级预算/超时止损兜底 |
+| subflow | 调用另一 flow，DAG 展开复用 | 展开检查 |
+
+#### 3.13.3 while 语义（裁决 2026/10/16）
+while 不设静态迭代上限（放弃静态终止检查）；止损归平台：循环内
+每步执行带步级 timeoutMs/budgetUsd（3.10），超限即步失败并终止
+循环；while 条件只读输入与已完成步的输出字段。
+
+#### 3.13.4 用户故事
+```
+作为打包者，我希望在 .ord 里直接表达分支、并行与循环编排，
+以便编排不被迫写进工具内部（与 3.11.7 能力归属一致）。
+```
+
+#### 3.13.5 配套改动
+- interpreter：线性 for 循环 → 拓扑执行 + join 语义；
+- validator：环检测、join 完备性、choice 谓词、subflow 展开检查；
+  不做 while 终止检查；
+- 步级策略（3.10）按分支/迭代各自生效；parallel 分支共享 run 预算；
+- 时间线与图视图渲染并行分支、choice 走向与迭代分组；
+- v1 线性 pack 向后兼容（线性是 v2 的子集）。
 
 ---
 
@@ -978,6 +1022,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 步级策略 | maxAttempts 耗尽后步失败且保留历次尝试回执；预算超限立即止损 | P0 |
 | 模块工具 | 四模块注册后 `pack list` 无 warnings；缺失任一工具时 pack 不可执行 | P0 |
 | 发布护栏 | 空 registry 时评审 fail、终稿标 degraded；`final` 仅在 registry 非空且 provenance 齐全时可达 | P0 |
+| DSL v2 | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止循环；v1 线性 pack 安装不回归 | P0 |
 
 ---
 
