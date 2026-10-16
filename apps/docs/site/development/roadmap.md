@@ -9,7 +9,7 @@
 
 周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
 负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V1.7.0（唯一 ground truth）。
+依据：[Polaris PRD](./prd) V1.8.0（唯一 ground truth）。
 
 ---
 
@@ -95,7 +95,7 @@ gantt
 | 里程碑 | 日期 | 交付物 | 成功指标 | 状态 |
 |--------|------|--------|----------|------|
 | M1 LLM 步骤可依赖 | W2 2026/10/30 | 步级策略引擎（maxAttempts/timeoutMs/budgetUsd）、历次尝试回执与时间线 attempt 分组、合成 fixture 测试、全量回归通过 | 北极星：救回率可测且有基线；护栏：既有 15 个 workflow-control 测试不回归 | 🟢 2026/10/16 提前交付（9d8c9035）；22/22 测试（7 新 step-policy + 15 既有零回归），救回率可测 |
-| M2 模块工具转绿 | W4 2026/11/13 | cve.processor/builder/exploiter/verifier 四模块工具、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过 | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🔵 |
+| M2 模块工具转绿 | W4 2026/11/13 | cve.processor/builder/exploiter/verifier 四模块工具、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🔵 |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | W6 2026/11/27 | R-1 final 前置护栏（claims=0 评审 fail、终稿标 degraded）；R-2 深度门槛（段落/字数进 revise 触发器 + 评审深度维）；R-3 provenance 修复（source tasks/digest/re-run command）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：无沙箱不阻塞（可选项不进本周期） | 🔵 |
 
 > M3（可信隔离执行，可选项）移出本周期，推迟到下一切片窗口。
