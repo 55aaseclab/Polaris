@@ -1,16 +1,17 @@
 # Polaris 2026 Q4 路线图
 
-版本号：V1.1.0
+版本号：V1.3.0
 
 | 版本   | 时间       | 修订人    | 备注                                |
 |--------|-----------|-----------|-------------------------------------|
 | V1.0.0 | 2026/10/16 | opencode | 依据 PRD V1.5.0 切片与排期；M1 先行 |
 | V1.1.0 | 2026/10/16 | opencode | 依据 PRD V1.6.0 新增切片 R（报告深度与护栏）；切片 3 移出本周期 |
 | V1.2.0 | 2026/10/16 | opencode | 依据 PRD V2.0.0 新增切片 D（DSL v2 结构化编排），插队 M2 前；M2 顺延 W5、M-R 保留 W6 |
+| V1.3.0 | 2026/10/16 | opencode | 依据 PRD V2.1.0 新增切片 D2（预算层级：run 级预算帽 + 步级 maxAttempts 语法），插队 M2 前；对账 M-D 翻绿 |
 
 周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
 负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V2.0.0（唯一 ground truth）。
+依据：[Polaris PRD](./prd) V2.1.0（唯一 ground truth）。
 
 ---
 
@@ -55,6 +56,7 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | 0 walking skeleton | 全链 | AutoResearch host run（已交付） | — | 已完成 |
 | 1 LLM 步骤可依赖（PRD 3.10） | 提交/监控/恢复/追溯 | 不稳定步骤偶发失败不拖垮运行；救回率可测 | 3~5 人天 | 已完成（2026/10/16 提前交付，9d8c9035） |
 | D DSL v2 结构化编排（PRD 3.13） | 声明/接入/提交/执行（全链编排面） | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止；v1 线性 pack 不回归 | 8~11 人天 | 已完成（2026/10/16 提前交付：1a9e4cac 引擎 + aa69f4c9 试验包重写） |
+| D2 预算层级（PRD 3.10.9） | 全链（run 级止损 + 步级尝试配置） | run 级预算超帽即止损整个运行（跨分支累计可测）；`.ord` 步级 maxAttempts 被 parser 接受且步级策略优先读它 | 1.5~2 人天 | 未开始（本周期插入，插队 M2 前） |
 | 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 未开始（顺延至切片 D 后） |
 | R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 未开始（本周期插入，占用切片 3 缓冲位） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
@@ -79,7 +81,8 @@ gantt
     axisFormat %m/%d
     section 引擎
     切片 1 步级重试与预算止损 :done, a1, 2026-10-16, 1d
-    切片 D DSL v2 引擎（parser/validator/interpreter） :a2, 2026-10-26, 9d
+    切片 D DSL v2 引擎（parser/validator/interpreter） :done, a2, 2026-10-16, 1d
+    切片 D2 预算层级（run 帽 + maxAttempts 语法） :a4, 2026-10-26, 2d
     切片 2b API 幂等键 :a3, 2026-11-16, 3d
     section 工具
     切片 2 四模块工具与注册（新 DSL） :b1, 2026-11-09, 10d
@@ -107,6 +110,7 @@ gantt
 |--------|------|--------|----------|------|
 | M1 LLM 步骤可依赖 | 2026/10/16（提前） | 步级策略引擎（maxAttempts/timeoutMs/budgetUsd）、历次尝试回执与时间线 attempt 分组、合成 fixture 测试、全量回归通过 | 北极星：救回率可测且有基线；护栏：既有 15 个 workflow-control 测试不回归 | 🟢 已交付（9d8c9035）；22/22 测试（7 新 step-policy + 15 既有零回归），救回率可测 |
 | M-D DSL v2 结构化编排 | W3 2026/11/06 | 六构造（sequence/parallel/choice/forEach/while/subflow）、拓扑执行 interpreter、DAG 校验、步级策略按分支生效、时间线/图渲染、v1 线性兼容 | 北极星：编排不再被迫漏回工具；护栏：v1 线性 pack 安装/运行不回归 | 🟢 2026/10/16 提前交付（1a9e4cac 引擎 22/22 + aa69f4c9 试验包重写；surfaces 45/45） |
+| M-D2 预算层级 | W3 2026/11/06 | run 级预算帽（跨步骤/分支累计止损）+ `.ord` 步级 maxAttempts 语法与步级策略接线 | 北极星：run 级止损可测；护栏：无 run 帽配置时行为不变 | 🔵 |
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（写在新 DSL 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🔵 |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | W6 2026/11/27 | R-1 final 前置护栏（claims=0 评审 fail、终稿标 degraded）；R-2 深度门槛（段落/字数进 revise 触发器 + 评审深度维）；R-3 provenance 修复（source tasks/digest/re-run command）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：无沙箱不阻塞（可选项不进本周期） | 🔵 |
 
@@ -176,3 +180,4 @@ gantt
 | V1.0.0 | 2026/10/16 | 初始版本：依据 PRD V1.5.0 切片与排期；交付顺序裁决（切片 1 先行、沙箱可选）已纳入 | — |
 | V1.1.0 | 2026/10/16 | 依据 PRD V1.6.0 新增切片 R（报告深度与护栏）；切片 3 移出本周期 | M-R 占用切片 3 缓冲位 |
 | V1.2.0 | 2026/10/16 | 依据 PRD V2.0.0 新增切片 D（DSL v2 结构化编排），插队 M2 前；M2 顺延 W5、M-R 保留 W6；M1 翻绿与切片 1 状态对账 | 产能超订风险入矩阵；W4 末止损规则生效 |
+| V1.3.0 | 2026/10/16 | 依据 PRD V2.1.0 新增切片 D2（预算层级），插队 M2 前；M-D 翻绿对账 | 产能超订略缓解（D 实际 1 人天交付，回填约 8 人天） |
