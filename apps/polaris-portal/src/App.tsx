@@ -46,6 +46,7 @@ import {
   type ShellHostSummary,
   type ShellSession,
   type WorkflowGraphProjection,
+  type WorkflowStepGroupLog,
 } from "@polaris/polaris-shell";
 import { Button, buttonVariants } from "./components/ui/button.js";
 import { Badge } from "./components/ui/badge.js";
@@ -93,6 +94,7 @@ import {
 } from "./timeline-call.js";
 import { layoutWorkflowGraph } from "./workflow-graph-layout.js";
 import { useI18n } from "./i18n/index.js";
+import type { MessageKey } from "./i18n/messages.js";
 import { localizedPackWarning, localizedWorkflowError, localizedWorkflowEvent, LocalizedError } from "./i18n/messages.js";
 import { backTo } from "./portal-navigation.js";
 import {
@@ -421,6 +423,26 @@ function TimelineCallView({
       {block.note && <span className="timeline-note"> · {block.note}</span>}
     </p>
   );
+}
+
+/** DSL v2 structured group badge (PRD 3.13.5): parallel branch / choice path /
+ * iteration / subflow, localized by kind + values. */
+function timelineGroupLabel(
+  group: WorkflowStepGroupLog,
+  t: (key: MessageKey, values?: Record<string, string | number>) => string,
+): string {
+  switch (group.kind) {
+    case "parallel":
+      return t("run.groupParallel", { branch: group.branch ?? "" });
+    case "choice":
+      return t("run.groupChoice", { when: group.when ?? group.branch ?? "" });
+    case "forEach":
+      return t("run.groupForEach", { iteration: group.iteration ?? 0 });
+    case "while":
+      return t("run.groupWhile", { iteration: group.iteration ?? 0 });
+    case "subflow":
+      return t("run.groupSubflow");
+  }
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -1277,15 +1299,17 @@ function WorkflowGraphViewer({ graph }: { graph: WorkflowGraphProjection }) {
     <div className="workflow-graph-canvas">
       <svg className="workflow-graph-svg" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={t("settings.graphAria", { title: graph.flowTitle })}>
         <defs><marker id="workflow-graph-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" /></marker></defs>
-        {layout.edges.map(({ edge, d }, edgeIndex) => <path key={`${edge.from}-${edge.to}-${edge.field ?? edgeIndex}`} d={d} markerEnd="url(#workflow-graph-arrow)" />)}
+        {layout.edges.map(({ edge, d, fromX, fromY, toX, toY }, edgeIndex) => <g key={`${edge.from}-${edge.to}-${edge.field ?? edge.when ?? edgeIndex}`}><path d={d} markerEnd="url(#workflow-graph-arrow)" />{edge.when && <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 4} className="workflow-graph-edge-when">{edge.when}</text>}</g>)}
         {nodes.map((node) => {
           const position = layout.positions.get(node.id);
           if (!position) return null;
-          return <g key={node.id} className={cn("workflow-graph-node", node.kind === "input" && "workflow-graph-node-input", node.kind === "output" && "workflow-graph-node-output", selectedNodeId === node.id && "is-selected")} transform={`translate(${position.x} ${position.y})`} onClick={() => setSelectedNodeId(node.id)} tabIndex={0} role="button" aria-label={node.label}>
+          const constructKind = ["parallel", "choice", "forEach", "while", "subflow"].includes(node.kind) ? node.kind : null;
+          return <g key={node.id} className={cn("workflow-graph-node", node.kind === "input" && "workflow-graph-node-input", node.kind === "output" && "workflow-graph-node-output", constructKind && `workflow-graph-node-${constructKind}`, node.group?.branch && "workflow-graph-node-branch", selectedNodeId === node.id && "is-selected")} transform={`translate(${position.x} ${position.y})`} onClick={() => setSelectedNodeId(node.id)} tabIndex={0} role="button" aria-label={node.label}>
             <rect width={layout.nodeWidth} height={layout.nodeHeight} rx="6" />
             <text x="14" y="24" className="workflow-graph-node-label">{node.label}</text>
             {node.call && <text x="14" y="44" className="workflow-graph-node-call">{t("run.graphCall", { port: node.call })}</text>}
-            <text x="14" y={node.call ? 66 : 48} className="workflow-graph-node-meta">{t("run.graphInputs")} {node.uses.length} · {t("run.graphOutputs")} {node.outputs.length}</text>
+            {node.group?.when && <text x="14" y={node.call ? 62 : 44} className="workflow-graph-node-when">{node.group.when}</text>}
+            <text x="14" y={node.call ? (node.group?.when ? 82 : 66) : (node.group?.when ? 64 : 48)} className="workflow-graph-node-meta">{t("run.graphInputs")} {node.uses.length} · {t("run.graphOutputs")} {node.outputs.length}</text>
           </g>;
         })}
       </svg>
@@ -1319,6 +1343,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
     tone: "neutral" | "accent" | "warning" | "success";
     call: TimelineCallBlock | null;
     attempts: TimelineAttempt[];
+    group: WorkflowStepGroupLog | undefined;
   }>>(() => [
     ...run.events.map((event) => ({
       id: `event-${event.id}`,
@@ -1329,6 +1354,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
       tone: event.tone,
       call: null,
       attempts: [],
+      group: undefined,
     })),
     ...run.steps.map((step) => {
       const call = timelineCallBlock({
@@ -1350,6 +1376,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
         tone: step.status === "failed" ? "warning" as const : "accent" as const,
         call,
         attempts: step.status === "failed" ? attempts : attempts.length > 1 ? attempts : [],
+        group: step.group,
       };
     }),
   ].sort((left, right) => right.timestamp.localeCompare(left.timestamp) || right.sequence - left.sequence), [run.events, run.id, run.steps, run.receipts, t]);
@@ -1373,7 +1400,7 @@ function RunDetailPage({ runId, navigate }: { runId: string; navigate: (path: st
       <div className="run-detail-layout">
         <div className="run-detail-main">
           <Card><CardHeader><CardTitle>{t("run.progress")}</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader><CardContent><div className="run-progress run-progress-large"><span style={{ width: `${run.progress}%` }} /></div><div className="run-progress-meta"><span>{t("run.percentComplete", { percent: run.progress })}</span><span>{workflowExecutionTargetLabel(run, t)}</span></div></CardContent></Card>
-          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong><time>{item.timestamp.slice(11, 16)}</time></div>{item.call ? <TimelineCallView runId={run.id} block={item.call} fallback={item.detail} navigate={navigate} /> : <p>{item.detail}</p>}{item.attempts.length > 0 && <details className="timeline-attempts"><summary>{t("run.attempts", { count: item.attempts.length })}</summary><ul className="timeline-attempt-list">{item.attempts.map((attempt) => <li className="timeline-attempt" key={attempt.requestId}><span className={cn("timeline-attempt-index", attempt.status !== "completed" && attempt.status !== "succeeded" && "is-failed")}>#{attempt.attempt}/{attempt.attemptCount}</span><code>{attempt.requestId}</code><span className="timeline-attempt-status">{t(attempt.status === "completed" || attempt.status === "succeeded" ? "status.completed" : "status.failed")}</span>{attempt.error && <span className="timeline-attempt-error">{attempt.errorCode ? localizedWorkflowError({ code: attempt.errorCode, message: attempt.error }, t, attempt.values) : attempt.error}</span>}</li>)}</ul></details>}</div></div>)}</div></CardContent></Card>
+          <Card><CardHeader><CardTitle>{t("run.timeline")}</CardTitle><CardDescription>{t("run.timelineDescription")}</CardDescription></CardHeader><CardContent><div className="run-timeline">{timeline.map((item) => <div className="timeline-item" key={item.id}><span className={cn("timeline-dot", `timeline-dot-${item.tone}`)} /><div><div className="timeline-title"><strong>{item.title}</strong>{item.group && <span className="timeline-group">{timelineGroupLabel(item.group, t)}</span>}<time>{item.timestamp.slice(11, 16)}</time></div>{item.call ? <TimelineCallView runId={run.id} block={item.call} fallback={item.detail} navigate={navigate} /> : <p>{item.detail}</p>}{item.attempts.length > 0 && <details className="timeline-attempts"><summary>{t("run.attempts", { count: item.attempts.length })}</summary><ul className="timeline-attempt-list">{item.attempts.map((attempt) => <li className="timeline-attempt" key={attempt.requestId}><span className={cn("timeline-attempt-index", attempt.status !== "completed" && attempt.status !== "succeeded" && "is-failed")}>#{attempt.attempt}/{attempt.attemptCount}</span><code>{attempt.requestId}</code><span className="timeline-attempt-status">{t(attempt.status === "completed" || attempt.status === "succeeded" ? "status.completed" : "status.failed")}</span>{attempt.error && <span className="timeline-attempt-error">{attempt.errorCode ? localizedWorkflowError({ code: attempt.errorCode, message: attempt.error }, t, attempt.values) : attempt.error}</span>}</li>)}</ul></details>}</div></div>)}</div></CardContent></Card>
           {run.error && <Card className="run-error-card"><CardHeader><CardTitle>{t("run.needsAction")}</CardTitle></CardHeader><CardContent><p>{localizedWorkflowError(run.error, t)}</p><code>{run.error.code}</code></CardContent></Card>}
         </div>
         <aside className="run-detail-side"><Card><CardHeader><CardTitle>{t("run.context")}</CardTitle></CardHeader><CardContent><dl className="data-rows compact-data-rows"><div className="data-row"><dt>{t("run.pack")}</dt><dd>{pack?.title || run.packId}</dd></div><div className="data-row"><dt>{t("run.version")}</dt><dd>{pack?.version || "—"}</dd></div><div className="data-row"><dt>{run.driver === "none" ? t("run.executionLocation") : t("run.targetVault")}</dt><dd>{workflowExecutionTargetLabel(run, t)}</dd></div><div className="data-row"><dt>{t("run.strategy")}</dt><dd>{run.approvalRequired ? t("run.needsConfirmation") : t("run.autoComplete")}</dd></div><div className="data-row"><dt>{t("run.created")}</dt><dd>{formatRunDateTime(run.createdAt)}</dd></div></dl></CardContent></Card><Card><CardHeader><CardTitle>{t("run.inputSnapshot")}</CardTitle><CardDescription>{t("run.inputDescription")}</CardDescription></CardHeader><CardContent><dl className="input-snapshot">{Object.entries(run.input).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><code>{formatInputSnapshotValue(value)}</code></dd></div>)}</dl></CardContent></Card>{run.artifacts.length > 0 && <Card><CardHeader><CardTitle>{t("run.artifacts")}</CardTitle><CardDescription>{run.driver === "none" ? t("run.artifactHost") : t("run.artifactVault")}</CardDescription></CardHeader><CardContent><div className="artifact-list">{run.artifacts.map((item) => <a href={artifactPreviewPage(run.id, item.id)} className="artifact-row" key={item.id} onClick={(event) => { event.preventDefault(); navigate(artifactPreviewPage(run.id, item.id)); }}><span className="artifact-icon"><FileText className="h-4 w-4" /></span><span><strong>{item.name}</strong><small>{item.summary} · {item.size}</small></span><ExternalLink className="h-4 w-4" /></a>)}</div></CardContent></Card>}</aside>

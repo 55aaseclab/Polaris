@@ -3,16 +3,20 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   flattenDomain,
+  flowBodyItems,
   normalizeVersion,
   parse,
   resolvePort,
   runPipeline,
   satisfies,
+  type ChoicePredicate,
   type DomainAccent,
+  type FlowBodyItem,
   type PackSource,
   type PipelineResult,
   type PortAst,
   type InputFieldAst,
+  type StepAst,
   type ToolResolver,
   type FlowAst,
 } from "polaris-workflow";
@@ -567,10 +571,29 @@ export interface VerifiedDomainPackRuntime {
   pipeline: PipelineResult;
 }
 
+function predicateText(pred: ChoicePredicate): string {
+  const valueText = typeof pred.value === "string" ? `"${pred.value}"` : String(pred.value);
+  switch (pred.op) {
+    case "truthy":
+      return pred.field;
+    case "in":
+      return `${pred.field} in [${(pred.values ?? []).join(", ")}]`;
+    default:
+      return `${pred.field} ${pred.op === "eq" ? "==" : pred.op === "ne" ? "!=" : pred.op} ${valueText}`;
+  }
+}
+
+/**
+ * DSL v2 graph projection (PRD 3.13.5): the graph stays a dataflow DAG.
+ * Constructs emit marker nodes (parallel/choice/forEach/while/subflow) and
+ * their inner steps carry construct grouping; choice branches connect through
+ * when-labeled edges so the graph shows the fork paths.
+ */
 function flowGraph(
   pack: StoredDomainPack,
   flow: FlowAst,
   ports: PortAst[],
+  flows: FlowAst[],
 ): WorkflowGraphProjection {
   const inputId = "__input__";
   const outputId = "__output__";
@@ -581,7 +604,18 @@ function flowGraph(
     uses: [],
     outputs: flow.inputs.map((field) => field.name),
   }];
-  for (const step of flow.steps) {
+  const edges: WorkflowGraphProjection["flow"]["edges"] = [];
+  const producer = new Map<string, string>(flow.inputs.map((field) => [field.name, inputId]));
+  const edgeKeys = new Set<string>();
+  const addEdge = (from: string, to: string, field?: string, when?: string) => {
+    const key = `${from}->${to}:${field ?? when ?? ""}`;
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push({ from, to, ...(field ? { field } : {}), ...(when ? { when } : {}) });
+  };
+  const flowsByName = new Map(flows.map((candidate) => [candidate.name, candidate]));
+
+  const stepNode = (step: StepAst, group: WorkflowGraphNode["group"]) => {
     const port = portForStep(ports, step);
     const call = step.map
       ? resolvePort(ports, step.map.call.name, step.map.call.version)?.qualifiedName
@@ -597,8 +631,127 @@ function flowGraph(
       uses: [...step.uses],
       outputs: step.outputs.map((output) => output.name),
       ...(step.map ? { map: { item: step.map.item, source: step.map.source, call: step.map.call.raw } } : {}),
+      ...(group ? { group } : {}),
     });
-  }
+    for (const field of step.uses) {
+      const from = producer.get(field);
+      if (from && from !== step.id) addEdge(from, step.id, field);
+    }
+    for (const output of step.outputs) producer.set(output.name, step.id);
+  };
+
+  const emitBody = (items: FlowBodyItem[], group: WorkflowGraphNode["group"]): void => {
+    for (const item of items) {
+      if (item.kind === "Step") {
+        stepNode(item.step, group);
+        continue;
+      }
+      if (item.kind === "Parallel") {
+        nodes.push({
+          id: item.id,
+          label: `并行 × ${item.branches.length}`,
+          kind: "parallel",
+          uses: [],
+          outputs: [],
+        });
+        for (const branch of item.branches) {
+          const mark = nodes.length;
+          emitBody(branch.body, {
+            kind: "parallel",
+            id: item.id,
+            branch: branch.id,
+            ...(branch.label ? { when: branch.label } : {}),
+          });
+          const first = nodes[mark];
+          if (first) addEdge(item.id, first.id);
+        }
+        continue;
+      }
+      if (item.kind === "Choice") {
+        const predicateFields = new Set<string>();
+        for (const branch of item.branches) {
+          if (branch.when) predicateFields.add(branch.when.field);
+        }
+        nodes.push({
+          id: item.id,
+          label: "选择",
+          kind: "choice",
+          uses: [...predicateFields],
+          outputs: [],
+        });
+        for (const field of predicateFields) {
+          const from = producer.get(field);
+          if (from) addEdge(from, item.id, field);
+        }
+        for (const [index, branch] of item.branches.entries()) {
+          const isElse = branch.when === undefined;
+          const whenLabel = isElse ? "else" : predicateText(branch.when!);
+          const mark = nodes.length;
+          emitBody(branch.body, {
+            kind: "choice",
+            id: item.id,
+            branch: isElse ? "else" : `when-${index + 1}`,
+            when: whenLabel,
+          });
+          const first = nodes[mark];
+          if (first) addEdge(item.id, first.id, undefined, whenLabel);
+        }
+        continue;
+      }
+      if (item.kind === "ForEach") {
+        nodes.push({
+          id: item.id,
+          label: `逐项 ${item.item}${item.maxInFlight ? ` × ${item.maxInFlight}` : ""}`,
+          kind: "forEach",
+          uses: [item.source],
+          outputs: [],
+        });
+        const from = producer.get(item.source);
+        if (from) addEdge(from, item.id, item.source);
+        const mark = nodes.length;
+        emitBody(item.body, { kind: "forEach", id: item.id });
+        const first = nodes[mark];
+        if (first) addEdge(item.id, first.id);
+        continue;
+      }
+      if (item.kind === "While") {
+        nodes.push({
+          id: item.id,
+          label: `循环 ${predicateText(item.when)}`,
+          kind: "while",
+          uses: [item.when.field],
+          outputs: [],
+        });
+        const from = producer.get(item.when.field);
+        if (from) addEdge(from, item.id, item.when.field);
+        const mark = nodes.length;
+        emitBody(item.body, { kind: "while", id: item.id });
+        const first = nodes[mark];
+        if (first) addEdge(item.id, first.id);
+        continue;
+      }
+      const target = flowsByName.get(item.flow);
+      const uses = item.input
+        ? [...new Set(Object.values(item.input))]
+        : (target?.inputs ?? []).map((input) => input.name);
+      const outputs = (target?.outputs ?? []).map((output) => output.name);
+      nodes.push({
+        id: item.id,
+        label: item.flow,
+        kind: "subflow",
+        uses,
+        outputs,
+      });
+      for (const field of uses) {
+        const from = producer.get(field);
+        if (from && from !== item.id) addEdge(from, item.id, field);
+      }
+      for (const name of outputs) producer.set(name, item.id);
+    }
+  };
+
+  emitBody(flowBodyItems(flow), undefined);
+
   nodes.push({
     id: outputId,
     label: "输出",
@@ -606,23 +759,6 @@ function flowGraph(
     uses: flow.outputs.map((output) => output.from ?? output.name),
     outputs: flow.outputs.map((output) => output.name),
   });
-
-  const edges: WorkflowGraphProjection["flow"]["edges"] = [];
-  const producer = new Map<string, string>(flow.inputs.map((field) => [field.name, inputId]));
-  const edgeKeys = new Set<string>();
-  const addEdge = (from: string, to: string, field: string) => {
-    const key = `${from}->${to}:${field}`;
-    if (edgeKeys.has(key)) return;
-    edgeKeys.add(key);
-    edges.push({ from, to, field });
-  };
-  for (const step of flow.steps) {
-    for (const field of step.uses) {
-      const from = producer.get(field);
-      if (from && from !== step.id) addEdge(from, step.id, field);
-    }
-    for (const output of step.outputs) producer.set(output.name, step.id);
-  }
   for (const output of flow.outputs) {
     const field = output.from ?? output.name;
     const from = producer.get(field);
@@ -655,7 +791,7 @@ export function getDomainPackFlowGraphProjection(
   const flow = flattenDomain(pipeline.ast).flows.find((candidate) => candidate.name === flowId);
   if (!flow) throw new Error(`Workflow is unavailable: ${packId}/${flowId}`);
   const flattened = flattenDomain(pipeline.ast);
-  return flowGraph(pack, flow, flattened.ports);
+  return flowGraph(pack, flow, flattened.ports, flattened.flows);
 }
 
 /** Load exactly the installed bytes named by a run's immutable pack pin. */

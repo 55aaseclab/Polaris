@@ -1,16 +1,16 @@
-import { flattenDomain, type DomainAst, type FlowAst, type InputFieldAst } from './ast.js'
+import { flattenDomain, flowBodyItems, type DomainAst, type FlowAst, type InputFieldAst } from './ast.js'
 import type { FfiHost } from './host.js'
 import {
   applyFlowEffects,
   collectFlowOutputs,
   evalRequireExpr,
-  execStepWithIO,
   type DocStore,
   type RunInput,
   type RunResult,
   type StepContext,
   type StepLog,
 } from './runtime.js'
+import { execFlowBodySync, subflowRunInput, type FlowBodyEnv } from './structure.js'
 
 /**
  * Interpreter — 动态 walk AST；call port → host.invoke
@@ -34,7 +34,7 @@ export class DslInterpreter {
     return this.allFlows().find((f) => f.name === name)
   }
 
-  interpret(flowName: string, rawInput: RunInput): RunResult {
+  interpret(flowName: string, rawInput: RunInput, depth = 0): RunResult {
     const flow = this.findFlow(flowName)
     if (!flow) {
       return { ok: false, message: `解释器: AST 中无 flow ${flowName}`, mode: 'interpret', stepLog: [] }
@@ -87,39 +87,34 @@ export class DslInterpreter {
     }
 
     const stepLog: StepLog[] = []
-    for (const step of flow.steps) {
-      const log = execStepWithIO(
-        {
-          id: step.id,
-          label: step.label,
-          uses: step.uses,
-          outputs: step.outputs.map((o) => ({ name: o.name, type: o.type })),
-          call: step.call?.name,
-          callVersion: step.call?.version,
-          map: step.map ? {
-            item: step.map.item,
-            source: step.map.source,
-            call: step.map.call.name,
-            callVersion: step.map.call.version,
-          } : undefined,
-        },
-        {
-          ctx,
-          record,
-          host: this.host,
-          flowName,
-          mode: 'interpret',
-        },
-      )
-      stepLog.push(log)
-      if (!log.ok) {
-        return {
-          ok: false,
-          message: log.detail ?? `步骤失败: ${step.label}`,
-          mode: 'interpret',
-          stepLog,
-          record: record ?? undefined,
+    const env: FlowBodyEnv = {
+      ctx,
+      record,
+      host: this.host,
+      flowName,
+      mode: 'interpret',
+      depth,
+      onLog: (log) => stepLog.push(log),
+      runSubflow: (item, outerCtx) => {
+        const target = this.findFlow(item.flow)
+        if (!target) {
+          return { ok: false, message: `解释器: AST 中无 flow ${item.flow}`, mode: 'interpret', stepLog: [] }
         }
+        const subInput = subflowRunInput(item, outerCtx, target.inputs.map((i) => i.name))
+        const result = this.interpret(item.flow, subInput, depth + 1)
+        // subflow inner steps merge into the outer run timeline (PRD 3.13.5)
+        for (const log of result.stepLog) stepLog.push(log)
+        return result
+      },
+    }
+    const outcome = execFlowBodySync(flowBodyItems(flow), env)
+    if (!outcome.ok) {
+      return {
+        ok: false,
+        message: outcome.message ?? 'flow 执行失败',
+        mode: 'interpret',
+        stepLog,
+        record: record ?? undefined,
       }
     }
 

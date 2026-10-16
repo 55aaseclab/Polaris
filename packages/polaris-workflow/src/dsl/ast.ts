@@ -7,9 +7,11 @@ export type FieldType = 'ID' | 'String' | 'Number' | 'Money' | 'Boolean' | strin
 
 export type PortEffect = 'pure' | 'read' | 'write' | 'ffi' | 'human' | 'time'
 export type DomainAccent = 'green' | 'blue' | 'amber'
-export type DslLanguageVersion = '0.3' | '0.4' | string
+export type DslLanguageVersion = '0.3' | '0.4' | '0.5' | string
 
 export const DEFAULT_DSL_LANGUAGE_VERSION: DslLanguageVersion = '0.3'
+/** DSL v2 structured control flow (PRD 3.13). */
+export const DSL_V2_LANGUAGE_VERSION: DslLanguageVersion = '0.5'
 
 /** 跨域包导入 */
 export interface ImportAst {
@@ -151,7 +153,80 @@ export interface StepAst {
   call?: PortRef
   command?: string
   map?: MapAst
+  /** DSL v2 step-level policy (PRD 3.10): the platform host enforces it; the DSL only declares. */
+  timeoutMs?: number
+  budgetUsd?: number
 }
+
+/** DSL v2 predicate (PRD 3.13.2/3.13.3): a field reference plus a comparison operator. */
+export interface ChoicePredicate {
+  /** A flow input field or a completed step's output field. */
+  field: string
+  op: 'eq' | 'ne' | 'gt' | 'lt' | 'ge' | 'le' | 'in' | 'truthy'
+  value?: string | number | boolean
+  values?: string[]
+}
+
+export interface ParallelBranchAst {
+  id: string
+  label?: string
+  body: FlowBodyItem[]
+}
+
+export interface ParallelAst {
+  kind: 'Parallel'
+  /** Construct instance id (numbered at parse time, e.g. parallel-1). */
+  id: string
+  branches: ParallelBranchAst[]
+}
+
+export interface ChoiceBranchAst {
+  /** A branch without a when predicate is the else branch. */
+  when?: ChoicePredicate
+  body: FlowBodyItem[]
+}
+
+export interface ChoiceAst {
+  kind: 'Choice'
+  id: string
+  branches: ChoiceBranchAst[]
+}
+
+export interface ForEachAst {
+  kind: 'ForEach'
+  id: string
+  /** Iteration variable name. */
+  item: string
+  /** List artifact field (a JSON collection in ctx). */
+  source: string
+  /** Concurrency cap (defaults to 1, sequential). */
+  maxInFlight?: number
+  body: FlowBodyItem[]
+}
+
+export interface WhileAst {
+  kind: 'While'
+  id: string
+  when: ChoicePredicate
+  body: FlowBodyItem[]
+}
+
+export interface SubflowAst {
+  kind: 'Subflow'
+  id: string
+  /** Target flow name (same domain pack). */
+  flow: string
+  /** Input mapping: the subflow's input name to an outer ctx field. */
+  input?: Record<string, string>
+}
+
+export type FlowBodyItem =
+  | { kind: 'Step'; step: StepAst }
+  | ParallelAst
+  | ChoiceAst
+  | ForEachAst
+  | WhileAst
+  | SubflowAst
 
 export interface RequireAst {
   expr: string
@@ -176,7 +251,10 @@ export interface FlowAst {
   inputs: InputFieldAst[]
   outputs: FlowOutputAst[]
   require?: RequireAst
+  /** v1 linear view: the plain steps of body (back-compat; v2 constructs are not listed). */
   steps: StepAst[]
+  /** DSL v2 structured body (PRD 3.13); when absent, steps is the linear body. */
+  body?: FlowBodyItem[]
   transition?: { field: string; to: string }
   emit?: string
   ui: {
@@ -240,4 +318,15 @@ export function flattenDomain(ast: DomainAst): {
     for (const p of m.ports) ports.push({ ...p, module: m.name })
   }
   return { entities, flows, enums, ports }
+}
+
+/** The flow's structured body: v2 uses flow.body; v1 (hand-built ASTs without body) wraps steps as a linear body. */
+export function flowBodyItems(flow: FlowAst): FlowBodyItem[] {
+  if (flow.body) return flow.body
+  return flow.steps.map((step) => ({ kind: 'Step', step }) as FlowBodyItem)
+}
+
+/** Whether a body item is a plain step (for the v1 linear view and graph projection). */
+export function isStepItem(item: FlowBodyItem): item is { kind: 'Step'; step: StepAst } {
+  return item.kind === 'Step'
 }

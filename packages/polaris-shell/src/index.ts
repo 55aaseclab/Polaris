@@ -69,6 +69,7 @@ export type {
   WorkflowEventsResponse,
   WorkflowEffectReceipt,
   WorkflowStepResult,
+  WorkflowStepGroupLog,
   WorkflowExecutionClass,
   WorkflowExecutionDriver,
   WorkflowStatus,

@@ -1,0 +1,41 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.helper version "1.0.0" {
+  in { question: String }
+  out { answer: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// positive: subflow — call another flow in the same domain, reuse its DAG
+flow HelperFlow title "Helper flow" create {
+  input { question: String required }
+  steps {
+    ask "Ask" {
+      uses { question }
+      call probe.helper
+      command "run"
+      output { answer: String }
+    }
+  }
+  output {
+    answer: String from answer
+  }
+  ui { layout form primary "Ask" }
+}
+
+flow SubflowRun title "Subflow run" create {
+  input { question: String required }
+  steps {
+    subflow HelperFlow { input { question = question } }
+    wrap "Wrap" {
+      uses { answer }
+      output { wrapped: String }
+    }
+  }
+  output {
+    answer: String from answer
+  }
+  ui { layout form primary "Run" }
+}

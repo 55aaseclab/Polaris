@@ -1,0 +1,28 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.item version "1.0.0" {
+  in { entry: String }
+  out { value: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// positive: forEach — per-item over a list artifact, maxInFlight caps concurrency
+flow ForEachRun title "ForEach run" create {
+  input { items: String required }
+  steps {
+    forEach entry in items maxInFlight 2 {
+      process "Process item" {
+        uses { entry }
+        call probe.item
+        command "run"
+        output { value: String }
+      }
+    }
+  }
+  output {
+    value: String from value
+  }
+  ui { layout form primary "Run" }
+}

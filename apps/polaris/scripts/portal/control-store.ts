@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { WorkflowStepGroupLog } from "@polaris/polaris-shell";
 import { polarisStateRoot } from "../utils/paths.js";
 
 export type DurableJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -140,6 +141,8 @@ export interface WorkflowStepResultRecord {
   input: Record<string, unknown>;
   output: Record<string, unknown>;
   outputFields: string[];
+  /** DSL v2 structured control-flow group (PRD 3.13.5). */
+  group?: WorkflowStepGroupLog;
   createdAt: string;
   completedAt: string;
 }
@@ -562,9 +565,36 @@ function rowToWorkflowStepResult(row: SqlRow): WorkflowStepResultRecord {
     input: parseRecord(row.input_json),
     output: parseRecord(row.output_json),
     outputFields: parseStringArray(row.output_fields_json),
+    group: parseStepGroup(row.group_json),
     createdAt: String(row.created_at),
     completedAt: String(row.completed_at),
   };
+}
+
+function parseStepGroup(raw: unknown): WorkflowStepGroupLog | undefined {
+  if (raw == null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const record = parsed as Record<string, unknown>;
+  const kind = String(record.kind ?? "");
+  if (!["parallel", "choice", "forEach", "while", "subflow"].includes(kind)) return undefined;
+  const id = String(record.id ?? "");
+  if (!id) return undefined;
+  const group: WorkflowStepGroupLog = { kind: kind as WorkflowStepGroupLog["kind"], id };
+  const branch = record.branch;
+  if (typeof branch === "string" && branch) group.branch = branch;
+  const when = record.when;
+  if (typeof when === "string" && when) group.when = when;
+  const iteration = record.iteration;
+  if (typeof iteration === "number" && Number.isInteger(iteration) && iteration > 0) {
+    group.iteration = iteration;
+  }
+  return group;
 }
 
 function rowToWorkflowArtifact(row: SqlRow): WorkflowArtifactRecord {
@@ -839,6 +869,9 @@ function ensureWorkflowStepResultColumns(db: DatabaseSync): void {
   }
   if (!names.has("sequence")) {
     db.exec("ALTER TABLE workflow_step_results ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("group_json")) {
+    db.exec("ALTER TABLE workflow_step_results ADD COLUMN group_json TEXT");
   }
 }
 
@@ -1717,8 +1750,8 @@ export class PolarisControlStore {
     this.db.prepare(`
       INSERT OR REPLACE INTO workflow_step_results (
         id, sequence, run_id, tenant_id, step_id, step_label, status, detail, call,
-        input_json, output_json, output_fields_json, created_at, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_json, output_json, output_fields_json, group_json, created_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       step.id,
       step.sequence,
@@ -1732,6 +1765,7 @@ export class PolarisControlStore {
       boundedJson(step.input),
       boundedJson(step.output),
       boundedJsonArray(step.outputFields),
+      step.group ? boundedJson(step.group) : null,
       step.createdAt,
       step.completedAt,
     );

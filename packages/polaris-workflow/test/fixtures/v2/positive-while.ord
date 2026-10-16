@@ -1,0 +1,29 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.loop version "1.0.0" {
+  in { rounds: Number }
+  out { rounds: Number, result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// positive: while — condition reads an input and completed step outputs;
+// no static iteration cap (PRD 3.13.3), stop-loss belongs to step policy
+flow WhileRun title "While run" create {
+  input { rounds: Number required }
+  steps {
+    while rounds > 0 {
+      iterate "Iterate" {
+        uses { rounds }
+        call probe.loop
+        command "run"
+        output { rounds: Number, result: String }
+      }
+    }
+  }
+  output {
+    result: String from result
+  }
+  ui { layout form primary "Run" }
+}

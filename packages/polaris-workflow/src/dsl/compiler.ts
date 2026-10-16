@@ -1,16 +1,20 @@
-import { flattenDomain, type DomainAst, type FlowAst, type InputFieldAst, type PortAst } from './ast.js'
+import { flattenDomain, flowBodyItems, type DomainAst, type FlowAst, type InputFieldAst, type PortAst, type SubflowAst } from './ast.js'
 import type { AsyncFfiHost, FfiHost } from './host.js'
 import {
   applyFlowEffects,
   collectFlowOutputs,
   evalRequireExpr,
-  execStepWithIO,
-  execStepWithIOAsync,
   type DocStore,
   type RunInput,
   type RunResult,
   type StepContext,
 } from './runtime.js'
+import {
+  execFlowBodyAsync,
+  execFlowBodySync,
+  subflowRunInput,
+  type FlowBodyEnv,
+} from './structure.js'
 
 export interface ProgramField {
   name: string
@@ -77,8 +81,8 @@ export interface ProgramFlowMeta {
 
 export interface CompiledFlowHandler {
   meta: ProgramFlowMeta
-  execute: (input: RunInput, store: DocStore, host: FfiHost) => RunResult
-  executeAsync: (input: RunInput, store: DocStore, host: FfiHost | AsyncFfiHost) => Promise<RunResult>
+  execute: (input: RunInput, store: DocStore, host: FfiHost, depth?: number) => RunResult
+  executeAsync: (input: RunInput, store: DocStore, host: FfiHost | AsyncFfiHost, depth?: number) => Promise<RunResult>
 }
 
 export interface ProgramModuleMeta {
@@ -184,7 +188,7 @@ export function toMeta(flow: FlowAst): ProgramFlowMeta {
   }
 }
 
-function compileFlow(flow: FlowAst): CompiledFlowHandler {
+function compileFlow(flow: FlowAst, byName: Map<string, CompiledFlowHandler>): CompiledFlowHandler {
   const meta = toMeta(flow)
 
   const flowName = flow.name
@@ -213,7 +217,7 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
   const inputs = flow.inputs.map((i) => ({ ...i, label: labelOf(i) }))
   const flowOutSpecs = flow.outputs.map((o) => ({ name: o.name, from: o.from }))
 
-  const execute = (rawInput: RunInput, store: DocStore, host: FfiHost): RunResult => {
+  const execute = (rawInput: RunInput, store: DocStore, host: FfiHost, depth = 0): RunResult => {
     for (const port of needs) {
       if (!host.has(port.name, port.version)) {
         return { ok: false, message: `缺少能力 port: ${port.raw}`, mode: 'compile', stepLog: [] }
@@ -257,24 +261,31 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
       }
     }
 
-    const stepLog = []
-    for (const step of steps) {
-      const log = execStepWithIO(step, {
-        ctx,
-        record,
-        host,
-        flowName,
-        mode: 'compile',
-      })
-      stepLog.push(log)
-      if (!log.ok) {
-        return {
-          ok: false,
-          message: log.detail ?? `步骤失败: ${step.label}`,
-          mode: 'compile',
-          stepLog,
-          record: record ?? undefined,
+    const stepLog: RunResult['stepLog'] = []
+    const outcome = execFlowBodySync(flowBodyItems(flow), {
+      ctx,
+      record,
+      host,
+      flowName,
+      mode: 'compile',
+      depth,
+      onLog: (log) => stepLog.push(log),
+      runSubflow: (item, outerCtx) => {
+        const target = byName.get(item.flow)
+        if (!target) {
+          return { ok: false, message: `Program 无 flow ${item.flow}`, mode: 'compile', stepLog: [] }
         }
+        const subInput = subflowRunInput(item, outerCtx, target.meta.fields.map((f) => f.name))
+        return target.execute(subInput, store, host, depth + 1)
+      },
+    })
+    if (!outcome.ok) {
+      return {
+        ok: false,
+        message: outcome.message ?? 'flow 执行失败',
+        mode: 'compile',
+        stepLog,
+        record: record ?? undefined,
       }
     }
 
@@ -310,6 +321,7 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
     rawInput: RunInput,
     store: DocStore,
     host: FfiHost | AsyncFfiHost,
+    depth = 0,
   ): Promise<RunResult> => {
     for (const port of needs) {
       if (!host.has(port.name, port.version)) {
@@ -354,24 +366,45 @@ function compileFlow(flow: FlowAst): CompiledFlowHandler {
       }
     }
 
-    const stepLog = []
-    for (const step of steps) {
-      const log = await execStepWithIOAsync(step, {
-        ctx,
-        record,
-        host,
-        flowName,
-        mode: 'compile',
-      })
-      stepLog.push(log)
-      if (!log.ok) {
-        return {
-          ok: false,
-          message: log.detail ?? `步骤失败: ${step.label}`,
-          mode: 'compile',
-          stepLog,
-          record: record ?? undefined,
+    const stepLog: RunResult['stepLog'] = []
+    const outcome = await execFlowBodyAsync(flowBodyItems(flow), {
+      ctx,
+      record,
+      host,
+      flowName,
+      mode: 'compile',
+      depth,
+      onLog: (log) => stepLog.push(log),
+      runSubflow: (item: SubflowAst, outerCtx) => {
+        const target = byName.get(item.flow)
+        if (!target) {
+          return { ok: false, message: `Program 无 flow ${item.flow}`, mode: 'compile', stepLog: [] }
         }
+        const subInput = subflowRunInput(item, outerCtx, target.meta.fields.map((f) => f.name))
+        const result = target.execute(subInput, store, host, depth + 1)
+        // subflow inner steps merge into the outer run timeline (PRD 3.13.5)
+        for (const log of result.stepLog) stepLog.push(log)
+        return result
+      },
+      runSubflowAsync: async (item, outerCtx) => {
+        const target = byName.get(item.flow)
+        if (!target) {
+          return { ok: false, message: `Program 无 flow ${item.flow}`, mode: 'compile', stepLog: [] }
+        }
+        const subInput = subflowRunInput(item, outerCtx, target.meta.fields.map((f) => f.name))
+        const result = await target.executeAsync(subInput, store, host, depth + 1)
+        // subflow inner steps merge into the outer run timeline (PRD 3.13.5)
+        for (const log of result.stepLog) stepLog.push(log)
+        return result
+      },
+    })
+    if (!outcome.ok) {
+      return {
+        ok: false,
+        message: outcome.message ?? 'flow 执行失败',
+        mode: 'compile',
+        stepLog,
+        record: record ?? undefined,
       }
     }
 
@@ -468,8 +501,9 @@ function emitJsSource(ast: DomainAst, flows: CompiledFlowHandler[], ports: Progr
 
 export function compile(ast: DomainAst): Program {
   const flat = flattenDomain(ast)
-  const handlers = flat.flows.map((flow) => compileFlow(flow))
-  const byName = new Map(handlers.map((h) => [h.meta.name, h]))
+  const byName = new Map<string, CompiledFlowHandler>()
+  const handlers = flat.flows.map((flow) => compileFlow(flow, byName))
+  for (const handler of handlers) byName.set(handler.meta.name, handler)
   const ports = flat.ports.map(portMeta)
 
   return {

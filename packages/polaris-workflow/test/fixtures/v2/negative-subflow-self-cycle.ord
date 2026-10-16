@@ -1,0 +1,21 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.a version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// negative: subflow self-cycle — flow A calls itself (validator must reject)
+flow CycleA title "Cycle A" create {
+  input { value: String required }
+  steps {
+    subflow CycleA { input { value = value } }
+  }
+  output {
+    result: String from result
+  }
+  ui { layout form primary "Run" }
+}

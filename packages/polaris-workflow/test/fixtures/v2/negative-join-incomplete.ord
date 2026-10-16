@@ -1,0 +1,45 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.a version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// negative: join incompleteness — branchOnly is produced only inside one
+// choice branch without an else, so the join cannot guarantee it (validator
+// must reject the downstream use and the flow output)
+flow IncompleteJoin title "Incomplete join" create {
+  input {
+    value: String required
+    mode: String required
+  }
+  steps {
+    choice {
+      when mode == "a" {
+        pathA "Path A" {
+          uses { value }
+          call probe.a
+          output { branchOnly: String }
+        }
+      }
+      when mode == "b" {
+        pathB "Path B" {
+          uses { value }
+          call probe.a
+          output { otherOnly: String }
+        }
+      }
+    }
+    consume "Consume" {
+      uses { branchOnly }
+      output { summary: String }
+    }
+  }
+  output {
+    branchOnly: String from branchOnly
+  }
+  ui { layout form primary "Run" }
+}

@@ -1,13 +1,20 @@
 import {
   flattenDomain,
+  flowBodyItems,
+  type ChoicePredicate,
   type DomainAst,
+  type FlowAst,
+  type FlowBodyItem,
   type PortAst,
   type PortRef,
+  type StepAst,
   type ValidationIssue,
 } from './ast.js'
 import { resolvePort } from './resolve.js'
 
 const BUILTIN_TYPES = new Set(['ID', 'String', 'Number', 'Money', 'Boolean', 'Status'])
+/** Subflow expansion depth cap (validator static check). */
+const SUBFLOW_MAX_DEPTH = 8
 
 export interface ValidateResult {
   ok: boolean
@@ -66,7 +73,7 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
   const issues: ValidationIssue[] = []
   if (!ast.name) push(issues, 'error', 'E_DOMAIN_NAME', 'Domain name is required')
   const languageVersion = ast.languageVersion ?? '0.3'
-  if (languageVersion !== '0.3' && languageVersion !== '0.4') {
+  if (languageVersion !== '0.3' && languageVersion !== '0.4' && languageVersion !== '0.5') {
     push(issues, 'error', 'E_DSL_VERSION', `Unsupported DSL language version ${languageVersion}`)
   }
 
@@ -112,6 +119,7 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     if (flowNames.has(flow.name)) push(issues, 'error', 'E_DUP_FLOW', `Duplicate flow ${flow.name}`)
     flowNames.add(flow.name)
   }
+  const flowsByName = new Map(flat.flows.map((flow) => [flow.name, flow]))
 
   for (const pipe of ast.pipelines ?? []) {
     if (pipe.steps.length < 1) {
@@ -153,131 +161,20 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     inputNames.add('recordId')
     inputNames.add('id')
     const available = new Set<string>(inputNames)
+    const guarded = new Set<string>()
     const called: PortRef[] = []
 
-    for (const step of flow.steps) {
-      if (step.map) {
-        if (!available.has(step.map.source)) {
-          push(issues, 'error', 'E_MAP_SOURCE', `map ${step.id} uses unknown collection ${step.map.source}`, `flow.${flow.name}.${step.id}`)
-        }
-        const port = findPort(flat.ports, step.map.call)
-        if (!port) {
-          push(issues, 'error', 'E_MAP_PORT', `map ${step.id} references unknown port ${step.map.call.raw}`, `flow.${flow.name}.${step.id}`)
-        }
-        if (step.call) {
-          push(issues, 'error', 'E_MAP_CALL', `map ${step.id} must not also declare call`, `flow.${flow.name}.${step.id}`)
-        }
-        called.push(step.map.call)
-      }
-      if (step.uses.length === 0 && !step.call) {
-        push(issues, 'warning', 'W_STEP_NO_USES', `step ${step.id} 未声明 uses`, `flow.${flow.name}.${step.id}`)
-      }
-      for (const u of step.uses) {
-        if (!available.has(u)) {
-          if (!flow.create) {
-            push(
-              issues,
-              'warning',
-              'W_STEP_USES_RECORD',
-              `step ${step.id} uses "${u}" 将尝试从单据状态读取`,
-              `flow.${flow.name}.${step.id}`,
-            )
-            available.add(u)
-          } else {
-            push(
-              issues,
-              'error',
-              'E_STEP_USES',
-              `step ${step.id} uses "${u}" 不在 input/上游 out`,
-              `flow.${flow.name}.${step.id}`,
-            )
-          }
-        }
-      }
-
-      if (step.call) {
-        called.push(step.call)
-        const port = findPort(flat.ports, step.call)
-        if (!port) {
-          push(
-            issues,
-            'error',
-            'E_CALL_PORT',
-            `step ${step.id} call 未知 port ${step.call.raw}`,
-            `flow.${flow.name}.${step.id}`,
-          )
-        } else {
-          if (port.effect === 'ffi') {
-            if (!port.binding?.tool) {
-              push(
-                issues,
-                'error',
-                'E_FFI_BINDING',
-                `call ${step.call.raw} has no external tool binding`,
-                `flow.${flow.name}.${step.id}`,
-              )
-            } else if (toolResolver) {
-              const tool = toolResolver.resolve(port.binding.tool)
-              if (!tool) {
-                push(
-                  issues,
-                  'error',
-                  'E_FFI_TOOL',
-                  `call ${step.call.raw} references unavailable tool ${port.binding.tool}`,
-                  `flow.${flow.name}.${step.id}`,
-                )
-              } else {
-                const command = step.command ?? port.binding.command
-                if (!command) {
-                  push(
-                    issues,
-                    'error',
-                    'E_FFI_COMMAND',
-                    `call ${step.call.raw} has no external tool command`,
-                    `flow.${flow.name}.${step.id}`,
-                  )
-                } else if (!tool.commands.includes(command)) {
-                push(
-                  issues,
-                  'error',
-                  'E_FFI_COMMAND',
-                  `call ${step.call.raw} references unavailable command ${command}`,
-                  `flow.${flow.name}.${step.id}`,
-                )
-                }
-              }
-            }
-          }
-          for (const f of port.inFields) {
-            if (!f.optional && !step.uses.includes(f.name) && !available.has(f.name)) {
-              push(
-                issues,
-                'warning',
-                'W_CALL_IN',
-                `call ${step.call.raw} 期望 in.${f.name}，step uses 未列出`,
-                `flow.${flow.name}.${step.id}`,
-              )
-            }
-          }
-          if (step.outputs.length === 0 && port.outFields.length > 0) {
-            push(
-              issues,
-              'warning',
-              'W_CALL_OUT',
-              `call ${step.call.raw} 有 out，但 step 未声明 output`,
-              `flow.${flow.name}.${step.id}`,
-            )
-          }
-        }
-      }
-
-      if (step.outputs.length === 0 && !step.call) {
-        push(issues, 'warning', 'W_STEP_NO_OUT', `step ${step.id} 未声明 output`, `flow.${flow.name}.${step.id}`)
-      }
-      for (const o of step.outputs) {
-        available.add(o.name)
-      }
-    }
+    validateBodyItems(flowBodyItems(flow), {
+      flow,
+      available,
+      guarded,
+      called,
+      ports: flat.ports,
+      flowNames,
+      flowsForSubflow: flowsByName,
+      issues,
+      toolResolver,
+    })
 
     for (const c of called) {
       if (flow.needs?.length) {
@@ -306,6 +203,16 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     for (const o of flow.outputs) {
       const src = o.from ?? o.name
       if (src === 'record.id' || src === 'record.status') continue
+      if (guarded.has(src) || guarded.has(o.name)) {
+        push(
+          issues,
+          'error',
+          'E_CHOICE_NOT_EXHAUSTIVE',
+          `flow output "${o.name}" from "${src}" 在 choice 分支中并非全路径产出`,
+          `flow.${flow.name}.output`,
+        )
+        continue
+      }
       if (!available.has(src) && !available.has(o.name)) {
         push(
           issues,
@@ -318,5 +225,342 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     }
   }
 
+  checkSubflowGraph(flat.flows, issues)
+
   return { ok: !issues.some((i) => i.level === 'error'), issues }
+}
+
+interface BodyWalkState {
+  flow: FlowAst
+  available: Set<string>
+  /** Fields not produced on every choice path; a downstream use is an error. */
+  guarded: Set<string>
+  called: PortRef[]
+  ports: PortAst[]
+  flowNames: Set<string>
+  flowsForSubflow: Map<string, FlowAst>
+  issues: ValidationIssue[]
+  toolResolver?: ToolResolver
+}
+
+/** DSL v2 structured body validation (PRD 3.13.5): sequence/parallel/choice/forEach/while/subflow. */
+function validateBodyItems(items: FlowBodyItem[], state: BodyWalkState): void {
+  const { flow, available, guarded, issues } = state
+  const flowPath = `flow.${flow.name}`
+  for (const item of items) {
+    if (item.kind === 'Step') {
+      validateStepFields(item.step, state)
+      continue
+    }
+    if (item.kind === 'Parallel') {
+      const path = `${flowPath}.${item.id}`
+      if (item.branches.length < 2) {
+        push(issues, 'error', 'E_PARALLEL_BRANCHES', `parallel ${item.id} 至少需要 2 个分支`, path)
+      }
+      const seen = new Set<string>()
+      for (const branch of item.branches) {
+        if (seen.has(branch.id)) {
+          push(issues, 'error', 'E_PARALLEL_BRANCH_DUP', `parallel ${item.id} 分支 id 重复: ${branch.id}`, path)
+        }
+        seen.add(branch.id)
+      }
+      // Join completeness: the join point collects every branch's outputs; downstream may use any of them.
+      for (const branch of item.branches) {
+        const branchAvailable = new Set(available)
+        validateBodyItems(branch.body, { ...state, available: branchAvailable })
+        for (const name of branchAvailable) available.add(name)
+      }
+      continue
+    }
+    if (item.kind === 'Choice') {
+      const path = `${flowPath}.${item.id}`
+      const elseCount = item.branches.filter((branch) => branch.when === undefined).length
+      if (elseCount > 1) {
+        push(issues, 'error', 'E_CHOICE_ELSE', `choice ${item.id} 最多一个 else 分支`, path)
+      }
+      const branchOutputs: Set<string>[] = []
+      let hasElse = false
+      for (const [index, branch] of item.branches.entries()) {
+        const branchPath = `${path}.when-${index + 1}`
+        if (branch.when === undefined) {
+          hasElse = true
+          const elseAvailable = new Set(available)
+          validateBodyItems(branch.body, { ...state, available: elseAvailable })
+          branchOutputs.push(elseAvailable)
+          continue
+        }
+        checkPredicate(branch.when, available, issues, branchPath, 'choice')
+        const branchAvailable = new Set(available)
+        validateBodyItems(branch.body, { ...state, available: branchAvailable })
+        branchOutputs.push(branchAvailable)
+      }
+      // Join completeness (choice side): only fields produced on every branch (else included) are safe downstream.
+      const before = new Set(available)
+      const union = new Set<string>()
+      for (const outputs of branchOutputs) {
+        for (const name of outputs) union.add(name)
+      }
+      let safe = new Set<string>()
+      if (hasElse && branchOutputs.length > 0) {
+        safe = branchOutputs.reduce((acc, outputs) => new Set([...acc].filter((name) => outputs.has(name))))
+      }
+      for (const name of union) {
+        available.add(name)
+        if (!safe.has(name) && !before.has(name)) guarded.add(name)
+      }
+      continue
+    }
+    if (item.kind === 'ForEach') {
+      const path = `${flowPath}.${item.id}`
+      if (!available.has(item.source)) {
+        push(issues, 'error', 'E_FOREACH_SOURCE', `forEach ${item.id} 源字段 ${item.source} 不在 input/上游 out`, path)
+      }
+      if (item.maxInFlight !== undefined && (!Number.isInteger(item.maxInFlight) || item.maxInFlight < 1)) {
+        push(issues, 'error', 'E_FOREACH_MAX_IN_FLIGHT', `forEach ${item.id} maxInFlight 必须是正整数`, path)
+      }
+      const bodyAvailable = new Set(available)
+      bodyAvailable.add(item.item)
+      validateBodyItems(item.body, { ...state, available: bodyAvailable })
+      for (const name of bodyAvailable) available.add(name)
+      continue
+    }
+    if (item.kind === 'While') {
+      const path = `${flowPath}.${item.id}`
+      // The while condition reads inputs and completed step outputs only; no termination check (PRD 3.13.3).
+      checkPredicate(item.when, available, issues, path, 'while')
+      const bodyAvailable = new Set(available)
+      validateBodyItems(item.body, { ...state, available: bodyAvailable })
+      for (const name of bodyAvailable) available.add(name)
+      continue
+    }
+    // Subflow: the target flow's outputs are available downstream.
+    const path = `${flowPath}.${item.id}`
+    const target = state.flowNames.has(item.flow) ? findFlowByName(state, item.flow) : undefined
+    if (!target) {
+      push(issues, 'error', 'E_SUBFLOW_UNKNOWN', `subflow ${item.id} 引用未知 flow ${item.flow}`, path)
+      continue
+    }
+    if (item.input) {
+      for (const [param, ref] of Object.entries(item.input)) {
+        if (!target.inputs.some((input) => input.name === param)) {
+          push(issues, 'error', 'E_SUBFLOW_INPUT_UNKNOWN', `subflow ${item.id} 传入未知输入 ${param}（flow ${item.flow}）`, path)
+        }
+        if (!available.has(ref)) {
+          push(issues, 'error', 'E_SUBFLOW_INPUT_SOURCE', `subflow ${item.id} 输入 ${param} 引用的源字段 ${ref} 不在 input/上游 out`, path)
+        }
+      }
+    }
+    for (const output of target.outputs) {
+      available.add(output.name)
+    }
+  }
+}
+
+function findFlowByName(state: BodyWalkState, name: string): FlowAst | undefined {
+  return state.flowsForSubflow.get(name)
+}
+
+/** Single-step checks (v1 semantics kept): map/uses/call/outputs plus choice-guarded fields. */
+function validateStepFields(step: StepAst, state: BodyWalkState): void {
+  const { flow, available, guarded, called, ports, issues, toolResolver } = state
+  const stepPath = `flow.${flow.name}.${step.id}`
+  if (step.map) {
+    if (!available.has(step.map.source)) {
+      push(issues, 'error', 'E_MAP_SOURCE', `map ${step.id} uses unknown collection ${step.map.source}`, stepPath)
+    }
+    const port = findPort(ports, step.map.call)
+    if (!port) {
+      push(issues, 'error', 'E_MAP_PORT', `map ${step.id} references unknown port ${step.map.call.raw}`, stepPath)
+    }
+    if (step.call) {
+      push(issues, 'error', 'E_MAP_CALL', `map ${step.id} must not also declare call`, stepPath)
+    }
+    called.push(step.map.call)
+  }
+  if (step.uses.length === 0 && !step.call) {
+    push(issues, 'warning', 'W_STEP_NO_USES', `step ${step.id} 未声明 uses`, stepPath)
+  }
+  for (const u of step.uses) {
+    if (guarded.has(u)) {
+      push(
+        issues,
+        'error',
+        'E_CHOICE_NOT_EXHAUSTIVE',
+        `step ${step.id} uses "${u}" 在 choice 分支中并非全路径产出`,
+        stepPath,
+      )
+      continue
+    }
+    if (!available.has(u)) {
+      if (!flow.create) {
+        push(
+          issues,
+          'warning',
+          'W_STEP_USES_RECORD',
+          `step ${step.id} uses "${u}" 将尝试从单据状态读取`,
+          stepPath,
+        )
+        available.add(u)
+      } else {
+        push(
+          issues,
+          'error',
+          'E_STEP_USES',
+          `step ${step.id} uses "${u}" 不在 input/上游 out`,
+          stepPath,
+        )
+      }
+    }
+  }
+
+  if (step.call) {
+    called.push(step.call)
+    const port = findPort(ports, step.call)
+    if (!port) {
+      push(
+        issues,
+        'error',
+        'E_CALL_PORT',
+        `step ${step.id} call 未知 port ${step.call.raw}`,
+        stepPath,
+      )
+    } else {
+      if (port.effect === 'ffi') {
+        if (!port.binding?.tool) {
+          push(
+            issues,
+            'error',
+            'E_FFI_BINDING',
+            `call ${step.call.raw} has no external tool binding`,
+            stepPath,
+          )
+        } else if (toolResolver) {
+          const tool = toolResolver.resolve(port.binding.tool)
+          if (!tool) {
+            push(
+              issues,
+              'error',
+              'E_FFI_TOOL',
+              `call ${step.call.raw} references unavailable tool ${port.binding.tool}`,
+              stepPath,
+            )
+          } else {
+            const command = step.command ?? port.binding.command
+            if (!command) {
+              push(
+                issues,
+                'error',
+                'E_FFI_COMMAND',
+                `call ${step.call.raw} has no external tool command`,
+                stepPath,
+              )
+            } else if (!tool.commands.includes(command)) {
+              push(
+                issues,
+                'error',
+                'E_FFI_COMMAND',
+                `call ${step.call.raw} references unavailable command ${command}`,
+                stepPath,
+              )
+            }
+          }
+        }
+      }
+      for (const f of port.inFields) {
+        if (!f.optional && !step.uses.includes(f.name) && !available.has(f.name)) {
+          push(
+            issues,
+            'warning',
+            'W_CALL_IN',
+            `call ${step.call.raw} 期望 in.${f.name}，step uses 未列出`,
+            stepPath,
+          )
+        }
+      }
+      if (step.outputs.length === 0 && port.outFields.length > 0) {
+        push(
+          issues,
+          'warning',
+          'W_CALL_OUT',
+          `call ${step.call.raw} 有 out，但 step 未声明 output`,
+          stepPath,
+        )
+      }
+    }
+  }
+
+  if (step.outputs.length === 0 && !step.call) {
+    push(issues, 'warning', 'W_STEP_NO_OUT', `step ${step.id} 未声明 output`, stepPath)
+  }
+  for (const o of step.outputs) {
+    available.add(o.name)
+  }
+}
+
+function checkPredicate(
+  pred: ChoicePredicate,
+  available: Set<string>,
+  issues: ValidationIssue[],
+  path: string,
+  kind: 'choice' | 'while',
+): void {
+  const code = kind === 'choice' ? 'E_CHOICE_FIELD' : 'E_WHILE_FIELD'
+  const label = kind === 'choice' ? 'choice' : 'while'
+  if (!available.has(pred.field)) {
+    push(issues, 'error', code, `${label} 条件字段 ${pred.field} 不在 input/上游 out`, path)
+  }
+  if (pred.op === 'in' && (pred.values ?? []).length === 0) {
+    push(issues, 'error', 'E_CHOICE_PREDICATE', `${label} 谓词 in 列表为空`, path)
+  }
+  if (pred.op !== 'in' && pred.op !== 'truthy' && pred.value === undefined) {
+    push(issues, 'error', 'E_CHOICE_PREDICATE', `${label} 谓词缺少比较值`, path)
+  }
+}
+
+/** subflow reference graph: cycle detection + expansion depth cap (PRD 3.13.2) */
+function checkSubflowGraph(flows: FlowAst[], issues: ValidationIssue[]): void {
+  const deps = new Map<string, string[]>()
+  const targetsIn = (items: FlowBodyItem[]): string[] => {
+    const found: string[] = []
+    for (const item of items) {
+      if (item.kind === 'Step') continue
+      if (item.kind === 'Subflow') found.push(item.flow)
+      else if (item.kind === 'Parallel') for (const b of item.branches) found.push(...targetsIn(b.body))
+      else if (item.kind === 'Choice') for (const b of item.branches) found.push(...targetsIn(b.body))
+      else found.push(...targetsIn(item.body))
+    }
+    return found
+  }
+  for (const flow of flows) {
+    deps.set(flow.name, [...new Set(targetsIn(flowBodyItems(flow)))])
+  }
+  const state = new Map<string, 'visiting' | 'done'>()
+  const depth = new Map<string, number>()
+  const reported = new Set<string>()
+  const visit = (name: string, path: string[]): number => {
+    const mark = state.get(name)
+    if (mark === 'visiting') {
+      const chain = [...path.slice(path.indexOf(name)), name].join(' → ')
+      if (!reported.has(chain)) {
+        reported.add(chain)
+        push(issues, 'error', 'E_SUBFLOW_CYCLE', `subflow 循环调用: ${chain}`, `flow.${name}`)
+      }
+      return 0
+    }
+    if (mark === 'done') return depth.get(name) ?? 0
+    state.set(name, 'visiting')
+    let maxChild = 0
+    for (const target of deps.get(name) ?? []) {
+      if (!deps.has(target)) continue
+      maxChild = Math.max(maxChild, visit(target, [...path, name]))
+    }
+    state.set(name, 'done')
+    const own = maxChild + 1
+    depth.set(name, own)
+    if (own > SUBFLOW_MAX_DEPTH) {
+      push(issues, 'error', 'E_SUBFLOW_DEPTH', `subflow 展开深度超过上限 ${SUBFLOW_MAX_DEPTH}`, `flow.${name}`)
+    }
+    return own
+  }
+  for (const flow of flows) visit(flow.name, [])
 }

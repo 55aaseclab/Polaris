@@ -1,0 +1,49 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.a version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// positive: choice — predicate over an input field picks one branch
+flow ChoiceRun title "Choice run" create {
+  input {
+    value: String required
+    mode: String required
+  }
+  steps {
+    choice {
+      when mode == "fast" {
+        fastPath "Fast path" {
+          uses { value }
+          call probe.a
+          command "run"
+          output { result: String }
+        }
+      }
+      when mode == "deep" {
+        slowPath "Slow path" {
+          uses { value }
+          call probe.a
+          command "run"
+          output { result: String }
+        }
+      }
+      else {
+        fallback "Fallback" {
+          uses { value }
+          call probe.a
+          command "run"
+          output { result: String }
+        }
+      }
+    }
+  }
+  output {
+    result: String from result
+  }
+  ui { layout form primary "Run" }
+}

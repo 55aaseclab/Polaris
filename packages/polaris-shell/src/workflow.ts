@@ -30,7 +30,8 @@ export type WorkflowFlowProjection = {
 export type WorkflowGraphNode = {
   id: string;
   label: string;
-  kind: "input" | "step" | "output";
+  /** DSL v2 adds the structured construct kinds (PRD 3.13). */
+  kind: "input" | "step" | "output" | "parallel" | "choice" | "forEach" | "while" | "subflow";
   role?: string;
   call?: string;
   effect?: string;
@@ -41,6 +42,14 @@ export type WorkflowGraphNode = {
   retry?: { maxAttempts: number; backoffMs: number };
   timeoutMs?: number;
   terminal?: boolean;
+  /** DSL v2 construct grouping: which parallel branch / choice path / loop
+   * a step belongs to, rendered as branch/iteration grouping (PRD 3.13.5). */
+  group?: {
+    kind: "parallel" | "choice" | "forEach" | "while" | "subflow";
+    id: string;
+    branch?: string;
+    when?: string;
+  };
 };
 
 export type WorkflowGraphEdge = {
@@ -153,6 +162,16 @@ export type WorkflowEffectReceipt = {
   completedAt: string;
 };
 
+/** DSL v2 structured control-flow group of a step result (PRD 3.13.5). */
+export type WorkflowStepGroupLog = {
+  kind: "parallel" | "choice" | "forEach" | "while" | "subflow";
+  id: string;
+  branch?: string;
+  /** Choice branch predicate text (timeline rendering). */
+  when?: string;
+  iteration?: number;
+};
+
 export type WorkflowStepResult = {
   id: string;
   sequence: number;
@@ -164,6 +183,7 @@ export type WorkflowStepResult = {
   input: Record<string, unknown>;
   output: Record<string, unknown>;
   outputFields: string[];
+  group?: WorkflowStepGroupLog;
   createdAt: string;
   completedAt: string;
 };

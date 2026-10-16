@@ -1,15 +1,24 @@
 import type {
+  ChoicePredicate,
   DomainAst,
   DomainAccent,
   EntityAst,
   EnumAst,
   FieldAst,
   FlowAst,
+  FlowBodyItem,
   FlowOutputAst,
   ImportAst,
   InputFieldAst,
   ModuleAst,
   ParseError,
+  ParallelAst,
+  ParallelBranchAst,
+  ChoiceAst,
+  ChoiceBranchAst,
+  ForEachAst,
+  WhileAst,
+  SubflowAst,
   PipelineAst,
   PortAst,
   PortEffect,
@@ -155,7 +164,8 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
   const outputs: FlowOutputAst[] = []
   const needs: PortRef[] = []
   let requireExpr: string | undefined
-  const steps: StepAst[] = []
+  const bodyItems: FlowBodyItem[] = []
+  const constructCounters = newConstructCounters()
   let transition: FlowAst['transition']
   let emit: string | undefined
   const ui: FlowAst['ui'] = { layout: 'form', primary: '提交' }
@@ -234,9 +244,9 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
     } else if (kind === 'require') {
       requireExpr = blk.body.trim().replace(/\s+/g, ' ')
     } else if (kind === 'steps') {
-      const parsedSteps = parseStepsBlock(blk.body)
-      if (typeof parsedSteps === 'string') return { message: parsedSteps }
-      steps.push(...parsedSteps)
+      const parsedBody = parseFlowBody(blk.body, constructCounters)
+      if (typeof parsedBody === 'string') return { message: parsedBody }
+      bodyItems.push(...parsedBody)
     } else if (kind === 'ui') {
       const layoutM = blk.body.match(/\blayout\s+(form|wizard)/i)
       if (layoutM) ui.layout = layoutM[1].toLowerCase() as 'form' | 'wizard'
@@ -248,6 +258,11 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
 
     i = blk.end
   }
+
+  // v1 linear view: the plain steps of body (v2 constructs are not listed)
+  const steps = bodyItems
+    .filter((item): item is { kind: 'Step'; step: StepAst } => item.kind === 'Step')
+    .map((item) => item.step)
 
   return {
     kind: 'Flow',
@@ -261,6 +276,7 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
     outputs,
     require: requireExpr ? { expr: requireExpr } : undefined,
     steps,
+    body: bodyItems,
     transition,
     emit,
     ui,
@@ -468,107 +484,405 @@ function parseStepOutputs(body: string): StepOutputAst[] {
  *   id "label" { uses { a, b }  output { x: Type } }
  *   id "label"                           // 兼容旧写法
  *   id "label" uses a, b -> x: Type      // 单行紧凑
+ *   parallel { branch a { ... } }        // DSL v2 construct (PRD 3.13)
+ *   choice { when x == "y" { ... } else { ... } }
+ *   forEach item in listRef maxInFlight 2 { ... }
+ *   while x == false { ... }
+ *   subflow Helper { input { q = question } }
  * }
  */
-function parseStepsBlock(body: string): StepAst[] | string {
-  const steps: StepAst[] = []
+function parseFlowBody(body: string, counters: ConstructCounters): FlowBodyItem[] | string {
+  const items: FlowBodyItem[] = []
   let i = 0
   while (i < body.length) {
     while (i < body.length && /\s/.test(body[i])) i++
     if (i >= body.length) break
 
-    const head = body.slice(i).match(re(`^(${ID})(?:\\s+(\"([^\"]*)\"|'([^']*)'))?`))
+    const head = body.slice(i).match(re(`^(${ID})`))
     if (!head) {
       const nl = body.indexOf('\n', i)
       i = nl === -1 ? body.length : nl + 1
       continue
     }
-    const id = head[1]
-    const label = head[3] ?? head[4] ?? id
-    i += head[0].length
-    while (i < body.length && /[ \t]/.test(body[i])) i++
+    const keyword = head[1].toLowerCase()
+    let next = i + head[0].length
+    while (next < body.length && /[ \t]/.test(body[next])) next++
+    const after = body.slice(next)
 
-    let uses: string[] = []
-    let outputs: StepOutputAst[] = []
-    let call: PortRef | undefined
-    let command: string | undefined
-    let map: StepAst['map'] | undefined
-
-    // 块形式
-    if (body[i] === '{') {
-      const blk = extractBlock(body, i)
-      if (!blk) return `Unclosed step body for ${id}`
-      let j = 0
-      const sb = blk.body
-      while (j < sb.length) {
-        while (j < sb.length && /\s/.test(sb[j])) j++
-        if (j >= sb.length) break
-        const part = sb.slice(j)
-
-        const callRef = parseCallRef(part)
-        if (callRef) {
-          call = callRef
-          const eaten = part.match(re(`^call\\s+(${ID}(?:\\.${ID})?)(?:@[\\d.]+)?`, 'i'))
-          j += eaten?.[0].length ?? callRef.raw.length + 5
-          continue
-        }
-
-        const commandM = part.match(/^command\s+("([^"]*)"|'([^']*)'|([^\s}]+))/i)
-        if (commandM) {
-          command = commandM[2] ?? commandM[3] ?? commandM[4]
-          j += commandM[0].length
-          continue
-        }
-
-        const mapM = part.match(re(`^map\\s+(${ID})\\s+in\\s+(${ID})\\s+call\\s+(${PORT_ID})(?:@([\\d.]+))?`, 'i'))
-        if (mapM) {
-          const raw = mapM[4] ? `${mapM[3]}@${mapM[4]}` : mapM[3]
-          map = { item: mapM[1], source: mapM[2], call: parsePortRef(raw) }
-          j += mapM[0].length
-          continue
-        }
-
-        const km = part.match(/^(uses|output|out)\b/i)
-        if (!km) {
-          const nl = sb.indexOf('\n', j)
-          j = nl === -1 ? sb.length : nl + 1
-          continue
-        }
-        const k = km[1].toLowerCase()
-        j += km[0].length
-        while (j < sb.length && /\s/.test(sb[j])) j++
-        if (sb[j] !== '{') return `Expected '{' after ${k} in step ${id}`
-        const inner = extractBlock(sb, j)
-        if (!inner) return `Unclosed ${k} in step ${id}`
-        if (k === 'uses') uses = parseUsesList(inner.body)
-        else outputs = parseStepOutputs(inner.body)
-        j = inner.end
-      }
-      i = blk.end
-    } else {
-      const restLine = body.slice(i).split('\n')[0] ?? ''
-      const callRef = parseCallRef(restLine.trim())
-      if (callRef) {
-        call = callRef
-        i += restLine.length
-      } else {
-        const usesM = restLine.match(/^\s*uses\s+([^-{\n]+?)(?:\s*->\s*(.+))?$/)
-        if (usesM) {
-          uses = parseUsesList(usesM[1])
-          if (usesM[2]) {
-            for (const part of usesM[2].split(',')) {
-              const om = part.trim().match(re(`^(${ID})\\s*:\\s*(${ID})$`))
-              if (om) outputs.push({ name: om[1], type: om[2] })
-            }
-          }
-          i += restLine.length
-        } else if (body[i] === '\n') i++
-      }
+    if (keyword === 'parallel' && after.startsWith('{')) {
+      const parsed = parseParallel(body.slice(next), counters)
+      if (typeof parsed === 'string') return parsed
+      items.push(parsed)
+      i = next + parsed.end
+      continue
+    }
+    if (keyword === 'choice' && after.startsWith('{')) {
+      const parsed = parseChoice(body.slice(next), counters)
+      if (typeof parsed === 'string') return parsed
+      items.push(parsed)
+      i = next + parsed.end
+      continue
+    }
+    if (keyword === 'foreach') {
+      const parsed = parseForEach(after, counters)
+      if (typeof parsed === 'string') return parsed
+      items.push(parsed)
+      i = next + parsed.end
+      continue
+    }
+    if (keyword === 'while') {
+      const parsed = parseWhile(after, counters)
+      if (typeof parsed === 'string') return parsed
+      items.push(parsed)
+      i = next + parsed.end
+      continue
+    }
+    if (keyword === 'subflow') {
+      const parsed = parseSubflow(after, counters)
+      if (typeof parsed === 'string') return parsed
+      items.push(parsed)
+      i = next + parsed.end
+      continue
     }
 
-    steps.push({ id, label, uses, outputs, call, ...(command ? { command } : {}), ...(map ? { map } : {}) })
+    const parsed = parsePlainStep(body, i)
+    if (typeof parsed === 'string') return parsed
+    items.push({ kind: 'Step', step: parsed.step })
+    i = parsed.next
   }
-  return steps
+  return items
+}
+
+interface ConstructCounters {
+  parallel: number
+  choice: number
+  forEach: number
+  while: number
+  subflow: number
+}
+
+function newConstructCounters(): ConstructCounters {
+  return { parallel: 0, choice: 0, forEach: 0, while: 0, subflow: 0 }
+}
+
+/** Predicate: field | field == v | field != v | field > n | field < n | field >= n | field <= n | field in [a, b] */
+function parsePredicate(text: string): ChoicePredicate | null {
+  const t = text.trim()
+  const inM = t.match(re(`^(${ID})\\s+in\\s*\\[([^\\]]*)\\]$`, 'u'))
+  if (inM) {
+    return { field: inM[1], op: 'in', values: inM[2].split(/[\s,]+/).map(unquote).filter(Boolean) }
+  }
+  const cmpM = t.match(re(`^(${ID})\\s*(==|!=|>=|<=|>|<)\\s*(.+)$`, 'u'))
+  if (cmpM) {
+    const opRaw = cmpM[2]
+    const op =
+      opRaw === '==' ? 'eq'
+      : opRaw === '!=' ? 'ne'
+      : opRaw === '>' ? 'gt'
+      : opRaw === '<' ? 'lt'
+      : opRaw === '>=' ? 'ge'
+      : 'le'
+    const value = parsePredicateValue(cmpM[3])
+    if (value === null) return null
+    return { field: cmpM[1], op, value }
+  }
+  const truthyM = t.match(re(`^(${ID})$`, 'u'))
+  if (truthyM) return { field: truthyM[1], op: 'truthy' }
+  return null
+}
+
+function parsePredicateValue(raw: string): string | number | boolean | null {
+  const t = raw.trim()
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t)
+  if (t === 'true') return true
+  if (t === 'false') return false
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return unquote(t)
+  if (re(`^${ID}$`, 'u').test(t)) return t
+  return null
+}
+
+/** parallel { branch a ["label"] { <flow-body> } ... } — input starts at '{' */
+function parseParallel(
+  text: string,
+  counters: ConstructCounters,
+): (ParallelAst & { end: number }) | string {
+  const blk = extractBlock(text, 0)
+  if (!blk) return 'Unclosed parallel block'
+  counters.parallel += 1
+  const id = `parallel-${counters.parallel}`
+  const branches: ParallelBranchAst[] = []
+  const seen = new Set<string>()
+  const body = blk.body
+  let i = 0
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    const headM = body.slice(i).match(re(`^branch\\s+(${ID})(?:\\s+("([^"]*)"|'([^']*)'))?`, 'i'))
+    if (!headM) {
+      const nl = body.indexOf('\n', i)
+      i = nl === -1 ? body.length : nl + 1
+      continue
+    }
+    const branchId = headM[1]
+    if (seen.has(branchId)) return `Duplicate parallel branch: ${branchId}`
+    seen.add(branchId)
+    i += headM[0].length
+    while (i < body.length && /[ \t]/.test(body[i])) i++
+    if (body[i] !== '{') return `Expected '{' after branch ${branchId}`
+    const branchBlk = extractBlock(body, i)
+    if (!branchBlk) return `Unclosed branch ${branchId} in parallel ${id}`
+    const parsedBody = parseFlowBody(branchBlk.body, counters)
+    if (typeof parsedBody === 'string') return parsedBody
+    branches.push({
+      id: branchId,
+      ...(headM[2] ? { label: headM[3] ?? headM[4] } : {}),
+      body: parsedBody,
+    })
+    i = branchBlk.end
+  }
+  return { kind: 'Parallel', id, branches, end: blk.end }
+}
+
+/** choice { when <pred> { body } ... [else { body }] } — input starts at '{' */
+function parseChoice(
+  text: string,
+  counters: ConstructCounters,
+): (ChoiceAst & { end: number }) | string {
+  const blk = extractBlock(text, 0)
+  if (!blk) return 'Unclosed choice block'
+  counters.choice += 1
+  const id = `choice-${counters.choice}`
+  const branches: ChoiceBranchAst[] = []
+  const body = blk.body
+  let i = 0
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    const whenM = body.slice(i).match(/^when\b/i)
+    const elseM = body.slice(i).match(/^else\b/i)
+    if (!whenM && !elseM) {
+      const nl = body.indexOf('\n', i)
+      i = nl === -1 ? body.length : nl + 1
+      continue
+    }
+    i += (whenM ?? elseM)![0].length
+    while (i < body.length && /[ \t]/.test(body[i])) i++
+    let predicate: ChoicePredicate | undefined
+    if (whenM) {
+      const brace = body.indexOf('{', i)
+      if (brace < 0) return 'Unclosed when branch in choice'
+      const parsedPredicate = parsePredicate(body.slice(i, brace))
+      if (!parsedPredicate) return `Invalid when predicate in choice ${id}`
+      predicate = parsedPredicate
+      i = brace
+    }
+    if (body[i] !== '{') return `Expected '{' after ${whenM ? 'when' : 'else'} in choice ${id}`
+    const branchBlk = extractBlock(body, i)
+    if (!branchBlk) return `Unclosed ${whenM ? 'when' : 'else'} branch in choice ${id}`
+    const parsedBody = parseFlowBody(branchBlk.body, counters)
+    if (typeof parsedBody === 'string') return parsedBody
+    branches.push({ ...(predicate ? { when: predicate } : {}), body: parsedBody })
+    i = branchBlk.end
+  }
+  return { kind: 'Choice', id, branches, end: blk.end }
+}
+
+/** forEach <item> in <source> [maxInFlight <n>] { <flow-body> } */
+function parseForEach(
+  text: string,
+  counters: ConstructCounters,
+): (ForEachAst & { end: number }) | string {
+  const headM = text.match(re(`^(${ID})\\s+in\\s+(${ID})(.*)$`, 'is'))
+  if (!headM) return `Invalid forEach header: forEach ${text.split('{')[0]?.trim() ?? ''}`
+  const item = headM[1]
+  const source = headM[2]
+  let rest = headM[3]
+  let maxInFlight: number | undefined
+  const flightM = rest.match(/\bmaxInFlight\s+(\d+)/i)
+  if (flightM) maxInFlight = Number(flightM[1])
+  const brace = rest.indexOf('{')
+  if (brace < 0) return 'forEach is missing a body block'
+  const blk = extractBlock(rest, brace)
+  if (!blk) return 'Unclosed forEach block'
+  const parsedBody = parseFlowBody(blk.body, counters)
+  if (typeof parsedBody === 'string') return parsedBody
+  counters.forEach += 1
+  const id = `forEach-${counters.forEach}`
+  return {
+    kind: 'ForEach',
+    id,
+    item,
+    source,
+    ...(maxInFlight !== undefined ? { maxInFlight } : {}),
+    body: parsedBody,
+    end: brace + blk.end,
+  }
+}
+
+/** while <pred> { <flow-body> } — no static iteration cap (PRD 3.13.3) */
+function parseWhile(
+  text: string,
+  counters: ConstructCounters,
+): (WhileAst & { end: number }) | string {
+  const brace = text.indexOf('{')
+  if (brace < 0) return 'while is missing a body block'
+  const predicate = parsePredicate(text.slice(0, brace))
+  if (!predicate) return `Invalid while predicate: ${text.slice(0, brace).trim()}`
+  const blk = extractBlock(text, brace)
+  if (!blk) return 'Unclosed while block'
+  const parsedBody = parseFlowBody(blk.body, counters)
+  if (typeof parsedBody === 'string') return parsedBody
+  counters.while += 1
+  const id = `while-${counters.while}`
+  return { kind: 'While', id, when: predicate, body: parsedBody, end: brace + blk.end }
+}
+
+/** subflow <FlowName> [input { param = ref, ... }] — the braced body form is also supported */
+function parseSubflow(
+  text: string,
+  counters: ConstructCounters,
+): (SubflowAst & { end: number }) | string {
+  const headM = text.match(re(`^(${ID})`, 'u'))
+  if (!headM) return 'Invalid subflow header'
+  const rest = text.slice(headM[0].length)
+  const lead = rest.length - rest.replace(/^\s+/, '').length
+  const trimmed = rest.slice(lead)
+  const input: Record<string, string> = {}
+  let end = headM[0].length
+  const parseInputBlock = (body: string): void => {
+    for (const raw of splitEntries(body)) {
+      const m = raw.match(re(`^(${ID})\\s*[=:]\\s*(${ID})$`))
+      if (m) input[m[1]] = m[2]
+    }
+  }
+  const directM = trimmed.match(/^input\s*\{([\s\S]*?)\}/)
+  if (directM) {
+    parseInputBlock(directM[1] ?? '')
+    end = headM[0].length + lead + directM[0].length
+  } else if (trimmed[0] === '{') {
+    const blk = extractBlock(trimmed, 0)
+    if (!blk) return 'Unclosed subflow body'
+    end = headM[0].length + lead + blk.end
+    const inputM = blk.body.match(/\binput\s*\{([\s\S]*?)\}/)
+    if (inputM) parseInputBlock(inputM[1] ?? '')
+  }
+  counters.subflow += 1
+  const id = `subflow-${counters.subflow}`
+  return { kind: 'Subflow', id, flow: headM[1], ...(Object.keys(input).length ? { input } : {}), end }
+}
+
+/** Parse one plain step (v1 syntax) starting at index i. */
+function parsePlainStep(body: string, i: number): { step: StepAst; next: number } | string {
+  const head = body.slice(i).match(re(`^(${ID})(?:\\s+(\"([^\"]*)\"|'([^']*)'))?`))
+  if (!head) return `Invalid step at offset ${i}`
+  const id = head[1]
+  const label = head[3] ?? head[4] ?? id
+  i += head[0].length
+  while (i < body.length && /[ \t]/.test(body[i])) i++
+
+  let uses: string[] = []
+  let outputs: StepOutputAst[] = []
+  let call: PortRef | undefined
+  let command: string | undefined
+  let map: StepAst['map'] | undefined
+  let timeoutMs: number | undefined
+  let budgetUsd: number | undefined
+
+  // block form
+  if (body[i] === '{') {
+    const blk = extractBlock(body, i)
+    if (!blk) return `Unclosed step body for ${id}`
+    let j = 0
+    const sb = blk.body
+    while (j < sb.length) {
+      while (j < sb.length && /\s/.test(sb[j])) j++
+      if (j >= sb.length) break
+      const part = sb.slice(j)
+
+      const callRef = parseCallRef(part)
+      if (callRef) {
+        call = callRef
+        const eaten = part.match(re(`^call\\s+(${ID}(?:\\.${ID})?)(?:@[\\d.]+)?`, 'i'))
+        j += eaten?.[0].length ?? callRef.raw.length + 5
+        continue
+      }
+
+      const commandM = part.match(/^command\s+("([^"]*)"|'([^']*)'|([^\s}]+))/i)
+      if (commandM) {
+        command = commandM[2] ?? commandM[3] ?? commandM[4]
+        j += commandM[0].length
+        continue
+      }
+
+      const mapM = part.match(re(`^map\\s+(${ID})\\s+in\\s+(${ID})\\s+call\\s+(${PORT_ID})(?:@([\\d.]+))?`, 'i'))
+      if (mapM) {
+        const raw = mapM[4] ? `${mapM[3]}@${mapM[4]}` : mapM[3]
+        map = { item: mapM[1], source: mapM[2], call: parsePortRef(raw) }
+        j += mapM[0].length
+        continue
+      }
+
+      const policyM = part.match(/^(timeoutMs|budgetUsd)\s+([^\s}]+)/i)
+      if (policyM) {
+        const parsed = Number(policyM[2])
+        if (Number.isFinite(parsed)) {
+          if (policyM[1].toLowerCase() === 'timeoutms') timeoutMs = Math.round(parsed)
+          else budgetUsd = parsed
+        }
+        j += policyM[0].length
+        continue
+      }
+
+      const km = part.match(/^(uses|output|out)\b/i)
+      if (!km) {
+        const nl = sb.indexOf('\n', j)
+        j = nl === -1 ? sb.length : nl + 1
+        continue
+      }
+      const k = km[1].toLowerCase()
+      j += km[0].length
+      while (j < sb.length && /\s/.test(sb[j])) j++
+      if (sb[j] !== '{') return `Expected '{' after ${k} in step ${id}`
+      const inner = extractBlock(sb, j)
+      if (!inner) return `Unclosed ${k} in step ${id}`
+      if (k === 'uses') uses = parseUsesList(inner.body)
+      else outputs = parseStepOutputs(inner.body)
+      j = inner.end
+    }
+    i = blk.end
+  } else {
+    const restLine = body.slice(i).split('\n')[0] ?? ''
+    const callRef = parseCallRef(restLine.trim())
+    if (callRef) {
+      call = callRef
+      i += restLine.length
+    } else {
+      const usesM = restLine.match(/^\s*uses\s+([^-{\n]+?)(?:\s*->\s*(.+))?$/)
+      if (usesM) {
+        uses = parseUsesList(usesM[1])
+        if (usesM[2]) {
+          for (const part of usesM[2].split(',')) {
+            const om = part.trim().match(re(`^(${ID})\\s*:\\s*(${ID})$`))
+            if (om) outputs.push({ name: om[1], type: om[2] })
+          }
+        }
+        i += restLine.length
+      } else if (body[i] === '\n') i++
+    }
+  }
+
+  const step: StepAst = {
+    id,
+    label,
+    uses,
+    outputs,
+    ...(call ? { call } : {}),
+    ...(command ? { command } : {}),
+    ...(map ? { map } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+  }
+  return { step, next: i }
 }
 
 function parseDurationMs(raw: string): number | null {
@@ -954,7 +1268,7 @@ export function parse(source: string): ParseResult {
   const languageM = cleaned.match(/^\s*dsl\s+version\s+(?:"([^"]*)"|'([^']*)')/im)
   if (languageM) {
     const requested = (languageM[1] ?? languageM[2] ?? '').trim().replace(/^v(?=\d)/i, '')
-    if (requested === '0.3' || requested === '0.4') {
+    if (requested === '0.3' || requested === '0.4' || requested === '0.5') {
       ast.languageVersion = requested
     } else {
       errors.push({ message: `Unsupported DSL language version: ${requested}` })

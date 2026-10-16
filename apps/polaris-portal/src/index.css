@@ -1612,6 +1612,18 @@
   font-size: .8rem;
 }
 
+/* DSL v2 structured group badge (PRD 3.13.5): parallel branch / choice path /
+ * iteration / subflow. */
+.timeline-group {
+  margin-left: .5rem;
+  padding: .05rem .4rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: .65rem;
+  white-space: nowrap;
+}
+
 .timeline-item p,
 .timeline-call {
   margin: .25rem 0 0;
@@ -2268,6 +2280,43 @@
   fill: #eff6ff;
   stroke: #2563eb;
   stroke-width: 1.8;
+}
+/* DSL v2 structured construct nodes (PRD 3.13.5). */
+.workflow-graph-node-parallel rect {
+  fill: #f5f3ff;
+  stroke: #7c3aed;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-choice rect {
+  fill: #fff7ed;
+  stroke: #ea580c;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-forEach rect {
+  fill: #ecfeff;
+  stroke: #0891b2;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-while rect {
+  fill: #fef2f2;
+  stroke: #dc2626;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-subflow rect {
+  fill: #f0fdf4;
+  stroke: #16a34a;
+  stroke-width: 1.8;
+}
+.workflow-graph-node-branch rect {
+  stroke-dasharray: 5 3;
+}
+.workflow-graph-edge-when {
+  fill: #b45309;
+  font-size: 11px;
+}
+.workflow-graph-node-when {
+  fill: #b45309;
+  font-size: 11px;
 }
 .workflow-graph-node-label {
   fill: #0f172a;

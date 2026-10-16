@@ -43,6 +43,21 @@ export interface StepLog {
   call?: string
   /** 是否走了 Host.invoke */
   ffi?: boolean
+  /** DSL v2 structured grouping (parallel branch / choice direction / iteration / subflow) */
+  group?: StepGroupLog
+}
+
+/** Structured construct execution group (PRD 3.13.5: the timeline renders branches, choice paths, iterations). */
+export interface StepGroupLog {
+  kind: 'parallel' | 'choice' | 'forEach' | 'while' | 'subflow'
+  /** Construct instance id (e.g. parallel-1). */
+  id: string
+  /** Parallel branch id / choice path (when-N | else). */
+  branch?: string
+  /** The choice path's predicate text (for timeline rendering). */
+  when?: string
+  /** forEach/while iteration number (1-based). */
+  iteration?: number
 }
 
 export interface RunResult {
@@ -295,6 +310,14 @@ function mapItems(value: CtxValue): unknown[] | null {
     return null
   }
   return null
+}
+
+/** Resolve a list artifact from a ctx value: host collection resolution first, inline JSON fallback (map/forEach share this). */
+export function resolveListSource(
+  host: StepExecOptions['host'] | undefined,
+  value: CtxValue,
+): unknown[] | null {
+  return host?.resolveCollection?.(value) ?? mapItems(value)
 }
 
 function mapFailureLog(step: StepSpec, used: Record<string, CtxValue>, detail: string): StepLog {

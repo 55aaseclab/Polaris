@@ -1,0 +1,50 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.a version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+port probe.b version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// positive: parallel fork-join — both branches join before the summary step
+flow ParallelRun title "Parallel run" create {
+  input { value: String required }
+  steps {
+    parallel {
+      branch left {
+        runA "Run A" {
+          uses { value }
+          call probe.a
+          command "run"
+          output { leftResult: String }
+        }
+      }
+      branch right {
+        runB "Run B" {
+          uses { value }
+          call probe.b
+          command "run"
+          output { rightResult: String }
+        }
+      }
+    }
+    summary "Summarize" {
+      uses { leftResult, rightResult }
+      output { summary: String }
+    }
+  }
+  output {
+    leftResult: String from leftResult
+    rightResult: String from rightResult
+  }
+  ui { layout form primary "Run" }
+}

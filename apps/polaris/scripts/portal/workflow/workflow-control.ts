@@ -271,6 +271,7 @@ function projectionForRun(
     input: step.input,
     output: step.output,
     outputFields: step.outputFields,
+    ...(step.group ? { group: step.group } : {}),
     createdAt: step.createdAt,
     completedAt: step.completedAt,
   }));
@@ -407,6 +408,9 @@ class WorkflowRpcHost implements AsyncFfiHost {
   private readonly ports: PortAst[];
   private readonly toolDispatcher?: WorkflowToolDispatcher;
   private callSequence = 0;
+  /** PRD 3.13.5: parallel branches share the run-level step-cost cumulative,
+   * so step budgetUsd stops loss across concurrently executing branches. */
+  private stepBudgetSpentUsd = 0;
 
   constructor(
     private readonly run: WorkflowRunRecord,
@@ -782,7 +786,8 @@ class WorkflowRpcHost implements AsyncFfiHost {
   /** PRD 3.10 step policy loop around the dispatcher path: each attempt gets
    * its own requestId (hence its own receipt); timeout/budget/exhaustion are
    * recorded as step failure, never thrown. Verdicts carry stable error codes
-   * that the Portal localizes; the step detail stays neutral. */
+   * that the Portal localizes; the step detail stays neutral. PRD 3.13.5:
+   * the cost cumulative is host-level, shared across concurrent branches. */
   private async invokeDispatcherWithStepPolicy(
     req: FfiInvokeRequest,
     port: PortAst,
@@ -790,7 +795,6 @@ class WorkflowRpcHost implements AsyncFfiHost {
     const dispatcher = this.toolDispatcher!;
     const policy = readStepPolicy(this.options.environment);
     const annotate = policy.maxAttempts > 1;
-    let totalCostUsd = 0;
     let last: FfiInvokeResult | undefined;
     let lastOutcome: Awaited<ReturnType<typeof this.attemptDispatcherOnce>> | undefined;
     for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
@@ -808,8 +812,9 @@ class WorkflowRpcHost implements AsyncFfiHost {
       lastOutcome = outcome;
       const costUsd = outcome.result.output.costUsd;
       if (typeof costUsd === "number" && Number.isFinite(costUsd)) {
-        totalCostUsd += costUsd;
+        this.stepBudgetSpentUsd += costUsd;
       }
+      const totalCostUsd = this.stepBudgetSpentUsd;
       const budgetUsd = policy.budgetUsd;
       const budgetExceeded = budgetUsd !== undefined && totalCostUsd > budgetUsd;
       const exhausted = !budgetExceeded && annotate && attempt >= policy.maxAttempts;
@@ -1872,6 +1877,7 @@ export class WorkflowControlService {
         input: step.used ?? {},
         output: step.produced ?? {},
         outputFields: Object.keys(step.produced ?? {}),
+        ...(step.group ? { group: step.group } : {}),
         createdAt: completedAt,
         completedAt,
       });

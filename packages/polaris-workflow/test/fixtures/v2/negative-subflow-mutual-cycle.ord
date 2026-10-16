@@ -1,0 +1,32 @@
+dsl version "0.5"
+domain StructuredPack version "0.1.0"
+
+port probe.a version "1.0.0" {
+  in { value: String }
+  out { result: String }
+  effect ffi
+  binding { tool "synthetic.tool" }
+}
+
+// negative: subflow mutual cycle — A → B → A (validator must reject)
+flow PingFlow title "Ping" create {
+  input { value: String required }
+  steps {
+    subflow PongFlow { input { value = value } }
+  }
+  output {
+    result: String from result
+  }
+  ui { layout form primary "Run" }
+}
+
+flow PongFlow title "Pong" create {
+  input { value: String required }
+  steps {
+    subflow PingFlow { input { value = value } }
+  }
+  output {
+    result: String from result
+  }
+  ui { layout form primary "Run" }
+}
