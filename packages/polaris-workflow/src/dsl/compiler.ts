@@ -77,6 +77,9 @@ export interface ProgramFlowMeta {
   transitionTo?: string
   emit?: string
   pipeline: string[]
+  /** PRD 3.10.9 flow-level budget declaration; the host enforces flow > env. */
+  budgetUsd?: number
+  timeoutMs?: number
 }
 
 export interface CompiledFlowHandler {
@@ -185,6 +188,8 @@ export function toMeta(flow: FlowAst): ProgramFlowMeta {
       flow.transition ? `${flow.transition.field} → ${flow.transition.to}` : '状态: 不变',
       flow.emit ? `事件: ${flow.emit}` : '事件: 无',
     ],
+    ...(flow.budgetUsd !== undefined ? { budgetUsd: flow.budgetUsd } : {}),
+    ...(flow.timeoutMs !== undefined ? { timeoutMs: flow.timeoutMs } : {}),
   }
 }
 

@@ -65,6 +65,9 @@ function stepSpec(step: StepAst): StepSpec {
           callVersion: step.map.call.version,
         }
       : undefined,
+    maxAttempts: step.maxAttempts,
+    timeoutMs: step.timeoutMs,
+    budgetUsd: step.budgetUsd,
   }
 }
 

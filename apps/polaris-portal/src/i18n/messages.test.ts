@@ -70,6 +70,22 @@ test("step-policy verdict codes interpolate their diagnostic values", () => {
     localizedWorkflowError({ code: "step-attempt-timeout", message: "fallback" }, en, { timeout: 100 }),
     "Step attempt timed out (100ms)",
   );
+  assert.equal(
+    localizedWorkflowError({ code: "run-budget-exceeded", message: "fallback" }, zh, { total: "$0.8", budget: "$0.5" }),
+    "运行级预算超限：累计成本 $0.8 超过预算 $0.5",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "run-budget-exceeded", message: "fallback" }, en, { total: "$0.8", budget: "$0.5" }),
+    "Run budget exceeded: cumulative cost $0.8 over budget $0.5",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "run-timeout-exceeded", message: "fallback" }, zh, { elapsed: 400, timeout: 200 }),
+    "运行级超时：运行时长 400ms 超过上限 200ms",
+  );
+  assert.equal(
+    localizedWorkflowError({ code: "run-timeout-exceeded", message: "fallback" }, en, { elapsed: 400, timeout: 200 }),
+    "Run timeout exceeded: run duration 400ms over the 200ms cap",
+  );
 });
 
 test("all stable workflow error codes have centralized translations", () => {
@@ -91,7 +107,9 @@ test("all stable workflow error codes have centralized translations", () => {
     "pack-pin-unavailable",
     "release-id-required",
     "retry-not-available",
+    "run-budget-exceeded",
     "run-not-found",
+    "run-timeout-exceeded",
     "step-attempt-timeout",
     "step-attempts-exhausted",
     "step-budget-exceeded",

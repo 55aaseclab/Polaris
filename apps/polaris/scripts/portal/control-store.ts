@@ -24,6 +24,7 @@ export interface DurableJob {
   cancelRequested: boolean;
   errorCode?: string;
   errorMessage?: string;
+  errorValues?: Record<string, string | number>;
   result?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -201,6 +202,7 @@ export interface WorkflowRunRecord {
   output: Record<string, unknown>;
   errorCode?: string;
   errorMessage?: string;
+  errorValues?: Record<string, string | number>;
   workerOwner?: string;
   workerExpiresAt?: number;
   createdAt: string;
@@ -442,6 +444,7 @@ function rowToJob(row: SqlRow): DurableJob {
     cancelRequested: Number(row.cancel_requested ?? 0) === 1,
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
+    errorValues: parseErrorValues(row.error_values_json),
     result: parseOptionalPayload(row.result_json),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -817,6 +820,9 @@ function ensureWorkflowRunColumns(db: DatabaseSync): void {
   if (columns.length > 0 && !columns.some((column) => String(column.name) === "available_at")) {
     db.exec("ALTER TABLE workflow_runs ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0");
   }
+  if (columns.length > 0 && !columns.some((column) => String(column.name) === "error_values_json")) {
+    db.exec("ALTER TABLE workflow_runs ADD COLUMN error_values_json TEXT");
+  }
 }
 
 function ensureWorkflowArtifactColumns(db: DatabaseSync): void {
@@ -929,6 +935,7 @@ export class PolarisControlStore {
         cancel_requested INTEGER NOT NULL DEFAULT 0,
         error_code TEXT,
         error_message TEXT,
+        error_values_json TEXT,
         result_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -1543,6 +1550,7 @@ export class PolarisControlStore {
     output?: Record<string, unknown>;
     errorCode?: string | null;
     errorMessage?: string | null;
+    errorValues?: Record<string, string | number> | null;
   }): WorkflowRunRecord {
     const tenant = input.tenantId.trim();
     const runId = input.runId.trim();
@@ -1561,7 +1569,7 @@ export class PolarisControlStore {
       const result = this.db.prepare(`
         UPDATE workflow_runs
         SET status = ?, progress = ?, output_json = COALESCE(?, output_json),
-            error_code = ?, error_message = ?,
+            error_code = ?, error_message = ?, error_values_json = ?,
             worker_owner = CASE WHEN ? THEN NULL ELSE worker_owner END,
             worker_expires_at = CASE WHEN ? THEN NULL ELSE worker_expires_at END,
             updated_at = ?, completed_at = CASE WHEN ? THEN ? ELSE completed_at END
@@ -1572,6 +1580,7 @@ export class PolarisControlStore {
         input.output === undefined ? null : boundedJson(input.output),
         input.errorCode?.trim() || null,
         input.errorMessage?.trim() || null,
+        input.errorValues ? boundedJson(input.errorValues) : null,
         terminal || input.status === "waiting" ? 1 : 0,
         terminal || input.status === "waiting" ? 1 : 0,
         now,

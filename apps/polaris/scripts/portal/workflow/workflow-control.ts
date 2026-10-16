@@ -322,7 +322,13 @@ function projectionForRun(
     receipts,
     artifacts,
     ...(run.errorCode || run.errorMessage
-      ? { error: { code: run.errorCode ?? "workflow-failed", message: run.errorMessage ?? "workflow failed" } }
+      ? {
+          error: {
+            code: run.errorCode ?? "workflow-failed",
+            message: run.errorMessage ?? "workflow failed",
+            ...(run.errorValues ? { values: run.errorValues } : {}),
+          },
+        }
       : {}),
   };
 }
@@ -343,6 +349,47 @@ const STEP_BUDGET_EXCEEDED_CODE = "step-budget-exceeded";
 const STEP_ATTEMPTS_EXHAUSTED_CODE = "step-attempts-exhausted";
 const STEP_ATTEMPT_TIMEOUT_CODE = "step-attempt-timeout";
 
+const RUN_POLICY_BUDGET_USD_ENV = "POLARIS_RUN_BUDGET_USD";
+const RUN_POLICY_TIMEOUT_MS_ENV = "POLARIS_RUN_TIMEOUT_MS";
+/** PRD 3.10.9 run-level verdict codes; the Portal i18n map localizes them. */
+const RUN_BUDGET_EXCEEDED_CODE = "run-budget-exceeded";
+const RUN_TIMEOUT_EXCEEDED_CODE = "run-timeout-exceeded";
+
+/** Run-wide budget/timeout caps; an omitted cap means enforcement is off. */
+type WorkflowRunPolicy = {
+  budgetUsd?: number;
+  timeoutMs?: number;
+};
+
+/** PRD 3.10.9 run-level caps (env-configurable); a flow-level declaration
+ * (PRD 3.10.9) overrides the env fallback for that flow's steps. */
+function readRunPolicy(
+  environment: Record<string, string | undefined>,
+  flow?: { budgetUsd?: number; timeoutMs?: number },
+): WorkflowRunPolicy {
+  const budgetUsd = readOptionalNumber(flow?.budgetUsd ?? environment[RUN_POLICY_BUDGET_USD_ENV], 0);
+  const timeoutMs = readOptionalNumber(flow?.timeoutMs ?? environment[RUN_POLICY_TIMEOUT_MS_ENV], 1);
+  return {
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs: Math.floor(timeoutMs) } : {}),
+  };
+}
+
+/** Mechanical step-detail text for a run-level stop (code + values, no prose). */
+function runStopDetail(stop: WorkflowStepVerdict): string {
+  const values = stop.values ?? {};
+  if (stop.code === RUN_TIMEOUT_EXCEEDED_CODE) {
+    return `${stop.code} (${values.elapsed ?? 0}ms > ${values.timeout ?? 0}ms)`;
+  }
+  return `${stop.code} (${values.total ?? "$0"} > ${values.budget ?? "$0"})`;
+}
+
+/** Backend fallback copy for run-level stop-loss; the Portal localizes by code. */
+function runStopFailureMessage(stop: WorkflowStepVerdict): string {
+  const parts = Object.entries(stop.values ?? {}).map(([key, value]) => `${key}=${String(value)}`);
+  return parts.length ? `${stop.code} (${parts.join(", ")})` : stop.code;
+}
+
 function formatUsd(value: number): string {
   return String(Math.round(value * 1e6) / 1e6);
 }
@@ -354,7 +401,10 @@ function readOptionalNumber(value: unknown, minimum: number): number | undefined
   return parsed;
 }
 
-function readStepPolicy(environment: Record<string, string | undefined>): WorkflowStepPolicy {
+function readStepPolicy(
+  environment: Record<string, string | undefined>,
+  step?: { maxAttempts?: number; timeoutMs?: number; budgetUsd?: number },
+): WorkflowStepPolicy {
   let raw: Record<string, unknown> = {};
   const json = environment[STEP_POLICY_ENV]?.trim();
   if (json) {
@@ -367,16 +417,18 @@ function readStepPolicy(environment: Record<string, string | undefined>): Workfl
       // Invalid JSON falls back to the individual env vars and the default.
     }
   }
+  // PRD 3.10.9: the step-level declaration (request meta from the parsed
+  // .ord step) wins over the env fallbacks.
   const maxAttempts = readOptionalNumber(
-    raw.maxAttempts ?? environment[STEP_POLICY_MAX_ATTEMPTS_ENV],
+    step?.maxAttempts ?? raw.maxAttempts ?? environment[STEP_POLICY_MAX_ATTEMPTS_ENV],
     1,
   ) ?? 1;
   const timeoutMs = readOptionalNumber(
-    raw.timeoutMs ?? environment[STEP_POLICY_TIMEOUT_MS_ENV],
+    step?.timeoutMs ?? raw.timeoutMs ?? environment[STEP_POLICY_TIMEOUT_MS_ENV],
     1,
   );
   const budgetUsd = readOptionalNumber(
-    raw.budgetUsd ?? environment[STEP_POLICY_BUDGET_USD_ENV],
+    step?.budgetUsd ?? raw.budgetUsd ?? environment[STEP_POLICY_BUDGET_USD_ENV],
     0,
   );
   return {
@@ -411,6 +463,10 @@ class WorkflowRpcHost implements AsyncFfiHost {
   /** PRD 3.13.5: parallel branches share the run-level step-cost cumulative,
    * so step budgetUsd stops loss across concurrently executing branches. */
   private stepBudgetSpentUsd = 0;
+  /** PRD 3.10.9: run-wide stop verdict once a run-level cap trips; the run
+   * executor maps it onto the run's stable error code. */
+  private runStop: WorkflowStepVerdict | null = null;
+  private readonly runStartedAtMs: number;
 
   constructor(
     private readonly run: WorkflowRunRecord,
@@ -423,6 +479,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
       liveMetadataReader?: WorkflowLiveVaultArtifactMetadataReader;
     },
   ) {
+    this.runStartedAtMs = options.now().getTime();
     this.ports = programPortsAsAst(program);
     if (run.policy.mode === "host") {
       this.toolDispatcher = new WorkflowToolDispatcher(run, this.ports, {
@@ -438,6 +495,71 @@ class WorkflowRpcHost implements AsyncFfiHost {
 
   materializeCollection(items: unknown[]): string {
     return this.toolDispatcher?.materializeCollection(items) ?? JSON.stringify(items);
+  }
+
+  /** PRD 3.10.9: the run-wide stop verdict (stable code + values) once the
+   * run budget or timeout cap trips; null while no cap is configured or both
+   * caps are untripped. The run executor reads this after the flow aborts. */
+  runStopVerdict(): WorkflowStepVerdict | null {
+    return this.runStop;
+  }
+
+  /** PRD 3.10.9: the compiled pack's flow-level budget declaration for the
+   * flow that owns the dispatching step (host-initialization channel: the
+   * caps ride the program's flow meta, not the runtime meta pipeline). */
+  private flowRunCaps(flowName?: string): { budgetUsd?: number; timeoutMs?: number } {
+    const flow = this.program.flows.find(
+      (candidate) => candidate.meta.name === (flowName ?? this.run.flowId),
+    );
+    if (!flow) return {};
+    return {
+      ...(flow.meta.budgetUsd !== undefined ? { budgetUsd: flow.meta.budgetUsd } : {}),
+      ...(flow.meta.timeoutMs !== undefined ? { timeoutMs: flow.meta.timeoutMs } : {}),
+    };
+  }
+
+  /** PRD 3.10.9: run-wide caps enforced at dispatcher step boundaries across
+   * all steps and parallel branches; the budget shares the host-level
+   * step-cost cumulative and the timeout reads the run's wall clock. */
+  private evaluateRunStop(policy: WorkflowRunPolicy): WorkflowStepVerdict | null {
+    if (this.runStop) return this.runStop;
+    if (policy.budgetUsd !== undefined && this.stepBudgetSpentUsd > policy.budgetUsd) {
+      this.runStop = {
+        code: RUN_BUDGET_EXCEEDED_CODE,
+        values: {
+          total: `$${formatUsd(this.stepBudgetSpentUsd)}`,
+          budget: `$${formatUsd(policy.budgetUsd)}`,
+        },
+      };
+      return this.runStop;
+    }
+    if (policy.timeoutMs !== undefined) {
+      const elapsedMs = Math.max(0, this.options.now().getTime() - this.runStartedAtMs);
+      if (elapsedMs > policy.timeoutMs) {
+        this.runStop = {
+          code: RUN_TIMEOUT_EXCEEDED_CODE,
+          values: { elapsed: elapsedMs, timeout: policy.timeoutMs },
+        };
+        return this.runStop;
+      }
+    }
+    return null;
+  }
+
+  /** PRD 3.10.9: stop-loss result for a run-wide cap tripped before the
+   * attempt: no dispatcher work starts, the failure receipt carries the
+   * run-stop code, and the failed step aborts the whole run (fail-closed). */
+  private runStopResult(req: FfiInvokeRequest, port: PortAst, stop: WorkflowStepVerdict): FfiInvokeResult {
+    const request = this.createRpcRequest(port, req, "mock");
+    const response = this.dispatcherRpcResponse(request, { ok: false, output: {} }, stop);
+    const logged = this.logRpcInvocation({
+      req,
+      request,
+      response,
+      evidenceRecorded: false,
+      ...(stop.values ? { errorValues: stop.values } : {}),
+    });
+    return { ...logged, error: runStopDetail(stop) };
   }
 
   private policyMode(): "mock" | "live" {
@@ -787,17 +909,27 @@ class WorkflowRpcHost implements AsyncFfiHost {
    * its own requestId (hence its own receipt); timeout/budget/exhaustion are
    * recorded as step failure, never thrown. Verdicts carry stable error codes
    * that the Portal localizes; the step detail stays neutral. PRD 3.13.5:
-   * the cost cumulative is host-level, shared across concurrent branches. */
+   * the cost cumulative is host-level, shared across concurrent branches.
+   * PRD 3.10.9: run-wide budget/timeout caps are checked at the loop head and
+   * after each failed attempt; a tripped cap stops loss for the whole run. */
   private async invokeDispatcherWithStepPolicy(
     req: FfiInvokeRequest,
     port: PortAst,
   ): Promise<FfiInvokeResult> {
     const dispatcher = this.toolDispatcher!;
-    const policy = readStepPolicy(this.options.environment);
+    const policy = readStepPolicy(this.options.environment, req.meta);
+    // PRD 3.10.9: the owning flow's declaration overrides the env fallback.
+    const runPolicy = readRunPolicy(this.options.environment, this.flowRunCaps(req.meta?.flowName));
     const annotate = policy.maxAttempts > 1;
     let last: FfiInvokeResult | undefined;
     let lastOutcome: Awaited<ReturnType<typeof this.attemptDispatcherOnce>> | undefined;
     for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+      // PRD 3.10.9: a cap already tripped by an earlier step or branch stops
+      // loss here — no further attempt is dispatched.
+      const runStop = this.evaluateRunStop(runPolicy);
+      if (runStop) {
+        return this.runStopResult(req, port, runStop);
+      }
       const request = this.createRpcRequest(port, req, "mock");
       const outcome = await this.attemptDispatcherOnce(dispatcher, req, port, policy.timeoutMs);
       if (outcome.result.ok) {
@@ -814,14 +946,17 @@ class WorkflowRpcHost implements AsyncFfiHost {
       if (typeof costUsd === "number" && Number.isFinite(costUsd)) {
         this.stepBudgetSpentUsd += costUsd;
       }
+      // PRD 3.10.9: a cap crossed by this attempt takes precedence over the
+      // step-level verdicts so the run stops with the run-stop code.
+      const runStopAfter = this.evaluateRunStop(runPolicy);
       const totalCostUsd = this.stepBudgetSpentUsd;
       const budgetUsd = policy.budgetUsd;
-      const budgetExceeded = budgetUsd !== undefined && totalCostUsd > budgetUsd;
-      const exhausted = !budgetExceeded && annotate && attempt >= policy.maxAttempts;
+      const budgetExceeded = runStopAfter === null && budgetUsd !== undefined && totalCostUsd > budgetUsd;
+      const exhausted = runStopAfter === null && !budgetExceeded && annotate && attempt >= policy.maxAttempts;
       // Receipt verdicts carry code + values only (no prose message);
       // the Portal i18n map localizes by code + values.
-      const finalVerdict: WorkflowStepVerdict | undefined =
-        budgetExceeded && budgetUsd !== undefined
+      const finalVerdict: WorkflowStepVerdict | undefined = runStopAfter
+        ?? (budgetExceeded && budgetUsd !== undefined
           ? {
               code: STEP_BUDGET_EXCEEDED_CODE,
               values: {
@@ -834,7 +969,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
                 code: STEP_ATTEMPTS_EXHAUSTED_CODE,
                 values: { count: policy.maxAttempts },
               }
-            : undefined;
+            : undefined);
       const timeoutMs = policy.timeoutMs;
       const verdict: WorkflowStepVerdict | undefined = finalVerdict
         ?? (outcome.timedOut && timeoutMs !== undefined
@@ -853,9 +988,11 @@ class WorkflowRpcHost implements AsyncFfiHost {
         ...(verdict?.values ? { errorValues: verdict.values } : {}),
       });
       if (finalVerdict) {
-        const error = budgetExceeded && budgetUsd !== undefined
-          ? `${STEP_BUDGET_EXCEEDED_CODE} (${formatUsd(totalCostUsd)} > ${formatUsd(budgetUsd)})`
-          : `${STEP_ATTEMPTS_EXHAUSTED_CODE} (${policy.maxAttempts}/${policy.maxAttempts}): ${outcome.result.error ?? "unknown"}`;
+        const error = runStopAfter
+          ? runStopDetail(runStopAfter)
+          : budgetExceeded && budgetUsd !== undefined
+            ? `${STEP_BUDGET_EXCEEDED_CODE} (${formatUsd(totalCostUsd)} > ${formatUsd(budgetUsd)})`
+            : `${STEP_ATTEMPTS_EXHAUSTED_CODE} (${policy.maxAttempts}/${policy.maxAttempts}): ${outcome.result.error ?? "unknown"}`;
         return { ...last, error };
       }
     }
@@ -1908,6 +2045,13 @@ export class WorkflowControlService {
       });
     }
     if (!result.ok) {
+      // PRD 3.10.9: a tripped run-wide cap surfaces as the run's stable error
+      // code instead of the generic execution failure.
+      const stop = host.runStopVerdict();
+      if (stop) {
+        this.fail(run, stop.code, runStopFailureMessage(stop), stop.values ?? undefined);
+        return;
+      }
       this.fail(run, "workflow-execution-failed", result.message);
       return;
     }
@@ -1964,7 +2108,7 @@ export class WorkflowControlService {
     });
   }
 
-  private fail(run: WorkflowRunRecord, code: string, message: string): void {
+  private fail(run: WorkflowRunRecord, code: string, message: string, values?: Record<string, string | number>): void {
     try {
       const current = this.store.getWorkflowRun(run.tenantId, run.id);
       if (!current || current.status === "cancelled") return;
@@ -1976,6 +2120,7 @@ export class WorkflowControlService {
         workerId: this.workerId,
         errorCode: code,
         errorMessage: message,
+        ...(values ? { errorValues: values } : {}),
         event: {
           kind: "failed",
           title: "工作流执行失败",

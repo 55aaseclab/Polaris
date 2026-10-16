@@ -298,3 +298,98 @@ test("compiled programs can await async FFI hosts without changing sync executio
   assert.equal(asyncHost.syncCalls, 0);
   assert.equal(asyncHost.asyncCalls, 1);
 });
+
+const policyStepSource = (maxAttempts: string) => `
+domain PolicyPack version "1.0.0"
+port PolicyPort version "1.0.0" {
+  out {
+    status: String
+  }
+  effect write
+}
+flow PolicyRun title "Policy run" create {
+  needs { PolicyPort }
+  steps {
+    go "Go" {
+      call PolicyPort
+      timeoutMs 1000
+      budgetUsd 0.5
+      maxAttempts ${maxAttempts}
+      output {
+        status: String
+      }
+    }
+  }
+  output {
+    status: String from status
+  }
+  ui { layout form primary "Run" }
+}
+`;
+
+test("step-level maxAttempts parses into the step policy (PRD 3.10.9)", () => {
+  const pipeline = runPipeline(policyStepSource("5"));
+  assert.equal(pipeline.ok, true);
+  const step = pipeline.ast?.flows[0]?.steps[0];
+  assert.equal(step?.maxAttempts, 5);
+  assert.equal(step?.timeoutMs, 1000);
+  assert.equal(step?.budgetUsd, 0.5);
+});
+
+test("step-level maxAttempts sanity checks reject non-positive and non-integer values", () => {
+  const zero = runPipeline(policyStepSource("0"));
+  assert.equal(zero.ok, false);
+  assert.ok(zero.issues.some((issue) => issue.code === "E_STEP_MAX_ATTEMPTS"));
+
+  const fractional = runPipeline(policyStepSource("2.5"));
+  assert.equal(fractional.ok, false);
+  assert.ok(fractional.issues.some((issue) => issue.code === "E_STEP_MAX_ATTEMPTS"));
+});
+
+const flowCapSource = (header: string) => `
+domain FlowCapPack version "1.0.0"
+port FlowCapPort version "1.0.0" {
+  out {
+    status: String
+  }
+  effect write
+}
+flow FlowCapRun title "Budget cap run" ${header} create {
+  needs { FlowCapPort }
+  steps {
+    go "Go" {
+      call FlowCapPort
+      output {
+        status: String
+      }
+    }
+  }
+  output {
+    status: String from status
+  }
+  ui { layout form primary "Run" }
+}
+`;
+
+test("flow-level budget declarations parse into the flow header (PRD 3.10.9)", () => {
+  const pipeline = runPipeline(flowCapSource("budgetUsd 5.0 timeoutMs 2700000"));
+  assert.equal(pipeline.ok, true);
+  const flow = pipeline.ast?.flows[0];
+  assert.equal(flow?.budgetUsd, 5.0);
+  assert.equal(flow?.timeoutMs, 2700000);
+
+  const bare = runPipeline(flowCapSource(""));
+  assert.equal(bare.ok, true);
+  assert.equal(bare.ast?.flows[0]?.budgetUsd, undefined);
+  assert.equal(bare.ast?.flows[0]?.timeoutMs, undefined);
+});
+
+test("flow-level budget sanity checks reject negative budget and non-positive timeout", () => {
+  const negativeBudget = runPipeline(flowCapSource("budgetUsd -1"));
+  assert.equal(negativeBudget.ok, false);
+  assert.ok(negativeBudget.issues.some((issue) => issue.code === "E_FLOW_BUDGET_USD"));
+
+  const zeroTimeout = runPipeline(flowCapSource("timeoutMs 0"));
+  assert.equal(zeroTimeout.ok, false);
+  assert.ok(zeroTimeout.issues.some((issue) => issue.code === "E_FLOW_TIMEOUT_MS"));
+});

@@ -160,6 +160,14 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
   const on = onM?.[1]
   let description: string | undefined
   let create = /\bcreate\b/i.test(header)
+  // PRD 3.10.9: flow-level budget declaration as header parts (same style as
+  // title/create); non-finite values are skipped like the step-level parser.
+  const budgetM = header.match(/\bbudgetUsd\s+(\S+)/i)
+  const budgetUsd = budgetM && Number.isFinite(Number(budgetM[1])) ? Number(budgetM[1]) : undefined
+  const flowTimeoutM = header.match(/\btimeoutMs\s+(\S+)/i)
+  const timeoutMs = flowTimeoutM && Number.isFinite(Number(flowTimeoutM[1]))
+    ? Math.round(Number(flowTimeoutM[1]))
+    : undefined
   const inputs: InputFieldAst[] = []
   const outputs: FlowOutputAst[] = []
   const needs: PortRef[] = []
@@ -271,6 +279,8 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
     description,
     on,
     create,
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     needs,
     inputs,
     outputs,
@@ -787,6 +797,7 @@ function parsePlainStep(body: string, i: number): { step: StepAst; next: number 
   let map: StepAst['map'] | undefined
   let timeoutMs: number | undefined
   let budgetUsd: number | undefined
+  let maxAttempts: number | undefined
 
   // block form
   if (body[i] === '{') {
@@ -822,12 +833,14 @@ function parsePlainStep(body: string, i: number): { step: StepAst; next: number 
         continue
       }
 
-      const policyM = part.match(/^(timeoutMs|budgetUsd)\s+([^\s}]+)/i)
+      const policyM = part.match(/^(timeoutMs|budgetUsd|maxAttempts)\s+([^\s}]+)/i)
       if (policyM) {
         const parsed = Number(policyM[2])
         if (Number.isFinite(parsed)) {
-          if (policyM[1].toLowerCase() === 'timeoutms') timeoutMs = Math.round(parsed)
-          else budgetUsd = parsed
+          const key = policyM[1].toLowerCase()
+          if (key === 'timeoutms') timeoutMs = Math.round(parsed)
+          else if (key === 'budgetusd') budgetUsd = parsed
+          else maxAttempts = parsed
         }
         j += policyM[0].length
         continue
@@ -881,6 +894,7 @@ function parsePlainStep(body: string, i: number): { step: StepAst; next: number 
     ...(map ? { map } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
   }
   return { step, next: i }
 }

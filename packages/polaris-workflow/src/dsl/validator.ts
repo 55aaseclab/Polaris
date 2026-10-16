@@ -143,6 +143,14 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     if (flow.on && !entityNames.has(flow.on)) {
       push(issues, 'error', 'E_FLOW_ON', `flow ${flow.name} on unknown entity ${flow.on}`)
     }
+    // PRD 3.10.9: flow-level budget declarations must be sane; the host
+    // enforces flow > env with these as the run-level caps.
+    if (flow.budgetUsd !== undefined && !(flow.budgetUsd >= 0)) {
+      push(issues, 'error', 'E_FLOW_BUDGET_USD', `flow ${flow.name} budgetUsd 必须为 >= 0`, `flow.${flow.name}`)
+    }
+    if (flow.timeoutMs !== undefined && !(flow.timeoutMs >= 1)) {
+      push(issues, 'error', 'E_FLOW_TIMEOUT_MS', `flow ${flow.name} timeoutMs 必须为 >= 1`, `flow.${flow.name}`)
+    }
     if (flow.require) checkRequireExpr(flow.require.expr, allStatusValues, issues, flow.name)
 
     for (const n of flow.needs ?? []) {
@@ -364,6 +372,11 @@ function findFlowByName(state: BodyWalkState, name: string): FlowAst | undefined
 function validateStepFields(step: StepAst, state: BodyWalkState): void {
   const { flow, available, guarded, called, ports, issues, toolResolver } = state
   const stepPath = `flow.${flow.name}.${step.id}`
+  // PRD 3.10.9: the step-level retry cap must be a positive integer; the
+  // runtime still floors as a defensive fallback when validation is skipped.
+  if (step.maxAttempts !== undefined && (step.maxAttempts < 1 || !Number.isInteger(step.maxAttempts))) {
+    push(issues, 'error', 'E_STEP_MAX_ATTEMPTS', `step ${step.id} maxAttempts 必须为 >= 1 的整数`, stepPath)
+  }
   if (step.map) {
     if (!available.has(step.map.source)) {
       push(issues, 'error', 'E_MAP_SOURCE', `map ${step.id} uses unknown collection ${step.map.source}`, stepPath)

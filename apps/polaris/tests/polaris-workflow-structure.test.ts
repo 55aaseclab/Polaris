@@ -118,6 +118,8 @@ const POLICY_ENV_KEYS = [
   "POLARIS_WORKFLOW_STEP_MAX_ATTEMPTS",
   "POLARIS_WORKFLOW_STEP_TIMEOUT_MS",
   "POLARIS_WORKFLOW_STEP_BUDGET_USD",
+  "POLARIS_RUN_BUDGET_USD",
+  "POLARIS_RUN_TIMEOUT_MS",
   "POLARIS_SYNTHETIC_FAIL_UNTIL",
   "POLARIS_SYNTHETIC_SLEEP_MS",
   "POLARIS_SYNTHETIC_COST_USD",
@@ -238,6 +240,32 @@ test("parallel branches share the run-level step budget (PRD 3.13.5)", { concurr
     );
     assert.equal(budgetVerdicts.length, 1);
     const values = (budgetVerdicts[0] as { errorValues?: Record<string, string | number> }).errorValues;
+    assert.equal(values?.total, "$0.8");
+    assert.equal(values?.budget, "$0.5");
+  } finally {
+    restoreEnvironment(fixture);
+  }
+});
+
+test("the run-level budget cap stops loss across parallel branches (PRD 3.10.9)", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let pack: WorkflowDomainPackProjection | undefined;
+  try {
+    pack = await installStructurePack(fixture.root);
+    process.env.POLARIS_RUN_BUDGET_USD = "0.5";
+    process.env.POLARIS_SYNTHETIC_FAIL_UNTIL = "99";
+    process.env.POLARIS_SYNTHETIC_COST_USD = "0.4";
+    const run = await runFlow(pack, "tenant-run-policy-budget", "ParallelRun", { payload: "synthetic" });
+    assert.equal(run.status, "failed");
+    // Both branch steps' cumulative cost (0.4 + 0.4 = 0.8) crosses the
+    // run-wide 0.5 cap, so the run fails with the stable run-stop code.
+    assert.equal(run.error?.code, "run-budget-exceeded");
+    assert.match(run.error?.message ?? "", /run-budget-exceeded/u);
+    const stopVerdicts = run.receipts.filter(
+      (receipt) => (receipt as { errorCode?: string }).errorCode === "run-budget-exceeded",
+    );
+    assert.ok(stopVerdicts.length >= 1);
+    const values = (stopVerdicts[0] as { errorValues?: Record<string, string | number> }).errorValues;
     assert.equal(values?.total, "$0.8");
     assert.equal(values?.budget, "$0.5");
   } finally {

@@ -223,6 +223,8 @@ export type WorkflowRunProjection = {
   error?: {
     code: string;
     message: string;
+    /** Structured values for the error code's localized copy. */
+    values?: Record<string, string | number>;
   };
 };
 

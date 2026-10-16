@@ -141,6 +141,10 @@ export interface StepSpec {
   callVersion?: string
   command?: string
   map?: { item: string; source: string; call: string; callVersion?: string }
+  /** DSL v2 step-level policy (PRD 3.10.9); the host prefers it over env. */
+  maxAttempts?: number
+  timeoutMs?: number
+  budgetUsd?: number
 }
 
 export interface StepExecOptions {
@@ -161,6 +165,9 @@ export interface StepExecOptions {
         mapItem?: string
         mapSource?: string
         mapIndex?: number
+        maxAttempts?: number
+        timeoutMs?: number
+        budgetUsd?: number
       }
     }) => {
       ok: boolean
@@ -350,7 +357,8 @@ function executeMappedSync(step: StepSpec, opts: StepExecOptions, used: Record<s
       input,
       meta: { stepId: step.id, flowName, mode, command: step.command, mapCall: step.map!.call,
         mapItem: step.map!.item, mapSource: step.map!.source, mapIndex: index,
-        outputFields: step.outputs.map((output) => output.name) },
+        outputFields: step.outputs.map((output) => output.name),
+        maxAttempts: step.maxAttempts, timeoutMs: step.timeoutMs, budgetUsd: step.budgetUsd },
     })
     if (!res.ok) return ffiFailureLog(step, input, res.error)
     results.push(res.output)
@@ -401,6 +409,9 @@ export function execStepWithIO(step: StepSpec, opts: StepExecOptions): StepLog {
         mode,
         ...(step.command ? { command: step.command } : {}),
         outputFields: step.outputs.map((output) => output.name),
+        maxAttempts: step.maxAttempts,
+        timeoutMs: step.timeoutMs,
+        budgetUsd: step.budgetUsd,
       },
     })
     if (!res.ok) return ffiFailureLog(step, used, res.error)
@@ -462,7 +473,8 @@ export async function execStepWithIOAsync(
         port: step.map.call, version: step.map.callVersion, input,
         meta: { stepId: step.id, flowName, mode, command: step.command, mapCall: step.map.call,
           mapItem: step.map.item, mapSource: step.map.source, mapIndex: index,
-          outputFields: step.outputs.map((output) => output.name) },
+          outputFields: step.outputs.map((output) => output.name),
+          maxAttempts: step.maxAttempts, timeoutMs: step.timeoutMs, budgetUsd: step.budgetUsd },
       })
       if (!res.ok) return ffiFailureLog(step, input, res.error)
       results.push(res.output)
@@ -502,6 +514,9 @@ export async function execStepWithIOAsync(
       mode,
       ...(step.command ? { command: step.command } : {}),
       outputFields: step.outputs.map((output) => output.name),
+      maxAttempts: step.maxAttempts,
+      timeoutMs: step.timeoutMs,
+      budgetUsd: step.budgetUsd,
     },
   })
   if (!res.ok) return ffiFailureLog(step, used, res.error)

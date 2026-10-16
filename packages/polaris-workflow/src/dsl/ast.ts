@@ -156,6 +156,8 @@ export interface StepAst {
   /** DSL v2 step-level policy (PRD 3.10): the platform host enforces it; the DSL only declares. */
   timeoutMs?: number
   budgetUsd?: number
+  /** DSL v2 step-level retry cap (PRD 3.10.9); the platform env fallback applies when omitted. */
+  maxAttempts?: number
 }
 
 /** DSL v2 predicate (PRD 3.13.2/3.13.3): a field reference plus a comparison operator. */
@@ -246,6 +248,10 @@ export interface FlowAst {
   description?: string
   on?: string
   create?: boolean
+  /** DSL v2 flow-level budget declaration (PRD 3.10.9): the host enforces
+   * flow > env as the run-level caps for the flow's steps. */
+  budgetUsd?: number
+  timeoutMs?: number
   /** port 能力需求（可带 @version） */
   needs: PortRef[]
   inputs: InputFieldAst[]

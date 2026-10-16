@@ -29,6 +29,9 @@ export interface FfiInvokeRequest {
     timeoutMs?: number
     costUsd?: number
     elapsedMs?: number
+    /** DSL v2 step-level policy (PRD 3.10.9); the host prefers it over env. */
+    maxAttempts?: number
+    budgetUsd?: number
     execution?: {
       class: 'pure' | 'workspace' | 'ai'
       isolation: 'disposable' | 'scoped' | 'none'
