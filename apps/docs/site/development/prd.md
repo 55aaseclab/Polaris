@@ -814,7 +814,7 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
 | cve.builder | plan | 环境搭建计划 |
 | cve.builder | setup | 沙箱内执行计划 + critic 纠错循环 |
 | cve.exploiter | exploit | 单次尝试：内部只做 dev+critic 收敛迭代；attempt 级重试（maxAttempts=5）、timeoutMs、budgetUsd 由步级策略（3.10）承担；每次重试的全新隔离环境（3.8 可选项生效时）由步级重试提供 |
-| cve.verifier | verify | weak/strong CTF verifier，按成功判据检查 |
+| cve.verifier | verify | CTF flag-retrieval verifier（Verifier Dev + Flag Checker + Verifier Critic 在工具内部；verifier 修订 ≤5 次；论文 weak/strong = 判据质量谱系，非两段流程） |
 
 #### 3.11.4 LLM 依赖与成本口径
 - 模块工具调用 LLM 经 env 注入的二进制与模型（如
