@@ -1,6 +1,6 @@
 # Polaris 2026 Q4 路线图
 
-版本号：V1.5.0
+版本号：V1.6.0
 
 | 版本   | 时间       | 修订人    | 备注                                |
 |--------|-----------|-----------|-------------------------------------|
@@ -10,10 +10,11 @@
 | V1.3.0 | 2026/10/16 | opencode | 依据 PRD V2.1.0 新增切片 D2（预算层级：run 级预算帽 + 步级 maxAttempts 语法），插队 M2 前；对账 M-D 翻绿 |
 | V1.4.0 | 2026/10/16 | opencode | 依据 PRD V2.2.0 D2 范围扩上 flow 级预算声明；对账 D2 已交付部分 |
 | V1.5.0 | 2026/10/17 | opencode | 依据 PRD V2.3.0 新增切片 D3（LLM 调用运行时 CLH 基础设施），插队 M2 前；M2 改为薄工具跑在 CLH 上 |
+| V1.6.0 | 2026/10/17 | opencode | 依据 PRD V2.4.0 新增切片 D4（pack 自含：pack-local tools + 完整安装），M2 后执行；M2/2b 对账翻绿 |
 
 周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
 负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V2.3.0（唯一 ground truth）。
+依据：[Polaris PRD](./prd) V2.4.0（唯一 ground truth）。
 
 ---
 
@@ -27,6 +28,7 @@
 | O2 | 领域接入成本下降（降低学习成本，北极星 1） | KR1: 四模块工具注册后 pack list 无 warnings | P0 | 切片 2 |
 | O2 | | KR2: API 幂等键（重复 POST 返回同一 run） | P0 | 切片 2b |
 | O2 | | KR3: 模块工具零手写 LLM 调用逻辑（CLH preset 化，PRD 3.14） | P0 | 切片 D3 |
+| O2 | | KR4: pack 自含——领域特有工具随 pack 分发，全局 tools/ 不膨胀（PRD 3.11.8） | P0 | 切片 D4 |
 | O3 | 可信隔离执行（降低信任成本，北极星 3） | KR1: 污染断言通过 | P1 可选 | 切片 3 |
 
 ---
@@ -62,6 +64,7 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | D2 预算层级（PRD 3.10.9） | 全链（run 级止损 + 步级/flow 级预算配置） | run 级预算超帽即止损整个运行（跨分支累计可测）；`.ord` 步级 maxAttempts 与 flow 级 budgetUsd/timeoutMs 被 parser 接受，flow 声明 > env 兜底 | 2~3 人天 | 已完成（2026/10/16 提前交付：179d43d2） |
 | D3 LLM 调用运行时（PRD 3.14） | 接入/执行/追溯（CLH 基础设施） | 非法 preset 被拒；compiler 产物对 dsh schema 校验通过；wrapper 解析会话日志产出回执；api 后端单 call 计费回读；凭据缺失 fail-closed；8 份 preset（CVE-Genie 映射）编译干净 | 2~3 人天 | 已完成（2026/10/17 提前交付，eaad6ebd） |
 | 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 已完成（2026/10/17 提前交付，90fcf6df：四薄工具跑在 CLH 上） |
+| D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 未开始（M2 后执行） |
 | R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 未开始（本周期插入，占用切片 3 缓冲位） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
 | 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
@@ -86,18 +89,22 @@ gantt
     section 引擎
     切片 1 步级重试与预算止损 :done, a1, 2026-10-16, 1d
     切片 D DSL v2 引擎（parser/validator/interpreter） :done, a2, 2026-10-16, 1d
-    切片 D2 预算层级（run 帽 + maxAttempts 语法） :a4, 2026-10-26, 2d
-    切片 D3 CLH 基础设施（preset/compiler/wrapper/seam） :a5, 2026-11-02, 3d
-    切片 2b API 幂等键 :a3, 2026-11-16, 3d
+    切片 D2 预算层级（run 帽 + maxAttempts 语法） :done, a4, 2026-10-16, 1d
+    切片 D3 CLH 基础设施（preset/compiler/wrapper/seam） :done, a5, 2026-10-17, 1d
+    切片 2b API 幂等键 :done, a3, 2026-10-17, 1d
     section 工具
-    切片 2 四模块工具与注册（新 DSL） :b1, 2026-11-09, 10d
+    切片 2 四模块工具与注册（新 DSL） :done, b1, 2026-10-17, 1d
+    切片 D4 pack 自含（pack-local tools + 完整安装） :b2, 2026-10-19, 2d
     section 报告
-    切片 R 报告深度与护栏 :r1, 2026-11-23, 5d
+    切片 R 报告深度与护栏 :r1, 2026-11-09, 5d
     section 里程碑
     M1 LLM 步骤可依赖 :milestone, m1, 2026-10-16, 0d
-    M-D DSL v2 结构化编排 :milestone, md, 2026-11-06, 0d
-    M2 模块工具转绿 :milestone, m2, 2026-11-20, 0d
-    M-R 报告深度与护栏 :milestone, mr, 2026-11-27, 0d
+    M-D DSL v2 结构化编排 :milestone, md, 2026-10-16, 0d
+    M-D2 预算层级 :milestone, md2, 2026-10-16, 0d
+    M-D3 CLH 基础设施 :milestone, md3, 2026-10-17, 0d
+    M2 模块工具转绿 :milestone, m2, 2026-10-17, 0d
+    M-D4 pack 自含 :milestone, md4, 2026-10-21, 0d
+    M-R 报告深度与护栏 :milestone, mr, 2026-11-14, 0d
 ```
 
 > M3（可信隔离执行，可选项）移出本周期，连同切片 3 推迟到下一
@@ -122,6 +129,7 @@ gantt
 | M-D3 CLH 基础设施 | W3 2026/11/06 | `packages/llm-harness`（preset schema + compiler + wrapper + api 后端 + dispatcher seam）、8 份 preset（CVE-Genie 映射，prompts Apache-2.0 注明出处）、合成 fixture 测试 | 北极星：模块工具零手写 LLM 调用逻辑；护栏：凭据缺失 fail-closed，既有测试零回归 | 🟢 2026/10/17 提前交付（eaad6ebd；llm-harness 43/43 + 既有 26/31 零回归，8 preset 编译 8/8） |
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | W6 2026/11/27 | R-1 final 前置护栏（claims=0 评审 fail、终稿标 degraded）；R-2 深度门槛（段落/字数进 revise 触发器 + 评审深度维）；R-3 provenance 修复（source tasks/digest/re-run command）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：无沙箱不阻塞（可选项不进本周期） | 🔵 |
+| M-D4 pack 自含 | W2 2026/10/21 | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🔵 |
 
 ---
 
@@ -195,3 +203,4 @@ agentlib 式循环写完再迁移）→ 切片 2（薄工具+注册）→ 切片
 | V1.3.0 | 2026/10/16 | 依据 PRD V2.1.0 新增切片 D2（预算层级），插队 M2 前；M-D 翻绿对账 | 产能超订略缓解（D 实际 1 人天交付，回填约 8 人天） |
 | V1.4.0 | 2026/10/16 | 依据 PRD V2.2.0 D2 范围扩上 flow 级预算声明；D2 对账翻绿 | D2 实际 1 人天交付 |
 | V1.5.0 | 2026/10/17 | 依据 PRD V2.3.0 新增切片 D3（CLH 基础设施），插队 M2 前；M2 改为薄工具跑在 CLH 上；新增 dsh 后端风险行 | M2 交付形态变化；产能上沿 88~94%；W4 末止损规则覆盖 D3 |
+| V1.6.0 | 2026/10/17 | 依据 PRD V2.4.0 新增切片 D4（pack 自含），M2 后执行；M2/2b 对账翻绿（均提前交付）；gantt 与实际交付对齐 | O2 +KR4；切片 R 提前至 11/09 窗口；D4 1~2 人天 |
