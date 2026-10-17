@@ -8,7 +8,7 @@ or redoes analysis.
 final analysis output
   → formatted report input
   → local Codex structured draft
-  → unity / support / coherence / sentence reviews
+  → unity / support / coherence / sentence / depth reviews
   → optional local Codex revision
   → published report.md + report.json
 ```
@@ -153,7 +153,7 @@ Use `--no-resume` to ignore existing pipeline artifacts.
 It requires every template section in order. Each substantive section must bind
 to known claim IDs, and limitations must be copied from the frozen input.
 
-### 3. Run four focused reviewer passes
+### 3. Run five focused reviewer passes
 
 ```sh
 ./clue-report-writing review \
@@ -163,8 +163,11 @@ to known claim IDs, and limitations must be copied from the frozen input.
   --run-dir "$REPORTS/case-example/runs/review-1"
 ```
 
-The tool makes four structured calls: `unity`, `support`, `coherence`, and
-`sentence_skills`. A pass requires a score of at least 8 with no blocking issue.
+The tool makes five structured calls: `unity`, `support`, `coherence`,
+`sentence_skills`, and `depth`. A pass requires a score of at least 8 with no
+blocking issue. Reviews also carry two deterministic release guards: an empty
+evidence registry fails review (R-1), and a body below the word/paragraph
+depth floor records a `short` gate that triggers a revise round (R-2).
 
 ### 4. Revise when reviewers request it
 
@@ -190,10 +193,13 @@ Run `review` again after revision. A review is tied to one exact draft hash.
   --manifest "$REPORTS/case-example/report.json"
 ```
 
-`publish` refuses any reviewer state other than four passes. It renders Markdown
-deterministically with claim IDs, exact source URLs, and quotations for cited
-sections. `report.json` records the source output hash, draft hash, review hash,
-template, claim IDs, and limits used in the report.
+`publish` renders Markdown deterministically with claim IDs, exact source URLs,
+and quotations for cited sections. `final` is reachable only when every
+reviewer passes, the evidence registry is non-empty, and provenance is
+complete; a failed guard marks the manifest `degraded` or `short-report` with
+a `degradedReason` and a troubleshooting hint. `report.json` records the
+source output hash, draft hash, review hash, template, claim IDs, limits, and
+the publication provenance (input digest, source tasks, re-run command).
 
 ## Prompt boundary
 

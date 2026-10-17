@@ -28,8 +28,30 @@ DRAFT_SCHEMA = "clue.report-writing.draft.v2"
 REVIEW_SCHEMA = "clue.report-writing.review.v2"
 REPORT_SCHEMA = "clue.report-writing.output.v2"
 LOCAL_EXECUTOR = "local-codex"
-REVIEW_DIMENSIONS = ("unity", "support", "coherence", "sentence_skills")
+REVIEW_DIMENSIONS = ("unity", "support", "coherence", "sentence_skills", "depth")
 MAX_RENDERED_EVIDENCE_CHARS = 480
+# Release guards (PRD 3.12): R-1 final preconditions, R-2 depth floor,
+# R-3 provenance completeness. Publication status is final, degraded, or
+# short-report; `final` is reachable only when every guard passes.
+MIN_BODY_WORDS = 400
+MIN_BODY_PARAGRAPHS = 8
+DEGRADED_REASON_EMPTY_REGISTRY = "empty-registry"
+DEGRADED_REASON_PROVENANCE = "provenance-incomplete"
+DEGRADED_REASON_BODY_WORDS = "body-words-below-minimum"
+EMPTY_REGISTRY_GUIDANCE = (
+    "Evidence registry is empty (0 claims). Re-run collection and analysis "
+    "after resolving provider throttling or source errors, then regenerate the "
+    "draft; do not publish an empty skeleton."
+)
+PROVENANCE_GUIDANCE = (
+    "Provenance configuration not recorded (source tasks, input digest, or "
+    "re-run command missing). Backfill the collection reproduction config and "
+    "re-publish."
+)
+SHORT_REPORT_GUIDANCE = (
+    "Body is below the minimum depth floor (words/paragraphs). Run another "
+    "revise round to expand thin subsections before publishing."
+)
 # Report drafting defaults are chosen for unattended workflow latency.
 DEFAULT_REPORT_MODEL = "gpt-5.6-terra"
 DEFAULT_REPORT_REASONING_EFFORT = "low"
@@ -418,6 +440,116 @@ def collect_draft_prose(draft: dict[str, Any]) -> str:
             continue
         chunks.extend(collect_node_prose(section))
     return "\n".join(chunk for chunk in chunks if isinstance(chunk, str))
+
+
+def draft_paragraph_texts(draft: dict[str, Any]) -> list[str]:
+    """Body paragraphs flattened across sections and nested subsections."""
+    paragraphs: list[str] = []
+    for section in draft.get("sections") or []:
+        if isinstance(section, dict):
+            paragraphs.extend(collect_node_prose(section))
+    return [paragraph for paragraph in paragraphs if paragraph.strip()]
+
+
+def draft_body_words(draft: dict[str, Any]) -> int:
+    """Word count of draft body prose with inline claim markers removed."""
+    cleaned = INLINE_CLAIM_CITE_RE.sub("", collect_draft_prose(draft))
+    return len(cleaned.split())
+
+
+def report_provenance(report_input: dict[str, Any]) -> dict[str, Any]:
+    """R-3 provenance: input digest, source tasks, and re-run command."""
+    search_scope = report_input.get("search_scope") or {}
+    source_tasks = search_scope.get("source_tasks")
+    return {
+        "report_input_sha256": object_digest(report_input),
+        "source_tasks": deepcopy(source_tasks) if isinstance(source_tasks, list) else [],
+        "rerun_command": str(search_scope.get("rerun_command") or ""),
+    }
+
+
+def provenance_complete(report_input: dict[str, Any]) -> bool:
+    """R-3: source tasks, input digest, and re-run command are all recorded."""
+    provenance = report_provenance(report_input)
+    return bool(
+        provenance["source_tasks"]
+        and str(provenance["rerun_command"]).strip()
+        and str(provenance["report_input_sha256"]).strip()
+    )
+
+
+def publication_state(report_input: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+    """Release guard state per PRD 3.12.5 (final/degraded/short-report)."""
+    registry_count = len(report_input.get("evidence_registry") or [])
+    body_words = draft_body_words(draft)
+    paragraph_count = len(draft_paragraph_texts(draft))
+    provenance_ok = provenance_complete(report_input)
+    reasons: list[str] = []
+    guidance: list[str] = []
+    if registry_count == 0:
+        reasons.append(DEGRADED_REASON_EMPTY_REGISTRY)
+        guidance.append(EMPTY_REGISTRY_GUIDANCE)
+    if not provenance_ok:
+        reasons.append(DEGRADED_REASON_PROVENANCE)
+        guidance.append(PROVENANCE_GUIDANCE)
+    if body_words < MIN_BODY_WORDS or paragraph_count < MIN_BODY_PARAGRAPHS:
+        reasons.append(DEGRADED_REASON_BODY_WORDS)
+        guidance.append(SHORT_REPORT_GUIDANCE)
+    state: dict[str, Any] = {
+        "status": "final",
+        "registryCount": registry_count,
+        "bodyWords": body_words,
+        "provenanceComplete": provenance_ok,
+    }
+    if reasons:
+        state["status"] = (
+            "degraded"
+            if DEGRADED_REASON_EMPTY_REGISTRY in reasons
+            or DEGRADED_REASON_PROVENANCE in reasons
+            else "short-report"
+        )
+        state["degradedReason"] = ";".join(reasons)
+        state["guidance"] = " ".join(guidance)
+    return state
+
+
+def registry_gate(report_input: dict[str, Any]) -> dict[str, Any]:
+    """R-1: an empty evidence registry fails review (nothing left to check)."""
+    registry_count = len(report_input.get("evidence_registry") or [])
+    gate: dict[str, Any] = {
+        "gate": "R-1",
+        "name": "registry-nonempty",
+        "status": "pass" if registry_count > 0 else "fail",
+        "registry_count": registry_count,
+    }
+    if registry_count == 0:
+        gate["detail"] = (
+            "Evidence registry is empty (0 claims); the review fails and the "
+            "artifact cannot be published as final."
+        )
+    return gate
+
+
+def depth_floor_gate(report_input: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+    """R-2: depth floor as a soft gate — triggers revise, never blocks publish."""
+    words = draft_body_words(draft)
+    paragraphs = len(draft_paragraph_texts(draft))
+    passed = words >= MIN_BODY_WORDS and paragraphs >= MIN_BODY_PARAGRAPHS
+    gate: dict[str, Any] = {
+        "gate": "R-2",
+        "name": "depth-floor",
+        "status": "pass" if passed else "short",
+        "body_words": words,
+        "paragraph_count": paragraphs,
+        "min_body_words": MIN_BODY_WORDS,
+        "min_paragraph_count": MIN_BODY_PARAGRAPHS,
+    }
+    if not passed:
+        gate["detail"] = (
+            "Body is below the depth floor; the review triggers a revise round "
+            "instead of failing."
+        )
+    return gate
 
 
 def claim_reference_ids(
@@ -1454,7 +1586,9 @@ def validate_reviews(reviews: dict[str, Any], report_input: dict[str, Any], draf
         raise CliError("report reviews do not belong to this exact draft")
     items = require_list(reviews, "reviews", "report reviews")
     if len(items) != len(REVIEW_DIMENSIONS):
-        raise CliError("report reviews must contain all four reviewer dimensions")
+        raise CliError(
+            f"report reviews must contain all {len(REVIEW_DIMENSIONS)} reviewer dimensions"
+        )
     section_ids = {section["section_id"] for section in report_input["template"]["sections"]}
     by_dimension: dict[str, dict[str, Any]] = {}
     for item in items:
@@ -1464,15 +1598,18 @@ def validate_reviews(reviews: dict[str, Any], report_input: dict[str, Any], draf
         if dimension not in REVIEW_DIMENSIONS or dimension in by_dimension:
             raise CliError("report reviews must contain each reviewer dimension exactly once")
         by_dimension[dimension] = validate_review_item(item, dimension, section_ids)
+    gates = [registry_gate(report_input), depth_floor_gate(report_input, draft)]
     return {
         "schema_version": REVIEW_SCHEMA,
         "report_id": report_input["report_id"],
         "draft_sha256": object_digest(draft),
         "generated_at": reviews.get("generated_at", utc_now()),
         "reviews": [by_dimension[dimension] for dimension in REVIEW_DIMENSIONS],
+        "gates": gates,
         "summary": {
             "pass_count": sum(1 for item in by_dimension.values() if item["status"] == "pass"),
             "revise_count": sum(1 for item in by_dimension.values() if item["status"] == "revise"),
+            "gate_failures": [gate["name"] for gate in gates if gate.get("status") == "fail"],
         },
     }
 
@@ -2566,18 +2703,27 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
     draft = validate_draft_document(draft, report_input, root)
     reviews = validate_reviews(reviews, report_input, draft, root)
     blocked = [item["dimension"] for item in reviews["reviews"] if item["status"] != "pass"]
+    gate_failures = [
+        str(gate.get("name"))
+        for gate in reviews.get("gates") or []
+        if isinstance(gate, dict) and gate.get("status") == "fail"
+    ]
     allow_residual = bool(getattr(args, "allow_residual", False))
-    if blocked and not allow_residual:
-        raise CliError(f"report cannot publish until reviewers pass: {', '.join(blocked)}")
+    if (blocked or gate_failures) and not allow_residual:
+        raise CliError(
+            "report cannot publish as final: "
+            + ", ".join([*blocked, *gate_failures])
+        )
     markdown_path = Path(args.output).expanduser().resolve()
     manifest_path = Path(args.manifest).expanduser().resolve()
     if markdown_path == manifest_path:
         raise CliError("--output and --manifest must be different paths")
     markdown = render_markdown(report_input, draft)
+    publication = publication_state(report_input, draft)
     report = {
         "schema_version": REPORT_SCHEMA,
         "report_id": report_input["report_id"],
-        "status": "published",
+        "status": publication["status"],
         "published_at": utc_now(),
         "template_id": report_input["template"]["template_id"],
         "title": draft["title"],
@@ -2589,6 +2735,8 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
         ),
         "limitations": deepcopy(draft["limitations"]),
         "report_path": str(markdown_path),
+        "publication": publication,
+        "provenance": report_provenance(report_input),
         "review": {
             "mode": "reviewed",
             "status": "residual" if blocked else "passed",
@@ -2597,7 +2745,19 @@ def command_publish(args: argparse.Namespace, root: Path) -> int:
     }
     write_text(markdown_path, markdown)
     write_json(manifest_path, report)
-    print(json.dumps({"status": "succeeded", "output": str(markdown_path), "manifest": str(manifest_path), "claim_count": len(report["used_claim_ids"])}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "output": str(markdown_path),
+                "manifest": str(manifest_path),
+                "claim_count": len(report["used_claim_ids"]),
+                "publication": publication,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -2613,10 +2773,11 @@ def write_fixed_report(
     if markdown_path == manifest_path:
         raise CliError("fixed report Markdown and manifest must be different paths")
     markdown = render_markdown(report_input, draft)
+    publication = publication_state(report_input, draft)
     report = {
         "schema_version": REPORT_SCHEMA,
         "report_id": report_input["report_id"],
-        "status": "published",
+        "status": publication["status"],
         "published_at": utc_now(),
         "template_id": report_input["template"]["template_id"],
         "title": draft["title"],
@@ -2627,6 +2788,8 @@ def write_fixed_report(
         ),
         "limitations": deepcopy(draft["limitations"]),
         "report_path": str(markdown_path),
+        "publication": publication,
+        "provenance": report_provenance(report_input),
         "review": {
             "mode": "fixed",
             "status": "not_run",
@@ -2847,6 +3010,12 @@ def workflow_report_passed(reviews_path: Path) -> tuple[bool, int]:
         isinstance(item, dict) and item.get("status") == "pass"
         for item in review_items
     )
+    gates = reviews.get("gates")
+    if isinstance(gates, list):
+        passed = passed and all(
+            isinstance(gate, dict) and gate.get("status") == "pass"
+            for gate in gates
+        )
     return passed, len(review_items)
 
 

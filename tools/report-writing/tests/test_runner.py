@@ -272,7 +272,9 @@ class ReportWritingTests(unittest.TestCase):
                 markdown_path.read_text(encoding="utf-8"),
             )
             report = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["status"], "published")
+            # An empty registry cannot publish as final (release guard R-1).
+            self.assertEqual(report["status"], "degraded")
+            self.assertIn("empty-registry", report["publication"]["degradedReason"])
             self.assertEqual(report["review"], {"mode": "fixed", "status": "not_run"})
 
     def test_explicit_report_id_is_preserved_in_the_frozen_report_input(self) -> None:
@@ -397,7 +399,7 @@ class ReportWritingTests(unittest.TestCase):
         draft = runner.validate_draft(build_draft(self.report_input), self.report_input, TOOL_ROOT)
         reviews = runner.validate_reviews(passing_reviews(self.report_input, draft), self.report_input, draft, TOOL_ROOT)
 
-        self.assertEqual(reviews["summary"]["pass_count"], 4)
+        self.assertEqual(reviews["summary"]["pass_count"], len(runner.REVIEW_DIMENSIONS))
         markdown = runner.render_markdown(self.report_input, draft)
         self.assertIn("Synthetic finding", markdown)
         self.assertIn("https://source.example/one", markdown)
@@ -475,7 +477,7 @@ class ReportWritingTests(unittest.TestCase):
         validated = runner.validate_reviews(review, self.report_input, draft, TOOL_ROOT)
         self.assertEqual(validated["reviews"][1]["status"], "pass")
         self.assertEqual(validated["reviews"][1]["score"], 1)
-        self.assertEqual(validated["summary"]["pass_count"], 4)
+        self.assertEqual(validated["summary"]["pass_count"], len(runner.REVIEW_DIMENSIONS))
         self.assertTrue(
             any("treating as pass" in note for note in validated["reviews"][1]["notes"])
         )
@@ -508,7 +510,11 @@ class ReportWritingTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertTrue(report_path.is_file())
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["status"], "published")
+            # The synthetic fixture records no collection reproduction config,
+            # so the publication guard marks the manifest degraded.
+            self.assertEqual(manifest["status"], "degraded")
+            self.assertEqual(manifest["publication"]["status"], "degraded")
+            self.assertIn("provenance-incomplete", manifest["publication"]["degradedReason"])
             self.assertEqual(manifest["review"]["status"], "passed")
 
     def test_publish_command_rejects_residual_reviews_unless_allowed(self) -> None:
@@ -560,7 +566,7 @@ class ReportWritingTests(unittest.TestCase):
             )
             self.assertEqual(result, 0)
             manifest = runner.read_json(manifest_path, "manifest")
-            self.assertEqual(manifest["status"], "published")
+            self.assertEqual(manifest["status"], "degraded")
             self.assertEqual(manifest["review"]["status"], "residual")
             self.assertEqual(manifest["review"]["blocked_dimensions"], ["unity"])
 
@@ -605,13 +611,16 @@ class ReportWritingTests(unittest.TestCase):
             self.assertIn("--sandbox", first_command)
             self.assertIn("read-only", first_command)
             self.assertIn("-m", first_command)
-            self.assertEqual(first_command[first_command.index("-m") + 1], "gpt-5.5")
+            self.assertEqual(
+                first_command[first_command.index("-m") + 1],
+                runner.DEFAULT_REPORT_MODEL,
+            )
             self.assertIn("-c", first_command)
             self.assertIn('model_reasoning_effort="low"', first_command)
             self.assertIn("--add-dir", first_command)
             self.assertTrue(session_path.is_file())
             self.assertEqual(runner.extract_model_json(response), {})
-            self.assertEqual(response.get("model"), "gpt-5.5")
+            self.assertEqual(response.get("model"), runner.DEFAULT_REPORT_MODEL)
             self.assertEqual(response.get("model_reasoning_effort"), "low")
             self.assertFalse(response.get("session_resumed"))
             self.assertIn("resume", second_command)
@@ -664,7 +673,7 @@ class ReportWritingTests(unittest.TestCase):
                     },
                 )
 
-            remaining = iter(("coherence", "sentence_skills"))
+            remaining = iter(("coherence", "sentence_skills", "depth"))
 
             def fake_request_codex(_request, _attachments, _session_path, **_kwargs):
                 dimension = next(remaining)
@@ -698,13 +707,14 @@ class ReportWritingTests(unittest.TestCase):
                 )
 
             self.assertEqual(result, 0)
-            self.assertEqual(mocked.call_count, 2)
+            self.assertEqual(mocked.call_count, 3)
             reviews = runner.read_json(output_path, "reviews")
             self.assertEqual([item["dimension"] for item in reviews["reviews"]], list(runner.REVIEW_DIMENSIONS))
             self.assertEqual(reviews["reviews"][0]["notes"], ["reused"])
             self.assertEqual(reviews["reviews"][1]["notes"], ["reused"])
             self.assertEqual(reviews["reviews"][2]["notes"], ["fresh"])
             self.assertEqual(reviews["reviews"][3]["notes"], ["fresh"])
+            self.assertEqual(reviews["reviews"][4]["notes"], ["fresh"])
 
     def test_workflow_publish_rereviews_when_reviews_belong_to_old_draft(self) -> None:
         report_input = runner.build_report_input(TOOL_ROOT, ANALYSIS_OUTPUT, "decision-memo")
@@ -750,7 +760,17 @@ class ReportWritingTests(unittest.TestCase):
                 runner.write_json(Path(args.output), reviews)
                 return 0
 
-            with patch.object(runner, "command_review", side_effect=fake_review) as mocked:
+            def fake_revise(args, _root):
+                current = runner.read_json(Path(args.draft), "report draft")
+                runner.write_json(Path(args.output), current)
+                return 0
+
+            # The depth-floor gate keeps the tiny fixture draft below the
+            # revise threshold, so publish runs one extra revise round.
+            with (
+                patch.object(runner, "command_review", side_effect=fake_review) as mocked,
+                patch.object(runner, "command_revise", side_effect=fake_revise),
+            ):
                 result = runner.command_workflow(
                     Namespace(
                         input=str(request_path),
@@ -761,10 +781,10 @@ class ReportWritingTests(unittest.TestCase):
                 )
 
             self.assertEqual(result, 0)
-            self.assertEqual(mocked.call_count, 1)
+            self.assertEqual(mocked.call_count, 2)
             self.assertTrue((report_root / "report.md").is_file())
             published = runner.read_json(report_root / "report.json", "manifest")
-            self.assertEqual(published["status"], "published")
+            self.assertEqual(published["status"], "degraded")
             self.assertEqual(published["draft_sha256"], runner.object_digest(revised))
             self.assertEqual(published["review"]["status"], "passed")
 
@@ -835,7 +855,7 @@ class ReportWritingTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(mocked_revise.call_count, 1)
             published = runner.read_json(report_root / "report.json", "manifest")
-            self.assertEqual(published["status"], "published")
+            self.assertEqual(published["status"], "degraded")
             self.assertEqual(published["review"]["status"], "residual")
             self.assertEqual(published["review"]["blocked_dimensions"], ["unity"])
 

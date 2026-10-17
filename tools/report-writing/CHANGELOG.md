@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Release guards (PRD 3.12): the published manifest carries a `publication`
+  block (`status` final/degraded/short-report, `registryCount`, `bodyWords`,
+  `provenanceComplete`, `degradedReason`). An empty evidence registry fails
+  review and cannot publish as final (R-1); a body below the word/paragraph
+  depth floor records a `short` gate that triggers a revise round instead of
+  failing (R-2); the manifest records publication provenance (input digest,
+  source tasks, re-run command) and marks missing config degraded (R-3).
+  Reviews gain a fifth `depth` dimension.
 - Local Codex review/draft calls now snapshot JSON attachments and keep
   `resume` sandboxed read-only, so a resumed thread cannot delete the live
   `draft.json`. Review reuses completed dimension responses only for the
