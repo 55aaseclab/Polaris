@@ -1,0 +1,12 @@
+id: synthetic-critic
+title: "Synthetic critic preset (api)"
+description: "Fixture for api backend tests; single precise-json call."
+kind: api
+model: light
+toolBoundary: none
+loopCap: 1
+outputContract: precise-json
+permission: read-only
+prompts:
+  system: templates/system.j2
+  user: templates/user.j2

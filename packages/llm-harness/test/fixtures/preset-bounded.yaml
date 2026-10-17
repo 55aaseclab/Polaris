@@ -1,0 +1,12 @@
+id: synthetic-review
+title: "Synthetic review preset (dsh bounded)"
+description: "Fixture for compiler tests; references fixture j2 templates."
+kind: bounded
+model: strong
+toolBoundary: read-only
+loopCap: 5
+outputContract: artifact
+permission: read-only
+prompts:
+  system: templates/system.j2
+  user: templates/user.j2

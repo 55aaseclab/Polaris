@@ -1,0 +1,12 @@
+id: synthetic-open
+title: "Synthetic open preset (dsh open)"
+description: "Fixture for compiler tests; writable session."
+kind: open
+model: light
+toolBoundary: full
+loopCap: 60
+outputContract: artifact
+permission: workspace-write
+prompts:
+  system: templates/system.j2
+  user: templates/user.j2
