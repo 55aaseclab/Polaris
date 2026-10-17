@@ -311,7 +311,7 @@ flowchart LR
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 | 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
 | 运行 | run 级 maxRuns（run 重试计数） | P1 | flow 级 `maxRuns <n>`，默认 1 不变；论文 baseline 5，见 3.10.9 |
-| 基础设施 | LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam） | P0 | dsh 打头后端；api/bounded/open 三档 kind，见 3.14 |
+| 基础设施 | LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam） | P0 | 已交付（2026/10/17）：dsh 打头后端；api/bounded/open 三档 kind；8 份 preset，见 3.14 |
 
 ---
 

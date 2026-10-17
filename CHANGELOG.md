@@ -7,6 +7,12 @@ ordered newest first.
 
 ### Added
 
+- Configurable LLM harness (PRD 3.14): `packages/llm-harness` with a
+  preset schema (api/bounded/open kinds), an api backend with usage
+  readback and fail-closed credentials, a dsh backend compiler and
+  wrapper parsing session logs into receipts, a dispatcher seam via
+  the dsh `runnerCommand` override, and eight CVE-Genie-mapped
+  presets with vendored Apache-2.0 prompt templates.
 - Budget and attempt hierarchy (PRD 3.10.9): run-level budget/timeout
   cap with stable stop error codes, per-step maxAttempts and
   flow-level budgetUsd/timeoutMs in the `.ord` grammar, and
