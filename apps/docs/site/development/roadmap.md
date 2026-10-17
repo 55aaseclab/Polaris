@@ -64,7 +64,7 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | D2 预算层级（PRD 3.10.9） | 全链（run 级止损 + 步级/flow 级预算配置） | run 级预算超帽即止损整个运行（跨分支累计可测）；`.ord` 步级 maxAttempts 与 flow 级 budgetUsd/timeoutMs 被 parser 接受，flow 声明 > env 兜底 | 2~3 人天 | 已完成（2026/10/16 提前交付：179d43d2） |
 | D3 LLM 调用运行时（PRD 3.14） | 接入/执行/追溯（CLH 基础设施） | 非法 preset 被拒；compiler 产物对 dsh schema 校验通过；wrapper 解析会话日志产出回执；api 后端单 call 计费回读；凭据缺失 fail-closed；8 份 preset（CVE-Genie 映射）编译干净 | 2~3 人天 | 已完成（2026/10/17 提前交付，eaad6ebd） |
 | 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 已完成（2026/10/17 提前交付，90fcf6df：四薄工具跑在 CLH 上） |
-| D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 未开始（M2 后执行） |
+| D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 已完成（2026/10/17 提前交付，c931ac89） |
 | R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 未开始（本周期插入，占用切片 3 缓冲位） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
 | 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
@@ -129,7 +129,7 @@ gantt
 | M-D3 CLH 基础设施 | W3 2026/11/06 | `packages/llm-harness`（preset schema + compiler + wrapper + api 后端 + dispatcher seam）、8 份 preset（CVE-Genie 映射，prompts Apache-2.0 注明出处）、合成 fixture 测试 | 北极星：模块工具零手写 LLM 调用逻辑；护栏：凭据缺失 fail-closed，既有测试零回归 | 🟢 2026/10/17 提前交付（eaad6ebd；llm-harness 43/43 + 既有 26/31 零回归，8 preset 编译 8/8） |
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | W6 2026/11/27 | R-1 final 前置护栏（claims=0 评审 fail、终稿标 degraded）；R-2 深度门槛（段落/字数进 revise 触发器 + 评审深度维）；R-3 provenance 修复（source tasks/digest/re-run command）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：无沙箱不阻塞（可选项不进本周期） | 🔵 |
-| M-D4 pack 自含 | W2 2026/10/21 | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🔵 |
+| M-D4 pack 自含 | W2 2026/10/21 | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🟢 2026/10/17 提前交付（c931ac89；39+4 新测试 + 既有 26/31/14 零回归，autoresearch 零触碰） |
 
 ---
 

@@ -7,6 +7,12 @@ ordered newest first.
 
 ### Added
 
+- Pack self-containment (PRD 3.11.8): domain-specific tools ship
+  inside the pack directory (`packs/<pack>/tools/`) with pack-local
+  first resolution and a global `tools/` fallback; the installed pack
+  artifact now includes `tools/` and `harness/` (fixing the
+  presets-not-installed gap); removal drops pack-local tools
+  automatically. CLH stays global; autoresearch tools unchanged.
 - Four thin cve tools on the CLH (PRD 3.11/3.14): deterministic fetch,
   api-backend knowledge/plan presets, dsh-backend setup/exploit/verify
   with in-tool dev-critic convergence and at most 5 verifier revisions;
