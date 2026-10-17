@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V2.3.0
+版本号：V2.4.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -17,6 +17,7 @@
 | V2.1.0 | 2026/10/16 | opencode | 新增 3.10.9 预算层级 gap 修复：run 级预算帽（论文 per-CVE $5/45min 口径）+ 步级 maxAttempts 进 `.ord` 文法；插队 M2 前 |
 | V2.2.0 | 2026/10/16 | opencode | 3.10.9 补第三层：flow 级 `budgetUsd`/`timeoutMs` 进 `.ord` 文法，pack 自行声明论文 per-CVE 帽；host 侧 flow 声明 > env |
 | V2.3.0 | 2026/10/17 | opencode | 新增 3.14 LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam，dsh 打头后端，本体论 LLM 原语 vs harness）；3.10.9 补 run 级 maxRuns（run 重试计数，论文 baseline 5） |
+| V2.4.0 | 2026/10/17 | opencode | 新增 3.11.8 pack 自含性：领域特有工具随 pack 分发（pack-local tools + 完整安装）；能力归属裁决——CLH 全局（packages/llm-harness）、论文复现工具 pack 特有、autoresearch 既有全局不动 |
 
 ---
 
@@ -307,6 +308,7 @@ flowchart LR
 | 运维 | 工具预检 | P0 | CLI + `/settings/tools` |
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
 | 工具 | 领域模块工具与清单注册 | P0 | 已交付（2026/10/17）：cve 四薄工具经 CLH；注册后 pack 转绿（见 3.11） |
+| 工具 | pack 自含（pack-local tools + 完整安装） | P0 | 领域特有工具随 pack 分发；CLH 全局；见 3.11.8 |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 | 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
@@ -874,6 +876,36 @@ prompt 对照，下表右列一律不移植：
 | 编排与续跑 | `.ord` v2 结构化编排 + 同 run 重试（跳过已完成步） | main.py 的 pipeline 编排、checkpoint 续跑 |
 | 步间数据传递 | artifacts（outputFields/uses） | shared directory 自建约定 |
 
+#### 3.11.8 pack 自含性（pack-local tools + 完整安装）
+
+动机：每复现一个领域（如一篇论文）就往全局 `tools/` 加一批特有
+工具，tools/ 无限膨胀；且安装物不含 harness presets/prompts——
+pack 不自含，"安装"名不副实。裁决（C 方案，hybrid）：
+
+| 能力 | 归属 | 说明 |
+|------|------|------|
+| LLM harness（CLH） | **全局**（`packages/llm-harness`） | 跨域共享的平台能力，不在 pack 内 |
+| 领域特有工具（如 cve 四工具） | **pack 本地**（`packs/<pack>/tools/`） | 论文/领域特有，随 pack 分发与安装 |
+| 既有全局工具（autoresearch 系） | 全局不动 | 兼容：`tools/` 既有条目原样有效 |
+
+规则：
+- 解析顺序：pack 本地 `packs/<pack>/tools/<entrypoint>` 优先，
+  全局 `tools/<entrypoint>` 兜底；
+- 清单注册：全局 `tools/tool-inventory.json` 的 entrypoint 可指向
+  pack 本地路径（`packs/<pack>/tools/...`）；产品只认协议与清单
+  （3.11.1 不变）；
+- 安装物 = 完整 pack 目录（`main.ord` + `manifest.json` + `tools/`
+  + `harness/`）——presets/prompts 随装 gap 一并修复；
+- 移除 pack 即移除其本地工具；全局工具不受 pack 移除影响。
+
+#### 3.11.9 用户故事（pack 自含）
+```
+作为打包者，我希望领域特有工具随 pack 目录分发与安装，
+以便每复现一个领域不往全局 tools/ 添加工具。
+作为运维，我希望移除 pack 时其本地工具一并移除，
+以便全局工具目录不被领域残留污染。
+```
+
 ### 3.12 产物发布护栏（final 门槛）
 
 #### 3.12.1 描述
@@ -1116,6 +1148,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 与 flow 级 `budgetUsd`/`timeoutMs` 被 parser 接受，flow 声明 > env 兜底 | P0 |
 | maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
 | CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
+| pack 自含 | pack 本地工具解析优先于全局 `tools/`；安装物含 `tools/` 与 `harness/`；移除 pack 一并移除其本地工具；autoresearch 既有 pack 安装/运行不回归 | P0 |
 
 ---
 
