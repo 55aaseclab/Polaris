@@ -7,6 +7,16 @@ ordered newest first.
 
 ### Added
 
+- Four thin cve tools on the CLH (PRD 3.11/3.14): deterministic fetch,
+  api-backend knowledge/plan presets, dsh-backend setup/exploit/verify
+  with in-tool dev-critic convergence and at most 5 verifier revisions;
+  no attempt-level retries in tools; receipt values carry costUsd/tokens.
+- Tool inventory registration for the four cve tools with
+  `CveGenieTrial` as a workflow consumer; `pack list` shows zero
+  catalog warnings and fail-closed is preserved.
+- API idempotency (PRD 3.11): REST POST `/api/workflow-runs` accepts
+  an `Idempotency-Key` header or `idempotencyKey` body field; the same
+  tenant + key returns the same run.
 - Configurable LLM harness (PRD 3.14): `packages/llm-harness` with a
   preset schema (api/bounded/open kinds), an api backend with usage
   readback and fail-closed credentials, a dsh backend compiler and

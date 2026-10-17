@@ -294,7 +294,7 @@ flowchart LR
 | 工作流定义 | Pack 安装/列表/移除 | P0 | CLI 走同一 parse→resolve→validate |
 | 工作流定义 | 流程启停 | P0 | `/settings/workflows` |
 | 运行 | Portal 提交（work desk） | P0 | 选场景 + 可选 Vault 目标 |
-| 运行 | REST API 提交 | P0 | `/api/workflow-runs` |
+| 运行 | REST API 提交 | P0 | 已交付（2026/10/17）：`/api/workflow-runs` + 幂等键（Idempotency-Key header / body 字段，同 key 同 run） |
 | 运行 | host 持久运行 | P0 | `driver=none`，`mode:"host"` |
 | 运行 | 同 run 重试 | P0 | 跳过已完成步骤 |
 | 运行 | 步级重试与预算止损 | P0 | 已交付（2026/10/16）：maxAttempts / timeout / budget，默认 maxAttempts=1 行为不变 |
@@ -306,7 +306,7 @@ flowchart LR
 | 用户 | 身份/角色/产品线访问 | P0 | Authing 可禁用模式 |
 | 运维 | 工具预检 | P0 | CLI + `/settings/tools` |
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
-| 工具 | 领域模块工具与清单注册 | P0 | dispatcher 协议；注册后 pack 转绿（见 3.11） |
+| 工具 | 领域模块工具与清单注册 | P0 | 已交付（2026/10/17）：cve 四薄工具经 CLH；注册后 pack 转绿（见 3.11） |
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 | 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
