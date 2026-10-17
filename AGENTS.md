@@ -38,6 +38,10 @@
   reference is a defect.
 - Each document version's changelog row records the PRD version it was cut
   from; keep historical rows historically accurate.
+- Delivery reconciliation updates all delivery-state views in one batch:
+  the PRD functional inventory, the roadmap slice table, the gantt chart,
+  and the milestone table. Updating some but not all leaves drift, and
+  drift is a defect.
 
 ## Self-reflection and self-improving
 
