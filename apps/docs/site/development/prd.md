@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V2.2.0
+版本号：V2.3.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -16,6 +16,7 @@
 | V2.0.0 | 2026/10/16 | opencode | DSL v2：`.ord` 升级为结构化编排（六构造，无界 while + 预算兜底）；移除"线性 DAG"约束；插队 M2 前 |
 | V2.1.0 | 2026/10/16 | opencode | 新增 3.10.9 预算层级 gap 修复：run 级预算帽（论文 per-CVE $5/45min 口径）+ 步级 maxAttempts 进 `.ord` 文法；插队 M2 前 |
 | V2.2.0 | 2026/10/16 | opencode | 3.10.9 补第三层：flow 级 `budgetUsd`/`timeoutMs` 进 `.ord` 文法，pack 自行声明论文 per-CVE 帽；host 侧 flow 声明 > env |
+| V2.3.0 | 2026/10/17 | opencode | 新增 3.14 LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam，dsh 打头后端，本体论 LLM 原语 vs harness）；3.10.9 补 run 级 maxRuns（run 重试计数，论文 baseline 5） |
 
 ---
 
@@ -309,6 +310,8 @@ flowchart LR
 | 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 | 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
+| 运行 | run 级 maxRuns（run 重试计数） | P1 | flow 级 `maxRuns <n>`，默认 1 不变；论文 baseline 5，见 3.10.9 |
+| 基础设施 | LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam） | P0 | dsh 打头后端；api/bounded/open 三档 kind，见 3.14 |
 
 ---
 
@@ -800,6 +803,7 @@ write_file / list_dir。以 Port 声明、由 Host 绑定实现
 | run 级预算帽 | 无（只有步级 budgetUsd/timeoutMs） | 新增 run 级 budgetUsd/timeoutMs：跨全部步骤与 parallel 分支累计，超帽即止损整个运行；env 可配 + 提交时可覆盖 |
 | 步级 maxAttempts 语法 | `.ord` 不表达（parser 只认 timeoutMs/budgetUsd；maxAttempts 走全局 env，不同 workflow 不能各配各的） | parser 接受 `maxAttempts <n>` 作为步 part；步级策略优先读步级值，env 兜底 |
 | flow 级预算声明 | run 级帽仅 env 级，pack 无法自行声明论文的 per-CVE 帽 | flow 级 `budgetUsd <n>`/`timeoutMs <n>` 进 `.ord` 文法（flow 声明部分）；host 侧 flow 声明 > env 兜底；试验包声明论文口径 $5/45min |
+| run 级 maxRuns（run 重试） | 无（run 失败即终，需人工 re-submit） | flow 级 `maxRuns <n>` 进 `.ord` 文法：run 失败后在全新环境重跑整个 run（3.8 生效时），最多 n 次；默认 1（不配不变）；超限 → 稳定错误码 `run-retries-exhausted`。论文 baseline：5（重试收益 0.76 vs 不重试 0.54，5 次内收敛） |
 
 ### 3.11 领域模块工具与清单注册（dispatcher 协议）
 
@@ -836,8 +840,8 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
   scrub，不继承宿主凭据；
 - 凭据缺失时模块 fail-closed：返回非零退出并注明
   "LLM provider 不可用"，交由 3.10 步级策略处理；
-- costUsd 口径：优先回读 LLM wrapper 的计费输出；无计费输出时按
-  固定估算计入回执 [待确认]；
+- costUsd 口径：优先回读 CLH wrapper（3.14）的计费输出；无计费
+  输出时按固定估算计入回执 [待确认]；
 - 公开参考实现（如 CVE-Genie）仅作方法与 prompt 对照，自带基础
   设施不移植（能力归属见 3.11.7）。
 
@@ -866,7 +870,7 @@ prompt 对照，下表右列一律不移植：
 | attempt 重试/超时/预算 | 步级策略（3.10） | exploiter 主循环的 attempt 计数、预算判断、退避 |
 | 干净环境（快照/重建） | 隔离执行器（3.8，可选项） | vm_library 的 QEMU 快照管理与环境复用 |
 | 回执/审计/日志 | 控制平面（receipts/时间线/审计） | log.txt、conversations/*.json 自建日志 |
-| LLM 调用与凭据 | env 注入 + fail-closed（3.11.4） | agentlib 的 llm_api 重试与选型逻辑 |
+| LLM 调用与凭据 | CLH 运行时（3.14）+ env 注入 fail-closed（3.11.4） | agentlib 的 llm_api 重试与选型逻辑 |
 | 编排与续跑 | `.ord` v2 结构化编排 + 同 run 重试（跳过已完成步） | main.py 的 pipeline 编排、checkpoint 续跑 |
 | 步间数据传递 | artifacts（outputFields/uses） | shared directory 自建约定 |
 
@@ -951,6 +955,78 @@ while 不设静态迭代上限（放弃静态终止检查）；止损归平台�
 - 步级策略（3.10）按分支/迭代各自生效；parallel 分支共享 run 预算；
 - 时间线与图视图渲染并行分支、choice 走向与迭代分组；
 - v1 线性 pack 向后兼容（线性是 v2 的子集）。
+
+### 3.14 LLM 调用运行时（CLH，configurable LLM harness）
+
+#### 3.14.1 描述
+平台级 LLM 调用基础设施，消除"每个工具重搭一次 LLM 调用逻辑"
+（文献管线裸撞 429 → 0 claims 的教训）。本体论两层：**LLM 原语**
+（prompt 进 → completion 出，无循环无工具）与 **harness**（给 LLM
+能动性的一切：循环归属、工具执行、上下文管理、解析、沙箱）。参考
+实现的"多个 agent"实为同一 LLM 原语上的多份 harness 配置——契约
+中不引入 "agent" 概念，只有 preset。CLH 三组件：
+
+| 组件 | 职责 |
+|------|------|
+| preset schema | 步级声明：kind + model + 工具边界 + 循环上限 + 输出契约 + 权限 |
+| compiler | preset + 任务上下文 → 后端 patch/配置 + 渲染 prompt；一次性运行，零持久状态 |
+| wrapper | spawn 后端 → 解析会话日志 → 回执（tokens/costUsd/工具调用数/exit） |
+
+#### 3.14.2 preset schema
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| kind | Enum | api / bounded / open（见 3.14.3） |
+| model | String | 模型 id，env 解析（档位 light/strong → env 链），缺省 fail-closed（3.11.4） |
+| toolBoundary | Enum | none / read-only / full（dispatcher 四原语） |
+| loopCap | Number | 会话内迭代上限（attempt 内收敛，如参考实现的 60） |
+| outputContract | Enum | precise-json / artifact（工件存在性 + 判据） |
+| permission | Enum | 会话沙箱权限：read-only / workspace-write（后端语义） |
+
+#### 3.14.3 kind 与后端绑定
+
+| kind | 语义 | 后端 |
+|------|------|------|
+| api | 纯 LLM 调用（无工具无循环） | 直连 OpenAI 兼容 endpoint（零 harness 依赖） |
+| bounded | 只读变换（输入不可变 + 精确输出） | harness 引擎（dsh 打头，read-only 沙箱） |
+| open | 可写执行（工作区即操作对象） | harness 引擎（dsh 打头，workspace-write） |
+
+后端绑定对实现不可知：dsh 打头（MIT、TS/pnpm 同栈、版本钉死），
+后续可换 codex/opencode/dsh 新版——开发者预览的破坏性变更风险由
+compiler 层隔离（preset 不动，换后端重编译）。选择规则：单 call/
+无工具 → api；只读变换 → bounded；可写/命令执行 → open。
+
+#### 3.14.4 归属边界（V1.8.0 一致性）
+1. **编排留平台**：一个 preset = 一次后端调用；dev↔critic 收敛、
+   修订 ≤N 的循环在工具内（attempt 内收敛，非平台重试）；不把多个
+   preset 挂成 harness 引擎的 subagent——编排权不交给引擎；
+2. **循环内 vs 跨 attempt**：引擎内建的调用重试/迭代上限 = attempt
+   内（合法，不重建）；跨 attempt 重试/timeout/budget = 3.10 在
+   CLH 外层承担；
+3. **回执**：一次会话 = 一个平台 attempt，会话日志解析为一条回执
+   进时间线（M1 语义）；循环细节以日志路径引用，不逐次拆回执；
+4. **凭据**：endpoint/key 经 env 注入，进程环境沙箱 scrub，不入库
+   不入产物（3.11.4）；缺失 fail-closed。
+
+#### 3.14.5 隔离 seam
+open kind 的命令执行经插件机制替换为 dispatcher adapter（命令走
+dispatcher 协议）；3.8 隔离执行器落地后 dispatcher 指向隔离环境，
+seam 不变。镜像参考实现的 SSH toolbox 模式。
+
+#### 3.14.6 用户故事
+```
+作为模块工具作者，我希望按 preset 声明 LLM 调用（kind/模型/边界/
+上限/输出契约），以便不重搭退避/计费/凭据/会话逻辑。
+作为打包者，我希望同一 preset 换后端（dsh/codex/opencode/直连）
+只需改绑定，以便引擎更迭不进契约。
+```
+
+#### 3.14.7 参考实现落地
+- CVE-Genie 的 9 份 harness 配置映射为 8+1 份 preset（3.11.3 四模块
+  的内部结构），prompts 以 Apache-2.0 引入并注明出处；agentlib 不
+  移植（3.11.7）；
+- 文献管线（LR）迁移为 bounded preset：附件快照、只读约束、精确
+  JSON、stale 会话兜底进 wrapper，消除工具内手写框死逻辑。
 
 ---
 
@@ -1038,6 +1114,8 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 发布护栏 | 空 registry 时评审 fail、终稿标 degraded；`final` 仅在 registry 非空且 provenance 齐全时可达 | P0 |
 | DSL v2 | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止循环；v1 线性 pack 安装不回归 | P0 |
 | 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 与 flow 级 `budgetUsd`/`timeoutMs` 被 parser 接受，flow 声明 > env 兜底 | P0 |
+| maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
+| CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
 
 ---
 
