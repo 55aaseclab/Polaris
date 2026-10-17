@@ -7,6 +7,14 @@ ordered newest first.
 
 ### Added
 
+- Report release guardrails (PRD 3.12): final pre-condition gate
+  (non-empty evidence registry + minimum body length, deterministic
+  registry gate in the reviews document, stable degraded reason codes
+  and troubleshooting guidance), a fifth depth reviewer dimension with
+  soft revise triggers (paragraph/word floors), and provenance
+  recording (source tasks, input digest, re-run command) marking
+  artifacts degraded when incomplete; publication state carries the
+  full data dictionary.
 - Pack self-containment (PRD 3.11.8): domain-specific tools ship
   inside the pack directory (`packs/<pack>/tools/`) with pack-local
   first resolution and a global `tools/` fallback; the installed pack

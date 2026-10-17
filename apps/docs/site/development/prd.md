@@ -309,7 +309,7 @@ flowchart LR
 | 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
 | 工具 | 领域模块工具与清单注册 | P0 | 已交付（2026/10/17）：cve 四薄工具经 CLH；注册后 pack 转绿（见 3.11） |
 | 工具 | pack 自含（pack-local tools + 完整安装） | P0 | 已交付（2026/10/17）：cve 五包移入 pack；解析 pack 本地优先；完整安装含 tools/+harness/，见 3.11.8 |
-| 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 见 3.12 |
+| 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 已交付（2026/10/17）：R-1/R-2/R-3 守卫 + 三态发布，见 3.12 |
 | 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
 | 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
 | 运行 | run 级 maxRuns（run 重试计数） | P1 | flow 级 `maxRuns <n>`，默认 1 不变；论文 baseline 5，见 3.10.9 |

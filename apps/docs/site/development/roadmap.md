@@ -65,7 +65,7 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | D3 LLM 调用运行时（PRD 3.14） | 接入/执行/追溯（CLH 基础设施） | 非法 preset 被拒；compiler 产物对 dsh schema 校验通过；wrapper 解析会话日志产出回执；api 后端单 call 计费回读；凭据缺失 fail-closed；8 份 preset（CVE-Genie 映射）编译干净 | 2~3 人天 | 已完成（2026/10/17 提前交付，eaad6ebd） |
 | 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 已完成（2026/10/17 提前交付，90fcf6df：四薄工具跑在 CLH 上） |
 | D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 已完成（2026/10/17 提前交付，c931ac89） |
-| R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 未开始（本周期插入，占用切片 3 缓冲位） |
+| R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 已完成（2026/10/17 提前交付，6d22d71d） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
 | 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
 
@@ -96,7 +96,7 @@ gantt
     切片 2 四模块工具与注册（新 DSL） :done, b1, 2026-10-17, 1d
     切片 D4 pack 自含（pack-local tools + 完整安装） :done, b2, 2026-10-17, 1d
     section 报告
-    切片 R 报告深度与护栏 :r1, 2026-11-09, 5d
+    切片 R 报告深度与护栏 :done, r1, 2026-10-17, 1d
     section 里程碑
     M1 LLM 步骤可依赖 :milestone, m1, 2026-10-16, 0d
     M-D DSL v2 结构化编排 :milestone, md, 2026-10-16, 0d
@@ -104,7 +104,7 @@ gantt
     M-D3 CLH 基础设施 :milestone, md3, 2026-10-17, 0d
     M2 模块工具转绿 :milestone, m2, 2026-10-17, 0d
     M-D4 pack 自含 :milestone, md4, 2026-10-17, 0d
-    M-R 报告深度与护栏 :milestone, mr, 2026-11-13, 0d
+    M-R 报告深度与护栏 :milestone, mr, 2026-10-17, 0d
 ```
 
 > M3（可信隔离执行，可选项）移出本周期，连同切片 3 推迟到下一
@@ -128,7 +128,7 @@ gantt
 | M-D2 预算层级 | W3 2026/11/06 | run 级预算帽（跨步骤/分支累计止损）+ `.ord` 步级 maxAttempts 语法与步级策略接线 | 北极星：run 级止损可测；护栏：无 run 帽配置时行为不变 | 🟢 2026/10/16 提前交付（179d43d2；workflow 26/26 + apps 31/31） |
 | M-D3 CLH 基础设施 | W3 2026/11/06 | `packages/llm-harness`（preset schema + compiler + wrapper + api 后端 + dispatcher seam）、8 份 preset（CVE-Genie 映射，prompts Apache-2.0 注明出处）、合成 fixture 测试 | 北极星：模块工具零手写 LLM 调用逻辑；护栏：凭据缺失 fail-closed，既有测试零回归 | 🟢 2026/10/17 提前交付（eaad6ebd；llm-harness 43/43 + 既有 26/31 零回归，8 preset 编译 8/8） |
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
-| M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | W4 2026/11/13（提前排期） | R-1 final 前置护栏（claims=0 评审 fail、终稿标 degraded）；R-2 深度门槛（段落/字数进 revise 触发器 + 评审深度维）；R-3 provenance 修复（source tasks/digest/re-run command）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：无沙箱不阻塞（可选项不进本周期） | 🔵 |
+| M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | 2026/10/17（提前） | R-1 final 前置护栏（registry gate 进 reviews + 0-claims 评 degraded + 排查指引）；R-2 深度门槛（第五评审维 + 字数/段落软门槛）；R-3 provenance（digest/re-run command/回写）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：final 仅在检查通过时可达 | 🟢 2026/10/17 提前交付（6d22d71d；35/35 Python + 6 新守卫测试 + 既有 26/31/14 零回归） |
 | M-D4 pack 自含 | 2026/10/17（提前） | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🟢 2026/10/17 提前交付（c931ac89；39+4 新测试 + 既有 26/31/14 零回归，autoresearch 零触碰） |
 
 ---
