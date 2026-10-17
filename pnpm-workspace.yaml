@@ -1,6 +1,11 @@
 packages:
   - apps/*
   - packages/*
+  - tools/cve-common
+  - tools/cve-processor
+  - tools/cve-builder
+  - tools/cve-exploiter
+  - tools/cve-verifier
 minimumReleaseAge: 0
 overrides:
   '@clerk/shared': 4.25.6

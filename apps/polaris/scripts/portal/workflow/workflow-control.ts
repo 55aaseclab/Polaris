@@ -1695,7 +1695,11 @@ export class WorkflowControlService {
             ]
           : ["pack-digest-pinned", "vault-capability-lease", "mock-host-only"],
       },
-      dedupeKey: `workflow-manual:${tenantId}:${randomUUID()}`,
+      // API idempotency key (PRD KR2): submissions carrying the same key
+      // dedupe to the same run; the store's envelope dedupe owns the replay.
+      dedupeKey: input.idempotencyKey
+        ? `workflow-manual:${tenantId}:${input.idempotencyKey}`
+        : `workflow-manual:${tenantId}:${randomUUID()}`,
       event: {
         kind: "submitted",
         title: "已提交到执行队列",

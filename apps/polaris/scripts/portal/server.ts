@@ -521,7 +521,7 @@ function parseWorkflowScenario(raw: string | undefined): WorkflowMockScenario | 
   return scenario;
 }
 
-function parseWorkflowRunRequest(body: ParsedBody): WorkflowRunRequest {
+function parseWorkflowRunRequest(body: ParsedBody, headerIdempotencyKey?: string): WorkflowRunRequest {
   const packId = body.packId?.trim() || "";
   const flowId = body.flowId?.trim() || "";
   const vaultId = body.vaultId?.trim() || "";
@@ -540,6 +540,7 @@ function parseWorkflowRunRequest(body: ParsedBody): WorkflowRunRequest {
     throw new PortalRequestError("packId and flowId are required", 400);
   }
   const scenario = parseWorkflowScenario(body.scenario);
+  const idempotencyKey = workflowIdempotencyKey(body.idempotencyKey, headerIdempotencyKey);
   return {
     packId,
     flowId,
@@ -547,7 +548,26 @@ function parseWorkflowRunRequest(body: ParsedBody): WorkflowRunRequest {
     ...(driver ? { driver } : {}),
     values: parseWorkflowValues(body.values ?? ""),
     ...(scenario ? { scenario } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   };
+}
+
+/**
+ * API idempotency key (PRD KR2): the `idempotencyKey` body field wins over
+ * the `Idempotency-Key` header; keys are 1-128 printable ASCII characters.
+ */
+function workflowIdempotencyKey(bodyKey: unknown, headerKey: string | undefined): string | undefined {
+  const raw = (typeof bodyKey === "string" && bodyKey.trim()) || headerKey?.trim() || "";
+  if (!raw) {
+    return undefined;
+  }
+  if (!/^[\x21-\x7e]{1,128}$/u.test(raw)) {
+    throw new PortalRequestError(
+      "Workflow idempotency key must be 1-128 printable ASCII characters",
+      400,
+    );
+  }
+  return raw;
 }
 
 function parseWorkflowSetupRequest(body: ParsedBody): WorkflowSetupRequest {
@@ -2963,7 +2983,10 @@ export function createPortalServer(port = 8787, host = "127.0.0.1"): Server {
             return;
           }
           if (segments.length === 2 && req.method === "POST") {
-            const run = await workflowControl.createRun(userId, parseWorkflowRunRequest(await readBody(req)));
+            const run = await workflowControl.createRun(
+              userId,
+              parseWorkflowRunRequest(await readBody(req), requestHeader(req, "idempotency-key")),
+            );
             sendJson(res, 202, { run });
             return;
           }

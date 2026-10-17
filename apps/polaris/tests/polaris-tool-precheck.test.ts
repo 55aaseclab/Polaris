@@ -28,12 +28,20 @@ async function captureStdout(fn: () => Promise<void>): Promise<string> {
 test("every common tool lock declares prerequisites and Python tools declare requirements", () => {
   const locks = readHostToolBackendLocks(import.meta.url);
   assert.ok(locks.length > 0);
+  // TS-backed tools (TS/pnpm stack, no Python runtime) declare no python
+  // prerequisites.
+  const nonPythonTools = new Set([
+    "pdf.capture",
+    "literature.source.curated-web",
+    "cve.processor",
+    "cve.builder",
+    "cve.exploiter",
+    "cve.verifier",
+  ]);
   for (const lock of locks) {
     assert.ok(fs.existsSync(lock.checkSetupPath), `${lock.toolId} check-setup`);
     assert.ok(Array.isArray(lock.prerequisites.env), `${lock.toolId} env`);
-    const pythonTool = lock.toolId !== "pdf.capture"
-      && lock.toolId !== "literature.source.curated-web";
-    if (pythonTool) {
+    if (!nonPythonTools.has(lock.toolId)) {
       assert.ok(lock.prerequisites.python, `${lock.toolId} must declare python requirements`);
       assert.ok(Array.isArray(lock.prerequisites.python.requirements), `${lock.toolId} requirements`);
     }

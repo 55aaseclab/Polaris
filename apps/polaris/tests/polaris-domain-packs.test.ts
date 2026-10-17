@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { runPipeline } from "polaris-workflow";
 import { runCli } from "../scripts/cli/main.js";
 import {
   getDomainPackFlowGraphProjection,
   listDomainPackProjections,
   listDomainPacks,
 } from "../scripts/config/domain-packs.js";
+import { repoRoot } from "../scripts/utils/paths.js";
 
 test("DSL flow projection exposes every declared step and only data dependencies", () => {
   const graph = getDomainPackFlowGraphProjection(
@@ -349,6 +351,58 @@ test("third-party domain pack sources remain discoverable without installing the
     assert.ok(sourceIds.every((id) => summaries.some((pack) => pack.id === id)));
   });
 });
+
+test("CveGenieTrial pack turns green once its module tools are registered", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    const projection = listDomainPackProjections(import.meta.url)
+      .find((candidate) => candidate.id === "CveGenieTrial");
+    assert.ok(projection);
+    // Registration clears the catalog warnings (PRD 3.11.5): no E_FFI_TOOL /
+    // E_FFI_COMMAND errors survive.
+    assert.deepEqual(projection.warnings, []);
+    const flow = projection.flows.find((candidate) => candidate.id === "CveReproduction");
+    assert.ok(flow);
+    assert.ok(flow.toolCalls.length > 0);
+    assert.ok(
+      flow.toolCalls.every((call) => !call.unresolved),
+      `unresolved tool calls: ${JSON.stringify(flow.toolCalls)}`,
+    );
+    const toolCalls = new Set(flow.toolCalls.map((call) => call.port));
+    assert.deepEqual(
+      [...toolCalls].sort(),
+      ["cve.builder", "cve.exploiter", "cve.processor", "cve.verifier"],
+    );
+  });
+});
+
+test("CveGenieTrial stays fail-closed when a bound tool is not registered", { concurrency: false }, async () => {
+  await withDataRoot(async () => {
+    // A pack whose binding references an unregistered tool must stay
+    // unexecutable (PRD 3.11.6): the checked pipeline raises E_FFI_TOOL.
+    const source = fs.readFileSync(
+      path.join(repoRoot(import.meta.url), "packs", "cve-genie-trial", "main.ord"),
+      "utf8",
+    ).replace('binding { tool "cve.processor" }', 'binding { tool "cve.missing" }');
+    const inventory = JSON.parse(
+      fs.readFileSync(path.join(repoRoot(import.meta.url), "tools", "tool-inventory.json"), "utf8"),
+    ) as { tools: Array<{ id?: unknown; commands?: unknown }> };
+    const tools = new Map<string, readonly string[]>();
+    for (const item of inventory.tools) {
+      if (typeof item.id === "string" && Array.isArray(item.commands)) {
+        tools.set(item.id, item.commands.filter((command): command is string => typeof command === "string"));
+      }
+    }
+    const result = runPipeline(source, {
+      toolResolver: { resolve: (toolId) => {
+        const commands = tools.get(toolId);
+        return commands ? { commands } : null;
+      } },
+    });
+    assert.equal(result.ok, false);
+    assert.ok(result.issues.some((issue) => issue.code === "E_FFI_TOOL"));
+  });
+});
+
 
 test("third-party packs remain visible in the workflow catalog even without local tools", { concurrency: false }, async () => {
   await withDataRoot(async () => {

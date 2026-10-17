@@ -68,6 +68,21 @@ Vault. Ordinary UI admission creates `mode: "mock"` runs; host admission
 creates `mode: "host"` runs; only the operator path above admits
 `mode: "live"`.
 
+POST `/api/workflow-runs` is idempotent under an API idempotency key (PRD
+KR2): pass the key as the `idempotencyKey` body field or the
+`Idempotency-Key` header (1-128 printable ASCII characters; the body field
+wins when both are present). A repeated submission carrying the same key
+returns the same run instead of enqueueing a duplicate; keys scope to the
+submitting tenant.
+
+```bash
+curl -X POST https://your-domain.example/api/workflow-runs \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: submit-cve-2024-4340-1" \
+  --cookie "<portal-session>" \
+  -d '{"packId":"cve-genie-trial","flowId":"CveReproduction","driver":"none","values":"cveId=..."}'
+```
+
 A durable run moves through a small state machine:
 
 ```text
@@ -446,8 +461,7 @@ The workflow HTTP API is the non-CLI surface for the same objects:
 | --- | --- | --- |
 | `/api/workflow-vaults` | GET | User Vaults with server-derived run availability |
 | `/api/workflow-setup` | GET/PUT | Read or persist pack, Vault, and enabled flows |
-| `/api/workflow-runs` | GET/POST | List or submit durable runs |
-| `/api/workflow-runs/:runId` | GET/DELETE | One run projection |
+| `/api/workflow-runs` | GET/POST | List or submit durable runs; POST dedupes under an idempotency key || `/api/workflow-runs/:runId` | GET/DELETE | One run projection |
 | `/api/workflow-runs/:runId/events?after=:cursor` | GET | Replayable ordered events |
 | `/api/workflow-runs/:runId/{approve,cancel,retry}` | POST | Durable transitions |
 | `/api/workflow-runs/:runId/artifacts/:artifactId` | GET | Bounded artifact projection |

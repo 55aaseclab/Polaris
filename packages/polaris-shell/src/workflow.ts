@@ -250,6 +250,12 @@ export type WorkflowRunRequest = {
   driver?: WorkflowExecutionDriver;
   values: Record<string, string>;
   scenario?: WorkflowMockScenario;
+  /**
+   * API idempotency key (PRD KR2): repeated submissions carrying the same
+   * key return the same run instead of enqueueing a duplicate. Arrives as
+   * the `idempotencyKey` body field or the `Idempotency-Key` header.
+   */
+  idempotencyKey?: string;
 };
 
 export type WorkflowRunsResponse = {

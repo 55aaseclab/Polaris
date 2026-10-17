@@ -252,6 +252,101 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  tools/cve-builder:
+    dependencies:
+      '@polaris/cve-common':
+        specifier: workspace:*
+        version: link:../cve-common
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  tools/cve-common:
+    dependencies:
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  tools/cve-exploiter:
+    dependencies:
+      '@polaris/cve-common':
+        specifier: workspace:*
+        version: link:../cve-common
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  tools/cve-processor:
+    dependencies:
+      '@polaris/cve-common':
+        specifier: workspace:*
+        version: link:../cve-common
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  tools/cve-verifier:
+    dependencies:
+      '@polaris/cve-common':
+        specifier: workspace:*
+        version: link:../cve-common
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.19.4
+        version: 4.23.11
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
 packages:
 
   '@algolia/abtesting@1.25.0':

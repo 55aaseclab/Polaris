@@ -1,7 +1,7 @@
 {
   "schema_version": "polaris.common-tool-inventory.v1",
   "catalog_id": "polaris-common-tools",
-  "workflow_consumers": ["AutoResearch"],
+  "workflow_consumers": ["AutoResearch", "CveGenieTrial"],
   "tools": [
     {
       "id": "literature.collection",
@@ -92,6 +92,34 @@
       "entrypoint": "synthetic-step-policy/synthetic-step-policy",
       "commands": ["workflow"],
       "capabilities": ["synthetic-fixture"]
+    },
+    {
+      "id": "cve.processor",
+      "entrypoint": "cve-processor/cve-processor",
+      "version_file": "cve-processor/VERSION",
+      "commands": ["workflow", "fetch", "build-knowledge"],
+      "capabilities": ["source-location", "affected-version-extraction", "knowledge-base"]
+    },
+    {
+      "id": "cve.builder",
+      "entrypoint": "cve-builder/cve-builder",
+      "version_file": "cve-builder/VERSION",
+      "commands": ["workflow", "plan", "setup"],
+      "capabilities": ["setup-plan", "vulnerable-environment", "dev-critic-convergence"]
+    },
+    {
+      "id": "cve.exploiter",
+      "entrypoint": "cve-exploiter/cve-exploiter",
+      "version_file": "cve-exploiter/VERSION",
+      "commands": ["workflow", "exploit"],
+      "capabilities": ["poc-generation", "dev-critic-convergence", "single-attempt"]
+    },
+    {
+      "id": "cve.verifier",
+      "entrypoint": "cve-verifier/cve-verifier",
+      "version_file": "cve-verifier/VERSION",
+      "commands": ["workflow", "verify"],
+      "capabilities": ["ctf-flag-checker", "verifier-revision-bound", "dev-critic-convergence"]
     }
   ],
   "policy": {
