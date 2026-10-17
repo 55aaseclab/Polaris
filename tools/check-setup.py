@@ -21,6 +21,11 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    tomllib = None  # type: ignore[assignment]
+
 
 NEXT_STEPS: dict[str, str] = {
     "DISPLAY": "Start Xvfb and set DISPLAY=:99. See tools/browser/SETUP-BROWSER.md",
@@ -36,6 +41,7 @@ NEXT_STEPS: dict[str, str] = {
     "POLARIS_LITERATURE_SEMANTIC_SCHOLAR_API_KEY": "Set POLARIS_LITERATURE_SEMANTIC_SCHOLAR_API_KEY (or SEMANTIC_SCHOLAR_API_KEY) for search and citation expansion.",
     "POLARIS_LITERATURE_DEEPSEC_API_URL": "Set POLARIS_LITERATURE_DEEPSEC_API_URL or DEEPSEC_API_URL. Polaristool does not invent a DeepSec host.",
     "POLARIS_LITERATURE_CODEX_BIN": "Install Codex CLI (PATH `codex`) or set POLARIS_LITERATURE_CODEX_BIN / CODEX_BIN.",
+    "codex login": "Run `codex login`, or select an API-key provider in $CODEX_HOME/config.toml.",
     "node": "Install Node.js 22+.",
     "python3": "Install Python 3.11+.",
     "docker": "Install Docker to run the local SearXNG backend.",
@@ -324,6 +330,83 @@ def collect_live_findings(tool_id: str, environment: dict[str, str]) -> list[dic
     return findings
 
 
+CODEX_LOGIN_TIMEOUT_SECONDS = 15
+
+
+def resolve_codex_binary(environment: dict[str, str]) -> str | None:
+    configured = (
+        environment.get("POLARIS_LITERATURE_CODEX_BIN") or environment.get("CODEX_BIN") or ""
+    ).strip()
+    if configured:
+        return configured if shutil.which(configured) else None
+    return shutil.which("codex")
+
+
+def codex_api_key_provider(environment: dict[str, str]) -> tuple[str, str] | None:
+    """Return (provider, env_key) when Codex is configured for a non-OpenAI API-key provider."""
+    if tomllib is None:
+        return None
+    codex_home = Path(environment.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    config_path = codex_home / "config.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    provider = config.get("model_provider")
+    if not isinstance(provider, str) or provider in {"", "openai"}:
+        return None
+    entry = (config.get("model_providers") or {}).get(provider)
+    env_key = entry.get("env_key") if isinstance(entry, dict) else None
+    if not isinstance(env_key, str) or not env_key:
+        return None
+    return provider, env_key
+
+
+def codex_login_findings(tool_id: str, environment: dict[str, str]) -> list[dict[str, str]]:
+    """Check that Codex can authenticate: `codex login status`, or the API key of a custom provider."""
+    binary = resolve_codex_binary(environment)
+    if binary is None:
+        # The binary prerequisite in backend.lock.json already reports this.
+        return []
+    api_key_provider = codex_api_key_provider(environment)
+    if api_key_provider is not None:
+        provider, env_key = api_key_provider
+        if env_present(environment, env_key):
+            return []
+        return [
+            finding(
+                tool_id,
+                "required",
+                "env",
+                env_key,
+                f"Codex provider '{provider}' in $CODEX_HOME/config.toml reads its API key from {env_key}, which is not set.",
+            )
+        ]
+    try:
+        probe = subprocess.run(
+            [binary, "login", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+            timeout=CODEX_LOGIN_TIMEOUT_SECONDS,
+        )
+        logged_in = probe.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        logged_in = False
+    if logged_in:
+        return []
+    return [
+        finding(
+            tool_id,
+            "required",
+            "command",
+            "codex login",
+            "Codex is installed but not logged in, so the AI steps of a workflow run will fail.",
+        )
+    ]
+
+
 def evaluate(root: Path, environment: dict[str, str]) -> dict[str, Any]:
     lock_path = root / "backend.lock.json"
     if not lock_path.is_file():
@@ -352,6 +435,9 @@ def evaluate(root: Path, environment: dict[str, str]) -> dict[str, Any]:
         "BROWSER_PROXY_PASSWORD",
     }:
         for item in collect_live_findings(tool_id, environment):
+            apply_finding(checked, item)
+    if root.name == "codex":
+        for item in codex_login_findings(tool_id, environment):
             apply_finding(checked, item)
     missing = [item for item in checked if item["status"] == "missing"]
     required = [item for item in missing if item["kind"] == "required"]

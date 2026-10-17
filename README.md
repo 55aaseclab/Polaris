@@ -99,12 +99,9 @@ so install a newer one (`brew install bash`) and start with
 `"$(brew --prefix)/bin/bash" ./scripts/run-polaris-local-stack-service.sh .env.dev`.
 
 AI steps run through the Codex CLI (`npm install -g @openai/codex`), which
-must be installed and logged in (`codex login status`). `ops tool-precheck`
-does not check this yet. PDF rendering needs Chrome or Chromium; on macOS
-the app in `/Applications` is found automatically.
-
-`reportTemplate` must name a file in `tools/report-writing/templates/`
-(for a literature review: `literature-report`).
+must be installed and logged in (`codex login status`); `ops tool-precheck`
+checks both. PDF rendering needs Chrome or Chromium; on macOS the app in
+`/Applications` is found automatically.
 
 Portal start also runs `ops tool-precheck` and logs remaining gaps.
 After the stack is up, open `/settings/tools` to see the same
