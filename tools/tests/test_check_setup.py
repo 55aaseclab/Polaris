@@ -1,6 +1,8 @@
+import importlib.util
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -170,6 +172,67 @@ class CheckSetupTests(unittest.TestCase):
             self.assertTrue((directory / "check-setup").is_file(), item["id"])
             self.assertTrue((directory / "backend.lock.json").is_file(), item["id"])
 
+
+
+def load_check_setup():
+    spec = importlib.util.spec_from_file_location("check_setup", TOOLS / "check-setup.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CodexLoginCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.check_setup = load_check_setup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.codex_home = self.root / "codex-home"
+        self.codex_home.mkdir()
+
+    def fake_codex(self, login_exit_code):
+        binary = self.root / "codex"
+        binary.write_text(
+            f'#!/bin/sh\nif [ "$1 $2" = "login status" ]; then exit {login_exit_code}; fi\nexit 0\n',
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+        return str(binary)
+
+    def environment(self, binary, **extra):
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "POLARIS_LITERATURE_CODEX_BIN": binary,
+            "CODEX_HOME": str(self.codex_home),
+            **extra,
+        }
+
+    def test_reports_missing_login(self):
+        findings = self.check_setup.codex_login_findings("codex", self.environment(self.fake_codex(1)))
+        self.assertEqual([(item["kind"], item["key"]) for item in findings], [("required", "codex login")])
+
+    def test_accepts_logged_in_codex(self):
+        findings = self.check_setup.codex_login_findings("codex", self.environment(self.fake_codex(0)))
+        self.assertEqual(findings, [])
+
+    def test_api_key_provider_needs_its_env_key(self):
+        if self.check_setup.tomllib is None:
+            self.skipTest("tomllib needs Python 3.11+")
+        (self.codex_home / "config.toml").write_text(
+            'model_provider = "lab"\n\n[model_providers.lab]\nenv_key = "LAB_API_KEY"\n',
+            encoding="utf-8",
+        )
+        binary = self.fake_codex(1)
+        missing = self.check_setup.codex_login_findings("codex", self.environment(binary))
+        self.assertEqual([(item["kind"], item["key"]) for item in missing], [("required", "LAB_API_KEY")])
+        present = self.check_setup.codex_login_findings(
+            "codex", self.environment(binary, LAB_API_KEY="set")
+        )
+        self.assertEqual(present, [])
+
+    def test_skips_when_codex_is_not_installed(self):
+        environment = self.environment(str(self.root / "missing-codex"))
+        self.assertEqual(self.check_setup.codex_login_findings("codex", environment), [])
 
 if __name__ == "__main__":
     unittest.main()
